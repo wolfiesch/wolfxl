@@ -1,0 +1,92 @@
+site_name: WolfXL
+site_description: Rust-backed, openpyxl-style Excel engine for Python
+site_url: https://wolfxl.readthedocs.io
+repo_url: https://github.com/wolfiesch/wolfxl
+repo_name: wolfxl
+
+docs_dir: .
+site_dir: ../site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Install: getting-started/install.md
+      - Quickstart: getting-started/quickstart.md
+      - First Workbook: getting-started/first-workbook.md
+  - Migration:
+      - Openpyxl Migration: migration/openpyxl-migration.md
+      - Compatibility Matrix: migration/compatibility-matrix.md
+      - Legacy Shim: migration/legacy-shim.md
+  - Performance:
+      - Methodology: performance/methodology.md
+      - Benchmark Results: performance/benchmark-results.md
+      - Run on Your Files: performance/run-on-your-files.md
+      - Troubleshooting: performance/perf-troubleshooting.md
+  - Fidelity:
+      - Scoring Model: fidelity/scoring-model.md
+      - Fixture Design: fidelity/fixture-design.md
+      - Known Differences: fidelity/known-differences.md
+  - API:
+      - Workbook: api/workbook.md
+      - Worksheet: api/worksheet.md
+      - Cell: api/cell.md
+      - Styles: api/styles.md
+  - Operations:
+      - Production Checklist: operations/production-checklist.md
+      - Versioning and Upgrades: operations/versioning-and-upgrades.md
+      - Troubleshooting: operations/troubleshooting.md
+  - Trust:
+      - Limitations: trust/limitations.md
+      - Changelog: trust/changelog.md
+      - Security and Integrity: trust/security-and-integrity.md
