@@ -17,6 +17,8 @@ Usage::
     wb.save("out.xlsx")
 """
 
+import os
+
 from wolfxl._rust import __version__
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._workbook import Workbook
@@ -35,7 +37,7 @@ __all__ = [
 
 
 def load_workbook(
-    filename: str,
+    filename: str | os.PathLike[str],
     read_only: bool = False,
     data_only: bool = False,
     keep_links: bool = True,

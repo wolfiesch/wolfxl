@@ -7,6 +7,7 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from wolfxl._worksheet import Worksheet
@@ -101,8 +102,9 @@ class Workbook:
         self._sheets[title] = ws
         return ws
 
-    def save(self, filename: str) -> None:
+    def save(self, filename: str | os.PathLike[str]) -> None:
         """Flush all pending writes and save to disk."""
+        filename = str(filename)
         if self._rust_patcher is not None:
             # Modify mode — flush to patcher, then surgical save.
             for ws in self._sheets.values():

@@ -827,3 +827,290 @@ class TestModifyMode:
         assert wb2.active is not None
         assert wb2.active["A1"].value == "Has links"
         wb2.close()
+
+
+# ======================================================================
+# Batch flush tests (write_sheet_values optimization)
+# ======================================================================
+
+
+class TestBatchFlush:
+    """Verify the batch flush path produces correct output."""
+
+    def setup_method(self) -> None:
+        _require_rust()
+
+    def test_batch_numeric_roundtrip(self, tmp_path: Path) -> None:
+        """Bulk numeric writes should batch into write_sheet_values."""
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        # Write a 100×10 grid of numbers — all batchable types.
+        for r in range(1, 101):
+            for c in range(1, 11):
+                ws.cell(row=r, column=c, value=r * 100 + c)
+        out = tmp_path / "batch_numeric.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == 101
+        assert ws2["J100"].value == 10010
+        assert ws2["E50"].value == 5005
+        wb2.close()
+
+    def test_batch_mixed_types(self, tmp_path: Path) -> None:
+        """Mixed types: ints/strs batch, bools/formulas go per-cell."""
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws["A1"] = 42          # batchable
+        ws["B1"] = "hello"     # batchable
+        ws["C1"] = 3.14        # batchable
+        ws["D1"] = True        # NOT batchable (bool)
+        ws["E1"] = "=SUM(1,2)" # NOT batchable (formula)
+        ws["F1"] = None         # batchable (skip)
+        out = tmp_path / "batch_mixed.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == 42 or ws2["A1"].value == 42.0
+        assert ws2["B1"].value == "hello"
+        assert abs(ws2["C1"].value - 3.14) < 0.001
+        assert ws2["D1"].value is True
+        val_e = ws2["E1"].value
+        assert val_e is not None and "SUM" in str(val_e).upper()
+        wb2.close()
+
+    def test_batch_with_format(self, tmp_path: Path) -> None:
+        """Cells with both values and formats: value batches, format per-cell."""
+        from wolfxl import Font, Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        # A1: value + format (value goes to batch, format goes per-cell)
+        ws["A1"] = "styled"
+        ws["A1"].font = Font(bold=True)
+        # B1: value only (pure batch)
+        ws["B1"] = "plain"
+        out = tmp_path / "batch_format.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == "styled"
+        assert ws2["A1"].font.bold is True
+        assert ws2["B1"].value == "plain"
+        wb2.close()
+
+    def test_batch_large_grid(self, tmp_path: Path) -> None:
+        """10K cells — the batch path should handle this without issues."""
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        rows, cols = 1000, 10
+        for r in range(1, rows + 1):
+            for c in range(1, cols + 1):
+                ws.cell(row=r, column=c, value=float(r * cols + c))
+        out = tmp_path / "batch_10k.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        # Spot-check corners
+        assert ws2["A1"].value == 11.0
+        assert ws2["J1000"].value == 10010.0
+        wb2.close()
+
+
+# ======================================================================
+# Append tests (openpyxl-compatible ws.append)
+# ======================================================================
+
+
+class TestAppend:
+    """Test ws.append() — openpyxl-compatible row insertion."""
+
+    def setup_method(self) -> None:
+        _require_rust()
+
+    def test_append_basic(self, tmp_path: Path) -> None:
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["Name", "Age", "City"])
+        ws.append(["Alice", 30, "NYC"])
+        ws.append(["Bob", 25, "LA"])
+        out = tmp_path / "append_basic.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == "Name"
+        assert ws2["B2"].value == 30 or ws2["B2"].value == 30.0
+        assert ws2["C3"].value == "LA"
+        wb2.close()
+
+    def test_append_many_rows(self, tmp_path: Path) -> None:
+        """Append 5000 rows — exercises the batch flush path."""
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        for i in range(5000):
+            ws.append([i, f"row_{i}", i * 1.1])
+        out = tmp_path / "append_5k.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == 0 or ws2["A1"].value == 0.0
+        assert ws2["B5000"].value == "row_4999"
+        wb2.close()
+
+    def test_append_mixed_with_cell(self, tmp_path: Path) -> None:
+        """Mix append() with direct cell() writes.
+
+        Like openpyxl, direct cell() writes do NOT advance the append counter.
+        So append() after cell(row=2) still writes to the next append row (2),
+        overwriting the cell() value. This matches openpyxl semantics.
+        """
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["Header1", "Header2"])   # row 1, next_append = 2
+        ws.cell(row=5, column=1, value="manual")  # does NOT advance counter
+        ws.append(["Row2_A", "Row2_B"])     # row 2 (matches openpyxl)
+        out = tmp_path / "append_mixed.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == "Header1"
+        assert ws2["A2"].value == "Row2_A"
+        assert ws2["A5"].value == "manual"
+        wb2.close()
+
+    def test_append_empty_row(self, tmp_path: Path) -> None:
+        """Appending an empty iterable should still advance the row counter."""
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["row1"])
+        ws.append([])  # empty
+        ws.append(["row3"])
+        out = tmp_path / "append_empty.xlsx"
+        wb.save(str(out))
+
+        wb2 = load_workbook(str(out))
+        ws2 = wb2[wb2.sheetnames[0]]
+        assert ws2["A1"].value == "row1"
+        assert ws2["A3"].value == "row3"
+        wb2.close()
+
+
+# ======================================================================
+# PathLike support tests
+# ======================================================================
+
+
+class TestPathLike:
+    """Test os.PathLike support for save() and load_workbook()."""
+
+    def setup_method(self) -> None:
+        _require_rust()
+
+    def test_save_with_path(self, tmp_path: Path) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws["A1"] = "pathlib"
+        out = tmp_path / "pathlike.xlsx"
+        wb.save(out)  # Pass Path object, not str
+        assert out.exists()
+
+    def test_load_with_path(self, tmp_path: Path) -> None:
+        from wolfxl import Workbook, load_workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws["A1"] = "pathlib"
+        out = tmp_path / "pathlike_load.xlsx"
+        wb.save(out)
+
+        wb2 = load_workbook(out)  # Pass Path object, not str
+        assert wb2.active is not None
+        assert wb2.active["A1"].value == "pathlib"
+        wb2.close()
+
+    def test_save_and_load_modify_with_path(self) -> None:
+        fixture = FIXTURES / "tier1" / "01_cell_values.xlsx"
+        if not fixture.exists():
+            pytest.skip("fixture not found")
+        from wolfxl import load_workbook
+
+        wb = load_workbook(fixture, modify=True)  # Path object
+        assert wb.active is not None
+        wb.close()
+
+
+# ======================================================================
+# Title setter tests
+# ======================================================================
+
+
+class TestTitleSetter:
+    """Test ws.title setter for renaming worksheets."""
+
+    def setup_method(self) -> None:
+        _require_rust()
+
+    def test_rename_sheet(self) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        assert ws.title == "Sheet"
+        ws.title = "Data"
+        assert ws.title == "Data"
+        assert wb.sheetnames == ["Data"]
+        assert "Data" in wb
+        assert "Sheet" not in wb
+
+    def test_rename_duplicate_raises(self) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        wb.create_sheet("Other")
+        ws = wb.active
+        assert ws is not None
+        with pytest.raises(ValueError, match="already exists"):
+            ws.title = "Other"
+
+    def test_rename_noop(self) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Sheet"  # Same name — should be a no-op
+        assert ws.title == "Sheet"
