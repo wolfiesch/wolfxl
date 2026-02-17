@@ -11,7 +11,7 @@ Fixtures are Excel-authored source files used as ground truth.
 
 ## In the ExcelBench repository
 
-Fixtures live in the [ExcelBench](https://github.com/wolfiesch/ExcelBench) repository:
+Fixtures live in the [ExcelBench](https://github.com/SynthGL/ExcelBench) repository:
 
 - Canonical xlsx fixtures: `fixtures/excel/`
 - Canonical xls fixtures: `fixtures/excel_xls/`

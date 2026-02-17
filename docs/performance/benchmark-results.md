@@ -5,7 +5,7 @@ This page is intentionally lightweight and should link to generated artifacts.
 ## Current source of truth
 
 - ExcelBench dashboard: [excelbench.vercel.app](https://excelbench.vercel.app)
-- ExcelBench repo: [github.com/wolfiesch/ExcelBench](https://github.com/wolfiesch/ExcelBench)
+- ExcelBench repo: [github.com/SynthGL/ExcelBench](https://github.com/SynthGL/ExcelBench)
 
 ## Hardware context (current docs baseline)
 
@@ -16,7 +16,7 @@ Always attach runtime details (OS, Python, package versions) when sharing new ru
 
 ## Regenerate reports
 
-From the [ExcelBench](https://github.com/wolfiesch/ExcelBench) repository:
+From the [ExcelBench](https://github.com/SynthGL/ExcelBench) repository:
 
 ```bash
 uv run excelbench report --input results/xlsx/results.json --output results/xlsx

@@ -10,7 +10,7 @@
 
 ## 0.1.0 (2026-02-15)
 
-Initial release. Extracted from [ExcelBench](https://github.com/wolfiesch/ExcelBench).
+Initial release. Extracted from [ExcelBench](https://github.com/SynthGL/ExcelBench).
 
 ### Features
 

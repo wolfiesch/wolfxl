@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://pypi.org/project/wolfxl/"><img src="https://img.shields.io/pypi/v/wolfxl?color=blue&label=PyPI" alt="PyPI"></a>
   <a href="https://pypi.org/project/wolfxl/"><img src="https://img.shields.io/pypi/pyversions/wolfxl?color=blue" alt="Python"></a>
-  <a href="https://github.com/wolfiesch/wolfxl/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://github.com/SynthGL/wolfxl/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <a href="https://excelbench.vercel.app"><img src="https://img.shields.io/badge/benchmarks-ExcelBench-orange" alt="ExcelBench"></a>
 </p>
 

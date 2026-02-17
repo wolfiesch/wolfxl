@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 license = "MIT"
 description = "Fast, openpyxl-compatible Excel I/O backed by Rust"
-repository = "https://github.com/wolfiesch/wolfxl"
+repository = "https://github.com/SynthGL/wolfxl"
 build = "build.rs"
 
 [lib]

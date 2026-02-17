@@ -1,7 +1,7 @@
 site_name: WolfXL
 site_description: Rust-backed, openpyxl-style Excel engine for Python
 site_url: https://wolfxl.readthedocs.io
-repo_url: https://github.com/wolfiesch/wolfxl
+repo_url: https://github.com/SynthGL/wolfxl
 repo_name: wolfxl
 
 docs_dir: .

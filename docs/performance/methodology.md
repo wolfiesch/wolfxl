@@ -27,7 +27,7 @@ Unless a result explicitly says otherwise, benchmark numbers in WolfXL docs were
 
 ## Suggested benchmark commands
 
-From the [ExcelBench](https://github.com/wolfiesch/ExcelBench) repository:
+From the [ExcelBench](https://github.com/SynthGL/ExcelBench) repository:
 
 ```bash
 uv run excelbench benchmark --tests fixtures/excel --output results

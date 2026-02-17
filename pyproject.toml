@@ -21,8 +21,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/wolfiesch/wolfxl"
-Repository = "https://github.com/wolfiesch/wolfxl"
+Homepage = "https://github.com/SynthGL/wolfxl"
+Repository = "https://github.com/SynthGL/wolfxl"
 
 [tool.maturin]
 bindings = "pyo3"
