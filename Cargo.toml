@@ -1,6 +1,6 @@
 [package]
 name = "wolfxl"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT"
 description = "Fast, openpyxl-compatible Excel I/O backed by Rust"
