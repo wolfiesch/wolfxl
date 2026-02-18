@@ -4,8 +4,8 @@ site_url: https://wolfxl.readthedocs.io
 repo_url: https://github.com/SynthGL/wolfxl
 repo_name: wolfxl
 
-docs_dir: .
-site_dir: ../site
+docs_dir: docs
+site_dir: site
 
 theme:
   name: material
@@ -88,5 +88,5 @@ nav:
       - Troubleshooting: operations/troubleshooting.md
   - Trust:
       - Limitations: trust/limitations.md
-      - Changelog: trust/changelog.md
+      - Changelog: trust/release-notes.md
       - Security and Integrity: trust/security-and-integrity.md

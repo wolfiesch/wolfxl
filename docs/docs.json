@@ -1,0 +1,110 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "WolfXL",
+  "description": "Rust-backed, openpyxl-compatible Excel library for Python. Up to 5x faster with one import change.",
+  "colors": {
+    "primary": "#f97316",
+    "light": "#fdba74",
+    "dark": "#ea580c"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/SynthGL/wolfxl"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "PyPI",
+      "href": "https://pypi.org/project/wolfxl/"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/SynthGL/wolfxl",
+      "x": "https://x.com/wolfgangsch"
+    },
+    "links": [
+      {
+        "header": "Resources",
+        "items": [
+          {
+            "label": "ExcelBench Dashboard",
+            "href": "https://excelbench.vercel.app"
+          },
+          {
+            "label": "ExcelBench Docs",
+            "href": "https://excelbench.mintlify.app"
+          }
+        ]
+      }
+    ]
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": [
+          "index",
+          "getting-started/install",
+          "getting-started/quickstart",
+          "getting-started/first-workbook"
+        ]
+      },
+      {
+        "group": "Migration",
+        "pages": [
+          "migration/openpyxl-migration",
+          "migration/compatibility-matrix",
+          "migration/legacy-shim"
+        ]
+      },
+      {
+        "group": "Performance",
+        "pages": [
+          "performance/methodology",
+          "performance/benchmark-results",
+          "performance/run-on-your-files",
+          "performance/perf-troubleshooting"
+        ]
+      },
+      {
+        "group": "Fidelity",
+        "pages": [
+          "fidelity/scoring-model",
+          "fidelity/fixture-design",
+          "fidelity/known-differences"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/workbook",
+          "api/worksheet",
+          "api/cell",
+          "api/styles"
+        ]
+      },
+      {
+        "group": "Operations",
+        "pages": [
+          "operations/production-checklist",
+          "operations/versioning-and-upgrades",
+          "operations/troubleshooting"
+        ]
+      },
+      {
+        "group": "Trust",
+        "pages": [
+          "trust/limitations",
+          "trust/release-notes",
+          "trust/security-and-integrity",
+          "case-study-synthgl"
+        ]
+      }
+    ]
+  }
+}
