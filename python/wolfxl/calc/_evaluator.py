@@ -3,23 +3,45 @@
 Replaces fragile regex-based dispatch with a proper recursive descent
 parser that handles balanced parentheses, operator precedence, and
 arbitrarily nested expressions like ``=ROUND(SUM(A1:A5)*IF(B1>0,1.1,1.0),2)``.
+
+When the ``formulas`` library is installed (via ``wolfxl[calc]``), unsupported
+functions fall back to the library's Excel function implementations.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from typing import TYPE_CHECKING, Any
 
 from wolfxl.calc._functions import FunctionRegistry
 from wolfxl.calc._graph import DependencyGraph
-from wolfxl.calc._parser import expand_range
+from wolfxl.calc._parser import expand_range, range_shape
 from wolfxl.calc._protocol import CellDelta, RecalcResult
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# formulas library availability
+# ---------------------------------------------------------------------------
+
+_formulas_available: bool | None = None
+
+
+def _check_formulas() -> bool:
+    global _formulas_available
+    if _formulas_available is None:
+        try:
+            import formulas  # noqa: F401
+
+            _formulas_available = True
+        except ImportError:
+            _formulas_available = False
+    return _formulas_available
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +283,8 @@ class WorkbookEvaluator:
         self._graph = DependencyGraph()
         self._functions = FunctionRegistry()
         self._loaded = False
+        self._use_formulas = _check_formulas()
+        self._compiled_cache: dict[str, Any] = {}  # formula -> compiled callable
 
     def load(self, workbook: Workbook) -> None:
         """Scan workbook, store cell values, build dependency graph."""
@@ -357,7 +381,11 @@ class WorkbookEvaluator:
     # ------------------------------------------------------------------
 
     def _evaluate_formula(self, cell_ref: str, formula: str) -> Any:
-        """Evaluate a single formula string (starting with ``=``)."""
+        """Evaluate a single formula string (starting with ``=``).
+
+        Tries the builtin recursive descent evaluator first. If that returns
+        None (unsupported function), falls back to the ``formulas`` library.
+        """
         body = formula.strip()
         if body.startswith('='):
             body = body[1:]
@@ -365,6 +393,13 @@ class WorkbookEvaluator:
         result = self._eval_expr(body.strip(), sheet)
         if result is not None:
             return result
+
+        # Fallback: try the formulas library for unsupported functions
+        if self._use_formulas:
+            fb = self._formulas_fallback(formula, sheet)
+            if fb is not None:
+                return fb
+
         logger.debug("Cannot evaluate formula %r in %s", formula, cell_ref)
         return None
 
@@ -544,6 +579,112 @@ class WorkbookEvaluator:
             return self._resolve_range(arg, sheet)
 
         return self._eval_expr(arg, sheet)
+
+    # ------------------------------------------------------------------
+    # formulas library fallback
+    # ------------------------------------------------------------------
+
+    def _formulas_fallback(self, formula: str, sheet: str) -> Any:
+        """Evaluate a formula via the ``formulas`` library.
+
+        Compiles the formula into a callable, resolves its cell reference
+        parameters from ``_cell_values``, and returns the scalar result.
+        """
+        import formulas as fm
+        import numpy as np
+
+        # Compile (with caching)
+        compiled = self._compiled_cache.get(formula)
+        if compiled is None:
+            try:
+                result = fm.Parser().ast(formula)
+                if result and len(result) > 1:
+                    compiled = result[1].compile()
+                    self._compiled_cache[formula] = compiled
+            except Exception:
+                logger.debug("formulas: cannot compile %r", formula)
+                return None
+        if compiled is None:
+            return None
+
+        # Resolve parameters: the compiled function's signature tells us
+        # which cell references it needs (e.g., "A1:A5", "B1")
+        try:
+            params = list(inspect.signature(compiled).parameters.keys())
+        except (ValueError, TypeError):
+            params = []
+
+        if not params:
+            # No cell references - purely constant formula (e.g., =PMT(0.05/12,360,200000))
+            try:
+                raw = compiled()
+                return self._normalize_formulas_result(raw)
+            except Exception as e:
+                logger.debug("formulas: error evaluating %r: %s", formula, e)
+                return None
+
+        # Map parameter names to cell values
+        args: list[Any] = []
+        for param in params:
+            # Param names from formulas lib use the formula's raw ref tokens
+            # like "A1:A5" or "A1" (no sheet prefix for same-sheet refs)
+            if ':' in param:
+                # Range parameter - resolve to numpy array
+                # Qualify with sheet name for range_shape parsing
+                qualified = param if '!' in param else f"{sheet}!{param}"
+                values = self._resolve_range(param, sheet)
+                flat = np.array([v if v is not None else 0 for v in values])
+                n_rows, n_cols = range_shape(qualified)
+                if n_cols > 1 and flat.size == n_rows * n_cols:
+                    flat = flat.reshape(n_rows, n_cols)
+                args.append(flat)
+            else:
+                # Single cell parameter
+                val = self._resolve_cell_ref(param, sheet)
+                if isinstance(val, (int, float)):
+                    args.append(np.float64(val))
+                elif isinstance(val, str):
+                    args.append(val)
+                else:
+                    args.append(np.float64(0) if val is None else val)
+
+        try:
+            raw = compiled(*args)
+            return self._normalize_formulas_result(raw)
+        except Exception as e:
+            logger.debug("formulas: error evaluating %r: %s", formula, e)
+            return None
+
+    @staticmethod
+    def _normalize_formulas_result(raw: Any) -> Any:
+        """Convert a ``formulas`` library result to a plain Python value."""
+        if raw is None:
+            return None
+        # numpy scalar types
+        if hasattr(raw, 'item'):
+            try:
+                val = raw.item()
+                if isinstance(val, float) and val == int(val):
+                    return int(val)
+                return val
+            except (ValueError, TypeError):
+                pass
+        # numpy array with single element
+        if hasattr(raw, 'shape') and hasattr(raw, 'flat'):
+            try:
+                if raw.size == 1:
+                    val = raw.flat[0]
+                    if hasattr(val, 'item'):
+                        val = val.item()
+                    if isinstance(val, float) and val == int(val):
+                        return int(val)
+                    return val
+            except (ValueError, TypeError, IndexError):
+                pass
+        # Already a plain Python type
+        if isinstance(raw, (int, float, str, bool)):
+            return raw
+        return raw
 
     @staticmethod
     def _sheet_from_ref(cell_ref: str) -> str:

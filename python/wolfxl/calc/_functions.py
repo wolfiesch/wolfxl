@@ -219,6 +219,118 @@ def _builtin_average(args: list[Any]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Additional math builtins
+# ---------------------------------------------------------------------------
+
+
+def _builtin_rounddown(args: list[Any]) -> float:
+    if len(args) < 1 or len(args) > 2:
+        raise ValueError("ROUNDDOWN requires 1 or 2 arguments")
+    nums = _coerce_numeric([args[0]])
+    if not nums:
+        raise ValueError("ROUNDDOWN: non-numeric argument")
+    digits = int(_coerce_numeric([args[1]])[0]) if len(args) > 1 else 0
+    if digits == 0:
+        return float(math.trunc(nums[0]))
+    factor = 10 ** digits
+    return math.trunc(nums[0] * factor) / factor
+
+
+def _builtin_mod(args: list[Any]) -> float:
+    if len(args) != 2:
+        raise ValueError("MOD requires exactly 2 arguments")
+    nums = _coerce_numeric(args)
+    if len(nums) != 2:
+        raise ValueError("MOD: non-numeric argument")
+    if nums[1] == 0:
+        raise ValueError("MOD: division by zero")
+    # Excel MOD: result has the sign of the divisor
+    return nums[0] - nums[1] * math.floor(nums[0] / nums[1])
+
+
+def _builtin_power(args: list[Any]) -> float:
+    if len(args) != 2:
+        raise ValueError("POWER requires exactly 2 arguments")
+    nums = _coerce_numeric(args)
+    if len(nums) != 2:
+        raise ValueError("POWER: non-numeric argument")
+    return nums[0] ** nums[1]
+
+
+def _builtin_sqrt(args: list[Any]) -> float:
+    if len(args) != 1:
+        raise ValueError("SQRT requires exactly 1 argument")
+    nums = _coerce_numeric(args)
+    if not nums:
+        raise ValueError("SQRT: non-numeric argument")
+    if nums[0] < 0:
+        raise ValueError("SQRT: negative argument")
+    return math.sqrt(nums[0])
+
+
+def _builtin_sign(args: list[Any]) -> float:
+    if len(args) != 1:
+        raise ValueError("SIGN requires exactly 1 argument")
+    nums = _coerce_numeric(args)
+    if not nums:
+        raise ValueError("SIGN: non-numeric argument")
+    if nums[0] > 0:
+        return 1.0
+    if nums[0] < 0:
+        return -1.0
+    return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Text builtins
+# ---------------------------------------------------------------------------
+
+
+def _coerce_string(val: Any) -> str:
+    if val is None:
+        return ""
+    return str(val)
+
+
+def _builtin_left(args: list[Any]) -> str:
+    if len(args) < 1 or len(args) > 2:
+        raise ValueError("LEFT requires 1 or 2 arguments")
+    text = _coerce_string(args[0])
+    num_chars = int(_coerce_numeric([args[1]])[0]) if len(args) > 1 else 1
+    return text[:num_chars]
+
+
+def _builtin_right(args: list[Any]) -> str:
+    if len(args) < 1 or len(args) > 2:
+        raise ValueError("RIGHT requires 1 or 2 arguments")
+    text = _coerce_string(args[0])
+    num_chars = int(_coerce_numeric([args[1]])[0]) if len(args) > 1 else 1
+    return text[-num_chars:] if num_chars > 0 else ""
+
+
+def _builtin_mid(args: list[Any]) -> str:
+    if len(args) != 3:
+        raise ValueError("MID requires exactly 3 arguments")
+    text = _coerce_string(args[0])
+    start = int(_coerce_numeric([args[1]])[0])
+    num_chars = int(_coerce_numeric([args[2]])[0])
+    # Excel MID is 1-indexed
+    return text[start - 1 : start - 1 + num_chars]
+
+
+def _builtin_len(args: list[Any]) -> float:
+    if len(args) != 1:
+        raise ValueError("LEN requires exactly 1 argument")
+    return float(len(_coerce_string(args[0])))
+
+
+def _builtin_concatenate(args: list[Any]) -> str:
+    if not args:
+        raise ValueError("CONCATENATE requires at least 1 argument")
+    return "".join(_coerce_string(a) for a in args)
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -227,7 +339,12 @@ _BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
     "ABS": _builtin_abs,
     "ROUND": _builtin_round,
     "ROUNDUP": _builtin_roundup,
+    "ROUNDDOWN": _builtin_rounddown,
     "INT": _builtin_int,
+    "MOD": _builtin_mod,
+    "POWER": _builtin_power,
+    "SQRT": _builtin_sqrt,
+    "SIGN": _builtin_sign,
     "IF": _builtin_if,
     "IFERROR": _builtin_iferror,
     "AND": _builtin_and,
@@ -238,6 +355,11 @@ _BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
     "MIN": _builtin_min,
     "MAX": _builtin_max,
     "AVERAGE": _builtin_average,
+    "LEFT": _builtin_left,
+    "RIGHT": _builtin_right,
+    "MID": _builtin_mid,
+    "LEN": _builtin_len,
+    "CONCATENATE": _builtin_concatenate,
 }
 
 

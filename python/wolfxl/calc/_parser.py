@@ -153,6 +153,26 @@ def expand_range(range_ref: str) -> list[str]:
     return cells
 
 
+def range_shape(range_ref: str) -> tuple[int, int]:
+    """Return ``(n_rows, n_cols)`` for a range reference like ``A1:C3``.
+
+    The *range_ref* may include a sheet prefix (``Sheet1!A1:C3``).
+    """
+    ref_part = range_ref
+    if "!" in range_ref:
+        _, ref_part = range_ref.rsplit("!", 1)
+
+    parts = ref_part.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid range: {range_ref!r}")
+
+    start_row, start_col = a1_to_rowcol(parts[0].replace("$", ""))
+    end_row, end_col = a1_to_rowcol(parts[1].replace("$", ""))
+    n_rows = abs(end_row - start_row) + 1
+    n_cols = abs(end_col - start_col) + 1
+    return (n_rows, n_cols)
+
+
 # ---------------------------------------------------------------------------
 # All-references extraction (combines singles + expanded ranges)
 # ---------------------------------------------------------------------------
