@@ -119,6 +119,50 @@ class Workbook:
             raise RuntimeError("save requires write or modify mode")
 
     # ------------------------------------------------------------------
+    # Formula evaluation (requires wolfxl.calc)
+    # ------------------------------------------------------------------
+
+    def calculate(self) -> dict[str, Any]:
+        """Evaluate all formulas in the workbook.
+
+        Returns a dict of cell_ref -> computed value for all formula cells.
+        Requires the ``wolfxl.calc`` module (install via ``pip install wolfxl[calc]``).
+
+        The internal evaluator is cached so that a subsequent
+        :meth:`recalculate` call can reuse it without rescanning.
+        """
+        from wolfxl.calc._evaluator import WorkbookEvaluator
+
+        ev = WorkbookEvaluator()
+        ev.load(self)
+        result = ev.calculate()
+        self._evaluator = ev  # cache for recalculate()
+        return result
+
+    def recalculate(
+        self,
+        perturbations: dict[str, float | int],
+        tolerance: float = 1e-10,
+    ) -> Any:
+        """Perturb input cells and recompute affected formulas.
+
+        Returns a ``RecalcResult`` describing which cells changed.
+        Requires the ``wolfxl.calc`` module.
+
+        If :meth:`calculate` was called first, the cached evaluator is
+        reused (avoiding a full rescan + recalculate).
+        """
+        ev = getattr(self, '_evaluator', None)
+        if ev is None:
+            from wolfxl.calc._evaluator import WorkbookEvaluator
+
+            ev = WorkbookEvaluator()
+            ev.load(self)
+            ev.calculate()
+            self._evaluator = ev
+        return ev.recalculate(perturbations, tolerance)
+
+    # ------------------------------------------------------------------
     # Context manager + cleanup
     # ------------------------------------------------------------------
 
