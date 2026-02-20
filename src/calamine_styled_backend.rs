@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDate, PyDateTime, PyDict, PyList};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -12,7 +12,7 @@ use calamine_styles::{
     VerticalAlignment, WorksheetLayout,
 };
 use calamine_styles::{Data, Range, Reader, Xlsx};
-use chrono::NaiveTime;
+use chrono::{Datelike, NaiveTime, Timelike};
 
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
@@ -183,7 +183,7 @@ fn data_to_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
 
 /// Convert a calamine Data value to a plain Python object (no dict wrapper).
 ///
-/// Returns str, float, int, bool, None, or ISO date/datetime string directly.
+/// Returns str, float, int, bool, None, datetime.date, or datetime.datetime.
 fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
     match value {
         Data::Empty => Ok(py.None()),
@@ -195,17 +195,42 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
             if let Some(ndt) = dt.as_datetime() {
                 let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
                 if ndt.time() == midnight {
-                    let s = ndt.date().format("%Y-%m-%d").to_string();
-                    Ok(s.to_object(py))
+                    let d = PyDate::new(py, ndt.year(), ndt.month() as u8, ndt.day() as u8)?;
+                    Ok(d.into_any().unbind())
                 } else {
-                    let s = ndt.format("%Y-%m-%dT%H:%M:%S").to_string();
-                    Ok(s.to_object(py))
+                    let d = PyDateTime::new(
+                        py, ndt.year(), ndt.month() as u8, ndt.day() as u8,
+                        ndt.hour() as u8, ndt.minute() as u8, ndt.second() as u8,
+                        0, None,
+                    )?;
+                    Ok(d.into_any().unbind())
                 }
             } else {
                 Ok(dt.as_f64().to_object(py))
             }
         }
-        Data::DateTimeIso(s) => Ok(s.to_object(py)),
+        Data::DateTimeIso(s) => {
+            let raw = s.trim_end_matches('Z');
+            if let Some(d) = parse_iso_date(raw) {
+                let pydate = PyDate::new(py, d.year(), d.month() as u8, d.day() as u8)?;
+                Ok(pydate.into_any().unbind())
+            } else if let Some(ndt) = parse_iso_datetime(raw) {
+                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                if ndt.time() == midnight {
+                    let pydate = PyDate::new(py, ndt.year(), ndt.month() as u8, ndt.day() as u8)?;
+                    Ok(pydate.into_any().unbind())
+                } else {
+                    let pydt = PyDateTime::new(
+                        py, ndt.year(), ndt.month() as u8, ndt.day() as u8,
+                        ndt.hour() as u8, ndt.minute() as u8, ndt.second() as u8,
+                        0, None,
+                    )?;
+                    Ok(pydt.into_any().unbind())
+                }
+            } else {
+                Ok(s.to_object(py))
+            }
+        }
         Data::DurationIso(s) => Ok(s.to_object(py)),
         Data::RichText(rt) => Ok(rt.plain_text().to_object(py)),
         Data::Error(e) => {

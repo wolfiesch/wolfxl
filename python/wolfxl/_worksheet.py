@@ -152,7 +152,47 @@ class Worksheet:
         """
         if not rows:
             return
-        self._bulk_writes.append((rows, start_row, start_col))
+        # Store a shallow copy so flush can safely mutate without affecting caller.
+        copied = [list(row) for row in rows]
+        self._bulk_writes.append((copied, start_row, start_col))
+
+    def _materialize_bulk_writes(self) -> None:
+        """Convert bulk write buffers into Cell objects.
+
+        Called before the patcher flush path which has no batch API and
+        needs all values as individual dirty cells.
+        """
+        writes = self._bulk_writes
+        if not writes:
+            return
+        self._bulk_writes = []
+        for grid, sr, sc in writes:
+            for ri, row in enumerate(grid):
+                for ci, val in enumerate(row):
+                    if val is not None:
+                        self.cell(row=sr + ri, column=sc + ci, value=val)
+
+    @staticmethod
+    def _extract_non_batchable(
+        grid: list[list[Any]], start_row: int, start_col: int,
+    ) -> list[tuple[int, int, Any]]:
+        """Extract non-batchable values from grid, replacing them with None.
+
+        Non-batchable: booleans, formulas (str starting with '='), and
+        non-primitive types (dates, datetimes, etc.).  These require
+        per-cell ``write_cell_value()`` calls with type-preserving payloads.
+        """
+        indiv: list[tuple[int, int, Any]] = []
+        for ri, row in enumerate(grid):
+            for ci, val in enumerate(row):
+                if val is not None and (
+                    isinstance(val, bool)
+                    or (isinstance(val, str) and val.startswith("="))
+                    or not isinstance(val, (int, float, str))
+                ):
+                    indiv.append((start_row + ri, start_col + ci, val))
+                    row[ci] = None
+        return indiv
 
     # ------------------------------------------------------------------
     # Iteration
@@ -303,10 +343,12 @@ class Worksheet:
         writer = wb._rust_writer  # noqa: SLF001
 
         if patcher is not None:
-            # Modify mode: materialize append buffer first (patcher has no
-            # batch API), then flush dirty cells individually.
+            # Modify mode: materialize buffers first (patcher has no batch
+            # API), then flush dirty cells individually.
             if self._append_buffer:
                 self._materialize_append_buffer()
+            if self._bulk_writes:
+                self._materialize_bulk_writes()
             self._flush_to_patcher(patcher, python_value_to_payload,
                                    font_to_format_dict, fill_to_format_dict,
                                    alignment_to_format_dict, border_to_rust_dict)
@@ -340,18 +382,7 @@ class Worksheet:
             start_row = self._append_buffer_start
             start_a1 = rowcol_to_a1(start_row, 1)
 
-            # Scan for non-batchable values and replace with None in the grid.
-            # Non-batchable values get individual write_cell_value calls after.
-            indiv_from_buf: list[tuple[int, int, Any]] = []
-            for ri, row in enumerate(buf):
-                for ci, val in enumerate(row):
-                    if val is not None and (
-                        isinstance(val, bool)
-                        or (isinstance(val, str) and val.startswith("="))
-                        or not isinstance(val, (int, float, str))
-                    ):
-                        indiv_from_buf.append((start_row + ri, ci + 1, val))
-                        row[ci] = None  # will be skipped by write_sheet_values
+            indiv_from_buf = self._extract_non_batchable(buf, start_row, 1)
 
             writer.write_sheet_values(self._title, start_a1, buf)
 
@@ -365,17 +396,7 @@ class Worksheet:
         # -- Flush bulk writes (write_rows) -----------------------------------
         for grid, sr, sc in self._bulk_writes:
             start_a1 = rowcol_to_a1(sr, sc)
-            # Same non-batchable scan as append buffer.
-            indiv_from_bulk: list[tuple[int, int, Any]] = []
-            for ri, row in enumerate(grid):
-                for ci, val in enumerate(row):
-                    if val is not None and (
-                        isinstance(val, bool)
-                        or (isinstance(val, str) and val.startswith("="))
-                        or not isinstance(val, (int, float, str))
-                    ):
-                        indiv_from_bulk.append((sr + ri, sc + ci, val))
-                        row[ci] = None
+            indiv_from_bulk = self._extract_non_batchable(grid, sr, sc)
             writer.write_sheet_values(self._title, start_a1, grid)
             for r, c, val in indiv_from_bulk:
                 coord = rowcol_to_a1(r, c)
