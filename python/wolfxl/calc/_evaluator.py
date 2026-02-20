@@ -15,7 +15,6 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
 from wolfxl.calc._functions import ExcelError, FunctionRegistry, RangeValue, first_error
 from wolfxl.calc._graph import DependencyGraph
 from wolfxl.calc._parser import expand_range, range_shape
@@ -554,87 +553,28 @@ class WorkbookEvaluator:
     # ------------------------------------------------------------------
 
     def _eval_function(self, func_name: str, args_str: str, sheet: str) -> Any:
-        """Evaluate a function call with resolved arguments."""
-        # OFFSET is special: it creates a dynamic reference, not a scalar.
-        if func_name == "OFFSET":
-            return self._eval_offset(args_str, sheet)
+        """Evaluate a function call with resolved arguments.
 
+        Functions with ``_raw_args = True`` receive raw argument strings
+        and the evaluator's expression evaluator, rather than resolved values.
+        """
         func = self._functions.get(func_name)
         if func is None:
             logger.debug("Unsupported function: %s", func_name)
             return None
+        if getattr(func, '_raw_args', False):
+            raw_args = self._split_top_level_args(args_str)
+            try:
+                return func(raw_args, self._eval_expr, sheet)
+            except Exception as e:
+                logger.debug("Error evaluating %s: %s", func_name, e)
+                return None
         args = self._parse_function_args(args_str, sheet)
         try:
             return func(args)
         except Exception as e:
             logger.debug("Error evaluating %s: %s", func_name, e)
             return None
-
-    def _eval_offset(self, args_str: str, sheet: str) -> Any:
-        """Evaluate OFFSET(reference, rows, cols, [height], [width]).
-
-        Returns a RangeValue for multi-cell results or a scalar for single-cell.
-        """
-        raw_args = self._split_top_level_args(args_str)
-        if len(raw_args) < 3 or len(raw_args) > 5:
-            return ExcelError.REF
-
-        # First arg is a cell reference - parse it as text, not resolve its value
-        ref_str = raw_args[0].strip().replace('$', '')
-        rows_offset = self._eval_expr(raw_args[1].strip(), sheet)
-        cols_offset = self._eval_expr(raw_args[2].strip(), sheet)
-        height = self._eval_expr(raw_args[3].strip(), sheet) if len(raw_args) > 3 else None
-        width = self._eval_expr(raw_args[4].strip(), sheet) if len(raw_args) > 4 else None
-
-        try:
-            rows_offset = int(float(rows_offset))
-            cols_offset = int(float(cols_offset))
-        except (ValueError, TypeError):
-            return ExcelError.REF
-
-        # Parse the base reference
-        if '!' in ref_str:
-            parts = ref_str.split('!', 1)
-            ref_sheet = parts[0].strip("'")
-            cell_a1 = parts[1].upper()
-        else:
-            ref_sheet = sheet
-            cell_a1 = ref_str.upper()
-
-        # Handle range references (e.g. OFFSET(A1:A5, ...))
-        if ':' in cell_a1:
-            cell_a1 = cell_a1.split(':')[0]  # Use start of range as base
-
-        try:
-            base_row, base_col = a1_to_rowcol(cell_a1)
-        except ValueError:
-            return ExcelError.REF
-
-        # Compute target
-        target_row = base_row + rows_offset
-        target_col = base_col + cols_offset
-
-        h = int(float(height)) if height is not None else 1
-        w = int(float(width)) if width is not None else 1
-
-        if h < 1 or w < 1 or target_row < 1 or target_col < 1:
-            return ExcelError.REF
-
-        # Single cell
-        if h == 1 and w == 1:
-            cell_ref = f"{ref_sheet}!{rowcol_to_a1(target_row, target_col)}"
-            return self._cell_values.get(cell_ref)
-
-        # Multi-cell range
-        end_row = target_row + h - 1
-        end_col = target_col + w - 1
-        start_a1 = rowcol_to_a1(target_row, target_col)
-        end_a1 = rowcol_to_a1(end_row, end_col)
-        range_ref = f"{ref_sheet}!{start_a1}:{end_a1}"
-
-        cells = expand_range(range_ref)
-        values = [self._cell_values.get(c) for c in cells]
-        return RangeValue(values=values, n_rows=h, n_cols=w)
 
     def _split_top_level_args(self, args_str: str) -> list[str]:
         """Split on commas at depth 0 WITHOUT resolving - returns raw strings."""

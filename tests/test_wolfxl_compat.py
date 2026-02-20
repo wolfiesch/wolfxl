@@ -1691,3 +1691,23 @@ class TestPrintArea:
         ws.print_area = "A1:D10"
         ws.print_area = None
         assert ws.print_area is None
+
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        """print_area survives save to xlsx (verified via XML inspection)."""
+        import zipfile
+
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws["A1"] = "data"
+        ws.print_area = "A1:D10"
+        out = str(tmp_path / "pa.xlsx")
+        wb.save(out)
+
+        # Verify print area is in the workbook XML
+        with zipfile.ZipFile(out) as zf:
+            # Print areas are defined as named ranges in xl/workbook.xml
+            workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+            assert "Print_Area" in workbook_xml or "print_area" in workbook_xml.lower()

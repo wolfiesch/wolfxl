@@ -388,8 +388,8 @@ class TestFormulasFallbackPerturbation:
 
 
 class TestBuiltinRegistryCoverage:
-    def test_62_builtins_registered(self) -> None:
-        """All 62 builtin functions should be in the registry."""
+    def test_67_builtins_registered(self) -> None:
+        """All 67 builtin functions should be in the registry."""
         from wolfxl.calc._functions import FunctionRegistry
 
         reg = FunctionRegistry()
@@ -400,10 +400,12 @@ class TestBuiltinRegistryCoverage:
             "COUNT", "COUNTA", "MIN", "MAX", "AVERAGE",
             "LEFT", "RIGHT", "MID", "LEN", "CONCATENATE",
             "INDEX", "MATCH", "VLOOKUP", "HLOOKUP", "XLOOKUP", "CHOOSE",
+            "OFFSET",
             "SUMIF", "SUMIFS", "COUNTIF", "COUNTIFS",
             "AVERAGEIF", "AVERAGEIFS", "MINIFS", "MAXIFS",
             "PV", "FV", "PMT", "NPV", "IRR", "SLN", "DB",
             "TODAY", "DATE", "YEAR", "MONTH", "DAY", "EDATE", "EOMONTH", "DAYS",
+            "NOW", "HOUR", "MINUTE", "SECOND",
             "UPPER", "LOWER", "TRIM", "SUBSTITUTE", "TEXT", "REPT", "EXACT", "FIND",
         }
         assert expected == reg.supported_functions
@@ -418,10 +420,12 @@ class TestBuiltinRegistryCoverage:
             "COUNT", "COUNTA", "MIN", "MAX", "AVERAGE",
             "LEFT", "RIGHT", "MID", "LEN", "CONCATENATE",
             "INDEX", "MATCH", "VLOOKUP", "HLOOKUP", "XLOOKUP", "CHOOSE",
+            "OFFSET",
             "SUMIF", "SUMIFS", "COUNTIF", "COUNTIFS",
             "AVERAGEIF", "AVERAGEIFS", "MINIFS", "MAXIFS",
             "PV", "FV", "PMT", "NPV", "IRR", "SLN", "DB",
             "TODAY", "DATE", "YEAR", "MONTH", "DAY", "EDATE", "EOMONTH", "DAYS",
+            "NOW", "HOUR", "MINUTE", "SECOND",
             "UPPER", "LOWER", "TRIM", "SUBSTITUTE", "TEXT", "REPT", "EXACT", "FIND",
         ]:
             assert ev._functions.has(name), f"Missing builtin: {name}"

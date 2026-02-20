@@ -16,8 +16,8 @@ from wolfxl.calc._functions import (
 
 
 class TestWhitelist:
-    def test_whitelist_has_63_functions(self) -> None:
-        assert len(FUNCTION_WHITELIST_V1) == 63
+    def test_whitelist_has_67_functions(self) -> None:
+        assert len(FUNCTION_WHITELIST_V1) == 67
 
     def test_all_categories_represented(self) -> None:
         categories = set(FUNCTION_WHITELIST_V1.values())
@@ -976,3 +976,122 @@ class TestBuiltinTEXTExpanded:
     def test_general(self) -> None:
         assert _BUILTINS["TEXT"]([42, "General"]) == "42"
         assert _BUILTINS["TEXT"]([3.14, "General"]) == "3.14"
+
+
+# ---------------------------------------------------------------------------
+# OFFSET raw-arg protocol
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinOFFSET:
+    """Verify OFFSET is in _BUILTINS with _raw_args attribute."""
+
+    def test_in_builtins(self) -> None:
+        assert "OFFSET" in _BUILTINS
+
+    def test_raw_args_attribute(self) -> None:
+        assert getattr(_BUILTINS["OFFSET"], '_raw_args', False) is True
+
+    def test_callable(self) -> None:
+        assert callable(_BUILTINS["OFFSET"])
+
+
+# ---------------------------------------------------------------------------
+# Time builtins
+# ---------------------------------------------------------------------------
+
+
+class TestSerialToTime:
+    """Verify _serial_to_time fractional day extraction."""
+
+    def test_midnight(self) -> None:
+        from wolfxl.calc._functions import _serial_to_time
+
+        assert _serial_to_time(0.0) == (0, 0, 0)
+
+    def test_noon(self) -> None:
+        from wolfxl.calc._functions import _serial_to_time
+
+        assert _serial_to_time(0.5) == (12, 0, 0)
+
+    def test_6pm(self) -> None:
+        from wolfxl.calc._functions import _serial_to_time
+
+        assert _serial_to_time(0.75) == (18, 0, 0)
+
+    def test_with_integer_part(self) -> None:
+        """Integer part is ignored - only fractional portion matters."""
+        from wolfxl.calc._functions import _serial_to_time
+
+        assert _serial_to_time(45000.5) == (12, 0, 0)
+
+    def test_specific_time(self) -> None:
+        """6:30:00 AM = 0.270833..."""
+        from wolfxl.calc._functions import _serial_to_time
+
+        h, m, s = _serial_to_time(6.5 / 24)
+        assert h == 6
+        assert m == 30
+        assert s == 0
+
+
+class TestBuiltinNOW:
+    def test_returns_float(self) -> None:
+        result = _BUILTINS["NOW"]([])
+        assert isinstance(result, float)
+
+    def test_greater_than_today(self) -> None:
+        """NOW() should be >= TODAY() (has fractional time part)."""
+        today_serial = _BUILTINS["TODAY"]([])
+        now_serial = _BUILTINS["NOW"]([])
+        assert now_serial >= today_serial
+
+    def test_integer_part_matches_today(self) -> None:
+        today_serial = _BUILTINS["TODAY"]([])
+        now_serial = _BUILTINS["NOW"]([])
+        assert int(now_serial) == today_serial
+
+
+class TestBuiltinHOUR:
+    def test_noon(self) -> None:
+        """HOUR(0.5) = 12 (noon)."""
+        assert _BUILTINS["HOUR"]([0.5]) == 12
+
+    def test_6pm(self) -> None:
+        """HOUR(0.75) = 18 (6 PM)."""
+        assert _BUILTINS["HOUR"]([0.75]) == 18
+
+    def test_midnight(self) -> None:
+        assert _BUILTINS["HOUR"]([0.0]) == 0
+
+    def test_wrong_arity(self) -> None:
+        with pytest.raises(ValueError, match="exactly 1"):
+            _BUILTINS["HOUR"]([0.5, 0.5])
+
+
+class TestBuiltinMINUTE:
+    def test_half_hour(self) -> None:
+        """MINUTE(0.5 + 30/1440) = 30 (12:30 PM)."""
+        serial = 0.5 + 30 / 1440  # 12:30:00
+        assert _BUILTINS["MINUTE"]([serial]) == 30
+
+    def test_noon_exact(self) -> None:
+        assert _BUILTINS["MINUTE"]([0.5]) == 0
+
+
+class TestBuiltinSECOND:
+    def test_noon_exact(self) -> None:
+        assert _BUILTINS["SECOND"]([0.5]) == 0
+
+    def test_30_seconds(self) -> None:
+        """SECOND at 12:00:30 = 30."""
+        serial = 0.5 + 30 / 86400  # noon + 30 seconds
+        assert _BUILTINS["SECOND"]([serial]) == 30
+
+    def test_roundtrip_hour_now(self) -> None:
+        """HOUR(NOW()) should return the current hour."""
+        import datetime
+
+        now_serial = _BUILTINS["NOW"]([])
+        hour = _BUILTINS["HOUR"]([now_serial])
+        assert hour == datetime.datetime.now().hour

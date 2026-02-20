@@ -206,6 +206,11 @@ FUNCTION_WHITELIST_V1: dict[str, str] = {
     "EDATE": "date",
     "EOMONTH": "date",
     "DAYS": "date",
+    # Time (4)
+    "NOW": "date",
+    "HOUR": "date",
+    "MINUTE": "date",
+    "SECOND": "date",
 }
 
 
@@ -1601,6 +1606,16 @@ def _serial_to_date(serial: int) -> tuple[int, int, int]:
     return (dt.year, dt.month, dt.day)
 
 
+def _serial_to_time(serial: int | float) -> tuple[int, int, int]:
+    """Extract (hour, minute, second) from the fractional portion of a serial number."""
+    frac = abs(float(serial)) - int(abs(float(serial)))
+    total_seconds = round(frac * 86400)
+    hour = total_seconds // 3600
+    minute = (total_seconds % 3600) // 60
+    second = total_seconds % 60
+    return (hour, minute, second)
+
+
 # ---------------------------------------------------------------------------
 # Date builtins (TODAY, DATE, YEAR, MONTH, DAY, EDATE, EOMONTH, DAYS)
 # ---------------------------------------------------------------------------
@@ -1697,10 +1712,124 @@ def _builtin_days(args: list[Any]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Time builtins (NOW, HOUR, MINUTE, SECOND)
+# ---------------------------------------------------------------------------
+
+
+def _builtin_now(args: list[Any]) -> float:
+    """NOW(). Returns the current date and time as an Excel serial number."""
+    now = datetime.datetime.now()
+    date_serial = _date_to_serial(now.year, now.month, now.day)
+    time_frac = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
+    return date_serial + time_frac
+
+
+def _builtin_hour(args: list[Any]) -> int:
+    """HOUR(serial). Extract hour (0-23) from a serial number."""
+    if len(args) != 1:
+        raise ValueError("HOUR requires exactly 1 argument")
+    serial = float(args[0])
+    h, _m, _s = _serial_to_time(serial)
+    return h
+
+
+def _builtin_minute(args: list[Any]) -> int:
+    """MINUTE(serial). Extract minute (0-59) from a serial number."""
+    if len(args) != 1:
+        raise ValueError("MINUTE requires exactly 1 argument")
+    serial = float(args[0])
+    _h, m, _s = _serial_to_time(serial)
+    return m
+
+
+def _builtin_second(args: list[Any]) -> int:
+    """SECOND(serial). Extract second (0-59) from a serial number."""
+    if len(args) != 1:
+        raise ValueError("SECOND requires exactly 1 argument")
+    serial = float(args[0])
+    _h, _m, s = _serial_to_time(serial)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# Raw-arg builtins (receive raw arg strings, not resolved values)
+# ---------------------------------------------------------------------------
+
+
+def _builtin_offset(raw_args: list[str], eval_fn: Callable, sheet: str) -> Any:
+    """OFFSET(reference, rows, cols, [height], [width]).
+
+    Raw-arg function: first arg is a cell reference token, not a resolved value.
+    Returns a RangeValue for multi-cell results or a scalar for single-cell.
+    """
+    from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+    from wolfxl.calc._parser import expand_range
+
+    if len(raw_args) < 3 or len(raw_args) > 5:
+        return ExcelError.REF
+
+    ref_str = raw_args[0].strip().replace('$', '')
+    rows_offset = eval_fn(raw_args[1].strip(), sheet)
+    cols_offset = eval_fn(raw_args[2].strip(), sheet)
+    height = eval_fn(raw_args[3].strip(), sheet) if len(raw_args) > 3 else None
+    width = eval_fn(raw_args[4].strip(), sheet) if len(raw_args) > 4 else None
+
+    try:
+        rows_offset = int(float(rows_offset))
+        cols_offset = int(float(cols_offset))
+    except (ValueError, TypeError):
+        return ExcelError.REF
+
+    # Parse the base reference
+    if '!' in ref_str:
+        parts = ref_str.split('!', 1)
+        ref_sheet = parts[0].strip("'")
+        cell_a1 = parts[1].upper()
+    else:
+        ref_sheet = sheet
+        cell_a1 = ref_str.upper()
+
+    # Handle range references (e.g. OFFSET(A1:A5, ...))
+    if ':' in cell_a1:
+        cell_a1 = cell_a1.split(':')[0]
+
+    try:
+        base_row, base_col = a1_to_rowcol(cell_a1)
+    except ValueError:
+        return ExcelError.REF
+
+    target_row = base_row + rows_offset
+    target_col = base_col + cols_offset
+
+    h = int(float(height)) if height is not None else 1
+    w = int(float(width)) if width is not None else 1
+
+    if h < 1 or w < 1 or target_row < 1 or target_col < 1:
+        return ExcelError.REF
+
+    if h == 1 and w == 1:
+        cell_ref = f"{ref_sheet}!{rowcol_to_a1(target_row, target_col)}"
+        return eval_fn(cell_ref.split('!')[1], ref_sheet)
+
+    end_row = target_row + h - 1
+    end_col = target_col + w - 1
+    start_a1 = rowcol_to_a1(target_row, target_col)
+    end_a1 = rowcol_to_a1(end_row, end_col)
+    range_ref = f"{ref_sheet}!{start_a1}:{end_a1}"
+
+    cells = expand_range(range_ref)
+    values = [eval_fn(c.split('!')[1], c.split('!')[0]) for c in cells]
+    return RangeValue(values=values, n_rows=h, n_cols=w)
+
+
+_builtin_offset._raw_args = True  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
-_BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
+_BUILTINS: dict[str, Callable[..., Any]] = {
     "SUM": _builtin_sum,
     "ABS": _builtin_abs,
     "ROUND": _builtin_round,
@@ -1751,6 +1880,11 @@ _BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
     "EDATE": _builtin_edate,
     "EOMONTH": _builtin_eomonth,
     "DAYS": _builtin_days,
+    # Time (Phase 7)
+    "NOW": _builtin_now,
+    "HOUR": _builtin_hour,
+    "MINUTE": _builtin_minute,
+    "SECOND": _builtin_second,
     # Conditional stats (Phase 5)
     "AVERAGEIF": _builtin_averageif,
     "AVERAGEIFS": _builtin_averageifs,
@@ -1765,6 +1899,8 @@ _BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
     "REPT": _builtin_rept,
     "EXACT": _builtin_exact,
     "FIND": _builtin_find,
+    # Raw-arg functions (receive raw strings, dispatched via _raw_args protocol)
+    "OFFSET": _builtin_offset,
 }
 
 
@@ -1775,12 +1911,12 @@ class FunctionRegistry:
     """
 
     def __init__(self) -> None:
-        self._functions: dict[str, Callable[[list[Any]], Any]] = dict(_BUILTINS)
+        self._functions: dict[str, Callable[..., Any]] = dict(_BUILTINS)
 
-    def register(self, name: str, func: Callable[[list[Any]], Any]) -> None:
+    def register(self, name: str, func: Callable[..., Any]) -> None:
         self._functions[name.upper()] = func
 
-    def get(self, name: str) -> Callable[[list[Any]], Any] | None:
+    def get(self, name: str) -> Callable[..., Any] | None:
         return self._functions.get(name.upper())
 
     def has(self, name: str) -> bool:

@@ -153,6 +153,7 @@ pub struct RustXlsxWriterBook {
     hyperlinks: Vec<HyperlinkPayload>,
     comments: Vec<CommentPayload>,
     panes: HashMap<String, PaneSetting>,
+    print_areas: HashMap<String, String>,
     conditional_formats: Vec<ConditionalFormatPayload>,
     data_validations: Vec<DataValidationPayload>,
     named_ranges: Vec<NamedRangePayload>,
@@ -1192,6 +1193,7 @@ impl RustXlsxWriterBook {
             hyperlinks: Vec::new(),
             comments: Vec::new(),
             panes: HashMap::new(),
+            print_areas: HashMap::new(),
             conditional_formats: Vec::new(),
             data_validations: Vec::new(),
             named_ranges: Vec::new(),
@@ -1312,6 +1314,9 @@ impl RustXlsxWriterBook {
         }
         if let Some(pane) = self.panes.remove(old_name) {
             self.panes.insert(new_name.to_string(), pane);
+        }
+        if let Some(pa) = self.print_areas.remove(old_name) {
+            self.print_areas.insert(new_name.to_string(), pa);
         }
         for cf in &mut self.conditional_formats {
             if cf.sheet == old_name {
@@ -1752,6 +1757,13 @@ impl RustXlsxWriterBook {
         Ok(())
     }
 
+    pub fn set_print_area(&mut self, sheet: &str, range_str: &str) -> PyResult<()> {
+        self.ensure_sheet_exists(sheet)?;
+        self.print_areas
+            .insert(sheet.to_string(), range_str.to_string());
+        Ok(())
+    }
+
     // =========================================================================
     // Tier 2/3 Write Operations (Sprint2)
     // =========================================================================
@@ -2040,6 +2052,30 @@ impl RustXlsxWriterBook {
                         })?;
                         split_patches.push((sheet.clone(), x_i32.max(0), y_i32.max(0)));
                     }
+                }
+            }
+        }
+
+        // Print areas.
+        for (sheet, range_str) in &self.print_areas {
+            if let Some(ws) = ws_map.get_mut(sheet) {
+                // Parse "A1:D10" → (first_row, first_col, last_row, last_col)
+                let clean = range_str.replace('$', "");
+                let parts: Vec<&str> = clean.split(':').collect();
+                if parts.len() == 2 {
+                    let (r1, c1) =
+                        a1_to_row_col(parts[0]).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                    let (r2, c2) =
+                        a1_to_row_col(parts[1]).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                    let c1_u16: u16 = c1.try_into().map_err(|_| {
+                        PyErr::new::<PyValueError, _>(format!("Column out of range: {range_str}"))
+                    })?;
+                    let c2_u16: u16 = c2.try_into().map_err(|_| {
+                        PyErr::new::<PyValueError, _>(format!("Column out of range: {range_str}"))
+                    })?;
+                    ws.set_print_area(r1, c1_u16, r2, c2_u16).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("set_print_area failed: {e}"))
+                    })?;
                 }
             }
         }
