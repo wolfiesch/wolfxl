@@ -1,8 +1,9 @@
 """Tests for lookup and conditional aggregation builtins.
 
-Covers: INDEX, MATCH, XLOOKUP, CHOOSE, SUMIF, SUMIFS, COUNTIF, COUNTIFS,
-the ``&`` string concatenation operator, RangeValue backward compatibility,
-and perturbation propagation through lookup/conditional chains.
+Covers: INDEX, MATCH, VLOOKUP, HLOOKUP, XLOOKUP, CHOOSE, SUMIF, SUMIFS,
+COUNTIF, COUNTIFS, the ``&`` string concatenation operator, RangeValue
+backward compatibility, and perturbation propagation through lookup/conditional
+chains.
 """
 
 from __future__ import annotations
@@ -232,6 +233,143 @@ class TestBuiltinXlookup:
         )
         results = _calc(wb)
         assert results["Sheet!C1"] == 600
+
+
+# ---------------------------------------------------------------------------
+# VLOOKUP tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinVlookup:
+    def test_exact_match_numeric(self) -> None:
+        """VLOOKUP with FALSE (exact match) on numeric keys."""
+        wb = _make_wb(
+            {"A1": 1, "B1": 100,
+             "A2": 2, "B2": 200,
+             "A3": 3, "B3": 300},
+            {"C1": "=VLOOKUP(2,A1:B3,2,FALSE)"},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == 200
+
+    def test_exact_match_string(self) -> None:
+        """VLOOKUP case-insensitive string lookup."""
+        wb = _make_wb(
+            {"A1": "Revenue", "B1": 1000,
+             "A2": "COGS", "B2": 600,
+             "A3": "OpEx", "B3": 200},
+            {"C1": '=VLOOKUP("cogs",A1:B3,2,FALSE)'},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == 600
+
+    def test_approximate_match(self) -> None:
+        """VLOOKUP with TRUE (approximate match, default) on sorted data."""
+        wb = _make_wb(
+            {"A1": 10, "B1": "Low",
+             "A2": 50, "B2": "Medium",
+             "A3": 100, "B3": "High"},
+            {"C1": "=VLOOKUP(75,A1:B3,2,TRUE)"},
+        )
+        results = _calc(wb)
+        # 75 falls between 50 and 100, largest <= 75 is 50 -> "Medium"
+        assert results["Sheet!C1"] == "Medium"
+
+    def test_not_found_returns_na(self) -> None:
+        wb = _make_wb(
+            {"A1": 1, "B1": 100, "A2": 2, "B2": 200},
+            {"C1": "=VLOOKUP(99,A1:B2,2,FALSE)"},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == "#N/A"
+
+    def test_col_index_out_of_bounds(self) -> None:
+        wb = _make_wb(
+            {"A1": 1, "B1": 100},
+            {"C1": "=VLOOKUP(1,A1:B1,5,FALSE)"},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == "#REF!"
+
+    def test_nested_with_cell_ref_lookup(self) -> None:
+        """VLOOKUP with lookup_value from a cell reference."""
+        wb = _make_wb(
+            {"A1": "4001", "B1": "Cash",
+             "A2": "5001", "B2": "Revenue",
+             "A3": "6001", "B3": "Rent Expense",
+             "C1": "5001"},
+            {"D1": "=VLOOKUP(C1,A1:B3,2,FALSE)"},
+        )
+        results = _calc(wb)
+        assert results["Sheet!D1"] == "Revenue"
+
+    def test_default_range_lookup_is_true(self) -> None:
+        """VLOOKUP without 4th arg defaults to approximate match."""
+        wb = _make_wb(
+            {"A1": 0, "B1": "Zero",
+             "A2": 100, "B2": "Hundred",
+             "A3": 1000, "B3": "Thousand"},
+            {"C1": "=VLOOKUP(500,A1:B3,2)"},
+        )
+        results = _calc(wb)
+        # Default range_lookup=TRUE, largest <= 500 is 100 -> "Hundred"
+        assert results["Sheet!C1"] == "Hundred"
+
+
+# ---------------------------------------------------------------------------
+# HLOOKUP tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinHlookup:
+    def test_exact_match(self) -> None:
+        """HLOOKUP with exact match on first row."""
+        wb = _make_wb(
+            {"A1": "Q1", "B1": "Q2", "C1": "Q3",
+             "A2": 100, "B2": 200, "C2": 300,
+             "A3": 50, "B3": 75, "C3": 90},
+            {"D1": '=HLOOKUP("Q2",A1:C3,2,FALSE)'},
+        )
+        results = _calc(wb)
+        assert results["Sheet!D1"] == 200
+
+    def test_row_3_return(self) -> None:
+        """HLOOKUP returning from row 3."""
+        wb = _make_wb(
+            {"A1": "Q1", "B1": "Q2", "C1": "Q3",
+             "A2": 100, "B2": 200, "C2": 300,
+             "A3": 50, "B3": 75, "C3": 90},
+            {"D1": '=HLOOKUP("Q3",A1:C3,3,FALSE)'},
+        )
+        results = _calc(wb)
+        assert results["Sheet!D1"] == 90
+
+    def test_approximate_match(self) -> None:
+        """HLOOKUP with approximate match on numeric first row."""
+        wb = _make_wb(
+            {"A1": 2020, "B1": 2021, "C1": 2022,
+             "A2": 100, "B2": 200, "C2": 300},
+            {"D1": "=HLOOKUP(2021.5,A1:C2,2,TRUE)"},
+        )
+        results = _calc(wb)
+        # Largest <= 2021.5 is 2021 -> row 2 = 200
+        assert results["Sheet!D1"] == 200
+
+    def test_not_found(self) -> None:
+        wb = _make_wb(
+            {"A1": "X", "B1": "Y", "A2": 1, "B2": 2},
+            {"C1": '=HLOOKUP("Z",A1:B2,2,FALSE)'},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == "#N/A"
+
+    def test_row_index_out_of_bounds(self) -> None:
+        wb = _make_wb(
+            {"A1": "Q1", "B1": "Q2", "A2": 10, "B2": 20},
+            {"C1": '=HLOOKUP("Q1",A1:B2,5,FALSE)'},
+        )
+        results = _calc(wb)
+        assert results["Sheet!C1"] == "#REF!"
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +613,29 @@ class TestPerturbationPropagation:
         delta_map = {d.cell_ref: d for d in recalc.deltas}
         assert "Sheet!D1" in delta_map
         assert delta_map["Sheet!D1"].new_value == 999
+
+    def test_perturbation_through_vlookup(self) -> None:
+        """Perturbing a table cell should propagate through VLOOKUP."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 1
+        ws["B1"] = 100
+        ws["A2"] = 2
+        ws["B2"] = 200
+        ws["A3"] = 3
+        ws["B3"] = 300
+        ws["C1"] = "=VLOOKUP(2,A1:B3,2,FALSE)"
+
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!C1"] == 200
+
+        # Perturb B2 (the cell VLOOKUP resolves to)
+        recalc = ev.recalculate({"Sheet!B2": 999})
+        delta_map = {d.cell_ref: d for d in recalc.deltas}
+        assert "Sheet!C1" in delta_map
+        assert delta_map["Sheet!C1"].new_value == 999
 
     def test_perturbation_through_sumif(self) -> None:
         """Perturbing a sum_range cell should propagate through SUMIF."""

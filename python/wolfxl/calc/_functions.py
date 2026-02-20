@@ -623,6 +623,145 @@ def _builtin_xlookup(args: list[Any]) -> Any:
     return if_not_found
 
 
+def _builtin_vlookup(args: list[Any]) -> Any:
+    """VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]).
+
+    range_lookup: FALSE (or 0) = exact match, TRUE (or 1, default) = approximate.
+    Approximate match assumes the first column is sorted ascending and finds
+    the largest value <= lookup_value.
+    """
+    if len(args) < 3 or len(args) > 4:
+        raise ValueError("VLOOKUP requires 3 or 4 arguments")
+    lookup_value = args[0]
+    table_array = args[1]
+    col_index_num = int(float(args[2]))
+    range_lookup = True
+    if len(args) > 3 and args[3] is not None:
+        rl = args[3]
+        if isinstance(rl, bool):
+            range_lookup = rl
+        elif isinstance(rl, (int, float)):
+            range_lookup = bool(rl)
+        elif isinstance(rl, str):
+            range_lookup = rl.upper() != "FALSE"
+
+    if col_index_num < 1:
+        return "#VALUE!"
+
+    if isinstance(table_array, RangeValue):
+        if col_index_num > table_array.n_cols:
+            return "#REF!"
+        first_col = table_array.column(1)
+        return_col = table_array.column(col_index_num)
+    elif isinstance(table_array, (list, tuple)):
+        # Flat list treated as single column
+        if col_index_num > 1:
+            return "#REF!"
+        first_col = list(table_array)
+        return_col = first_col
+    else:
+        return "#N/A"
+
+    if range_lookup:
+        # Approximate match: largest value <= lookup_value (sorted ascending)
+        best_idx = None
+        for i, v in enumerate(first_col):
+            if v is None:
+                continue
+            if isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
+                if float(v) <= float(lookup_value):
+                    best_idx = i
+            elif isinstance(lookup_value, str) and isinstance(v, str):
+                if v.lower() <= lookup_value.lower():
+                    best_idx = i
+        if best_idx is None:
+            return "#N/A"
+        return return_col[best_idx] if best_idx < len(return_col) else "#N/A"
+    else:
+        # Exact match (case-insensitive for strings)
+        for i, v in enumerate(first_col):
+            if v is None:
+                continue
+            if isinstance(lookup_value, str) and isinstance(v, str):
+                if lookup_value.lower() == v.lower():
+                    return return_col[i] if i < len(return_col) else "#N/A"
+            elif isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
+                if float(lookup_value) == float(v):
+                    return return_col[i] if i < len(return_col) else "#N/A"
+            elif lookup_value == v:
+                return return_col[i] if i < len(return_col) else "#N/A"
+        return "#N/A"
+
+
+def _builtin_hlookup(args: list[Any]) -> Any:
+    """HLOOKUP(lookup_value, table_array, row_index_num, [range_lookup]).
+
+    Searches the first row of a table and returns a value from the specified row.
+    range_lookup: FALSE (or 0) = exact match, TRUE (or 1, default) = approximate.
+    """
+    if len(args) < 3 or len(args) > 4:
+        raise ValueError("HLOOKUP requires 3 or 4 arguments")
+    lookup_value = args[0]
+    table_array = args[1]
+    row_index_num = int(float(args[2]))
+    range_lookup = True
+    if len(args) > 3 and args[3] is not None:
+        rl = args[3]
+        if isinstance(rl, bool):
+            range_lookup = rl
+        elif isinstance(rl, (int, float)):
+            range_lookup = bool(rl)
+        elif isinstance(rl, str):
+            range_lookup = rl.upper() != "FALSE"
+
+    if row_index_num < 1:
+        return "#VALUE!"
+
+    if isinstance(table_array, RangeValue):
+        if row_index_num > table_array.n_rows:
+            return "#REF!"
+        first_row = table_array.row(1)
+        return_row = table_array.row(row_index_num)
+    elif isinstance(table_array, (list, tuple)):
+        # Flat list treated as single row
+        if row_index_num > 1:
+            return "#REF!"
+        first_row = list(table_array)
+        return_row = first_row
+    else:
+        return "#N/A"
+
+    if range_lookup:
+        # Approximate match: largest value <= lookup_value (sorted ascending)
+        best_idx = None
+        for i, v in enumerate(first_row):
+            if v is None:
+                continue
+            if isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
+                if float(v) <= float(lookup_value):
+                    best_idx = i
+            elif isinstance(lookup_value, str) and isinstance(v, str):
+                if v.lower() <= lookup_value.lower():
+                    best_idx = i
+        if best_idx is None:
+            return "#N/A"
+        return return_row[best_idx] if best_idx < len(return_row) else "#N/A"
+    else:
+        # Exact match (case-insensitive for strings)
+        for i, v in enumerate(first_row):
+            if v is None:
+                continue
+            if isinstance(lookup_value, str) and isinstance(v, str):
+                if lookup_value.lower() == v.lower():
+                    return return_row[i] if i < len(return_row) else "#N/A"
+            elif isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
+                if float(lookup_value) == float(v):
+                    return return_row[i] if i < len(return_row) else "#N/A"
+            elif lookup_value == v:
+                return return_row[i] if i < len(return_row) else "#N/A"
+        return "#N/A"
+
+
 def _builtin_choose(args: list[Any]) -> Any:
     """CHOOSE(index_num, value1, value2, ...)."""
     if len(args) < 2:
@@ -789,6 +928,8 @@ _BUILTINS: dict[str, Callable[[list[Any]], Any]] = {
     "CONCATENATE": _builtin_concatenate,
     "INDEX": _builtin_index,
     "MATCH": _builtin_match,
+    "VLOOKUP": _builtin_vlookup,
+    "HLOOKUP": _builtin_hlookup,
     "XLOOKUP": _builtin_xlookup,
     "CHOOSE": _builtin_choose,
     "SUMIF": _builtin_sumif,
