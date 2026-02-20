@@ -6,9 +6,9 @@ import os
 import tempfile
 
 import pytest
+from wolfxl.calc._evaluator import WorkbookEvaluator
 
 import wolfxl
-from wolfxl.calc._evaluator import WorkbookEvaluator
 
 
 def _make_sum_chain_workbook() -> wolfxl.Workbook:
@@ -451,3 +451,99 @@ class TestEdgeCases:
         ev.load(wb)
         results = ev.calculate()
         assert results["Sheet!B1"] == "#DIV/0!"
+
+
+class TestTextComparison:
+    """Verify that string comparisons work in formulas (PR review fix)."""
+
+    def test_string_equality(self) -> None:
+        """=IF(A1="OK",1,0) with string value in A1."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "OK"
+        ws["B1"] = '=IF(A1="OK",1,0)'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 1
+
+    def test_string_inequality(self) -> None:
+        """=IF(A1="OK",1,0) with different string value."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "FAIL"
+        ws["B1"] = '=IF(A1="OK",1,0)'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 0
+
+    def test_string_comparison_case_insensitive(self) -> None:
+        """Excel string comparisons are case-insensitive."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "ok"
+        ws["B1"] = '=IF(A1="OK",1,0)'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 1
+
+    def test_string_not_equal(self) -> None:
+        """=IF(A1<>"OK",1,0) with string comparison."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "FAIL"
+        ws["B1"] = '=IF(A1<>"OK",1,0)'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 1
+
+
+class TestQuotedCommasInArgs:
+    """Verify that commas inside string literals don't split args (PR review fix)."""
+
+    def test_if_with_comma_in_string(self) -> None:
+        """=IF(TRUE,"a,b","c") should not split on the comma inside quotes."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = '=IF(TRUE,"a,b","c")'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!A1"] == "a,b"
+
+    def test_if_false_branch_with_comma(self) -> None:
+        """=IF(FALSE,"a","b,c") picks the false branch correctly."""
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = '=IF(FALSE,"a","b,c")'
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!A1"] == "b,c"
+
+
+class TestScientificNotation:
+    """Verify that scientific notation numeric literals parse correctly (PR review fix)."""
+
+    def test_1e3(self) -> None:
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 5
+        ws["B1"] = "=A1+1E3"
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 1005.0
+
+    def test_negative_exponent(self) -> None:
+        wb = wolfxl.Workbook()
+        ws = wb.active
+        ws["A1"] = 100
+        ws["B1"] = "=A1*2.5e-1"
+        ev = WorkbookEvaluator()
+        ev.load(wb)
+        results = ev.calculate()
+        assert results["Sheet!B1"] == 25.0

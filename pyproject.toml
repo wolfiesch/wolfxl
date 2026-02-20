@@ -38,7 +38,12 @@ extraPaths = ["python"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+markers = ["slow: marks tests that are sensitive to CI timing"]
 
 [tool.mypy]
 strict = true

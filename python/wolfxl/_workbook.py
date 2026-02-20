@@ -8,9 +8,12 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from wolfxl._worksheet import Worksheet
+
+if TYPE_CHECKING:
+    from wolfxl.calc._protocol import RecalcResult
 
 
 class Workbook:
@@ -23,6 +26,7 @@ class Workbook:
         self._rust_writer: Any = _rust.RustXlsxWriterBook()
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
+        self._evaluator: Any = None
         self._sheet_names: list[str] = ["Sheet"]
         self._sheets: dict[str, Worksheet] = {}
         self._sheets["Sheet"] = Worksheet(self, "Sheet")
@@ -36,6 +40,7 @@ class Workbook:
         wb = object.__new__(cls)
         wb._rust_writer = None
         wb._rust_patcher = None
+        wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path)
         names = [str(n) for n in wb._rust_reader.sheet_names()]
         wb._sheet_names = names
@@ -51,6 +56,7 @@ class Workbook:
 
         wb = object.__new__(cls)
         wb._rust_writer = None
+        wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path)
         wb._rust_patcher = _rust.XlsxPatcher.open(path)
         names = [str(n) for n in wb._rust_reader.sheet_names()]
@@ -143,7 +149,7 @@ class Workbook:
         self,
         perturbations: dict[str, float | int],
         tolerance: float = 1e-10,
-    ) -> Any:
+    ) -> RecalcResult:
         """Perturb input cells and recompute affected formulas.
 
         Returns a ``RecalcResult`` describing which cells changed.
@@ -152,7 +158,7 @@ class Workbook:
         If :meth:`calculate` was called first, the cached evaluator is
         reused (avoiding a full rescan + recalculate).
         """
-        ev = getattr(self, '_evaluator', None)
+        ev = self._evaluator
         if ev is None:
             from wolfxl.calc._evaluator import WorkbookEvaluator
 

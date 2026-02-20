@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import pytest
-
 from wolfxl.calc._functions import (
+    _BUILTINS,
     FUNCTION_WHITELIST_V1,
     FunctionRegistry,
-    _BUILTINS,
     is_supported,
 )
 

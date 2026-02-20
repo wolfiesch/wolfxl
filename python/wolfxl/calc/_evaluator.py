@@ -138,6 +138,12 @@ def _find_top_level_split(expr: str) -> tuple[str, str, str] | None:
                 if j < 0 or expr[j] in ('(', ',', '+', '-', '*', '/', '>', '<', '='):
                     i -= 1
                     continue
+                # Skip +/- that are part of scientific notation (e.g. 2.5e-1)
+                if matched_op in ('+', '-') and j >= 1 and expr[j] in ('e', 'E'):
+                    pre_e = j - 1
+                    if pre_e >= 0 and expr[pre_e].isdigit():
+                        i -= 1
+                        continue
 
                 left = expr[:op_start].strip()
                 right = expr[op_start + len(matched_op) :].strip()
@@ -178,12 +184,36 @@ def _binary_op(left: Any, op: str, right: Any) -> Any:
 
 
 def _compare(left: Any, right: Any, op: str) -> bool:
-    """Evaluate a comparison operation."""
-    try:
-        lf = float(left) if not isinstance(left, (int, float)) else left
-        rf = float(right) if not isinstance(right, (int, float)) else right
-    except (ValueError, TypeError):
-        return False
+    """Evaluate a comparison operation.
+
+    Handles both numeric and string comparisons. String comparisons are
+    case-insensitive (matching Excel behavior).
+    """
+    # Both numeric -> numeric comparison
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        lf, rf = left, right
+    else:
+        # Try numeric coercion first
+        try:
+            lf = float(left) if not isinstance(left, (int, float)) else left
+            rf = float(right) if not isinstance(right, (int, float)) else right
+        except (ValueError, TypeError):
+            # Fall back to string comparison (case-insensitive, like Excel)
+            ls = str(left).lower() if left is not None else ""
+            rs = str(right).lower() if right is not None else ""
+            if op in ('=', '=='):
+                return ls == rs
+            if op in ('<>', '!='):
+                return ls != rs
+            if op == '>':
+                return ls > rs
+            if op == '<':
+                return ls < rs
+            if op == '>=':
+                return ls >= rs
+            if op == '<=':
+                return ls <= rs
+            return False
     if op == '>':
         return lf > rf
     if op == '<':
@@ -386,11 +416,16 @@ class WorkbookEvaluator:
         if expr.startswith('+'):
             return self._eval_expr(expr[1:], sheet)
 
-        # 5. Numeric literal
+        # 5. Numeric literal (int, float, and scientific notation like 1E3)
         try:
-            return float(expr) if '.' in expr else int(expr)
+            num = float(expr)
         except ValueError:
             pass
+        else:
+            # Preserve int for plain integer literals
+            if re.fullmatch(r'[+-]?\d+', expr):
+                return int(expr)
+            return num
 
         # 6. String literal
         if len(expr) >= 2 and expr[0] == '"' and expr[-1] == '"':
@@ -451,23 +486,44 @@ class WorkbookEvaluator:
             return None
 
     def _parse_function_args(self, args_str: str, sheet: str) -> list[Any]:
-        """Split on commas at depth 0, resolve each argument."""
+        """Split on commas at depth 0 (respecting strings), resolve each argument."""
         args: list[Any] = []
         depth = 0
+        in_string = False
         current = ""
+        i = 0
+        length = len(args_str)
 
-        for ch in args_str:
-            if ch == '(':
-                depth += 1
+        while i < length:
+            ch = args_str[i]
+
+            if ch == '"':
+                if in_string:
+                    # Handle Excel escaped quote ("")
+                    if i + 1 < length and args_str[i + 1] == '"':
+                        current += '""'
+                        i += 2
+                        continue
+                    in_string = False
+                else:
+                    in_string = True
                 current += ch
-            elif ch == ')':
-                depth -= 1
-                current += ch
-            elif ch == ',' and depth == 0:
-                args.append(self._resolve_arg(current.strip(), sheet))
-                current = ""
+            elif not in_string:
+                if ch == '(':
+                    depth += 1
+                    current += ch
+                elif ch == ')':
+                    depth -= 1
+                    current += ch
+                elif ch == ',' and depth == 0:
+                    args.append(self._resolve_arg(current.strip(), sheet))
+                    current = ""
+                else:
+                    current += ch
             else:
                 current += ch
+
+            i += 1
 
         if current.strip():
             args.append(self._resolve_arg(current.strip(), sheet))

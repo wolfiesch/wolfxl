@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from wolfxl.calc._parser import (
     FormulaParser,
     all_references,

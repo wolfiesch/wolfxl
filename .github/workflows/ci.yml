@@ -30,7 +30,7 @@ jobs:
       - name: Build wheel and install
         run: |
           maturin build --release --out dist
-          pip install --find-links dist wolfxl
+          pip install --no-index --find-links dist wolfxl
 
       - name: Run tests
         run: pytest tests/ -v

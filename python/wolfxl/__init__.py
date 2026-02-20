@@ -17,6 +17,8 @@ Usage::
     wb.save("out.xlsx")
 """
 
+from __future__ import annotations
+
 import os
 
 from wolfxl._rust import __version__

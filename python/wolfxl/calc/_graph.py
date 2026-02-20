@@ -44,7 +44,7 @@ class DependencyGraph:
 
         Raises ValueError if a circular reference is detected.
         """
-        # Only consider formula cells
+        # Only consider formula cells (sorted for determinism)
         formula_cells = set(self.formulas.keys())
         if not formula_cells:
             return []
@@ -57,17 +57,17 @@ class DependencyGraph:
             in_degree[cell] = len(deps & formula_cells)
 
         # Start with formula cells that have no formula-cell dependencies
-        queue: deque[str] = deque()
-        for cell in formula_cells:
-            if in_degree[cell] == 0:
-                queue.append(cell)
+        # Sorted to ensure deterministic output across runs (Python hash randomization)
+        queue: deque[str] = deque(sorted(
+            cell for cell in formula_cells if in_degree[cell] == 0
+        ))
 
         order: list[str] = []
         while queue:
             cell = queue.popleft()
             order.append(cell)
-            # Reduce in-degree for dependent formula cells
-            for dep in self.dependents.get(cell, set()):
+            # Reduce in-degree for dependent formula cells (sorted for determinism)
+            for dep in sorted(self.dependents.get(cell, set())):
                 if dep in formula_cells:
                     in_degree[dep] -= 1
                     if in_degree[dep] == 0:
