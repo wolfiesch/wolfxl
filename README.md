@@ -36,7 +36,7 @@ Your existing code works as-is. Same `ws["A1"].value`, same `Font(bold=True)`, s
 </p>
 
 <p align="center">
-  <sub>Measured with <a href="https://excelbench.vercel.app">ExcelBench</a> on Apple M1 Pro, Python 3.12, median of 3 runs.</sub>
+  <sub>Measured with <a href="https://excelbench.vercel.app">ExcelBench</a> on Apple M4 Pro, Python 3.12, median of 3 runs.</sub>
 </p>
 
 ## Install
@@ -202,7 +202,7 @@ Named ranges are resolved automatically. Error values (`#N/A`, `#VALUE!`, `#DIV/
 
 ## Case Study: SynthGL
 
-[SynthGL](https://synthgl.dev) switched from openpyxl to WolfXL for their GL journal exports (14-column financial data, 1K-50K rows). Results: **4x faster writes**, **9x faster reads** at scale. 50K-row exports dropped from 7.6s to 1.3s. [Read the full case study](docs/case-study-synthgl.md).
+[SynthGL](https://github.com/SynthGL) switched from openpyxl to WolfXL for their GL journal exports (14-column financial data, 1K-50K rows). Results: **4x faster writes**, **9x faster reads** at scale. 50K-row exports dropped from 7.6s to 1.3s. [Read the full case study](docs/case-study-synthgl.md).
 
 ## How It Works
 

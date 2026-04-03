@@ -2,7 +2,7 @@
 
 ## Company
 
-[SynthGL](https://synthgl.dev) generates synthetic accounting data for fintech QA teams and AI model training. Integration teams at companies like Plaid, Ramp, and Mercury use it to test accounting connectors against deterministic general ledger (GL) data - journal entries, trial balances, financial statements - without touching production systems.
+[SynthGL](https://github.com/SynthGL) generates synthetic accounting data for fintech QA teams and AI model training. Integration teams at companies like Plaid, Ramp, and Mercury use it to test accounting connectors against deterministic general ledger (GL) data - journal entries, trial balances, financial statements - without touching production systems.
 
 ## The Workload
 
