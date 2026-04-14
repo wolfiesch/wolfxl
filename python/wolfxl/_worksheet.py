@@ -95,6 +95,44 @@ class _AutoFilter:
         self._ref = value
 
 
+class _MergedCellsProxy:
+    """openpyxl-shape proxy for ``Worksheet.merged_cells``.
+
+    openpyxl's ``MultiCellRange`` exposes ``.ranges`` as an iterable of
+    ``CellRange`` objects. SynthGL only iterates ``.ranges`` and stringifies
+    each entry, so we expose a list of range strings — adequate for parity
+    on the read path. Write-mode mutations still go through
+    ``Worksheet.merge_cells`` / ``unmerge_cells``.
+    """
+
+    __slots__ = ("_ws",)
+
+    def __init__(self, ws: Worksheet) -> None:
+        self._ws = ws
+
+    @property
+    def ranges(self) -> list[str]:
+        ws = self._ws
+        # Write mode: trust the in-memory set (kept in sync by
+        # ``merge_cells`` / ``unmerge_cells``).
+        wb = ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return list(ws._merged_ranges)  # noqa: SLF001
+        # Read mode: pull from the Rust calamine backend (already cached
+        # there after first call). Falls back to the in-memory set if the
+        # reader rejects the call (e.g. sheet was added in modify mode).
+        try:
+            return wb._rust_reader.read_merged_ranges(ws._title)  # noqa: SLF001
+        except Exception:
+            return list(ws._merged_ranges)  # noqa: SLF001
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(self.ranges)
+
+    def __len__(self) -> int:
+        return len(self.ranges)
+
+
 class Worksheet:
     """Proxy for a single worksheet in a Workbook."""
 
@@ -453,6 +491,28 @@ class Worksheet:
         if not self._cells:
             return 1
         return max(k[1] for k in self._cells)
+
+    # openpyxl exposes these as properties, not methods. Mirror that contract
+    # so ``ws.max_row`` (no parens) works as a drop-in for openpyxl callers.
+    # Pinned by ``tests/parity/test_read_parity.py`` (uses ``op_ws.max_row``).
+    @property
+    def max_row(self) -> int:
+        return self._max_row()
+
+    @property
+    def max_column(self) -> int:
+        return self._max_col()
+
+    @property
+    def merged_cells(self) -> _MergedCellsProxy:
+        """openpyxl-shape merged-cells accessor.
+
+        Lazy: on first access, pulls merged ranges from the Rust reader
+        (read mode) or returns the in-memory write-mode set. Always exposes
+        a ``.ranges`` iterable of range strings — matching openpyxl's
+        ``MultiCellRange`` shape closely enough for SynthGL's needs.
+        """
+        return _MergedCellsProxy(self)
 
     # ------------------------------------------------------------------
     # Write-mode helpers

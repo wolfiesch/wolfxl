@@ -21,19 +21,23 @@ from __future__ import annotations
 
 import os
 
+from wolfxl._cell import Cell
 from wolfxl._rust import __version__
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._workbook import Workbook
+from wolfxl._worksheet import Worksheet
 
 __all__ = [
     "__version__",
     "Alignment",
     "Border",
+    "Cell",
     "Color",
     "Font",
     "PatternFill",
     "Side",
     "Workbook",
+    "Worksheet",
     "load_workbook",
 ]
 
