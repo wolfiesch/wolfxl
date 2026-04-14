@@ -40,21 +40,10 @@ RATCHET_PATH = Path(__file__).parent / "ratchet.json"
 # (so we get measurement), but the test is xfail to keep CI green during
 # Phase 0. Each entry must reference a documented gap in KNOWN_GAPS.md.
 KNOWN_FIXTURE_GAPS: dict[str, str] = {
-    "flat_register/excelx_accounts_payable.xlsx": (
-        "wolfxl returns date for datetime cells with 00:00 time component "
-        "(KNOWN_GAPS.md > 'Cell.value type narrowing')"
-    ),
-    "flat_register/excelx_accounts_receivable.xlsx": (
-        "Same date/datetime narrowing as accounts_payable."
-    ),
-    "flat_register/excelx_general_ledger.xlsx": (
-        "Same date/datetime narrowing."
-    ),
     "time_series/ilpa_pe_fund_reporting_v1.1.xlsx": (
-        "Multiple gaps surfaced: (1) merged_cells empty, (2) data_only=True "
-        "ignored — formulas return as strings instead of cached values, "
-        "(3) number_format backslash escapes stripped, (4) max_row/max_col "
-        "off-by-one on sheets with trailing blank rows."
+        "Remaining read-side gap: number_format parity still diverges on "
+        "styled-but-empty template coordinates. openpyxl reports General for "
+        "synthetic blank cells while wolfxl still surfaces the worksheet style grid."
     ),
 }
 
@@ -147,8 +136,11 @@ def _diff_sheet(
     cells_seen = 0
     for row in op_ws.iter_rows():
         for op_cell in row:
+            if op_cell.value is None and getattr(op_cell, "style_id", 0) == 0:
+                continue
             if cells_seen >= MAX_CELLS_PER_SHEET:
                 return
+            cells_seen += 1
             coord = op_cell.coordinate
             wx_cell = wx_ws[coord]
 
@@ -164,7 +156,6 @@ def _diff_sheet(
                 _normalize_number_format(op_cell.number_format),
                 _normalize_number_format(wx_cell.number_format),
             )
-            cells_seen += 1
 
 
 def _normalize_value(v: Any) -> Any:
@@ -200,7 +191,7 @@ def test_read_parity(xlsx_fixture: Path) -> None:
     report = ParityReport(fixture_id=fixture_id)
 
     op_wb = openpyxl.load_workbook(xlsx_fixture, data_only=True)
-    wx_wb = wolfxl.load_workbook(str(xlsx_fixture))
+    wx_wb = wolfxl.load_workbook(str(xlsx_fixture), data_only=True)
     try:
         _diff_workbooks(report, op_wb, wx_wb)
     finally:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,7 @@ class TestStyles:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
+PARITY_FIXTURES = REPO_ROOT / "tests" / "parity" / "fixtures" / "synthgl_snapshot"
 
 
 class TestReadMode:
@@ -198,6 +200,68 @@ class TestReadMode:
         rows = list(ws.iter_rows(values_only=True))
         assert len(rows) > 10  # fixture has ~20 rows
         wb.close()
+
+    def test_date_cells_read_as_midnight_datetime(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "flat_register" / "excelx_accounts_payable.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        wb = load_workbook(str(path))
+        value = wb["Sheet1"]["C2"].value
+        wb.close()
+
+        assert value == datetime(2024, 12, 16, 0, 0)
+        assert isinstance(value, datetime)
+
+    def test_data_only_returns_cached_formula_values(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path), data_only=False) as formula_wb:
+            assert formula_wb["Reporting Template"]["E4"].value == "=P4"
+
+        with load_workbook(str(path), data_only=True) as cached_wb:
+            cell_value = cached_wb["Reporting Template"]["E4"].value
+            row_value = next(
+                cached_wb["Reporting Template"].iter_rows(
+                    min_row=4,
+                    max_row=4,
+                    min_col=5,
+                    max_col=5,
+                    values_only=True,
+                )
+            )[0]
+
+        expected = datetime(2015, 10, 1, 0, 0)
+        assert cell_value == expected
+        assert row_value == expected
+
+    def test_sheet_dimensions_follow_worksheet_dimension_ref(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Suggested Guidance"]
+            assert ws.max_row == 201
+            assert ws.max_column == 3
+
+    def test_number_format_preserves_excel_escape_backslashes(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            assert wb["Reporting Template"]["E4"].number_format == r"\([$-409]mmm\-yy\ \-"
 
     def test_workbook_contains(self) -> None:
         from wolfxl import load_workbook

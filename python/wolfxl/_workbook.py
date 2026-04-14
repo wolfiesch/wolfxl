@@ -26,6 +26,7 @@ class Workbook:
         self._rust_writer: Any = _rust.RustXlsxWriterBook()
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
+        self._data_only = False
         self._evaluator: Any = None
         self._sheet_names: list[str] = ["Sheet"]
         self._sheets: dict[str, Worksheet] = {}
@@ -33,13 +34,14 @@ class Workbook:
         self._rust_writer.add_sheet("Sheet")
 
     @classmethod
-    def _from_reader(cls, path: str) -> Workbook:
+    def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
         """Open an existing .xlsx file in read mode."""
         from wolfxl import _rust
 
         wb = object.__new__(cls)
         wb._rust_writer = None
         wb._rust_patcher = None
+        wb._data_only = data_only
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path)
         names = [str(n) for n in wb._rust_reader.sheet_names()]
@@ -50,12 +52,13 @@ class Workbook:
         return wb
 
     @classmethod
-    def _from_patcher(cls, path: str) -> Workbook:
+    def _from_patcher(cls, path: str, *, data_only: bool = False) -> Workbook:
         """Open an existing .xlsx file in modify mode (read + surgical save)."""
         from wolfxl import _rust
 
         wb = object.__new__(cls)
         wb._rust_writer = None
+        wb._data_only = data_only
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path)
         wb._rust_patcher = _rust.XlsxPatcher.open(path)

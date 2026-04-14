@@ -91,7 +91,8 @@ _OPEN_ENTRIES: tuple[SurfaceEntry, ...] = (
         ),
         parity_note=(
             "Accept ``data_only``, ``read_only``, ``keep_links`` kwargs without "
-            "error. Return a workbook with iterable ``sheetnames`` and ``__getitem__``. "
+            "error. ``data_only=True`` must return cached formula results when present. "
+            "Return a workbook with iterable ``sheetnames`` and ``__getitem__``. "
             "Password kwarg lands in Phase 2."
         ),
         tags=frozenset({"hard"}),
@@ -159,11 +160,10 @@ _CELL_READ_ENTRIES: tuple[SurfaceEntry, ...] = (
         ),
         parity_note=(
             "Values MUST match byte-for-byte for string/number/bool/None. Dates "
-            "+ datetimes must compare equal via ``==``. Formulas: if cached value "
-            "is present, return it (openpyxl read_only returns formula string "
-            "without ``data_only=True``; wolfxl currently returns the formula "
-            "string for write-mode and cached value for read-mode — document in "
-            "KNOWN_GAPS if they diverge)."
+            "+ datetimes must compare equal via ``==``. Midnight date cells must "
+            "surface as ``datetime`` objects (matching openpyxl's read contract). "
+            "Formulas return formula text by default and cached values under "
+            "``data_only=True``."
         ),
         tags=frozenset({"hard"}),
     ),

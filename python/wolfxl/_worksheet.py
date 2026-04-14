@@ -423,6 +423,7 @@ class Worksheet:
 
         reader = self._workbook._rust_reader  # noqa: SLF001
         sheet = self._title
+        data_only = getattr(self._workbook, "_data_only", False)
 
         # Build an A1:B2-style range string for Rust.
         r_min = min_row or 1
@@ -434,9 +435,9 @@ class Worksheet:
         # Prefer plain-value read (no dict overhead) if available.
         use_plain = hasattr(reader, "read_sheet_values_plain")
         if use_plain:
-            rows = reader.read_sheet_values_plain(sheet, range_str)
+            rows = reader.read_sheet_values_plain(sheet, range_str, data_only)
         else:
-            rows = reader.read_sheet_values(sheet, range_str)
+            rows = reader.read_sheet_values(sheet, range_str, data_only)
 
         if not rows:
             return
@@ -469,7 +470,11 @@ class Worksheet:
         if wb._rust_reader is None:  # noqa: SLF001
             self._dimensions = (1, 1)
             return self._dimensions
-        rows = wb._rust_reader.read_sheet_values(self._title, None)  # noqa: SLF001
+        xml_dims = wb._rust_reader.read_sheet_dimensions(self._title)  # noqa: SLF001
+        if isinstance(xml_dims, tuple) and len(xml_dims) == 2:
+            self._dimensions = (int(xml_dims[0]), int(xml_dims[1]))
+            return self._dimensions
+        rows = wb._rust_reader.read_sheet_values(self._title, None, False)  # noqa: SLF001
         if not rows or not isinstance(rows, list):
             self._dimensions = (1, 1)
             return self._dimensions

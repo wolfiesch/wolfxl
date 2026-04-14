@@ -59,8 +59,10 @@ def load_workbook(
         engine (surgical ZIP patching) instead of a full DOM rewrite.
 
     Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
-    accepted for openpyxl compatibility but currently ignored.
+    accepted for openpyxl compatibility. ``data_only=True`` returns cached
+    formula results when they exist; ``read_only`` and ``keep_links`` remain
+    no-op compatibility shims.
     """
     if modify:
-        return Workbook._from_patcher(str(filename))  # noqa: SLF001
-    return Workbook._from_reader(str(filename))  # noqa: SLF001
+        return Workbook._from_patcher(str(filename), data_only=data_only)  # noqa: SLF001
+    return Workbook._from_reader(str(filename), data_only=data_only)  # noqa: SLF001

@@ -76,63 +76,22 @@ verbatim.
 
 ## Per-fixture read gaps (surfaced by Phase 0 baseline run)
 
-The harness (read_parity test) discovered these on real SynthGL fixtures.
-Each is xfailed in `test_read_parity.py::KNOWN_FIXTURE_GAPS` and will flip
-green once the underlying wolfxl bug is fixed in Phase 0 cleanup or later.
+The read-parity harness is down to a single fixture-specific xfail.
 
-### `Cell.value` type narrowing — date vs datetime
+### `number_format` parity on styled-but-empty template cells
 
-WolfXL returns `datetime.date(2007, 2, 25)` where openpyxl returns
-`datetime.datetime(2007, 2, 25, 0, 0)` for cells whose date format has no
-time component. Affected fixtures: `flat_register/excelx_*.xlsx`.
+In `time_series/ilpa_pe_fund_reporting_v1.1.xlsx`, openpyxl materializes
+missing coordinates inside the worksheet dimension as synthetic blank cells
+with `number_format == 'General'`. WolfXL still surfaces the worksheet style
+grid for some of those blank coordinates, so `Cell.number_format` reports the
+template's currency/count format instead.
 
-**Fix sketch:** in `python/wolfxl/_cell.py::_payload_to_python`, when payload
-type is `"date"`, return a `datetime` (not `date`) to mirror openpyxl. If
-preserving the date-vs-datetime distinction matters for some callers, expose
-both `cell.value` (datetime) and `cell.date_value` (date).
-
-### `data_only=True` is not honored — formulas return as strings
-
-WolfXL ignores the `data_only` kwarg and returns formula strings (`'=P4'`)
-where openpyxl returns the cached evaluated value. Affected fixture:
-`time_series/ilpa_pe_fund_reporting_v1.1.xlsx`.
-
-**Fix sketch:** in `python/wolfxl/__init__.py::load_workbook`, when
-`data_only=True` is passed, set a flag on the workbook that causes
-`_payload_to_python` to return `payload["value"]` (cached) instead of
-`payload["formula"]` for formula cells. The cached value is already in the
-calamine payload — wolfxl just isn't surfacing it.
-
-### `merged_cells` empty on read
-
-WolfXL's `Worksheet.merged_cells` is a private `_merged_ranges` set that
-reads from local writer state, not from the underlying xlsx. When a
-workbook is opened in read mode, merged ranges are never populated.
-Affected: any fixture with merged cells.
-
-**Fix sketch:** wire `CalamineStyledBook.read_merged_cells(sheet)` (the Rust
-side already supports this — used by other read paths) into the Worksheet's
-`merged_cells.ranges` accessor.
-
-### `number_format` backslash escapes stripped
-
-WolfXL returns `'([$-409]mmm-yy -'` where openpyxl returns
-`'\\([$-409]mmm\\-yy\\ \\-'`. WolfXL is stripping the backslash escapes
-that openpyxl preserves verbatim from the xlsx XML.
-
-**Fix sketch:** in the Rust `styles.rs` number-format extraction, preserve
-the raw string from `xl/styles.xml` (don't post-process). openpyxl returns
-exactly what's in the file.
-
-### `max_row`/`max_column` off-by-one on sheets with trailing blanks
-
-WolfXL reports `max_row=200`, openpyxl reports `201` when the trailing rows
-are styled-but-blank. Affected: sheets with template formatting in unused
-rows.
-
-**Fix sketch:** match openpyxl's heuristic — `max_row` is the highest row
-index with ANY occupied cell (value OR explicit format), not just the
-highest with a non-empty value.
+**Fix sketch:** resolve `number_format` from the sparse worksheet cell model,
+not just the positional style grid. The exact openpyxl contract appears to be
+"only workbook-backed cells carry style-derived number formats; synthetic blank
+cells inside the used range stay General." That likely means reading style IDs
+directly from worksheet XML and treating absent cells as style-less even when
+the style grid has a positional format.
 
 ## Out of scope (documented, not planned)
 

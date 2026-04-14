@@ -1,6 +1,6 @@
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDate, PyDateTime, PyDict, PyList};
+use pyo3::types::{PyDateTime, PyDict, PyList};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -51,6 +51,48 @@ fn map_error_formula(formula: &str) -> Option<&'static str> {
         return Some("#VALUE!");
     }
     None
+}
+
+fn openpyxl_builtin_num_fmt(format_id: u32) -> Option<&'static str> {
+    match format_id {
+        0 => Some("General"),
+        1 => Some("0"),
+        2 => Some("0.00"),
+        3 => Some("#,##0"),
+        4 => Some("#,##0.00"),
+        5 => Some("\"$\"#,##0_);(\"$\"#,##0)"),
+        6 => Some("\"$\"#,##0_);[Red](\"$\"#,##0)"),
+        7 => Some("\"$\"#,##0.00_);(\"$\"#,##0.00)"),
+        8 => Some("\"$\"#,##0.00_);[Red](\"$\"#,##0.00)"),
+        9 => Some("0%"),
+        10 => Some("0.00%"),
+        11 => Some("0.00E+00"),
+        12 => Some("# ?/?"),
+        13 => Some("# ??/??"),
+        14 => Some("mm-dd-yy"),
+        15 => Some("d-mmm-yy"),
+        16 => Some("d-mmm"),
+        17 => Some("mmm-yy"),
+        18 => Some("h:mm AM/PM"),
+        19 => Some("h:mm:ss AM/PM"),
+        20 => Some("h:mm"),
+        21 => Some("h:mm:ss"),
+        22 => Some("m/d/yy h:mm"),
+        37 => Some("#,##0_);(#,##0)"),
+        38 => Some("#,##0_);[Red](#,##0)"),
+        39 => Some("#,##0.00_);(#,##0.00)"),
+        40 => Some("#,##0.00_);[Red](#,##0.00)"),
+        41 => Some(r#"_(* #,##0_);_(* \(#,##0\);_(* "-"_);_(@_)"#),
+        42 => Some(r#"_("$"* #,##0_);_("$"* \(#,##0\);_("$"* "-"_);_(@_)"#),
+        43 => Some(r#"_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)"#),
+        44 => Some(r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#),
+        45 => Some("mm:ss"),
+        46 => Some("[h]:mm:ss"),
+        47 => Some("mmss.0"),
+        48 => Some("##0.0E+0"),
+        49 => Some("@"),
+        _ => None,
+    }
 }
 
 /// Convert a calamine Color to a "#RRGGBB" hex string.
@@ -193,18 +235,18 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
         Data::Bool(b) => Ok(b.to_object(py)),
         Data::DateTime(dt) => {
             if let Some(ndt) = dt.as_datetime() {
-                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                if ndt.time() == midnight {
-                    let d = PyDate::new(py, ndt.year(), ndt.month() as u8, ndt.day() as u8)?;
-                    Ok(d.into_any().unbind())
-                } else {
-                    let d = PyDateTime::new(
-                        py, ndt.year(), ndt.month() as u8, ndt.day() as u8,
-                        ndt.hour() as u8, ndt.minute() as u8, ndt.second() as u8,
-                        0, None,
-                    )?;
-                    Ok(d.into_any().unbind())
-                }
+                let d = PyDateTime::new(
+                    py,
+                    ndt.year(),
+                    ndt.month() as u8,
+                    ndt.day() as u8,
+                    ndt.hour() as u8,
+                    ndt.minute() as u8,
+                    ndt.second() as u8,
+                    0,
+                    None,
+                )?;
+                Ok(d.into_any().unbind())
             } else {
                 Ok(dt.as_f64().to_object(py))
             }
@@ -212,21 +254,31 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
         Data::DateTimeIso(s) => {
             let raw = s.trim_end_matches('Z');
             if let Some(d) = parse_iso_date(raw) {
-                let pydate = PyDate::new(py, d.year(), d.month() as u8, d.day() as u8)?;
-                Ok(pydate.into_any().unbind())
+                let pydt = PyDateTime::new(
+                    py,
+                    d.year(),
+                    d.month() as u8,
+                    d.day() as u8,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                )?;
+                Ok(pydt.into_any().unbind())
             } else if let Some(ndt) = parse_iso_datetime(raw) {
-                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
-                if ndt.time() == midnight {
-                    let pydate = PyDate::new(py, ndt.year(), ndt.month() as u8, ndt.day() as u8)?;
-                    Ok(pydate.into_any().unbind())
-                } else {
-                    let pydt = PyDateTime::new(
-                        py, ndt.year(), ndt.month() as u8, ndt.day() as u8,
-                        ndt.hour() as u8, ndt.minute() as u8, ndt.second() as u8,
-                        0, None,
-                    )?;
-                    Ok(pydt.into_any().unbind())
-                }
+                let pydt = PyDateTime::new(
+                    py,
+                    ndt.year(),
+                    ndt.month() as u8,
+                    ndt.day() as u8,
+                    ndt.hour() as u8,
+                    ndt.minute() as u8,
+                    ndt.second() as u8,
+                    0,
+                    None,
+                )?;
+                Ok(pydt.into_any().unbind())
             } else {
                 Ok(s.to_object(py))
             }
@@ -370,6 +422,8 @@ pub struct CalamineStyledBook {
     formula_map_cache: HashMap<String, HashMap<(u32, u32), String>>,
     /// Cache: raw sheet XML content (avoids re-opening zip for Tier 2 + formula parsing).
     sheet_xml_content_cache: HashMap<String, String>,
+    /// Lazy cache: custom number formats from xl/styles.xml with verbatim escapes.
+    raw_number_formats: Option<HashMap<u32, String>>,
 }
 
 #[pymethods]
@@ -395,14 +449,28 @@ impl CalamineStyledBook {
             range_cache: HashMap::new(),
             formula_map_cache: HashMap::new(),
             sheet_xml_content_cache: HashMap::new(),
+            raw_number_formats: None,
         })
+    }
+
+    pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
+        self.ensure_sheet_exists(sheet)?;
+        let xml = self.sheet_xml_content(sheet)?;
+        Self::parse_sheet_dimensions_from_sheet_xml(&xml)
     }
 
     pub fn sheet_names(&self) -> Vec<String> {
         self.sheet_names.clone()
     }
 
-    pub fn read_cell_value(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    #[pyo3(signature = (sheet, a1, data_only = false))]
+    pub fn read_cell_value(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
         let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
 
         self.ensure_sheet_exists(sheet)?;
@@ -415,27 +483,29 @@ impl CalamineStyledBook {
             Some(v) => v,
         };
 
-        // Check the fast formula map (parsed from worksheet XML in a single pass).
-        if let Some(fmap) = self.formula_map_cache.get(sheet) {
-            if let Some(f) = fmap.get(&(row, col)) {
-                let formula = if f.starts_with('=') {
-                    f.clone()
-                } else {
-                    format!("={f}")
-                };
+        if !data_only {
+            // Check the fast formula map (parsed from worksheet XML in a single pass).
+            if let Some(fmap) = self.formula_map_cache.get(sheet) {
+                if let Some(f) = fmap.get(&(row, col)) {
+                    let formula = if f.starts_with('=') {
+                        f.clone()
+                    } else {
+                        format!("={f}")
+                    };
 
-                if let Some(err_val) = map_error_formula(&formula) {
+                    if let Some(err_val) = map_error_formula(&formula) {
+                        let d = PyDict::new(py);
+                        d.set_item("type", "error")?;
+                        d.set_item("value", err_val)?;
+                        return Ok(d.into());
+                    }
+
                     let d = PyDict::new(py);
-                    d.set_item("type", "error")?;
-                    d.set_item("value", err_val)?;
+                    d.set_item("type", "formula")?;
+                    d.set_item("formula", &formula)?;
+                    d.set_item("value", &formula)?;
                     return Ok(d.into());
                 }
-
-                let d = PyDict::new(py);
-                d.set_item("type", "formula")?;
-                d.set_item("formula", &formula)?;
-                d.set_item("value", &formula)?;
-                return Ok(d.into());
             }
         }
 
@@ -447,11 +517,13 @@ impl CalamineStyledBook {
     /// Returns `list[list[dict]]` where each dict has the same shape as
     /// `read_cell_value()`.  Used by performance workloads to avoid per-cell
     /// FFI overhead.
+    #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
     pub fn read_sheet_values(
         &mut self,
         py: Python<'_>,
         sheet: &str,
         cell_range: Option<&str>,
+        data_only: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         self.ensure_value_caches(sheet)?;
@@ -501,27 +573,29 @@ impl CalamineStyledBook {
         for row in start_row..=end_row {
             let inner = PyList::empty(py);
             for col in start_col..=end_col {
-                // Check fast formula map first.
-                if let Some(ref fm) = fmap {
-                    if let Some(f) = fm.get(&(row, col)) {
-                        let formula = if f.starts_with('=') {
-                            f.clone()
-                        } else {
-                            format!("={f}")
-                        };
-                        if let Some(err_val) = map_error_formula(&formula) {
+                if !data_only {
+                    // Check fast formula map first.
+                    if let Some(ref fm) = fmap {
+                        if let Some(f) = fm.get(&(row, col)) {
+                            let formula = if f.starts_with('=') {
+                                f.clone()
+                            } else {
+                                format!("={f}")
+                            };
+                            if let Some(err_val) = map_error_formula(&formula) {
+                                let d = PyDict::new(py);
+                                d.set_item("type", "error")?;
+                                d.set_item("value", err_val)?;
+                                inner.append(d)?;
+                                continue;
+                            }
                             let d = PyDict::new(py);
-                            d.set_item("type", "error")?;
-                            d.set_item("value", err_val)?;
+                            d.set_item("type", "formula")?;
+                            d.set_item("formula", &formula)?;
+                            d.set_item("value", &formula)?;
                             inner.append(d)?;
                             continue;
                         }
-                        let d = PyDict::new(py);
-                        d.set_item("type", "formula")?;
-                        d.set_item("formula", &formula)?;
-                        d.set_item("value", &formula)?;
-                        inner.append(d)?;
-                        continue;
                     }
                 }
                 // Fall back to data value.
@@ -540,13 +614,16 @@ impl CalamineStyledBook {
     ///
     /// Returns `list[list[PyObject]]` where each element is a native Python
     /// value: str, float, int, bool, None, or ISO date/datetime string.
-    /// Formulas are returned as their formula text (with `=` prefix).
+    /// Formulas return either their formula text (default) or cached values
+    /// when ``data_only=True``.
     /// Used by the `values_only=True` fast path to avoid 140K dict allocations.
+    #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
     pub fn read_sheet_values_plain(
         &mut self,
         py: Python<'_>,
         sheet: &str,
         cell_range: Option<&str>,
+        data_only: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         self.ensure_value_caches(sheet)?;
@@ -594,21 +671,23 @@ impl CalamineStyledBook {
         for row in start_row..=end_row {
             let inner = PyList::empty(py);
             for col in start_col..=end_col {
-                // Check formula map first.
-                if let Some(ref fm) = fmap {
-                    if let Some(f) = fm.get(&(row, col)) {
-                        let formula = if f.starts_with('=') {
-                            f.clone()
-                        } else {
-                            format!("={f}")
-                        };
-                        // For error-producing formulas, return the error string.
-                        if let Some(err_val) = map_error_formula(&formula) {
-                            inner.append(err_val)?;
-                        } else {
-                            inner.append(&formula)?;
+                if !data_only {
+                    // Check formula map first.
+                    if let Some(ref fm) = fmap {
+                        if let Some(f) = fm.get(&(row, col)) {
+                            let formula = if f.starts_with('=') {
+                                f.clone()
+                            } else {
+                                format!("={f}")
+                            };
+                            // For error-producing formulas, return the error string.
+                            if let Some(err_val) = map_error_formula(&formula) {
+                                inner.append(err_val)?;
+                            } else {
+                                inner.append(&formula)?;
+                            }
+                            continue;
                         }
-                        continue;
                     }
                 }
                 // Convert Data directly to plain Python values.
@@ -665,6 +744,10 @@ impl CalamineStyledBook {
         a1: &str,
     ) -> PyResult<PyObject> {
         let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let style_id = self.cell_style_id(sheet, row, col)?;
+        if style_id.unwrap_or(0) == 0 {
+            return Ok(PyDict::new(py).into());
+        }
         let style = self.get_style(sheet, row, col)?;
         let d = PyDict::new(py);
 
@@ -678,10 +761,8 @@ impl CalamineStyledBook {
                 Self::populate_fill(py, &d, fill)?;
             }
             // NumberFormat
-            if let Some(nf) = &style.number_format {
-                if nf.format_code != "General" {
-                    d.set_item("number_format", &nf.format_code)?;
-                }
+            if let Some(number_format) = self.resolved_number_format(sheet, row, col, &style)? {
+                d.set_item("number_format", number_format)?;
             }
             // Alignment
             if let Some(align) = &style.alignment {
@@ -1013,6 +1094,40 @@ impl CalamineStyledBook {
         }
         let pos = ((row - or) as usize, (col - oc) as usize);
         Ok(cache.styles.get(pos).cloned())
+    }
+
+    fn resolved_number_format(
+        &mut self,
+        _sheet: &str,
+        _row: u32,
+        _col: u32,
+        style: &Style,
+    ) -> PyResult<Option<String>> {
+        let Some(nf) = &style.number_format else {
+            return Ok(None);
+        };
+        if nf.format_code == "General" {
+            return Ok(None);
+        }
+
+        if let Some(format_id) = nf.format_id {
+            self.ensure_raw_number_formats()?;
+            if let Some(raw) = self
+                .raw_number_formats
+                .as_ref()
+                .and_then(|formats| formats.get(&format_id))
+            {
+                return Ok(Some(raw.clone()));
+            }
+            if let Some(builtin) = openpyxl_builtin_num_fmt(format_id) {
+                if builtin == "General" {
+                    return Ok(None);
+                }
+                return Ok(Some(builtin.to_string()));
+            }
+        }
+
+        Ok(Some(nf.format_code.clone()))
     }
 
     fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
@@ -1392,6 +1507,43 @@ impl CalamineStyledBook {
         }
 
         Ok(out)
+    }
+
+    fn parse_sheet_dimensions_from_sheet_xml(xml: &str) -> PyResult<Option<(u32, u32)>> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                    if e.local_name().as_ref() == b"dimension" {
+                        let Some(ref_attr) = ooxml_util::attr_value(&e, b"ref") else {
+                            return Ok(None);
+                        };
+                        if ref_attr.is_empty() || ref_attr == "#REF!" {
+                            return Ok(None);
+                        }
+
+                        let clean = ref_attr.replace('$', "").to_ascii_uppercase();
+                        let end_ref = clean.split(':').next_back().unwrap_or(&clean);
+                        let (row, col) = a1_to_row_col(end_ref)
+                            .map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                        return Ok(Some((row + 1, col + 1)));
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse worksheet XML: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(None)
     }
 
     fn cell_display_text(&mut self, sheet: &str, a1: &str) -> PyResult<String> {
@@ -1779,7 +1931,9 @@ impl CalamineStyledBook {
                     if !in_dxf {
                         // nothing
                     } else {
-                        if e.local_name().as_ref() == b"fgColor" || e.local_name().as_ref() == b"bgColor" {
+                        if e.local_name().as_ref() == b"fgColor"
+                            || e.local_name().as_ref() == b"bgColor"
+                        {
                             if cur_bg.is_none() {
                                 if let Some(rgb) = ooxml_util::attr_value(&e, b"rgb") {
                                     cur_bg = Self::normalize_ooxml_rgb(&rgb);
@@ -2016,6 +2170,76 @@ impl CalamineStyledBook {
         Ok(())
     }
 
+    fn ensure_raw_number_formats(&mut self) -> PyResult<()> {
+        if self.raw_number_formats.is_some() {
+            return Ok(());
+        }
+
+        let mut zip = self.open_zip()?;
+        let styles_xml = match ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
+            Some(s) => s,
+            None => {
+                self.raw_number_formats = Some(HashMap::new());
+                return Ok(());
+            }
+        };
+
+        let formats = Self::parse_raw_number_formats_from_styles_xml(&styles_xml)?;
+        self.raw_number_formats = Some(formats);
+        Ok(())
+    }
+
+    fn parse_raw_number_formats_from_styles_xml(xml: &str) -> PyResult<HashMap<u32, String>> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut in_numfmts = false;
+        let mut formats: HashMap<u32, String> = HashMap::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    if e.local_name().as_ref() == b"numFmts" {
+                        in_numfmts = true;
+                    } else if in_numfmts && e.local_name().as_ref() == b"numFmt" {
+                        let format_id = ooxml_util::attr_value(&e, b"numFmtId")
+                            .and_then(|s| s.parse::<u32>().ok());
+                        let format_code = ooxml_util::attr_value(&e, b"formatCode");
+                        if let (Some(id), Some(code)) = (format_id, format_code) {
+                            formats.insert(id, code);
+                        }
+                    }
+                }
+                Ok(Event::Empty(e)) => {
+                    if in_numfmts && e.local_name().as_ref() == b"numFmt" {
+                        let format_id = ooxml_util::attr_value(&e, b"numFmtId")
+                            .and_then(|s| s.parse::<u32>().ok());
+                        let format_code = ooxml_util::attr_value(&e, b"formatCode");
+                        if let (Some(id), Some(code)) = (format_id, format_code) {
+                            formats.insert(id, code);
+                        }
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if e.local_name().as_ref() == b"numFmts" {
+                        in_numfmts = false;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse styles.xml: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(formats)
+    }
+
     fn compute_conditional_formats(
         &mut self,
         sheet: &str,
@@ -2104,7 +2328,9 @@ impl CalamineStyledBook {
                             out.push(rule);
                         }
                     } else if in_dxf {
-                        if e.local_name().as_ref() == b"fgColor" || e.local_name().as_ref() == b"bgColor" {
+                        if e.local_name().as_ref() == b"fgColor"
+                            || e.local_name().as_ref() == b"bgColor"
+                        {
                             if let Some(ref mut rule) = cur_rule {
                                 if rule.bg_color.is_none() {
                                     if let Some(rgb) = ooxml_util::attr_value(&e, b"rgb") {
