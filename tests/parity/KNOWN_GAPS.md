@@ -76,22 +76,9 @@ verbatim.
 
 ## Per-fixture read gaps (surfaced by Phase 0 baseline run)
 
-The read-parity harness is down to a single fixture-specific xfail.
-
-### `number_format` parity on styled-but-empty template cells
-
-In `time_series/ilpa_pe_fund_reporting_v1.1.xlsx`, openpyxl materializes
-missing coordinates inside the worksheet dimension as synthetic blank cells
-with `number_format == 'General'`. WolfXL still surfaces the worksheet style
-grid for some of those blank coordinates, so `Cell.number_format` reports the
-template's currency/count format instead.
-
-**Fix sketch:** resolve `number_format` from the sparse worksheet cell model,
-not just the positional style grid. The exact openpyxl contract appears to be
-"only workbook-backed cells carry style-derived number formats; synthetic blank
-cells inside the used range stay General." That likely means reading style IDs
-directly from worksheet XML and treating absent cells as style-less even when
-the style grid has a positional format.
+Phase 0's read-parity xfail list is now empty. Any newly discovered
+fixture-specific drift should be added to `test_read_parity.py::KNOWN_FIXTURE_GAPS`
+and documented here before the ratchet baseline is updated.
 
 ## Out of scope (documented, not planned)
 

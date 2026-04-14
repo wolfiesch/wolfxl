@@ -263,6 +263,24 @@ class TestReadMode:
         with load_workbook(str(path)) as wb:
             assert wb["Reporting Template"]["E4"].number_format == r"\([$-409]mmm\-yy\ \-"
 
+    def test_merged_subordinate_cells_do_not_expose_anchor_number_formats(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Reporting Template"]
+            assert ws["E13"].number_format == "#,##0_);(#,##0)"
+            assert ws["F13"].number_format is None
+            assert ws["G13"].number_format is None
+            assert ws["K71"].number_format == r'"$"#,##0_);\("$"#,##0\)'
+            assert ws["L71"].number_format is None
+            assert ws["M71"].number_format is None
+            assert ws["F67"].number_format is None
+            assert ws["G67"].number_format is None
+
     def test_workbook_contains(self) -> None:
         from wolfxl import load_workbook
 

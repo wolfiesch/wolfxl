@@ -39,13 +39,7 @@ RATCHET_PATH = Path(__file__).parent / "ratchet.json"
 # Fixtures with known wolfxl read-side gaps. The harness still runs them
 # (so we get measurement), but the test is xfail to keep CI green during
 # Phase 0. Each entry must reference a documented gap in KNOWN_GAPS.md.
-KNOWN_FIXTURE_GAPS: dict[str, str] = {
-    "time_series/ilpa_pe_fund_reporting_v1.1.xlsx": (
-        "Remaining read-side gap: number_format parity still diverges on "
-        "styled-but-empty template coordinates. openpyxl reports General for "
-        "synthetic blank cells while wolfxl still surfaces the worksheet style grid."
-    ),
-}
+KNOWN_FIXTURE_GAPS: dict[str, str] = {}
 
 
 def _load_ratchet() -> dict[str, dict[str, int]]:

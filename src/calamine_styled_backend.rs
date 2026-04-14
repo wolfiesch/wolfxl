@@ -20,6 +20,7 @@ use zip::ZipArchive;
 
 use crate::ooxml_util;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
+use crate::wolfxl::styles::XfEntry;
 
 fn map_error_value(err_str: &str) -> &'static str {
     let e = err_str.to_ascii_uppercase();
@@ -387,6 +388,7 @@ struct DiagonalBorderInfo {
 #[derive(Default)]
 struct Tier2SheetCache {
     merged_ranges: Option<Vec<String>>,
+    merged_bounds: Option<Vec<(u32, u32, u32, u32)>>,
     hyperlinks: Option<Vec<HyperlinkInfo>>,
     comments: Option<Vec<CommentInfo>>,
     freeze_panes: Option<FreezePaneInfo>,
@@ -424,6 +426,8 @@ pub struct CalamineStyledBook {
     sheet_xml_content_cache: HashMap<String, String>,
     /// Lazy cache: custom number formats from xl/styles.xml with verbatim escapes.
     raw_number_formats: Option<HashMap<u32, String>>,
+    /// Lazy cache: parsed cellXfs entries from xl/styles.xml.
+    cell_xfs: Option<Vec<XfEntry>>,
 }
 
 #[pymethods]
@@ -450,6 +454,7 @@ impl CalamineStyledBook {
             formula_map_cache: HashMap::new(),
             sheet_xml_content_cache: HashMap::new(),
             raw_number_formats: None,
+            cell_xfs: None,
         })
     }
 
@@ -744,6 +749,9 @@ impl CalamineStyledBook {
         a1: &str,
     ) -> PyResult<PyObject> {
         let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        if self.is_merged_subordinate(sheet, row, col)? {
+            return Ok(PyDict::new(py).into());
+        }
         let style_id = self.cell_style_id(sheet, row, col)?;
         if style_id.unwrap_or(0) == 0 {
             return Ok(PyDict::new(py).into());
@@ -761,7 +769,7 @@ impl CalamineStyledBook {
                 Self::populate_fill(py, &d, fill)?;
             }
             // NumberFormat
-            if let Some(number_format) = self.resolved_number_format(sheet, row, col, &style)? {
+            if let Some(number_format) = self.resolved_number_format(sheet, row, col)? {
                 d.set_item("number_format", number_format)?;
             }
             // Alignment
@@ -1098,36 +1106,51 @@ impl CalamineStyledBook {
 
     fn resolved_number_format(
         &mut self,
-        _sheet: &str,
-        _row: u32,
-        _col: u32,
-        style: &Style,
+        sheet: &str,
+        row: u32,
+        col: u32,
     ) -> PyResult<Option<String>> {
-        let Some(nf) = &style.number_format else {
+        if self.is_merged_subordinate(sheet, row, col)? {
+            return Ok(None);
+        }
+        let Some(style_id) = self.cell_style_id(sheet, row, col)? else {
             return Ok(None);
         };
-        if nf.format_code == "General" {
+        if style_id == 0 {
             return Ok(None);
         }
 
-        if let Some(format_id) = nf.format_id {
-            self.ensure_raw_number_formats()?;
-            if let Some(raw) = self
-                .raw_number_formats
-                .as_ref()
-                .and_then(|formats| formats.get(&format_id))
-            {
-                return Ok(Some(raw.clone()));
-            }
-            if let Some(builtin) = openpyxl_builtin_num_fmt(format_id) {
-                if builtin == "General" {
-                    return Ok(None);
-                }
-                return Ok(Some(builtin.to_string()));
-            }
+        self.ensure_cell_xfs()?;
+        let Some(xf) = self
+            .cell_xfs
+            .as_ref()
+            .and_then(|entries| entries.get(style_id as usize))
+        else {
+            return Ok(None);
+        };
+
+        let format_id = xf.num_fmt_id;
+        if format_id == 0 {
+            return Ok(None);
         }
 
-        Ok(Some(nf.format_code.clone()))
+        self.ensure_raw_number_formats()?;
+        if let Some(raw) = self
+            .raw_number_formats
+            .as_ref()
+            .and_then(|formats| formats.get(&format_id))
+        {
+            return Ok(Some(raw.clone()));
+        }
+
+        if let Some(builtin) = openpyxl_builtin_num_fmt(format_id) {
+            if builtin == "General" {
+                return Ok(None);
+            }
+            return Ok(Some(builtin.to_string()));
+        }
+
+        Ok(None)
     }
 
     fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
@@ -1396,6 +1419,66 @@ impl CalamineStyledBook {
         }
 
         Ok(out)
+    }
+
+    fn parse_merged_range_bounds(range_ref: &str) -> Option<(u32, u32, u32, u32)> {
+        let clean = range_ref.replace('$', "");
+        let (start, end) = clean.split_once(':').unwrap_or((&clean, &clean));
+        let (row0, col0) = a1_to_row_col(start).ok()?;
+        let (row1, col1) = a1_to_row_col(end).ok()?;
+        Some((row0.min(row1), col0.min(col1), row0.max(row1), col0.max(col1)))
+    }
+
+    fn ensure_merged_bounds(&mut self, sheet: &str) -> PyResult<()> {
+        self.ensure_sheet_exists(sheet)?;
+
+        let needs_load = self
+            .tier2_cache
+            .get(sheet)
+            .and_then(|c| c.merged_bounds.as_ref())
+            .is_none();
+        if !needs_load {
+            return Ok(());
+        }
+
+        let ranges = if let Some(ranges) = self
+            .tier2_cache
+            .get(sheet)
+            .and_then(|c| c.merged_ranges.clone())
+        {
+            ranges
+        } else {
+            self.compute_merged_ranges(sheet)?
+        };
+
+        let bounds = ranges
+            .iter()
+            .filter_map(|range_ref| Self::parse_merged_range_bounds(range_ref))
+            .collect();
+
+        let cache = self.tier2_cache.entry(sheet.to_string()).or_default();
+        cache.merged_ranges = Some(ranges);
+        cache.merged_bounds = Some(bounds);
+        Ok(())
+    }
+
+    fn is_merged_subordinate(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<bool> {
+        self.ensure_merged_bounds(sheet)?;
+        let Some(bounds) = self
+            .tier2_cache
+            .get(sheet)
+            .and_then(|c| c.merged_bounds.as_ref())
+        else {
+            return Ok(false);
+        };
+
+        for (min_row, min_col, max_row, max_col) in bounds {
+            if row >= *min_row && row <= *max_row && col >= *min_col && col <= *max_col {
+                return Ok(!(row == *min_row && col == *min_col));
+            }
+        }
+
+        Ok(false)
     }
 
     fn parse_cell_style_ids_from_sheet_xml(xml: &str) -> PyResult<HashMap<(u32, u32), u32>> {
@@ -2186,6 +2269,25 @@ impl CalamineStyledBook {
 
         let formats = Self::parse_raw_number_formats_from_styles_xml(&styles_xml)?;
         self.raw_number_formats = Some(formats);
+        Ok(())
+    }
+
+    fn ensure_cell_xfs(&mut self) -> PyResult<()> {
+        if self.cell_xfs.is_some() {
+            return Ok(());
+        }
+
+        let mut zip = self.open_zip()?;
+        let styles_xml = match ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
+            Some(s) => s,
+            None => {
+                self.cell_xfs = Some(Vec::new());
+                return Ok(());
+            }
+        };
+
+        let entries = crate::wolfxl::styles::parse_cellxfs(&styles_xml);
+        self.cell_xfs = Some(entries);
         Ok(())
     }
 
