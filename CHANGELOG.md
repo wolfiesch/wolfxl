@@ -1,6 +1,44 @@
 # Changelog
 
-## 0.6.0 (2026-04-19)
+## wolfxl-cli 0.7.0 / wolfxl-core 0.6.0 (2026-04-19)
+
+### Added
+
+- **`wolfxl schema <file>` subcommand**: per-column type, cardinality,
+  null count, format category, and up to three sample values. Defaults
+  to JSON for agent consumption; `--format text` produces a tabular
+  terminal view. Pass `--sheet NAME` to scope to one sheet, omit to
+  schema every sheet in the workbook.
+- **`wolfxl-core::schema` module**: `InferredType`, `Cardinality`,
+  `ColumnSchema`, `SheetSchema`, and the `infer_sheet_schema` entry
+  point — callable from third-party Rust consumers, identical answers
+  to the CLI.
+
+### Notes
+
+- **Cardinality buckets** are: `unique` (every non-null cell distinct),
+  `categorical` (≤20 distinct AND distinct × 2 ≤ non-null — the
+  "lookup-friendly dimension" bucket an agent needs to plan a `WHERE`
+  clause), `high-cardinality` (everything else above the cap or with
+  many distincts), and `empty`.
+- **Type inference** collapses `Int + Float` in the same column to
+  `Float` (numeric supertype). Any other multi-type column resolves to
+  `Mixed` so an agent doesn't pick a dominant type from a noisy mix.
+- **Unique-count tracking is capped at 10 000** distinct rendered
+  values per column; columns past the cap report
+  `unique_capped: true` and class as `high-cardinality` (the safer
+  bucket — caller won't wrongly treat an unverified column as a
+  categorical lookup). Picked so a million-row sheet doesn't blow
+  memory on the per-column HashSet.
+- **Format category is locked from the first non-empty cell** of each
+  column. Mixed-format columns are rare in practice; if a user wanted
+  per-cell formatting they would be looking at a CSV. Note: openpyxl-
+  generated fixtures often emit no `cellXfs` styles, so format
+  detection on those workbooks falls back to `general`. Real Excel-
+  authored workbooks carry the styles correctly. The full styles.xml
+  walker that lifts this limitation is tracked separately.
+
+## wolfxl-cli 0.6.0 (2026-04-19)
 
 ### Added
 
@@ -22,7 +60,12 @@
 - **Token budget tracker**: `Budget::used_with(buf, section)` re-encodes
   the full concatenation rather than summing per-section counts, because
   cl100k_base BPE merges across boundaries (additive checks would
-  over-count and reject sections that actually fit).
+  over-count and reject sections that actually fit). After PR review,
+  the budget reserves a worst-case footer cost up-front so the printed
+  `--max-tokens N` is honored end-to-end (body + footer).
+- Best-effort `NAMED_RANGES` block (capped at 8 entries with overflow
+  marker) gated through `try_append`, so a workbook with hundreds of
+  named ranges cannot single-handedly drain the agent's budget.
 
 ### Notes
 

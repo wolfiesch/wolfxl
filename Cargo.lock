@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "wolfxl-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -996,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "wolfxl-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "calamine-styles",
  "chrono",
