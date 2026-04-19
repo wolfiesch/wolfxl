@@ -1,13 +1,14 @@
 //! Integration tests for `wolfxl peek`.
 //!
-//! Goldens were captured with `xleak <fixture> -e <fmt>`, locking in
-//! byte-for-byte parity with the third-party CLI we're replacing in the
-//! `spreadsheet-peek` skill. If you change a renderer and a golden moves,
-//! treat it as the migration's CI-drift signal: either update the golden
-//! and the benchmark numerics in spreadsheet-peek/SKILL.md, or fix the bug.
+//! Goldens lock in the rendering contract for `text`, `csv`, and `json`
+//! exporters: integer thousand-grouping, two-decimal float formatting,
+//! ISO date/time, RFC 4180 CSV quoting, and the JSON `{sheet, rows,
+//! columns, headers, data}` shape. If you change a renderer and a golden
+//! moves, either regenerate the golden intentionally and update the token
+//! tables in `spreadsheet-peek`, or fix the bug.
 //!
-//! The boxed renderer isn't goldened here - its banner is wolfxl-branded
-//! and column widths can drift on minor rendering tweaks. Smoke-tested
+//! The boxed renderer isn't goldened - its banner is wolfxl-branded and
+//! column widths can drift on minor rendering tweaks. Smoke-tested
 //! instead via `boxed_smoke`.
 
 use std::path::{Path, PathBuf};
@@ -44,42 +45,42 @@ fn run(args: &[&str]) -> String {
 }
 
 #[test]
-fn text_export_matches_xleak_sample() {
+fn text_export_matches_golden_sample() {
     let path = fixture("sample-financials.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "text"]);
     assert_eq!(actual, golden("sample-financials.text"));
 }
 
 #[test]
-fn csv_export_matches_xleak_sample() {
+fn csv_export_matches_golden_sample() {
     let path = fixture("sample-financials.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "csv"]);
     assert_eq!(actual, golden("sample-financials.csv"));
 }
 
 #[test]
-fn json_export_matches_xleak_sample() {
+fn json_export_matches_golden_sample() {
     let path = fixture("sample-financials.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "json"]);
     assert_eq!(actual, golden("sample-financials.json"));
 }
 
 #[test]
-fn text_export_matches_xleak_wide() {
+fn text_export_matches_golden_wide() {
     let path = fixture("wide-table.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "text"]);
     assert_eq!(actual, golden("wide-table.text"));
 }
 
 #[test]
-fn csv_export_matches_xleak_wide() {
+fn csv_export_matches_golden_wide() {
     let path = fixture("wide-table.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "csv"]);
     assert_eq!(actual, golden("wide-table.csv"));
 }
 
 #[test]
-fn json_export_matches_xleak_wide() {
+fn json_export_matches_golden_wide() {
     let path = fixture("wide-table.xlsx");
     let actual = run(&["peek", path.to_str().unwrap(), "-e", "json"]);
     assert_eq!(actual, golden("wide-table.json"));

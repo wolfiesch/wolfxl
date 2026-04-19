@@ -6,8 +6,9 @@
 //! - `csv`:  RFC 4180 CSV, integer thousand-grouping retained
 //! - `json`: machine-shaped `{sheet, rows, columns, headers, data}`
 //!
-//! Parity targets `xleak` byte-for-byte where xleak is sensible (csv/json/text
-//! shape, JSON keys, integer grouping behavior). Banner text is wolfxl-branded.
+//! Format choices (integer grouping, two-decimal floats, ISO dates, JSON shape)
+//! are locked in by golden tests in `tests/cli.rs` so token-cost benchmarks in
+//! the `spreadsheet-peek` skill stay reproducible.
 
 use std::io::Write;
 
@@ -22,10 +23,10 @@ pub struct RenderOptions<'a> {
 }
 
 pub fn text<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
-    // xleak's `-n` is box-mode only; text/csv/json emit the full sheet so
-    // the benchmark can pipe through `head` reproducibly. Header row is
-    // emitted as raw strings (no int-grouping) to match xleak's separate
-    // headers track.
+    // `-n` caps box-mode only; text/csv/json emit the full sheet so the
+    // benchmark can pipe through `head` reproducibly. Header row is emitted
+    // as raw strings (no int-grouping) — header text should round-trip even
+    // when a header literal happens to be numeric.
     writeln!(w, "{}", sheet.headers().join("\t"))?;
     for row in sheet.rows().iter().skip(1) {
         let cells: Vec<String> = row.iter().map(|c| display_cell(c, true)).collect();
@@ -35,8 +36,8 @@ pub fn text<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::i
 }
 
 pub fn csv<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
-    // xleak emits headers as `data.headers.join(",")` with no per-cell quoting,
-    // which is broken on commas in headers. We at least quote properly.
+    // Quote every header cell individually so commas, quotes, and embedded
+    // newlines in a header literal don't shred the output row.
     let headers: Vec<String> = sheet.headers().iter().map(|h| csv_quote(h)).collect();
     writeln!(w, "{}", headers.join(","))?;
     for row in sheet.rows().iter().skip(1) {
@@ -46,12 +47,13 @@ pub fn csv<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io
     Ok(())
 }
 
-/// Emit JSON shaped like xleak's `--export json`:
+/// Emit JSON in the agent-friendly shape:
 /// - top-level object pretty-printed with 2-space indent
 /// - `headers` array: one element per line
-/// - `data` array: one row per line, each row inline `[v, v, v]` with
-///   space after every comma (matches xleak byte-for-byte so token counts
-///   in `benchmarks/measure_tokens.py` reproduce).
+/// - `data` array: one row per line, each row inline `[v, v, v]` with a
+///   space after every comma. The shape is a contract — token-cost figures
+///   in `spreadsheet-peek/benchmarks/measure_tokens.py` are computed against
+///   it — so changes here move the published "tokens per row" numbers.
 pub fn json<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
     let (total_rows, cols) = sheet.dimensions();
     let data_rows = total_rows.saturating_sub(1);
@@ -237,7 +239,8 @@ fn effective_row_cap(sheet: &Sheet, opts: &RenderOptions) -> usize {
     let total = sheet.rows().len();
     match opts.max_rows {
         None => total,
-        // box renderer counts header in the cap; xleak does the same.
+        // box renderer counts the header row inside the cap, so `-n 5`
+        // shows 1 header + 5 data rows.
         Some(n) => (n + 1).min(total),
     }
 }
@@ -263,8 +266,9 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 fn csv_quote(s: &str) -> String {
-    // RFC 4180: quote on any of `,"\r\n`. xleak only quotes on `,` and `"`,
-    // which is broken — embedded line-breaks split the row. We diverge here.
+    // RFC 4180 trigger set: `,`, `"`, `\r`, `\n`. The carriage return matters
+    // because Excel cells with line breaks store `\r\n` — quoting only on `\n`
+    // would let a stray `\r` slip through and shred downstream parsers.
     if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         let escaped = s.replace('"', "\"\"");
         format!("\"{escaped}\"")
@@ -277,7 +281,7 @@ fn display_cell(cell: &Cell, group_ints: bool) -> String {
     match &cell.value {
         CellValue::Empty => String::new(),
         CellValue::String(s) => s.clone(),
-        // Lowercase to match xleak's `bool::Display`.
+        // Lowercase `true`/`false` so JSON and text exports agree.
         CellValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         CellValue::Int(n) => {
             if group_ints {
@@ -290,7 +294,8 @@ fn display_cell(cell: &Cell, group_ints: bool) -> String {
         CellValue::Date(d) => d.format("%Y-%m-%d").to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         CellValue::Time(t) => t.format("%H:%M:%S").to_string(),
-        // xleak's `CellValue::Error` Display prefixes with "ERROR: ".
+        // Prefix Excel error sentinels with "ERROR: " so a `#REF!` cell is
+        // visually distinct from a literal string `"#REF!"` in the output.
         CellValue::Error(e) => format!("ERROR: {e}"),
     }
 }
@@ -339,11 +344,10 @@ fn group_thousands(mut n: u64) -> String {
 }
 
 fn trim_float(n: f64) -> String {
-    // Matches xleak's `CellValue::Float` Display impl: integer-valued floats
-    // render with no decimals (`{n:.0}`), everything else is forced to two
-    // (`{n:.2}`), and the integer part gets thousand separators in both cases.
-    // This is destructive precision-wise but is the parity target for
-    // text/csv/box; JSON keeps full precision via serde_json.
+    // Float rendering contract for text/csv/box: integer-valued floats render
+    // with no decimals (`{n:.0}`), everything else is forced to two
+    // (`{n:.2}`), and the integer part gets thousand separators. This is
+    // destructive precision-wise; JSON keeps full precision via serde_json.
     if !n.is_finite() {
         return n.to_string();
     }
@@ -361,7 +365,7 @@ fn trim_float(n: f64) -> String {
     let digits = int_part.trim_start_matches('-');
     let grouped = match digits.parse::<u64>() {
         Ok(n) => group_thousands(n),
-        // f64 outside u64 range (>= 2^64). xleak falls back to ungrouped digits.
+        // f64 outside u64 range (>= 2^64) — fall back to ungrouped digits.
         Err(_) => digits.to_string(),
     };
     let grouped = if negative { format!("-{grouped}") } else { grouped };
@@ -396,9 +400,9 @@ mod tests {
     }
 
     #[test]
-    fn trim_float_matches_xleak_display() {
-        // xleak parity: integer-valued -> {:.0}, otherwise -> {:.2}, then
-        // thousand-separator the integer part.
+    fn trim_float_matches_format_contract() {
+        // Integer-valued -> {:.0}, otherwise -> {:.2}, then thousand-separate
+        // the integer part. Locked in by golden CSV/text fixtures.
         assert_eq!(trim_float(3.0), "3");
         assert_eq!(trim_float(3.14), "3.14");
         assert_eq!(trim_float(3.14159), "3.14");

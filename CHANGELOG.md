@@ -10,9 +10,9 @@
   consumers. No PyO3 coupling.
 - **`wolfxl-cli` crate** (crates.io): installs the `wolfxl` binary with a
   `peek` subcommand. `wolfxl peek <file> [-n N] [-s SHEET] [-w WIDTH]
-  [-e {box,text,csv,json}]` produces previews at xleak byte-parity for
-  text/csv/json (77/81 in-repo fixtures match) and a styled box view by
-  default. Install via `cargo install wolfxl-cli`.
+  [-e {box,text,csv,json}]` produces a styled box preview by default and
+  text/csv/json exports tuned for piping into agent or shell pipelines.
+  Install via `cargo install wolfxl-cli`.
 
 ### Changed
 

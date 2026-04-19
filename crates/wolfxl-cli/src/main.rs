@@ -8,9 +8,8 @@ mod render;
 
 /// Fast, agent-friendly Excel previews.
 ///
-/// `wolfxl peek <file>` prints a styled, token-efficient view of a workbook.
-/// Drop-in replacement for the third-party `xleak` CLI that the
-/// `spreadsheet-peek` skill previously called.
+/// `wolfxl peek <file>` prints a styled, token-efficient view of a workbook —
+/// box / text / csv / json output, sheet selection, row and width caps.
 #[derive(Parser, Debug)]
 #[command(name = "wolfxl", version, about, long_about = None)]
 struct Cli {
