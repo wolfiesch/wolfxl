@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pure-Rust xlsx reader with Excel number-format-aware cell rendering. Backs the wolfxl-cli previewer."
+readme = "README.md"
 keywords = ["xlsx", "excel", "spreadsheet", "calamine"]
 categories = ["parser-implementations", "command-line-utilities"]
 

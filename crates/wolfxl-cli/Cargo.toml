@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Excel xlsx previewer. Installs the `wolfxl` binary with a `peek` subcommand for box/text/csv/json output."
+readme = "README.md"
 keywords = ["xlsx", "excel", "cli", "preview", "spreadsheet"]
 categories = ["command-line-utilities", "visualization"]
 

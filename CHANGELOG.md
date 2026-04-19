@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.0 (2026-04-19)
+
+### Added
+
+- **`wolfxl-core` crate** (crates.io): pure-Rust xlsx reader with Excel
+  number-format-aware cell rendering. Exposes `Workbook`, `Sheet`, `Cell`,
+  `CellValue`, `FormatCategory`, and `format_cell` for third-party Rust
+  consumers. No PyO3 coupling.
+- **`wolfxl-cli` crate** (crates.io): installs the `wolfxl` binary with a
+  `peek` subcommand. `wolfxl peek <file> [-n N] [-s SHEET] [-w WIDTH]
+  [-e {box,text,csv,json}]` produces previews at xleak byte-parity for
+  text/csv/json (77/81 in-repo fixtures match) and a styled box view by
+  default. Install via `cargo install wolfxl-cli`.
+
+### Changed
+
+- **PyO3 0.24 → 0.28**: required for Python 3.14 support. No public Python
+  API changes; all 611 pytest tests pass on 3.12 and 3.14.
+- Repository converted to a Cargo workspace with the existing PyO3 cdylib
+  at the root and the new `crates/wolfxl-core` + `crates/wolfxl-cli`
+  members.
+
+### Fixed
+
+- `wolfxl-core` currency rendering: `format_currency(1.995, 2)` now returns
+  `"$2.00"` (was `"$1.100"` due to splitting `trunc()`/`fract()` separately
+  before rounding).
+
 ## 0.3.2 (2026-04-16)
 
 ### Added
