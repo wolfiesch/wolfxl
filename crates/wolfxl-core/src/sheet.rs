@@ -149,35 +149,45 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
     if serial > 0.0 && serial < 60.0 {
         days += 1;
     }
-    let base = NaiveDate::from_ymd_opt(1899, 12, 30).expect("static date");
-    let date = if days >= 0 {
-        base.checked_add_days(chrono::Days::new(days as u64))
-    } else {
-        // u64 cast on negative i64 wraps; subtract instead.
-        base.checked_sub_days(chrono::Days::new((-days) as u64))
-    }
-    .unwrap_or(base);
     if frac.abs() < f64::EPSILON {
-        return CellValue::Date(date);
+        return CellValue::Date(days_to_date_from_excel_base(days));
     }
-    let secs = (frac * 86_400.0).round() as u32;
-    // A fraction like 0.99999999 rounds up to 86_400 seconds (a full day).
-    // Carry into the next date instead of clamping h to 23 — the prior
-    // `h.min(23)` produced 23:00:00 on the wrong date.
-    let (date, secs) = if secs >= 86_400 {
-        let next = date
-            .checked_add_days(chrono::Days::new(1))
-            .unwrap_or(date);
-        (next, secs - 86_400)
-    } else {
-        (date, secs)
-    };
+    // Keep the day-fraction arithmetic signed until normalized into
+    // [0, 86_400) — a negative serial like -0.5 produces frac = -0.5 here,
+    // and the prior `(frac * 86_400).round() as u32` would wrap a negative
+    // f64 to a huge positive u32, then the next-day carry branch would
+    // emit a corrupted pre-1900 datetime. Borrow whole days off `days`
+    // until secs lands in the valid range; then carry forward the same
+    // way the existing 0.99999999 → 86_400 case does.
+    let mut secs_signed = (frac * 86_400.0).round() as i64;
+    if secs_signed < 0 {
+        let borrow_days = (-secs_signed + 86_399) / 86_400; // ceil division
+        secs_signed += borrow_days * 86_400;
+        days -= borrow_days;
+    } else if secs_signed >= 86_400 {
+        let carry_days = secs_signed / 86_400;
+        secs_signed -= carry_days * 86_400;
+        days += carry_days;
+    }
+    let secs = secs_signed as u32; // now in [0, 86_400)
+    let date = days_to_date_from_excel_base(days);
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
     let time = NaiveTime::from_hms_opt(h, m, s)
         .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).unwrap());
     CellValue::DateTime(NaiveDateTime::new(date, time))
+}
+
+fn days_to_date_from_excel_base(days: i64) -> NaiveDate {
+    let base = NaiveDate::from_ymd_opt(1899, 12, 30).expect("static date");
+    if days >= 0 {
+        base.checked_add_days(chrono::Days::new(days as u64))
+    } else {
+        // u64 cast on negative i64 wraps; subtract the absolute value.
+        base.checked_sub_days(chrono::Days::new((-days) as u64))
+    }
+    .unwrap_or(base)
 }
 
 fn parse_iso_datetime_or_string(s: &str) -> CellValue {
@@ -279,6 +289,30 @@ mod tests {
                 assert_eq!(t, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
             }
             other => panic!("expected Time(00:00:00), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn excel_serial_negative_fractional_borrows_into_prior_day() {
+        // Serial -0.5 means "12:00 the day before 1899-12-30", i.e.
+        // 1899-12-29 12:00:00. The prior code computed
+        // `(frac * 86_400).round() as u32` where frac was -0.5; the
+        // negative→u32 cast wrapped to a huge positive, and the
+        // "carry into next day" branch then emitted a corrupted
+        // far-future datetime. Signed arithmetic with a borrow keeps
+        // the result in chrono's representable range and on the
+        // correct calendar day.
+        let value = excel_serial_to_datetime(-0.5);
+        match value {
+            CellValue::DateTime(dt) => {
+                assert_eq!(
+                    dt.date(),
+                    NaiveDate::from_ymd_opt(1899, 12, 29).unwrap(),
+                    "expected borrow into prior day, got {dt}",
+                );
+                assert_eq!(dt.time(), NaiveTime::from_hms_opt(12, 0, 0).unwrap());
+            }
+            other => panic!("expected DateTime, got {other:?}"),
         }
     }
 

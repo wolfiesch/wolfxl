@@ -684,6 +684,23 @@ class TestReadMode:
             f"expected dimension to reflect on-disk extent unchanged by empty append, got {dim!r}"
         )
 
+    def test_canonical_data_type_collapses_temporals_to_datetime(
+        self,
+    ) -> None:
+        # The Rust reader's `data_type_name()` collapses `Data::DateTime` /
+        # `Data::DateTimeIso` to a single "datetime" label. The Python
+        # canonical helper used to emit "date" for `datetime.date`, which
+        # produced mixed schemas inside one `cell_records()` result
+        # whenever a date cell was edited in modify mode. Lock the helper
+        # to the same single-label vocabulary as Rust.
+        import datetime as _dt
+
+        from wolfxl._worksheet import _canonical_data_type
+
+        assert _canonical_data_type(_dt.datetime(2026, 1, 1, 12, 0)) == "datetime"
+        assert _canonical_data_type(_dt.date(2026, 1, 1)) == "datetime"
+        assert _canonical_data_type(_dt.time(12, 0)) == "datetime"
+
     def test_iter_cell_records_write_mode_honors_include_coordinate(self) -> None:
         # Write mode (no Rust reader) goes through the Python fallback.
         # Earlier the fallback always emitted `coordinate`, ignoring

@@ -14,10 +14,10 @@ def _canonical_data_type(value: Any) -> str:
     """Map a Python value to the same canonical label the Rust reader emits.
 
     Rust's `read_sheet_records` returns `data_type` strings from a closed set
-    (`string` / `number` / `boolean` / `date` / `datetime` / `error` /
-    `formula` / `blank`). Overlay/Python-side records must use the same
-    vocabulary so consumers that filter by these tokens see one schema across
-    pure-read mode, modify mode, and pure-write mode.
+    (`string` / `number` / `boolean` / `datetime` / `error` / `formula` /
+    `blank`). Overlay/Python-side records must use the same vocabulary so
+    consumers that filter by these tokens see one schema across pure-read
+    mode, modify mode, and pure-write mode.
 
     A string value beginning with ``=`` is classified as ``"formula"`` to
     match openpyxl's convention (and Rust's formula_map_cache path) — without
@@ -34,11 +34,14 @@ def _canonical_data_type(value: Any) -> str:
         return "number"
     if isinstance(value, str):
         return "formula" if value.startswith("=") else "string"
-    if isinstance(value, _dt.datetime):
-        return "datetime"
-    if isinstance(value, _dt.date):
-        return "date"
-    if isinstance(value, _dt.time):
+    # All temporal types collapse to "datetime" to match the Rust reader,
+    # whose `data_type_name()` emits a single "datetime" label for both
+    # `Data::DateTime` and `Data::DateTimeIso`. Returning "date" for a
+    # `datetime.date` would produce mixed schemas inside one
+    # `cell_records()` result whenever an overlay edit touched a date
+    # cell — consumers filtering on the documented tokens would silently
+    # miss those records.
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
         return "datetime"
     return "string"
 
