@@ -238,3 +238,65 @@ fn agent_unknown_sheet_errors() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not found"), "stderr was: {stderr}");
 }
+
+#[test]
+fn schema_default_emits_all_sheets_as_json() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["schema", path.to_str().unwrap()]);
+    let v: serde_json::Value = serde_json::from_str(&out).expect("schema JSON parses");
+    let sheets = v["sheets"].as_array().expect("sheets is array");
+    assert_eq!(sheets.len(), 3, "default scopes to all sheets");
+    let names: Vec<&str> = sheets.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"P&L"));
+    assert!(names.contains(&"Balance Sheet"));
+    assert!(names.contains(&"Revenue Breakdown"));
+}
+
+#[test]
+fn schema_revenue_breakdown_classifies_segment_as_categorical() {
+    // The Segment column has 4 distinct values across the body rows
+    // (Enterprise / Mid-Market / SMB / one more). With unique * 2 ≤ non_null
+    // and unique ≤ 20 it should be classed as `categorical` — the bucket
+    // an agent uses to recognize lookup-friendly dimensions.
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["schema", path.to_str().unwrap(), "--sheet", "Revenue Breakdown"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let cols = v["sheets"][0]["columns"].as_array().unwrap();
+    let segment = cols
+        .iter()
+        .find(|c| c["name"] == "Segment")
+        .expect("Segment column present");
+    assert_eq!(segment["type"], "string");
+    assert_eq!(segment["cardinality"], "categorical");
+    let samples = segment["samples"].as_array().unwrap();
+    assert!(samples.len() <= 3, "samples capped at 3");
+}
+
+#[test]
+fn schema_text_format_renders_table_with_header() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&[
+        "schema",
+        path.to_str().unwrap(),
+        "--sheet",
+        "Revenue Breakdown",
+        "--format",
+        "text",
+    ]);
+    assert!(out.contains("Sheet: Revenue Breakdown"), "missing sheet header: {out}");
+    assert!(out.contains("column") && out.contains("type") && out.contains("cardinality"));
+    assert!(out.contains("Customer"), "missing column row: {out}");
+}
+
+#[test]
+fn schema_unknown_sheet_errors() {
+    let path = fixture("sample-financials.xlsx");
+    let out = Command::cargo_bin("wolfxl")
+        .unwrap()
+        .args(["schema", path.to_str().unwrap(), "--sheet", "Nope"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not found"), "stderr: {stderr}");
+}

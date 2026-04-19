@@ -12,6 +12,7 @@ mod render;
 /// box / text / csv / json output, sheet selection, row and width caps.
 /// `wolfxl map <file>` prints a one-page summary of every sheet.
 /// `wolfxl agent <file> --max-tokens N` composes a token-budgeted briefing.
+/// `wolfxl schema <file>` emits per-column type, cardinality, and format.
 #[derive(Parser, Debug)]
 #[command(name = "wolfxl", version, about, long_about = None)]
 struct Cli {
@@ -27,6 +28,8 @@ enum Command {
     Map(MapArgs),
     /// Compose a token-budgeted workbook briefing for an LLM context window.
     Agent(AgentArgs),
+    /// Per-column schema: type, cardinality, null count, format category.
+    Schema(SchemaArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -57,6 +60,26 @@ struct AgentArgs {
     /// Sheet to focus on (default: largest data-class sheet, else first).
     #[arg(short = 's', long)]
     sheet: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct SchemaArgs {
+    /// Path to the workbook (.xlsx).
+    file: PathBuf,
+
+    /// Sheet name. Omit to schema every sheet in the workbook.
+    #[arg(short = 's', long)]
+    sheet: Option<String>,
+
+    /// Output format.
+    #[arg(short = 'f', long = "format", default_value = "json")]
+    format: SchemaFormat,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum SchemaFormat {
+    Json,
+    Text,
 }
 
 #[derive(clap::Args, Debug)]
@@ -95,6 +118,7 @@ fn main() -> ExitCode {
         Command::Peek(args) => commands::peek::run(args),
         Command::Map(args) => commands::map::run(args.file, args.format),
         Command::Agent(args) => commands::agent::run(args.file, args.max_tokens, args.sheet),
+        Command::Schema(args) => commands::schema::run(args.file, args.format, args.sheet),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
