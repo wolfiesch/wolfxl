@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use calamine_styles::{Reader, Xlsx};
 
 use crate::error::{Error, Result};
-use crate::map::{SheetMap, WorkbookMap, classify_sheet};
+use crate::map::{classify_sheet, SheetMap, WorkbookMap};
 use crate::sheet::Sheet;
 
 type XlsxReader = Xlsx<BufReader<File>>;

@@ -277,8 +277,14 @@ impl TypeCounts {
     /// resolve to Float (numeric supertype). Anything else with two or
     /// more types contributing returns Mixed.
     fn dominant(&self) -> InferredType {
-        let total =
-            self.string + self.int + self.float + self.bool_ + self.date + self.datetime + self.time + self.error;
+        let total = self.string
+            + self.int
+            + self.float
+            + self.bool_
+            + self.date
+            + self.datetime
+            + self.time
+            + self.error;
         if total == 0 {
             return InferredType::Empty;
         }
@@ -310,7 +316,11 @@ impl TypeCounts {
         if nonzero > 1 {
             return InferredType::Mixed;
         }
-        pairs.iter().find(|(c, _)| *c > 0).map(|(_, t)| *t).unwrap_or(InferredType::Empty)
+        pairs
+            .iter()
+            .find(|(c, _)| *c > 0)
+            .map(|(_, t)| *t)
+            .unwrap_or(InferredType::Empty)
     }
 }
 
@@ -319,13 +329,22 @@ mod tests {
     use super::*;
 
     fn s(v: &str) -> Cell {
-        Cell { value: CellValue::String(v.to_string()), number_format: None }
+        Cell {
+            value: CellValue::String(v.to_string()),
+            number_format: None,
+        }
     }
     fn i(n: i64) -> Cell {
-        Cell { value: CellValue::Int(n), number_format: None }
+        Cell {
+            value: CellValue::Int(n),
+            number_format: None,
+        }
     }
     fn f(n: f64) -> Cell {
-        Cell { value: CellValue::Float(n), number_format: None }
+        Cell {
+            value: CellValue::Float(n),
+            number_format: None,
+        }
     }
     fn empty() -> Cell {
         Cell::empty()
@@ -343,12 +362,7 @@ mod tests {
 
     #[test]
     fn pure_int_column_infers_int_unique_when_distinct() {
-        let rows = vec![
-            vec![s("id")],
-            vec![i(1)],
-            vec![i(2)],
-            vec![i(3)],
-        ];
+        let rows = vec![vec![s("id")], vec![i(1)], vec![i(2)], vec![i(3)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         let col = &schema.columns[0];
         assert_eq!(col.inferred_type, InferredType::Int);
@@ -359,23 +373,14 @@ mod tests {
 
     #[test]
     fn int_plus_float_collapses_to_float() {
-        let rows = vec![
-            vec![s("price")],
-            vec![i(1)],
-            vec![f(2.5)],
-            vec![i(3)],
-        ];
+        let rows = vec![vec![s("price")], vec![i(1)], vec![f(2.5)], vec![i(3)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Float);
     }
 
     #[test]
     fn mixed_string_and_numeric_returns_mixed() {
-        let rows = vec![
-            vec![s("col")],
-            vec![s("hello")],
-            vec![i(42)],
-        ];
+        let rows = vec![vec![s("col")], vec![s("hello")], vec![i(42)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Mixed);
     }
@@ -467,7 +472,10 @@ mod tests {
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         let col = &schema.columns[0];
         assert_eq!(col.unique_count, UNIQUE_CAP);
-        assert!(!col.unique_capped, "exact-at-cap with only repeats should stay uncapped");
+        assert!(
+            !col.unique_capped,
+            "exact-at-cap with only repeats should stay uncapped"
+        );
     }
 
     #[test]

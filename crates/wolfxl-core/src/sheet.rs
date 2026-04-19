@@ -336,10 +336,7 @@ mod tests {
         let value = excel_serial_to_datetime(44197.0 + 0.99999999);
         match value {
             CellValue::DateTime(dt) => {
-                assert_eq!(
-                    dt.date(),
-                    NaiveDate::from_ymd_opt(2021, 1, 2).unwrap(),
-                );
+                assert_eq!(dt.date(), NaiveDate::from_ymd_opt(2021, 1, 2).unwrap(),);
                 assert_eq!(dt.time(), NaiveTime::from_hms_opt(0, 0, 0).unwrap());
             }
             other => panic!("expected DateTime, got {other:?}"),
