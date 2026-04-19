@@ -21,19 +21,23 @@ from __future__ import annotations
 
 import os
 
+from wolfxl._cell import Cell
 from wolfxl._rust import __version__
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._workbook import Workbook
+from wolfxl._worksheet import Worksheet
 
 __all__ = [
     "__version__",
     "Alignment",
     "Border",
+    "Cell",
     "Color",
     "Font",
     "PatternFill",
     "Side",
     "Workbook",
+    "Worksheet",
     "load_workbook",
 ]
 
@@ -55,8 +59,10 @@ def load_workbook(
         engine (surgical ZIP patching) instead of a full DOM rewrite.
 
     Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
-    accepted for openpyxl compatibility but currently ignored.
+    accepted for openpyxl compatibility. ``data_only=True`` returns cached
+    formula results when they exist; ``read_only`` and ``keep_links`` remain
+    no-op compatibility shims.
     """
     if modify:
-        return Workbook._from_patcher(str(filename))  # noqa: SLF001
-    return Workbook._from_reader(str(filename))  # noqa: SLF001
+        return Workbook._from_patcher(str(filename), data_only=data_only)  # noqa: SLF001
+    return Workbook._from_reader(str(filename), data_only=data_only)  # noqa: SLF001

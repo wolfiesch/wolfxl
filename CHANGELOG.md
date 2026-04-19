@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.0 (2026-04-19)
+
+### Added
+
+- **`wolfxl-core` crate** (crates.io): pure-Rust xlsx reader with Excel
+  number-format-aware cell rendering. Exposes `Workbook`, `Sheet`, `Cell`,
+  `CellValue`, `FormatCategory`, and `format_cell` for third-party Rust
+  consumers. No PyO3 coupling.
+- **`wolfxl-cli` crate** (crates.io): installs the `wolfxl` binary with a
+  `peek` subcommand. `wolfxl peek <file> [-n N] [-s SHEET] [-w WIDTH]
+  [-e {box,text,csv,json}]` produces a styled box preview by default and
+  text/csv/json exports tuned for piping into agent or shell pipelines.
+  Install via `cargo install wolfxl-cli`.
+
+### Changed
+
+- **PyO3 0.24 → 0.28**: required for Python 3.14 support. No public Python
+  API changes; all 611 pytest tests pass on 3.12 and 3.14.
+- Repository converted to a Cargo workspace with the existing PyO3 cdylib
+  at the root and the new `crates/wolfxl-core` + `crates/wolfxl-cli`
+  members.
+
+### Fixed
+
+- `wolfxl-core` currency rendering: `format_currency(1.995, 2)` now returns
+  `"$2.00"` (was `"$1.100"` due to splitting `trunc()`/`fract()` separately
+  before rounding).
+
+## 0.3.2 (2026-04-16)
+
+### Added
+
+- **Bulk styled cell records**: `Worksheet.iter_cell_records()` and `Worksheet.cell_records()` return populated cells as dictionaries with values, formulas, coordinates, and compact formatting metadata.
+- **Record-shape controls**: `include_empty`, `include_format`, `include_formula_blanks`, `include_coordinate`, and per-call `data_only` options support ingestion, dataframe, and sparse-workbook workloads.
+- **Robust dimensions**: `Worksheet.calculate_dimension()` now merges stale worksheet dimension tags with parsed value/formula storage and preserves offset used ranges such as `C4:C4`.
+
+### Changed
+
+- `max_row` / `max_column` now benefit from the same stale-dimension hardening while preserving their openpyxl-style bottom/right edge semantics.
+- `calculate_dimension()` includes buffered `append()` / `write_rows()` data before save, making write-mode dimension reporting more useful for standalone callers.
+
 ## 0.3.1 (2026-02-20)
 
 ### Added

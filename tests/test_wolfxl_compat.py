@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -103,6 +106,7 @@ class TestStyles:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
+PARITY_FIXTURES = REPO_ROOT / "tests" / "parity" / "fixtures" / "synthgl_snapshot"
 
 
 class TestReadMode:
@@ -198,6 +202,741 @@ class TestReadMode:
         rows = list(ws.iter_rows(values_only=True))
         assert len(rows) > 10  # fixture has ~20 rows
         wb.close()
+
+    def test_cell_records_exposes_values_and_compact_format_metadata(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, Side
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Records"
+        ws["A1"] = "Header"
+        ws["A1"].font = Font(bold=True, italic=True, size=12)
+        ws["A2"] = "Child"
+        ws["A2"].alignment = Alignment(indent=2, horizontal="left")
+        ws["B2"] = 1500
+        ws["B2"].number_format = "$#,##0.00_);($#,##0.00)"
+        ws["B3"] = "Total"
+        ws["B3"].border = Border(bottom=Side(style="double"))
+        ws["C4"] = "=SUM(B2:B2)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = {record["coordinate"]: record for record in wb["Records"].cell_records()}
+
+        assert records["A1"]["value"] == "Header"
+        assert records["A1"]["bold"] is True
+        assert records["A1"]["italic"] is True
+        assert records["A1"]["font_size"] == 12.0
+        assert records["A2"]["indent"] == 2
+        assert records["A2"]["h_align"] == "left"
+        assert records["B2"]["value"] == 1500
+        assert records["B2"]["number_format"] == "$#,##0.00_);($#,##0.00)"
+        assert records["B3"]["has_bottom_border"] is True
+        assert records["B3"]["is_double_underline"] is True
+        assert records["C4"]["data_type"] == "formula"
+        assert records["C4"]["formula"] == "=SUM(B2:B2)"
+
+    def test_cell_records_can_emit_dense_empty_range(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "dense-records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Dense"
+        ws["B2"] = "value"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            records = wb["Dense"].cell_records(
+                min_row=1,
+                max_row=2,
+                min_col=1,
+                max_col=2,
+                include_format=False,
+                include_empty=True,
+            )
+
+        assert [record["coordinate"] for record in records] == ["A1", "B1", "A2", "B2"]
+        assert records[0]["data_type"] == "blank"
+        assert records[-1]["value"] == "value"
+
+    def test_cell_records_can_skip_coordinate_strings(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "no-coordinate-records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Records"
+        ws["B2"] = "value"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            records = wb["Records"].cell_records(include_coordinate=False)
+
+        assert records == [{"row": 2, "column": 2, "data_type": "string", "value": "value"}]
+
+    def test_cell_records_data_only_skips_uncached_formulas_by_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = {record["coordinate"]: record for record in wb["Formula"].cell_records()}
+        assert records["B2"]["data_type"] == "formula"
+        assert records["B2"]["formula"] == "=SUM(A1:A1)"
+
+        with load_workbook(str(path), data_only=True) as wb:
+            records = {record["coordinate"]: record for record in wb["Formula"].cell_records()}
+            dense = wb["Formula"].cell_records(
+                min_row=2,
+                max_row=2,
+                min_col=2,
+                max_col=2,
+                include_empty=True,
+            )
+
+        assert "B2" not in records
+        assert dense[0]["coordinate"] == "B2"
+        assert dense[0]["data_type"] == "blank"
+        assert dense[0]["value"] is None
+        assert dense[0]["formula"] == "=SUM(A1:A1)"
+
+    def test_cell_records_include_formula_blanks_false_skips_uncached_inside_range(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # When a template formula sits inside the populated rectangular range,
+        # calamine returns Some(Data::Empty) rather than None for that cell.
+        # `include_formula_blanks=False` must still suppress the formula record;
+        # treating Some(Data::Empty) as a backing entry was the regression.
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-in-range.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = wb["Formula"].cell_records(include_formula_blanks=False)
+
+        coords = [r["coordinate"] for r in records]
+        assert "B2" not in coords, (
+            f"uncached formula B2 should be suppressed when "
+            f"include_formula_blanks=False, got coords={coords}"
+        )
+
+    def test_max_row_max_column_reflect_pending_writes_in_write_mode(
+        self,
+    ) -> None:
+        # Pure write mode: ``ws.append()`` parks rows in ``_append_buffer``
+        # without materializing Cell objects. ``max_row``/``max_column`` must
+        # reflect the buffer extents — otherwise downstream range derivations
+        # (e.g. iter_rows bounds) miss the appended data before save.
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws.max_row == 1
+        assert ws.max_column == 1
+
+        ws.append([1, 2, 3])
+        ws.append([4, 5, 6, 7])
+        assert ws.max_row == 2, f"expected 2 after two appends, got {ws.max_row}"
+        assert ws.max_column == 4, (
+            f"expected 4 (widest appended row), got {ws.max_column}"
+        )
+
+    def test_cell_records_overlays_modify_mode_pending_edits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # In modify mode the Rust reader serves on-disk values while pending
+        # edits live in Python-side ``_dirty``/``_append_buffer``. The
+        # iterator must overlay the edits — otherwise callers see stale
+        # values for cells they just modified.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "modify-overlay.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Overlay"
+        ws["A1"] = "old-a1"
+        ws["B2"] = "old-b2"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Overlay"]
+            ws["A1"] = "new-a1"  # overwrite existing on-disk cell
+            ws["E10"] = "added"  # write outside on-disk range
+
+            records = ws.cell_records()
+            by_coord = {r["coordinate"]: r["value"] for r in records}
+
+        assert by_coord.get("A1") == "new-a1", (
+            f"expected pending edit on A1 to overlay on-disk value, got {by_coord}"
+        )
+        assert by_coord.get("B2") == "old-b2", (
+            f"expected unmodified B2 to keep on-disk value, got {by_coord}"
+        )
+        assert by_coord.get("E10") == "added", (
+            f"expected new edit at E10 to appear in records, got {by_coord}"
+        )
+
+    def test_read_cell_value_data_only_blanks_uncached_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `data_only=True` per-cell access should match openpyxl: an uncached
+        # formula reads as None, not as the placeholder empty string calamine
+        # parks in `Some(Data::String(""))`. `read_sheet_records` already does
+        # this; the per-cell and bulk readers must mirror it or template-heavy
+        # sheets corrupt downstream ingestion.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-cell.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=True) as wb:
+            sheet = wb["Formula"]
+            assert sheet["B2"].value is None, (
+                f"expected None for uncached formula in data_only mode, got {sheet['B2'].value!r}"
+            )
+
+    def test_iter_rows_values_only_blanks_uncached_formulas(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Same uncached-formula normalization for the bulk path
+        # (`read_sheet_values` / `read_sheet_values_plain`).
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-bulk.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=True) as wb:
+            rows = list(
+                wb["Formula"].iter_rows(
+                    min_row=1, max_row=2, min_col=1, max_col=2, values_only=True,
+                )
+            )
+
+        assert rows[1][1] is None, (
+            f"expected None at B2 in values_only bulk read, got {rows[1][1]!r}"
+        )
+
+    def test_max_row_does_not_inflate_from_read_only_cell_access(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `_cells` is a read-cache: ws['Z999'].value populates it without
+        # ever marking a cell dirty. The pending-bounds helper must iterate
+        # `_dirty` (actually-modified cells), not `_cells` — otherwise read
+        # access at far coordinates inflates max_row/max_column and
+        # downstream range derivations scan empty space.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "no-inflate.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Tight"
+        ws["A1"] = "only-cell"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Tight"]
+            assert ws.max_row == 1
+            assert ws.max_column == 1
+
+            # Mere read access at a far coordinate must not be treated as
+            # a pending write.
+            _ = ws["Z999"].value
+            assert ws.max_row == 1, (
+                f"reading Z999 inflated max_row to {ws.max_row}"
+            )
+            assert ws.max_column == 1, (
+                f"reading Z999 inflated max_column to {ws.max_column}"
+            )
+            assert ws.calculate_dimension() == "A1:A1", (
+                f"reading Z999 inflated dimension to {ws.calculate_dimension()}"
+            )
+
+            # Now actually write — bounds should grow.
+            ws["Z999"] = "now-dirty"
+            assert ws.max_row == 999
+            assert ws.max_column == 26
+
+    def test_cell_records_overlay_labels_pending_formulas_as_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Strings starting with '=' are formulas in openpyxl's convention
+        # (and match Rust's formula_map_cache path). Overlay records must
+        # label them data_type='formula' or any consumer counting/filtering
+        # formula records misses pending edits.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Form"
+        ws["A1"] = 10
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Form"]
+            ws["B2"] = "=SUM(A1:A1)"  # extra-overlay formula
+            by_coord = {
+                r["coordinate"]: r["data_type"]
+                for r in ws.cell_records()
+            }
+
+        assert by_coord.get("B2") == "formula", (
+            f"expected pending formula at B2 to label 'formula', got {by_coord.get('B2')!r}"
+        )
+
+    def test_cell_records_overlay_clears_stale_formula_metadata_on_literal_swap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Replacing a formula cell with a literal must drop the on-disk
+        # `formula` field from the overlay record. Leaving it stale lets
+        # downstream consumers see `data_type='number'` next to a leftover
+        # `formula='SUM(...)'`, which mis-classifies a now-literal cell as
+        # a formula cell.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula-cleared.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "F"
+        ws["A1"] = 1
+        ws["A2"] = 2
+        ws["B1"] = "=SUM(A1:A2)"  # on-disk formula cell
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["F"]
+            ws["B1"] = 99  # literal overwrites the formula
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        b1 = by_coord["B1"]
+        assert b1["value"] == 99
+        assert b1["data_type"] == "number"
+        assert "formula" not in b1, (
+            f"stale formula leaked into literal-overwrite record: {b1!r}"
+        )
+
+    def test_cell_records_overlay_replaces_formula_metadata_on_formula_swap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Replacing one formula with a different formula (or a literal with
+        # a formula) must update the `formula` field too — not just `value`
+        # / `data_type` — so consumers don't see contradictory metadata.
+        # Stripped of leading "=" to match the Rust reader's convention.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula-replaced.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "F"
+        ws["A1"] = 1
+        ws["B1"] = "=A1+1"  # original formula
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["F"]
+            ws["B1"] = "=A1*10"  # different formula
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        b1 = by_coord["B1"]
+        assert b1["data_type"] == "formula"
+        assert b1.get("formula") == "A1*10", (
+            f"formula field not refreshed: {b1!r}"
+        )
+
+    def test_cell_records_extra_overlay_emits_formula_field_for_pending_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # The "extra-overlay" branch yields cells the Rust reader didn't
+        # return (e.g. a formula written into an on-disk empty cell). It
+        # must include the `formula` key when the value is a formula
+        # string — otherwise the record has data_type='formula' but no
+        # expression, diverging from records that came from the Rust path.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "extra-overlay-formula.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "X"
+        ws["A1"] = 1
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["X"]
+            ws["C5"] = "=SUM(A1:A1)"  # formula in a previously empty cell
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        c5 = by_coord["C5"]
+        assert c5["data_type"] == "formula"
+        assert c5.get("formula") == "SUM(A1:A1)", (
+            f"extra-overlay formula record missing/incorrect formula field: {c5!r}"
+        )
+
+    def test_pending_writes_bounds_skips_zero_width_appended_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `ws.append([])` consumes a row index but contributes no columns.
+        # Earlier code computed `max(len(row) for row in buf)` which yields
+        # 0 for an empty row, propagating to `_max_col()==0`. Downstream
+        # 1-based coord helpers (`rowcol_to_a1`) then see the invalid
+        # column index 0. The bounds calc must clamp/skip zero-width rows.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "empty-append.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "E"
+        ws["A1"] = "header"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["E"]
+            ws.append([])  # zero-width append — should NOT zero out max_col
+            # calculate_dimension routes through _pending_writes_bounds when
+            # there are pending edits; this would crash or emit "A1:A0" if
+            # max_c collapsed to 0.
+            dim = ws.calculate_dimension()
+
+        # Must produce a valid 1-based range — column 0 is invalid.
+        assert "A0" not in dim, f"zero-column leaked into dimension: {dim!r}"
+        # Existing 'A1' header anchors max_col=1 via the Rust reader's
+        # contribution; the empty append must not regress that.
+        assert dim == "A1:A2" or dim == "A1:A1", (
+            f"expected dimension to reflect on-disk extent unchanged by empty append, got {dim!r}"
+        )
+
+    def test_canonical_data_type_collapses_temporals_to_datetime(
+        self,
+    ) -> None:
+        # The Rust reader's `data_type_name()` collapses `Data::DateTime` /
+        # `Data::DateTimeIso` to a single "datetime" label. The Python
+        # canonical helper used to emit "date" for `datetime.date`, which
+        # produced mixed schemas inside one `cell_records()` result
+        # whenever a date cell was edited in modify mode. Lock the helper
+        # to the same single-label vocabulary as Rust.
+        import datetime as _dt
+
+        from wolfxl._worksheet import _canonical_data_type
+
+        assert _canonical_data_type(_dt.datetime(2026, 1, 1, 12, 0)) == "datetime"
+        assert _canonical_data_type(_dt.date(2026, 1, 1)) == "datetime"
+        assert _canonical_data_type(_dt.time(12, 0)) == "datetime"
+
+    def test_iter_cell_records_write_mode_honors_include_coordinate(self) -> None:
+        # Write mode (no Rust reader) goes through the Python fallback.
+        # Earlier the fallback always emitted `coordinate`, ignoring
+        # `include_coordinate=False` and forcing per-cell A1 string
+        # allocation that the API explicitly promises to skip.
+        from wolfxl import Workbook as WolfxlWorkbook
+
+        # Fresh in-memory workbook → _rust_reader is None → fallback path.
+        wb = WolfxlWorkbook()
+        ws = wb.active
+        ws["A1"] = 1
+        ws["B2"] = 2
+
+        records_with = ws.cell_records(include_coordinate=True)
+        records_without = ws.cell_records(include_coordinate=False)
+
+        wb.close()
+
+        assert all("coordinate" in r for r in records_with), records_with
+        assert all("coordinate" not in r for r in records_without), records_without
+        # Sanity: the rest of the schema is unchanged.
+        assert {r["value"] for r in records_without} == {1, 2}
+
+    def test_cell_records_overlay_uses_canonical_data_type_labels(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Overlay records must use Rust's canonical labels (`string`,
+        # `number`, `boolean`) — not Python type names (`str`, `int`,
+        # `bool`). Mixed schemas in one `cell_records()` result break
+        # consumers that filter/group by the documented tokens.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-types.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Types"
+        ws["A1"] = "old"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Types"]
+            ws["A1"] = "patched"  # patches a Rust-returned record
+            ws["B1"] = 42         # int → "number"
+            ws["C1"] = 3.14       # float → "number"
+            ws["D1"] = True       # bool → "boolean" (NOT "number")
+            ws["E1"] = "text"     # str → "string"
+
+            by_coord = {r["coordinate"]: r["data_type"] for r in ws.cell_records()}
+
+        # Patched-overlay path
+        assert by_coord["A1"] == "string", f"A1 should be 'string', got {by_coord['A1']!r}"
+        # Extra-overlay path (cells outside on-disk range)
+        assert by_coord["B1"] == "number", f"B1 (int) should be 'number', got {by_coord['B1']!r}"
+        assert by_coord["C1"] == "number", f"C1 (float) should be 'number', got {by_coord['C1']!r}"
+        assert by_coord["D1"] == "boolean", f"D1 (bool) should be 'boolean', got {by_coord['D1']!r}"
+        assert by_coord["E1"] == "string", f"E1 (str) should be 'string', got {by_coord['E1']!r}"
+
+    def test_calculate_dimension_includes_modify_mode_pending_edits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Modify mode has both a Rust reader (on-disk extents) AND Python-side
+        # pending writes. ``calculate_dimension()`` must union them, otherwise
+        # callers that derive ranges from it omit unsaved cells.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "modify-pending.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Pending"
+        ws["A1"] = "head"
+        ws["B2"] = "tail"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Pending"]
+            on_disk = ws.calculate_dimension()
+            assert on_disk == "A1:B2", on_disk
+            # Touch a cell well outside the on-disk bounds.
+            ws["E10"] = "added"
+            after = ws.calculate_dimension()
+            assert after == "A1:E10", (
+                f"expected union of on-disk bounds and pending edit at E10, "
+                f"got {after}"
+            )
+
+    def test_calculate_dimension_uses_cell_storage_when_dimension_tag_is_stale(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        source = tmp_path / "source-dimension.xlsx"
+        stale = tmp_path / "stale-dimension.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Stale"
+        ws["A1"] = "head"
+        ws["C7"] = "tail"
+        op_wb.save(source)
+        op_wb.close()
+
+        with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(stale, "w") as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    text = data.decode("utf-8")
+                    text = re.sub(r'<dimension ref="[^"]+"', '<dimension ref="A1"', text, count=1)
+                    data = text.encode("utf-8")
+                zout.writestr(item, data)
+
+        with load_workbook(str(stale)) as wb:
+            ws = wb["Stale"]
+            assert ws.calculate_dimension() == "A1:C7"
+            assert ws.max_row == 7
+            assert ws.max_column == 3
+
+    def test_calculate_dimension_preserves_offset_used_range(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "offset-dimension.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Offset"
+        ws["C4"] = "tail"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Offset"]
+            assert ws.calculate_dimension() == "C4:C4"
+            assert ws.max_row == 4
+            assert ws.max_column == 3
+
+    def test_calculate_dimension_includes_buffered_write_apis(self) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+
+        assert ws.calculate_dimension() == "A1:A1"
+        ws.append(["Name", "Amount"])
+        assert ws.calculate_dimension() == "A1:B1"
+        ws.write_rows([["tail"]], start_row=4, start_col=3)
+        assert ws.calculate_dimension() == "A1:C4"
+
+    def test_date_cells_read_as_midnight_datetime(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "flat_register" / "excelx_accounts_payable.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        wb = load_workbook(str(path))
+        value = wb["Sheet1"]["C2"].value
+        wb.close()
+
+        assert value == datetime(2024, 12, 16, 0, 0)
+        assert isinstance(value, datetime)
+
+    def test_data_only_returns_cached_formula_values(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path), data_only=False) as formula_wb:
+            assert formula_wb["Reporting Template"]["E4"].value == "=P4"
+
+        with load_workbook(str(path), data_only=True) as cached_wb:
+            cell_value = cached_wb["Reporting Template"]["E4"].value
+            row_value = next(
+                cached_wb["Reporting Template"].iter_rows(
+                    min_row=4,
+                    max_row=4,
+                    min_col=5,
+                    max_col=5,
+                    values_only=True,
+                )
+            )[0]
+
+        expected = datetime(2015, 10, 1, 0, 0)
+        assert cell_value == expected
+        assert row_value == expected
+
+    def test_sheet_dimensions_follow_worksheet_dimension_ref(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Suggested Guidance"]
+            assert ws.max_row == 201
+            assert ws.max_column == 3
+
+    def test_number_format_preserves_excel_escape_backslashes(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            assert wb["Reporting Template"]["E4"].number_format == r"\([$-409]mmm\-yy\ \-"
+
+    def test_merged_subordinate_cells_do_not_expose_anchor_number_formats(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Reporting Template"]
+            assert ws["E13"].number_format == "#,##0_);(#,##0)"
+            assert ws["F13"].number_format is None
+            assert ws["G13"].number_format is None
+            assert ws["K71"].number_format == r'"$"#,##0_);\("$"#,##0\)'
+            assert ws["L71"].number_format is None
+            assert ws["M71"].number_format is None
+            assert ws["F67"].number_format is None
+            assert ws["G67"].number_format is None
 
     def test_workbook_contains(self) -> None:
         from wolfxl import load_workbook

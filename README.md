@@ -156,11 +156,27 @@ for row in ws.iter_rows(values_only=True):
     process(row)  # row is a tuple of plain Python values
 ```
 
+For ingestion, dataframe, or review workflows that need values plus formatting
+signals, use `cell_records()`. It returns compact dictionaries without creating
+one Python `Cell` object per coordinate:
+
+```python
+records = ws.cell_records(
+    include_format=True,
+    include_formula_blanks=False,
+    include_coordinate=False,
+)
+
+for record in records:
+    print(record["row"], record["column"], record["value"], record.get("number_format"))
+```
+
 | API | vs openpyxl | How |
 |-----|-------------|-----|
 | `ws.append(row)` | **3.7x** faster write | Buffers rows, single Rust call at save |
 | `ws.write_rows(grid)` | **3.7x** faster write | Same mechanism, arbitrary start position |
 | `ws.iter_rows(values_only=True)` | **6.7x** faster read | Single Rust call, no Cell objects |
+| `ws.cell_records()` | Fast styled sparse read | Single Rust call, values plus compact format metadata |
 | `ws.cell(r, c, value=v)` | **1.6x** faster write | Per-cell FFI (compatible but slower) |
 
 ## Formula Engine

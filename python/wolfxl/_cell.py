@@ -164,7 +164,7 @@ class Cell:
         if wb._rust_reader is None:  # noqa: SLF001
             return None
         payload = wb._rust_reader.read_cell_value(  # noqa: SLF001
-            self._ws.title, self.coordinate,
+            self._ws.title, self.coordinate, getattr(wb, "_data_only", False),
         )
         return _payload_to_python(payload)
 
@@ -267,7 +267,9 @@ def _payload_to_python(payload: Any) -> Any:
         return payload.get("formula", v)
     if t == "date":
         if isinstance(v, str):
-            return date.fromisoformat(v)
+            return datetime.fromisoformat(v)
+        if isinstance(v, date) and not isinstance(v, datetime):
+            return datetime.combine(v, datetime.min.time())
         return v
     if t == "datetime":
         if isinstance(v, str):

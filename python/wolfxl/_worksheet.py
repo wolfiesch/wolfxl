@@ -2,11 +2,48 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
 from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+
+
+def _canonical_data_type(value: Any) -> str:
+    """Map a Python value to the same canonical label the Rust reader emits.
+
+    Rust's `read_sheet_records` returns `data_type` strings from a closed set
+    (`string` / `number` / `boolean` / `datetime` / `error` / `formula` /
+    `blank`). Overlay/Python-side records must use the same vocabulary so
+    consumers that filter by these tokens see one schema across pure-read
+    mode, modify mode, and pure-write mode.
+
+    A string value beginning with ``=`` is classified as ``"formula"`` to
+    match openpyxl's convention (and Rust's formula_map_cache path) — without
+    this, pending formula edits in modify mode would silently downgrade to
+    plain strings and any consumer counting/filtering formula records would
+    miss them.
+    """
+    if value is None:
+        return "blank"
+    # bool is a subclass of int — check it first or "number" wins.
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "formula" if value.startswith("=") else "string"
+    # All temporal types collapse to "datetime" to match the Rust reader,
+    # whose `data_type_name()` emits a single "datetime" label for both
+    # `Data::DateTime` and `Data::DateTimeIso`. Returning "date" for a
+    # `datetime.date` would produce mixed schemas inside one
+    # `cell_records()` result whenever an overlay edit touched a date
+    # cell — consumers filtering on the documented tokens would silently
+    # miss those records.
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return "datetime"
+    return "string"
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -93,6 +130,44 @@ class _AutoFilter:
     @ref.setter
     def ref(self, value: str | None) -> None:
         self._ref = value
+
+
+class _MergedCellsProxy:
+    """openpyxl-shape proxy for ``Worksheet.merged_cells``.
+
+    openpyxl's ``MultiCellRange`` exposes ``.ranges`` as an iterable of
+    ``CellRange`` objects. SynthGL only iterates ``.ranges`` and stringifies
+    each entry, so we expose a list of range strings — adequate for parity
+    on the read path. Write-mode mutations still go through
+    ``Worksheet.merge_cells`` / ``unmerge_cells``.
+    """
+
+    __slots__ = ("_ws",)
+
+    def __init__(self, ws: Worksheet) -> None:
+        self._ws = ws
+
+    @property
+    def ranges(self) -> list[str]:
+        ws = self._ws
+        # Write mode: trust the in-memory set (kept in sync by
+        # ``merge_cells`` / ``unmerge_cells``).
+        wb = ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return list(ws._merged_ranges)  # noqa: SLF001
+        # Read mode: pull from the Rust calamine backend (already cached
+        # there after first call). Falls back to the in-memory set if the
+        # reader rejects the call (e.g. sheet was added in modify mode).
+        try:
+            return wb._rust_reader.read_merged_ranges(ws._title)  # noqa: SLF001
+        except Exception:
+            return list(ws._merged_ranges)  # noqa: SLF001
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(self.ranges)
+
+    def __len__(self) -> int:
+        return len(self.ranges)
 
 
 class Worksheet:
@@ -385,6 +460,7 @@ class Worksheet:
 
         reader = self._workbook._rust_reader  # noqa: SLF001
         sheet = self._title
+        data_only = getattr(self._workbook, "_data_only", False)
 
         # Build an A1:B2-style range string for Rust.
         r_min = min_row or 1
@@ -396,9 +472,9 @@ class Worksheet:
         # Prefer plain-value read (no dict overhead) if available.
         use_plain = hasattr(reader, "read_sheet_values_plain")
         if use_plain:
-            rows = reader.read_sheet_values_plain(sheet, range_str)
+            rows = reader.read_sheet_values_plain(sheet, range_str, data_only)
         else:
-            rows = reader.read_sheet_values(sheet, range_str)
+            rows = reader.read_sheet_values(sheet, range_str, data_only)
 
         if not rows:
             return
@@ -423,6 +499,317 @@ class Worksheet:
                 else:
                     yield tuple(vals) + (None,) * (expected_cols - n)
 
+    def iter_cell_records(
+        self,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+        *,
+        data_only: bool | None = None,
+        include_format: bool = True,
+        include_empty: bool = False,
+        include_formula_blanks: bool = True,
+        include_coordinate: bool = True,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate populated cells as compact dictionaries.
+
+        This is WolfXL's high-throughput read API for ingestion and dataframe
+        workloads. In read mode it makes one Rust call for the requested range,
+        returning native Python values plus optional formatting metadata such as
+        ``number_format``, ``bold``, ``indent``, and border cues.
+
+        Coordinates are openpyxl-style 1-based ``row`` / ``column`` integers.
+        Empty cells are skipped by default; pass ``include_empty=True`` when a
+        dense rectangular record stream is needed. Formula cells without a
+        backing cached value are included by default; pass
+        ``include_formula_blanks=False`` to skip those template-only formulas.
+        Pass ``include_coordinate=False`` when row/column integers are enough
+        and avoiding A1 string allocation matters.
+        """
+        if self._workbook._rust_reader is None:  # noqa: SLF001
+            yield from self._iter_cell_records_python(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+                include_empty=include_empty,
+                include_coordinate=include_coordinate,
+            )
+            return
+
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
+        reader = self._workbook._rust_reader  # noqa: SLF001
+        effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
+        records = reader.read_sheet_records(
+            self._title,
+            range_str,
+            effective_data_only,
+            include_format,
+            include_empty,
+            include_formula_blanks,
+            include_coordinate,
+        )
+
+        # Modify mode can have pending Python-side edits the Rust reader
+        # can't see. Overlay them on top of the on-disk records so the
+        # iterator reflects current worksheet state, not the last save.
+        # The overlay is only built when something is dirty — pure read
+        # mode pays no extra cost.
+        overlay = self._collect_pending_overlay()
+        if not overlay:
+            yield from records
+            return
+
+        seen: set[tuple[int, int]] = set()
+        for record in records:
+            row, col = int(record["row"]), int(record["column"])
+            key = (row, col)
+            if key not in overlay:
+                yield record
+                continue
+            seen.add(key)
+            new_value = overlay[key]
+            if new_value is None and not include_empty:
+                continue
+            patched = dict(record)
+            patched["value"] = new_value
+            patched["data_type"] = _canonical_data_type(new_value)
+            # The on-disk record may carry a "formula" field from the
+            # original cell. After an overlay edit, that field is stale:
+            # a literal-overwrites-formula edit must drop it, and a
+            # formula-overwrites-literal edit must replace it. Strip the
+            # leading "=" to match the Rust reader's convention (formula
+            # text is stored without the prefix; openpyxl writes it back).
+            if isinstance(new_value, str) and new_value.startswith("="):
+                patched["formula"] = new_value[1:]
+            else:
+                patched.pop("formula", None)
+            yield patched
+
+        # Yield pending edits that were inside the requested range but the
+        # Rust reader didn't return (e.g. empty-on-disk cell user just set).
+        for (row, col), value in overlay.items():
+            if (row, col) in seen:
+                continue
+            if not (r_min <= row <= r_max and c_min <= col <= c_max):
+                continue
+            if value is None and not include_empty:
+                continue
+            extra: dict[str, Any] = {
+                "row": row,
+                "column": col,
+                "value": value,
+                "data_type": _canonical_data_type(value),
+            }
+            # Mirror the patched-overlay branch: a formula string emits the
+            # `formula` key (Rust-style, leading "=" stripped) so consumers
+            # that pull `record["formula"]` for formula cells see the
+            # expression for unsaved edits, not just on-disk records.
+            if isinstance(value, str) and value.startswith("="):
+                extra["formula"] = value[1:]
+            if include_coordinate:
+                extra["coordinate"] = rowcol_to_a1(row, col)
+            yield extra
+
+    def _collect_pending_overlay(self) -> dict[tuple[int, int], Any]:
+        """Return ``{(row, col): value}`` for cells modified since the last save.
+
+        Includes explicit cell edits (anything in ``_dirty``), the append
+        buffer, and bulk-write grids. Returns an empty dict when nothing is
+        pending — the Rust read path stays a hot, allocation-free loop.
+        """
+        overlay: dict[tuple[int, int], Any] = {}
+        if self._dirty:
+            for key in self._dirty:
+                cell = self._cells.get(key)
+                if cell is not None:
+                    overlay[key] = cell.value
+        if self._append_buffer:
+            start = self._append_buffer_start
+            for row_offset, row_values in enumerate(self._append_buffer):
+                for col_offset, value in enumerate(row_values):
+                    overlay[(start + row_offset, col_offset + 1)] = value
+        for grid, start_row, start_col in self._bulk_writes:
+            for row_offset, row_values in enumerate(grid):
+                for col_offset, value in enumerate(row_values):
+                    overlay[(start_row + row_offset, start_col + col_offset)] = value
+        return overlay
+
+    def cell_records(
+        self,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+        *,
+        data_only: bool | None = None,
+        include_format: bool = True,
+        include_empty: bool = False,
+        include_formula_blanks: bool = True,
+        include_coordinate: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return ``iter_cell_records(...)`` as a list."""
+        return list(
+            self.iter_cell_records(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+                data_only=data_only,
+                include_format=include_format,
+                include_empty=include_empty,
+                include_formula_blanks=include_formula_blanks,
+                include_coordinate=include_coordinate,
+            ),
+        )
+
+    def _iter_cell_records_python(
+        self,
+        *,
+        min_row: int | None,
+        max_row: int | None,
+        min_col: int | None,
+        max_col: int | None,
+        include_empty: bool,
+        include_coordinate: bool = True,
+    ) -> Iterator[dict[str, Any]]:
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+        for row in range(r_min, r_max + 1):
+            for col in range(c_min, c_max + 1):
+                cell = self._get_or_create_cell(row, col)
+                value = cell.value
+                if value is None and not include_empty:
+                    continue
+                record: dict[str, Any] = {
+                    "row": row,
+                    "column": col,
+                    "value": value,
+                    "data_type": _canonical_data_type(value),
+                }
+                if include_coordinate:
+                    record["coordinate"] = rowcol_to_a1(row, col)
+                yield record
+
+    def calculate_dimension(self) -> str:
+        """Return the used worksheet range in openpyxl's ``A1:C10`` form."""
+        bounds = self._read_dimension_bounds()
+        if bounds is None:
+            return "A1:A1"
+        min_row, min_col, max_row, max_col = bounds
+        return f"{rowcol_to_a1(min_row, min_col)}:{rowcol_to_a1(max_row, max_col)}"
+
+    def _read_dimension_bounds(self) -> tuple[int, int, int, int] | None:
+        """Return 1-based ``(min_row, min_col, max_row, max_col)`` bounds.
+
+        Modify mode has both a Rust reader (for the on-disk extents) and
+        Python-side pending writes (cells/append buffer/bulk writes). The
+        reported bounds must be the union, otherwise callers that derive
+        ranges from ``calculate_dimension()`` miss unsaved edits.
+        """
+        wb = self._workbook
+        rust_bounds: tuple[int, int, int, int] | None = None
+        if wb._rust_reader is not None:  # noqa: SLF001
+            raw = wb._rust_reader.read_sheet_bounds(self._title)  # noqa: SLF001
+            if isinstance(raw, tuple) and len(raw) == 4:
+                rust_bounds = tuple(int(value) for value in raw)  # type: ignore[assignment]
+
+        pending = self._pending_writes_bounds()
+        if rust_bounds is None and pending is None:
+            return None
+        if pending is None:
+            return rust_bounds
+        if rust_bounds is None:
+            return pending
+        return (
+            min(rust_bounds[0], pending[0]),
+            min(rust_bounds[1], pending[1]),
+            max(rust_bounds[2], pending[2]),
+            max(rust_bounds[3], pending[3]),
+        )
+
+    def _pending_writes_bounds(self) -> tuple[int, int, int, int] | None:
+        """Bounds of unsaved Python-side writes: ``(min_row, min_col, max_row, max_col)``.
+
+        Used by ``_read_dimension_bounds`` to fold modify-mode edits into the
+        on-disk Rust bounds, and by ``_max_row``/``_max_col`` so write-mode
+        ``ws.max_row`` reflects ``append()``/``write_rows()`` that haven't
+        materialized yet.
+
+        Iterates ``_dirty`` (set of actually-modified cell keys) rather than
+        ``_cells`` — the cell map is populated by mere read access
+        (``ws['Z999']`` materializes a Cell without modifying it), so reading
+        a far cell would otherwise inflate dimension bounds and trigger
+        oversized scans in downstream callers.
+        """
+        dirty = self._dirty
+        buf = self._append_buffer
+        bulk = self._bulk_writes
+        if not dirty and not buf and not bulk:
+            return None
+        min_r = min_c = None
+        max_r = max_c = 0
+        for row, col in dirty:
+            if min_r is None or row < min_r:
+                min_r = row
+            if min_c is None or col < min_c:
+                min_c = col
+            if row > max_r:
+                max_r = row
+            if col > max_c:
+                max_c = col
+        if buf:
+            start = self._append_buffer_start
+            buf_max_r = start + len(buf) - 1
+            # An empty appended row (`ws.append([])`) still consumes a row
+            # index but contributes no columns. Without `default=0`, a buf
+            # of all-empty rows would be a max() over an empty generator;
+            # with it but no >0 guard, the column-bounds branch would set
+            # min_c=1 / max_c=0, which `_max_col()` would then emit as the
+            # invalid 1-based column 0 to `rowcol_to_a1`.
+            buf_max_c = max((len(row) for row in buf), default=0)
+            if min_r is None or start < min_r:
+                min_r = start
+            if buf_max_r > max_r:
+                max_r = buf_max_r
+            if buf_max_c > 0:
+                if min_c is None or 1 < min_c:
+                    min_c = 1
+                if buf_max_c > max_c:
+                    max_c = buf_max_c
+        for grid, start_row, start_col in bulk:
+            if not grid:
+                continue
+            grid_max_r = start_row + len(grid) - 1
+            # Same zero-width guard: a grid where every row is empty would
+            # yield grid_max_c = start_col - 1, potentially below 1.
+            grid_width = max((len(row) for row in grid), default=0)
+            if grid_width == 0:
+                if min_r is None or start_row < min_r:
+                    min_r = start_row
+                if grid_max_r > max_r:
+                    max_r = grid_max_r
+                continue
+            grid_max_c = start_col + grid_width - 1
+            if min_r is None or start_row < min_r:
+                min_r = start_row
+            if min_c is None or start_col < min_c:
+                min_c = start_col
+            if grid_max_r > max_r:
+                max_r = grid_max_r
+            if grid_max_c > max_c:
+                max_c = grid_max_c
+        if min_r is None or min_c is None:
+            return None
+        return min_r, min_c, max_r, max_c
+
     def _read_dimensions(self) -> tuple[int, int]:
         """Discover sheet dimensions from the Rust backend (read mode only)."""
         if self._dimensions is not None:
@@ -431,7 +818,11 @@ class Worksheet:
         if wb._rust_reader is None:  # noqa: SLF001
             self._dimensions = (1, 1)
             return self._dimensions
-        rows = wb._rust_reader.read_sheet_values(self._title, None)  # noqa: SLF001
+        xml_dims = wb._rust_reader.read_sheet_dimensions(self._title)  # noqa: SLF001
+        if isinstance(xml_dims, tuple) and len(xml_dims) == 2:
+            self._dimensions = (int(xml_dims[0]), int(xml_dims[1]))
+            return self._dimensions
+        rows = wb._rust_reader.read_sheet_values(self._title, None, False)  # noqa: SLF001
         if not rows or not isinstance(rows, list):
             self._dimensions = (1, 1)
             return self._dimensions
@@ -441,18 +832,51 @@ class Worksheet:
         return self._dimensions
 
     def _max_row(self) -> int:
+        # Read mode honors the on-disk ``<dimension>`` tag (parity with
+        # openpyxl, which trusts the tag even when trailing rows are empty).
+        # Modify/write modes additionally union with Python-side pending
+        # writes so ``ws.max_row`` reflects ``append()`` / ``write_rows()`` /
+        # cell edits before save.
         if self._workbook._rust_reader is not None:  # noqa: SLF001
-            return self._read_dimensions()[0]
-        if not self._cells:
-            return 1
-        return max(k[0] for k in self._cells)
+            disk_max_r = self._read_dimensions()[0]
+        else:
+            disk_max_r = max((k[0] for k in self._cells), default=0)
+        pending = self._pending_writes_bounds()
+        if pending is None:
+            return disk_max_r if disk_max_r else 1
+        return max(disk_max_r, pending[2])
 
     def _max_col(self) -> int:
         if self._workbook._rust_reader is not None:  # noqa: SLF001
-            return self._read_dimensions()[1]
-        if not self._cells:
-            return 1
-        return max(k[1] for k in self._cells)
+            disk_max_c = self._read_dimensions()[1]
+        else:
+            disk_max_c = max((k[1] for k in self._cells), default=0)
+        pending = self._pending_writes_bounds()
+        if pending is None:
+            return disk_max_c if disk_max_c else 1
+        return max(disk_max_c, pending[3])
+
+    # openpyxl exposes these as properties, not methods. Mirror that contract
+    # so ``ws.max_row`` (no parens) works as a drop-in for openpyxl callers.
+    # Pinned by ``tests/parity/test_read_parity.py`` (uses ``op_ws.max_row``).
+    @property
+    def max_row(self) -> int:
+        return self._max_row()
+
+    @property
+    def max_column(self) -> int:
+        return self._max_col()
+
+    @property
+    def merged_cells(self) -> _MergedCellsProxy:
+        """openpyxl-shape merged-cells accessor.
+
+        Lazy: on first access, pulls merged ranges from the Rust reader
+        (read mode) or returns the in-memory write-mode set. Always exposes
+        a ``.ranges`` iterable of range strings — matching openpyxl's
+        ``MultiCellRange`` shape closely enough for SynthGL's needs.
+        """
+        return _MergedCellsProxy(self)
 
     # ------------------------------------------------------------------
     # Write-mode helpers

@@ -49,3 +49,50 @@ jobs:
 
       - name: Ruff check
         run: ruff check python/ tests/
+
+  parity:
+    # Openpyxl parity gate. Runs the committed SynthGL snapshot corpus and
+    # the surface-smoke contract. HARD-tier mismatches fail CI; SOFT-tier
+    # mismatches are ratcheted against tests/parity/ratchet.json.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest pytest-xdist openpyxl
+
+      - name: Build wheel and install
+        run: |
+          maturin build --release --out dist
+          pip install --no-index --find-links dist wolfxl
+
+      - name: Run parity harness
+        run: |
+          pytest tests/parity/ -v \
+            --junitxml=parity-results.xml \
+            -n auto
+
+      - name: Upload parity JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-results
+          path: parity-results.xml
+
+  excelbench-fidelity:
+    # Cross-repo fidelity delta. wolfxl aggregate must match or beat openpyxl
+    # on the public ExcelBench tier1 corpus. Disabled until ExcelBench is
+    # pinned as a submodule or published.
+    runs-on: ubuntu-latest
+    if: ${{ false }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Enable after ExcelBench is vendored or released as a wheel."

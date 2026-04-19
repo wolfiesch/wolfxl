@@ -1,0 +1,25 @@
+[package]
+name = "wolfxl-cli"
+version = "0.4.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Excel xlsx previewer. Installs the `wolfxl` binary with a `peek` subcommand for box/text/csv/json output."
+readme = "README.md"
+keywords = ["xlsx", "excel", "cli", "preview", "spreadsheet"]
+categories = ["command-line-utilities", "visualization"]
+
+[[bin]]
+name = "wolfxl"
+path = "src/main.rs"
+
+[dependencies]
+wolfxl-core = { path = "../wolfxl-core", version = "0.4.0" }
+clap = { version = "4", features = ["derive"] }
+anyhow.workspace = true
+serde_json.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
