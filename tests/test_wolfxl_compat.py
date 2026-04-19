@@ -414,6 +414,102 @@ class TestReadMode:
             f"expected new edit at E10 to appear in records, got {by_coord}"
         )
 
+    def test_read_cell_value_data_only_blanks_uncached_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `data_only=True` per-cell access should match openpyxl: an uncached
+        # formula reads as None, not as the placeholder empty string calamine
+        # parks in `Some(Data::String(""))`. `read_sheet_records` already does
+        # this; the per-cell and bulk readers must mirror it or template-heavy
+        # sheets corrupt downstream ingestion.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-cell.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=True) as wb:
+            sheet = wb["Formula"]
+            assert sheet["B2"].value is None, (
+                f"expected None for uncached formula in data_only mode, got {sheet['B2'].value!r}"
+            )
+
+    def test_iter_rows_values_only_blanks_uncached_formulas(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Same uncached-formula normalization for the bulk path
+        # (`read_sheet_values` / `read_sheet_values_plain`).
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-bulk.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=True) as wb:
+            rows = list(
+                wb["Formula"].iter_rows(
+                    min_row=1, max_row=2, min_col=1, max_col=2, values_only=True,
+                )
+            )
+
+        assert rows[1][1] is None, (
+            f"expected None at B2 in values_only bulk read, got {rows[1][1]!r}"
+        )
+
+    def test_cell_records_overlay_uses_canonical_data_type_labels(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Overlay records must use Rust's canonical labels (`string`,
+        # `number`, `boolean`) — not Python type names (`str`, `int`,
+        # `bool`). Mixed schemas in one `cell_records()` result break
+        # consumers that filter/group by the documented tokens.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-types.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Types"
+        ws["A1"] = "old"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Types"]
+            ws["A1"] = "patched"  # patches a Rust-returned record
+            ws["B1"] = 42         # int → "number"
+            ws["C1"] = 3.14       # float → "number"
+            ws["D1"] = True       # bool → "boolean" (NOT "number")
+            ws["E1"] = "text"     # str → "string"
+
+            by_coord = {r["coordinate"]: r["data_type"] for r in ws.cell_records()}
+
+        # Patched-overlay path
+        assert by_coord["A1"] == "string", f"A1 should be 'string', got {by_coord['A1']!r}"
+        # Extra-overlay path (cells outside on-disk range)
+        assert by_coord["B1"] == "number", f"B1 (int) should be 'number', got {by_coord['B1']!r}"
+        assert by_coord["C1"] == "number", f"C1 (float) should be 'number', got {by_coord['C1']!r}"
+        assert by_coord["D1"] == "boolean", f"D1 (bool) should be 'boolean', got {by_coord['D1']!r}"
+        assert by_coord["E1"] == "string", f"E1 (str) should be 'string', got {by_coord['E1']!r}"
+
     def test_calculate_dimension_includes_modify_mode_pending_edits(
         self,
         tmp_path: Path,

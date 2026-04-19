@@ -2,11 +2,39 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
 from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+
+
+def _canonical_data_type(value: Any) -> str:
+    """Map a Python value to the same canonical label the Rust reader emits.
+
+    Rust's `read_sheet_records` returns `data_type` strings from a closed set
+    (`string` / `number` / `boolean` / `date` / `datetime` / `error` /
+    `formula` / `blank`). Overlay/Python-side records must use the same
+    vocabulary so consumers that filter by these tokens see one schema across
+    pure-read mode, modify mode, and pure-write mode.
+    """
+    if value is None:
+        return "blank"
+    # bool is a subclass of int — check it first or "number" wins.
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, _dt.datetime):
+        return "datetime"
+    if isinstance(value, _dt.date):
+        return "date"
+    if isinstance(value, _dt.time):
+        return "datetime"
+    return "string"
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -540,9 +568,7 @@ class Worksheet:
                 continue
             patched = dict(record)
             patched["value"] = new_value
-            patched["data_type"] = (
-                "blank" if new_value is None else type(new_value).__name__
-            )
+            patched["data_type"] = _canonical_data_type(new_value)
             yield patched
 
         # Yield pending edits that were inside the requested range but the
@@ -558,7 +584,7 @@ class Worksheet:
                 "row": row,
                 "column": col,
                 "value": value,
-                "data_type": "blank" if value is None else type(value).__name__,
+                "data_type": _canonical_data_type(value),
             }
             if include_coordinate:
                 extra["coordinate"] = rowcol_to_a1(row, col)
@@ -640,7 +666,7 @@ class Worksheet:
                     "column": col,
                     "coordinate": rowcol_to_a1(row, col),
                     "value": value,
-                    "data_type": "blank" if value is None else type(value).__name__,
+                    "data_type": _canonical_data_type(value),
                 }
 
     def calculate_dimension(self) -> str:

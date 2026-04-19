@@ -321,6 +321,34 @@ fn data_is_formula_text(value: &Data, formula: &str) -> bool {
     text.is_empty() || text == formula || format!("={text}") == formula
 }
 
+/// Per-cell wrapper around [`data_is_formula_text`] that consults the formula
+/// map. `data_only=true` reads should hide cells where this returns true:
+/// calamine writes an empty `<v/>` element on a formula cell as
+/// `Some(Data::String(""))`, and a placeholder for the formula text itself
+/// reflects "no cached value" rather than a real string. `read_sheet_records`
+/// already normalizes this; the per-cell and bulk readers must mirror it or
+/// template-heavy sheets see corruption from non-blank reads on uncached
+/// formulas.
+fn is_uncached_formula_value(
+    formula_map: Option<&HashMap<(u32, u32), String>>,
+    row: u32,
+    col: u32,
+    value: &Data,
+) -> bool {
+    let Some(fmap) = formula_map else {
+        return false;
+    };
+    let Some(raw) = fmap.get(&(row, col)) else {
+        return false;
+    };
+    let formula = if raw.starts_with('=') {
+        raw.clone()
+    } else {
+        format!("={raw}")
+    };
+    data_is_formula_text(value, &formula)
+}
+
 fn row_col_to_a1(row: u32, col: u32) -> String {
     let mut n = col + 1;
     let mut letters: Vec<char> = Vec::new();
@@ -645,6 +673,13 @@ impl CalamineStyledBook {
                     return Ok(d.into());
                 }
             }
+        } else if is_uncached_formula_value(
+            self.formula_map_cache.get(sheet),
+            row,
+            col,
+            value,
+        ) {
+            return cell_blank(py);
         }
 
         data_to_py(py, value)
@@ -739,7 +774,13 @@ impl CalamineStyledBook {
                 // Fall back to data value.
                 match range.get_value((row, col)) {
                     None => inner.append(cell_blank(py)?)?,
-                    Some(v) => inner.append(data_to_py(py, v)?)?,
+                    Some(v) => {
+                        if data_only && is_uncached_formula_value(fmap, row, col, v) {
+                            inner.append(cell_blank(py)?)?;
+                        } else {
+                            inner.append(data_to_py(py, v)?)?;
+                        }
+                    }
                 }
             }
             outer.append(inner)?;
@@ -832,8 +873,12 @@ impl CalamineStyledBook {
                 match range.get_value((row, col)) {
                     None => inner.append(py.None())?,
                     Some(v) => {
-                        let obj = data_to_plain_py(py, v)?;
-                        inner.append(obj)?;
+                        if data_only && is_uncached_formula_value(fmap, row, col, v) {
+                            inner.append(py.None())?;
+                        } else {
+                            let obj = data_to_plain_py(py, v)?;
+                            inner.append(obj)?;
+                        }
                     }
                 }
             }
