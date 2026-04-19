@@ -615,17 +615,14 @@ class TestReadMode:
             f"formula field not refreshed: {b1!r}"
         )
 
-    def test_iter_cell_records_write_mode_honors_include_coordinate(
-        self,
-        tmp_path: Path,
-    ) -> None:
+    def test_iter_cell_records_write_mode_honors_include_coordinate(self) -> None:
         # Write mode (no Rust reader) goes through the Python fallback.
         # Earlier the fallback always emitted `coordinate`, ignoring
         # `include_coordinate=False` and forcing per-cell A1 string
         # allocation that the API explicitly promises to skip.
         from wolfxl import Workbook as WolfxlWorkbook
 
-        path = tmp_path / "writemode-coord.xlsx"
+        # Fresh in-memory workbook → _rust_reader is None → fallback path.
         wb = WolfxlWorkbook()
         ws = wb.active
         ws["A1"] = 1
