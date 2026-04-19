@@ -1,10 +1,10 @@
 [package]
 name = "wolfxl-cli"
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Excel xlsx previewer. Installs the `wolfxl` binary with a `peek` subcommand for box/text/csv/json output."
+description = "Excel xlsx previewer for AI agents. Installs the `wolfxl` binary with `peek` (styled previews), `map` (workbook overview), and `agent` (token-budgeted briefing) subcommands."
 readme = "README.md"
 keywords = ["xlsx", "excel", "cli", "preview", "spreadsheet"]
 categories = ["command-line-utilities", "visualization"]
@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive"] }
 anyhow.workspace = true
 serde_json.workspace = true
 unicode-width = "0.2"
+tiktoken-rs = "0.11.0"
 
 [dev-dependencies]
 assert_cmd = "2"

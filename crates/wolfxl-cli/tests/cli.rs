@@ -176,3 +176,65 @@ fn map_handles_wide_table_with_truncated_header_preview() {
     assert!(out.contains("[data] Dept Operations  (25 rows × 29 cols)"), "missing dims: {out}");
     assert!(out.contains("… (+21 more)"), "missing overflow marker: {out}");
 }
+
+#[test]
+fn agent_picks_largest_data_sheet_and_emits_overview_plus_samples() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["agent", path.to_str().unwrap(), "--max-tokens", "800"]);
+    // Workbook overview lists every sheet with class + first column.
+    assert!(out.contains("WORKBOOK: sample-financials.xlsx"), "missing workbook line: {out}");
+    assert!(out.contains("- P&L (21r×7c) [data]"), "missing P&L overview: {out}");
+    assert!(out.contains("- Balance Sheet (27r×5c) [data]"), "missing balance sheet overview");
+    // Balance Sheet is the largest data sheet (27 > 21 > 13) so it's
+    // picked when --sheet isn't given.
+    assert!(
+        out.contains("SHEET: Balance Sheet  [data]  27 rows × 5 cols"),
+        "wrong target sheet: {out}"
+    );
+    assert!(out.contains("HEADERS: Account\tMar 31 2024"), "missing headers row: {out}");
+    // All three row sections fit at 800-token budget.
+    assert!(out.contains("ROWS (head 3 of"), "missing head block: {out}");
+    assert!(out.contains("ROWS (tail 2 of"), "missing tail block: {out}");
+    assert!(out.contains("ROWS (middle stratified"), "missing middle block: {out}");
+    // Footer reports cl100k_base accounting.
+    assert!(out.contains("# wolfxl agent:"), "missing footer: {out}");
+    assert!(out.contains("/800 tokens (cl100k_base)"), "wrong footer format: {out}");
+}
+
+#[test]
+fn agent_respects_explicit_sheet_override() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["agent", path.to_str().unwrap(), "-s", "Revenue Breakdown"]);
+    assert!(
+        out.contains("SHEET: Revenue Breakdown"),
+        "explicit --sheet should win over largest-data heuristic: {out}"
+    );
+}
+
+#[test]
+fn agent_falls_back_to_orientation_when_budget_too_small() {
+    // 100-token budget can't fit the orientation core for a 3-sheet
+    // workbook with 5-7 column headers; we still emit it (overage
+    // reported in footer) and skip every row block. The agent at least
+    // learns the workbook structure.
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["agent", path.to_str().unwrap(), "--max-tokens", "100"]);
+    assert!(out.contains("WORKBOOK:"), "must always emit workbook line");
+    assert!(out.contains("SHEET:"), "must always emit sheet header");
+    assert!(out.contains("HEADERS:"), "must always emit columns");
+    assert!(!out.contains("ROWS (head"), "head block must drop at tight budget: {out}");
+    assert!(!out.contains("ROWS (tail"), "tail block must drop at tight budget: {out}");
+}
+
+#[test]
+fn agent_unknown_sheet_errors() {
+    let path = fixture("sample-financials.xlsx");
+    let out = Command::cargo_bin("wolfxl")
+        .unwrap()
+        .args(["agent", path.to_str().unwrap(), "-s", "Does Not Exist"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not found"), "stderr was: {stderr}");
+}
