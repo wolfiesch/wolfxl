@@ -4,6 +4,8 @@ use pyo3::IntoPyObject;
 
 use chrono::{NaiveDate, NaiveDateTime};
 
+type PyObject = Py<PyAny>;
+
 pub fn a1_to_row_col(a1: &str) -> Result<(u32, u32), String> {
     let mut col: u32 = 0;
     let mut row_digits = String::new();

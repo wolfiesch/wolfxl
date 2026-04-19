@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+type PyObject = Py<PyAny>;
+
 mod calamine_styled_backend;
 mod ooxml_util;
 mod rust_xlsxwriter_backend;
