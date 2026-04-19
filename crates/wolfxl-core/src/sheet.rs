@@ -117,9 +117,11 @@ fn data_to_cell_value(d: &Data) -> CellValue {
 }
 
 /// Excel serial date → chrono. Sub-day fractions become Time; ≥1.0 with no
-/// fractional part becomes Date; otherwise DateTime.
+/// fractional part becomes Date; otherwise DateTime. Serial 0.0 is the Excel
+/// epoch but for time-formatted cells means midnight; route it to Time(0,0,0)
+/// to match openpyxl rather than returning the epoch date.
 fn excel_serial_to_datetime(serial: f64) -> CellValue {
-    if serial < 1.0 && serial > 0.0 {
+    if serial < 1.0 && serial >= 0.0 {
         let secs = (serial * 86_400.0).round() as u32;
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
@@ -239,6 +241,20 @@ mod tests {
         let value = excel_serial_to_datetime(-100.0);
         let d = date(value);
         assert!(d.year() < 1900, "got {d}");
+    }
+
+    #[test]
+    fn excel_serial_zero_returns_midnight_time() {
+        // Serial 0 is the Excel epoch (1899-12-30) but for time-formatted
+        // cells means midnight. openpyxl returns Time(0,0,0) here; we
+        // match that rather than emitting the epoch date.
+        let value = excel_serial_to_datetime(0.0);
+        match value {
+            CellValue::Time(t) => {
+                assert_eq!(t, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+            }
+            other => panic!("expected Time(00:00:00), got {other:?}"),
+        }
     }
 
     #[test]

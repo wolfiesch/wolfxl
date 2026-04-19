@@ -354,6 +354,59 @@ class TestReadMode:
             f"include_formula_blanks=False, got coords={coords}"
         )
 
+    def test_max_row_max_column_reflect_pending_writes_in_write_mode(
+        self,
+    ) -> None:
+        # Pure write mode: ``ws.append()`` parks rows in ``_append_buffer``
+        # without materializing Cell objects. ``max_row``/``max_column`` must
+        # reflect the buffer extents — otherwise downstream range derivations
+        # (e.g. iter_rows bounds) miss the appended data before save.
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws.max_row == 1
+        assert ws.max_column == 1
+
+        ws.append([1, 2, 3])
+        ws.append([4, 5, 6, 7])
+        assert ws.max_row == 2, f"expected 2 after two appends, got {ws.max_row}"
+        assert ws.max_column == 4, (
+            f"expected 4 (widest appended row), got {ws.max_column}"
+        )
+
+    def test_calculate_dimension_includes_modify_mode_pending_edits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Modify mode has both a Rust reader (on-disk extents) AND Python-side
+        # pending writes. ``calculate_dimension()`` must union them, otherwise
+        # callers that derive ranges from it omit unsaved cells.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "modify-pending.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Pending"
+        ws["A1"] = "head"
+        ws["B2"] = "tail"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Pending"]
+            on_disk = ws.calculate_dimension()
+            assert on_disk == "A1:B2", on_disk
+            # Touch a cell well outside the on-disk bounds.
+            ws["E10"] = "added"
+            after = ws.calculate_dimension()
+            assert after == "A1:E10", (
+                f"expected union of on-disk bounds and pending edit at E10, "
+                f"got {after}"
+            )
+
     def test_calculate_dimension_uses_cell_storage_when_dimension_tag_is_stale(
         self,
         tmp_path: Path,

@@ -582,30 +582,86 @@ class Worksheet:
         return f"{rowcol_to_a1(min_row, min_col)}:{rowcol_to_a1(max_row, max_col)}"
 
     def _read_dimension_bounds(self) -> tuple[int, int, int, int] | None:
-        """Return 1-based ``(min_row, min_col, max_row, max_col)`` bounds."""
+        """Return 1-based ``(min_row, min_col, max_row, max_col)`` bounds.
+
+        Modify mode has both a Rust reader (for the on-disk extents) and
+        Python-side pending writes (cells/append buffer/bulk writes). The
+        reported bounds must be the union, otherwise callers that derive
+        ranges from ``calculate_dimension()`` miss unsaved edits.
+        """
         wb = self._workbook
+        rust_bounds: tuple[int, int, int, int] | None = None
         if wb._rust_reader is not None:  # noqa: SLF001
-            bounds = wb._rust_reader.read_sheet_bounds(self._title)  # noqa: SLF001
-            if isinstance(bounds, tuple) and len(bounds) == 4:
-                return tuple(int(value) for value in bounds)  # type: ignore[return-value]
-            return None
+            raw = wb._rust_reader.read_sheet_bounds(self._title)  # noqa: SLF001
+            if isinstance(raw, tuple) and len(raw) == 4:
+                rust_bounds = tuple(int(value) for value in raw)  # type: ignore[assignment]
 
-        used_cells = set(self._cells)
-        if self._append_buffer:
+        pending = self._pending_writes_bounds()
+        if rust_bounds is None and pending is None:
+            return None
+        if pending is None:
+            return rust_bounds
+        if rust_bounds is None:
+            return pending
+        return (
+            min(rust_bounds[0], pending[0]),
+            min(rust_bounds[1], pending[1]),
+            max(rust_bounds[2], pending[2]),
+            max(rust_bounds[3], pending[3]),
+        )
+
+    def _pending_writes_bounds(self) -> tuple[int, int, int, int] | None:
+        """Bounds of unsaved Python-side writes: ``(min_row, min_col, max_row, max_col)``.
+
+        Used by ``_read_dimension_bounds`` to fold modify-mode edits into the
+        on-disk Rust bounds, and by ``_max_row``/``_max_col`` so write-mode
+        ``ws.max_row`` reflects ``append()``/``write_rows()`` that haven't
+        materialized yet.
+        """
+        cells = self._cells
+        buf = self._append_buffer
+        bulk = self._bulk_writes
+        if not cells and not buf and not bulk:
+            return None
+        min_r = min_c = None
+        max_r = max_c = 0
+        for row, col in cells:
+            if min_r is None or row < min_r:
+                min_r = row
+            if min_c is None or col < min_c:
+                min_c = col
+            if row > max_r:
+                max_r = row
+            if col > max_c:
+                max_c = col
+        if buf:
             start = self._append_buffer_start
-            for row_offset, row_values in enumerate(self._append_buffer):
-                for col_offset, _value in enumerate(row_values):
-                    used_cells.add((start + row_offset, col_offset + 1))
-        for grid, start_row, start_col in self._bulk_writes:
-            for row_offset, row_values in enumerate(grid):
-                for col_offset, _value in enumerate(row_values):
-                    used_cells.add((start_row + row_offset, start_col + col_offset))
-
-        if not used_cells:
+            buf_max_r = start + len(buf) - 1
+            buf_max_c = max(len(row) for row in buf)
+            if min_r is None or start < min_r:
+                min_r = start
+            if min_c is None or 1 < min_c:
+                min_c = 1
+            if buf_max_r > max_r:
+                max_r = buf_max_r
+            if buf_max_c > max_c:
+                max_c = buf_max_c
+        for grid, start_row, start_col in bulk:
+            if not grid:
+                continue
+            grid_max_r = start_row + len(grid) - 1
+            grid_max_c = start_col + max(len(row) for row in grid) - 1
+            if min_r is None or start_row < min_r:
+                min_r = start_row
+            if min_c is None or start_col < min_c:
+                min_c = start_col
+            if grid_max_r > max_r:
+                max_r = grid_max_r
+            if grid_max_c > max_c:
+                max_c = grid_max_c
+        if min_r is None or min_c is None:
             return None
-        rows = [row for row, _col in used_cells]
-        cols = [col for _row, col in used_cells]
-        return min(rows), min(cols), max(rows), max(cols)
+        return min_r, min_c, max_r, max_c
 
     def _read_dimensions(self) -> tuple[int, int]:
         """Discover sheet dimensions from the Rust backend (read mode only)."""
@@ -629,18 +685,29 @@ class Worksheet:
         return self._dimensions
 
     def _max_row(self) -> int:
+        # Read mode honors the on-disk ``<dimension>`` tag (parity with
+        # openpyxl, which trusts the tag even when trailing rows are empty).
+        # Modify/write modes additionally union with Python-side pending
+        # writes so ``ws.max_row`` reflects ``append()`` / ``write_rows()`` /
+        # cell edits before save.
         if self._workbook._rust_reader is not None:  # noqa: SLF001
-            return self._read_dimensions()[0]
-        if not self._cells:
-            return 1
-        return max(k[0] for k in self._cells)
+            disk_max_r = self._read_dimensions()[0]
+        else:
+            disk_max_r = max((k[0] for k in self._cells), default=0)
+        pending = self._pending_writes_bounds()
+        if pending is None:
+            return disk_max_r if disk_max_r else 1
+        return max(disk_max_r, pending[2])
 
     def _max_col(self) -> int:
         if self._workbook._rust_reader is not None:  # noqa: SLF001
-            return self._read_dimensions()[1]
-        if not self._cells:
-            return 1
-        return max(k[1] for k in self._cells)
+            disk_max_c = self._read_dimensions()[1]
+        else:
+            disk_max_c = max((k[1] for k in self._cells), default=0)
+        pending = self._pending_writes_bounds()
+        if pending is None:
+            return disk_max_c if disk_max_c else 1
+        return max(disk_max_c, pending[3])
 
     # openpyxl exposes these as properties, not methods. Mirror that contract
     # so ``ws.max_row`` (no parens) works as a drop-in for openpyxl callers.
