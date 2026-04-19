@@ -603,6 +603,12 @@ class Worksheet:
                 "value": value,
                 "data_type": _canonical_data_type(value),
             }
+            # Mirror the patched-overlay branch: a formula string emits the
+            # `formula` key (Rust-style, leading "=" stripped) so consumers
+            # that pull `record["formula"]` for formula cells see the
+            # expression for unsaved edits, not just on-disk records.
+            if isinstance(value, str) and value.startswith("="):
+                extra["formula"] = value[1:]
             if include_coordinate:
                 extra["coordinate"] = rowcol_to_a1(row, col)
             yield extra
@@ -759,20 +765,36 @@ class Worksheet:
         if buf:
             start = self._append_buffer_start
             buf_max_r = start + len(buf) - 1
-            buf_max_c = max(len(row) for row in buf)
+            # An empty appended row (`ws.append([])`) still consumes a row
+            # index but contributes no columns. Without `default=0`, a buf
+            # of all-empty rows would be a max() over an empty generator;
+            # with it but no >0 guard, the column-bounds branch would set
+            # min_c=1 / max_c=0, which `_max_col()` would then emit as the
+            # invalid 1-based column 0 to `rowcol_to_a1`.
+            buf_max_c = max((len(row) for row in buf), default=0)
             if min_r is None or start < min_r:
                 min_r = start
-            if min_c is None or 1 < min_c:
-                min_c = 1
             if buf_max_r > max_r:
                 max_r = buf_max_r
-            if buf_max_c > max_c:
-                max_c = buf_max_c
+            if buf_max_c > 0:
+                if min_c is None or 1 < min_c:
+                    min_c = 1
+                if buf_max_c > max_c:
+                    max_c = buf_max_c
         for grid, start_row, start_col in bulk:
             if not grid:
                 continue
             grid_max_r = start_row + len(grid) - 1
-            grid_max_c = start_col + max(len(row) for row in grid) - 1
+            # Same zero-width guard: a grid where every row is empty would
+            # yield grid_max_c = start_col - 1, potentially below 1.
+            grid_width = max((len(row) for row in grid), default=0)
+            if grid_width == 0:
+                if min_r is None or start_row < min_r:
+                    min_r = start_row
+                if grid_max_r > max_r:
+                    max_r = grid_max_r
+                continue
+            grid_max_c = start_col + grid_width - 1
             if min_r is None or start_row < min_r:
                 min_r = start_row
             if min_c is None or start_col < min_c:

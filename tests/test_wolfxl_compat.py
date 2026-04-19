@@ -615,6 +615,75 @@ class TestReadMode:
             f"formula field not refreshed: {b1!r}"
         )
 
+    def test_cell_records_extra_overlay_emits_formula_field_for_pending_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # The "extra-overlay" branch yields cells the Rust reader didn't
+        # return (e.g. a formula written into an on-disk empty cell). It
+        # must include the `formula` key when the value is a formula
+        # string — otherwise the record has data_type='formula' but no
+        # expression, diverging from records that came from the Rust path.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "extra-overlay-formula.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "X"
+        ws["A1"] = 1
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["X"]
+            ws["C5"] = "=SUM(A1:A1)"  # formula in a previously empty cell
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        c5 = by_coord["C5"]
+        assert c5["data_type"] == "formula"
+        assert c5.get("formula") == "SUM(A1:A1)", (
+            f"extra-overlay formula record missing/incorrect formula field: {c5!r}"
+        )
+
+    def test_pending_writes_bounds_skips_zero_width_appended_rows(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `ws.append([])` consumes a row index but contributes no columns.
+        # Earlier code computed `max(len(row) for row in buf)` which yields
+        # 0 for an empty row, propagating to `_max_col()==0`. Downstream
+        # 1-based coord helpers (`rowcol_to_a1`) then see the invalid
+        # column index 0. The bounds calc must clamp/skip zero-width rows.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "empty-append.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "E"
+        ws["A1"] = "header"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["E"]
+            ws.append([])  # zero-width append — should NOT zero out max_col
+            # calculate_dimension routes through _pending_writes_bounds when
+            # there are pending edits; this would crash or emit "A1:A0" if
+            # max_c collapsed to 0.
+            dim = ws.calculate_dimension()
+
+        # Must produce a valid 1-based range — column 0 is invalid.
+        assert "A0" not in dim, f"zero-column leaked into dimension: {dim!r}"
+        # Existing 'A1' header anchors max_col=1 via the Rust reader's
+        # contribution; the empty append must not regress that.
+        assert dim == "A1:A2" or dim == "A1:A1", (
+            f"expected dimension to reflect on-disk extent unchanged by empty append, got {dim!r}"
+        )
+
     def test_iter_cell_records_write_mode_honors_include_coordinate(self) -> None:
         # Write mode (no Rust reader) goes through the Python fallback.
         # Earlier the fallback always emitted `coordinate`, ignoring
