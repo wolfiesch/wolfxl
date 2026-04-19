@@ -462,6 +462,151 @@ class Worksheet:
                 else:
                     yield tuple(vals) + (None,) * (expected_cols - n)
 
+    def iter_cell_records(
+        self,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+        *,
+        data_only: bool | None = None,
+        include_format: bool = True,
+        include_empty: bool = False,
+        include_formula_blanks: bool = True,
+        include_coordinate: bool = True,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate populated cells as compact dictionaries.
+
+        This is WolfXL's high-throughput read API for ingestion and dataframe
+        workloads. In read mode it makes one Rust call for the requested range,
+        returning native Python values plus optional formatting metadata such as
+        ``number_format``, ``bold``, ``indent``, and border cues.
+
+        Coordinates are openpyxl-style 1-based ``row`` / ``column`` integers.
+        Empty cells are skipped by default; pass ``include_empty=True`` when a
+        dense rectangular record stream is needed. Formula cells without a
+        backing cached value are included by default; pass
+        ``include_formula_blanks=False`` to skip those template-only formulas.
+        Pass ``include_coordinate=False`` when row/column integers are enough
+        and avoiding A1 string allocation matters.
+        """
+        if self._workbook._rust_reader is None:  # noqa: SLF001
+            yield from self._iter_cell_records_python(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+                include_empty=include_empty,
+            )
+            return
+
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
+        reader = self._workbook._rust_reader  # noqa: SLF001
+        effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
+        records = reader.read_sheet_records(
+            self._title,
+            range_str,
+            effective_data_only,
+            include_format,
+            include_empty,
+            include_formula_blanks,
+            include_coordinate,
+        )
+        yield from records
+
+    def cell_records(
+        self,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+        *,
+        data_only: bool | None = None,
+        include_format: bool = True,
+        include_empty: bool = False,
+        include_formula_blanks: bool = True,
+        include_coordinate: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Return ``iter_cell_records(...)`` as a list."""
+        return list(
+            self.iter_cell_records(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+                data_only=data_only,
+                include_format=include_format,
+                include_empty=include_empty,
+                include_formula_blanks=include_formula_blanks,
+                include_coordinate=include_coordinate,
+            ),
+        )
+
+    def _iter_cell_records_python(
+        self,
+        *,
+        min_row: int | None,
+        max_row: int | None,
+        min_col: int | None,
+        max_col: int | None,
+        include_empty: bool,
+    ) -> Iterator[dict[str, Any]]:
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+        for row in range(r_min, r_max + 1):
+            for col in range(c_min, c_max + 1):
+                cell = self._get_or_create_cell(row, col)
+                value = cell.value
+                if value is None and not include_empty:
+                    continue
+                yield {
+                    "row": row,
+                    "column": col,
+                    "coordinate": rowcol_to_a1(row, col),
+                    "value": value,
+                    "data_type": "blank" if value is None else type(value).__name__,
+                }
+
+    def calculate_dimension(self) -> str:
+        """Return the used worksheet range in openpyxl's ``A1:C10`` form."""
+        bounds = self._read_dimension_bounds()
+        if bounds is None:
+            return "A1:A1"
+        min_row, min_col, max_row, max_col = bounds
+        return f"{rowcol_to_a1(min_row, min_col)}:{rowcol_to_a1(max_row, max_col)}"
+
+    def _read_dimension_bounds(self) -> tuple[int, int, int, int] | None:
+        """Return 1-based ``(min_row, min_col, max_row, max_col)`` bounds."""
+        wb = self._workbook
+        if wb._rust_reader is not None:  # noqa: SLF001
+            bounds = wb._rust_reader.read_sheet_bounds(self._title)  # noqa: SLF001
+            if isinstance(bounds, tuple) and len(bounds) == 4:
+                return tuple(int(value) for value in bounds)  # type: ignore[return-value]
+            return None
+
+        used_cells = set(self._cells)
+        if self._append_buffer:
+            start = self._append_buffer_start
+            for row_offset, row_values in enumerate(self._append_buffer):
+                for col_offset, _value in enumerate(row_values):
+                    used_cells.add((start + row_offset, col_offset + 1))
+        for grid, start_row, start_col in self._bulk_writes:
+            for row_offset, row_values in enumerate(grid):
+                for col_offset, _value in enumerate(row_values):
+                    used_cells.add((start_row + row_offset, start_col + col_offset))
+
+        if not used_cells:
+            return None
+        rows = [row for row, _col in used_cells]
+        cols = [col for _row, col in used_cells]
+        return min(rows), min(cols), max(rows), max(cols)
+
     def _read_dimensions(self) -> tuple[int, int]:
         """Discover sheet dimensions from the Rust backend (read mode only)."""
         if self._dimensions is not None:

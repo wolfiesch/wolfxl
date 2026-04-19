@@ -1,10 +1,10 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-mod util;
-mod ooxml_util;
 mod calamine_styled_backend;
+mod ooxml_util;
 mod rust_xlsxwriter_backend;
+mod util;
 mod wolfxl;
 
 #[pyfunction]
@@ -13,14 +13,14 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     info.set_item("package", "wolfxl")?;
     info.set_item("package_version", env!("CARGO_PKG_VERSION"))?;
 
-    let enabled = PyList::new(
-        py,
-        ["calamine-styles", "rust_xlsxwriter", "wolfxl"],
-    )?;
+    let enabled = PyList::new(py, ["calamine-styles", "rust_xlsxwriter", "wolfxl"])?;
     info.set_item("enabled_backends", enabled)?;
 
     let versions = PyDict::new(py);
-    versions.set_item("calamine-styles", option_env!("WOLFXL_DEP_CALAMINE_VERSION"))?;
+    versions.set_item(
+        "calamine-styles",
+        option_env!("WOLFXL_DEP_CALAMINE_VERSION"),
+    )?;
     versions.set_item(
         "rust_xlsxwriter",
         option_env!("WOLFXL_DEP_RUST_XLSXWRITER_VERSION"),

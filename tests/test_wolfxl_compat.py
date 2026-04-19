@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -200,6 +202,191 @@ class TestReadMode:
         rows = list(ws.iter_rows(values_only=True))
         assert len(rows) > 10  # fixture has ~20 rows
         wb.close()
+
+    def test_cell_records_exposes_values_and_compact_format_metadata(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, Side
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Records"
+        ws["A1"] = "Header"
+        ws["A1"].font = Font(bold=True, italic=True, size=12)
+        ws["A2"] = "Child"
+        ws["A2"].alignment = Alignment(indent=2, horizontal="left")
+        ws["B2"] = 1500
+        ws["B2"].number_format = "$#,##0.00_);($#,##0.00)"
+        ws["B3"] = "Total"
+        ws["B3"].border = Border(bottom=Side(style="double"))
+        ws["C4"] = "=SUM(B2:B2)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = {record["coordinate"]: record for record in wb["Records"].cell_records()}
+
+        assert records["A1"]["value"] == "Header"
+        assert records["A1"]["bold"] is True
+        assert records["A1"]["italic"] is True
+        assert records["A1"]["font_size"] == 12.0
+        assert records["A2"]["indent"] == 2
+        assert records["A2"]["h_align"] == "left"
+        assert records["B2"]["value"] == 1500
+        assert records["B2"]["number_format"] == "$#,##0.00_);($#,##0.00)"
+        assert records["B3"]["has_bottom_border"] is True
+        assert records["B3"]["is_double_underline"] is True
+        assert records["C4"]["data_type"] == "formula"
+        assert records["C4"]["formula"] == "=SUM(B2:B2)"
+
+    def test_cell_records_can_emit_dense_empty_range(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "dense-records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Dense"
+        ws["B2"] = "value"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            records = wb["Dense"].cell_records(
+                min_row=1,
+                max_row=2,
+                min_col=1,
+                max_col=2,
+                include_format=False,
+                include_empty=True,
+            )
+
+        assert [record["coordinate"] for record in records] == ["A1", "B1", "A2", "B2"]
+        assert records[0]["data_type"] == "blank"
+        assert records[-1]["value"] == "value"
+
+    def test_cell_records_can_skip_coordinate_strings(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "no-coordinate-records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Records"
+        ws["B2"] = "value"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            records = wb["Records"].cell_records(include_coordinate=False)
+
+        assert records == [{"row": 2, "column": 2, "data_type": "string", "value": "value"}]
+
+    def test_cell_records_data_only_skips_uncached_formulas_by_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = {record["coordinate"]: record for record in wb["Formula"].cell_records()}
+        assert records["B2"]["data_type"] == "formula"
+        assert records["B2"]["formula"] == "=SUM(A1:A1)"
+
+        with load_workbook(str(path), data_only=True) as wb:
+            records = {record["coordinate"]: record for record in wb["Formula"].cell_records()}
+            dense = wb["Formula"].cell_records(
+                min_row=2,
+                max_row=2,
+                min_col=2,
+                max_col=2,
+                include_empty=True,
+            )
+
+        assert "B2" not in records
+        assert dense[0]["coordinate"] == "B2"
+        assert dense[0]["data_type"] == "blank"
+        assert dense[0]["value"] is None
+        assert dense[0]["formula"] == "=SUM(A1:A1)"
+
+    def test_calculate_dimension_uses_cell_storage_when_dimension_tag_is_stale(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        source = tmp_path / "source-dimension.xlsx"
+        stale = tmp_path / "stale-dimension.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Stale"
+        ws["A1"] = "head"
+        ws["C7"] = "tail"
+        op_wb.save(source)
+        op_wb.close()
+
+        with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(stale, "w") as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    text = data.decode("utf-8")
+                    text = re.sub(r'<dimension ref="[^"]+"', '<dimension ref="A1"', text, count=1)
+                    data = text.encode("utf-8")
+                zout.writestr(item, data)
+
+        with load_workbook(str(stale)) as wb:
+            ws = wb["Stale"]
+            assert ws.calculate_dimension() == "A1:C7"
+            assert ws.max_row == 7
+            assert ws.max_column == 3
+
+    def test_calculate_dimension_preserves_offset_used_range(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "offset-dimension.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Offset"
+        ws["C4"] = "tail"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            ws = wb["Offset"]
+            assert ws.calculate_dimension() == "C4:C4"
+            assert ws.max_row == 4
+            assert ws.max_column == 3
+
+    def test_calculate_dimension_includes_buffered_write_apis(self) -> None:
+        from wolfxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+
+        assert ws.calculate_dimension() == "A1:A1"
+        ws.append(["Name", "Amount"])
+        assert ws.calculate_dimension() == "A1:B1"
+        ws.write_rows([["tail"]], start_row=4, start_col=3)
+        assert ws.calculate_dimension() == "A1:C4"
 
     def test_date_cells_read_as_midnight_datetime(self) -> None:
         from wolfxl import load_workbook

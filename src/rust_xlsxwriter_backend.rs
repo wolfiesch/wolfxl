@@ -1216,9 +1216,7 @@ impl RustXlsxWriterBook {
             .sheet_names
             .iter()
             .position(|n| n == old_name)
-            .ok_or_else(|| {
-                PyErr::new::<PyValueError, _>(format!("Unknown sheet: {old_name}"))
-            })?;
+            .ok_or_else(|| PyErr::new::<PyValueError, _>(format!("Unknown sheet: {old_name}")))?;
         if self.sheet_names.contains(&new_name.to_string()) {
             return Err(PyErr::new::<PyValueError, _>(format!(
                 "Sheet '{new_name}' already exists"
@@ -1512,9 +1510,9 @@ impl RustXlsxWriterBook {
                 if val.is_none() {
                     continue;
                 }
-                let dict = val
-                    .downcast::<PyDict>()
-                    .map_err(|_| PyErr::new::<PyValueError, _>("format element must be dict or None"))?;
+                let dict = val.downcast::<PyDict>().map_err(|_| {
+                    PyErr::new::<PyValueError, _>("format element must be dict or None")
+                })?;
                 if dict.is_empty() {
                     continue;
                 }
@@ -1554,9 +1552,9 @@ impl RustXlsxWriterBook {
                 if val.is_none() {
                     continue;
                 }
-                let dict = val
-                    .downcast::<PyDict>()
-                    .map_err(|_| PyErr::new::<PyValueError, _>("border element must be dict or None"))?;
+                let dict = val.downcast::<PyDict>().map_err(|_| {
+                    PyErr::new::<PyValueError, _>("border element must be dict or None")
+                })?;
                 if dict.is_empty() {
                     continue;
                 }
@@ -1987,9 +1985,10 @@ impl RustXlsxWriterBook {
         // Apply row heights.  Python passes 1-indexed rows (openpyxl convention).
         for ((sheet, row), height) in &self.row_heights {
             if let Some(ws) = ws_map.get_mut(sheet) {
-                ws.set_row_height(row.saturating_sub(1), *height).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("set_row_height failed: {e}"))
-                })?;
+                ws.set_row_height(row.saturating_sub(1), *height)
+                    .map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("set_row_height failed: {e}"))
+                    })?;
             }
         }
 
@@ -2063,10 +2062,10 @@ impl RustXlsxWriterBook {
                 let clean = range_str.replace('$', "");
                 let parts: Vec<&str> = clean.split(':').collect();
                 if parts.len() == 2 {
-                    let (r1, c1) =
-                        a1_to_row_col(parts[0]).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                    let (r2, c2) =
-                        a1_to_row_col(parts[1]).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                    let (r1, c1) = a1_to_row_col(parts[0])
+                        .map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                    let (r2, c2) = a1_to_row_col(parts[1])
+                        .map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
                     let c1_u16: u16 = c1.try_into().map_err(|_| {
                         PyErr::new::<PyValueError, _>(format!("Column out of range: {range_str}"))
                     })?;

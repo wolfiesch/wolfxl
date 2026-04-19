@@ -293,6 +293,65 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
     }
 }
 
+fn data_type_name(value: &Data) -> &'static str {
+    match value {
+        Data::Empty => "blank",
+        Data::String(_) | Data::RichText(_) | Data::DurationIso(_) => "string",
+        Data::Float(_) | Data::Int(_) => "number",
+        Data::Bool(_) => "boolean",
+        Data::DateTime(_) => "datetime",
+        Data::DateTimeIso(_) => "datetime",
+        Data::Error(_) => "error",
+    }
+}
+
+fn data_is_formula_text(value: &Data, formula: &str) -> bool {
+    let owned;
+    let text = match value {
+        Data::String(s) => s.as_str(),
+        Data::RichText(rt) => {
+            owned = rt.plain_text();
+            owned.as_str()
+        }
+        _ => return false,
+    };
+    text.is_empty() || text == formula || format!("={text}") == formula
+}
+
+fn row_col_to_a1(row: u32, col: u32) -> String {
+    let mut n = col + 1;
+    let mut letters: Vec<char> = Vec::new();
+    while n > 0 {
+        n -= 1;
+        letters.push((b'A' + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    letters.reverse();
+    format!("{}{}", letters.into_iter().collect::<String>(), row + 1)
+}
+
+fn update_dimensions(dimensions: &mut Option<(u32, u32)>, row_count: u32, col_count: u32) {
+    match dimensions {
+        Some((rows, cols)) => {
+            *rows = (*rows).max(row_count);
+            *cols = (*cols).max(col_count);
+        }
+        None => *dimensions = Some((row_count, col_count)),
+    }
+}
+
+fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) {
+    match bounds {
+        Some((min_row, min_col, max_row, max_col)) => {
+            *min_row = (*min_row).min(row);
+            *min_col = (*min_col).min(col);
+            *max_row = (*max_row).max(row);
+            *max_col = (*max_col).max(col);
+        }
+        None => *bounds = Some((row, col, row, col)),
+    }
+}
+
 /// Per-sheet cached data: style grid + layout dimensions.
 struct SheetCache {
     styles: StyleRange,
@@ -385,6 +444,17 @@ struct DiagonalBorderInfo {
     color: String,
 }
 
+#[derive(Clone, Debug, Default)]
+struct RawFontInfo {
+    bold: bool,
+    italic: bool,
+    underline: Option<String>,
+    strikethrough: bool,
+    name: Option<String>,
+    size: Option<f64>,
+    color: Option<String>,
+}
+
 #[derive(Default)]
 struct Tier2SheetCache {
     merged_ranges: Option<Vec<String>>,
@@ -428,6 +498,8 @@ pub struct CalamineStyledBook {
     raw_number_formats: Option<HashMap<u32, String>>,
     /// Lazy cache: parsed cellXfs entries from xl/styles.xml.
     cell_xfs: Option<Vec<XfEntry>>,
+    /// Lazy cache: parsed fonts from xl/styles.xml.
+    raw_fonts: Option<Vec<RawFontInfo>>,
 }
 
 #[pymethods]
@@ -455,13 +527,71 @@ impl CalamineStyledBook {
             sheet_xml_content_cache: HashMap::new(),
             raw_number_formats: None,
             cell_xfs: None,
+            raw_fonts: None,
         })
     }
 
     pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
         self.ensure_sheet_exists(sheet)?;
         let xml = self.sheet_xml_content(sheet)?;
-        Self::parse_sheet_dimensions_from_sheet_xml(&xml)
+        let mut dimensions = Self::parse_sheet_dimensions_from_sheet_xml(&xml)?;
+        self.ensure_value_caches(sheet)?;
+
+        if let Some(range) = self.range_cache.get(sheet) {
+            let (height, width) = range.get_size();
+            if height > 0 && width > 0 {
+                let start = range.start().unwrap_or((0, 0));
+                update_dimensions(
+                    &mut dimensions,
+                    start.0 + height as u32,
+                    start.1 + width as u32,
+                );
+            }
+        }
+
+        if let Some(formulas) = self.formula_map_cache.get(sheet) {
+            for &(row, col) in formulas.keys() {
+                update_dimensions(&mut dimensions, row + 1, col + 1);
+            }
+        }
+
+        Ok(dimensions)
+    }
+
+    /// Return the actual used sheet bounds as 1-based
+    /// ``(min_row, min_col, max_row, max_col)`` coordinates.
+    pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
+        self.ensure_sheet_exists(sheet)?;
+        self.ensure_value_caches(sheet)?;
+
+        let mut bounds: Option<(u32, u32, u32, u32)> = None;
+        if let Some(range) = self.range_cache.get(sheet) {
+            let (height, width) = range.get_size();
+            if height > 0 && width > 0 {
+                let start = range.start().unwrap_or((0, 0));
+                update_bounds(&mut bounds, start.0, start.1);
+                update_bounds(
+                    &mut bounds,
+                    start.0 + height as u32 - 1,
+                    start.1 + width as u32 - 1,
+                );
+            }
+        }
+
+        if let Some(formulas) = self.formula_map_cache.get(sheet) {
+            for &(row, col) in formulas.keys() {
+                update_bounds(&mut bounds, row, col);
+            }
+        }
+
+        if bounds.is_none() {
+            let xml = self.sheet_xml_content(sheet)?;
+            bounds = Self::parse_sheet_bounds_from_sheet_xml(&xml)?;
+        }
+
+        Ok(bounds.map(|(min_row, min_col, max_row, max_col)| {
+            (min_row + 1, min_col + 1, max_row + 1, max_col + 1)
+        }))
     }
 
     pub fn sheet_names(&self) -> Vec<String> {
@@ -710,6 +840,120 @@ impl CalamineStyledBook {
         Ok(outer.into())
     }
 
+    /// Bulk-read populated cells as record dictionaries with optional format metadata.
+    ///
+    /// This is the high-throughput read path for ingestion/dataframe-style workloads:
+    /// one Rust/Python crossing returns native values plus compact cell metadata,
+    /// avoiding per-cell `Cell.value` / `Cell.number_format` property calls.
+    #[pyo3(signature = (
+        sheet,
+        cell_range = None,
+        data_only = false,
+        include_format = true,
+        include_empty = false,
+        include_formula_blanks = true,
+        include_coordinate = true,
+    ))]
+    pub fn read_sheet_records(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+        include_format: bool,
+        include_empty: bool,
+        include_formula_blanks: bool,
+        include_coordinate: bool,
+    ) -> PyResult<PyObject> {
+        self.ensure_sheet_exists(sheet)?;
+        self.ensure_value_caches(sheet)?;
+
+        let (start_row, start_col, end_row, end_col) = {
+            let range = self.range_cache.get(sheet).unwrap();
+            Self::resolve_range_bounds(range, cell_range)?
+        };
+
+        let records = PyList::empty(py);
+        for row in start_row..=end_row {
+            for col in start_col..=end_col {
+                let formula = self
+                    .formula_map_cache
+                    .get(sheet)
+                    .and_then(|m| m.get(&(row, col)).cloned())
+                    .map(|f| {
+                        if f.starts_with('=') {
+                            f
+                        } else {
+                            format!("={f}")
+                        }
+                    });
+                let value = self
+                    .range_cache
+                    .get(sheet)
+                    .and_then(|range| range.get_value((row, col)).cloned());
+                let value_is_uncached_formula =
+                    data_only
+                        && formula.as_ref().zip(value.as_ref()).is_some_and(
+                            |(formula_text, value)| data_is_formula_text(value, formula_text),
+                        );
+                let has_value = value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
+                    && !value_is_uncached_formula;
+                let has_formula_backing_entry = value.is_some();
+                let should_emit_formula = formula.is_some()
+                    && !data_only
+                    && (include_formula_blanks || has_formula_backing_entry);
+                if !include_empty && !should_emit_formula && !has_value {
+                    continue;
+                }
+
+                let record = PyDict::new(py);
+                record.set_item("row", row + 1)?;
+                record.set_item("column", col + 1)?;
+                if include_coordinate {
+                    record.set_item("coordinate", row_col_to_a1(row, col))?;
+                }
+
+                if let Some(formula_text) = &formula {
+                    record.set_item("formula", formula_text)?;
+                }
+
+                if should_emit_formula {
+                    let formula_text = formula.as_ref().unwrap();
+                    if let Some(err_val) = map_error_formula(formula_text) {
+                        record.set_item("data_type", "error")?;
+                        record.set_item("value", err_val)?;
+                    } else {
+                        record.set_item("data_type", "formula")?;
+                        record.set_item("value", formula_text)?;
+                    }
+                } else if let Some(v) = &value {
+                    if value_is_uncached_formula {
+                        record.set_item("data_type", "blank")?;
+                        record.set_item("value", py.None())?;
+                        if include_format {
+                            self.populate_record_format(py, sheet, row, col, &record)?;
+                        }
+                        records.append(record)?;
+                        continue;
+                    }
+                    record.set_item("data_type", data_type_name(v))?;
+                    record.set_item("value", data_to_plain_py(py, v)?)?;
+                } else {
+                    record.set_item("data_type", "blank")?;
+                    record.set_item("value", py.None())?;
+                }
+
+                if include_format {
+                    self.populate_record_format(py, sheet, row, col, &record)?;
+                }
+
+                records.append(record)?;
+            }
+        }
+
+        Ok(records.into())
+    }
+
     pub fn read_cell_formula(
         &mut self,
         py: Python<'_>,
@@ -763,6 +1007,9 @@ impl CalamineStyledBook {
             // Font
             if let Some(font) = &style.font {
                 Self::populate_font(py, &d, font)?;
+            }
+            if let Some(style_id) = style_id {
+                self.populate_raw_font(style_id, &d)?;
             }
             // Fill
             if let Some(fill) = &style.fill {
@@ -1033,6 +1280,37 @@ impl CalamineStyledBook {
 
 // Non-Python helper methods.
 impl CalamineStyledBook {
+    fn resolve_range_bounds(
+        range: &Range<Data>,
+        cell_range: Option<&str>,
+    ) -> PyResult<(u32, u32, u32, u32)> {
+        if let Some(cr) = cell_range {
+            if !cr.is_empty() {
+                let clean = cr.replace('$', "").to_ascii_uppercase();
+                let parts: Vec<&str> = clean.split(':').collect();
+                let a = parts[0];
+                let b = if parts.len() > 1 { parts[1] } else { a };
+                let (r0, c0) =
+                    a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                let (r1, c1) =
+                    a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+                return Ok((r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)));
+            }
+        }
+
+        let (h, w) = range.get_size();
+        if h == 0 || w == 0 {
+            return Ok((0, 0, 0, 0));
+        }
+        let start = range.start().unwrap_or((0, 0));
+        Ok((
+            start.0,
+            start.1,
+            start.0 + h as u32 - 1,
+            start.1 + w as u32 - 1,
+        ))
+    }
+
     /// Ensure the StyleRange + WorksheetLayout are cached for this sheet.
     fn ensure_cache(&mut self, sheet: &str) -> PyResult<()> {
         if self.style_cache.contains_key(sheet) {
@@ -1120,6 +1398,10 @@ impl CalamineStyledBook {
             return Ok(None);
         }
 
+        self.resolved_number_format_for_style_id(style_id)
+    }
+
+    fn resolved_number_format_for_style_id(&mut self, style_id: u32) -> PyResult<Option<String>> {
         self.ensure_cell_xfs()?;
         let Some(xf) = self
             .cell_xfs
@@ -1151,6 +1433,59 @@ impl CalamineStyledBook {
         }
 
         Ok(None)
+    }
+
+    fn populate_record_format(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        d: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        if self.is_merged_subordinate(sheet, row, col)? {
+            return Ok(());
+        }
+
+        let style_id = self.cell_style_id(sheet, row, col)?;
+        if let Some(style_id) = style_id {
+            d.set_item("style_id", style_id)?;
+        }
+        if style_id.unwrap_or(0) == 0 {
+            return Ok(());
+        }
+
+        if let Some(style) = self.get_style(sheet, row, col)? {
+            if let Some(font) = &style.font {
+                Self::populate_font(py, d, font)?;
+            }
+            if let Some(style_id) = style_id {
+                self.populate_raw_font(style_id, d)?;
+            }
+            if let Some(fill) = &style.fill {
+                Self::populate_fill(py, d, fill)?;
+            }
+            if let Some(style_id) = style_id {
+                if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
+                    d.set_item("number_format", number_format)?;
+                }
+            }
+            if let Some(align) = &style.alignment {
+                Self::populate_alignment(py, d, align)?;
+            }
+            if let Some(borders) = &style.borders {
+                let bottom_style = border_style_str(&borders.bottom.style);
+                if bottom_style != "none" {
+                    d.set_item("bottom_border_style", bottom_style)?;
+                    d.set_item("has_bottom_border", true)?;
+                    if bottom_style == "double" {
+                        d.set_item("is_double_underline", true)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
@@ -1426,7 +1761,12 @@ impl CalamineStyledBook {
         let (start, end) = clean.split_once(':').unwrap_or((&clean, &clean));
         let (row0, col0) = a1_to_row_col(start).ok()?;
         let (row1, col1) = a1_to_row_col(end).ok()?;
-        Some((row0.min(row1), col0.min(col1), row0.max(row1), col0.max(col1)))
+        Some((
+            row0.min(row1),
+            col0.min(col1),
+            row0.max(row1),
+            col0.max(col1),
+        ))
     }
 
     fn ensure_merged_bounds(&mut self, sheet: &str) -> PyResult<()> {
@@ -1593,6 +1933,11 @@ impl CalamineStyledBook {
     }
 
     fn parse_sheet_dimensions_from_sheet_xml(xml: &str) -> PyResult<Option<(u32, u32)>> {
+        Ok(Self::parse_sheet_bounds_from_sheet_xml(xml)?
+            .map(|(_, _, max_row, max_col)| (max_row + 1, max_col + 1)))
+    }
+
+    fn parse_sheet_bounds_from_sheet_xml(xml: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         let mut reader = XmlReader::from_str(xml);
         reader.config_mut().trim_text(true);
         let mut buf: Vec<u8> = Vec::new();
@@ -1609,10 +1954,19 @@ impl CalamineStyledBook {
                         }
 
                         let clean = ref_attr.replace('$', "").to_ascii_uppercase();
-                        let end_ref = clean.split(':').next_back().unwrap_or(&clean);
-                        let (row, col) = a1_to_row_col(end_ref)
+                        let mut refs = clean.split(':');
+                        let start_ref = refs.next().unwrap_or(&clean);
+                        let end_ref = refs.next_back().unwrap_or(start_ref);
+                        let (start_row, start_col) = a1_to_row_col(start_ref)
+                            .map_err(|msg| PyErr::new::<PyValueError, _>(msg.clone()))?;
+                        let (end_row, end_col) = a1_to_row_col(end_ref)
                             .map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                        return Ok(Some((row + 1, col + 1)));
+                        return Ok(Some((
+                            start_row.min(end_row),
+                            start_col.min(end_col),
+                            start_row.max(end_row),
+                            start_col.max(end_col),
+                        )));
                     }
                 }
                 Ok(Event::Eof) => break,
@@ -2289,6 +2643,152 @@ impl CalamineStyledBook {
         let entries = crate::wolfxl::styles::parse_cellxfs(&styles_xml);
         self.cell_xfs = Some(entries);
         Ok(())
+    }
+
+    fn ensure_raw_fonts(&mut self) -> PyResult<()> {
+        if self.raw_fonts.is_some() {
+            return Ok(());
+        }
+
+        let mut zip = self.open_zip()?;
+        let styles_xml = match ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
+            Some(s) => s,
+            None => {
+                self.raw_fonts = Some(Vec::new());
+                return Ok(());
+            }
+        };
+
+        let fonts = Self::parse_raw_fonts_from_styles_xml(&styles_xml)?;
+        self.raw_fonts = Some(fonts);
+        Ok(())
+    }
+
+    fn populate_raw_font(&mut self, style_id: u32, d: &Bound<'_, PyDict>) -> PyResult<()> {
+        self.ensure_cell_xfs()?;
+        let Some(font_id) = self
+            .cell_xfs
+            .as_ref()
+            .and_then(|entries| entries.get(style_id as usize))
+            .map(|xf| xf.font_id)
+        else {
+            return Ok(());
+        };
+
+        self.ensure_raw_fonts()?;
+        let Some(font) = self
+            .raw_fonts
+            .as_ref()
+            .and_then(|fonts| fonts.get(font_id as usize))
+        else {
+            return Ok(());
+        };
+
+        if font.bold {
+            d.set_item("bold", true)?;
+        }
+        if font.italic {
+            d.set_item("italic", true)?;
+        }
+        if let Some(underline) = &font.underline {
+            d.set_item("underline", underline)?;
+        }
+        if font.strikethrough {
+            d.set_item("strikethrough", true)?;
+        }
+        if let Some(name) = &font.name {
+            d.set_item("font_name", name)?;
+        }
+        if let Some(size) = font.size {
+            d.set_item("font_size", size)?;
+        }
+        if let Some(color) = &font.color {
+            d.set_item("font_color", color)?;
+        }
+        Ok(())
+    }
+
+    fn parse_raw_fonts_from_styles_xml(xml: &str) -> PyResult<Vec<RawFontInfo>> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut in_fonts = false;
+        let mut in_font = false;
+        let mut cur = RawFontInfo::default();
+        let mut fonts: Vec<RawFontInfo> = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                    b"fonts" => in_fonts = true,
+                    b"font" if in_fonts => {
+                        in_font = true;
+                        cur = RawFontInfo::default();
+                    }
+                    _ if in_font => Self::apply_raw_font_child(&mut cur, &e),
+                    _ => {}
+                },
+                Ok(Event::Empty(e)) => {
+                    if in_font {
+                        Self::apply_raw_font_child(&mut cur, &e);
+                    }
+                }
+                Ok(Event::End(e)) => match e.local_name().as_ref() {
+                    b"font" if in_font => {
+                        in_font = false;
+                        fonts.push(cur.clone());
+                    }
+                    b"fonts" => in_fonts = false,
+                    _ => {}
+                },
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse styles.xml fonts: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(fonts)
+    }
+
+    fn raw_bool_attr(e: &quick_xml::events::BytesStart<'_>, attr: &[u8]) -> bool {
+        ooxml_util::attr_value(e, attr)
+            .map(|v| {
+                let lowered = v.to_ascii_lowercase();
+                !(lowered == "0" || lowered == "false" || lowered == "none")
+            })
+            .unwrap_or(true)
+    }
+
+    fn apply_raw_font_child(cur: &mut RawFontInfo, e: &quick_xml::events::BytesStart<'_>) {
+        match e.local_name().as_ref() {
+            b"b" => cur.bold = Self::raw_bool_attr(e, b"val"),
+            b"i" => cur.italic = Self::raw_bool_attr(e, b"val"),
+            b"strike" => cur.strikethrough = Self::raw_bool_attr(e, b"val"),
+            b"u" => {
+                if Self::raw_bool_attr(e, b"val") {
+                    cur.underline = Some(
+                        ooxml_util::attr_value(e, b"val")
+                            .filter(|v| v != "1" && !v.eq_ignore_ascii_case("true"))
+                            .unwrap_or_else(|| "single".to_string()),
+                    );
+                }
+            }
+            b"name" => cur.name = ooxml_util::attr_value(e, b"val"),
+            b"sz" => {
+                cur.size = ooxml_util::attr_value(e, b"val").and_then(|v| v.parse::<f64>().ok());
+            }
+            b"color" => {
+                if let Some(rgb) = ooxml_util::attr_value(e, b"rgb") {
+                    cur.color = Self::normalize_ooxml_rgb(&rgb);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn parse_raw_number_formats_from_styles_xml(xml: &str) -> PyResult<HashMap<u32, String>> {
