@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.0 (2026-04-19)
+
+### Added
+
+- **`wolfxl agent <file> --max-tokens N` subcommand**: composes a
+  token-budgeted workbook briefing for an LLM context window. Emits a
+  workbook overview (every sheet with dims/class/first-column header),
+  picks the largest `data`-class sheet (or `--sheet` override), then
+  greedily fills the remaining budget with header row, head 3 rows, tail
+  2 rows, and up to 8 stratified middle samples. Token counts use
+  `tiktoken-rs::cl100k_base` to match the GPT-4 family tokenizer (and
+  `spreadsheet-peek/benchmarks/measure_tokens.py`); verified at 0-token
+  drift against Python `tiktoken`. Falls back to orientation-only output
+  if the budget is too tight (and reports the overage in the footer
+  rather than silently truncating).
+- **Stratified row sampling**: head + tail + uniform-stride middle
+  samples instead of head-only. An LLM seeing rows 1, 2, 3 of a 50-row
+  P&L can't tell totals from line items; rows 1-3, 25-26, 49-50 plus
+  middle samples surface the shape of the data.
+- **Token budget tracker**: `Budget::used_with(buf, section)` re-encodes
+  the full concatenation rather than summing per-section counts, because
+  cl100k_base BPE merges across boundaries (additive checks would
+  over-count and reject sections that actually fit).
+
+### Notes
+
+- `--agent` deliberately does NOT thousand-group integers (`1234567`,
+  not `1,234,567`). Every comma is a token boundary in cl100k_base, so
+  ungrouped costs ~2 tokens vs grouped ~5 for the same number. Pretty
+  output costs the agent context.
+- The orientation core (workbook overview + sheet header + columns) is
+  emitted even when it overflows the budget. We'd rather report the
+  overage in the footer than hide workbook structure from the agent.
+
 ## 0.5.0 (2026-04-19)
 
 ### Added
