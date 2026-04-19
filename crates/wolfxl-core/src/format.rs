@@ -48,10 +48,7 @@ pub fn classify_format(fmt: &str) -> FormatCategory {
     if fmt == "@" {
         return FormatCategory::Text;
     }
-    if fmt.contains('%') {
-        return FormatCategory::Percentage;
-    }
-    // Currency markers: explicit currency symbol or accounting brackets.
+    // Currency markers (check raw fmt — `[$-409]` carries the locale tag).
     if fmt.contains('$')
         || fmt.contains('€')
         || fmt.contains('£')
@@ -60,10 +57,18 @@ pub fn classify_format(fmt: &str) -> FormatCategory {
     {
         return FormatCategory::Currency;
     }
-    if fmt.contains('E') && (fmt.contains("E+") || fmt.contains("E-")) {
+    // Strip `[...]` segments before the date/time substring scan: tags like
+    // `[Red]` or `[h]` contain `d` and `h` which would otherwise trigger the
+    // date / time heuristics on a plain numeric format such as
+    // `#,##0_);[Red](#,##0)`.
+    let stripped = strip_bracketed_tags(fmt);
+    if stripped.contains('%') {
+        return FormatCategory::Percentage;
+    }
+    if stripped.contains('E') && (stripped.contains("E+") || stripped.contains("E-")) {
         return FormatCategory::Scientific;
     }
-    let lower = fmt.to_ascii_lowercase();
+    let lower = stripped.to_ascii_lowercase();
     let has_date = lower.contains('y') || lower.contains('d') || lower.contains("mmm");
     let has_time = lower.contains('h') || lower.contains(":mm") || lower.contains(':');
     match (has_date, has_time) {
@@ -71,15 +76,31 @@ pub fn classify_format(fmt: &str) -> FormatCategory {
         (true, false) => FormatCategory::Date,
         (false, true) => FormatCategory::Time,
         _ => {
-            if fmt.contains('.') {
+            if stripped.contains('.') {
                 FormatCategory::Float
-            } else if fmt.chars().any(|c| c == '0' || c == '#') {
+            } else if stripped.chars().any(|c| c == '0' || c == '#') {
                 FormatCategory::Integer
             } else {
                 FormatCategory::General
             }
         }
     }
+}
+
+/// Remove `[...]` segments from an Excel format code so substring-based
+/// scans don't get tripped up by characters inside color/locale tags.
+fn strip_bracketed_tags(fmt: &str) -> String {
+    let mut out = String::with_capacity(fmt.len());
+    let mut depth = 0usize;
+    for ch in fmt.chars() {
+        match ch {
+            '[' => depth += 1,
+            ']' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Render a [`Cell`] for human/agent display, respecting its number format.
@@ -191,6 +212,17 @@ mod tests {
         assert_eq!(classify_format("0.00E+00"), FormatCategory::Scientific);
         assert_eq!(classify_format("0.00"), FormatCategory::Float);
         assert_eq!(classify_format("#,##0"), FormatCategory::Integer);
+    }
+
+    #[test]
+    fn bracketed_tags_dont_trigger_date_or_time_heuristic() {
+        // `[Red]` contains `d`, which previously misclassified the format
+        // as Date. `[h]:mm:ss` legitimately encodes elapsed-hour time and
+        // should still classify as Time, but any non-time `[...]` tag
+        // should be ignored by the date/time scan.
+        assert_eq!(classify_format("#,##0_);[Red](#,##0)"), FormatCategory::Integer);
+        assert_eq!(classify_format("0.00;[Red]-0.00"), FormatCategory::Float);
+        assert_eq!(classify_format("[h]:mm:ss"), FormatCategory::Time);
     }
 
     #[test]

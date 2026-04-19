@@ -215,13 +215,15 @@ def _update_ratchet_observation(report: ParityReport) -> None:
     _OBSERVATIONS[report.fixture_id] = summary
 
 
-def test_ratchet_soft_failures_nondecreasing() -> None:
+def test_zz_ratchet_soft_failures_nondecreasing() -> None:
     """SOFT mismatch count must never rise above the committed baseline.
 
-    This runs after all ``test_read_parity`` cases collected observations,
-    so pytest's ordering (tests collected alphabetically) means this test's
-    ``test_`` name must sort AFTER the read tests. It does:
-    ``test_ratchet_...`` > ``test_read_parity``.
+    This depends on observations collected by every ``test_read_parity``
+    case, so it must run *after* all of them. pytest collects tests in
+    file declaration order by default, but third-party plugins (e.g.
+    pytest-xdist, pytest-randomly) can reorder collection — the ``zz_``
+    prefix sorts this test last under any plain alphabetical ordering and
+    keeps the dependency robust without a session finalizer.
     """
     ratchet = _load_ratchet()
     if not _OBSERVATIONS:

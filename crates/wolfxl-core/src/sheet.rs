@@ -128,14 +128,24 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
             .map(CellValue::Time)
             .unwrap_or_else(|| CellValue::Float(serial));
     }
-    let days = serial.trunc() as i64;
-    let frac = serial.fract();
-    // Excel treats 1900-01-00 as serial 0 and has the famous 1900 leap-year
-    // bug; matching openpyxl's correction.
+    let mut days = serial.trunc() as i64;
+    let frac = serial - (days as f64);
+    // Excel's 1900 leap-year bug: serial 60 maps to the non-existent
+    // 1900-02-29. openpyxl uses base 1899-12-30 (instead of 1899-12-31) to
+    // dodge the bug for serials >= 60, but that leaves serials 1..59 off by
+    // one day. The +1 correction restores serial 1 -> 1900-01-01 etc., which
+    // matches openpyxl.utils.datetime.from_excel.
+    if serial > 0.0 && serial < 60.0 {
+        days += 1;
+    }
     let base = NaiveDate::from_ymd_opt(1899, 12, 30).expect("static date");
-    let date = base
-        .checked_add_days(chrono::Days::new(days as u64))
-        .unwrap_or(base);
+    let date = if days >= 0 {
+        base.checked_add_days(chrono::Days::new(days as u64))
+    } else {
+        // u64 cast on negative i64 wraps; subtract instead.
+        base.checked_sub_days(chrono::Days::new((-days) as u64))
+    }
+    .unwrap_or(base);
     if frac.abs() < f64::EPSILON {
         return CellValue::Date(date);
     }
@@ -174,3 +184,49 @@ fn extract_number_format(style: &calamine_styles::Style) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use chrono::Datelike;
+
+    use super::*;
+
+    fn date(value: CellValue) -> NaiveDate {
+        match value {
+            CellValue::Date(d) => d,
+            other => panic!("expected Date, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn excel_serial_matches_openpyxl_for_pre_leap_serials() {
+        // openpyxl maps serial 1 -> 1900-01-01 thanks to its +1 correction
+        // for serials in (0, 60). Serial 59 -> 1900-02-28.
+        assert_eq!(
+            date(excel_serial_to_datetime(1.0)),
+            NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()
+        );
+        assert_eq!(
+            date(excel_serial_to_datetime(59.0)),
+            NaiveDate::from_ymd_opt(1900, 2, 28).unwrap()
+        );
+        // Serial 61 -> 1900-03-01 (Excel's fake serial-60 leap day is skipped).
+        assert_eq!(
+            date(excel_serial_to_datetime(61.0)),
+            NaiveDate::from_ymd_opt(1900, 3, 1).unwrap()
+        );
+        // A modern serial: 44197 -> 2021-01-01.
+        assert_eq!(
+            date(excel_serial_to_datetime(44197.0)),
+            NaiveDate::from_ymd_opt(2021, 1, 1).unwrap()
+        );
+    }
+
+    #[test]
+    fn excel_serial_negative_does_not_wrap() {
+        // Bad/sentinel serials shouldn't panic or produce a date in the
+        // far future via u64 wrap. Fall back to the epoch.
+        let value = excel_serial_to_datetime(-100.0);
+        let d = date(value);
+        assert!(d.year() < 1900, "got {d}");
+    }
+}

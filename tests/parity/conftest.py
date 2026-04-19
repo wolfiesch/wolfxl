@@ -59,13 +59,31 @@ def _fixture_id(path: Path) -> str:
 
 def _all_xlsx_fixtures() -> list[Path]:
     seen: dict[str, Path] = {}
-    for source in (_discover_xlsx(SNAPSHOT_DIR), _live_synthgl_fixtures()):
+    sources = (
+        (SNAPSHOT_DIR, _discover_xlsx(SNAPSHOT_DIR)),
+        (_live_synthgl_root(), _live_synthgl_fixtures()),
+    )
+    for root, source in sources:
         for path in source:
-            # Dedupe by (name, size) so the env-var corpus doesn't duplicate
-            # the committed snapshot.
-            key = f"{path.name}:{path.stat().st_size}"
+            # Dedupe on the path *relative to the source root* + size. Using
+            # `path.name` alone collapses distinct fixtures that share a
+            # filename across categories (e.g. two `summary.xlsx` files in
+            # different snapshot subfolders), which silently shrinks coverage.
+            try:
+                rel = path.relative_to(root) if root is not None else path
+            except ValueError:
+                rel = path
+            key = f"{rel.as_posix()}:{path.stat().st_size}"
             seen.setdefault(key, path)
     return list(seen.values())
+
+
+def _live_synthgl_root() -> Path | None:
+    env = os.environ.get("SYNTHGL_FIXTURES")
+    if not env:
+        return None
+    root = Path(env).expanduser()
+    return root if root.exists() else None
 
 
 @pytest.fixture(
@@ -91,15 +109,13 @@ def encrypted_fixture(request: pytest.FixtureRequest) -> Path:
 def _discover_xls(root: Path) -> Iterator[Path]:
     if not root.exists():
         return
-    for path in sorted(root.rglob("*.xls")):
-        yield path
+    yield from sorted(root.rglob("*.xls"))
 
 
 def _discover_xlsb(root: Path) -> Iterator[Path]:
     if not root.exists():
         return
-    for path in sorted(root.rglob("*.xlsb")):
-        yield path
+    yield from sorted(root.rglob("*.xlsb"))
 
 
 @pytest.fixture(

@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import Any, cast
 
 import pytest
-
 from openpyxl.styles.numbers import is_date_format as openpyxl_is_date_format
 from openpyxl.utils.cell import (
     column_index_from_string as openpyxl_column_index_from_string,

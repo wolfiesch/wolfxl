@@ -27,11 +27,14 @@ to catch drift.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 
 
-class SurfaceCategory(StrEnum):
-    """Logical grouping of the openpyxl API surface."""
+class SurfaceCategory(str, Enum):
+    """Logical grouping of the openpyxl API surface.
+
+    ``str`` mixin keeps ``SurfaceCategory.WORKBOOK_OPEN == "workbook_open"``
+    true on Python 3.9-3.10 (``enum.StrEnum`` is 3.11+)."""
 
     WORKBOOK_OPEN = "workbook_open"
     SHEET_ACCESS = "sheet_access"

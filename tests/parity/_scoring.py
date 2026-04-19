@@ -3,8 +3,9 @@
 Borrowed from ExcelBench's tiered fidelity model. Each dimension declares
 the set of attributes that participate and the tier that governs them:
 
-* ``HARD`` - any mismatch fails CI.
-* ``SOFT`` - tracked in ``ratchet.json`` (never allowed to decrease).
+* ``HARD`` - any mismatch fails CI immediately.
+* ``SOFT`` - count is tracked in ``ratchet.json``; the count is never
+  allowed to *increase* over the committed baseline (regressions block CI).
 * ``INFO`` - reported only, not gated.
 
 See ``Plans`` section "Pass semantics" for the full table.
@@ -13,11 +14,14 @@ See ``Plans`` section "Pass semantics" for the full table.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 
-class Tier(StrEnum):
+class Tier(str, Enum):
+    """``str`` mixin keeps ``Tier.HARD == "hard"`` true on Python 3.9-3.10
+    (``enum.StrEnum`` is 3.11+)."""
+
     HARD = "hard"
     SOFT = "soft"
     INFO = "info"

@@ -8,7 +8,7 @@ match openpyxl 3.1.x.
 from __future__ import annotations
 
 import re
-from functools import lru_cache
+from functools import cache
 from string import ascii_uppercase
 
 # Verbatim from openpyxl/utils/cell.py — keep in sync if openpyxl changes the
@@ -27,7 +27,7 @@ _ALPHA_TO_DECIMAL = {letter: pos for pos, letter in enumerate(ascii_uppercase, 1
 _POWERS = (1, 26, 676)
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_column_letter(col_idx: int) -> str:
     """1-based column index → letter. Capped at 18278 (ZZZ) per openpyxl."""
     if not 1 <= col_idx <= 18278:
@@ -46,7 +46,7 @@ def get_column_letter(col_idx: int) -> str:
     return "".join(result)
 
 
-@lru_cache(maxsize=None)
+@cache
 def column_index_from_string(col: str) -> int:
     """Column letter → 1-based index. Accepts up to 3 letters (A..ZZZ)."""
     error_msg = f"'{col}' is not a valid column name. Column names are from A to ZZZ"
