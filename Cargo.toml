@@ -33,7 +33,7 @@ name = "wolfxl"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["extension-module", "multiple-pymethods"] }
+pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
 calamine-styles.workspace = true
 rust_xlsxwriter.workspace = true
 indexmap.workspace = true
@@ -42,4 +42,4 @@ quick-xml.workspace = true
 chrono.workspace = true
 
 [build-dependencies]
-pyo3-build-config = "0.24"
+pyo3-build-config = "0.28"

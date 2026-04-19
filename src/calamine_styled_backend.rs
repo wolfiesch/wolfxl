@@ -1,6 +1,9 @@
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDateTime, PyDict, PyList};
+use pyo3::IntoPyObjectExt;
+
+type PyObject = Py<PyAny>;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -230,10 +233,10 @@ fn data_to_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
 fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
     match value {
         Data::Empty => Ok(py.None()),
-        Data::String(s) => Ok(s.to_object(py)),
-        Data::Float(f) => Ok(f.to_object(py)),
-        Data::Int(i) => Ok(i.to_object(py)),
-        Data::Bool(b) => Ok(b.to_object(py)),
+        Data::String(s) => s.into_py_any(py),
+        Data::Float(f) => f.into_py_any(py),
+        Data::Int(i) => i.into_py_any(py),
+        Data::Bool(b) => b.into_py_any(py),
         Data::DateTime(dt) => {
             if let Some(ndt) = dt.as_datetime() {
                 let d = PyDateTime::new(
@@ -249,7 +252,7 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
                 )?;
                 Ok(d.into_any().unbind())
             } else {
-                Ok(dt.as_f64().to_object(py))
+                dt.as_f64().into_py_any(py)
             }
         }
         Data::DateTimeIso(s) => {
@@ -281,14 +284,14 @@ fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
                 )?;
                 Ok(pydt.into_any().unbind())
             } else {
-                Ok(s.to_object(py))
+                s.into_py_any(py)
             }
         }
-        Data::DurationIso(s) => Ok(s.to_object(py)),
-        Data::RichText(rt) => Ok(rt.plain_text().to_object(py)),
+        Data::DurationIso(s) => s.into_py_any(py),
+        Data::RichText(rt) => rt.plain_text().into_py_any(py),
         Data::Error(e) => {
             let normalized = map_error_value(&format!("{e:?}"));
-            Ok(normalized.to_object(py))
+            normalized.into_py_any(py)
         }
     }
 }
