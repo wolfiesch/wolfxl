@@ -548,6 +548,99 @@ class TestReadMode:
             f"expected pending formula at B2 to label 'formula', got {by_coord.get('B2')!r}"
         )
 
+    def test_cell_records_overlay_clears_stale_formula_metadata_on_literal_swap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Replacing a formula cell with a literal must drop the on-disk
+        # `formula` field from the overlay record. Leaving it stale lets
+        # downstream consumers see `data_type='number'` next to a leftover
+        # `formula='SUM(...)'`, which mis-classifies a now-literal cell as
+        # a formula cell.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula-cleared.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "F"
+        ws["A1"] = 1
+        ws["A2"] = 2
+        ws["B1"] = "=SUM(A1:A2)"  # on-disk formula cell
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["F"]
+            ws["B1"] = 99  # literal overwrites the formula
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        b1 = by_coord["B1"]
+        assert b1["value"] == 99
+        assert b1["data_type"] == "number"
+        assert "formula" not in b1, (
+            f"stale formula leaked into literal-overwrite record: {b1!r}"
+        )
+
+    def test_cell_records_overlay_replaces_formula_metadata_on_formula_swap(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Replacing one formula with a different formula (or a literal with
+        # a formula) must update the `formula` field too — not just `value`
+        # / `data_type` — so consumers don't see contradictory metadata.
+        # Stripped of leading "=" to match the Rust reader's convention.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula-replaced.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "F"
+        ws["A1"] = 1
+        ws["B1"] = "=A1+1"  # original formula
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["F"]
+            ws["B1"] = "=A1*10"  # different formula
+            by_coord = {r["coordinate"]: r for r in ws.cell_records()}
+
+        b1 = by_coord["B1"]
+        assert b1["data_type"] == "formula"
+        assert b1.get("formula") == "A1*10", (
+            f"formula field not refreshed: {b1!r}"
+        )
+
+    def test_iter_cell_records_write_mode_honors_include_coordinate(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Write mode (no Rust reader) goes through the Python fallback.
+        # Earlier the fallback always emitted `coordinate`, ignoring
+        # `include_coordinate=False` and forcing per-cell A1 string
+        # allocation that the API explicitly promises to skip.
+        from wolfxl import Workbook as WolfxlWorkbook
+
+        path = tmp_path / "writemode-coord.xlsx"
+        wb = WolfxlWorkbook()
+        ws = wb.active
+        ws["A1"] = 1
+        ws["B2"] = 2
+
+        records_with = ws.cell_records(include_coordinate=True)
+        records_without = ws.cell_records(include_coordinate=False)
+
+        wb.close()
+
+        assert all("coordinate" in r for r in records_with), records_with
+        assert all("coordinate" not in r for r in records_without), records_without
+        # Sanity: the rest of the schema is unchanged.
+        assert {r["value"] for r in records_without} == {1, 2}
+
     def test_cell_records_overlay_uses_canonical_data_type_labels(
         self,
         tmp_path: Path,

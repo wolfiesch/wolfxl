@@ -531,6 +531,7 @@ class Worksheet:
                 min_col=min_col,
                 max_col=max_col,
                 include_empty=include_empty,
+                include_coordinate=include_coordinate,
             )
             return
 
@@ -575,6 +576,16 @@ class Worksheet:
             patched = dict(record)
             patched["value"] = new_value
             patched["data_type"] = _canonical_data_type(new_value)
+            # The on-disk record may carry a "formula" field from the
+            # original cell. After an overlay edit, that field is stale:
+            # a literal-overwrites-formula edit must drop it, and a
+            # formula-overwrites-literal edit must replace it. Strip the
+            # leading "=" to match the Rust reader's convention (formula
+            # text is stored without the prefix; openpyxl writes it back).
+            if isinstance(new_value, str) and new_value.startswith("="):
+                patched["formula"] = new_value[1:]
+            else:
+                patched.pop("formula", None)
             yield patched
 
         # Yield pending edits that were inside the requested range but the
@@ -656,6 +667,7 @@ class Worksheet:
         min_col: int | None,
         max_col: int | None,
         include_empty: bool,
+        include_coordinate: bool = True,
     ) -> Iterator[dict[str, Any]]:
         r_min = min_row or 1
         r_max = max_row or self._max_row()
@@ -667,13 +679,15 @@ class Worksheet:
                 value = cell.value
                 if value is None and not include_empty:
                     continue
-                yield {
+                record: dict[str, Any] = {
                     "row": row,
                     "column": col,
-                    "coordinate": rowcol_to_a1(row, col),
                     "value": value,
                     "data_type": _canonical_data_type(value),
                 }
+                if include_coordinate:
+                    record["coordinate"] = rowcol_to_a1(row, col)
+                yield record
 
     def calculate_dimension(self) -> str:
         """Return the used worksheet range in openpyxl's ``A1:C10`` form."""
