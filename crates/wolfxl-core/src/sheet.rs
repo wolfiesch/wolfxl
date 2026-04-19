@@ -55,6 +55,18 @@ impl Sheet {
         (h, w)
     }
 
+    /// Test-only constructor: build a `Sheet` from a pre-shaped grid without
+    /// round-tripping through xlsx. Lets crate-internal tests (e.g. the
+    /// classifier in `map.rs`) cover branches the committed fixtures don't
+    /// exercise.
+    #[cfg(test)]
+    pub(crate) fn from_rows_for_test(name: &str, rows: Vec<Vec<Cell>>) -> Self {
+        Self {
+            name: name.to_string(),
+            rows,
+        }
+    }
+
     pub fn rows(&self) -> &[Vec<Cell>] {
         &self.rows
     }
