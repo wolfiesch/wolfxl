@@ -1,0 +1,371 @@
+//! Output renderers for `wolfxl peek`.
+//!
+//! Four shapes, all driven from the same `Sheet` snapshot:
+//! - `boxed`: full TTY preview with banner, sheet metadata, box-drawn table
+//! - `text`: tab-separated rows, no banner (drop-in for `awk`/`cut`)
+//! - `csv`:  RFC 4180 CSV, integer thousand-grouping retained
+//! - `json`: machine-shaped `{sheet, rows, columns, headers, data}`
+//!
+//! Parity targets `xleak` byte-for-byte where xleak is sensible (csv/json/text
+//! shape, JSON keys, integer grouping behavior). Banner text is wolfxl-branded.
+
+use std::io::Write;
+
+use serde_json::Value;
+use unicode_width::UnicodeWidthStr;
+use wolfxl_core::{Cell, CellValue, Sheet};
+
+pub struct RenderOptions<'a> {
+    pub max_rows: Option<usize>,
+    pub max_width: usize,
+    pub all_sheets: &'a [String],
+}
+
+pub fn text<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
+    // xleak's `-n` is box-mode only; text/csv/json emit the full sheet so
+    // the benchmark can pipe through `head` reproducibly.
+    for row in sheet.rows() {
+        let cells: Vec<String> = row.iter().map(|c| display_cell(c, true)).collect();
+        writeln!(w, "{}", cells.join("\t"))?;
+    }
+    Ok(())
+}
+
+pub fn csv<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
+    for row in sheet.rows() {
+        let cells: Vec<String> = row.iter().map(|c| csv_quote(&display_cell(c, true))).collect();
+        writeln!(w, "{}", cells.join(","))?;
+    }
+    Ok(())
+}
+
+/// Emit JSON shaped like xleak's `--export json`:
+/// - top-level object pretty-printed with 2-space indent
+/// - `headers` array: one element per line
+/// - `data` array: one row per line, each row inline `[v, v, v]` with
+///   space after every comma (matches xleak byte-for-byte so token counts
+///   in `benchmarks/measure_tokens.py` reproduce).
+pub fn json<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
+    let (total_rows, cols) = sheet.dimensions();
+    let data_rows = total_rows.saturating_sub(1);
+    let headers: Vec<String> = sheet.headers();
+    let sheet_name_json = serde_json::to_string(&sheet.name).expect("string is JSON-safe");
+
+    writeln!(w, "{{")?;
+    writeln!(w, "  \"sheet\": {sheet_name_json},")?;
+    writeln!(w, "  \"rows\": {data_rows},")?;
+    writeln!(w, "  \"columns\": {cols},")?;
+
+    if headers.is_empty() {
+        writeln!(w, "  \"headers\": [],")?;
+    } else {
+        writeln!(w, "  \"headers\": [")?;
+        for (i, h) in headers.iter().enumerate() {
+            let h_json = serde_json::to_string(h).expect("string is JSON-safe");
+            let comma = if i + 1 == headers.len() { "" } else { "," };
+            writeln!(w, "    {h_json}{comma}")?;
+        }
+        writeln!(w, "  ],")?;
+    }
+
+    let body: Vec<&Vec<Cell>> = sheet.rows().iter().skip(1).collect();
+    if body.is_empty() {
+        writeln!(w, "  \"data\": []")?;
+    } else {
+        writeln!(w, "  \"data\": [")?;
+        let n = body.len();
+        for (i, row) in body.iter().enumerate() {
+            let inline = format_row_inline(row);
+            let comma = if i + 1 == n { "" } else { "," };
+            writeln!(w, "    {inline}{comma}")?;
+        }
+        writeln!(w, "  ]")?;
+    }
+    writeln!(w, "}}")
+}
+
+fn format_row_inline(row: &[Cell]) -> String {
+    let parts: Vec<String> = row
+        .iter()
+        .map(|c| serde_json::to_string(&json_cell(c)).unwrap_or_else(|_| "null".to_string()))
+        .collect();
+    format!("[{}]", parts.join(", "))
+}
+
+pub fn boxed<W: Write>(w: &mut W, sheet: &Sheet, opts: &RenderOptions) -> std::io::Result<()> {
+    let (total_rows, total_cols) = sheet.dimensions();
+    let data_rows = total_rows.saturating_sub(1);
+    write_banner(w)?;
+    writeln!(w, "Sheet: {} ({} rows × {} columns)", sheet.name, data_rows, total_cols)?;
+    writeln!(w, "Available sheets: {}", opts.all_sheets.join(", "))?;
+    writeln!(w)?;
+
+    if total_cols == 0 {
+        writeln!(w, "(empty sheet)")?;
+        return Ok(());
+    }
+
+    let cap_total = effective_row_cap(sheet, opts);
+    let display_rows: Vec<Vec<String>> = sheet
+        .rows()
+        .iter()
+        .take(cap_total)
+        .map(|row| row.iter().map(|c| truncate(&display_cell(c, true), opts.max_width)).collect())
+        .collect();
+
+    let widths = column_widths(&display_rows, total_cols);
+
+    write_box_border(w, &widths, BorderStyle::Top)?;
+    if let Some(header) = display_rows.first() {
+        write_box_row(w, header, &widths, true)?;
+        write_box_border(w, &widths, BorderStyle::Mid)?;
+    }
+    let body = display_rows.iter().skip(1);
+    let body_count = display_rows.len().saturating_sub(1);
+    for (i, row) in body.enumerate() {
+        write_box_row(w, row, &widths, false)?;
+        if i + 1 < body_count {
+            write_box_border(w, &widths, BorderStyle::Mid)?;
+        }
+    }
+    write_box_border(w, &widths, BorderStyle::Bottom)?;
+
+    let shown_data = cap_total.saturating_sub(1);
+    if data_rows > shown_data {
+        writeln!(w)?;
+        writeln!(
+            w,
+            "⚠️  Showing {shown_data} of {data_rows} rows (use -n 0 to show all)"
+        )?;
+    }
+    Ok(())
+}
+
+fn write_banner<W: Write>(w: &mut W) -> std::io::Result<()> {
+    let title = "wolfxl peek - Excel preview";
+    let inner = title.len() + 4;
+    let line = "═".repeat(inner);
+    writeln!(w, "╔{line}╗")?;
+    writeln!(w, "║  {title}  ║")?;
+    writeln!(w, "╚{line}╝")?;
+    writeln!(w)
+}
+
+#[derive(Copy, Clone)]
+enum BorderStyle {
+    Top,
+    Mid,
+    Bottom,
+}
+
+fn write_box_border<W: Write>(
+    w: &mut W,
+    widths: &[usize],
+    style: BorderStyle,
+) -> std::io::Result<()> {
+    let (left, mid, right) = match style {
+        BorderStyle::Top => ('┌', '┬', '┐'),
+        BorderStyle::Mid => ('├', '┼', '┤'),
+        BorderStyle::Bottom => ('└', '┴', '┘'),
+    };
+    write!(w, "{left}")?;
+    for (i, width) in widths.iter().enumerate() {
+        write!(w, "{}", "─".repeat(width + 2))?;
+        let sep = if i + 1 == widths.len() { right } else { mid };
+        write!(w, "{sep}")?;
+    }
+    writeln!(w)
+}
+
+fn write_box_row<W: Write>(
+    w: &mut W,
+    row: &[String],
+    widths: &[usize],
+    center: bool,
+) -> std::io::Result<()> {
+    write!(w, "│")?;
+    for (i, width) in widths.iter().enumerate() {
+        let cell = row.get(i).map(String::as_str).unwrap_or("");
+        let cell_width = UnicodeWidthStr::width(cell);
+        let pad = width.saturating_sub(cell_width);
+        if center {
+            let left = pad / 2;
+            let right = pad - left;
+            write!(
+                w,
+                " {}{}{} │",
+                " ".repeat(left),
+                cell,
+                " ".repeat(right)
+            )?;
+        } else {
+            write!(w, " {}{} │", cell, " ".repeat(pad))?;
+        }
+    }
+    writeln!(w)
+}
+
+fn column_widths(rows: &[Vec<String>], cols: usize) -> Vec<usize> {
+    let mut widths = vec![0usize; cols];
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i >= cols {
+                break;
+            }
+            let w = UnicodeWidthStr::width(cell.as_str());
+            if w > widths[i] {
+                widths[i] = w;
+            }
+        }
+    }
+    for w in widths.iter_mut() {
+        if *w == 0 {
+            *w = 1;
+        }
+    }
+    widths
+}
+
+fn effective_row_cap(sheet: &Sheet, opts: &RenderOptions) -> usize {
+    let total = sheet.rows().len();
+    match opts.max_rows {
+        None => total,
+        // box renderer counts header in the cap; xleak does the same.
+        Some(n) => (n + 1).min(total),
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    let width = UnicodeWidthStr::width(s);
+    if width <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut acc = 0usize;
+    let cap = max.saturating_sub(1);
+    for ch in s.chars() {
+        let cw = UnicodeWidthStr::width(ch.to_string().as_str());
+        if acc + cw > cap {
+            break;
+        }
+        out.push(ch);
+        acc += cw;
+    }
+    out.push('…');
+    out
+}
+
+fn csv_quote(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        let escaped = s.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    } else {
+        s.to_string()
+    }
+}
+
+fn display_cell(cell: &Cell, group_ints: bool) -> String {
+    match &cell.value {
+        CellValue::Empty => String::new(),
+        CellValue::String(s) => s.clone(),
+        CellValue::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+        CellValue::Int(n) => {
+            if group_ints {
+                group_thousands_signed(*n)
+            } else {
+                n.to_string()
+            }
+        }
+        CellValue::Float(n) => trim_float(*n),
+        CellValue::Date(d) => d.format("%Y-%m-%d").to_string(),
+        CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+        CellValue::Time(t) => t.format("%H:%M:%S").to_string(),
+        CellValue::Error(e) => e.clone(),
+    }
+}
+
+fn json_cell(cell: &Cell) -> Value {
+    match &cell.value {
+        CellValue::Empty => Value::Null,
+        CellValue::String(s) => Value::String(s.clone()),
+        CellValue::Bool(b) => Value::Bool(*b),
+        CellValue::Int(n) => Value::Number((*n).into()),
+        CellValue::Float(n) => serde_json::Number::from_f64(*n).map(Value::Number).unwrap_or(Value::Null),
+        CellValue::Date(d) => Value::String(d.format("%Y-%m-%d").to_string()),
+        CellValue::DateTime(dt) => Value::String(dt.format("%Y-%m-%dT%H:%M:%S").to_string()),
+        CellValue::Time(t) => Value::String(t.format("%H:%M:%S").to_string()),
+        CellValue::Error(e) => Value::String(e.clone()),
+    }
+}
+
+fn group_thousands_signed(n: i64) -> String {
+    let sign = if n < 0 { "-" } else { "" };
+    let abs = if n == i64::MIN {
+        // Avoid overflow on negation of i64::MIN.
+        (i64::MAX as u64) + 1
+    } else {
+        n.unsigned_abs()
+    };
+    format!("{sign}{}", group_thousands(abs))
+}
+
+fn group_thousands(mut n: u64) -> String {
+    if n == 0 {
+        return "0".to_string();
+    }
+    let mut parts: Vec<String> = Vec::new();
+    while n > 0 {
+        let chunk = n % 1000;
+        n /= 1000;
+        if n > 0 {
+            parts.push(format!("{chunk:03}"));
+        } else {
+            parts.push(chunk.to_string());
+        }
+    }
+    parts.reverse();
+    parts.join(",")
+}
+
+fn trim_float(n: f64) -> String {
+    if !n.is_finite() {
+        return n.to_string();
+    }
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{n:.1}")
+    } else {
+        let s = format!("{n:.6}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_quote_only_when_needed() {
+        assert_eq!(csv_quote("plain"), "plain");
+        assert_eq!(csv_quote("420,000"), "\"420,000\"");
+        assert_eq!(csv_quote("a\"b"), "\"a\"\"b\"");
+    }
+
+    #[test]
+    fn integer_grouping() {
+        assert_eq!(group_thousands_signed(0), "0");
+        assert_eq!(group_thousands_signed(1234567), "1,234,567");
+        assert_eq!(group_thousands_signed(-12345), "-12,345");
+    }
+
+    #[test]
+    fn truncate_respects_unicode_width() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("supercalifragilistic", 8), "superca…");
+    }
+
+    #[test]
+    fn trim_float_keeps_one_decimal_for_integral() {
+        assert_eq!(trim_float(3.0), "3.0");
+        assert_eq!(trim_float(3.14), "3.14");
+    }
+}
