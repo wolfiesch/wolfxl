@@ -23,8 +23,11 @@ pub struct RenderOptions<'a> {
 
 pub fn text<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
     // xleak's `-n` is box-mode only; text/csv/json emit the full sheet so
-    // the benchmark can pipe through `head` reproducibly.
-    for row in sheet.rows() {
+    // the benchmark can pipe through `head` reproducibly. Header row is
+    // emitted as raw strings (no int-grouping) to match xleak's separate
+    // headers track.
+    writeln!(w, "{}", sheet.headers().join("\t"))?;
+    for row in sheet.rows().iter().skip(1) {
         let cells: Vec<String> = row.iter().map(|c| display_cell(c, true)).collect();
         writeln!(w, "{}", cells.join("\t"))?;
     }
@@ -32,7 +35,11 @@ pub fn text<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::i
 }
 
 pub fn csv<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io::Result<()> {
-    for row in sheet.rows() {
+    // xleak emits headers as `data.headers.join(",")` with no per-cell quoting,
+    // which is broken on commas in headers. We at least quote properly.
+    let headers: Vec<String> = sheet.headers().iter().map(|h| csv_quote(h)).collect();
+    writeln!(w, "{}", headers.join(","))?;
+    for row in sheet.rows().iter().skip(1) {
         let cells: Vec<String> = row.iter().map(|c| csv_quote(&display_cell(c, true))).collect();
         writeln!(w, "{}", cells.join(","))?;
     }
@@ -256,7 +263,9 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 fn csv_quote(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
+    // RFC 4180: quote on any of `,"\r\n`. xleak only quotes on `,` and `"`,
+    // which is broken — embedded line-breaks split the row. We diverge here.
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         let escaped = s.replace('"', "\"\"");
         format!("\"{escaped}\"")
     } else {
@@ -268,7 +277,8 @@ fn display_cell(cell: &Cell, group_ints: bool) -> String {
     match &cell.value {
         CellValue::Empty => String::new(),
         CellValue::String(s) => s.clone(),
-        CellValue::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+        // Lowercase to match xleak's `bool::Display`.
+        CellValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
         CellValue::Int(n) => {
             if group_ints {
                 group_thousands_signed(*n)
@@ -280,7 +290,8 @@ fn display_cell(cell: &Cell, group_ints: bool) -> String {
         CellValue::Date(d) => d.format("%Y-%m-%d").to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         CellValue::Time(t) => t.format("%H:%M:%S").to_string(),
-        CellValue::Error(e) => e.clone(),
+        // xleak's `CellValue::Error` Display prefixes with "ERROR: ".
+        CellValue::Error(e) => format!("ERROR: {e}"),
     }
 }
 
@@ -328,14 +339,35 @@ fn group_thousands(mut n: u64) -> String {
 }
 
 fn trim_float(n: f64) -> String {
+    // Matches xleak's `CellValue::Float` Display impl: integer-valued floats
+    // render with no decimals (`{n:.0}`), everything else is forced to two
+    // (`{n:.2}`), and the integer part gets thousand separators in both cases.
+    // This is destructive precision-wise but is the parity target for
+    // text/csv/box; JSON keeps full precision via serde_json.
     if !n.is_finite() {
         return n.to_string();
     }
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        format!("{n:.1}")
+    let formatted = if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{n:.0}")
     } else {
-        let s = format!("{n:.6}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
+        format!("{n:.2}")
+    };
+    // Split on the decimal point (if any) and group the integer part.
+    let (int_part, frac_part) = match formatted.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (formatted.as_str(), None),
+    };
+    let negative = int_part.starts_with('-');
+    let digits = int_part.trim_start_matches('-');
+    let grouped = match digits.parse::<u64>() {
+        Ok(n) => group_thousands(n),
+        // f64 outside u64 range (>= 2^64). xleak falls back to ungrouped digits.
+        Err(_) => digits.to_string(),
+    };
+    let grouped = if negative { format!("-{grouped}") } else { grouped };
+    match frac_part {
+        Some(f) => format!("{grouped}.{f}"),
+        None => grouped,
     }
 }
 
@@ -364,8 +396,31 @@ mod tests {
     }
 
     #[test]
-    fn trim_float_keeps_one_decimal_for_integral() {
-        assert_eq!(trim_float(3.0), "3.0");
+    fn trim_float_matches_xleak_display() {
+        // xleak parity: integer-valued -> {:.0}, otherwise -> {:.2}, then
+        // thousand-separator the integer part.
+        assert_eq!(trim_float(3.0), "3");
         assert_eq!(trim_float(3.14), "3.14");
+        assert_eq!(trim_float(3.14159), "3.14");
+        assert_eq!(trim_float(-2.0), "-2");
+        assert_eq!(trim_float(2505.15), "2,505.15");
+        assert_eq!(trim_float(1234567.5), "1,234,567.50");
+        assert_eq!(trim_float(-1184.73), "-1,184.73");
+    }
+
+    #[test]
+    fn csv_quotes_on_carriage_return() {
+        assert_eq!(csv_quote("a\rb"), "\"a\rb\"");
+        assert_eq!(csv_quote("a\nb"), "\"a\nb\"");
+    }
+
+    #[test]
+    fn display_cell_bool_lowercase_and_error_prefix() {
+        let true_cell = Cell { value: CellValue::Bool(true), number_format: None };
+        let false_cell = Cell { value: CellValue::Bool(false), number_format: None };
+        let err_cell = Cell { value: CellValue::Error("#REF!".to_string()), number_format: None };
+        assert_eq!(display_cell(&true_cell, true), "true");
+        assert_eq!(display_cell(&false_cell, true), "false");
+        assert_eq!(display_cell(&err_cell, true), "ERROR: #REF!");
     }
 }

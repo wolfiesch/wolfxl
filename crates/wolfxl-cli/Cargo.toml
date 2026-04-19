@@ -4,14 +4,16 @@ version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Command-line tool for fast, agent-friendly Excel previews. Installs the `wolfxl` binary."
+description = "Excel xlsx previewer. Installs the `wolfxl` binary with a `peek` subcommand for box/text/csv/json output."
+keywords = ["xlsx", "excel", "cli", "preview", "spreadsheet"]
+categories = ["command-line-utilities", "visualization"]
 
 [[bin]]
 name = "wolfxl"
 path = "src/main.rs"
 
 [dependencies]
-wolfxl-core = { path = "../wolfxl-core" }
+wolfxl-core = { path = "../wolfxl-core", version = "0.4.0" }
 clap = { version = "4", features = ["derive"] }
 anyhow.workspace = true
 serde_json.workspace = true

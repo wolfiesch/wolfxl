@@ -117,10 +117,13 @@ pub fn format_cell(cell: &Cell) -> String {
 }
 
 fn format_currency(value: f64, decimals: usize) -> String {
+    // Round once on a single scaled integer so 1.995 carries to 2.00, not 1.100.
+    // Splitting `trunc()` and `fract()` separately drops the carry.
     let sign = if value < 0.0 { "-" } else { "" };
-    let abs = value.abs();
-    let whole = abs.trunc() as u64;
-    let frac = (abs.fract() * 10_f64.powi(decimals as i32)).round() as u64;
+    let scale = 10u64.pow(decimals as u32);
+    let scaled = (value.abs() * scale as f64).round() as u64;
+    let whole = scaled / scale;
+    let frac = scaled % scale;
     format!(
         "{}${}.{:0width$}",
         sign,
@@ -203,6 +206,23 @@ mod tests {
             number_format: Some("$#,##0.00".into()),
         };
         assert_eq!(format_cell(&neg), "-$42.00");
+    }
+
+    #[test]
+    fn currency_handles_carry_on_rounding() {
+        // Pre-fix: 1.995 → "$1.100" because frac rounded to 100 without carrying.
+        let cell = Cell {
+            value: CellValue::Float(1.995),
+            number_format: Some("$#,##0.00".into()),
+        };
+        assert_eq!(format_cell(&cell), "$2.00");
+
+        // Carry across the thousands boundary too.
+        let cell = Cell {
+            value: CellValue::Float(999.999),
+            number_format: Some("$#,##0.00".into()),
+        };
+        assert_eq!(format_cell(&cell), "$1,000.00");
     }
 
     #[test]
