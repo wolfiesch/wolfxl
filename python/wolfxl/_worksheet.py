@@ -18,6 +18,12 @@ def _canonical_data_type(value: Any) -> str:
     `formula` / `blank`). Overlay/Python-side records must use the same
     vocabulary so consumers that filter by these tokens see one schema across
     pure-read mode, modify mode, and pure-write mode.
+
+    A string value beginning with ``=`` is classified as ``"formula"`` to
+    match openpyxl's convention (and Rust's formula_map_cache path) — without
+    this, pending formula edits in modify mode would silently downgrade to
+    plain strings and any consumer counting/filtering formula records would
+    miss them.
     """
     if value is None:
         return "blank"
@@ -27,7 +33,7 @@ def _canonical_data_type(value: Any) -> str:
     if isinstance(value, (int, float)):
         return "number"
     if isinstance(value, str):
-        return "string"
+        return "formula" if value.startswith("=") else "string"
     if isinstance(value, _dt.datetime):
         return "datetime"
     if isinstance(value, _dt.date):
@@ -713,15 +719,21 @@ class Worksheet:
         on-disk Rust bounds, and by ``_max_row``/``_max_col`` so write-mode
         ``ws.max_row`` reflects ``append()``/``write_rows()`` that haven't
         materialized yet.
+
+        Iterates ``_dirty`` (set of actually-modified cell keys) rather than
+        ``_cells`` — the cell map is populated by mere read access
+        (``ws['Z999']`` materializes a Cell without modifying it), so reading
+        a far cell would otherwise inflate dimension bounds and trigger
+        oversized scans in downstream callers.
         """
-        cells = self._cells
+        dirty = self._dirty
         buf = self._append_buffer
         bulk = self._bulk_writes
-        if not cells and not buf and not bulk:
+        if not dirty and not buf and not bulk:
             return None
         min_r = min_c = None
         max_r = max_c = 0
-        for row, col in cells:
+        for row, col in dirty:
             if min_r is None or row < min_r:
                 min_r = row
             if min_c is None or col < min_c:

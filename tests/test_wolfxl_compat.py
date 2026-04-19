@@ -472,6 +472,82 @@ class TestReadMode:
             f"expected None at B2 in values_only bulk read, got {rows[1][1]!r}"
         )
 
+    def test_max_row_does_not_inflate_from_read_only_cell_access(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # `_cells` is a read-cache: ws['Z999'].value populates it without
+        # ever marking a cell dirty. The pending-bounds helper must iterate
+        # `_dirty` (actually-modified cells), not `_cells` — otherwise read
+        # access at far coordinates inflates max_row/max_column and
+        # downstream range derivations scan empty space.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "no-inflate.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Tight"
+        ws["A1"] = "only-cell"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Tight"]
+            assert ws.max_row == 1
+            assert ws.max_column == 1
+
+            # Mere read access at a far coordinate must not be treated as
+            # a pending write.
+            _ = ws["Z999"].value
+            assert ws.max_row == 1, (
+                f"reading Z999 inflated max_row to {ws.max_row}"
+            )
+            assert ws.max_column == 1, (
+                f"reading Z999 inflated max_column to {ws.max_column}"
+            )
+            assert ws.calculate_dimension() == "A1:A1", (
+                f"reading Z999 inflated dimension to {ws.calculate_dimension()}"
+            )
+
+            # Now actually write — bounds should grow.
+            ws["Z999"] = "now-dirty"
+            assert ws.max_row == 999
+            assert ws.max_column == 26
+
+    def test_cell_records_overlay_labels_pending_formulas_as_formula(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # Strings starting with '=' are formulas in openpyxl's convention
+        # (and match Rust's formula_map_cache path). Overlay records must
+        # label them data_type='formula' or any consumer counting/filtering
+        # formula records misses pending edits.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "overlay-formula.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Form"
+        ws["A1"] = 10
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Form"]
+            ws["B2"] = "=SUM(A1:A1)"  # extra-overlay formula
+            by_coord = {
+                r["coordinate"]: r["data_type"]
+                for r in ws.cell_records()
+            }
+
+        assert by_coord.get("B2") == "formula", (
+            f"expected pending formula at B2 to label 'formula', got {by_coord.get('B2')!r}"
+        )
+
     def test_cell_records_overlay_uses_canonical_data_type_labels(
         self,
         tmp_path: Path,
