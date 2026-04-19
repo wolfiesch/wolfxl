@@ -324,6 +324,36 @@ class TestReadMode:
         assert dense[0]["value"] is None
         assert dense[0]["formula"] == "=SUM(A1:A1)"
 
+    def test_cell_records_include_formula_blanks_false_skips_uncached_inside_range(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # When a template formula sits inside the populated rectangular range,
+        # calamine returns Some(Data::Empty) rather than None for that cell.
+        # `include_formula_blanks=False` must still suppress the formula record;
+        # treating Some(Data::Empty) as a backing entry was the regression.
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "uncached-formula-in-range.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = wb["Formula"].cell_records(include_formula_blanks=False)
+
+        coords = [r["coordinate"] for r in records]
+        assert "B2" not in coords, (
+            f"uncached formula B2 should be suppressed when "
+            f"include_formula_blanks=False, got coords={coords}"
+        )
+
     def test_calculate_dimension_uses_cell_storage_when_dimension_tag_is_stale(
         self,
         tmp_path: Path,

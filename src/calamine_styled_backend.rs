@@ -894,14 +894,25 @@ impl CalamineStyledBook {
                     .range_cache
                     .get(sheet)
                     .and_then(|range| range.get_value((row, col)).cloned());
-                let value_is_uncached_formula =
-                    data_only
-                        && formula.as_ref().zip(value.as_ref()).is_some_and(
-                            |(formula_text, value)| data_is_formula_text(value, formula_text),
-                        );
+                // calamine writes an empty `<v/>` element on a formula cell as
+                // `Some(Data::String(""))`, and renders blank cells inside the
+                // rectangular bounding box as `Some(Data::Empty)`. Either is
+                // semantically "the formula has no cached result". Treat them
+                // uniformly so `include_formula_blanks=false` actually suppresses
+                // the cell, and `data_only` still skips it via
+                // `value_is_uncached_formula`.
+                let value_is_formula_placeholder =
+                    formula.as_ref().zip(value.as_ref()).is_some_and(
+                        |(formula_text, v)| data_is_formula_text(v, formula_text),
+                    );
+                let value_is_uncached_formula = data_only && value_is_formula_placeholder;
                 let has_value = value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
-                    && !value_is_uncached_formula;
-                let has_formula_backing_entry = value.is_some();
+                    && !value_is_uncached_formula
+                    && !value_is_formula_placeholder;
+                let has_formula_backing_entry = value
+                    .as_ref()
+                    .is_some_and(|v| !matches!(v, Data::Empty))
+                    && !value_is_formula_placeholder;
                 let should_emit_formula = formula.is_some()
                     && !data_only
                     && (include_formula_blanks || has_formula_backing_entry);

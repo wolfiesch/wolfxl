@@ -150,10 +150,21 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
         return CellValue::Date(date);
     }
     let secs = (frac * 86_400.0).round() as u32;
+    // A fraction like 0.99999999 rounds up to 86_400 seconds (a full day).
+    // Carry into the next date instead of clamping h to 23 — the prior
+    // `h.min(23)` produced 23:00:00 on the wrong date.
+    let (date, secs) = if secs >= 86_400 {
+        let next = date
+            .checked_add_days(chrono::Days::new(1))
+            .unwrap_or(date);
+        (next, secs - 86_400)
+    } else {
+        (date, secs)
+    };
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
-    let time = NaiveTime::from_hms_opt(h.min(23), m.min(59), s.min(59))
+    let time = NaiveTime::from_hms_opt(h, m, s)
         .unwrap_or_else(|| NaiveTime::from_hms_opt(0, 0, 0).unwrap());
     CellValue::DateTime(NaiveDateTime::new(date, time))
 }
@@ -228,5 +239,23 @@ mod tests {
         let value = excel_serial_to_datetime(-100.0);
         let d = date(value);
         assert!(d.year() < 1900, "got {d}");
+    }
+
+    #[test]
+    fn excel_serial_carries_near_midnight_fraction_to_next_day() {
+        // 44197 + 0.99999999 rounds up to 86_400 secs in the day-fraction
+        // calc; that must carry into 2021-01-02 00:00:00 instead of clamping
+        // to 23:00:00 on 2021-01-01.
+        let value = excel_serial_to_datetime(44197.0 + 0.99999999);
+        match value {
+            CellValue::DateTime(dt) => {
+                assert_eq!(
+                    dt.date(),
+                    NaiveDate::from_ymd_opt(2021, 1, 2).unwrap(),
+                );
+                assert_eq!(dt.time(), NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+            }
+            other => panic!("expected DateTime, got {other:?}"),
+        }
     }
 }
