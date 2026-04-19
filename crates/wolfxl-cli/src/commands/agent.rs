@@ -4,15 +4,21 @@
 //! 1. Workbook overview (every sheet, dims + class + first-column header)
 //! 2. Focused sheet header (chosen sheet, dims, class)
 //! 3. Column headers for the focused sheet
-//! 4. Head rows (first 3) — ordering tends to be authored, so head matters
-//! 5. Tail rows (last 2) — totals/EPS/footnotes typically live at the bottom
-//! 6. Stratified middle samples — fills remaining budget with diverse rows
-//! 7. Footer line: `# wolfxl agent: USED/LIMIT tokens (cl100k_base)`
+//! 4. Named ranges (capped, budgeted — drops first if budget is tight)
+//! 5. Head rows (first 3) — ordering tends to be authored, so head matters
+//! 6. Tail rows (last 2) — totals/EPS/footnotes typically live at the bottom
+//! 7. Stratified middle samples — fills remaining budget with diverse rows
+//! 8. Footer line: `# wolfxl agent: USED/LIMIT tokens (cl100k_base)`
 //!
 //! Block 1+2+3 is the orientation core and is emitted even if the row blocks
 //! get dropped. If even the orientation core overflows, we still emit it
 //! (truncating the budget would defeat the purpose of telling the agent what
 //! sheets exist) and the footer reports the overage so the caller knows.
+//!
+//! Footer tokens count toward the budget. We reserve a worst-case footer
+//! cost up-front (so body composition stops early enough), and the final
+//! printed `USED` value re-encodes `body + footer` so the reported number
+//! matches what `tiktoken.cl100k_base.encode(stdout)` returns.
 //!
 //! Token counts use `tiktoken-rs::cl100k_base` to match the GPT-4 family
 //! tokenizer used by `spreadsheet-peek/benchmarks/measure_tokens.py`.
@@ -43,17 +49,35 @@ pub fn run(file: PathBuf, max_tokens: usize, target_sheet: Option<String>) -> Re
     write_overview(&mut buf, &map);
     write_sheet_header(&mut buf, &target, &sheet, &map);
 
+    // Named ranges are best-effort: emitted via try_append so they drop
+    // first when the budget is tight. They live between the orientation
+    // core and the row blocks so they get priority over samples but never
+    // crowd out columns.
+    write_named_ranges(&mut buf, &budget, &map);
+
     write_rows(&mut buf, &sheet, &budget);
 
-    let footer = format!(
-        "\n# wolfxl agent: {used}/{limit} tokens (cl100k_base)\n",
-        used = budget.used(&buf),
-        limit = max_tokens
-    );
-    buf.push_str(&footer);
+    // The footer reports `body+footer` tokens. Because the printed `used`
+    // value is itself part of the footer, we iterate to a fixed point: in
+    // practice this converges in 1-2 passes since cl100k_base token counts
+    // are stable across small changes in the digit length of the numerator.
+    let mut reported = budget.used(&buf);
+    for _ in 0..3 {
+        let probe = format_footer(reported, budget.limit);
+        let total = budget.used_with(&buf, &probe);
+        if total == reported {
+            break;
+        }
+        reported = total;
+    }
+    buf.push_str(&format_footer(reported, budget.limit));
 
     io::stdout().lock().write_all(buf.as_bytes())?;
     Ok(())
+}
+
+fn format_footer(used: usize, limit: usize) -> String {
+    format!("\n# wolfxl agent: {used}/{limit} tokens (cl100k_base)\n")
 }
 
 /// Pick the focus sheet. Explicit `--sheet` wins; otherwise prefer the
@@ -108,12 +132,27 @@ fn write_overview(buf: &mut String, map: &WorkbookMap) {
             ));
         }
     }
-    if !map.named_ranges.is_empty() {
-        buf.push_str("NAMED_RANGES:\n");
-        for (name, formula) in &map.named_ranges {
-            buf.push_str(&format!("  - {name} = {formula}\n"));
-        }
+}
+
+/// Best-effort named-ranges section. Capped at 8 entries so a workbook
+/// with 200 named ranges can't single-handedly drain the budget; longer
+/// lists get a `… (+N more)` overflow marker. The whole section is also
+/// gated through `try_append`, so under tight budgets it drops cleanly
+/// and never partially emits.
+fn write_named_ranges(buf: &mut String, budget: &Budget, map: &WorkbookMap) {
+    if map.named_ranges.is_empty() {
+        return;
     }
+    const MAX: usize = 8;
+    let total = map.named_ranges.len();
+    let mut section = String::from("\nNAMED_RANGES:\n");
+    for (name, formula) in map.named_ranges.iter().take(MAX) {
+        section.push_str(&format!("  - {name} = {formula}\n"));
+    }
+    if total > MAX {
+        section.push_str(&format!("  … (+{} more)\n", total - MAX));
+    }
+    try_append(buf, budget, &section);
 }
 
 fn write_sheet_header(buf: &mut String, target: &str, sheet: &Sheet, map: &WorkbookMap) {
@@ -128,10 +167,16 @@ fn write_sheet_header(buf: &mut String, target: &str, sheet: &Sheet, map: &Workb
     buf.push_str(&format!(
         "SHEET: {target}  [{class}]  {rows} rows × {cols} cols\n"
     ));
+    // Headers may come back as a vector of empty strings when the first
+    // row of a sheet has no header values (e.g., a sparse summary). In
+    // that case a `HEADERS:\t\t\t\t` line burns tokens for no signal —
+    // skip it. We also trim trailing empties so wide tables with mostly
+    // unlabelled trailing columns don't pad the line with noise tabs.
     let headers = sheet.headers();
-    if !headers.is_empty() {
+    if let Some(end) = headers.iter().rposition(|h| !h.is_empty()) {
+        let trimmed = &headers[..=end];
         buf.push_str("HEADERS: ");
-        buf.push_str(&headers.join("\t"));
+        buf.push_str(&trimmed.join("\t"));
         buf.push('\n');
     }
 }
@@ -244,9 +289,13 @@ fn render_section(sheet: &Sheet, lo: usize, hi: usize, label: &str) -> String {
 /// because cl100k_base BPE merges across boundaries — a token boundary that
 /// sits at the seam can collapse two pieces into one. Sub-additive merge
 /// would let an additive check reject sections that would actually fit.
+///
+/// The check is against `body_limit`, not `limit`: `body_limit` reserves
+/// space for the (yet-to-be-appended) footer line so the total emission
+/// honors `--max-tokens N`.
 fn try_append(buf: &mut String, budget: &Budget, section: &str) -> bool {
     let candidate_used = budget.used_with(buf, section);
-    if candidate_used > budget.limit {
+    if candidate_used > budget.body_limit {
         return false;
     }
     buf.push_str(section);
@@ -286,25 +335,40 @@ fn display_cell(cell: &Cell) -> String {
     }
 }
 
-/// Token budget tracker. Wraps `cl100k_base` and tracks the running total
-/// of tokens emitted so far. `consume(s)` returns the token count of `s`
-/// (so callers can decide whether to commit it); `remaining()` returns
-/// what's left given the latest `used()` recompute.
+/// Stateless token-budget projection. Wraps `cl100k_base` and exposes
+/// two queries: `used(buf)` re-encodes the buffer end-to-end, and
+/// `used_with(buf, section)` re-encodes `buf + section` (used by
+/// `try_append` to predict the cost of a candidate section).
 ///
-/// Implementation note: we recount the whole accumulated buffer in
-/// `used()` rather than incrementing per-add. BPE is *not* additive —
-/// `tokens(a + b) <= tokens(a) + tokens(b)` because adjacent pieces can
-/// merge into a single token across the boundary. Recomputing on the
-/// final buffer is the only way to get a count that matches what
-/// `tiktoken.cl100k_base.encode(full_output)` will produce.
+/// `limit` is the user-supplied `--max-tokens N`. `body_limit` is
+/// `limit - footer_reserve`, where `footer_reserve` is the worst-case
+/// token cost of the trailing `# wolfxl agent: USED/LIMIT ...` line.
+/// `try_append` checks against `body_limit` so the final emission
+/// (body + footer) honors the user's limit.
+///
+/// We re-encode the whole accumulated buffer rather than incrementing
+/// per-add because BPE is *not* additive — `tokens(a + b) <= tokens(a)
+/// + tokens(b)` since adjacent pieces can merge into a single token
+/// across the boundary. Recomputing on the final buffer is the only
+/// way to get a count that matches what `tiktoken.cl100k_base.encode(
+/// full_output)` produces in Python.
 struct Budget<'a> {
     bpe: &'a CoreBPE,
     limit: usize,
+    body_limit: usize,
 }
 
 impl<'a> Budget<'a> {
     fn new(bpe: &'a CoreBPE, limit: usize) -> Self {
-        Self { bpe, limit }
+        // Worst-case footer width: digits scaled to 10x the limit so an
+        // overage report like `8500/800` still fits the reserve. The
+        // reserve is intentionally a couple tokens looser than strictly
+        // necessary; over-reserving costs at most a row of samples.
+        let max_used = limit.saturating_mul(10).max(limit);
+        let worst = format_footer(max_used, limit);
+        let footer_reserve = bpe.encode_ordinary(&worst).len();
+        let body_limit = limit.saturating_sub(footer_reserve);
+        Self { bpe, limit, body_limit }
     }
 
     /// Total tokens an accumulated buffer would cost (matches what
@@ -342,6 +406,27 @@ mod tests {
         let combined = b.used("hello world");
         let with = b.used_with("hello", " world");
         assert_eq!(combined, with);
+    }
+
+    #[test]
+    fn budget_reserves_room_for_footer() {
+        // body_limit must leave at least enough headroom that appending
+        // the actual footer never crosses `limit`. We use a worst-case
+        // reserve of 10x the limit's digit width as the numerator, so
+        // even when the orientation core overflows and the footer reads
+        // e.g. "8500/800", body_limit + footer fits the projection.
+        let bpe = cl100k_base_singleton();
+        let b = Budget::new(bpe, 800);
+        assert!(b.body_limit < b.limit, "must reserve nonzero footer space");
+        let realistic_footer = format_footer(b.limit, b.limit);
+        let footer_tokens = b.used(&realistic_footer);
+        assert!(
+            b.body_limit + footer_tokens <= b.limit,
+            "body_limit ({}) + realistic footer ({}) must fit limit ({})",
+            b.body_limit,
+            footer_tokens,
+            b.limit
+        );
     }
 
     #[test]
