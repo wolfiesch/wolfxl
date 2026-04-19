@@ -1,7 +1,7 @@
 //! Per-column schema inference: type, null count, cardinality, format.
 //!
-//! Built for the `wolfxl schema` agent subcommand. Returns enough per-column
-//! detail for an LLM to plan a query strategy without round-tripping the
+//! Built for the `wolfxl schema` subcommand. Returns enough per-column detail
+//! for an LLM or agent to plan a query strategy without round-tripping the
 //! actual data: pick lookup columns by `cardinality`, choose dimension vs
 //! measure by `inferred_type` + `format_category`, decide whether `unique_count`
 //! is exact or capped before treating it as a primary key.
@@ -166,11 +166,19 @@ fn infer_column(sheet: &Sheet, col_idx: usize, name: &str, body_rows: usize) -> 
 
         let rendered = render_for_uniqueness(cell);
         if !unique_capped {
-            if uniques.len() < UNIQUE_CAP {
-                if uniques.insert(rendered.clone()) && samples.len() < SAMPLE_LIMIT {
+            if uniques.contains(&rendered) {
+                // Already-seen value: no cap consideration, no sample
+                // update needed.
+            } else if uniques.len() < UNIQUE_CAP {
+                uniques.insert(rendered.clone());
+                if samples.len() < SAMPLE_LIMIT {
                     samples.push(rendered);
                 }
             } else {
+                // First *new* distinct value past the cap. A column with
+                // exactly UNIQUE_CAP distinct values followed by repeats
+                // stays uncapped — `unique_count == UNIQUE_CAP` is then an
+                // exact, trustworthy figure.
                 unique_capped = true;
             }
         }
@@ -193,10 +201,18 @@ fn infer_column(sheet: &Sheet, col_idx: usize, name: &str, body_rows: usize) -> 
     }
 }
 
-/// Render a cell's value for distinct-set membership. Same semantics as
-/// what an agent would see in `wolfxl peek -e text` for that cell, minus
-/// thousand grouping (so `1000` and `1,000` aren't counted twice — but the
-/// underlying value space is the same).
+/// Render a cell's value as a HashSet key for distinct-counting and as a
+/// human-readable sample. Date/time/error formats follow the same conventions
+/// as `wolfxl peek -e text` (space-separated DateTime, `ERROR: ` error
+/// prefix) so a sample dropped into a `peek` filter expression matches what
+/// an agent would otherwise see.
+///
+/// Two intentional divergences from peek's text renderer:
+/// - **Floats keep full Rust precision** (`format!("{n}")`) rather than
+///   rounding to two decimals: dedup correctness needs `1.234` and `1.236`
+///   to count as distinct.
+/// - **Ints are not thousand-grouped**: `1000` and `1,000` would otherwise
+///   key into the HashSet as different strings.
 fn render_for_uniqueness(cell: &Cell) -> String {
     match &cell.value {
         CellValue::Empty => String::new(),
@@ -205,9 +221,9 @@ fn render_for_uniqueness(cell: &Cell) -> String {
         CellValue::Int(n) => n.to_string(),
         CellValue::Float(n) => format!("{n}"),
         CellValue::Date(d) => d.format("%Y-%m-%d").to_string(),
-        CellValue::DateTime(dt) => dt.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         CellValue::Time(t) => t.format("%H:%M:%S").to_string(),
-        CellValue::Error(e) => format!("ERR:{e}"),
+        CellValue::Error(e) => format!("ERROR: {e}"),
     }
 }
 
@@ -430,6 +446,43 @@ mod tests {
         let col = &schema.columns[0];
         assert_eq!(col.format_category, FormatCategory::Currency);
         assert_eq!(col.inferred_type, InferredType::Float);
+    }
+
+    #[test]
+    fn at_cap_then_repeats_stays_uncapped() {
+        // A column with exactly UNIQUE_CAP distinct values followed by a
+        // long run of repeats should report the exact count and stay
+        // uncapped. The earlier flip-on-next-row logic incorrectly set
+        // `unique_capped: true` (and forced HighCardinality) on the first
+        // duplicate after the cap, misleading downstream callers about
+        // whether the cardinality figure was trustworthy.
+        let mut rows: Vec<Vec<Cell>> = vec![vec![s("id")]];
+        for n in 0..(UNIQUE_CAP as i64) {
+            rows.push(vec![i(n)]);
+        }
+        // Repeats — these must NOT flip `unique_capped`.
+        for n in 0..50 {
+            rows.push(vec![i(n)]);
+        }
+        let schema = infer_sheet_schema(&sheet_with("t", rows));
+        let col = &schema.columns[0];
+        assert_eq!(col.unique_count, UNIQUE_CAP);
+        assert!(!col.unique_capped, "exact-at-cap with only repeats should stay uncapped");
+    }
+
+    #[test]
+    fn one_past_cap_flips_capped() {
+        // The first genuinely new value beyond UNIQUE_CAP correctly flips
+        // the capped flag; subsequent classification falls back to
+        // HighCardinality (the safer bucket).
+        let mut rows: Vec<Vec<Cell>> = vec![vec![s("id")]];
+        for n in 0..((UNIQUE_CAP + 1) as i64) {
+            rows.push(vec![i(n)]);
+        }
+        let schema = infer_sheet_schema(&sheet_with("t", rows));
+        let col = &schema.columns[0];
+        assert!(col.unique_capped);
+        assert_eq!(col.cardinality, Cardinality::HighCardinality);
     }
 
     #[test]

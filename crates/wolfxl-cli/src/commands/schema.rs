@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
+use unicode_width::UnicodeWidthStr;
 use wolfxl_core::{SheetSchema, Workbook, infer_sheet_schema};
 
 use crate::SchemaFormat;
@@ -106,10 +107,25 @@ fn print_text(schemas: &[SheetSchema]) {
     }
 }
 
+/// Truncate `s` so its terminal display width fits in `max` columns,
+/// appending `…` (1-wide) when truncation happens. Uses unicode-width to
+/// match the column-alignment behavior of `wolfxl peek`'s boxed renderer
+/// — `chars().count()` would misalign on CJK / wide glyphs.
 fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
+    if s.width() <= max {
         return s.to_string();
     }
-    let head: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{head}…")
+    let budget = max.saturating_sub(1); // reserve 1 column for the ellipsis
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let w = ch.to_string().width();
+        if used + w > budget {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
+    out
 }
