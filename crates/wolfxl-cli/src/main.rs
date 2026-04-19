@@ -10,6 +10,7 @@ mod render;
 ///
 /// `wolfxl peek <file>` prints a styled, token-efficient view of a workbook —
 /// box / text / csv / json output, sheet selection, row and width caps.
+/// `wolfxl map <file>` prints a one-page summary of every sheet.
 #[derive(Parser, Debug)]
 #[command(name = "wolfxl", version, about, long_about = None)]
 struct Cli {
@@ -21,6 +22,24 @@ struct Cli {
 enum Command {
     /// Print a preview of a spreadsheet.
     Peek(PeekArgs),
+    /// Print a one-page workbook overview (sheets, dims, headers, named ranges).
+    Map(MapArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct MapArgs {
+    /// Path to the workbook (.xlsx).
+    file: PathBuf,
+
+    /// Output format.
+    #[arg(short = 'f', long = "format", default_value = "json")]
+    format: MapFormat,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum MapFormat {
+    Json,
+    Text,
 }
 
 #[derive(clap::Args, Debug)]
@@ -57,6 +76,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Peek(args) => commands::peek::run(args),
+        Command::Map(args) => commands::map::run(args.file, args.format),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

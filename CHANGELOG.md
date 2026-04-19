@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.0 (2026-04-19)
+
+### Added
+
+- **`wolfxl map <file>` subcommand**: one-page workbook overview for agents
+  that need to orient before fetching cell ranges. Emits per-sheet name,
+  dimensions, headers, anchored tables, and a coarse classification
+  (`empty` / `readme` / `summary` / `data`) plus workbook-level defined
+  names. Two output formats: `--format json` (default, machine-parseable)
+  and `--format text` (terminal-friendly, sectioned per sheet, header
+  preview capped at 8 columns with overflow count).
+- **`wolfxl-core::map` module**: `WorkbookMap`, `SheetMap`, `SheetClass`,
+  and the `classify_sheet` heuristic, callable from third-party Rust
+  consumers via the new `Workbook::map()` method.
+- `Workbook::named_ranges()` and `Workbook::table_names_in_sheet(name)`
+  pass-throughs to calamine's metadata accessors. Tables are now eagerly
+  loaded at `Workbook::open` so these accessors stay infallible (calamine
+  panics on `table_names*` without a prior `load_tables`).
+- Test-only `Sheet::from_rows_for_test` constructor (gated behind
+  `#[cfg(test)]`) so the classifier can exercise `Empty` / `Readme` /
+  sparse `Summary` branches that the committed xlsx fixtures don't hit.
+
+### Notes
+
+- The classifier intentionally does not look at merged cells (the upstream
+  PyO3 layer does, but `wolfxl-core` doesn't expose merge metadata yet).
+  A merged-title-row sheet today classifies as `summary` via the size +
+  density rule, which is the right answer for a typical dashboard.
+- Pivot detection is still out of scope — calamine doesn't surface pivot
+  parts directly, and the agent value of "this sheet is a pivot" is
+  marginal next to dimensions + headers.
+
 ## 0.4.0 (2026-04-19)
 
 ### Added

@@ -137,3 +137,42 @@ fn missing_file_errors() {
         .unwrap();
     assert!(!out.status.success());
 }
+
+#[test]
+fn map_text_lists_every_sheet_with_class_and_dims() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["map", path.to_str().unwrap(), "--format", "text"]);
+    // All three sheets appear with their classification tag.
+    assert!(out.contains("[data] P&L  (21 rows × 7 cols)"), "missing P&L line: {out}");
+    assert!(out.contains("[data] Balance Sheet  (27 rows × 5 cols)"), "missing Balance Sheet line");
+    assert!(out.contains("[data] Revenue Breakdown  (13 rows × 7 cols)"), "missing Revenue line");
+    // Header preview surfaces the first column of P&L so callers can
+    // tell which sheet has which schema without a `peek`.
+    assert!(out.contains("Account | Jan 2024"), "missing P&L headers: {out}");
+}
+
+#[test]
+fn map_json_is_valid_and_has_expected_shape() {
+    let path = fixture("sample-financials.xlsx");
+    let out = run(&["map", path.to_str().unwrap()]);
+    let value: serde_json::Value = serde_json::from_str(&out).expect("map JSON parses");
+    let sheets = value["sheets"].as_array().expect("sheets is array");
+    assert_eq!(sheets.len(), 3, "expected 3 sheets in sample-financials");
+    assert_eq!(sheets[0]["name"], "P&L");
+    assert_eq!(sheets[0]["rows"], 21);
+    assert_eq!(sheets[0]["cols"], 7);
+    assert_eq!(sheets[0]["class"], "data");
+    assert_eq!(sheets[0]["headers"][0], "Account");
+    assert!(value["named_ranges"].is_array(), "named_ranges field must exist");
+}
+
+#[test]
+fn map_handles_wide_table_with_truncated_header_preview() {
+    let path = fixture("wide-table.xlsx");
+    let out = run(&["map", path.to_str().unwrap(), "--format", "text"]);
+    // Wide table has 29 columns; text view caps the header preview at 8
+    // and reports the overflow count so an agent can decide whether to
+    // `peek` the full width.
+    assert!(out.contains("[data] Dept Operations  (25 rows × 29 cols)"), "missing dims: {out}");
+    assert!(out.contains("… (+21 more)"), "missing overflow marker: {out}");
+}

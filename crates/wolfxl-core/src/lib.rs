@@ -28,11 +28,13 @@
 pub mod cell;
 pub mod error;
 pub mod format;
+pub mod map;
 pub mod sheet;
 pub mod workbook;
 
 pub use cell::{Cell, CellValue};
 pub use error::{Error, Result};
 pub use format::{FormatCategory, format_cell};
+pub use map::{SheetClass, SheetMap, WorkbookMap, classify_sheet};
 pub use sheet::Sheet;
 pub use workbook::Workbook;
