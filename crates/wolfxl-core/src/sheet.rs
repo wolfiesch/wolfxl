@@ -122,7 +122,16 @@ fn data_to_cell_value(d: &Data) -> CellValue {
 /// to match openpyxl rather than returning the epoch date.
 fn excel_serial_to_datetime(serial: f64) -> CellValue {
     if serial < 1.0 && serial >= 0.0 {
-        let secs = (serial * 86_400.0).round() as u32;
+        let mut secs = (serial * 86_400.0).round() as u32;
+        // 0.99999999 rounds to 86_400, which makes h=24 and `from_hms_opt`
+        // returns None — without this carry, the prior fallback emitted
+        // `CellValue::Float(serial)` and silently demoted a time-typed
+        // cell to a numeric. Mirror the day-carry the date+time branch
+        // does below: for a pure sub-day value, "next midnight" is just
+        // 00:00:00.
+        if secs >= 86_400 {
+            secs -= 86_400;
+        }
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
         let s = secs % 60;
@@ -241,6 +250,22 @@ mod tests {
         let value = excel_serial_to_datetime(-100.0);
         let d = date(value);
         assert!(d.year() < 1900, "got {d}");
+    }
+
+    #[test]
+    fn excel_serial_sub_day_near_midnight_carries_to_zero_time() {
+        // 0.99999999 rounds to 86_400 secs (h=24 is invalid). The prior
+        // fallback emitted CellValue::Float(serial), silently demoting a
+        // time-typed cell to a numeric. The carry should land on
+        // Time(00:00:00) — equivalent of "next midnight" with no date to
+        // carry into.
+        let value = excel_serial_to_datetime(0.99999999);
+        match value {
+            CellValue::Time(t) => {
+                assert_eq!(t, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+            }
+            other => panic!("expected Time(00:00:00), got {other:?}"),
+        }
     }
 
     #[test]

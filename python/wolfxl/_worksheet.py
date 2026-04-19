@@ -516,7 +516,77 @@ class Worksheet:
             include_formula_blanks,
             include_coordinate,
         )
-        yield from records
+
+        # Modify mode can have pending Python-side edits the Rust reader
+        # can't see. Overlay them on top of the on-disk records so the
+        # iterator reflects current worksheet state, not the last save.
+        # The overlay is only built when something is dirty — pure read
+        # mode pays no extra cost.
+        overlay = self._collect_pending_overlay()
+        if not overlay:
+            yield from records
+            return
+
+        seen: set[tuple[int, int]] = set()
+        for record in records:
+            row, col = int(record["row"]), int(record["column"])
+            key = (row, col)
+            if key not in overlay:
+                yield record
+                continue
+            seen.add(key)
+            new_value = overlay[key]
+            if new_value is None and not include_empty:
+                continue
+            patched = dict(record)
+            patched["value"] = new_value
+            patched["data_type"] = (
+                "blank" if new_value is None else type(new_value).__name__
+            )
+            yield patched
+
+        # Yield pending edits that were inside the requested range but the
+        # Rust reader didn't return (e.g. empty-on-disk cell user just set).
+        for (row, col), value in overlay.items():
+            if (row, col) in seen:
+                continue
+            if not (r_min <= row <= r_max and c_min <= col <= c_max):
+                continue
+            if value is None and not include_empty:
+                continue
+            extra: dict[str, Any] = {
+                "row": row,
+                "column": col,
+                "value": value,
+                "data_type": "blank" if value is None else type(value).__name__,
+            }
+            if include_coordinate:
+                extra["coordinate"] = rowcol_to_a1(row, col)
+            yield extra
+
+    def _collect_pending_overlay(self) -> dict[tuple[int, int], Any]:
+        """Return ``{(row, col): value}`` for cells modified since the last save.
+
+        Includes explicit cell edits (anything in ``_dirty``), the append
+        buffer, and bulk-write grids. Returns an empty dict when nothing is
+        pending — the Rust read path stays a hot, allocation-free loop.
+        """
+        overlay: dict[tuple[int, int], Any] = {}
+        if self._dirty:
+            for key in self._dirty:
+                cell = self._cells.get(key)
+                if cell is not None:
+                    overlay[key] = cell.value
+        if self._append_buffer:
+            start = self._append_buffer_start
+            for row_offset, row_values in enumerate(self._append_buffer):
+                for col_offset, value in enumerate(row_values):
+                    overlay[(start + row_offset, col_offset + 1)] = value
+        for grid, start_row, start_col in self._bulk_writes:
+            for row_offset, row_values in enumerate(grid):
+                for col_offset, value in enumerate(row_values):
+                    overlay[(start_row + row_offset, start_col + col_offset)] = value
+        return overlay
 
     def cell_records(
         self,

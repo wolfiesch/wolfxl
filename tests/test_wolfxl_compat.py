@@ -375,6 +375,45 @@ class TestReadMode:
             f"expected 4 (widest appended row), got {ws.max_column}"
         )
 
+    def test_cell_records_overlays_modify_mode_pending_edits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        # In modify mode the Rust reader serves on-disk values while pending
+        # edits live in Python-side ``_dirty``/``_append_buffer``. The
+        # iterator must overlay the edits — otherwise callers see stale
+        # values for cells they just modified.
+        from openpyxl import Workbook as OpWorkbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "modify-overlay.xlsx"
+        op_wb = OpWorkbook()
+        ws = op_wb.active
+        ws.title = "Overlay"
+        ws["A1"] = "old-a1"
+        ws["B2"] = "old-b2"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), modify=True) as wb:
+            ws = wb["Overlay"]
+            ws["A1"] = "new-a1"  # overwrite existing on-disk cell
+            ws["E10"] = "added"  # write outside on-disk range
+
+            records = ws.cell_records()
+            by_coord = {r["coordinate"]: r["value"] for r in records}
+
+        assert by_coord.get("A1") == "new-a1", (
+            f"expected pending edit on A1 to overlay on-disk value, got {by_coord}"
+        )
+        assert by_coord.get("B2") == "old-b2", (
+            f"expected unmodified B2 to keep on-disk value, got {by_coord}"
+        )
+        assert by_coord.get("E10") == "added", (
+            f"expected new edit at E10 to appear in records, got {by_coord}"
+        )
+
     def test_calculate_dimension_includes_modify_mode_pending_edits(
         self,
         tmp_path: Path,
