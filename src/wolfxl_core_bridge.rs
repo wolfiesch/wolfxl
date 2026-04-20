@@ -146,16 +146,71 @@ fn naive_datetime_from_py(dt: &Bound<'_, PyDateTime>) -> PyResult<NaiveDateTime>
 }
 
 /// Convert Python `List[List[Any]]` into a `wolfxl_core::Sheet`. The
-/// outer list is rows, the inner list is cells.
-fn build_sheet(name: &str, rows: &Bound<'_, PyList>) -> PyResult<Sheet> {
+/// outer list is rows, the inner list is cells. When
+/// `number_formats` is provided, it must be the same shape as `rows`
+/// (or `None` entries where no format applies) and its values are
+/// attached to each cell's `number_format` field. This is how the
+/// Python worksheet bridge ships per-cell `number_format` strings
+/// alongside values so schema inference sees the same format
+/// metadata as `wolfxl schema` on the same workbook — without it the
+/// CLI and Python paths disagree on `format_category`.
+fn build_sheet(
+    name: &str,
+    rows: &Bound<'_, PyList>,
+    number_formats: Option<&Bound<'_, PyList>>,
+) -> PyResult<Sheet> {
+    if let Some(fmts) = number_formats {
+        if fmts.len() != rows.len() {
+            return Err(PyValueError::new_err(format!(
+                "number_formats row count ({}) must match rows ({})",
+                fmts.len(),
+                rows.len()
+            )));
+        }
+    }
+
     let mut grid: Vec<Vec<Cell>> = Vec::with_capacity(rows.len());
-    for row_obj in rows.iter() {
+    for (row_idx, row_obj) in rows.iter().enumerate() {
         let row = row_obj.downcast::<PyList>().map_err(|_| {
             PyValueError::new_err("each row must be a list of cell values")
         })?;
+
+        let fmt_row = if let Some(fmts) = number_formats {
+            let entry = fmts.get_item(row_idx)?;
+            let fmt_list = entry.downcast::<PyList>().map_err(|_| {
+                PyValueError::new_err(
+                    "each number_formats row must be a list of Optional[str]",
+                )
+            })?.clone();
+            if fmt_list.len() != row.len() {
+                return Err(PyValueError::new_err(format!(
+                    "number_formats[{}] length ({}) must match rows[{}] length ({})",
+                    row_idx,
+                    fmt_list.len(),
+                    row_idx,
+                    row.len()
+                )));
+            }
+            Some(fmt_list)
+        } else {
+            None
+        };
+
         let mut cells: Vec<Cell> = Vec::with_capacity(row.len());
-        for cell_obj in row.iter() {
-            cells.push(py_to_cell(&cell_obj)?);
+        for (col_idx, cell_obj) in row.iter().enumerate() {
+            let mut cell = py_to_cell(&cell_obj)?;
+            if let Some(fmt_list) = &fmt_row {
+                let fmt_obj = fmt_list.get_item(col_idx)?;
+                if !fmt_obj.is_none() {
+                    let fmt_str: String = fmt_obj.extract().map_err(|_| {
+                        PyValueError::new_err(
+                            "number_formats entries must be str or None",
+                        )
+                    })?;
+                    cell.number_format = Some(fmt_str);
+                }
+            }
+            cells.push(cell);
         }
         grid.push(cells);
     }
@@ -185,18 +240,27 @@ pub fn classify_format(fmt: &str) -> String {
 #[pyfunction]
 #[pyo3(signature = (rows, name = "Sheet1"))]
 pub fn classify_sheet(rows: &Bound<'_, PyList>, name: &str) -> PyResult<String> {
-    let sheet = build_sheet(name, rows)?;
+    let sheet = build_sheet(name, rows, None)?;
     Ok(core_classify_sheet(&sheet).as_str().to_string())
 }
 
-/// Python-visible `infer_sheet_schema(rows, name) -> dict`.
+/// Python-visible `infer_sheet_schema(rows, name, number_formats) -> dict`.
 ///
 /// Returns the column-schema dict in the same JSON shape as
 /// `wolfxl schema --format json` emits per sheet, minus the outer
 /// `"sheets"` wrapper. Keys match the CLI output exactly so
 /// downstream callers can consume either surface interchangeably —
-/// that byte-identical parity is what task #22b's Python/CLI
-/// cross-surface test will eventually assert.
+/// that byte-identical parity is what `tests/test_classifier_parity.py`
+/// asserts on every run.
+///
+/// The optional `number_formats` argument is a parallel
+/// `List[List[Optional[str]]]` the same shape as `rows`. When
+/// provided, each entry populates `Cell::number_format`, so per-column
+/// `format_category` matches what the CLI sees on the same workbook.
+/// Without it, every cell's `number_format` defaults to `None` and
+/// every column's `format` falls back to `"general"`, which causes
+/// the CLI/Python surfaces to disagree on currency / percentage /
+/// date workbooks.
 ///
 /// Shape:
 ///
@@ -220,13 +284,14 @@ pub fn classify_sheet(rows: &Bound<'_, PyList>, name: &str) -> PyResult<String> 
 /// }
 /// ```
 #[pyfunction]
-#[pyo3(signature = (rows, name = "Sheet1"))]
+#[pyo3(signature = (rows, name = "Sheet1", number_formats = None))]
 pub fn infer_sheet_schema<'py>(
     py: Python<'py>,
     rows: &Bound<'py, PyList>,
     name: &str,
+    number_formats: Option<&Bound<'py, PyList>>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let sheet = build_sheet(name, rows)?;
+    let sheet = build_sheet(name, rows, number_formats)?;
     let schema = core_infer_sheet_schema(&sheet);
 
     let out = PyDict::new(py);
