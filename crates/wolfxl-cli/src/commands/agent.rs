@@ -31,8 +31,8 @@ use tiktoken_rs::{cl100k_base_singleton, CoreBPE};
 use wolfxl_core::{Cell, CellValue, Sheet, SheetClass, Workbook, WorkbookMap};
 
 pub fn run(file: PathBuf, max_tokens: usize, target_sheet: Option<String>) -> Result<()> {
-    let mut wb = Workbook::open(&file)
-        .with_context(|| format!("opening workbook: {}", file.display()))?;
+    let mut wb =
+        Workbook::open(&file).with_context(|| format!("opening workbook: {}", file.display()))?;
     let map = wb.map().context("building workbook map")?;
     let target = pick_target(&map, target_sheet.as_deref())?;
     let sheet = wb
@@ -191,7 +191,11 @@ fn write_rows(buf: &mut String, sheet: &Sheet, budget: &Budget) {
     }
     let body_count = total - body_start;
     let head_n = 3.min(body_count);
-    let tail_n = if body_count > head_n { 2.min(body_count - head_n) } else { 0 };
+    let tail_n = if body_count > head_n {
+        2.min(body_count - head_n)
+    } else {
+        0
+    };
 
     // Head: emit all-or-nothing as a labelled block. If the section overflows
     // we'd rather skip than half-emit (truncated rows lie about row count).
@@ -368,7 +372,11 @@ impl<'a> Budget<'a> {
         let worst = format_footer(max_used, limit);
         let footer_reserve = bpe.encode_ordinary(&worst).len();
         let body_limit = limit.saturating_sub(footer_reserve);
-        Self { bpe, limit, body_limit }
+        Self {
+            bpe,
+            limit,
+            body_limit,
+        }
     }
 
     /// Total tokens an accumulated buffer would cost (matches what

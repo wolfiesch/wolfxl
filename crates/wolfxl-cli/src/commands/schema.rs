@@ -11,15 +11,15 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use unicode_width::UnicodeWidthStr;
-use wolfxl_core::{SheetSchema, Workbook, infer_sheet_schema};
+use wolfxl_core::{infer_sheet_schema, SheetSchema, Workbook};
 
 use crate::SchemaFormat;
 
 pub fn run(file: PathBuf, format: SchemaFormat, sheet: Option<String>) -> Result<()> {
-    let mut wb = Workbook::open(&file)
-        .with_context(|| format!("opening workbook {}", file.display()))?;
+    let mut wb =
+        Workbook::open(&file).with_context(|| format!("opening workbook {}", file.display()))?;
 
     let sheet_names: Vec<String> = wb.sheet_names().to_vec();
     let targets: Vec<String> = match sheet {
@@ -82,7 +82,10 @@ fn print_text(schemas: &[SheetSchema]) {
             println!();
         }
         println!("Sheet: {}  ({} rows)", s.sheet, s.rows);
-        println!("{:<24} {:<9} {:<11} {:<7} {:<7} {:<16} samples", "column", "type", "format", "nulls", "unique", "cardinality");
+        println!(
+            "{:<24} {:<9} {:<11} {:<7} {:<7} {:<16} samples",
+            "column", "type", "format", "nulls", "unique", "cardinality"
+        );
         println!("{}", "-".repeat(96));
         for c in &s.columns {
             let unique = if c.unique_capped {

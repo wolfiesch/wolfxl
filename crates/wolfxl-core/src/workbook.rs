@@ -1,22 +1,62 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use calamine_styles::{Reader, Xlsx};
+use calamine_styles::{open_workbook_auto, Reader, Sheets};
 use zip::ZipArchive;
 
+use crate::csv_reader::CsvBackend;
 use crate::error::{Error, Result};
 use crate::map::{classify_sheet, SheetMap, WorkbookMap};
 use crate::ooxml::{
-    join_and_normalize, parse_relationship_targets, parse_workbook_sheet_rids,
-    zip_read_to_string, zip_read_to_string_opt,
+    join_and_normalize, parse_relationship_targets, parse_workbook_sheet_rids, zip_read_to_string,
+    zip_read_to_string_opt,
 };
-use crate::sheet::Sheet;
+use crate::sheet::{Sheet, SheetsReader};
 use crate::styles::{parse_cellxfs, parse_num_fmts, XfEntry};
 use crate::worksheet_xml::parse_cell_style_ids;
 
-type XlsxReader = Xlsx<BufReader<File>>;
+/// Source format detected from the file extension. Drives which calamine
+/// backend (or CSV reader) handles the workbook and gates xlsx-only
+/// features like the styles walker and table parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceFormat {
+    Xlsx,
+    Xls,
+    Xlsb,
+    Ods,
+    Csv,
+}
+
+impl SourceFormat {
+    fn from_extension(path: &Path) -> Result<Self> {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        match ext.as_deref() {
+            Some("xlsx" | "xlsm" | "xlam") => Ok(SourceFormat::Xlsx),
+            Some("xls" | "xla") => Ok(SourceFormat::Xls),
+            Some("xlsb") => Ok(SourceFormat::Xlsb),
+            Some("ods") => Ok(SourceFormat::Ods),
+            Some("csv" | "tsv" | "txt") => Ok(SourceFormat::Csv),
+            Some(other) => Err(Error::Format(format!(
+                "unsupported file extension: .{other} (supported: xlsx, xlsm, xlam, xls, xla, xlsb, ods, csv, tsv, txt)"
+            ))),
+            None => Err(Error::Format(
+                "cannot detect format: file has no extension".to_string(),
+            )),
+        }
+    }
+}
+
+/// Internal backend dispatch. Xlsx/Xls/Xlsb/Ods all flow through calamine's
+/// `Sheets` enum (which already abstracts them); CSV gets its own minimal
+/// value-only backend because it isn't a calamine-supported format.
+pub(crate) enum Backend {
+    Sheets(SheetsReader),
+    Csv(CsvBackend),
+}
 
 /// Pre-parsed style tables and worksheet-path lookup for a workbook.
 ///
@@ -38,12 +78,13 @@ impl WorkbookStyles {
         let mut zip = ZipArchive::new(file)
             .map_err(|e| Error::Xlsx(format!("failed to open xlsx zip: {e}")))?;
 
-        let cell_xfs = match zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
-            Some(xml) => parse_cellxfs(&xml),
+        let styles_xml = zip_read_to_string_opt(&mut zip, "xl/styles.xml")?;
+        let cell_xfs = match styles_xml.as_deref() {
+            Some(xml) => parse_cellxfs(xml),
             None => Vec::new(),
         };
-        let num_fmts = match zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
-            Some(xml) => parse_num_fmts(&xml)?,
+        let num_fmts = match styles_xml.as_deref() {
+            Some(xml) => parse_num_fmts(xml)?,
             None => HashMap::new(),
         };
 
@@ -95,10 +136,7 @@ impl WorkbookStyles {
     /// Lazily populate the per-cell styleId map for a sheet. Returns a
     /// reference to the cached map. Reading the XML is the expensive part;
     /// `&mut self` makes caching explicit.
-    pub fn sheet_style_ids_mut(
-        &mut self,
-        sheet_name: &str,
-    ) -> Result<&HashMap<(u32, u32), u32>> {
+    pub fn sheet_style_ids_mut(&mut self, sheet_name: &str) -> Result<&HashMap<(u32, u32), u32>> {
         if !self.per_sheet_style_ids.contains_key(sheet_name) {
             let Some(path) = self.sheet_xml_paths.get(sheet_name).cloned() else {
                 self.per_sheet_style_ids
@@ -125,34 +163,64 @@ impl WorkbookStyles {
 }
 
 pub struct Workbook {
-    inner: XlsxReader,
+    inner: Backend,
     sheet_names: Vec<String>,
     path: PathBuf,
+    format: SourceFormat,
     styles: Option<WorkbookStyles>,
 }
 
 impl Workbook {
+    /// Open a workbook, dispatching to the right backend by file extension.
+    ///
+    /// Supported: `.xlsx` / `.xlsm` / `.xlam` (primary, full style resolution via
+    /// calamine fast-path + cellXfs walker), `.xls` / `.xla` / `.xlsb` / `.ods`
+    /// (values + defined names via calamine; styles come back empty -
+    /// calamine-styles doesn't parse them for these formats yet), and
+    /// `.csv` / `.tsv` / `.txt` (single synthetic sheet, value-only, schema
+    /// inference is the source of truth for column types).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let file = File::open(&path)?;
-        let reader = BufReader::new(file);
-        let mut inner: XlsxReader =
-            Xlsx::new(reader).map_err(|e| Error::Xlsx(format!("failed to parse xlsx: {e}")))?;
-        // calamine `table_names*` panic if tables haven't been loaded; load
-        // eagerly so downstream `&self` accessors stay infallible. The call
-        // is idempotent and cheap on workbooks without table parts.
-        let _ = inner.load_tables();
-        let sheet_names = inner.sheet_names().to_vec();
-        Ok(Self {
-            inner,
-            sheet_names,
-            path,
-            styles: None,
-        })
+        let format = SourceFormat::from_extension(&path)?;
+
+        match format {
+            SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Xlsb | SourceFormat::Ods => {
+                let mut inner: SheetsReader = open_workbook_auto(&path)
+                    .map_err(|e| Error::Xlsx(format!("failed to open workbook: {e}")))?;
+                // Tables only exist on xlsx; load_tables is xlsx-specific
+                // and panics later in `table_names_in_sheet` if skipped.
+                if let Sheets::Xlsx(ref mut x) = inner {
+                    let _ = x.load_tables();
+                }
+                let sheet_names = inner.sheet_names().to_vec();
+                Ok(Self {
+                    inner: Backend::Sheets(inner),
+                    sheet_names,
+                    path,
+                    format,
+                    styles: None,
+                })
+            }
+            SourceFormat::Csv => {
+                let backend = CsvBackend::open(&path)?;
+                let sheet_names = backend.sheet_names();
+                Ok(Self {
+                    inner: Backend::Csv(backend),
+                    sheet_names,
+                    path,
+                    format,
+                    styles: None,
+                })
+            }
+        }
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn format(&self) -> SourceFormat {
+        self.format
     }
 
     pub fn sheet_names(&self) -> &[String] {
@@ -161,9 +229,17 @@ impl Workbook {
 
     /// Lazy accessor for the pre-parsed styles bundle. First call walks
     /// `xl/styles.xml` + `xl/workbook.xml` + rels; subsequent calls reuse
-    /// the cached [`WorkbookStyles`]. Returns `None` only if the zip is
-    /// unreadable (propagated via `Result`).
+    /// the cached [`WorkbookStyles`].
+    ///
+    /// Only meaningful for `.xlsx` / `.xlsm` / `.xlam` - for other formats returns
+    /// an error since there is no OOXML styles part to parse.
     pub fn styles(&mut self) -> Result<&mut WorkbookStyles> {
+        if self.format != SourceFormat::Xlsx {
+            return Err(Error::Xlsx(format!(
+                "styles walker only supports xlsx/xlsm/xlam; workbook format is {:?}",
+                self.format
+            )));
+        }
         if self.styles.is_none() {
             self.styles = Some(WorkbookStyles::load(&self.path)?);
         }
@@ -176,14 +252,18 @@ impl Workbook {
         if !self.sheet_names.iter().any(|n| n == name) {
             return Err(Error::SheetNotFound(name.to_string()));
         }
-        // Attempt styles load lazily. Failure here is non-fatal: older or
-        // non-standard xlsx zips without the expected parts still yield
-        // value-only sheets via the calamine path.
-        if self.styles.is_none() {
-            self.styles = WorkbookStyles::load(&self.path).ok();
+        match &mut self.inner {
+            Backend::Sheets(sheets) => {
+                // Styles walker is xlsx-only; other formats skip the lazy
+                // load entirely so `styles` stays None and the fallback
+                // path in `Sheet::load` never fires.
+                if self.format == SourceFormat::Xlsx && self.styles.is_none() {
+                    self.styles = WorkbookStyles::load(&self.path).ok();
+                }
+                Sheet::load(sheets, name, self.styles.as_mut())
+            }
+            Backend::Csv(csv) => csv.load_sheet(name),
         }
-        // Split borrow: `inner` and `styles` are separate fields.
-        Sheet::load(&mut self.inner, name, self.styles.as_mut())
     }
 
     /// Convenience: first sheet in workbook order.
@@ -196,20 +276,26 @@ impl Workbook {
         self.sheet(&name)
     }
 
-    /// Workbook-level defined names as `(name, formula)` pairs, exactly
-    /// as calamine surfaces them.
+    /// Workbook-level defined names as `(name, formula)` pairs. Empty for
+    /// CSV (no concept of named ranges).
     pub fn named_ranges(&self) -> Vec<(String, String)> {
-        self.inner.defined_names().to_vec()
+        match &self.inner {
+            Backend::Sheets(s) => s.defined_names().to_vec(),
+            Backend::Csv(_) => Vec::new(),
+        }
     }
 
-    /// Names of workbook tables anchored on the given sheet. Empty when
-    /// the sheet has none, which is the common case.
+    /// Names of workbook tables anchored on the given sheet. Xlsx-only;
+    /// returns empty on other formats since tables are an xlsx feature.
     pub fn table_names_in_sheet(&self, sheet_name: &str) -> Vec<String> {
-        self.inner
-            .table_names_in_sheet(sheet_name)
-            .into_iter()
-            .cloned()
-            .collect()
+        match &self.inner {
+            Backend::Sheets(Sheets::Xlsx(x)) => x
+                .table_names_in_sheet(sheet_name)
+                .into_iter()
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// Build a one-page summary: every sheet's dimensions, headers,

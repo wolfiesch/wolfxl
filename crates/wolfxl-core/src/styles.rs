@@ -41,11 +41,16 @@ pub fn parse_cellxfs(xml: &str) -> Vec<XfEntry> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+            Ok(Event::Start(ref e)) => {
                 let tag = e.local_name();
                 if tag.as_ref() == b"cellXfs" {
                     in_cellxfs = true;
                 } else if tag.as_ref() == b"xf" && in_cellxfs {
+                    entries.push(parse_xf_entry(e));
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                if e.local_name().as_ref() == b"xf" && in_cellxfs {
                     entries.push(parse_xf_entry(e));
                 }
             }
@@ -171,7 +176,10 @@ pub const BUILTIN_NUM_FMTS: &[(u32, &str)] = &[
     (41, r#"_(* #,##0_);_(* \(#,##0\);_(* "-"_);_(@_)"#),
     (42, r#"_("$"* #,##0_);_("$"* \(#,##0\);_("$"* "-"_);_(@_)"#),
     (43, r#"_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)"#),
-    (44, r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#),
+    (
+        44,
+        r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#,
+    ),
     (45, "mm:ss"),
     (46, "[h]:mm:ss"),
     (47, "mmss.0"),
@@ -191,10 +199,7 @@ pub fn builtin_num_fmt(id: u32) -> Option<&'static str> {
 /// Resolve a numFmtId against both the custom table and the built-in list.
 /// Custom entries win on conflict (Excel itself uses the custom value when
 /// an ID that overlaps with a built-in is redefined).
-pub fn resolve_num_fmt<'a>(
-    id: u32,
-    customs: &'a HashMap<u32, String>,
-) -> Option<&'a str> {
+pub fn resolve_num_fmt<'a>(id: u32, customs: &'a HashMap<u32, String>) -> Option<&'a str> {
     if let Some(custom) = customs.get(&id) {
         return Some(custom.as_str());
     }
@@ -231,6 +236,17 @@ mod tests {
     }
 
     #[test]
+    fn self_closing_cellxfs_does_not_capture_later_xfs() {
+        let xml = r#"
+<styleSheet>
+  <cellXfs count="0"/>
+  <cellStyleXfs count="1"><xf numFmtId="164"/></cellStyleXfs>
+</styleSheet>"#;
+        let entries = parse_cellxfs(xml);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
     fn parse_num_fmts_captures_custom_formats() {
         let customs = parse_num_fmts(MINIMAL_STYLES).unwrap();
         assert_eq!(customs.get(&164).map(|s| s.as_str()), Some("\"$\"#,##0.00"));
@@ -249,7 +265,10 @@ mod tests {
         assert_eq!(builtin_num_fmt(0), Some("General"));
         assert_eq!(builtin_num_fmt(9), Some("0%"));
         assert_eq!(builtin_num_fmt(14), Some("mm-dd-yy"));
-        assert_eq!(builtin_num_fmt(44), Some(r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#));
+        assert_eq!(
+            builtin_num_fmt(44),
+            Some(r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#)
+        );
         assert_eq!(builtin_num_fmt(163), None);
     }
 

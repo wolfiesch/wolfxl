@@ -31,10 +31,7 @@ pub fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
 
 /// Read a zip entry into a UTF-8 string, returning `None` when the entry
 /// is missing. Any other zip/IO error propagates.
-pub fn zip_read_to_string_opt(
-    zip: &mut ZipArchive<File>,
-    name: &str,
-) -> Result<Option<String>> {
+pub fn zip_read_to_string_opt(zip: &mut ZipArchive<File>, name: &str) -> Result<Option<String>> {
     match zip.by_name(name) {
         Ok(mut f) => {
             let mut out = String::new();
@@ -206,8 +203,14 @@ mod tests {
 
     #[test]
     fn normalize_collapses_dots() {
-        assert_eq!(normalize_zip_path("xl/./worksheets/../sheet1.xml"), "xl/sheet1.xml");
-        assert_eq!(normalize_zip_path("/xl/worksheets/sheet1.xml"), "xl/worksheets/sheet1.xml");
+        assert_eq!(
+            normalize_zip_path("xl/./worksheets/../sheet1.xml"),
+            "xl/sheet1.xml"
+        );
+        assert_eq!(
+            normalize_zip_path("/xl/worksheets/sheet1.xml"),
+            "xl/worksheets/sheet1.xml"
+        );
     }
 
     #[test]

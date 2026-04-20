@@ -1,14 +1,19 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use calamine_styles::{Data, Reader, Xlsx};
+use calamine_styles::{Data, Reader, Sheets};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
 use crate::cell::{Cell, CellValue};
 use crate::error::{Error, Result};
 use crate::workbook::WorkbookStyles;
 
-type XlsxReader = Xlsx<BufReader<File>>;
+/// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Xlsb/Ods
+/// behind a single enum. All four implement the `Reader` trait, so
+/// `worksheet_range` and `worksheet_style` work uniformly — xls/ods
+/// return an empty `StyleRange` (styles walker is xlsx-only), which
+/// is the expected behavior.
+pub(crate) type SheetsReader = Sheets<BufReader<File>>;
 
 pub struct Sheet {
     pub name: String,
@@ -17,7 +22,7 @@ pub struct Sheet {
 
 impl Sheet {
     pub(crate) fn load(
-        wb: &mut XlsxReader,
+        wb: &mut SheetsReader,
         name: &str,
         mut styles: Option<&mut WorkbookStyles>,
     ) -> Result<Self> {
@@ -35,6 +40,7 @@ impl Sheet {
         }
 
         let (h, w) = value_range.get_size();
+        let (start_row, start_col) = value_range.start().unwrap_or((0, 0));
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(h);
         for r in 0..h {
             let mut row: Vec<Cell> = Vec::with_capacity(w);
@@ -53,7 +59,7 @@ impl Sheet {
                         // where Style::get_number_format returns None.
                         styles
                             .as_ref()
-                            .and_then(|s| walker_number_format(s, name, r, c))
+                            .and_then(|s| walker_number_format(s, name, start_row, start_col, r, c))
                     });
                 row.push(Cell {
                     value,
@@ -85,6 +91,17 @@ impl Sheet {
             name: name.to_string(),
             rows,
         }
+    }
+
+    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend
+    /// internally; also public so third-party callers (notably the
+    /// PyO3 bridge in the sibling `wolfxl` cdylib) can feed externally-
+    /// sourced rows through `infer_sheet_schema` / `classify_sheet`
+    /// without reading from disk. No styles / number formats are
+    /// attached - callers with that information should set
+    /// `Cell::number_format` on the cells they build.
+    pub fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
+        Self { name, rows }
     }
 
     pub fn rows(&self) -> &[Vec<Cell>] {
@@ -255,11 +272,17 @@ fn extract_number_format(style: &calamine_styles::Style) -> Option<String> {
 fn walker_number_format(
     styles: &WorkbookStyles,
     sheet_name: &str,
+    start_row: u32,
+    start_col: u32,
     r: usize,
     c: usize,
 ) -> Option<String> {
-    let (row, col) = (u32::try_from(r).ok()?, u32::try_from(c).ok()?);
-    let style_id = styles.sheet_style_ids(sheet_name)?.get(&(row, col)).copied()?;
+    let row = start_row.checked_add(u32::try_from(r).ok()?)?;
+    let col = start_col.checked_add(u32::try_from(c).ok()?)?;
+    let style_id = styles
+        .sheet_style_ids(sheet_name)?
+        .get(&(row, col))
+        .copied()?;
     styles
         .number_format_for_style_id(style_id)
         .map(|s| s.to_string())

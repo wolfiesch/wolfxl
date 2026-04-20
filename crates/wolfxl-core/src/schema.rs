@@ -246,6 +246,34 @@ fn classify_cardinality(unique: usize, non_null: usize, capped: bool) -> Cardina
     Cardinality::HighCardinality
 }
 
+/// How a string-valued cell should be counted for type inference. Used by
+/// [`TypeCounts::observe`] so a CSV column of numeric-looking strings lands
+/// in the Int/Float bucket instead of the catch-all String bucket.
+enum StringShape {
+    Int,
+    Float,
+    Other,
+}
+
+/// Classify a string cell's text. Conservative: only classifies as numeric
+/// when the trimmed text parses cleanly as i64 / f64 with no stray
+/// characters. `"$100"`, `"1,000"`, `"100%"` stay `Other` — a number format
+/// is typically inferred from the column's format string, not from the cell
+/// text, for those shapes.
+fn classify_string_as_type(s: &str) -> StringShape {
+    let t = s.trim();
+    if t.is_empty() {
+        return StringShape::Other;
+    }
+    if t.parse::<i64>().is_ok() {
+        StringShape::Int
+    } else if t.parse::<f64>().is_ok_and(f64::is_finite) {
+        StringShape::Float
+    } else {
+        StringShape::Other
+    }
+}
+
 #[derive(Default)]
 struct TypeCounts {
     string: usize,
@@ -262,7 +290,16 @@ impl TypeCounts {
     fn observe(&mut self, v: &CellValue) {
         match v {
             CellValue::Empty => {}
-            CellValue::String(_) => self.string += 1,
+            // CSV cells and openpyxl-stored-as-text workbooks surface as
+            // strings here. Per invariant B4, schema inference is the
+            // single source of truth for "this column is actually numbers";
+            // parse the rendered text so a CSV column of `"100","200",...`
+            // classifies as Int, not String.
+            CellValue::String(s) => match classify_string_as_type(s) {
+                StringShape::Int => self.int += 1,
+                StringShape::Float => self.float += 1,
+                StringShape::Other => self.string += 1,
+            },
             CellValue::Int(_) => self.int += 1,
             CellValue::Float(_) => self.float += 1,
             CellValue::Bool(_) => self.bool_ += 1,
@@ -383,6 +420,18 @@ mod tests {
         let rows = vec![vec![s("col")], vec![s("hello")], vec![i(42)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Mixed);
+    }
+
+    #[test]
+    fn non_finite_numeric_strings_stay_strings() {
+        let rows = vec![
+            vec![s("value")],
+            vec![s("NaN")],
+            vec![s("inf")],
+            vec![s("-inf")],
+        ];
+        let schema = infer_sheet_schema(&sheet_with("t", rows));
+        assert_eq!(schema.columns[0].inferred_type, InferredType::String);
     }
 
     #[test]

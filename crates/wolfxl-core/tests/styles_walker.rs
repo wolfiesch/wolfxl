@@ -35,11 +35,7 @@ fn fixture_path(name: &str) -> PathBuf {
 #[test]
 fn workbook_resolves_date_formats_on_styled_fixture() {
     let path = fixture_path("tier1_01_cell_values.xlsx");
-    assert!(
-        path.exists(),
-        "fixture missing at {}",
-        path.display()
-    );
+    assert!(path.exists(), "fixture missing at {}", path.display());
 
     let mut wb = Workbook::open(&path).expect("open tier1_01_cell_values.xlsx");
     let first = wb.sheet_names()[0].clone();
@@ -116,7 +112,10 @@ fn walker_direct_resolution_from_synthetic_xml() {
     assert_eq!(xfs[4].num_fmt_id, 165);
 
     let num_fmts = parse_num_fmts(styles_xml).expect("parse numFmts");
-    assert_eq!(num_fmts.get(&164).map(String::as_str), Some(r"yyyy\-mm\-dd"));
+    assert_eq!(
+        num_fmts.get(&164).map(String::as_str),
+        Some(r"yyyy\-mm\-dd")
+    );
     assert_eq!(
         num_fmts.get(&165).map(String::as_str),
         Some(r"yyyy\-mm\-dd\ hh:mm:ss")

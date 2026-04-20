@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Error {
     Io(std::io::Error),
     Xlsx(String),
+    Format(String),
     SheetNotFound(String),
     InvalidRange(String),
 }
@@ -13,6 +14,7 @@ impl fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::Xlsx(s) => write!(f, "xlsx error: {s}"),
+            Error::Format(s) => write!(f, "format error: {s}"),
             Error::SheetNotFound(s) => write!(f, "sheet not found: {s:?}"),
             Error::InvalidRange(s) => write!(f, "invalid range: {s}"),
         }

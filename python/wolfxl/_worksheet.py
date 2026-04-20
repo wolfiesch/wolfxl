@@ -1182,5 +1182,84 @@ class Worksheet:
         if self._print_area is not None and hasattr(writer, "set_print_area"):
             writer.set_print_area(sheet, self._print_area)
 
+    # ------------------------------------------------------------------
+    # wolfxl-core classifier bridge (delegates to the single Rust
+    # classifier that `wolfxl schema --format json` also goes through —
+    # so Python callers and the CLI can never drift in their answers).
+    # ------------------------------------------------------------------
+
+    def classify_format(self, fmt: str) -> str:
+        """Classify an Excel number-format string (e.g. ``"$#,##0.00"``).
+
+        Returns the same category string the CLI's ``schema`` subcommand
+        emits in the per-column ``format`` field: ``"general"``,
+        ``"currency"``, ``"percentage"``, ``"scientific"``, ``"date"``,
+        ``"time"``, ``"datetime"``, ``"integer"``, ``"float"``, or
+        ``"text"``. The method is an
+        instance method for discoverability; it doesn't use any
+        worksheet state.
+        """
+        from wolfxl._rust import classify_format as _classify_format
+
+        return _classify_format(fmt)
+
+    def schema(self) -> dict[str, Any]:
+        """Infer this worksheet's schema via ``wolfxl_core::infer_sheet_schema``.
+
+        Returns a dict shaped exactly like one entry of
+        ``wolfxl schema <file> --format json``'s ``sheets`` array:
+
+        .. code-block:: python
+
+            {
+                "name": "Sheet1",
+                "rows": 50,
+                "columns": [
+                    {"name": "Account", "type": "string",
+                     "format": "general", "null_count": 0,
+                     "unique_count": 12, "unique_capped": false,
+                     "cardinality": "categorical",
+                     "samples": ["Revenue", "COGS", ...]},
+                    ...
+                ],
+            }
+
+        Builds two parallel grids — values and per-cell
+        ``number_format`` strings — from ``cell_records()`` so the
+        bridge sees the same format metadata the CLI does. Without the
+        format grid, currency / percentage / date columns would
+        classify as ``general`` and the Python answer would silently
+        drift from the CLI's. Pending in-memory ``number_format`` edits
+        are overlaid before inference so unsaved worksheet changes are
+        included too.
+        """
+        from wolfxl._cell import _UNSET
+        from wolfxl._rust import infer_sheet_schema as _infer_sheet_schema
+
+        max_row = self._max_row()
+        max_col = self._max_col()
+        values: list[list[Any]] = [[None] * max_col for _ in range(max_row)]
+        fmts: list[list[str | None]] = [[None] * max_col for _ in range(max_row)]
+        for record in self.iter_cell_records(
+            include_format=True,
+            include_empty=False,
+            include_coordinate=False,
+        ):
+            r = int(record["row"]) - 1
+            c = int(record["column"]) - 1
+            if r >= max_row or c >= max_col:
+                continue
+            values[r][c] = record.get("value")
+            nf = record.get("number_format")
+            if nf:
+                fmts[r][c] = nf
+        for (row, col), cell in self._cells.items():
+            if row > max_row or col > max_col:
+                continue
+            nf = cell._number_format
+            if nf is not _UNSET and nf:
+                fmts[row - 1][col - 1] = nf
+        return _infer_sheet_schema(values, self._title, fmts)
+
     def __repr__(self) -> str:
         return f"<Worksheet [{self._title}]>"

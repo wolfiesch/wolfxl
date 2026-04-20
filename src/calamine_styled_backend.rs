@@ -673,12 +673,7 @@ impl CalamineStyledBook {
                     return Ok(d.into());
                 }
             }
-        } else if is_uncached_formula_value(
-            self.formula_map_cache.get(sheet),
-            row,
-            col,
-            value,
-        ) {
+        } else if is_uncached_formula_value(self.formula_map_cache.get(sheet), row, col, value) {
             return cell_blank(py);
         }
 
@@ -946,18 +941,17 @@ impl CalamineStyledBook {
                 // uniformly so `include_formula_blanks=false` actually suppresses
                 // the cell, and `data_only` still skips it via
                 // `value_is_uncached_formula`.
-                let value_is_formula_placeholder =
-                    formula.as_ref().zip(value.as_ref()).is_some_and(
-                        |(formula_text, v)| data_is_formula_text(v, formula_text),
-                    );
+                let value_is_formula_placeholder = formula
+                    .as_ref()
+                    .zip(value.as_ref())
+                    .is_some_and(|(formula_text, v)| data_is_formula_text(v, formula_text));
                 let value_is_uncached_formula = data_only && value_is_formula_placeholder;
                 let has_value = value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
                     && !value_is_uncached_formula
                     && !value_is_formula_placeholder;
-                let has_formula_backing_entry = value
-                    .as_ref()
-                    .is_some_and(|v| !matches!(v, Data::Empty))
-                    && !value_is_formula_placeholder;
+                let has_formula_backing_entry =
+                    value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
+                        && !value_is_formula_placeholder;
                 let should_emit_formula = formula.is_some()
                     && !data_only
                     && (include_formula_blanks || has_formula_backing_entry);
