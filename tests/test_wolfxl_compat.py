@@ -169,6 +169,27 @@ class TestReadMode:
         assert fill is not None
         wb.close()
 
+    def test_read_explicit_bottom_alignment(self, tmp_path: Path) -> None:
+        import openpyxl
+        from openpyxl.styles import Alignment
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "alignment-bottom.xlsx"
+        op_wb = openpyxl.Workbook()
+        ws = op_wb.active
+        assert ws is not None
+        ws["B2"] = "bottom"
+        ws["B2"].alignment = Alignment(vertical="bottom")
+        op_wb.save(path)
+        op_wb.close()
+
+        wb = load_workbook(str(path))
+        ws2 = wb.active
+        assert ws2 is not None
+        assert ws2["B2"].alignment.vertical == "bottom"
+        wb.close()
+
     def test_context_manager(self) -> None:
         from wolfxl import load_workbook
 
