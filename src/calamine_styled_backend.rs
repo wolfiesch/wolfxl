@@ -138,7 +138,7 @@ fn h_align_str(a: &HorizontalAlignment) -> Option<&'static str> {
 /// Convert a calamine VerticalAlignment to the ExcelBench string.
 fn v_align_str(a: &VerticalAlignment) -> Option<&'static str> {
     match a {
-        VerticalAlignment::Bottom => None, // default — omit
+        VerticalAlignment::Bottom => Some("bottom"),
         VerticalAlignment::Top => Some("top"),
         VerticalAlignment::Center => Some("center"),
         VerticalAlignment::Justify => Some("justify"),
