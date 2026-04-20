@@ -40,10 +40,10 @@ impl SourceFormat {
             Some("xlsb") => Ok(SourceFormat::Xlsb),
             Some("ods") => Ok(SourceFormat::Ods),
             Some("csv" | "tsv" | "txt") => Ok(SourceFormat::Csv),
-            Some(other) => Err(Error::Xlsx(format!(
-                "unsupported file extension: .{other} (supported: xlsx, xlsm, xls, xlsb, ods, csv)"
+            Some(other) => Err(Error::Format(format!(
+                "unsupported file extension: .{other} (supported: xlsx, xlsm, xlam, xls, xla, xlsb, ods, csv, tsv, txt)"
             ))),
-            None => Err(Error::Xlsx(
+            None => Err(Error::Format(
                 "cannot detect format: file has no extension".to_string(),
             )),
         }
@@ -78,12 +78,13 @@ impl WorkbookStyles {
         let mut zip = ZipArchive::new(file)
             .map_err(|e| Error::Xlsx(format!("failed to open xlsx zip: {e}")))?;
 
-        let cell_xfs = match zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
-            Some(xml) => parse_cellxfs(&xml),
+        let styles_xml = zip_read_to_string_opt(&mut zip, "xl/styles.xml")?;
+        let cell_xfs = match styles_xml.as_deref() {
+            Some(xml) => parse_cellxfs(xml),
             None => Vec::new(),
         };
-        let num_fmts = match zip_read_to_string_opt(&mut zip, "xl/styles.xml")? {
-            Some(xml) => parse_num_fmts(&xml)?,
+        let num_fmts = match styles_xml.as_deref() {
+            Some(xml) => parse_num_fmts(xml)?,
             None => HashMap::new(),
         };
 
@@ -172,11 +173,11 @@ pub struct Workbook {
 impl Workbook {
     /// Open a workbook, dispatching to the right backend by file extension.
     ///
-    /// Supported: `.xlsx` / `.xlsm` (primary, full style resolution via
-    /// calamine fast-path + cellXfs walker), `.xls` / `.xlsb` / `.ods`
+    /// Supported: `.xlsx` / `.xlsm` / `.xlam` (primary, full style resolution via
+    /// calamine fast-path + cellXfs walker), `.xls` / `.xla` / `.xlsb` / `.ods`
     /// (values + defined names via calamine; styles come back empty -
     /// calamine-styles doesn't parse them for these formats yet), and
-    /// `.csv` / `.tsv` (single synthetic sheet, value-only, schema
+    /// `.csv` / `.tsv` / `.txt` (single synthetic sheet, value-only, schema
     /// inference is the source of truth for column types).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
@@ -230,12 +231,12 @@ impl Workbook {
     /// `xl/styles.xml` + `xl/workbook.xml` + rels; subsequent calls reuse
     /// the cached [`WorkbookStyles`].
     ///
-    /// Only meaningful for `.xlsx` / `.xlsm` - for other formats returns
+    /// Only meaningful for `.xlsx` / `.xlsm` / `.xlam` - for other formats returns
     /// an error since there is no OOXML styles part to parse.
     pub fn styles(&mut self) -> Result<&mut WorkbookStyles> {
         if self.format != SourceFormat::Xlsx {
             return Err(Error::Xlsx(format!(
-                "styles walker only supports xlsx/xlsm; workbook format is {:?}",
+                "styles walker only supports xlsx/xlsm/xlam; workbook format is {:?}",
                 self.format
             )));
         }

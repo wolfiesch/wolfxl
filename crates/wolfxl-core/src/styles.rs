@@ -41,11 +41,16 @@ pub fn parse_cellxfs(xml: &str) -> Vec<XfEntry> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+            Ok(Event::Start(ref e)) => {
                 let tag = e.local_name();
                 if tag.as_ref() == b"cellXfs" {
                     in_cellxfs = true;
                 } else if tag.as_ref() == b"xf" && in_cellxfs {
+                    entries.push(parse_xf_entry(e));
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                if e.local_name().as_ref() == b"xf" && in_cellxfs {
                     entries.push(parse_xf_entry(e));
                 }
             }
@@ -228,6 +233,17 @@ mod tests {
         assert_eq!(entries[0].num_fmt_id, 0);
         assert_eq!(entries[1].num_fmt_id, 164);
         assert_eq!(entries[2].num_fmt_id, 9);
+    }
+
+    #[test]
+    fn self_closing_cellxfs_does_not_capture_later_xfs() {
+        let xml = r#"
+<styleSheet>
+  <cellXfs count="0"/>
+  <cellStyleXfs count="1"><xf numFmtId="164"/></cellStyleXfs>
+</styleSheet>"#;
+        let entries = parse_cellxfs(xml);
+        assert!(entries.is_empty());
     }
 
     #[test]

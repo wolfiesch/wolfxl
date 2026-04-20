@@ -40,6 +40,7 @@ impl Sheet {
         }
 
         let (h, w) = value_range.get_size();
+        let (start_row, start_col) = value_range.start().unwrap_or((0, 0));
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(h);
         for r in 0..h {
             let mut row: Vec<Cell> = Vec::with_capacity(w);
@@ -58,7 +59,7 @@ impl Sheet {
                         // where Style::get_number_format returns None.
                         styles
                             .as_ref()
-                            .and_then(|s| walker_number_format(s, name, r, c))
+                            .and_then(|s| walker_number_format(s, name, start_row, start_col, r, c))
                     });
                 row.push(Cell {
                     value,
@@ -92,10 +93,14 @@ impl Sheet {
         }
     }
 
-    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend,
-    /// which has no styles / number formats and doesn't need the
-    /// calamine-styles fast path.
-    pub(crate) fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
+    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend
+    /// internally; also public so third-party callers (notably the
+    /// PyO3 bridge in the sibling `wolfxl` cdylib) can feed externally-
+    /// sourced rows through `infer_sheet_schema` / `classify_sheet`
+    /// without reading from disk. No styles / number formats are
+    /// attached - callers with that information should set
+    /// `Cell::number_format` on the cells they build.
+    pub fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
         Self { name, rows }
     }
 
@@ -267,10 +272,13 @@ fn extract_number_format(style: &calamine_styles::Style) -> Option<String> {
 fn walker_number_format(
     styles: &WorkbookStyles,
     sheet_name: &str,
+    start_row: u32,
+    start_col: u32,
     r: usize,
     c: usize,
 ) -> Option<String> {
-    let (row, col) = (u32::try_from(r).ok()?, u32::try_from(c).ok()?);
+    let row = start_row.checked_add(u32::try_from(r).ok()?)?;
+    let col = start_col.checked_add(u32::try_from(c).ok()?)?;
     let style_id = styles
         .sheet_style_ids(sheet_name)?
         .get(&(row, col))
