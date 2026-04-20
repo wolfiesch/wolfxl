@@ -9,14 +9,14 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use wolfxl_core::{Workbook, WorkbookMap};
 
 use crate::MapFormat;
 
 pub fn run(file: PathBuf, format: MapFormat) -> Result<()> {
-    let mut wb = Workbook::open(&file)
-        .with_context(|| format!("opening workbook {}", file.display()))?;
+    let mut wb =
+        Workbook::open(&file).with_context(|| format!("opening workbook {}", file.display()))?;
     let map = wb
         .map()
         .with_context(|| format!("building map for {}", file.display()))?;
@@ -56,7 +56,13 @@ fn print_text(map: &WorkbookMap) {
     }
     println!();
     for s in &map.sheets {
-        println!("[{}] {}  ({} rows × {} cols)", s.class.as_str(), s.name, s.rows, s.cols);
+        println!(
+            "[{}] {}  ({} rows × {} cols)",
+            s.class.as_str(),
+            s.name,
+            s.rows,
+            s.cols
+        );
         if !s.headers.is_empty() {
             // Truncate header preview at 8 columns to keep the per-sheet
             // block short. A wide-table dump in a `map` view is noise —
@@ -65,7 +71,13 @@ fn print_text(map: &WorkbookMap) {
                 .headers
                 .iter()
                 .take(8)
-                .map(|h| if h.is_empty() { "∅".to_string() } else { h.clone() })
+                .map(|h| {
+                    if h.is_empty() {
+                        "∅".to_string()
+                    } else {
+                        h.clone()
+                    }
+                })
                 .collect();
             let suffix = if s.headers.len() > 8 {
                 format!("  … (+{} more)", s.headers.len() - 8)

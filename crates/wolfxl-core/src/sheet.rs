@@ -1,14 +1,19 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use calamine_styles::{Data, Reader, Xlsx};
+use calamine_styles::{Data, Reader, Sheets};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
 use crate::cell::{Cell, CellValue};
 use crate::error::{Error, Result};
 use crate::workbook::WorkbookStyles;
 
-type XlsxReader = Xlsx<BufReader<File>>;
+/// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Xlsb/Ods
+/// behind a single enum. All four implement the `Reader` trait, so
+/// `worksheet_range` and `worksheet_style` work uniformly — xls/ods
+/// return an empty `StyleRange` (styles walker is xlsx-only), which
+/// is the expected behavior.
+pub(crate) type SheetsReader = Sheets<BufReader<File>>;
 
 pub struct Sheet {
     pub name: String,
@@ -17,7 +22,7 @@ pub struct Sheet {
 
 impl Sheet {
     pub(crate) fn load(
-        wb: &mut XlsxReader,
+        wb: &mut SheetsReader,
         name: &str,
         mut styles: Option<&mut WorkbookStyles>,
     ) -> Result<Self> {
@@ -85,6 +90,13 @@ impl Sheet {
             name: name.to_string(),
             rows,
         }
+    }
+
+    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend,
+    /// which has no styles / number formats and doesn't need the
+    /// calamine-styles fast path.
+    pub(crate) fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
+        Self { name, rows }
     }
 
     pub fn rows(&self) -> &[Vec<Cell>] {
@@ -259,7 +271,10 @@ fn walker_number_format(
     c: usize,
 ) -> Option<String> {
     let (row, col) = (u32::try_from(r).ok()?, u32::try_from(c).ok()?);
-    let style_id = styles.sheet_style_ids(sheet_name)?.get(&(row, col)).copied()?;
+    let style_id = styles
+        .sheet_style_ids(sheet_name)?
+        .get(&(row, col))
+        .copied()?;
     styles
         .number_format_for_style_id(style_id)
         .map(|s| s.to_string())
