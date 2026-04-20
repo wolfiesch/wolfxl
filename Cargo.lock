@@ -996,10 +996,12 @@ dependencies = [
 
 [[package]]
 name = "wolfxl-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "calamine-styles",
  "chrono",
+ "quick-xml 0.37.5",
+ "zip 2.4.2",
 ]
 
 [[package]]

@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] - wolfxl-core 0.7.0
+
+### Added
+
+- **`xl/styles.xml` cellXfs walker** in `wolfxl-core`: new `ooxml`,
+  `styles`, and `worksheet_xml` modules plus a `WorkbookStyles` bundle
+  that parses cellXfs + numFmts and per-sheet `(row, col) → styleId`
+  maps on demand. `Sheet::load` now resolves `number_format` via a
+  two-step chain — calamine-styles' fast path first, then the walker
+  fallback — so workbook shapes that leave `Style::get_number_format()`
+  returning `None` (openpyxl-emitted styles with unpaired cellStyleXfs,
+  and similar edge cases) still surface the author-intended currency /
+  percentage / date codes. Public re-exports: `WorkbookStyles`,
+  `XfEntry`, `BUILTIN_NUM_FMTS`, `builtin_num_fmt`, `resolve_num_fmt`.
+- **Integration test**: `tests/styles_walker.rs` covers the combined
+  fast-path + fallback end-to-end on a styled fixture, plus a direct
+  `parse_cellxfs` + `parse_num_fmts` + `resolve_num_fmt` drive-through
+  on synthetic OOXML.
+
+### Notes
+
+- The scope-docs "Not yet" bullet on the styles walker is now
+  resolved; the `schema` format-detection note about openpyxl
+  workbooks falling back to `general` no longer applies when the
+  workbook actually carries `cellXfs` + `numFmts` (even if calamine
+  can't see them). Workbooks that emit no styled cells at all still
+  fall back to general because there is nothing to resolve.
+
 ## wolfxl-cli 0.7.0 / wolfxl-core 0.6.0 (2026-04-19)
 
 ### Added

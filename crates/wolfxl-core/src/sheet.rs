@@ -6,6 +6,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
 use crate::cell::{Cell, CellValue};
 use crate::error::{Error, Result};
+use crate::workbook::WorkbookStyles;
 
 type XlsxReader = Xlsx<BufReader<File>>;
 
@@ -15,12 +16,23 @@ pub struct Sheet {
 }
 
 impl Sheet {
-    pub(crate) fn load(wb: &mut XlsxReader, name: &str) -> Result<Self> {
+    pub(crate) fn load(
+        wb: &mut XlsxReader,
+        name: &str,
+        mut styles: Option<&mut WorkbookStyles>,
+    ) -> Result<Self> {
         let value_range = wb
             .worksheet_range(name)
             .map_err(|e| Error::Xlsx(format!("read range for {name:?}: {e}")))?;
 
         let style_range = wb.worksheet_style(name).ok();
+
+        // Pre-populate the per-cell styleId map once so we don't re-walk
+        // the worksheet XML per cell. Failure here (e.g. missing sheet
+        // part in the zip) degrades gracefully to the calamine-only path.
+        if let Some(s) = styles.as_mut() {
+            let _ = s.sheet_style_ids_mut(name);
+        }
 
         let (h, w) = value_range.get_size();
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(h);
@@ -34,7 +46,15 @@ impl Sheet {
                 let number_format = style_range
                     .as_ref()
                     .and_then(|sr| sr.get((r, c)))
-                    .and_then(extract_number_format);
+                    .and_then(extract_number_format)
+                    .or_else(|| {
+                        // Calamine fast path missed. Fall back to the
+                        // cellXfs walker for openpyxl-style workbooks
+                        // where Style::get_number_format returns None.
+                        styles
+                            .as_ref()
+                            .and_then(|s| walker_number_format(s, name, r, c))
+                    });
                 row.push(Cell {
                     value,
                     number_format,
@@ -226,6 +246,23 @@ fn extract_number_format(style: &calamine_styles::Style) -> Option<String> {
     } else {
         Some(code.to_string())
     }
+}
+
+/// Walker fallback: look up the cell's styleId in the pre-parsed map and
+/// resolve it against cellXfs + numFmts. Returns `None` when the cell has
+/// no style override (the common case) or when the referenced format is
+/// `General` / absent.
+fn walker_number_format(
+    styles: &WorkbookStyles,
+    sheet_name: &str,
+    r: usize,
+    c: usize,
+) -> Option<String> {
+    let (row, col) = (u32::try_from(r).ok()?, u32::try_from(c).ok()?);
+    let style_id = styles.sheet_style_ids(sheet_name)?.get(&(row, col)).copied()?;
+    styles
+        .number_format_for_style_id(style_id)
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]

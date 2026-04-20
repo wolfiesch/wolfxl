@@ -14,7 +14,7 @@ name = "wolfxl"
 path = "src/main.rs"
 
 [dependencies]
-wolfxl-core = { path = "../wolfxl-core", version = "0.6.0" }
+wolfxl-core = { path = "../wolfxl-core", version = "0.7" }
 clap = { version = "4", features = ["derive"] }
 anyhow.workspace = true
 serde_json.workspace = true
