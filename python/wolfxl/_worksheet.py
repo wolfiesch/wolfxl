@@ -1194,11 +1194,13 @@ class Worksheet:
         Returns the same category string the CLI's ``schema`` subcommand
         emits in the per-column ``format`` field: ``"general"``,
         ``"currency"``, ``"percentage"``, ``"scientific"``, ``"date"``,
-        ``"time"``, ``"datetime"``, or ``"number"``. The method is an
+        ``"time"``, ``"datetime"``, ``"integer"``, ``"float"``, or
+        ``"text"``. The method is an
         instance method for discoverability; it doesn't use any
         worksheet state.
         """
         from wolfxl._rust import classify_format as _classify_format
+
         return _classify_format(fmt)
 
     def schema(self) -> dict[str, Any]:
@@ -1227,8 +1229,11 @@ class Worksheet:
         bridge sees the same format metadata the CLI does. Without the
         format grid, currency / percentage / date columns would
         classify as ``general`` and the Python answer would silently
-        drift from the CLI's.
+        drift from the CLI's. Pending in-memory ``number_format`` edits
+        are overlaid before inference so unsaved worksheet changes are
+        included too.
         """
+        from wolfxl._cell import _UNSET
         from wolfxl._rust import infer_sheet_schema as _infer_sheet_schema
 
         max_row = self._max_row()
@@ -1248,6 +1253,12 @@ class Worksheet:
             nf = record.get("number_format")
             if nf:
                 fmts[r][c] = nf
+        for (row, col), cell in self._cells.items():
+            if row > max_row or col > max_col:
+                continue
+            nf = cell._number_format
+            if nf is not _UNSET and nf:
+                fmts[row - 1][col - 1] = nf
         return _infer_sheet_schema(values, self._title, fmts)
 
     def __repr__(self) -> str:

@@ -35,7 +35,7 @@ impl CsvBackend {
 
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        let rows = parse_csv(&mut reader)?;
+        let rows = parse_delimited(&mut reader, delimiter_for_path(path))?;
 
         Ok(Self { sheet_name, rows })
     }
@@ -52,16 +52,28 @@ impl CsvBackend {
     }
 }
 
-/// RFC-4180-ish CSV parser. Handles quoted fields with embedded commas,
+fn delimiter_for_path(path: &Path) -> char {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("tsv") => '\t',
+        _ => ',',
+    }
+}
+
+/// RFC-4180-ish delimited parser. Handles quoted fields with embedded delimiters,
 /// doubled quotes (`""` → `"`), and `\r\n` / `\n` line endings. A
 /// quoted field may span multiple lines. Anything more exotic (custom
-/// delimiters, encodings other than UTF-8) is out of scope — we pull
-/// in the `csv` crate for that later if users actually hit it.
-fn parse_csv<R: BufRead>(reader: &mut R) -> Result<Vec<Vec<Cell>>> {
+/// encodings other than UTF-8) is out of scope — we pull in the `csv`
+/// crate for that later if users actually hit it.
+fn parse_delimited<R: BufRead>(reader: &mut R, delimiter: char) -> Result<Vec<Vec<Cell>>> {
     let mut buf = String::new();
     reader
         .read_to_string(&mut buf)
-        .map_err(|e| Error::Xlsx(format!("read csv: {e}")))?;
+        .map_err(|e| Error::Format(format!("read delimited text: {e}")))?;
 
     let mut rows: Vec<Vec<Cell>> = Vec::new();
     let mut current_row: Vec<Cell> = Vec::new();
@@ -86,8 +98,9 @@ fn parse_csv<R: BufRead>(reader: &mut R) -> Result<Vec<Vec<Cell>>> {
             continue;
         }
         match ch {
-            '"' => in_quotes = true,
-            ',' => {
+            '"' if field.is_empty() => in_quotes = true,
+            '"' => field.push('"'),
+            d if d == delimiter => {
                 current_row.push(cell_from_field(std::mem::take(&mut field)));
             }
             '\r' => {
@@ -128,6 +141,11 @@ fn parse_csv<R: BufRead>(reader: &mut R) -> Result<Vec<Vec<Cell>>> {
     Ok(rows)
 }
 
+#[cfg(test)]
+fn parse_csv<R: BufRead>(reader: &mut R) -> Result<Vec<Vec<Cell>>> {
+    parse_delimited(reader, ',')
+}
+
 fn cell_from_field(field: String) -> Cell {
     if field.is_empty() {
         Cell::empty()
@@ -149,6 +167,11 @@ mod tests {
         parse_csv(&mut reader).expect("parse ok")
     }
 
+    fn parse_tsv(input: &str) -> Vec<Vec<Cell>> {
+        let mut reader = Cursor::new(input.as_bytes());
+        parse_delimited(&mut reader, '\t').expect("parse ok")
+    }
+
     #[test]
     fn parses_plain_csv() {
         let rows = parse("a,b,c\n1,2,3\n");
@@ -168,6 +191,24 @@ mod tests {
         assert_eq!(rows.len(), 2);
         match &rows[1][1].value {
             CellValue::String(s) => assert_eq!(s, "she, specifically"),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_tsv_with_tab_delimiter() {
+        let rows = parse_tsv("name\tamount\nAlice\t10\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].len(), 2);
+        assert!(matches!(&rows[0][1].value, CellValue::String(s) if s == "amount"));
+        assert!(matches!(&rows[1][1].value, CellValue::String(s) if s == "10"));
+    }
+
+    #[test]
+    fn quote_inside_unquoted_field_is_literal() {
+        let rows = parse("name,note\nAlice,pre\"quoted\n");
+        match &rows[1][1].value {
+            CellValue::String(s) => assert_eq!(s, "pre\"quoted"),
             other => panic!("expected string, got {other:?}"),
         }
     }

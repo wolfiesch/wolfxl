@@ -40,6 +40,7 @@ impl Sheet {
         }
 
         let (h, w) = value_range.get_size();
+        let (start_row, start_col) = value_range.start().unwrap_or((0, 0));
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(h);
         for r in 0..h {
             let mut row: Vec<Cell> = Vec::with_capacity(w);
@@ -58,7 +59,7 @@ impl Sheet {
                         // where Style::get_number_format returns None.
                         styles
                             .as_ref()
-                            .and_then(|s| walker_number_format(s, name, r, c))
+                            .and_then(|s| walker_number_format(s, name, start_row, start_col, r, c))
                     });
                 row.push(Cell {
                     value,
@@ -271,10 +272,13 @@ fn extract_number_format(style: &calamine_styles::Style) -> Option<String> {
 fn walker_number_format(
     styles: &WorkbookStyles,
     sheet_name: &str,
+    start_row: u32,
+    start_col: u32,
     r: usize,
     c: usize,
 ) -> Option<String> {
-    let (row, col) = (u32::try_from(r).ok()?, u32::try_from(c).ok()?);
+    let row = start_row.checked_add(u32::try_from(r).ok()?)?;
+    let col = start_col.checked_add(u32::try_from(c).ok()?)?;
     let style_id = styles
         .sheet_style_ids(sheet_name)?
         .get(&(row, col))

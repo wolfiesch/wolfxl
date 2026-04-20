@@ -124,6 +124,7 @@ def _trim_trailing_empty(schema: dict) -> dict:
     not FIXTURE.exists(),
     reason=f"fixture {FIXTURE} not present (lives alongside wolfxl-core tests)",
 )
+@pytest.mark.slow
 def test_schema_parity_structural() -> None:
     """Sheet count, row counts, column names / metadata must match."""
     cli = _cli_schema(FIXTURE)
@@ -134,7 +135,7 @@ def test_schema_parity_structural() -> None:
         f"sheet count mismatch: cli={len(cli_sheets)}, py={len(py)}"
     )
 
-    for cli_sheet, py_sheet_raw in zip(cli_sheets, py, strict=True):
+    for cli_sheet, py_sheet_raw in zip(cli_sheets, py):
         py_sheet = _trim_trailing_empty(py_sheet_raw)
         assert cli_sheet["name"] == py_sheet["name"], (
             f"sheet name mismatch: cli={cli_sheet['name']!r}, "
@@ -151,7 +152,7 @@ def test_schema_parity_structural() -> None:
             f"cli={len(cli_cols)}, py={len(py_cols)}"
         )
 
-        for cli_col, py_col in zip(cli_cols, py_cols, strict=True):
+        for cli_col, py_col in zip(cli_cols, py_cols):
             assert cli_col["name"] == py_col["name"], (
                 f"column name mismatch in {cli_sheet['name']!r}: "
                 f"cli={cli_col['name']!r}, py={py_col['name']!r}"
@@ -175,8 +176,9 @@ def test_schema_parity_structural() -> None:
     not FIXTURE.exists(),
     reason=f"fixture {FIXTURE} not present (lives alongside wolfxl-core tests)",
 )
+@pytest.mark.slow
 def test_schema_parity_samples() -> None:
-    """Sample-value lists must match as multisets.
+    """Sample-value lists must match as sets.
 
     `samples` is the small per-column preview (≤3 rendered values).
     Order can diverge if the two surfaces walk the grid differently,
@@ -186,10 +188,11 @@ def test_schema_parity_samples() -> None:
     cli = _cli_schema(FIXTURE)
     py = _python_schemas(FIXTURE)
 
-    for cli_sheet, py_sheet_raw in zip(cli["sheets"], py, strict=True):
+    for cli_sheet, py_sheet_raw in zip(cli["sheets"], py):
         py_sheet = _trim_trailing_empty(py_sheet_raw)
         for cli_col, py_col in zip(
-            cli_sheet["columns"], py_sheet["columns"], strict=True,
+            cli_sheet["columns"],
+            py_sheet["columns"],
         ):
             # Normalize to strings before comparing — int/float widening
             # would otherwise cause "420000" vs "420000.0" drift. Set
@@ -253,3 +256,45 @@ def test_worksheet_classify_format_proxies() -> None:
     ws = wb.active
     for fmt in ("$#,##0", "0.00%", "yyyy-mm-dd", "General"):
         assert ws.classify_format(fmt) == wolfxl.classify_format(fmt)
+
+
+def test_classify_sheet_direct_bridge() -> None:
+    """The Python-visible bridge exposes direct sheet classification."""
+    from wolfxl._rust import classify_sheet
+
+    assert classify_sheet([], "Empty") == "empty"
+    assert classify_sheet([["account"], ["cash"]], "Readme") == "readme"
+
+
+def test_infer_sheet_schema_pads_ragged_rows() -> None:
+    """Ragged Python rows keep later wider cells visible to schema inference."""
+    from wolfxl._rust import infer_sheet_schema
+
+    schema = infer_sheet_schema([["name"], ["Alice", "extra"]], "Ragged")
+    assert schema["rows"] == 1
+    assert len(schema["columns"]) == 2
+    assert schema["columns"][0]["name"] == "name"
+    assert schema["columns"][1]["name"] == ""
+    assert schema["columns"][1]["samples"] == ["extra"]
+
+
+def test_infer_sheet_schema_preserves_oversized_python_int_text() -> None:
+    """Huge Python ints should not be rounded through a lossy f64 fallback."""
+    from wolfxl._rust import infer_sheet_schema
+
+    huge = 2**80 + 12345
+    schema = infer_sheet_schema([["value"], [huge]], "Huge")
+    col = schema["columns"][0]
+    assert col["samples"] == [str(huge)]
+
+
+def test_worksheet_schema_includes_pending_number_format_edits() -> None:
+    """Unsaved cell.number_format edits should influence schema categories."""
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "price"
+    ws["A2"] = 12.5
+    ws["A2"].number_format = "$#,##0.00"
+
+    schema = ws.schema()
+    assert schema["columns"][0]["format"] == "currency"

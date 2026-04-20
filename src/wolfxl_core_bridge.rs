@@ -36,12 +36,12 @@
 //!
 //! Anything else is coerced to its `str()` representation and stored
 //! as a string. This matches what a caller would get if they piped
-//! through `str(value)` themselves, and keeps the bridge tolerant of
-//! unknown types without raising.
+//! through `str(value)` themselves. If an object's `__str__` raises,
+//! that Python exception is propagated.
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDate, PyDateTime, PyDict, PyList, PyTime};
+use pyo3::types::{PyAny, PyBool, PyDate, PyDateTime, PyDict, PyFloat, PyInt, PyList, PyTime};
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
@@ -51,9 +51,8 @@ use wolfxl_core::{
 };
 
 /// Convert a single Python object into a [`Cell`]. Unknown types are
-/// stringified via `str()` so the bridge never raises on a novel type
-/// — it just degrades to "treat as string", which is the same
-/// behavior an agent would get if they pre-stringified themselves.
+/// stringified via `str()` and treated as strings. If that `__str__`
+/// implementation raises, the exception propagates.
 fn py_to_cell(obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
     if obj.is_none() {
         return Ok(Cell::empty());
@@ -62,40 +61,47 @@ fn py_to_cell(obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
     // Order matters: `bool` is a subclass of `int` in Python, so match
     // it first. `datetime.datetime` is a subclass of `datetime.date`,
     // so match datetime before date.
-    if let Ok(b) = obj.extract::<bool>() {
+    if let Ok(b) = obj.cast::<PyBool>() {
         return Ok(Cell {
-            value: CellValue::Bool(b),
+            value: CellValue::Bool(b.extract()?),
             number_format: None,
         });
     }
-    if let Ok(n) = obj.extract::<i64>() {
+    if let Ok(i) = obj.cast::<PyInt>() {
+        if let Ok(n) = i.extract::<i64>() {
+            return Ok(Cell {
+                value: CellValue::Int(n),
+                number_format: None,
+            });
+        }
+        let s: String = obj.str()?.to_string();
         return Ok(Cell {
-            value: CellValue::Int(n),
+            value: CellValue::String(s),
             number_format: None,
         });
     }
-    if let Ok(n) = obj.extract::<f64>() {
+    if let Ok(f) = obj.cast::<PyFloat>() {
         return Ok(Cell {
-            value: CellValue::Float(n),
+            value: CellValue::Float(f.extract()?),
             number_format: None,
         });
     }
 
-    if let Ok(dt) = obj.downcast::<PyDateTime>() {
+    if let Ok(dt) = obj.cast::<PyDateTime>() {
         let ndt = naive_datetime_from_py(dt)?;
         return Ok(Cell {
             value: CellValue::DateTime(ndt),
             number_format: None,
         });
     }
-    if let Ok(t) = obj.downcast::<PyTime>() {
+    if let Ok(t) = obj.cast::<PyTime>() {
         let nt = naive_time_from_py(t)?;
         return Ok(Cell {
             value: CellValue::Time(nt),
             number_format: None,
         });
     }
-    if let Ok(d) = obj.downcast::<PyDate>() {
+    if let Ok(d) = obj.cast::<PyDate>() {
         let nd = naive_date_from_py(d)?;
         return Ok(Cell {
             value: CellValue::Date(nd),
@@ -105,7 +111,7 @@ fn py_to_cell(obj: &Bound<'_, PyAny>) -> PyResult<Cell> {
 
     // Strings + everything unknown land here. `str()` on a string is
     // a no-op, and on unknown types it gives the caller a rendered
-    // representation instead of an error.
+    // representation unless that object's __str__ raises.
     let s: String = obj.str()?.to_string();
     Ok(Cell {
         value: CellValue::String(s),
@@ -146,7 +152,8 @@ fn naive_datetime_from_py(dt: &Bound<'_, PyDateTime>) -> PyResult<NaiveDateTime>
 }
 
 /// Convert Python `List[List[Any]]` into a `wolfxl_core::Sheet`. The
-/// outer list is rows, the inner list is cells. When
+/// outer list is rows, the inner list is cells. Ragged rows are padded
+/// to the widest row with empty cells before entering `wolfxl_core`. When
 /// `number_formats` is provided, it must be the same shape as `rows`
 /// (or `None` entries where no format applies) and its values are
 /// attached to each cell's `number_format` field. This is how the
@@ -171,17 +178,18 @@ fn build_sheet(
 
     let mut grid: Vec<Vec<Cell>> = Vec::with_capacity(rows.len());
     for (row_idx, row_obj) in rows.iter().enumerate() {
-        let row = row_obj.downcast::<PyList>().map_err(|_| {
-            PyValueError::new_err("each row must be a list of cell values")
-        })?;
+        let row = row_obj
+            .cast::<PyList>()
+            .map_err(|_| PyValueError::new_err("each row must be a list of cell values"))?;
 
         let fmt_row = if let Some(fmts) = number_formats {
             let entry = fmts.get_item(row_idx)?;
-            let fmt_list = entry.downcast::<PyList>().map_err(|_| {
-                PyValueError::new_err(
-                    "each number_formats row must be a list of Optional[str]",
-                )
-            })?.clone();
+            let fmt_list = entry
+                .cast::<PyList>()
+                .map_err(|_| {
+                    PyValueError::new_err("each number_formats row must be a list of Optional[str]")
+                })?
+                .clone();
             if fmt_list.len() != row.len() {
                 return Err(PyValueError::new_err(format!(
                     "number_formats[{}] length ({}) must match rows[{}] length ({})",
@@ -203,9 +211,7 @@ fn build_sheet(
                 let fmt_obj = fmt_list.get_item(col_idx)?;
                 if !fmt_obj.is_none() {
                     let fmt_str: String = fmt_obj.extract().map_err(|_| {
-                        PyValueError::new_err(
-                            "number_formats entries must be str or None",
-                        )
+                        PyValueError::new_err("number_formats entries must be str or None")
                     })?;
                     cell.number_format = Some(fmt_str);
                 }
@@ -213,6 +219,10 @@ fn build_sheet(
             cells.push(cell);
         }
         grid.push(cells);
+    }
+    let max_width = grid.iter().map(Vec::len).max().unwrap_or(0);
+    for row in &mut grid {
+        row.resize_with(max_width, Cell::empty);
     }
     Ok(Sheet::from_rows(name.to_string(), grid))
 }
