@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - wolfxl (PyPI cdylib) — follow-up
+## wolfxl 0.5.0 (2026-04-20) - PyPI cdylib parity release
 
 ### Added
 
@@ -48,9 +48,9 @@
   narrower format-category and int/float parity will tighten when
   Option-A collapses the reader paths.
 
-## [Unreleased] - wolfxl (PyPI cdylib)
+### Core Bridge Groundwork
 
-### Added
+#### Added
 
 - **`wolfxl_core_bridge` PyO3 module** (new `src/wolfxl_core_bridge.rs`,
   ~260 LOC). Exposes three `wolfxl-core` classifiers on the `_rust`
@@ -81,7 +81,7 @@
   `infer_sheet_schema` / `classify_sheet` without round-tripping
   through a file.
 
-### Notes
+#### Notes
 
 - **Purely additive surface.** This PR does not replace the duplicate
   per-cell classification calls that already live inside
@@ -93,7 +93,7 @@
   byte-identical results to `wolfxl <subcommand> --format json`. The
   cross-surface parity test lands with task #22b.
 
-## [Unreleased] - wolfxl-core 0.8.0 / wolfxl-cli 0.8.0
+## wolfxl-core 0.8.0 / wolfxl-cli 0.8.0 (2026-04-20)
 
 ### Added
 
@@ -263,7 +263,7 @@
   emitted even when it overflows the budget. We'd rather report the
   overage in the footer than hide workbook structure from the agent.
 
-## 0.5.0 (2026-04-19)
+## wolfxl-core 0.5.0 / wolfxl-cli 0.5.0 (2026-04-19)
 
 ### Added
 
