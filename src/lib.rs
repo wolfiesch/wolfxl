@@ -8,6 +8,7 @@ mod ooxml_util;
 mod rust_xlsxwriter_backend;
 mod util;
 mod wolfxl;
+mod wolfxl_core_bridge;
 
 #[pyfunction]
 fn build_info(py: Python<'_>) -> PyResult<PyObject> {
@@ -39,5 +40,6 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
     m.add_class::<rust_xlsxwriter_backend::RustXlsxWriterBook>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
+    wolfxl_core_bridge::register(m)?;
     Ok(())
 }

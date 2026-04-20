@@ -977,6 +977,7 @@ dependencies = [
  "pyo3-build-config",
  "quick-xml 0.37.5",
  "rust_xlsxwriter",
+ "wolfxl-core",
  "zip 2.4.2",
 ]
 

@@ -92,10 +92,14 @@ impl Sheet {
         }
     }
 
-    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend,
-    /// which has no styles / number formats and doesn't need the
-    /// calamine-styles fast path.
-    pub(crate) fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
+    /// Build a `Sheet` from a pre-shaped grid. Used by the CSV backend
+    /// internally; also public so third-party callers (notably the
+    /// PyO3 bridge in the sibling `wolfxl` cdylib) can feed externally-
+    /// sourced rows through `infer_sheet_schema` / `classify_sheet`
+    /// without reading from disk. No styles / number formats are
+    /// attached - callers with that information should set
+    /// `Cell::number_format` on the cells they build.
+    pub fn from_rows(name: String, rows: Vec<Vec<Cell>>) -> Self {
         Self { name, rows }
     }
 

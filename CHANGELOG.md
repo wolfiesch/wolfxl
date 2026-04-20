@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased] - wolfxl (PyPI cdylib)
+
+### Added
+
+- **`wolfxl_core_bridge` PyO3 module** (new `src/wolfxl_core_bridge.rs`,
+  ~260 LOC). Exposes three `wolfxl-core` classifiers on the `_rust`
+  extension module:
+  - `classify_format(fmt: str) -> str` — thin wrapper on
+    `wolfxl_core::classify_format`, returns the category string
+    (`"general"`, `"currency"`, `"date"`, ...) that `wolfxl schema
+    --format json` emits in the `format` field.
+  - `classify_sheet(rows: List[List[Any]], name: str = "Sheet1") -> str`
+    — returns the sheet-class string (`"empty"`, `"readme"`,
+    `"summary"`, `"data"`) that `wolfxl map --format json` emits in
+    the `class` field.
+  - `infer_sheet_schema(rows, name = "Sheet1") -> dict` — returns the
+    per-column schema dict in the same shape as `wolfxl schema
+    --format json`, minus the outer `"sheets"` wrapper.
+- **Native Python input coercion** in the bridge: `None` / `bool` /
+  `int` / `float` / `datetime.datetime` / `datetime.date` /
+  `datetime.time` / `str` all map to their `CellValue` counterparts.
+  Unknown types fall back to `str()` so the bridge never raises on a
+  novel type.
+- **`wolfxl-core` dep added to the cdylib's `Cargo.toml`** (version
+  `0.8`, path `crates/wolfxl-core`). First time the PyO3 surface has
+  taken a direct dep on the core crate — prerequisite for the
+  classifier-collapse work in the follow-up PR.
+- **`Sheet::from_rows` promoted to `pub`** in `wolfxl-core`. The CSV
+  backend already used it crate-internally; making it public lets the
+  bridge feed externally-sourced Python lists through
+  `infer_sheet_schema` / `classify_sheet` without round-tripping
+  through a file.
+
+### Notes
+
+- **Purely additive surface.** This PR does not replace the duplicate
+  per-cell classification calls that already live inside
+  `calamine_styled_backend.rs` — that wiring is the follow-up PR
+  (sprint-2 task #22b). All 617 existing pytest cases still pass
+  unchanged; the bridge is extra surface, not a rewrite.
+- **Single source of truth for future consumers.** Python callers that
+  want a classifier answer can now go through the bridge and get
+  byte-identical results to `wolfxl <subcommand> --format json`. The
+  cross-surface parity test lands with task #22b.
+
 ## [Unreleased] - wolfxl-core 0.8.0 / wolfxl-cli 0.8.0
 
 ### Added

@@ -45,7 +45,7 @@ pub mod worksheet_xml;
 
 pub use cell::{Cell, CellValue};
 pub use error::{Error, Result};
-pub use format::{format_cell, FormatCategory};
+pub use format::{classify_format, format_cell, FormatCategory};
 pub use map::{classify_sheet, SheetClass, SheetMap, WorkbookMap};
 pub use schema::{infer_sheet_schema, Cardinality, ColumnSchema, InferredType, SheetSchema};
 pub use sheet::Sheet;
