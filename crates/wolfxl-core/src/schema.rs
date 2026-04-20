@@ -267,7 +267,7 @@ fn classify_string_as_type(s: &str) -> StringShape {
     }
     if t.parse::<i64>().is_ok() {
         StringShape::Int
-    } else if t.parse::<f64>().is_ok() {
+    } else if t.parse::<f64>().is_ok_and(f64::is_finite) {
         StringShape::Float
     } else {
         StringShape::Other
@@ -420,6 +420,18 @@ mod tests {
         let rows = vec![vec![s("col")], vec![s("hello")], vec![i(42)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Mixed);
+    }
+
+    #[test]
+    fn non_finite_numeric_strings_stay_strings() {
+        let rows = vec![
+            vec![s("value")],
+            vec![s("NaN")],
+            vec![s("inf")],
+            vec![s("-inf")],
+        ];
+        let schema = infer_sheet_schema(&sheet_with("t", rows));
+        assert_eq!(schema.columns[0].inferred_type, InferredType::String);
     }
 
     #[test]

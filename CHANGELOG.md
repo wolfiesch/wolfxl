@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased] - wolfxl (PyPI cdylib) — follow-up
+
+### Added
+
+- **`Worksheet.schema()`** and **`Worksheet.classify_format(fmt)`**
+  Python methods, plus a module-level `wolfxl.classify_format(fmt)`.
+  Both delegate to the bridge added in the previous entry so Python
+  callers get byte-compatible answers with `wolfxl schema --format
+  json` for the structural fields (name, row count, column names,
+  null counts, unique counts, cardinality, samples). See
+  "Known divergences" in `tests/test_classifier_parity.py` for the
+  two fields that don't yet match (numeric `int` vs `float` and the
+  openpyxl-styled format-category gap — both close when the sprint-3
+  "Option A" engine-collapse work lands).
+- **`infer_sheet_schema(rows, name, number_formats=None)`** — the
+  bridge now accepts an optional parallel `List[List[Optional[str]]]`
+  of per-cell `number_format` strings. Without it, Python's inferred
+  `format_category` would silently drift to `"general"` for every
+  column because `py_to_cell` couldn't see format metadata. The
+  Python `Worksheet.schema()` passes formats from
+  `iter_cell_records(include_format=True)` so both surfaces see the
+  same format context going into `wolfxl_core::infer_sheet_schema`.
+- **`tests/test_classifier_parity.py`** (~240 LOC) — cross-surface
+  drift test. Runs `cargo run --quiet --release -p wolfxl-cli --
+  schema <fixture> --format json` as a subprocess and compares the
+  result to `Worksheet.schema()` on the same workbook. Four cases:
+  structural parity (row/column counts + names + null/unique/cardinality),
+  sample-list parity (as multisets), direct `classify_format`
+  round-trip over every `FormatCategory` variant, and
+  `Worksheet.classify_format` → module-level identity.
+
+### Notes
+
+- **Task #22b ships net-new Python surface, not replacements.** The
+  sprint-2 plan described #22b as "replace duplicate classifiers in
+  `calamine_styled_backend.rs`" — but inspection showed the cdylib
+  doesn't actually duplicate any classifier logic; it just returns
+  raw `number_format` strings. The "authoritative classifier" work
+  was already fully in `wolfxl-core`. So #22b collapsed to exposing
+  the bridge methods on the Python surface and adding the parity
+  test, both of which were also in the sprint plan's scope.
+- **Parity test is the drift detector going forward.** Any future
+  change to either the CLI's schema output or Python's
+  `worksheet.schema()` that breaks structural parity (null counts,
+  unique counts, column names, etc.) fails CI immediately. The
+  narrower format-category and int/float parity will tighten when
+  Option-A collapses the reader paths.
+
 ## [Unreleased] - wolfxl (PyPI cdylib)
 
 ### Added
