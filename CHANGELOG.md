@@ -1,5 +1,191 @@
 # Changelog
 
+## [Unreleased] - wolfxl (PyPI cdylib) — follow-up
+
+### Added
+
+- **`Worksheet.schema()`** and **`Worksheet.classify_format(fmt)`**
+  Python methods, plus a module-level `wolfxl.classify_format(fmt)`.
+  Both delegate to the bridge added in the previous entry so Python
+  callers get byte-compatible answers with `wolfxl schema --format
+  json` for the structural fields (name, row count, column names,
+  null counts, unique counts, cardinality, samples). See
+  "Known divergences" in `tests/test_classifier_parity.py` for the
+  two fields that don't yet match (numeric `int` vs `float` and the
+  openpyxl-styled format-category gap — both close when the sprint-3
+  "Option A" engine-collapse work lands).
+- **`infer_sheet_schema(rows, name, number_formats=None)`** — the
+  bridge now accepts an optional parallel `List[List[Optional[str]]]`
+  of per-cell `number_format` strings. Without it, Python's inferred
+  `format_category` would silently drift to `"general"` for every
+  column because `py_to_cell` couldn't see format metadata. The
+  Python `Worksheet.schema()` passes formats from
+  `iter_cell_records(include_format=True)` so both surfaces see the
+  same format context going into `wolfxl_core::infer_sheet_schema`.
+- **`tests/test_classifier_parity.py`** (~240 LOC) — cross-surface
+  drift test. Runs `cargo run --quiet --release -p wolfxl-cli --
+  schema <fixture> --format json` as a subprocess and compares the
+  result to `Worksheet.schema()` on the same workbook. Four cases:
+  structural parity (row/column counts + names + null/unique/cardinality),
+  sample-list parity (as multisets), direct `classify_format`
+  round-trip over every `FormatCategory` variant, and
+  `Worksheet.classify_format` → module-level identity.
+
+### Notes
+
+- **Task #22b ships net-new Python surface, not replacements.** The
+  sprint-2 plan described #22b as "replace duplicate classifiers in
+  `calamine_styled_backend.rs`" — but inspection showed the cdylib
+  doesn't actually duplicate any classifier logic; it just returns
+  raw `number_format` strings. The "authoritative classifier" work
+  was already fully in `wolfxl-core`. So #22b collapsed to exposing
+  the bridge methods on the Python surface and adding the parity
+  test, both of which were also in the sprint plan's scope.
+- **Parity test is the drift detector going forward.** Any future
+  change to either the CLI's schema output or Python's
+  `worksheet.schema()` that breaks structural parity (null counts,
+  unique counts, column names, etc.) fails CI immediately. The
+  narrower format-category and int/float parity will tighten when
+  Option-A collapses the reader paths.
+
+## [Unreleased] - wolfxl (PyPI cdylib)
+
+### Added
+
+- **`wolfxl_core_bridge` PyO3 module** (new `src/wolfxl_core_bridge.rs`,
+  ~260 LOC). Exposes three `wolfxl-core` classifiers on the `_rust`
+  extension module:
+  - `classify_format(fmt: str) -> str` — thin wrapper on
+    `wolfxl_core::classify_format`, returns the category string
+    (`"general"`, `"currency"`, `"date"`, ...) that `wolfxl schema
+    --format json` emits in the `format` field.
+  - `classify_sheet(rows: List[List[Any]], name: str = "Sheet1") -> str`
+    — returns the sheet-class string (`"empty"`, `"readme"`,
+    `"summary"`, `"data"`) that `wolfxl map --format json` emits in
+    the `class` field.
+  - `infer_sheet_schema(rows, name = "Sheet1") -> dict` — returns the
+    per-column schema dict in the same shape as `wolfxl schema
+    --format json`, minus the outer `"sheets"` wrapper.
+- **Native Python input coercion** in the bridge: `None` / `bool` /
+  `int` / `float` / `datetime.datetime` / `datetime.date` /
+  `datetime.time` / `str` all map to their `CellValue` counterparts.
+  Unknown types fall back to `str()` so the bridge never raises on a
+  novel type.
+- **`wolfxl-core` dep added to the cdylib's `Cargo.toml`** (version
+  `0.8`, path `crates/wolfxl-core`). First time the PyO3 surface has
+  taken a direct dep on the core crate — prerequisite for the
+  classifier-collapse work in the follow-up PR.
+- **`Sheet::from_rows` promoted to `pub`** in `wolfxl-core`. The CSV
+  backend already used it crate-internally; making it public lets the
+  bridge feed externally-sourced Python lists through
+  `infer_sheet_schema` / `classify_sheet` without round-tripping
+  through a file.
+
+### Notes
+
+- **Purely additive surface.** This PR does not replace the duplicate
+  per-cell classification calls that already live inside
+  `calamine_styled_backend.rs` — that wiring is the follow-up PR
+  (sprint-2 task #22b). All 617 existing pytest cases still pass
+  unchanged; the bridge is extra surface, not a rewrite.
+- **Single source of truth for future consumers.** Python callers that
+  want a classifier answer can now go through the bridge and get
+  byte-identical results to `wolfxl <subcommand> --format json`. The
+  cross-surface parity test lands with task #22b.
+
+## [Unreleased] - wolfxl-core 0.8.0 / wolfxl-cli 0.8.0
+
+### Added
+
+- **Multi-format `Workbook::open`**: `.xls`, `.xlsb`, `.ods`, and `.csv`
+  paths now open through the same API as `.xlsx`. Dispatch lives in
+  `Workbook::open`, so `wolfxl peek`, `wolfxl map`, `wolfxl agent`, and
+  `wolfxl schema` all gain the new format coverage for free. This
+  closes the breadth regression relative to `xleak` (the pre-2.0
+  predecessor), which handled the same four formats.
+- **CSV backend** (`wolfxl_core::csv_reader`, crate-private): reads a
+  CSV into a single synthetic `Sheet` named after the filename stem.
+  RFC-4180-ish parser handles quoted fields with embedded commas,
+  doubled quotes (`""` → `"`), and `\r\n` / `\n` line endings; ragged
+  rows are padded to the max column width so downstream
+  `dimensions()` / `headers()` consumers see a rectangular shape.
+  Cells land as `CellValue::String` — per invariant B4, schema
+  inference is the single source of truth for per-column types.
+- **Schema inference parses numeric-looking strings**: a CSV column of
+  `"100","200",...` now classifies as `Int` instead of `String`.
+  `CellValue::String` cells that parse cleanly as `i64` / `f64` are
+  counted as the parsed type in `TypeCounts::observe`; strings with
+  currency / thousand-separator / percent markers stay as `Other` and
+  classify as `String` (the number-format string, when present, still
+  drives the separate `format_category`).
+- **`SourceFormat` enum** and `Workbook::format()` accessor expose
+  which backend the dispatch routed to — `Xlsx`, `Xls`, `Xlsb`, `Ods`,
+  or `Csv` — for callers that need to condition on it.
+- **CLI multi-format smoke tests**: `tests/cli.rs` now drives `peek`
+  against `.csv`, `.xls`, and `.ods` fixtures and drives `schema`
+  against `.csv`, asserting the CSV's numeric columns classify as
+  `int`. No goldens locked for non-xlsx renders since calamine's
+  xls/ods readers return empty styles (R1 risk from the sprint plan)
+  and the boxed renderer's column widths can drift without the
+  styled fast path.
+
+### Changed
+
+- **`Workbook::styles()` errors for non-xlsx formats** with a clear
+  "`WorkbookStyles` only supports xlsx" message. xls/ods carry no
+  style information in calamine's public API, and CSV has no
+  concept of styles. Callers that want styled rendering should
+  branch on `Workbook::format()` before reaching for `styles()`.
+- **`WorkbookMap` on CSV** reports a single sheet entry classified
+  via the same heuristics as any other sheet; `named_ranges()`
+  returns an empty slice on CSV (no workbook-level metadata
+  exists).
+- **`wolfxl-cli` depends on `wolfxl-core 0.8`** (was 0.7). CLI
+  version bumps to 0.8.0 alongside core — shipping the two in
+  lockstep keeps the version math honest for users installing via
+  `cargo install wolfxl-cli`.
+
+### Notes
+
+- **xls / ods are value-only today.** calamine-styles leaves
+  `worksheet_style()` empty for these formats, so
+  `Cell::number_format` is always `None`; schema inference still
+  classifies numeric columns correctly because it reads values, not
+  styles. This is the documented R1 mitigation from the sprint-2 plan.
+- **CSV parsing intentionally minimal.** UTF-8 only, no custom
+  delimiters, no BOM detection. If users hit workbooks that need more,
+  the backend can swap to the `csv` crate later — the public API
+  (`Workbook::open`, single synthetic sheet, string-valued cells)
+  stays the same.
+
+## wolfxl-core 0.7.0 (superseded by 0.8.0 above)
+
+### Added
+
+- **`xl/styles.xml` cellXfs walker** in `wolfxl-core`: new `ooxml`,
+  `styles`, and `worksheet_xml` modules plus a `WorkbookStyles` bundle
+  that parses cellXfs + numFmts and per-sheet `(row, col) → styleId`
+  maps on demand. `Sheet::load` now resolves `number_format` via a
+  two-step chain — calamine-styles' fast path first, then the walker
+  fallback — so workbook shapes that leave `Style::get_number_format()`
+  returning `None` (openpyxl-emitted styles with unpaired cellStyleXfs,
+  and similar edge cases) still surface the author-intended currency /
+  percentage / date codes. Public re-exports: `WorkbookStyles`,
+  `XfEntry`, `BUILTIN_NUM_FMTS`, `builtin_num_fmt`, `resolve_num_fmt`.
+- **Integration test**: `tests/styles_walker.rs` covers the combined
+  fast-path + fallback end-to-end on a styled fixture, plus a direct
+  `parse_cellxfs` + `parse_num_fmts` + `resolve_num_fmt` drive-through
+  on synthetic OOXML.
+
+### Notes
+
+- The scope-docs "Not yet" bullet on the styles walker is now
+  resolved; the `schema` format-detection note about openpyxl
+  workbooks falling back to `general` no longer applies when the
+  workbook actually carries `cellXfs` + `numFmts` (even if calamine
+  can't see them). Workbooks that emit no styled cells at all still
+  fall back to general because there is nothing to resolve.
+
 ## wolfxl-cli 0.7.0 / wolfxl-core 0.6.0 (2026-04-19)
 
 ### Added

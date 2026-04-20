@@ -6,8 +6,8 @@
 //! CI environments that don't check out the sibling repo).
 
 use std::path::PathBuf;
-use wolfxl_core::{format_cell, FormatCategory, Workbook};
 use wolfxl_core::format::classify_format;
+use wolfxl_core::{format_cell, FormatCategory, Workbook};
 
 fn sample_path() -> Option<PathBuf> {
     let candidates = [
@@ -36,11 +36,17 @@ fn reads_sample_financials() {
 
     let sheet = wb.first_sheet().expect("read first sheet");
     let (rows, cols) = sheet.dimensions();
-    assert!(rows > 1 && cols > 0, "expected non-empty sheet, got {rows}x{cols}");
+    assert!(
+        rows > 1 && cols > 0,
+        "expected non-empty sheet, got {rows}x{cols}"
+    );
 
     let headers = sheet.headers();
     assert_eq!(headers.len(), cols);
-    assert!(headers.iter().any(|h| !h.is_empty()), "expected at least one non-empty header");
+    assert!(
+        headers.iter().any(|h| !h.is_empty()),
+        "expected at least one non-empty header"
+    );
 
     // Confirm reads work across every sheet (mostly proving sheet name
     // dispatch + iteration). Styled-format detection (currency/percent/date)
@@ -59,7 +65,10 @@ fn reads_sample_financials() {
             }
         }
     }
-    assert!(total_non_empty > 0, "expected non-empty cells across sheets");
+    assert!(
+        total_non_empty > 0,
+        "expected non-empty cells across sheets"
+    );
 
     // Smoke-test the format module against a known-good format string so we
     // know the API contract holds even if we can't yet observe it on this
