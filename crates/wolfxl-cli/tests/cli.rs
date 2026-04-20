@@ -25,8 +25,7 @@ fn golden(name: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
         .join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read golden {}: {e}", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read golden {}: {e}", path.display()))
 }
 
 fn run(args: &[&str]) -> String {
@@ -103,8 +102,18 @@ fn boxed_smoke() {
 #[test]
 fn boxed_named_sheet() {
     let path = fixture("sample-financials.xlsx");
-    let out = run(&["peek", path.to_str().unwrap(), "-s", "Revenue Breakdown", "-n", "3"]);
-    assert!(out.contains("Sheet: Revenue Breakdown"), "wrong sheet: {out}");
+    let out = run(&[
+        "peek",
+        path.to_str().unwrap(),
+        "-s",
+        "Revenue Breakdown",
+        "-n",
+        "3",
+    ]);
+    assert!(
+        out.contains("Sheet: Revenue Breakdown"),
+        "wrong sheet: {out}"
+    );
     assert!(out.contains("Showing 3 of 12 rows"), "wrong cap: {out}");
 }
 
@@ -143,12 +152,24 @@ fn map_text_lists_every_sheet_with_class_and_dims() {
     let path = fixture("sample-financials.xlsx");
     let out = run(&["map", path.to_str().unwrap(), "--format", "text"]);
     // All three sheets appear with their classification tag.
-    assert!(out.contains("[data] P&L  (21 rows × 7 cols)"), "missing P&L line: {out}");
-    assert!(out.contains("[data] Balance Sheet  (27 rows × 5 cols)"), "missing Balance Sheet line");
-    assert!(out.contains("[data] Revenue Breakdown  (13 rows × 7 cols)"), "missing Revenue line");
+    assert!(
+        out.contains("[data] P&L  (21 rows × 7 cols)"),
+        "missing P&L line: {out}"
+    );
+    assert!(
+        out.contains("[data] Balance Sheet  (27 rows × 5 cols)"),
+        "missing Balance Sheet line"
+    );
+    assert!(
+        out.contains("[data] Revenue Breakdown  (13 rows × 7 cols)"),
+        "missing Revenue line"
+    );
     // Header preview surfaces the first column of P&L so callers can
     // tell which sheet has which schema without a `peek`.
-    assert!(out.contains("Account | Jan 2024"), "missing P&L headers: {out}");
+    assert!(
+        out.contains("Account | Jan 2024"),
+        "missing P&L headers: {out}"
+    );
 }
 
 #[test]
@@ -163,7 +184,10 @@ fn map_json_is_valid_and_has_expected_shape() {
     assert_eq!(sheets[0]["cols"], 7);
     assert_eq!(sheets[0]["class"], "data");
     assert_eq!(sheets[0]["headers"][0], "Account");
-    assert!(value["named_ranges"].is_array(), "named_ranges field must exist");
+    assert!(
+        value["named_ranges"].is_array(),
+        "named_ranges field must exist"
+    );
 }
 
 #[test]
@@ -173,8 +197,14 @@ fn map_handles_wide_table_with_truncated_header_preview() {
     // Wide table has 29 columns; text view caps the header preview at 8
     // and reports the overflow count so an agent can decide whether to
     // `peek` the full width.
-    assert!(out.contains("[data] Dept Operations  (25 rows × 29 cols)"), "missing dims: {out}");
-    assert!(out.contains("… (+21 more)"), "missing overflow marker: {out}");
+    assert!(
+        out.contains("[data] Dept Operations  (25 rows × 29 cols)"),
+        "missing dims: {out}"
+    );
+    assert!(
+        out.contains("… (+21 more)"),
+        "missing overflow marker: {out}"
+    );
 }
 
 #[test]
@@ -182,23 +212,41 @@ fn agent_picks_largest_data_sheet_and_emits_overview_plus_samples() {
     let path = fixture("sample-financials.xlsx");
     let out = run(&["agent", path.to_str().unwrap(), "--max-tokens", "800"]);
     // Workbook overview lists every sheet with class + first column.
-    assert!(out.contains("WORKBOOK: sample-financials.xlsx"), "missing workbook line: {out}");
-    assert!(out.contains("- P&L (21r×7c) [data]"), "missing P&L overview: {out}");
-    assert!(out.contains("- Balance Sheet (27r×5c) [data]"), "missing balance sheet overview");
+    assert!(
+        out.contains("WORKBOOK: sample-financials.xlsx"),
+        "missing workbook line: {out}"
+    );
+    assert!(
+        out.contains("- P&L (21r×7c) [data]"),
+        "missing P&L overview: {out}"
+    );
+    assert!(
+        out.contains("- Balance Sheet (27r×5c) [data]"),
+        "missing balance sheet overview"
+    );
     // Balance Sheet is the largest data sheet (27 > 21 > 13) so it's
     // picked when --sheet isn't given.
     assert!(
         out.contains("SHEET: Balance Sheet  [data]  27 rows × 5 cols"),
         "wrong target sheet: {out}"
     );
-    assert!(out.contains("HEADERS: Account\tMar 31 2024"), "missing headers row: {out}");
+    assert!(
+        out.contains("HEADERS: Account\tMar 31 2024"),
+        "missing headers row: {out}"
+    );
     // All three row sections fit at 800-token budget.
     assert!(out.contains("ROWS (head 3 of"), "missing head block: {out}");
     assert!(out.contains("ROWS (tail 2 of"), "missing tail block: {out}");
-    assert!(out.contains("ROWS (middle stratified"), "missing middle block: {out}");
+    assert!(
+        out.contains("ROWS (middle stratified"),
+        "missing middle block: {out}"
+    );
     // Footer reports cl100k_base accounting.
     assert!(out.contains("# wolfxl agent:"), "missing footer: {out}");
-    assert!(out.contains("/800 tokens (cl100k_base)"), "wrong footer format: {out}");
+    assert!(
+        out.contains("/800 tokens (cl100k_base)"),
+        "wrong footer format: {out}"
+    );
 }
 
 #[test]
@@ -222,8 +270,14 @@ fn agent_falls_back_to_orientation_when_budget_too_small() {
     assert!(out.contains("WORKBOOK:"), "must always emit workbook line");
     assert!(out.contains("SHEET:"), "must always emit sheet header");
     assert!(out.contains("HEADERS:"), "must always emit columns");
-    assert!(!out.contains("ROWS (head"), "head block must drop at tight budget: {out}");
-    assert!(!out.contains("ROWS (tail"), "tail block must drop at tight budget: {out}");
+    assert!(
+        !out.contains("ROWS (head"),
+        "head block must drop at tight budget: {out}"
+    );
+    assert!(
+        !out.contains("ROWS (tail"),
+        "tail block must drop at tight budget: {out}"
+    );
 }
 
 #[test]
@@ -259,7 +313,12 @@ fn schema_revenue_breakdown_classifies_segment_as_categorical() {
     // and unique ≤ 20 it should be classed as `categorical` — the bucket
     // an agent uses to recognize lookup-friendly dimensions.
     let path = fixture("sample-financials.xlsx");
-    let out = run(&["schema", path.to_str().unwrap(), "--sheet", "Revenue Breakdown"]);
+    let out = run(&[
+        "schema",
+        path.to_str().unwrap(),
+        "--sheet",
+        "Revenue Breakdown",
+    ]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     let cols = v["sheets"][0]["columns"].as_array().unwrap();
     let segment = cols
@@ -283,7 +342,10 @@ fn schema_text_format_renders_table_with_header() {
         "--format",
         "text",
     ]);
-    assert!(out.contains("Sheet: Revenue Breakdown"), "missing sheet header: {out}");
+    assert!(
+        out.contains("Sheet: Revenue Breakdown"),
+        "missing sheet header: {out}"
+    );
     assert!(out.contains("column") && out.contains("type") && out.contains("cardinality"));
     assert!(out.contains("Customer"), "missing column row: {out}");
 }
@@ -299,4 +361,60 @@ fn schema_unknown_sheet_errors() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not found"), "stderr: {stderr}");
+}
+
+// ---- multi-format smoke tests (sprint-2 task #21) ----
+//
+// These don't lock goldens: xls/ods backends return empty styles so the
+// boxed renderer's column-width math can legitimately differ from xlsx
+// output, and CSV has no number formats to drive the styled path. The
+// contract being tested is "Workbook::open dispatches and the CLI
+// renders something sensible" - the per-format value/schema correctness
+// is asserted in `wolfxl-core`'s integration tests.
+
+#[test]
+fn peek_reads_csv_fixture() {
+    let path = fixture("sample-minimal.csv");
+    let out = run(&["peek", path.to_str().unwrap(), "-n", "3"]);
+    assert!(out.contains("Account"), "missing CSV header: {out}");
+    assert!(out.contains("Revenue"), "missing CSV data row: {out}");
+    assert!(out.contains("│"), "expected boxed renderer output");
+}
+
+#[test]
+fn peek_reads_xls_fixture() {
+    let path = fixture("sample-minimal.xls");
+    let out = run(&["peek", path.to_str().unwrap(), "-n", "3"]);
+    assert!(out.contains("Account"), "missing xls header: {out}");
+    assert!(out.contains("P&L"), "missing xls sheet name: {out}");
+}
+
+#[test]
+fn peek_reads_ods_fixture() {
+    let path = fixture("sample-minimal.ods");
+    let out = run(&["peek", path.to_str().unwrap(), "-n", "3"]);
+    assert!(out.contains("Account"), "missing ods header: {out}");
+}
+
+#[test]
+fn schema_reads_csv_fixture() {
+    let path = fixture("sample-minimal.csv");
+    // `wolfxl schema file.csv` with no --sheet emits all-sheets JSON.
+    // CSV exposes one synthetic sheet named after the filename stem.
+    let out = run(&["schema", path.to_str().unwrap(), "--format", "json"]);
+    assert!(
+        out.contains("\"sample-minimal\""),
+        "missing synthetic sheet name: {out}"
+    );
+    // Numeric columns (Jan/Feb/Mar/Q1) should classify as int via
+    // schema-layer string parsing, per invariant B4. Account column
+    // stays string.
+    assert!(
+        out.contains("\"type\": \"int\""),
+        "expected int-classified columns: {out}"
+    );
+    assert!(
+        out.contains("\"type\": \"string\""),
+        "expected Account as string: {out}"
+    );
 }

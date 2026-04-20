@@ -220,7 +220,10 @@ mod tests {
         // as Date. `[h]:mm:ss` legitimately encodes elapsed-hour time and
         // should still classify as Time, but any non-time `[...]` tag
         // should be ignored by the date/time scan.
-        assert_eq!(classify_format("#,##0_);[Red](#,##0)"), FormatCategory::Integer);
+        assert_eq!(
+            classify_format("#,##0_);[Red](#,##0)"),
+            FormatCategory::Integer
+        );
         assert_eq!(classify_format("0.00;[Red]-0.00"), FormatCategory::Float);
         assert_eq!(classify_format("[h]:mm:ss"), FormatCategory::Time);
     }

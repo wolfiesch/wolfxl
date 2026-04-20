@@ -41,7 +41,10 @@ pub fn csv<W: Write>(w: &mut W, sheet: &Sheet, _opts: &RenderOptions) -> std::io
     let headers: Vec<String> = sheet.headers().iter().map(|h| csv_quote(h)).collect();
     writeln!(w, "{}", headers.join(","))?;
     for row in sheet.rows().iter().skip(1) {
-        let cells: Vec<String> = row.iter().map(|c| csv_quote(&display_cell(c, true))).collect();
+        let cells: Vec<String> = row
+            .iter()
+            .map(|c| csv_quote(&display_cell(c, true)))
+            .collect();
         writeln!(w, "{}", cells.join(","))?;
     }
     Ok(())
@@ -105,7 +108,11 @@ pub fn boxed<W: Write>(w: &mut W, sheet: &Sheet, opts: &RenderOptions) -> std::i
     let (total_rows, total_cols) = sheet.dimensions();
     let data_rows = total_rows.saturating_sub(1);
     write_banner(w)?;
-    writeln!(w, "Sheet: {} ({} rows × {} columns)", sheet.name, data_rows, total_cols)?;
+    writeln!(
+        w,
+        "Sheet: {} ({} rows × {} columns)",
+        sheet.name, data_rows, total_cols
+    )?;
     writeln!(w, "Available sheets: {}", opts.all_sheets.join(", "))?;
     writeln!(w)?;
 
@@ -119,7 +126,11 @@ pub fn boxed<W: Write>(w: &mut W, sheet: &Sheet, opts: &RenderOptions) -> std::i
         .rows()
         .iter()
         .take(cap_total)
-        .map(|row| row.iter().map(|c| truncate(&display_cell(c, true), opts.max_width)).collect())
+        .map(|row| {
+            row.iter()
+                .map(|c| truncate(&display_cell(c, true), opts.max_width))
+                .collect()
+        })
         .collect();
 
     let widths = column_widths(&display_rows, total_cols);
@@ -200,13 +211,7 @@ fn write_box_row<W: Write>(
         if center {
             let left = pad / 2;
             let right = pad - left;
-            write!(
-                w,
-                " {}{}{} │",
-                " ".repeat(left),
-                cell,
-                " ".repeat(right)
-            )?;
+            write!(w, " {}{}{} │", " ".repeat(left), cell, " ".repeat(right))?;
         } else {
             write!(w, " {}{} │", cell, " ".repeat(pad))?;
         }
@@ -306,7 +311,9 @@ fn json_cell(cell: &Cell) -> Value {
         CellValue::String(s) => Value::String(s.clone()),
         CellValue::Bool(b) => Value::Bool(*b),
         CellValue::Int(n) => Value::Number((*n).into()),
-        CellValue::Float(n) => serde_json::Number::from_f64(*n).map(Value::Number).unwrap_or(Value::Null),
+        CellValue::Float(n) => serde_json::Number::from_f64(*n)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         CellValue::Date(d) => Value::String(d.format("%Y-%m-%d").to_string()),
         CellValue::DateTime(dt) => Value::String(dt.format("%Y-%m-%dT%H:%M:%S").to_string()),
         CellValue::Time(t) => Value::String(t.format("%H:%M:%S").to_string()),
@@ -368,7 +375,11 @@ fn trim_float(n: f64) -> String {
         // f64 outside u64 range (>= 2^64) — fall back to ungrouped digits.
         Err(_) => digits.to_string(),
     };
-    let grouped = if negative { format!("-{grouped}") } else { grouped };
+    let grouped = if negative {
+        format!("-{grouped}")
+    } else {
+        grouped
+    };
     match frac_part {
         Some(f) => format!("{grouped}.{f}"),
         None => grouped,
@@ -420,9 +431,18 @@ mod tests {
 
     #[test]
     fn display_cell_bool_lowercase_and_error_prefix() {
-        let true_cell = Cell { value: CellValue::Bool(true), number_format: None };
-        let false_cell = Cell { value: CellValue::Bool(false), number_format: None };
-        let err_cell = Cell { value: CellValue::Error("#REF!".to_string()), number_format: None };
+        let true_cell = Cell {
+            value: CellValue::Bool(true),
+            number_format: None,
+        };
+        let false_cell = Cell {
+            value: CellValue::Bool(false),
+            number_format: None,
+        };
+        let err_cell = Cell {
+            value: CellValue::Error("#REF!".to_string()),
+            number_format: None,
+        };
         assert_eq!(display_cell(&true_cell, true), "true");
         assert_eq!(display_cell(&false_cell, true), "false");
         assert_eq!(display_cell(&err_cell, true), "ERROR: #REF!");

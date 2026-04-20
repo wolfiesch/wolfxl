@@ -246,6 +246,34 @@ fn classify_cardinality(unique: usize, non_null: usize, capped: bool) -> Cardina
     Cardinality::HighCardinality
 }
 
+/// How a string-valued cell should be counted for type inference. Used by
+/// [`TypeCounts::observe`] so a CSV column of numeric-looking strings lands
+/// in the Int/Float bucket instead of the catch-all String bucket.
+enum StringShape {
+    Int,
+    Float,
+    Other,
+}
+
+/// Classify a string cell's text. Conservative: only classifies as numeric
+/// when the trimmed text parses cleanly as i64 / f64 with no stray
+/// characters. `"$100"`, `"1,000"`, `"100%"` stay `Other` — a number format
+/// is typically inferred from the column's format string, not from the cell
+/// text, for those shapes.
+fn classify_string_as_type(s: &str) -> StringShape {
+    let t = s.trim();
+    if t.is_empty() {
+        return StringShape::Other;
+    }
+    if t.parse::<i64>().is_ok() {
+        StringShape::Int
+    } else if t.parse::<f64>().is_ok_and(f64::is_finite) {
+        StringShape::Float
+    } else {
+        StringShape::Other
+    }
+}
+
 #[derive(Default)]
 struct TypeCounts {
     string: usize,
@@ -262,7 +290,16 @@ impl TypeCounts {
     fn observe(&mut self, v: &CellValue) {
         match v {
             CellValue::Empty => {}
-            CellValue::String(_) => self.string += 1,
+            // CSV cells and openpyxl-stored-as-text workbooks surface as
+            // strings here. Per invariant B4, schema inference is the
+            // single source of truth for "this column is actually numbers";
+            // parse the rendered text so a CSV column of `"100","200",...`
+            // classifies as Int, not String.
+            CellValue::String(s) => match classify_string_as_type(s) {
+                StringShape::Int => self.int += 1,
+                StringShape::Float => self.float += 1,
+                StringShape::Other => self.string += 1,
+            },
             CellValue::Int(_) => self.int += 1,
             CellValue::Float(_) => self.float += 1,
             CellValue::Bool(_) => self.bool_ += 1,
@@ -277,8 +314,14 @@ impl TypeCounts {
     /// resolve to Float (numeric supertype). Anything else with two or
     /// more types contributing returns Mixed.
     fn dominant(&self) -> InferredType {
-        let total =
-            self.string + self.int + self.float + self.bool_ + self.date + self.datetime + self.time + self.error;
+        let total = self.string
+            + self.int
+            + self.float
+            + self.bool_
+            + self.date
+            + self.datetime
+            + self.time
+            + self.error;
         if total == 0 {
             return InferredType::Empty;
         }
@@ -310,7 +353,11 @@ impl TypeCounts {
         if nonzero > 1 {
             return InferredType::Mixed;
         }
-        pairs.iter().find(|(c, _)| *c > 0).map(|(_, t)| *t).unwrap_or(InferredType::Empty)
+        pairs
+            .iter()
+            .find(|(c, _)| *c > 0)
+            .map(|(_, t)| *t)
+            .unwrap_or(InferredType::Empty)
     }
 }
 
@@ -319,13 +366,22 @@ mod tests {
     use super::*;
 
     fn s(v: &str) -> Cell {
-        Cell { value: CellValue::String(v.to_string()), number_format: None }
+        Cell {
+            value: CellValue::String(v.to_string()),
+            number_format: None,
+        }
     }
     fn i(n: i64) -> Cell {
-        Cell { value: CellValue::Int(n), number_format: None }
+        Cell {
+            value: CellValue::Int(n),
+            number_format: None,
+        }
     }
     fn f(n: f64) -> Cell {
-        Cell { value: CellValue::Float(n), number_format: None }
+        Cell {
+            value: CellValue::Float(n),
+            number_format: None,
+        }
     }
     fn empty() -> Cell {
         Cell::empty()
@@ -343,12 +399,7 @@ mod tests {
 
     #[test]
     fn pure_int_column_infers_int_unique_when_distinct() {
-        let rows = vec![
-            vec![s("id")],
-            vec![i(1)],
-            vec![i(2)],
-            vec![i(3)],
-        ];
+        let rows = vec![vec![s("id")], vec![i(1)], vec![i(2)], vec![i(3)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         let col = &schema.columns[0];
         assert_eq!(col.inferred_type, InferredType::Int);
@@ -359,25 +410,28 @@ mod tests {
 
     #[test]
     fn int_plus_float_collapses_to_float() {
-        let rows = vec![
-            vec![s("price")],
-            vec![i(1)],
-            vec![f(2.5)],
-            vec![i(3)],
-        ];
+        let rows = vec![vec![s("price")], vec![i(1)], vec![f(2.5)], vec![i(3)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Float);
     }
 
     #[test]
     fn mixed_string_and_numeric_returns_mixed() {
-        let rows = vec![
-            vec![s("col")],
-            vec![s("hello")],
-            vec![i(42)],
-        ];
+        let rows = vec![vec![s("col")], vec![s("hello")], vec![i(42)]];
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         assert_eq!(schema.columns[0].inferred_type, InferredType::Mixed);
+    }
+
+    #[test]
+    fn non_finite_numeric_strings_stay_strings() {
+        let rows = vec![
+            vec![s("value")],
+            vec![s("NaN")],
+            vec![s("inf")],
+            vec![s("-inf")],
+        ];
+        let schema = infer_sheet_schema(&sheet_with("t", rows));
+        assert_eq!(schema.columns[0].inferred_type, InferredType::String);
     }
 
     #[test]
@@ -467,7 +521,10 @@ mod tests {
         let schema = infer_sheet_schema(&sheet_with("t", rows));
         let col = &schema.columns[0];
         assert_eq!(col.unique_count, UNIQUE_CAP);
-        assert!(!col.unique_capped, "exact-at-cap with only repeats should stay uncapped");
+        assert!(
+            !col.unique_capped,
+            "exact-at-cap with only repeats should stay uncapped"
+        );
     }
 
     #[test]
