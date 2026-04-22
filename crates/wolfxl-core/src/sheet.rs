@@ -10,7 +10,7 @@ use crate::workbook::WorkbookStyles;
 
 /// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Xlsb/Ods
 /// behind a single enum. All four implement the `Reader` trait, so
-/// `worksheet_range` and `worksheet_style` work uniformly — xls/ods
+/// `worksheet_range` and `worksheet_style` work uniformly — xls/xlsb/ods
 /// return an empty `StyleRange` (styles walker is xlsx-only), which
 /// is the expected behavior.
 pub(crate) type SheetsReader = Sheets<BufReader<File>>;
@@ -49,9 +49,13 @@ impl Sheet {
                     .get((r, c))
                     .map(data_to_cell_value)
                     .unwrap_or(CellValue::Empty);
+                let absolute_position = absolute_position(start_row, start_col, r, c);
                 let number_format = style_range
                     .as_ref()
-                    .and_then(|sr| sr.get((r, c)))
+                    .and_then(|sr| {
+                        let (row, col) = absolute_position?;
+                        style_at_absolute_position(sr, row, col)
+                    })
                     .and_then(extract_number_format)
                     .or_else(|| {
                         // Calamine fast path missed. Fall back to the
@@ -128,6 +132,31 @@ impl Sheet {
             })
             .unwrap_or_default()
     }
+}
+
+fn absolute_position(
+    start_row: u32,
+    start_col: u32,
+    row_offset: usize,
+    col_offset: usize,
+) -> Option<(u32, u32)> {
+    let row = start_row.checked_add(u32::try_from(row_offset).ok()?)?;
+    let col = start_col.checked_add(u32::try_from(col_offset).ok()?)?;
+    Some((row, col))
+}
+
+fn style_at_absolute_position(
+    range: &calamine_styles::StyleRange,
+    row: u32,
+    col: u32,
+) -> Option<&calamine_styles::Style> {
+    let (start_row, start_col) = range.start()?;
+    if row < start_row || col < start_col {
+        return None;
+    }
+    let rel_row = usize::try_from(row - start_row).ok()?;
+    let rel_col = usize::try_from(col - start_col).ok()?;
+    range.get((rel_row, rel_col))
 }
 
 fn format_value_plain(v: &CellValue) -> String {
@@ -299,6 +328,14 @@ mod tests {
             CellValue::Date(d) => d,
             other => panic!("expected Date, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn absolute_position_overflow_returns_none() {
+        assert_eq!(absolute_position(10, 20, 2, 3), Some((12, 23)));
+        assert_eq!(absolute_position(u32::MAX, 20, 1, 0), None);
+        assert_eq!(absolute_position(10, u32::MAX, 0, 1), None);
+        assert_eq!(absolute_position(10, 20, usize::MAX, 0), None);
     }
 
     #[test]

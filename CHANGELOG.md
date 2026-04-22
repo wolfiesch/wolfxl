@@ -125,14 +125,24 @@
   against `.csv`, `.xls`, and `.ods` fixtures and drives `schema`
   against `.csv`, asserting the CSV's numeric columns classify as
   `int`. No goldens locked for non-xlsx renders since calamine's
-  xls/ods readers return empty styles (R1 risk from the sprint plan)
+  xls/xlsb/ods readers return empty styles (R1 risk from the sprint plan)
   and the boxed renderer's column widths can drift without the
   styled fast path.
+- **Expanded CLI confidence matrix**: committed a tiny `.xlsb` fixture
+  sourced from calamine's MIT-licensed test corpus and now smoke-tests
+  `peek`, `map`, `schema`, and `agent` across `.csv`, `.xls`, `.xlsb`,
+  and `.ods`. CLI help and README text now describe the broad input
+  surface instead of implying `.xlsx` only.
+- **Number-format-aware CLI previews**: added a formatted workbook
+  fixture and assertions that human-facing `peek` box/text/CSV renders
+  currency symbols and percentage formats while JSON preserves raw
+  machine values. `agent` keeps compact raw numerics intentionally to
+  protect token budgets.
 
 ### Changed
 
 - **`Workbook::styles()` errors for non-xlsx formats** with a clear
-  "`WorkbookStyles` only supports xlsx" message. xls/ods carry no
+  "`WorkbookStyles` only supports xlsx" message. xls/xlsb/ods carry no
   style information in calamine's public API, and CSV has no
   concept of styles. Callers that want styled rendering should
   branch on `Workbook::format()` before reaching for `styles()`.
@@ -147,7 +157,7 @@
 
 ### Notes
 
-- **xls / ods are value-only today.** calamine-styles leaves
+- **xls / xlsb / ods are value-only today.** calamine-styles leaves
   `worksheet_style()` empty for these formats, so
   `Cell::number_format` is always `None`; schema inference still
   classifies numeric columns correctly because it reads values, not

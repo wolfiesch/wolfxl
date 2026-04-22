@@ -5,10 +5,10 @@
 //! routes to the right backend, and returns a workbook that answers the
 //! same questions (`sheet_names`, `first_sheet`, per-column schema) as
 //! the xlsx path - even when the backend has to synthesize a sheet (CSV)
-//! or calamine leaves styles empty (xls / ods).
+//! or calamine leaves styles empty (xls / xlsb / ods).
 //!
-//! What these tests do NOT assert: number-format fidelity on xls/ods.
-//! calamine-styles' xls/ods readers return an empty `StyleRange` today,
+//! What these tests do NOT assert: number-format fidelity on xls/xlsb/ods.
+//! calamine-styles' non-xlsx readers return an empty `StyleRange` today,
 //! so the `number_format` field always comes back `None`. That's a known
 //! gap per the sprint plan R1 mitigation - values and schema inference
 //! work either way.
@@ -115,6 +115,33 @@ fn opens_xls_with_calamine_backend() {
         "Jan column should infer Int, got {:?}",
         schema.columns[1].inferred_type
     );
+}
+
+#[test]
+fn opens_xlsb_with_calamine_backend() {
+    // Fixture source: calamine's MIT-licensed `tests/date.xlsb`, copied
+    // into this repo as a tiny binary workbook that exercises the xlsb
+    // dispatch path without relying on a local Excel install.
+    let path = fixture("sample-date.xlsb");
+    assert!(path.exists(), "xlsb fixture missing at {}", path.display());
+
+    let mut wb = Workbook::open(&path).expect("open xlsb");
+    assert_eq!(wb.format(), SourceFormat::Xlsb);
+
+    let names = wb.sheet_names().to_vec();
+    assert_eq!(names, vec!["Sheet1"]);
+
+    let sheet = wb.first_sheet().expect("read xlsb sheet");
+    let (rows, cols) = sheet.dimensions();
+    assert_eq!((rows, cols), (3, 2));
+
+    let headers = sheet.headers();
+    assert_eq!(headers[0], "2021-01-01");
+    assert_eq!(headers[1], "15");
+
+    let schema = infer_sheet_schema(&sheet);
+    assert_eq!(schema.columns.len(), 2);
+    assert_eq!(schema.columns[1].inferred_type, InferredType::Int);
 }
 
 #[test]

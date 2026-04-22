@@ -109,6 +109,7 @@ fn strip_bracketed_tags(fmt: &str) -> String {
 /// richer than what an agent needs. The goal: a sensible default that beats
 /// raw `Display` of the underlying value.
 pub fn format_cell(cell: &Cell) -> String {
+    let number_format = cell.number_format.as_deref();
     let category = cell
         .number_format
         .as_deref()
@@ -124,8 +125,12 @@ pub fn format_cell(cell: &Cell) -> String {
         (CellValue::DateTime(dt), _) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
         (CellValue::Time(t), _) => t.format("%H:%M:%S").to_string(),
 
-        (CellValue::Int(n), FormatCategory::Currency) => format_currency(*n as f64, 2),
-        (CellValue::Float(n), FormatCategory::Currency) => format_currency(*n, 2),
+        (CellValue::Int(n), FormatCategory::Currency) => {
+            format_currency(*n as f64, 2, currency_symbol(number_format))
+        }
+        (CellValue::Float(n), FormatCategory::Currency) => {
+            format_currency(*n, 2, currency_symbol(number_format))
+        }
 
         (CellValue::Int(n), FormatCategory::Percentage) => format_percentage(*n as f64, 1),
         (CellValue::Float(n), FormatCategory::Percentage) => format_percentage(*n, 1),
@@ -137,7 +142,22 @@ pub fn format_cell(cell: &Cell) -> String {
     }
 }
 
-fn format_currency(value: f64, decimals: usize) -> String {
+fn currency_symbol(fmt: Option<&str>) -> &'static str {
+    let Some(fmt) = fmt else {
+        return "$";
+    };
+    if fmt.contains('€') {
+        "€"
+    } else if fmt.contains('£') {
+        "£"
+    } else if fmt.contains('¥') {
+        "¥"
+    } else {
+        "$"
+    }
+}
+
+fn format_currency(value: f64, decimals: usize, symbol: &str) -> String {
     // Round once on a single scaled integer so 1.995 carries to 2.00, not 1.100.
     // Splitting `trunc()` and `fract()` separately drops the carry.
     let sign = if value < 0.0 { "-" } else { "" };
@@ -146,8 +166,9 @@ fn format_currency(value: f64, decimals: usize) -> String {
     let whole = scaled / scale;
     let frac = scaled % scale;
     format!(
-        "{}${}.{:0width$}",
+        "{}{}{}.{:0width$}",
         sign,
+        symbol,
         group_thousands(whole),
         frac,
         width = decimals
@@ -241,6 +262,27 @@ mod tests {
             number_format: Some("$#,##0.00".into()),
         };
         assert_eq!(format_cell(&neg), "-$42.00");
+    }
+
+    #[test]
+    fn currency_render_preserves_common_symbols() {
+        let euro = Cell {
+            value: CellValue::Float(1234.5),
+            number_format: Some("€#,##0.00".into()),
+        };
+        assert_eq!(format_cell(&euro), "€1,234.50");
+
+        let pound = Cell {
+            value: CellValue::Float(-42.0),
+            number_format: Some("[$£-809]#,##0.00".into()),
+        };
+        assert_eq!(format_cell(&pound), "-£42.00");
+
+        let yen = Cell {
+            value: CellValue::Int(5000),
+            number_format: Some("¥#,##0".into()),
+        };
+        assert_eq!(format_cell(&yen), "¥5,000.00");
     }
 
     #[test]
