@@ -49,11 +49,13 @@ impl Sheet {
                     .get((r, c))
                     .map(data_to_cell_value)
                     .unwrap_or(CellValue::Empty);
-                let abs_row = start_row.checked_add(u32::try_from(r).unwrap_or(0));
-                let abs_col = start_col.checked_add(u32::try_from(c).unwrap_or(0));
+                let absolute_position = absolute_position(start_row, start_col, r, c);
                 let number_format = style_range
                     .as_ref()
-                    .and_then(|sr| style_at_absolute_position(sr, abs_row?, abs_col?))
+                    .and_then(|sr| {
+                        let (row, col) = absolute_position?;
+                        style_at_absolute_position(sr, row, col)
+                    })
                     .and_then(extract_number_format)
                     .or_else(|| {
                         // Calamine fast path missed. Fall back to the
@@ -130,6 +132,17 @@ impl Sheet {
             })
             .unwrap_or_default()
     }
+}
+
+fn absolute_position(
+    start_row: u32,
+    start_col: u32,
+    row_offset: usize,
+    col_offset: usize,
+) -> Option<(u32, u32)> {
+    let row = start_row.checked_add(u32::try_from(row_offset).ok()?)?;
+    let col = start_col.checked_add(u32::try_from(col_offset).ok()?)?;
+    Some((row, col))
 }
 
 fn style_at_absolute_position(
@@ -315,6 +328,14 @@ mod tests {
             CellValue::Date(d) => d,
             other => panic!("expected Date, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn absolute_position_overflow_returns_none() {
+        assert_eq!(absolute_position(10, 20, 2, 3), Some((12, 23)));
+        assert_eq!(absolute_position(u32::MAX, 20, 1, 0), None);
+        assert_eq!(absolute_position(10, u32::MAX, 0, 1), None);
+        assert_eq!(absolute_position(10, 20, usize::MAX, 0), None);
     }
 
     #[test]
