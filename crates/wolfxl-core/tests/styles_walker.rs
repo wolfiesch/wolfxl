@@ -81,6 +81,25 @@ fn workbook_resolves_date_formats_on_styled_fixture() {
 }
 
 #[test]
+fn workbook_aligns_sparse_style_range_to_value_range() {
+    let path = fixture_path("formatted-values.xlsx");
+    assert!(path.exists(), "fixture missing at {}", path.display());
+
+    let mut wb = Workbook::open(&path).expect("open formatted-values.xlsx");
+    let sheet = wb.sheet("Formats").expect("load Formats sheet");
+    let first_data = &sheet.rows()[1];
+
+    assert_eq!(
+        first_data[0].number_format.as_deref(),
+        None,
+        "text column should not inherit the next column's currency format"
+    );
+    assert_eq!(first_data[1].number_format.as_deref(), Some("$#,##0.00"));
+    assert_eq!(first_data[2].number_format.as_deref(), Some("0.0%"));
+    assert_eq!(first_data[3].number_format.as_deref(), Some("yyyy-mm-dd"));
+}
+
+#[test]
 fn walker_direct_resolution_from_synthetic_xml() {
     // Minimal OOXML that exercises the walker end-to-end without a real
     // zip: openpyxl-style numFmts (id 164+165), cellXfs that reference

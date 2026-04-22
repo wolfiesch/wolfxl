@@ -14,7 +14,7 @@ use std::io::Write;
 
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
-use wolfxl_core::{Cell, CellValue, Sheet};
+use wolfxl_core::{classify_format, format_cell, Cell, CellValue, FormatCategory, Sheet};
 
 pub struct RenderOptions<'a> {
     pub max_rows: Option<usize>,
@@ -283,6 +283,9 @@ fn csv_quote(s: &str) -> String {
 }
 
 fn display_cell(cell: &Cell, group_ints: bool) -> String {
+    if let Some(rendered) = display_number_format(cell) {
+        return rendered;
+    }
     match &cell.value {
         CellValue::Empty => String::new(),
         CellValue::String(s) => s.clone(),
@@ -302,6 +305,19 @@ fn display_cell(cell: &Cell, group_ints: bool) -> String {
         // Prefix Excel error sentinels with "ERROR: " so a `#REF!` cell is
         // visually distinct from a literal string `"#REF!"` in the output.
         CellValue::Error(e) => format!("ERROR: {e}"),
+    }
+}
+
+fn display_number_format(cell: &Cell) -> Option<String> {
+    let category = cell.number_format.as_deref().map(classify_format)?;
+    match category {
+        // Keep the long-standing plain-number contract for General /
+        // Integer / Float. Route formats where the symbol or scale is
+        // essential through the core formatter.
+        FormatCategory::Currency | FormatCategory::Percentage | FormatCategory::Scientific => {
+            Some(format_cell(cell))
+        }
+        _ => None,
     }
 }
 
@@ -446,5 +462,19 @@ mod tests {
         assert_eq!(display_cell(&true_cell, true), "true");
         assert_eq!(display_cell(&false_cell, true), "false");
         assert_eq!(display_cell(&err_cell, true), "ERROR: #REF!");
+    }
+
+    #[test]
+    fn display_cell_respects_currency_and_percentage_formats() {
+        let currency = Cell {
+            value: CellValue::Float(1234.5),
+            number_format: Some("$#,##0.00".to_string()),
+        };
+        let percentage = Cell {
+            value: CellValue::Float(0.234),
+            number_format: Some("0.0%".to_string()),
+        };
+        assert_eq!(display_cell(&currency, true), "$1,234.50");
+        assert_eq!(display_cell(&percentage, true), "23.4%");
     }
 }

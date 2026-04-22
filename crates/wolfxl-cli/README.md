@@ -36,9 +36,10 @@ wolfxl schema workbook.xlsx -s "P&L" -f text
 ```
 
 The `text`, `csv`, and `json` exporters are tuned for piping into LLM /
-agent contexts and Unix tooling: integer thousand-grouping, two-decimal
-floats, ISO dates, RFC 4180 CSV quoting (including embedded `\r`/`\n`),
-and stable JSON shape (`{sheet, rows, columns, headers, data}`).
+agent contexts and Unix tooling. Human-facing `box`, `text`, and `csv`
+renders preserve common Excel display formats such as currency and
+percentages, while JSON keeps machine-shaped values
+(`{sheet, rows, columns, headers, data}`).
 
 The default `box` exporter is wolfxl-branded with `╔═╗` banner and `┌─┬─┐`
 table borders.
@@ -57,9 +58,10 @@ schema inference reads numeric-looking strings to classify columns.
 `map` emits workbook-level metadata for planning a next step: sheet names,
 dimensions, detected sheet class, headers, and named ranges. `agent` uses the
 same core metadata plus a stratified row sample to compose a briefing that fits
-within a `cl100k_base` token budget. `schema` emits per-column type,
-cardinality, null-count, format-category, and sample-value inference for one
-sheet or the whole workbook.
+within a `cl100k_base` token budget. To protect that budget, `agent` keeps
+compact raw numeric rendering instead of spending tokens on display symbols.
+`schema` emits per-column type, cardinality, null-count, format-category, and
+sample-value inference for one sheet or the whole workbook.
 
 ## Built on
 

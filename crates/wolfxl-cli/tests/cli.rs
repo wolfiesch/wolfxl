@@ -86,6 +86,48 @@ fn json_export_matches_golden_wide() {
 }
 
 #[test]
+fn text_export_respects_number_formats_on_human_surface() {
+    let path = fixture("formatted-values.xlsx");
+    let out = run(&["peek", path.to_str().unwrap(), "-e", "text"]);
+    assert!(
+        out.contains("Revenue\t$1,234,567.50\t23.4%\t2024-03-31\t2,505.15"),
+        "text export should render currency and percent formats: {out}"
+    );
+}
+
+#[test]
+fn csv_export_respects_number_formats_on_human_surface() {
+    let path = fixture("formatted-values.xlsx");
+    let out = run(&["peek", path.to_str().unwrap(), "-e", "csv"]);
+    assert!(
+        out.contains("Revenue,\"$1,234,567.50\",23.4%,2024-03-31,\"2,505.15\""),
+        "csv export should render currency and percent formats: {out}"
+    );
+}
+
+#[test]
+fn boxed_export_respects_number_formats_on_human_surface() {
+    let path = fixture("formatted-values.xlsx");
+    let out = run(&["peek", path.to_str().unwrap(), "-n", "2"]);
+    assert!(out.contains("$1,234,567.50"), "missing currency: {out}");
+    assert!(out.contains("23.4%"), "missing percent: {out}");
+}
+
+#[test]
+fn json_export_keeps_machine_values_for_formatted_cells() {
+    let path = fixture("formatted-values.xlsx");
+    let out = run(&["peek", path.to_str().unwrap(), "-e", "json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json parses");
+    let data = v["data"].as_array().expect("data array");
+    assert_eq!(data[0][1], 1234567.5);
+    assert_eq!(data[0][2], 0.234);
+    assert!(
+        !out.contains("$1,234,567.50") && !out.contains("23.4%"),
+        "json should stay value-shaped, not display-shaped: {out}"
+    );
+}
+
+#[test]
 fn boxed_smoke() {
     let path = fixture("sample-financials.xlsx");
     let out = run(&["peek", path.to_str().unwrap(), "-n", "5"]);
@@ -256,6 +298,20 @@ fn agent_respects_explicit_sheet_override() {
     assert!(
         out.contains("SHEET: Revenue Breakdown"),
         "explicit --sheet should win over largest-data heuristic: {out}"
+    );
+}
+
+#[test]
+fn agent_keeps_compact_raw_numbers_for_formatted_cells() {
+    let path = fixture("formatted-values.xlsx");
+    let out = run(&["agent", path.to_str().unwrap(), "--max-tokens", "400"]);
+    assert!(
+        out.contains("Revenue\t1234567.50\t0.23\t2024-03-31\t2505.15"),
+        "agent output should keep cheap numeric rendering: {out}"
+    );
+    assert!(
+        !out.contains("$1,234,567.50") && !out.contains("23.4%"),
+        "agent should not spend tokens on display symbols: {out}"
     );
 }
 

@@ -49,9 +49,11 @@ impl Sheet {
                     .get((r, c))
                     .map(data_to_cell_value)
                     .unwrap_or(CellValue::Empty);
+                let abs_row = start_row.checked_add(u32::try_from(r).unwrap_or(0));
+                let abs_col = start_col.checked_add(u32::try_from(c).unwrap_or(0));
                 let number_format = style_range
                     .as_ref()
-                    .and_then(|sr| sr.get((r, c)))
+                    .and_then(|sr| style_at_absolute_position(sr, abs_row?, abs_col?))
                     .and_then(extract_number_format)
                     .or_else(|| {
                         // Calamine fast path missed. Fall back to the
@@ -128,6 +130,20 @@ impl Sheet {
             })
             .unwrap_or_default()
     }
+}
+
+fn style_at_absolute_position(
+    range: &calamine_styles::StyleRange,
+    row: u32,
+    col: u32,
+) -> Option<&calamine_styles::Style> {
+    let (start_row, start_col) = range.start()?;
+    if row < start_row || col < start_col {
+        return None;
+    }
+    let rel_row = usize::try_from(row - start_row).ok()?;
+    let rel_col = usize::try_from(col - start_col).ok()?;
+    range.get((rel_row, rel_col))
 }
 
 fn format_value_plain(v: &CellValue) -> String {
