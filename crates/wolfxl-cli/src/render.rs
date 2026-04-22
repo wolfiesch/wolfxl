@@ -477,4 +477,13 @@ mod tests {
         assert_eq!(display_cell(&currency, true), "$1,234.50");
         assert_eq!(display_cell(&percentage, true), "23.4%");
     }
+
+    #[test]
+    fn display_cell_preserves_non_usd_currency_symbol() {
+        let euro = Cell {
+            value: CellValue::Float(1234.5),
+            number_format: Some("€#,##0.00".to_string()),
+        };
+        assert_eq!(display_cell(&euro, true), "€1,234.50");
+    }
 }

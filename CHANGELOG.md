@@ -135,9 +135,9 @@
   surface instead of implying `.xlsx` only.
 - **Number-format-aware CLI previews**: added a formatted workbook
   fixture and assertions that human-facing `peek` box/text/CSV renders
-  currency and percentage formats while JSON preserves raw machine
-  values. `agent` keeps compact raw numerics intentionally to protect
-  token budgets.
+  currency symbols and percentage formats while JSON preserves raw
+  machine values. `agent` keeps compact raw numerics intentionally to
+  protect token budgets.
 
 ### Changed
 
