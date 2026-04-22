@@ -19,7 +19,7 @@
 //! ## Scope
 //!
 //! - **In scope today:** read xlsx / xls / xlsb / ods / csv values + best-effort
-//!   number-format strings (xlsx only — calamine leaves xls/ods style ranges
+//!   number-format strings (xlsx only — calamine leaves xls/xlsb/ods style ranges
 //!   empty and CSV has no style concept), classify formats into
 //!   [`FormatCategory`], render via [`format_cell`], map workbook structure,
 //!   infer per-column schema/cardinality summaries (reads through

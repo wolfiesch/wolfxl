@@ -10,7 +10,7 @@ use crate::workbook::WorkbookStyles;
 
 /// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Xlsb/Ods
 /// behind a single enum. All four implement the `Reader` trait, so
-/// `worksheet_range` and `worksheet_style` work uniformly — xls/ods
+/// `worksheet_range` and `worksheet_style` work uniformly — xls/xlsb/ods
 /// return an empty `StyleRange` (styles walker is xlsx-only), which
 /// is the expected behavior.
 pub(crate) type SheetsReader = Sheets<BufReader<File>>;

@@ -2,7 +2,9 @@
 
 [![crates.io](https://img.shields.io/crates/v/wolfxl-cli.svg)](https://crates.io/crates/wolfxl-cli)
 
-Command-line previewer for Excel xlsx files. Installs the `wolfxl` binary.
+Command-line previewer for spreadsheets. Installs the `wolfxl` binary and
+opens `.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv`, and `.txt`
+inputs through the same `peek` / `map` / `agent` / `schema` workflow.
 
 ```bash
 cargo install wolfxl-cli
@@ -24,6 +26,8 @@ wolfxl peek workbook.xlsx -e csv            # RFC 4180 CSV
 wolfxl peek workbook.xlsx -e json           # machine-readable JSON
 wolfxl peek workbook.xlsx -n 20 -w 30       # 20 rows, 30-char column cap
 wolfxl peek workbook.xlsx -s "Balance Sheet"
+wolfxl peek workbook.xlsb                   # binary Excel workbook
+wolfxl map export.csv --format text         # delimited file as one sheet
 wolfxl map workbook.xlsx                    # workbook inventory for agents
 wolfxl map workbook.xlsx --format text      # terminal-friendly summary
 wolfxl agent workbook.xlsx --max-tokens 400 # fit a briefing to a token budget
@@ -39,6 +43,17 @@ and stable JSON shape (`{sheet, rows, columns, headers, data}`).
 The default `box` exporter is wolfxl-branded with `╔═╗` banner and `┌─┬─┐`
 table borders.
 
+## Format Support
+
+`wolfxl-cli` routes `.xlsx`, `.xlsm`, `.xlam`, `.xls`, `.xla`, `.xlsb`, and
+`.ods` through the workbook reader, and treats `.csv`, `.tsv`, and `.txt` as a
+single synthetic sheet named after the file stem.
+
+`.xlsx` / `.xlsm` / `.xlam` can carry resolved number formats and the style
+walker fallback. Legacy/binary/OpenDocument formats are value/schema-first when
+the reader does not expose styles. Delimited files have no style metadata, so
+schema inference reads numeric-looking strings to classify columns.
+
 `map` emits workbook-level metadata for planning a next step: sheet names,
 dimensions, detected sheet class, headers, and named ranges. `agent` uses the
 same core metadata plus a stratified row sample to compose a briefing that fits
@@ -48,10 +63,10 @@ sheet or the whole workbook.
 
 ## Built on
 
-- [`wolfxl-core`](https://crates.io/crates/wolfxl-core) — pure-Rust xlsx
-  reader.
-- [`calamine-styles`](https://crates.io/crates/calamine-styles) — xlsx
-  parser with style metadata.
+- [`wolfxl-core`](https://crates.io/crates/wolfxl-core) — pure-Rust
+  spreadsheet reader.
+- [`calamine-styles`](https://crates.io/crates/calamine-styles) — workbook
+  parser with style metadata for primary OOXML paths.
 
 ## License
 

@@ -365,12 +365,44 @@ fn schema_unknown_sheet_errors() {
 
 // ---- multi-format smoke tests (sprint-2 task #21) ----
 //
-// These don't lock goldens: xls/ods backends return empty styles so the
-// boxed renderer's column-width math can legitimately differ from xlsx
-// output, and CSV has no number formats to drive the styled path. The
-// contract being tested is "Workbook::open dispatches and the CLI
-// renders something sensible" - the per-format value/schema correctness
-// is asserted in `wolfxl-core`'s integration tests.
+// These don't lock goldens: xls/xlsb/ods backends can return empty styles
+// so the boxed renderer's column-width math can legitimately differ from
+// xlsx output, and CSV has no number formats to drive the styled path. The
+// contract being tested is "Workbook::open dispatches and every CLI surface
+// renders something sensible" - the per-format value/schema correctness is
+// asserted in `wolfxl-core`'s integration tests.
+
+struct MultiFormatCase {
+    file: &'static str,
+    peek_marker: &'static str,
+    sheet_marker: &'static str,
+}
+
+fn multi_format_cases() -> [MultiFormatCase; 4] {
+    [
+        MultiFormatCase {
+            file: "sample-minimal.csv",
+            peek_marker: "Revenue",
+            sheet_marker: "sample-minimal",
+        },
+        MultiFormatCase {
+            file: "sample-minimal.xls",
+            peek_marker: "Account",
+            sheet_marker: "P&L",
+        },
+        MultiFormatCase {
+            file: "sample-minimal.ods",
+            peek_marker: "Account",
+            sheet_marker: "P&L",
+        },
+        MultiFormatCase {
+            // Fixture source: calamine's MIT-licensed `tests/date.xlsb`.
+            file: "sample-date.xlsb",
+            peek_marker: "2021-01-02",
+            sheet_marker: "Sheet1",
+        },
+    ]
+}
 
 #[test]
 fn peek_reads_csv_fixture() {
@@ -417,4 +449,92 @@ fn schema_reads_csv_fixture() {
         out.contains("\"type\": \"string\""),
         "expected Account as string: {out}"
     );
+}
+
+#[test]
+fn peek_reads_every_supported_fixture_shape() {
+    for case in multi_format_cases() {
+        let path = fixture(case.file);
+        let out = run(&["peek", path.to_str().unwrap(), "-n", "3"]);
+        assert!(
+            out.contains(case.peek_marker),
+            "peek missing marker {:?} for {}:\n{out}",
+            case.peek_marker,
+            case.file
+        );
+        assert!(out.contains("wolfxl peek"), "missing boxed banner: {out}");
+    }
+}
+
+#[test]
+fn map_reads_every_supported_fixture_shape() {
+    for case in multi_format_cases() {
+        let path = fixture(case.file);
+        let out = run(&["map", path.to_str().unwrap(), "--format", "text"]);
+        assert!(
+            out.contains(case.sheet_marker),
+            "map missing sheet marker {:?} for {}:\n{out}",
+            case.sheet_marker,
+            case.file
+        );
+        assert!(out.contains("sheets:"), "missing sheet count: {out}");
+    }
+}
+
+#[test]
+fn schema_reads_every_supported_fixture_shape() {
+    for case in multi_format_cases() {
+        let path = fixture(case.file);
+        let out = run(&["schema", path.to_str().unwrap(), "--format", "json"]);
+        let v: serde_json::Value = serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("schema JSON parses for {}: {e}\n{out}", case.file));
+        let sheets = v["sheets"].as_array().expect("sheets is array");
+        assert!(!sheets.is_empty(), "no schema sheets for {}", case.file);
+        assert_eq!(sheets[0]["name"], case.sheet_marker);
+        assert!(
+            sheets[0]["columns"]
+                .as_array()
+                .is_some_and(|cols| !cols.is_empty()),
+            "schema columns missing for {}:\n{out}",
+            case.file
+        );
+    }
+}
+
+#[test]
+fn agent_reads_every_supported_fixture_shape() {
+    for case in multi_format_cases() {
+        let path = fixture(case.file);
+        let out = run(&["agent", path.to_str().unwrap(), "--max-tokens", "400"]);
+        assert!(
+            out.contains(&format!("WORKBOOK: {}", case.file)),
+            "agent missing workbook name for {}:\n{out}",
+            case.file
+        );
+        assert!(
+            out.contains(&format!("SHEET: {}", case.sheet_marker)),
+            "agent missing target sheet {:?} for {}:\n{out}",
+            case.sheet_marker,
+            case.file
+        );
+        assert!(
+            out.contains("# wolfxl agent:"),
+            "missing token footer: {out}"
+        );
+    }
+}
+
+#[test]
+fn help_mentions_supported_input_formats() {
+    for command in ["peek", "map", "schema", "agent"] {
+        let out = run(&[command, "--help"]);
+        for ext in [
+            ".xlsx", ".xlsm", ".xls", ".xlsb", ".ods", ".csv", ".tsv", ".txt",
+        ] {
+            assert!(
+                out.contains(ext),
+                "{command} help missing {ext} support boundary:\n{out}"
+            );
+        }
+    }
 }

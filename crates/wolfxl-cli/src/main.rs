@@ -6,10 +6,11 @@ use clap::{Parser, ValueEnum};
 mod commands;
 mod render;
 
-/// Fast, agent-friendly Excel previews.
+/// Fast, agent-friendly spreadsheet previews.
 ///
-/// `wolfxl peek <file>` prints a styled, token-efficient view of a workbook —
-/// box / text / csv / json output, sheet selection, row and width caps.
+/// `wolfxl peek <file>` prints a styled, token-efficient view of a workbook or
+/// delimited file: box / text / csv / json output, sheet selection, row and
+/// width caps.
 /// `wolfxl map <file>` prints a one-page summary of every sheet.
 /// `wolfxl agent <file> --max-tokens N` composes a token-budgeted briefing.
 /// `wolfxl schema <file>` emits per-column type, cardinality, and format.
@@ -34,7 +35,7 @@ enum Command {
 
 #[derive(clap::Args, Debug)]
 struct MapArgs {
-    /// Path to the workbook (.xlsx).
+    /// Path to a spreadsheet (.xlsx/.xlsm/.xls/.xlsb/.ods/.csv/.tsv/.txt).
     file: PathBuf,
 
     /// Output format.
@@ -50,7 +51,7 @@ pub enum MapFormat {
 
 #[derive(clap::Args, Debug)]
 struct AgentArgs {
-    /// Path to the workbook (.xlsx).
+    /// Path to a spreadsheet (.xlsx/.xlsm/.xls/.xlsb/.ods/.csv/.tsv/.txt).
     file: PathBuf,
 
     /// Token budget (cl100k_base). Output is composed greedily to fit.
@@ -64,7 +65,7 @@ struct AgentArgs {
 
 #[derive(clap::Args, Debug)]
 struct SchemaArgs {
-    /// Path to the workbook (.xlsx).
+    /// Path to a spreadsheet (.xlsx/.xlsm/.xls/.xlsb/.ods/.csv/.tsv/.txt).
     file: PathBuf,
 
     /// Sheet name. Omit to schema every sheet in the workbook.
@@ -84,7 +85,7 @@ pub enum SchemaFormat {
 
 #[derive(clap::Args, Debug)]
 struct PeekArgs {
-    /// Path to the workbook (.xlsx).
+    /// Path to a spreadsheet (.xlsx/.xlsm/.xls/.xlsb/.ods/.csv/.tsv/.txt).
     file: PathBuf,
 
     /// Sheet name (default: first sheet).
