@@ -1,7 +1,8 @@
 //! `xl/styles.xml` emitter — full styles file assembled from [`StylesBuilder`]. Wave 2A.
 
 use crate::model::format::{
-    AlignmentSpec, BorderSpec, BorderSideSpec, FillSpec, FontSpec, StylesBuilder, XfRecord,
+    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, StylesBuilder,
+    XfRecord,
 };
 use crate::xml_escape;
 
@@ -75,8 +76,19 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
          </cellStyles>",
     );
 
-    // 8. dxfs — empty; Wave 3C extends for conditional formats.
-    out.push_str("<dxfs count=\"0\"/>");
+    // 8. dxfs — differential formats referenced by conditional-formatting
+    //    rules. Empty is the common case; when populated, each dxf emits
+    //    whichever of <font>/<fill>/<border> is `Some` — number formats
+    //    and alignment are not valid children of <dxf>.
+    if styles.dxfs.is_empty() {
+        out.push_str("<dxfs count=\"0\"/>");
+    } else {
+        out.push_str(&format!("<dxfs count=\"{}\">", styles.dxfs.len()));
+        for dxf in &styles.dxfs {
+            out.push_str(&dxf_to_xml(dxf));
+        }
+        out.push_str("</dxfs>");
+    }
 
     // 9. tableStyles
     out.push_str(
@@ -181,6 +193,27 @@ fn alignment_xml(align: &AlignmentSpec) -> String {
         attrs.push_str(" shrinkToFit=\"1\"");
     }
     format!("<alignment{attrs}/>")
+}
+
+/// Emit one `<dxf>` element. Only the overrides present on the record
+/// appear in the output — an all-`None` record emits `<dxf/>`, which is
+/// valid but pointless (the builder's dedup prevents that in practice).
+fn dxf_to_xml(dxf: &DxfRecord) -> String {
+    let mut parts = String::new();
+    if let Some(ref font) = dxf.font {
+        parts.push_str(&font_to_xml(font));
+    }
+    if let Some(ref fill) = dxf.fill {
+        parts.push_str(&fill_to_xml(fill));
+    }
+    if let Some(ref border) = dxf.border {
+        parts.push_str(&border_to_xml(border));
+    }
+    if parts.is_empty() {
+        "<dxf/>".to_string()
+    } else {
+        format!("<dxf>{parts}</dxf>")
+    }
 }
 
 fn xf_to_xml(xf: &XfRecord) -> String {
@@ -621,5 +654,62 @@ mod tests {
             "got: {text}"
         );
         assert!(!text.contains(r#"rgb="FF"00"#), "raw quote leaked: {text}");
+    }
+
+    // -------------------------------------------------------------------
+    // Test: dxfs empty — emits self-closing <dxfs count="0"/>
+    // -------------------------------------------------------------------
+    #[test]
+    fn dxfs_empty_emits_self_closing() {
+        let styles = StylesBuilder::default();
+        let text = emit_str(&styles);
+        assert!(
+            text.contains("<dxfs count=\"0\"/>"),
+            "missing empty dxfs self-closing: {text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Test: dxfs non-empty — emits <dxfs count="N"> with child <dxf>s
+    // -------------------------------------------------------------------
+    #[test]
+    fn dxfs_non_empty_emits_wrapper_and_children() {
+        use crate::model::format::DxfRecord;
+        let mut styles = StylesBuilder::default();
+        let id = styles.intern_dxf(&DxfRecord {
+            font: Some(FontSpec {
+                bold: true,
+                color_rgb: Some("FFFF0000".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(id, 0, "first dxf interns at index 0");
+
+        // Dedup should return same index.
+        let id2 = styles.intern_dxf(&DxfRecord {
+            font: Some(FontSpec {
+                bold: true,
+                color_rgb: Some("FFFF0000".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(id2, 0, "identical dxf should dedup");
+
+        let bytes = emit(&styles);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<dxfs count=\"1\">"),
+            "missing count-1 wrapper: {text}"
+        );
+        assert!(text.contains("<dxf>"), "missing <dxf> child: {text}");
+        assert!(text.contains("<b/>"), "missing bold inside dxf: {text}");
+        assert!(
+            text.contains("FFFF0000"),
+            "missing red color inside dxf: {text}"
+        );
+        assert!(text.contains("</dxfs>"), "missing </dxfs>: {text}");
     }
 }

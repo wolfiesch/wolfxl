@@ -74,9 +74,11 @@ pub fn emit(
         emit_merges(&mut out, sheet);
     }
 
-    // EXT-W3C: conditional_formats (Wave 3C)
+    // EXT-W3C: conditional_formats — inserted between mergeCells and hyperlinks
+    emit_conditional_formats(&mut out, sheet);
 
-    // EXT-W3C: data_validations (Wave 3C)
+    // EXT-W3C: data_validations — inserted between CF and hyperlinks
+    emit_data_validations(&mut out, sheet);
 
     // 7. <hyperlinks> (only if any exist)
     if !sheet.hyperlinks.is_empty() {
@@ -87,8 +89,10 @@ pub fn emit(
     out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
 
     // EXT-W3A: legacyDrawing — emitted iff !sheet.comments.is_empty(); rId via convention
+    emit_legacy_drawing(&mut out, sheet);
 
     // EXT-W3B: tableParts — one <tablePart r:id=...> per table
+    emit_table_parts(&mut out, sheet);
 
     out.push_str("</worksheet>");
 
@@ -492,6 +496,49 @@ fn format_f64(n: f64) -> String {
         format!("{}", n as i64)
     } else {
         format!("{}", n)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3 extension-point helpers
+//
+// Each helper guards on the relevant collection being non-empty so the
+// default output stays byte-identical to Wave 2 for sheets that don't use
+// the feature. Wave 3 agents fill in the bodies (scoped strictly to what's
+// inside the `if` block) — the call sites in `emit()` do not move.
+// ---------------------------------------------------------------------------
+
+/// Emit `<conditionalFormatting>` elements between `</mergeCells>` and
+/// `<hyperlinks>`. Filled by W3C.
+fn emit_conditional_formats(_out: &mut String, sheet: &Worksheet) {
+    if !sheet.conditional_formats.is_empty() {
+        // W3C fills in
+    }
+}
+
+/// Emit `<dataValidations count="N">…</dataValidations>` between the CF
+/// block and `<hyperlinks>`. Filled by W3C.
+fn emit_data_validations(_out: &mut String, sheet: &Worksheet) {
+    if !sheet.validations.is_empty() {
+        // W3C fills in
+    }
+}
+
+/// Emit `<legacyDrawing r:id="rId2"/>` when comments exist. The rId is a
+/// hardcoded convention (see `rels::emit_sheet`): with comments present,
+/// rId1 → commentsN.xml and rId2 → vmlDrawingN.vml. Filled by W3A.
+fn emit_legacy_drawing(_out: &mut String, sheet: &Worksheet) {
+    if !sheet.comments.is_empty() {
+        // W3A fills in
+    }
+}
+
+/// Emit `<tableParts count="N">…<tablePart r:id="rIdX"/>…</tableParts>`.
+/// rId starts after comments (offset = 2 iff comments exist, else 0),
+/// one rId per table in sheet-local order. Filled by W3B.
+fn emit_table_parts(_out: &mut String, sheet: &Worksheet) {
+    if !sheet.tables.is_empty() {
+        // W3B fills in
     }
 }
 

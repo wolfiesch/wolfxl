@@ -1,5 +1,6 @@
 //! Top-level workbook data: sheets, doc props, styles, SST, defined names.
 
+use super::comment::CommentAuthorTable;
 use super::defined_name::DefinedName;
 use super::format::StylesBuilder;
 use super::worksheet::Worksheet;
@@ -27,6 +28,13 @@ pub struct Workbook {
 
     /// The shared string table. Strings are interned on insertion.
     pub sst: SstBuilder,
+
+    /// Workbook-scope comment authors. Every `commentsN.xml` emits this
+    /// full `<authors>` block — `authorId` on a `<comment>` indexes into
+    /// it. Insertion order is preserved by [`CommentAuthorTable`] so
+    /// multi-author workbooks round-trip without the BTreeMap reordering
+    /// bug that motivated this rewrite.
+    pub comment_authors: CommentAuthorTable,
 }
 
 impl Workbook {

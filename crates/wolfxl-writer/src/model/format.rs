@@ -114,6 +114,9 @@ pub struct StylesBuilder {
     pub num_fmts: Vec<(u32, String)>,
     /// The cellXfs table — one entry per distinct (font,fill,border,numFmt,align) combo.
     pub cell_xfs: Vec<XfRecord>,
+    /// Differential-format records referenced by conditional-formatting rules.
+    /// Index into this vec is what `<cfRule dxfId="N">` points at.
+    pub dxfs: Vec<DxfRecord>,
 
     // --- Dedup indices (not serialized) ---
     font_index: HashMap<FontSpec, u32>,
@@ -121,6 +124,7 @@ pub struct StylesBuilder {
     border_index: HashMap<BorderSpec, u32>,
     num_fmt_index: HashMap<String, u32>,
     xf_index: HashMap<XfRecord, u32>,
+    dxf_index: HashMap<DxfRecord, u32>,
     next_custom_num_fmt_id: u32,
 }
 
@@ -132,11 +136,13 @@ impl Default for StylesBuilder {
             borders: Vec::new(),
             num_fmts: Vec::new(),
             cell_xfs: Vec::new(),
+            dxfs: Vec::new(),
             font_index: HashMap::new(),
             fill_index: HashMap::new(),
             border_index: HashMap::new(),
             num_fmt_index: HashMap::new(),
             xf_index: HashMap::new(),
+            dxf_index: HashMap::new(),
             // Excel reserves 0-163 for built-in format codes; custom ids start at 164.
             next_custom_num_fmt_id: 164,
         };
@@ -275,6 +281,19 @@ impl StylesBuilder {
         self.xf_index.insert(record, idx);
         idx
     }
+
+    /// Intern a differential-format record and return its index into
+    /// `<dxfs>`. Two rules pointing at the same `DxfRecord` share an
+    /// index, same dedup story as `intern_font` / `intern_fill` / …
+    pub fn intern_dxf(&mut self, dxf: &DxfRecord) -> u32 {
+        if let Some(&idx) = self.dxf_index.get(dxf) {
+            return idx;
+        }
+        let idx = self.dxfs.len() as u32;
+        self.dxfs.push(dxf.clone());
+        self.dxf_index.insert(dxf.clone(), idx);
+        idx
+    }
 }
 
 /// One row of the `<cellXfs>` table. Two cells with the same `XfRecord`
@@ -291,6 +310,19 @@ pub struct XfRecord {
     pub apply_border: bool,
     pub apply_number_format: bool,
     pub apply_alignment: bool,
+}
+
+/// One entry in `<dxfs>` — differential formatting for conditional
+/// formatting rules. Unlike [`XfRecord`], a dxf does NOT carry an
+/// alignment or number-format override (those aren't valid in OOXML's
+/// dxf schema), just the visual overrides — font / fill / border.
+/// Fields are `Option` so a CF rule can say "make it bold" without
+/// touching the fill or border.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct DxfRecord {
+    pub font: Option<FontSpec>,
+    pub fill: Option<FillSpec>,
+    pub border: Option<BorderSpec>,
 }
 
 /// Excel's 164 built-in number-format slots. Returns `Some(id)` if `code`

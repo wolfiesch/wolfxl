@@ -122,6 +122,11 @@ fn build_fixture() -> (Workbook, u32) {
 
 /// Emit every Wave 1+2 part, package the archive, return the raw xlsx bytes.
 fn emit_full_pipeline(wb: &mut Workbook) -> Vec<u8> {
+    // Pinned reference to the workbook-scope author table. The Wave 3A
+    // comments emitter needs this, and threading it here keeps the
+    // contract-commit change visible even before Wave 3 lands.
+    let _authors = &wb.comment_authors;
+
     // Sheet emission mutates the SST — must run before the SST emitter.
     let mut sheet_parts: Vec<(String, Vec<u8>)> = Vec::new();
     for (idx, sheet) in wb.sheets.iter().enumerate() {
