@@ -1328,4 +1328,105 @@ mod tests {
             "rId3 with comments: {text}"
         );
     }
+
+    // --- 37. table_parts_multiple_tables_no_comments_rids_sequential ---
+
+    #[test]
+    fn table_parts_multiple_tables_no_comments_rids_sequential() {
+        use crate::model::table::{Table, TableColumn};
+        let mut sheet = Worksheet::new("S");
+        // Two tables on the same sheet, no comments → rIds start at 1 and run sequentially.
+        sheet.tables.push(Table {
+            name: "TableA".into(),
+            display_name: None,
+            range: "A1:B10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        sheet.tables.push(Table {
+            name: "TableB".into(),
+            display_name: None,
+            range: "D1:E10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        // Two tables, no comments → rId1, rId2 in sheet-local order.
+        assert!(
+            text.contains("<tableParts count=\"2\"><tablePart r:id=\"rId1\"/><tablePart r:id=\"rId2\"/></tableParts>"),
+            "rId1/rId2 sequential with no comments: {text}"
+        );
+    }
+
+    // --- 38. table_parts_multiple_tables_with_comments_rids_offset ---
+
+    #[test]
+    fn table_parts_multiple_tables_with_comments_rids_offset() {
+        use crate::model::comment::Comment;
+        use crate::model::table::{Table, TableColumn};
+        let mut sheet = Worksheet::new("S");
+        // Comments → comments_offset = 2 (rId1=commentsN.xml, rId2=vmlDrawingN.vml)
+        sheet.comments.insert(
+            "A1".to_string(),
+            Comment {
+                author_id: 0,
+                text: "Note".into(),
+                width_pt: None,
+                height_pt: None,
+                visible: false,
+            },
+        );
+        sheet.tables.push(Table {
+            name: "TableA".into(),
+            display_name: None,
+            range: "A1:B10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        sheet.tables.push(Table {
+            name: "TableB".into(),
+            display_name: None,
+            range: "D1:E10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        // rId1=comments, rId2=VML, rId3=table[0], rId4=table[1].
+        assert!(
+            text.contains("<tableParts count=\"2\"><tablePart r:id=\"rId3\"/><tablePart r:id=\"rId4\"/></tableParts>"),
+            "rId3/rId4 sequential with comments: {text}"
+        );
+    }
 }
