@@ -5,7 +5,7 @@ use pyo3::IntoPyObjectExt;
 
 type PyObject = Py<PyAny>;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -1121,6 +1121,62 @@ impl CalamineStyledBook {
         };
 
         let records = PyList::empty(py);
+        if cell_range.is_none() && !include_empty {
+            let start = self
+                .range_cache
+                .get(sheet)
+                .and_then(|range| range.start())
+                .unwrap_or((0, 0));
+            let mut emitted: HashSet<(u32, u32)> = HashSet::new();
+            let mut cells: Vec<(u32, u32, Option<Data>)> = Vec::new();
+            if let Some(range) = self.range_cache.get(sheet) {
+                for (rel_row, rel_col, value) in range.used_cells() {
+                    let row = start.0 + rel_row as u32;
+                    let col = start.1 + rel_col as u32;
+                    emitted.insert((row, col));
+                    cells.push((row, col, Some(value.clone())));
+                }
+            }
+            if let Some(formulas) = self.formula_map_cache.get(sheet) {
+                for &(row, col) in formulas.keys() {
+                    if !emitted.contains(&(row, col)) {
+                        cells.push((row, col, None));
+                    }
+                }
+            }
+            cells.sort_by_key(|(row, col, _)| (*row, *col));
+            for (row, col, value) in cells {
+                let formula = self
+                    .formula_map_cache
+                    .get(sheet)
+                    .and_then(|m| m.get(&(row, col)).cloned())
+                    .map(|f| {
+                        if f.starts_with('=') {
+                            f
+                        } else {
+                            format!("={f}")
+                        }
+                    });
+                self.append_sheet_record(
+                    py,
+                    &records,
+                    sheet,
+                    row,
+                    col,
+                    value.as_ref(),
+                    formula.as_deref(),
+                    data_only,
+                    include_format,
+                    include_empty,
+                    include_formula_blanks,
+                    include_coordinate,
+                    include_style_id,
+                    include_extended_format,
+                    include_cached_formula_value,
+                )?;
+            }
+            return Ok(records.into());
+        }
         for row in start_row..=end_row {
             for col in start_col..=end_col {
                 let formula = self
@@ -1138,100 +1194,23 @@ impl CalamineStyledBook {
                     .range_cache
                     .get(sheet)
                     .and_then(|range| range.get_value((row, col)).cloned());
-                // calamine writes an empty `<v/>` element on a formula cell as
-                // `Some(Data::String(""))`, and renders blank cells inside the
-                // rectangular bounding box as `Some(Data::Empty)`. Either is
-                // semantically "the formula has no cached result". Treat them
-                // uniformly so `include_formula_blanks=false` actually suppresses
-                // the cell, and `data_only` still skips it via
-                // `value_is_uncached_formula`.
-                let value_is_formula_placeholder = formula
-                    .as_ref()
-                    .zip(value.as_ref())
-                    .is_some_and(|(formula_text, v)| data_is_formula_text(v, formula_text));
-                let value_is_uncached_formula = data_only && value_is_formula_placeholder;
-                let has_value = value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
-                    && !value_is_uncached_formula
-                    && !value_is_formula_placeholder;
-                let has_formula_backing_entry =
-                    value.as_ref().is_some_and(|v| !matches!(v, Data::Empty))
-                        && !value_is_formula_placeholder;
-                let should_emit_formula = formula.is_some()
-                    && !data_only
-                    && (include_formula_blanks || has_formula_backing_entry);
-                if !include_empty && !should_emit_formula && !has_value {
-                    continue;
-                }
-
-                let record = PyDict::new(py);
-                record.set_item("row", row + 1)?;
-                record.set_item("column", col + 1)?;
-                if include_coordinate {
-                    record.set_item("coordinate", row_col_to_a1(row, col))?;
-                }
-
-                if let Some(formula_text) = &formula {
-                    record.set_item("formula", formula_text)?;
-                    if include_cached_formula_value {
-                        if let Some(v) = &value {
-                            if !matches!(v, Data::Empty) && !value_is_formula_placeholder {
-                                record.set_item("cached_value", data_to_plain_py(py, v)?)?;
-                            }
-                        }
-                    }
-                }
-
-                if should_emit_formula {
-                    let formula_text = formula.as_ref().unwrap();
-                    if let Some(err_val) = map_error_formula(formula_text) {
-                        record.set_item("data_type", "error")?;
-                        record.set_item("value", err_val)?;
-                    } else {
-                        record.set_item("data_type", "formula")?;
-                        record.set_item("value", formula_text)?;
-                    }
-                } else if let Some(v) = &value {
-                    if value_is_uncached_formula {
-                        record.set_item("data_type", "blank")?;
-                        record.set_item("value", py.None())?;
-                        if include_format {
-                            let style_id = self.record_style_id(sheet, row, col);
-                            self.populate_record_format_for_style_id(
-                                py,
-                                sheet,
-                                row,
-                                col,
-                                style_id,
-                                &record,
-                                include_style_id,
-                                include_extended_format,
-                            )?;
-                        }
-                        records.append(record)?;
-                        continue;
-                    }
-                    record.set_item("data_type", data_type_name(v))?;
-                    record.set_item("value", data_to_plain_py(py, v)?)?;
-                } else {
-                    record.set_item("data_type", "blank")?;
-                    record.set_item("value", py.None())?;
-                }
-
-                if include_format {
-                    let style_id = self.record_style_id(sheet, row, col);
-                    self.populate_record_format_for_style_id(
-                        py,
-                        sheet,
-                        row,
-                        col,
-                        style_id,
-                        &record,
-                        include_style_id,
-                        include_extended_format,
-                    )?;
-                }
-
-                records.append(record)?;
+                self.append_sheet_record(
+                    py,
+                    &records,
+                    sheet,
+                    row,
+                    col,
+                    value.as_ref(),
+                    formula.as_deref(),
+                    data_only,
+                    include_format,
+                    include_empty,
+                    include_formula_blanks,
+                    include_coordinate,
+                    include_style_id,
+                    include_extended_format,
+                    include_cached_formula_value,
+                )?;
             }
         }
 
@@ -1616,6 +1595,120 @@ impl CalamineStyledBook {
 
 // Non-Python helper methods.
 impl CalamineStyledBook {
+    #[allow(clippy::too_many_arguments)]
+    fn append_sheet_record(
+        &mut self,
+        py: Python<'_>,
+        records: &Bound<'_, PyList>,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        value: Option<&Data>,
+        formula: Option<&str>,
+        data_only: bool,
+        include_format: bool,
+        include_empty: bool,
+        include_formula_blanks: bool,
+        include_coordinate: bool,
+        include_style_id: bool,
+        include_extended_format: bool,
+        include_cached_formula_value: bool,
+    ) -> PyResult<()> {
+        // calamine writes an empty `<v/>` element on a formula cell as
+        // `Some(Data::String(""))`, and renders blank cells inside the
+        // rectangular bounding box as `Some(Data::Empty)`. Either is
+        // semantically "the formula has no cached result". Treat them
+        // uniformly so `include_formula_blanks=false` actually suppresses
+        // the cell, and `data_only` still skips it via
+        // `value_is_uncached_formula`.
+        let value_is_formula_placeholder = formula
+            .zip(value)
+            .is_some_and(|(formula_text, v)| data_is_formula_text(v, formula_text));
+        let value_is_uncached_formula = data_only && value_is_formula_placeholder;
+        let has_value = value.is_some_and(|v| !matches!(v, Data::Empty))
+            && !value_is_uncached_formula
+            && !value_is_formula_placeholder;
+        let has_formula_backing_entry =
+            value.is_some_and(|v| !matches!(v, Data::Empty)) && !value_is_formula_placeholder;
+        let should_emit_formula = formula.is_some()
+            && !data_only
+            && (include_formula_blanks || has_formula_backing_entry);
+        if !include_empty && !should_emit_formula && !has_value {
+            return Ok(());
+        }
+
+        let record = PyDict::new(py);
+        record.set_item("row", row + 1)?;
+        record.set_item("column", col + 1)?;
+        if include_coordinate {
+            record.set_item("coordinate", row_col_to_a1(row, col))?;
+        }
+
+        if let Some(formula_text) = formula {
+            record.set_item("formula", formula_text)?;
+            if include_cached_formula_value {
+                if let Some(v) = value {
+                    if !matches!(v, Data::Empty) && !value_is_formula_placeholder {
+                        record.set_item("cached_value", data_to_plain_py(py, v)?)?;
+                    }
+                }
+            }
+        }
+
+        if should_emit_formula {
+            let formula_text = formula.unwrap();
+            if let Some(err_val) = map_error_formula(formula_text) {
+                record.set_item("data_type", "error")?;
+                record.set_item("value", err_val)?;
+            } else {
+                record.set_item("data_type", "formula")?;
+                record.set_item("value", formula_text)?;
+            }
+        } else if let Some(v) = value {
+            if value_is_uncached_formula {
+                record.set_item("data_type", "blank")?;
+                record.set_item("value", py.None())?;
+                if include_format {
+                    let style_id = self.record_style_id(sheet, row, col);
+                    self.populate_record_format_for_style_id(
+                        py,
+                        sheet,
+                        row,
+                        col,
+                        style_id,
+                        &record,
+                        include_style_id,
+                        include_extended_format,
+                    )?;
+                }
+                records.append(record)?;
+                return Ok(());
+            }
+            record.set_item("data_type", data_type_name(v))?;
+            record.set_item("value", data_to_plain_py(py, v)?)?;
+        } else {
+            record.set_item("data_type", "blank")?;
+            record.set_item("value", py.None())?;
+        }
+
+        if include_format {
+            let style_id = self.record_style_id(sheet, row, col);
+            self.populate_record_format_for_style_id(
+                py,
+                sheet,
+                row,
+                col,
+                style_id,
+                &record,
+                include_style_id,
+                include_extended_format,
+            )?;
+        }
+
+        records.append(record)?;
+        Ok(())
+    }
+
     fn resolve_range_bounds(
         range: &Range<Data>,
         cell_range: Option<&str>,
