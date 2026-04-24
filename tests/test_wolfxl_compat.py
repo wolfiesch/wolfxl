@@ -418,6 +418,37 @@ class TestReadMode:
             f"include_formula_blanks=False, got coords={coords}"
         )
 
+    def test_cell_records_unbounded_sparse_includes_formula_blank_beyond_values(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "unbounded-formula-blank.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = "seed"
+        ws["B20"] = "=SUM(A1:A1)"
+        ws["B20"].number_format = "#,##0"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = wb["Formula"].cell_records(
+                include_coordinate=False,
+                include_style_id=False,
+                include_extended_format=False,
+            )
+
+        by_position = {(record["row"], record["column"]): record for record in records}
+        formula_record = by_position[(20, 2)]
+        assert formula_record["formula"] == "=SUM(A1:A1)"
+        assert formula_record["data_type"] == "formula"
+        assert formula_record["number_format"] == "#,##0"
+
     def test_max_row_max_column_reflect_pending_writes_in_write_mode(
         self,
     ) -> None:

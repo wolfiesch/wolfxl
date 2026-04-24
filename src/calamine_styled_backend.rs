@@ -1074,11 +1074,35 @@ impl CalamineStyledBook {
         include_extended_format: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
-        self.ensure_value_caches(sheet)?;
+        if include_format {
+            self.ensure_value_and_style_caches(sheet)?;
+        } else {
+            self.ensure_value_caches(sheet)?;
+        }
 
         let (start_row, start_col, end_row, end_col) = {
             let range = self.range_cache.get(sheet).unwrap();
-            Self::resolve_range_bounds(range, cell_range)?
+            if cell_range.is_none() {
+                let mut bounds: Option<(u32, u32, u32, u32)> = None;
+                let (height, width) = range.get_size();
+                if height > 0 && width > 0 {
+                    let start = range.start().unwrap_or((0, 0));
+                    update_bounds(&mut bounds, start.0, start.1);
+                    update_bounds(
+                        &mut bounds,
+                        start.0 + height as u32 - 1,
+                        start.1 + width as u32 - 1,
+                    );
+                }
+                if let Some(formulas) = self.formula_map_cache.get(sheet) {
+                    for &(row, col) in formulas.keys() {
+                        update_bounds(&mut bounds, row, col);
+                    }
+                }
+                bounds.unwrap_or((0, 0, 0, 0))
+            } else {
+                Self::resolve_range_bounds(range, cell_range)?
+            }
         };
 
         let records = PyList::empty(py);
@@ -1604,6 +1628,34 @@ impl CalamineStyledBook {
         Ok(())
     }
 
+    /// Ensure value/formula caches plus per-cell style ids for formatted bulk records.
+    fn ensure_value_and_style_caches(&mut self, sheet: &str) -> PyResult<()> {
+        if self.range_cache.contains_key(sheet) {
+            self.ensure_cell_style_ids(sheet)?;
+            return Ok(());
+        }
+
+        if !self.sheet_xml_content_cache.contains_key(sheet) {
+            let xml = self.sheet_xml_content(sheet)?;
+            let _ = xml;
+        }
+
+        let xml = self.sheet_xml_content_cache.get(sheet).unwrap();
+        let (formulas, style_ids) = Self::parse_formula_and_style_ids_from_sheet_xml(xml)?;
+        self.formula_map_cache.insert(sheet.to_string(), formulas);
+        self.tier2_cache
+            .entry(sheet.to_string())
+            .or_default()
+            .cell_style_ids = Some(style_ids);
+
+        let range = self.workbook.worksheet_range(sheet).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("Failed to read sheet {sheet}: {e}"))
+        })?;
+        self.range_cache.insert(sheet.to_string(), range);
+
+        Ok(())
+    }
+
     /// Get the Style for an absolute (row, col) position, or None if no style applied.
     fn get_style(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<Style>> {
         self.ensure_cache(sheet)?;
@@ -2111,6 +2163,89 @@ impl CalamineStyledBook {
         }
 
         Ok(out)
+    }
+
+    fn parse_formula_and_style_ids_from_sheet_xml(
+        xml: &str,
+    ) -> PyResult<(HashMap<(u32, u32), String>, HashMap<(u32, u32), u32>)> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut formulas: HashMap<(u32, u32), String> = HashMap::new();
+        let mut style_ids: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut current_cell: Option<(u32, u32)> = None;
+        let mut in_formula = false;
+        let mut formula_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"c" {
+                        let a1 = ooxml_util::attr_value(e, b"r").unwrap_or_default();
+                        current_cell = if a1.is_empty() {
+                            None
+                        } else {
+                            a1_to_row_col(&a1).ok()
+                        };
+                        if let Some(pos) = current_cell {
+                            let style_id = ooxml_util::attr_value(e, b"s")
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            if style_id != 0 {
+                                style_ids.insert(pos, style_id);
+                            }
+                        }
+                    } else if name.as_ref() == b"f" && current_cell.is_some() {
+                        in_formula = true;
+                        formula_text.clear();
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"f" && in_formula {
+                        in_formula = false;
+                        if let Some(pos) = current_cell {
+                            if !formula_text.is_empty() {
+                                formulas.insert(pos, formula_text.clone());
+                            }
+                        }
+                    } else if name.as_ref() == b"c" {
+                        current_cell = None;
+                    }
+                }
+                Ok(Event::Text(ref t)) if in_formula => {
+                    if let Ok(text) = t.unescape() {
+                        formula_text.push_str(&text);
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    if e.local_name().as_ref() == b"c" {
+                        let a1 = ooxml_util::attr_value(e, b"r").unwrap_or_default();
+                        if !a1.is_empty() {
+                            if let Ok(pos) = a1_to_row_col(&a1) {
+                                let style_id = ooxml_util::attr_value(e, b"s")
+                                    .and_then(|s| s.parse::<u32>().ok())
+                                    .unwrap_or(0);
+                                if style_id != 0 {
+                                    style_ids.insert(pos, style_id);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse worksheet XML for formulas/styles: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok((formulas, style_ids))
     }
 
     /// Fast formula-only parse: walk `<sheetData>` with quick_xml and extract
@@ -2661,7 +2796,7 @@ impl CalamineStyledBook {
         Ok(())
     }
 
-    fn cell_style_id(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<u32>> {
+    fn ensure_cell_style_ids(&mut self, sheet: &str) -> PyResult<()> {
         self.ensure_sheet_exists(sheet)?;
 
         let needs_load = self
@@ -2677,6 +2812,12 @@ impl CalamineStyledBook {
                 .or_default()
                 .cell_style_ids = Some(map);
         }
+
+        Ok(())
+    }
+
+    fn cell_style_id(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<u32>> {
+        self.ensure_cell_style_ids(sheet)?;
 
         Ok(self
             .tier2_cache

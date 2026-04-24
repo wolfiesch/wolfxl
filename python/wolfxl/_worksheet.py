@@ -545,13 +545,27 @@ class Worksheet:
             )
             return
 
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
         reader = self._workbook._rust_reader  # noqa: SLF001
         effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
+        overlay = self._collect_pending_overlay()
+        unbounded_sparse_read = (
+            min_row is None
+            and max_row is None
+            and min_col is None
+            and max_col is None
+            and not include_empty
+            and not overlay
+        )
+        if unbounded_sparse_read:
+            r_min = c_min = 1
+            r_max = c_max = None
+            range_str = None
+        else:
+            r_min = min_row or 1
+            r_max = max_row or self._max_row()
+            c_min = min_col or 1
+            c_max = max_col or self._max_col()
+            range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
         records = reader.read_sheet_records(
             self._title,
             range_str,
@@ -569,7 +583,6 @@ class Worksheet:
         # iterator reflects current worksheet state, not the last save.
         # The overlay is only built when something is dirty — pure read
         # mode pays no extra cost.
-        overlay = self._collect_pending_overlay()
         if not overlay:
             yield from records
             return
