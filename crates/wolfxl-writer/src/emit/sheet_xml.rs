@@ -527,9 +527,9 @@ fn emit_data_validations(_out: &mut String, sheet: &Worksheet) {
 /// Emit `<legacyDrawing r:id="rId2"/>` when comments exist. The rId is a
 /// hardcoded convention (see `rels::emit_sheet`): with comments present,
 /// rId1 → commentsN.xml and rId2 → vmlDrawingN.vml. Filled by W3A.
-fn emit_legacy_drawing(_out: &mut String, sheet: &Worksheet) {
+fn emit_legacy_drawing(out: &mut String, sheet: &Worksheet) {
     if !sheet.comments.is_empty() {
-        // W3A fills in
+        out.push_str("<legacyDrawing r:id=\"rId2\"/>");
     }
 }
 
@@ -1240,5 +1240,42 @@ mod tests {
         );
         // The cell MUST emit because it has a style.
         assert!(text.contains("<c r=\"E10\" s=\"3\"/>"), "got: {text}");
+    }
+
+    // --- 34. legacyDrawing emitted when comments exist ---
+
+    #[test]
+    fn legacy_drawing_emitted_when_comments_exist() {
+        use crate::model::comment::Comment;
+        let mut sheet = Worksheet::new("S");
+        sheet.comments.insert(
+            "A1".to_string(),
+            Comment {
+                author_id: 0,
+                text: "Note".into(),
+                width_pt: None,
+                height_pt: None,
+                visible: false,
+            },
+        );
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<legacyDrawing r:id=\"rId2\"/>"),
+            "legacyDrawing with rId2: {text}"
+        );
+    }
+
+    // --- 35. legacyDrawing absent when no comments ---
+
+    #[test]
+    fn legacy_drawing_absent_when_no_comments() {
+        let sheet = Worksheet::new("S");
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            !text.contains("<legacyDrawing"),
+            "legacyDrawing must not appear without comments: {text}"
+        );
     }
 }
