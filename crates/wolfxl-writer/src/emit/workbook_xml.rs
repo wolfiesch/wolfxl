@@ -21,6 +21,18 @@ fn builtin_name_str(b: BuiltinName) -> &'static str {
     }
 }
 
+/// True iff `defined_names` already carries a `PrintArea` builtin scoped
+/// to sheet `idx`. Used to suppress the `Worksheet::print_area` auto-inject
+/// when the caller has declared the print area explicitly via `DefinedName`.
+fn has_user_print_area_for_sheet(
+    defined_names: &[crate::model::defined_name::DefinedName],
+    idx: usize,
+) -> bool {
+    defined_names.iter().any(|dn| {
+        matches!(dn.builtin, Some(BuiltinName::PrintArea)) && dn.scope_sheet_index == Some(idx)
+    })
+}
+
 /// Emit `xl/workbook.xml` as UTF-8 bytes.
 pub fn emit(wb: &Workbook) -> Vec<u8> {
     let mut out = String::with_capacity(1024);
@@ -30,10 +42,12 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
     ));
 
     // Fixed file-version and workbook-properties elements.
+    // Attribute values mirror what openpyxl writes; Excel accepts them unchanged.
     out.push_str(
         "<fileVersion appName=\"xl\" lastEdited=\"7\" lowestEdited=\"7\" rupBuild=\"10000\"/>",
     );
     out.push_str("<workbookPr date1904=\"false\"/>");
+    // windowWidth/windowHeight below are openpyxl-matching defaults.
     out.push_str(
         "<bookViews>\
          <workbookView xWindow=\"0\" yWindow=\"0\" windowWidth=\"20490\" windowHeight=\"7770\"/>\
@@ -92,9 +106,14 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
             ));
         }
 
-        // Auto-injected print areas.
+        // Auto-injected print areas. If the caller already declared a
+        // `_xlnm.Print_Area` `DefinedName` for this sheet, skip — emitting
+        // both would produce a malformed workbook. User-declared wins.
         for (idx, sheet) in wb.sheets.iter().enumerate() {
             if let Some(ref range) = sheet.print_area {
+                if has_user_print_area_for_sheet(&wb.defined_names, idx) {
+                    continue;
+                }
                 let quoted_name = quote_sheet_name_if_needed(&sheet.name);
                 let formula = format!("{quoted_name}!{range}");
                 let formula_escaped = xml_escape::text(&formula);
@@ -107,6 +126,7 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         out.push_str("</definedNames>");
     }
 
+    // calcId="171027" is the openpyxl-matching stamp; Excel accepts it unchanged.
     out.push_str("<calcPr calcId=\"171027\"/>");
     out.push_str("</workbook>");
     out.into_bytes()
@@ -348,7 +368,70 @@ mod tests {
         );
     }
 
-    // 12. Hidden flag emitted.
+    // 12a. User-declared PrintArea DefinedName suppresses the sheet.print_area
+    // auto-inject so the emitter never writes two `_xlnm.Print_Area` entries
+    // for the same sheet (which Excel treats as a malformed workbook).
+    #[test]
+    fn user_print_area_suppresses_auto_inject() {
+        let mut wb = Workbook::new();
+        let mut sheet = Worksheet::new("Sheet1");
+        sheet.print_area = Some("A1:D20".to_string());
+        wb.add_sheet(sheet);
+        wb.defined_names.push(DefinedName {
+            name: "ignored".to_string(),
+            formula: "Sheet1!A1:C10".to_string(),
+            scope_sheet_index: Some(0),
+            builtin: Some(BuiltinName::PrintArea),
+            hidden: false,
+        });
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        assert_eq!(
+            text.matches("_xlnm.Print_Area").count(),
+            1,
+            "expected a single _xlnm.Print_Area entry when both paths set it: {text}"
+        );
+        // The user-declared formula wins; the auto-inject's A1:D20 must not appear.
+        assert!(
+            text.contains("Sheet1!A1:C10"),
+            "user-declared formula should win: {text}"
+        );
+        assert!(
+            !text.contains("Sheet1!A1:D20"),
+            "auto-inject formula must be suppressed: {text}"
+        );
+    }
+
+    // 12b. An unrelated PrintArea entry (different sheet index) does NOT
+    // suppress auto-inject on the sheet that actually has `print_area` set.
+    #[test]
+    fn user_print_area_for_other_sheet_does_not_suppress() {
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("Sheet1"));
+        let mut sheet2 = Worksheet::new("Sheet2");
+        sheet2.print_area = Some("A1:B5".to_string());
+        wb.add_sheet(sheet2);
+        wb.defined_names.push(DefinedName {
+            name: "pa1".to_string(),
+            formula: "Sheet1!A1:C3".to_string(),
+            scope_sheet_index: Some(0),
+            builtin: Some(BuiltinName::PrintArea),
+            hidden: false,
+        });
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        assert_eq!(
+            text.matches("_xlnm.Print_Area").count(),
+            2,
+            "expected both the user-declared and auto-injected entries: {text}"
+        );
+        assert!(text.contains("localSheetId=\"0\""), "{text}");
+        assert!(text.contains("localSheetId=\"1\""), "{text}");
+    }
+
+    // 13. Hidden flag emitted.
     #[test]
     fn hidden_flag_emitted() {
         let mut wb = Workbook::new();
