@@ -307,6 +307,46 @@ class TestReadMode:
 
         assert records == [{"row": 2, "column": 2, "data_type": "string", "value": "value"}]
 
+    def test_cell_records_include_formula_blanks_without_coordinate_strings(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "synthgl-formula-record-shape.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Formula"
+        ws["A1"] = 10
+        ws["B2"] = "=SUM(A1:A1)"
+        ws["B2"].number_format = "#,##0"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path), data_only=False) as wb:
+            records = wb["Formula"].cell_records(
+                min_row=2,
+                max_row=2,
+                min_col=2,
+                max_col=2,
+                include_format=True,
+                include_empty=False,
+                include_formula_blanks=True,
+                include_coordinate=False,
+            )
+
+        assert len(records) == 1
+        record = records[0]
+        assert "coordinate" not in record
+        assert record["row"] == 2
+        assert record["column"] == 2
+        assert record["formula"] == "=SUM(A1:A1)"
+        assert record["data_type"] == "formula"
+        assert record["value"] == "=SUM(A1:A1)"
+        assert record["number_format"] == "#,##0"
+
     def test_cell_records_data_only_skips_uncached_formulas_by_default(
         self,
         tmp_path: Path,
