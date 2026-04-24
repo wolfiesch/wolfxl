@@ -17,11 +17,20 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use wolfxl_writer::emit::{
-    content_types, doc_props, rels, shared_strings_xml, sheet_xml, styles_xml, workbook_xml,
+    comments_xml, content_types, doc_props, drawings_vml, rels, shared_strings_xml, sheet_xml,
+    styles_xml, tables_xml, workbook_xml,
 };
 use wolfxl_writer::model::cell::{FormulaResult, WriteCell, WriteCellValue};
+use wolfxl_writer::model::comment::Comment;
+use wolfxl_writer::model::conditional::{
+    CellIsOperator, ConditionalFormat, ConditionalKind, ConditionalRule,
+};
 use wolfxl_writer::model::defined_name::DefinedName;
-use wolfxl_writer::model::format::{FontSpec, FormatSpec};
+use wolfxl_writer::model::format::{DxfRecord, FontSpec, FormatSpec};
+use wolfxl_writer::model::table::{Table, TableColumn};
+use wolfxl_writer::model::validation::{
+    DataValidation, ErrorStyle, ValidationOperator, ValidationType,
+};
 use wolfxl_writer::model::workbook::Workbook;
 use wolfxl_writer::model::worksheet::{FreezePane, Merge, Worksheet};
 use wolfxl_writer::zip::{package, ZipEntry};
@@ -120,13 +129,8 @@ fn build_fixture() -> (Workbook, u32) {
     (wb, style_id)
 }
 
-/// Emit every Wave 1+2 part, package the archive, return the raw xlsx bytes.
+/// Emit every Wave 1+2+3 part, package the archive, return the raw xlsx bytes.
 fn emit_full_pipeline(wb: &mut Workbook) -> Vec<u8> {
-    // Pinned reference to the workbook-scope author table. The Wave 3A
-    // comments emitter needs this, and threading it here keeps the
-    // contract-commit change visible even before Wave 3 lands.
-    let _authors = &wb.comment_authors;
-
     // Sheet emission mutates the SST — must run before the SST emitter.
     let mut sheet_parts: Vec<(String, Vec<u8>)> = Vec::new();
     for (idx, sheet) in wb.sheets.iter().enumerate() {
@@ -157,7 +161,7 @@ fn emit_full_pipeline(wb: &mut Workbook) -> Vec<u8> {
         entries.push(ZipEntry { path, bytes });
     }
     // Per-sheet rels — only include non-empty ones (empty means no hyperlinks,
-    // comments, or tables). This fixture has none, so skip all.
+    // comments, or tables).
     for idx in 0..wb.sheets.len() {
         let sheet_rels = rels::emit_sheet(wb, idx);
         if !sheet_rels.is_empty() {
@@ -167,6 +171,31 @@ fn emit_full_pipeline(wb: &mut Workbook) -> Vec<u8> {
             });
         }
     }
+
+    // Wave 3 rich-feature parts: emit only for sheets that actually use them.
+    // Table files are globally numbered (table1.xml, table2.xml, ...) across
+    // all sheets — this counter mirrors the rels allocation logic.
+    let mut global_table_idx: usize = 1;
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if !sheet.comments.is_empty() {
+            entries.push(ZipEntry {
+                path: format!("xl/comments/comments{}.xml", idx + 1),
+                bytes: comments_xml::emit(sheet, &wb.comment_authors),
+            });
+            entries.push(ZipEntry {
+                path: format!("xl/drawings/vmlDrawing{}.vml", idx + 1),
+                bytes: drawings_vml::emit(sheet),
+            });
+        }
+        for table in &sheet.tables {
+            entries.push(ZipEntry {
+                path: format!("xl/tables/table{}.xml", global_table_idx),
+                bytes: tables_xml::emit(table, idx, global_table_idx),
+            });
+            global_table_idx += 1;
+        }
+    }
+
     entries.extend([
         ZipEntry {
             path: "xl/styles.xml".to_string(),
@@ -344,5 +373,264 @@ fn wave2_full_pipeline_roundtrip() {
     assert!(
         styles.contains("FFFF0000") || styles.contains("ffff0000"),
         "red color missing from styles: {styles}"
+    );
+}
+
+/// Wave 3 integration gate: build a workbook that exercises every rich
+/// feature added in Wave 3 — multi-author comments (insertion-ordered),
+/// a structured table with totals row, a conditional format pointing at
+/// an interned dxf, and a list-type data validation. The xlsx is then
+/// re-opened and every feature is asserted from the resulting parts.
+fn build_wave3_fixture() -> (Workbook, u32) {
+    let mut wb = Workbook::new();
+
+    // Authors interned in deliberate order — Bob FIRST, Alice SECOND. This
+    // is the test that proves the BTreeMap-ordering bug from rust_xlsxwriter
+    // is gone: alphabetical sort would put Alice first.
+    let bob_id = wb.comment_authors.intern("Bob");
+    let alice_id = wb.comment_authors.intern("Alice");
+    assert_eq!(bob_id, 0);
+    assert_eq!(alice_id, 1);
+
+    // Intern a bold-red dxf for the conditional format to point at.
+    let bold_red_dxf = DxfRecord {
+        font: Some(FontSpec {
+            bold: true,
+            color_rgb: Some("FFFF0000".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let dxf_id = wb.styles.intern_dxf(&bold_red_dxf);
+
+    let mut sheet = Worksheet::new("Data");
+    sheet.set_cell(
+        1,
+        1,
+        WriteCell::new(WriteCellValue::String("Alpha".to_string())),
+    );
+    sheet.set_cell(
+        1,
+        2,
+        WriteCell::new(WriteCellValue::String("Beta".to_string())),
+    );
+    sheet.set_cell(
+        1,
+        3,
+        WriteCell::new(WriteCellValue::String("Gamma".to_string())),
+    );
+    sheet.set_cell(2, 1, WriteCell::new(WriteCellValue::Number(50.0)));
+    sheet.set_cell(2, 2, WriteCell::new(WriteCellValue::Number(150.0)));
+    sheet.set_cell(2, 3, WriteCell::new(WriteCellValue::Number(75.0)));
+
+    // Comments from each author on different cells. authorId values must
+    // match the workbook-scope intern order (Bob=0, Alice=1).
+    sheet.comments.insert(
+        "A1".to_string(),
+        Comment {
+            text: "Bob's note".to_string(),
+            author_id: bob_id,
+            width_pt: None,
+            height_pt: None,
+            visible: false,
+        },
+    );
+    sheet.comments.insert(
+        "B1".to_string(),
+        Comment {
+            text: "Alice's note".to_string(),
+            author_id: alice_id,
+            width_pt: None,
+            height_pt: None,
+            visible: false,
+        },
+    );
+
+    // Structured table with three columns and a totals row.
+    sheet.tables.push(Table {
+        name: "DataTable".to_string(),
+        display_name: None,
+        range: "A1:C3".to_string(),
+        columns: vec![
+            TableColumn {
+                name: "Alpha".to_string(),
+                totals_function: None,
+                totals_label: None,
+            },
+            TableColumn {
+                name: "Beta".to_string(),
+                totals_function: Some("sum".to_string()),
+                totals_label: None,
+            },
+            TableColumn {
+                name: "Gamma".to_string(),
+                totals_function: None,
+                totals_label: None,
+            },
+        ],
+        header_row: true,
+        totals_row: true,
+        style: None,
+        autofilter: true,
+    });
+
+    // Conditional format: cells > 100 get bold-red dxf.
+    sheet.conditional_formats.push(ConditionalFormat {
+        sqref: "A2:C2".to_string(),
+        rules: vec![ConditionalRule {
+            kind: ConditionalKind::CellIs {
+                operator: CellIsOperator::GreaterThan,
+                formula_a: "100".to_string(),
+                formula_b: None,
+            },
+            dxf_id: Some(dxf_id),
+            stop_if_true: false,
+        }],
+    });
+
+    // Data validation: list of three colors.
+    sheet.validations.push(DataValidation {
+        sqref: "A4".to_string(),
+        validation_type: ValidationType::List,
+        operator: ValidationOperator::Between,
+        formula_a: Some("\"Red,Green,Blue\"".to_string()),
+        formula_b: None,
+        allow_blank: true,
+        show_dropdown: false,
+        show_error_message: true,
+        error_style: ErrorStyle::Stop,
+        error_title: None,
+        error_message: None,
+        show_input_message: false,
+        input_title: None,
+        input_message: None,
+    });
+
+    wb.add_sheet(sheet);
+    (wb, dxf_id)
+}
+
+#[test]
+fn wave3_rich_features_roundtrip() {
+    let (mut wb, _dxf_id) = build_wave3_fixture();
+    let bytes = emit_full_pipeline(&mut wb);
+
+    // 1. Archive opens and contains the Wave 3 parts.
+    let parts = read_archive(&bytes);
+    for required in [
+        "xl/worksheets/sheet1.xml",
+        "xl/comments/comments1.xml",
+        "xl/drawings/vmlDrawing1.vml",
+        "xl/tables/table1.xml",
+        "xl/styles.xml",
+    ] {
+        assert!(
+            parts.contains_key(required),
+            "archive missing Wave 3 part: {required}; got keys={:?}",
+            parts.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // 2. Every part is well-formed XML/VML.
+    for (path, data) in &parts {
+        assert_xml_well_formed(path, data);
+    }
+
+    // 3. comments1.xml emits authors in INSERTION order — Bob before Alice.
+    //    This is the assertion that proves the BTreeMap bug is gone; an
+    //    alphabetical sort would put Alice first.
+    let comments = std::str::from_utf8(&parts["xl/comments/comments1.xml"]).unwrap();
+    let bob_pos = comments
+        .find("<author>Bob</author>")
+        .expect("Bob in <authors>");
+    let alice_pos = comments
+        .find("<author>Alice</author>")
+        .expect("Alice in <authors>");
+    assert!(
+        bob_pos < alice_pos,
+        "Bob must precede Alice (insertion order): {comments}"
+    );
+    // authorId attributes match the intern order.
+    assert!(
+        comments.contains("<comment ref=\"A1\" authorId=\"0\">"),
+        "Bob's comment authorId=0 (A1): {comments}"
+    );
+    assert!(
+        comments.contains("<comment ref=\"B1\" authorId=\"1\">"),
+        "Alice's comment authorId=1 (B1): {comments}"
+    );
+
+    // 4. vmlDrawing1.vml declares the three required namespaces.
+    let vml = std::str::from_utf8(&parts["xl/drawings/vmlDrawing1.vml"]).unwrap();
+    assert!(vml.contains("xmlns:v="), "missing v: namespace: {vml}");
+    assert!(vml.contains("xmlns:o="), "missing o: namespace: {vml}");
+    assert!(vml.contains("xmlns:x="), "missing x: namespace: {vml}");
+
+    // 5. table1.xml has id=1 and three <tableColumn> entries.
+    let table = std::str::from_utf8(&parts["xl/tables/table1.xml"]).unwrap();
+    assert!(
+        table.contains("<table xmlns=") && table.contains(" id=\"1\""),
+        "table1 root id=1: {table}"
+    );
+    assert!(
+        table.contains("<tableColumns count=\"3\">"),
+        "three tableColumns: {table}"
+    );
+    assert!(
+        table.contains("totalsRowFunction=\"sum\""),
+        "totals row sum function: {table}"
+    );
+
+    // 6. sheet1.xml wires up <legacyDrawing> and <tableParts>.
+    let sheet = std::str::from_utf8(&parts["xl/worksheets/sheet1.xml"]).unwrap();
+    assert!(
+        sheet.contains("<legacyDrawing r:id=\"rId2\"/>"),
+        "legacyDrawing rId2: {sheet}"
+    );
+    assert!(
+        sheet.contains("<tableParts count=\"1\"><tablePart r:id=\"rId3\"/></tableParts>"),
+        "tableParts rId3 (after comments rId1+VML rId2): {sheet}"
+    );
+
+    // 7. sheet1.xml carries the conditional-format block with cellIs rule.
+    assert!(
+        sheet.contains("<conditionalFormatting sqref=\"A2:C2\">"),
+        "CF wrapper present: {sheet}"
+    );
+    assert!(
+        sheet.contains("type=\"cellIs\"") && sheet.contains("operator=\"greaterThan\""),
+        "CF cellIs greaterThan: {sheet}"
+    );
+
+    // 8. sheet1.xml carries the data-validation block with the literal list.
+    assert!(
+        sheet.contains("<dataValidations count=\"1\">"),
+        "DV wrapper count=1: {sheet}"
+    );
+    assert!(
+        sheet.contains("<formula1>\"Red,Green,Blue\"</formula1>"),
+        "DV list formula1: {sheet}"
+    );
+
+    // 9. styles.xml has a non-empty <dxfs> with our bold-red font.
+    let styles = std::str::from_utf8(&parts["xl/styles.xml"]).unwrap();
+    let dxfs_start = styles
+        .find("<dxfs ")
+        .expect("dxfs element present in styles");
+    let dxfs_end = styles[dxfs_start..]
+        .find("</dxfs>")
+        .expect("dxfs close tag");
+    let dxfs_block = &styles[dxfs_start..dxfs_start + dxfs_end];
+    assert!(
+        !dxfs_block.contains("count=\"0\""),
+        "dxfs must not be empty when CF references one: {dxfs_block}"
+    );
+    assert!(
+        dxfs_block.contains("<dxf>") && dxfs_block.contains("<font>") && dxfs_block.contains("<b/>"),
+        "dxfs block must contain bold-font dxf: {dxfs_block}"
+    );
+    assert!(
+        dxfs_block.contains("FFFF0000") || dxfs_block.contains("ffff0000"),
+        "dxfs block must contain red color: {dxfs_block}"
     );
 }
