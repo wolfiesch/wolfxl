@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wolfxl-core", "crates/wolfxl-cli"]
+members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer"]
 
 [workspace.package]
 edition = "2021"

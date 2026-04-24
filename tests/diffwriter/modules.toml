@@ -1,0 +1,78 @@
+# Module / case status manifest for the differential writer harness.
+#
+# Updated by each wave's subagent PR. Conftest parameterizes pytest tests
+# from this file and applies xfail/xpass markers based on per-layer status.
+#
+# Status values: "pass", "fail", "xfail", "pending"
+# Route values:  "oracle" (rust_xlsxwriter), "native" (wolfxl-writer),
+#                "split"  (per-case routing — case bodies decide),
+#                "dual"   (both backends run, output diffed)
+
+# ----------------------------------------------------------------------
+# Wave 1 modules — foundations (scaffolded, routing still oracle)
+# ----------------------------------------------------------------------
+
+[module.model]
+route = "oracle"
+source_paths = [
+    "crates/wolfxl-writer/src/model/cell.rs",
+    "crates/wolfxl-writer/src/model/workbook.rs",
+    "crates/wolfxl-writer/src/model/worksheet.rs",
+    "crates/wolfxl-writer/src/model/format.rs",
+    "crates/wolfxl-writer/src/model/date.rs",
+]
+
+[module.refs]
+route = "oracle"
+source_paths = ["crates/wolfxl-writer/src/refs.rs"]
+
+[module.zip_container]
+route = "oracle"
+source_paths = [
+    "crates/wolfxl-writer/src/zip.rs",
+    "crates/wolfxl-writer/src/emit/content_types.rs",
+    "crates/wolfxl-writer/src/emit/rels.rs",
+    "crates/wolfxl-writer/src/emit/doc_props.rs",
+]
+
+# ----------------------------------------------------------------------
+# Wave 2 modules — emitters (all pending, routing still oracle)
+# ----------------------------------------------------------------------
+
+[module.styles_xml]
+route = "oracle"
+source_paths = ["crates/wolfxl-writer/src/emit/styles_xml.rs"]
+
+[module.sheet_xml]
+route = "oracle"
+source_paths = ["crates/wolfxl-writer/src/emit/sheet_xml.rs"]
+
+[module.shared_strings_xml]
+route = "oracle"
+source_paths = [
+    "crates/wolfxl-writer/src/emit/shared_strings_xml.rs",
+    "crates/wolfxl-writer/src/intern.rs",
+    "crates/wolfxl-writer/src/emit/workbook_xml.rs",
+]
+
+# ----------------------------------------------------------------------
+# Wave 3 modules — rich features (all pending)
+# ----------------------------------------------------------------------
+
+[module.comments]
+route = "oracle"
+source_paths = [
+    "crates/wolfxl-writer/src/emit/comments_xml.rs",
+    "crates/wolfxl-writer/src/emit/drawings_vml.rs",
+]
+
+[module.tables]
+route = "oracle"
+source_paths = ["crates/wolfxl-writer/src/emit/tables_xml.rs"]
+
+[module.conditional_validation]
+route = "oracle"
+source_paths = [
+    "crates/wolfxl-writer/src/model/conditional.rs",
+    "crates/wolfxl-writer/src/model/validation.rs",
+]
