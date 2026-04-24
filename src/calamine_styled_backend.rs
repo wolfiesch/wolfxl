@@ -1173,11 +1173,13 @@ impl CalamineStyledBook {
                         record.set_item("data_type", "blank")?;
                         record.set_item("value", py.None())?;
                         if include_format {
-                            self.populate_record_format(
+                            let style_id = self.record_style_id(sheet, row, col);
+                            self.populate_record_format_for_style_id(
                                 py,
                                 sheet,
                                 row,
                                 col,
+                                style_id,
                                 &record,
                                 include_style_id,
                                 include_extended_format,
@@ -1194,11 +1196,13 @@ impl CalamineStyledBook {
                 }
 
                 if include_format {
-                    self.populate_record_format(
+                    let style_id = self.record_style_id(sheet, row, col);
+                    self.populate_record_format_for_style_id(
                         py,
                         sheet,
                         row,
                         col,
+                        style_id,
                         &record,
                         include_style_id,
                         include_extended_format,
@@ -1721,12 +1725,13 @@ impl CalamineStyledBook {
         Ok(None)
     }
 
-    fn populate_record_format(
+    fn populate_record_format_for_style_id(
         &mut self,
         _py: Python<'_>,
         sheet: &str,
         row: u32,
         col: u32,
+        style_id: Option<u32>,
         d: &Bound<'_, PyDict>,
         include_style_id: bool,
         include_extended_format: bool,
@@ -1735,7 +1740,6 @@ impl CalamineStyledBook {
             return Ok(());
         }
 
-        let style_id = self.cell_style_id(sheet, row, col)?;
         if include_style_id {
             if let Some(style_id) = style_id {
                 d.set_item("style_id", style_id)?;
@@ -1757,6 +1761,13 @@ impl CalamineStyledBook {
         }
 
         Ok(())
+    }
+
+    fn record_style_id(&self, sheet: &str, row: u32, col: u32) -> Option<u32> {
+        self.tier2_cache
+            .get(sheet)
+            .and_then(|c| c.cell_style_ids.as_ref())
+            .and_then(|m| m.get(&(row, col)).copied())
     }
 
     fn record_format_info_for_style_id(
