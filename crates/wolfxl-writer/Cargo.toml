@@ -13,4 +13,7 @@ quick-xml.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
-# Kept light — unit tests use the crate's own types + std/zip introspection.
+# Integration tests re-parse the emitter output with quick-xml and crack open
+# the packaged xlsx with the zip crate. Both are already workspace deps.
+quick-xml.workspace = true
+zip.workspace = true
