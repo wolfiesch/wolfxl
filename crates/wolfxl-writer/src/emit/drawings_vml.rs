@@ -41,7 +41,8 @@ pub fn emit(sheet: &Worksheet) -> Vec<u8> {
 
     // One <v:shape> per comment — BTreeMap gives A1 order
     for (idx, (cell_ref, comment)) in sheet.comments.iter().enumerate() {
-        let shape_num = 1024 + (idx as u32) + 1; // starts at 1025
+        // VML shape IDs conventionally start at 1025 per sheet (Excel's internal reserved range 0..=1024).
+        let shape_num = 1025 + idx as u32;
 
         // Parse row/col from the A1 key (1-based), convert to 0-based
         let (row0, col0) = match refs::parse_a1(cell_ref) {
@@ -73,6 +74,8 @@ pub fn emit(sheet: &Worksheet) -> Vec<u8> {
         out.push_str("<x:ClientData ObjectType=\"Note\">");
         out.push_str("<x:MoveWithCells/>");
         out.push_str("<x:SizeWithCells/>");
+        // VML anchor: 8-integer tuple encoding (colLeft, offLeft, rowTop, offTop, colRight, offRight, rowBottom, offBottom).
+        // The default here places the comment box two columns right and three rows tall relative to its cell.
         out.push_str("<x:Anchor>2, 0, 0, 0, 3, 20, 3, 15</x:Anchor>");
         out.push_str("<x:AutoFill>False</x:AutoFill>");
         out.push_str(&format!("<x:Row>{}</x:Row>", row0));
