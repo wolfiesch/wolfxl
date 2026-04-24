@@ -515,10 +515,11 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
 
     if !sheet.conditional_formats.is_empty() {
         for cf in &sheet.conditional_formats {
-            out.push_str(&format!(
-                "<conditionalFormatting sqref=\"{}\">",
-                xml_escape::attr(&cf.sqref)
-            ));
+            // Buffer rule XML first; only emit the wrapper if at least one rule
+            // produced output. Otherwise we'd emit an empty
+            // `<conditionalFormatting sqref="..."></conditionalFormatting>`,
+            // which Excel treats as invalid and "repairs" on open.
+            let mut rules_buf = String::new();
 
             for (priority_0, rule) in cf.rules.iter().enumerate() {
                 let priority = priority_0 + 1;
@@ -536,72 +537,72 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                             CellIsOperator::NotBetween => "notBetween",
                         };
 
-                        out.push_str(&format!(
+                        rules_buf.push_str(&format!(
                             "<cfRule type=\"cellIs\" priority=\"{}\" operator=\"{}\"",
                             priority, op_str
                         ));
                         if let Some(dxf_id) = rule.dxf_id {
-                            out.push_str(&format!(" dxfId=\"{}\"", dxf_id));
+                            rules_buf.push_str(&format!(" dxfId=\"{}\"", dxf_id));
                         }
                         if rule.stop_if_true {
-                            out.push_str(" stopIfTrue=\"1\"");
+                            rules_buf.push_str(" stopIfTrue=\"1\"");
                         }
-                        out.push('>');
-                        out.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula_a)));
+                        rules_buf.push('>');
+                        rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula_a)));
                         let needs_second = matches!(operator, CellIsOperator::Between | CellIsOperator::NotBetween);
                         if needs_second {
                             if let Some(fb) = formula_b {
-                                out.push_str(&format!("<formula>{}</formula>", xml_escape::text(fb)));
+                                rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(fb)));
                             }
                         }
-                        out.push_str("</cfRule>");
+                        rules_buf.push_str("</cfRule>");
                     }
 
                     ConditionalKind::Expression { formula } => {
-                        out.push_str(&format!(
+                        rules_buf.push_str(&format!(
                             "<cfRule type=\"expression\" priority=\"{}\"",
                             priority
                         ));
                         if let Some(dxf_id) = rule.dxf_id {
-                            out.push_str(&format!(" dxfId=\"{}\"", dxf_id));
+                            rules_buf.push_str(&format!(" dxfId=\"{}\"", dxf_id));
                         }
                         if rule.stop_if_true {
-                            out.push_str(" stopIfTrue=\"1\"");
+                            rules_buf.push_str(" stopIfTrue=\"1\"");
                         }
-                        out.push('>');
-                        out.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula)));
-                        out.push_str("</cfRule>");
+                        rules_buf.push('>');
+                        rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula)));
+                        rules_buf.push_str("</cfRule>");
                     }
 
                     ConditionalKind::DataBar { color_rgb, min, max } => {
-                        out.push_str(&format!(
+                        rules_buf.push_str(&format!(
                             "<cfRule type=\"dataBar\" priority=\"{}\">",
                             priority
                         ));
-                        out.push_str("<dataBar>");
-                        emit_cfvo(out, min);
-                        emit_cfvo(out, max);
-                        out.push_str(&format!("<color rgb=\"{}\"/>", color_rgb));
-                        out.push_str("</dataBar>");
-                        out.push_str("</cfRule>");
+                        rules_buf.push_str("<dataBar>");
+                        emit_cfvo(&mut rules_buf, min);
+                        emit_cfvo(&mut rules_buf, max);
+                        rules_buf.push_str(&format!("<color rgb=\"{}\"/>", color_rgb));
+                        rules_buf.push_str("</dataBar>");
+                        rules_buf.push_str("</cfRule>");
                     }
 
                     ConditionalKind::ColorScale { stops } => {
-                        out.push_str(&format!(
+                        rules_buf.push_str(&format!(
                             "<cfRule type=\"colorScale\" priority=\"{}\">",
                             priority
                         ));
-                        out.push_str("<colorScale>");
+                        rules_buf.push_str("<colorScale>");
                         // All cfvo elements first
                         for stop in stops {
-                            emit_cfvo(out, &stop.threshold);
+                            emit_cfvo(&mut rules_buf, &stop.threshold);
                         }
                         // Then all color elements
                         for stop in stops {
-                            out.push_str(&format!("<color rgb=\"{}\"/>", stop.color_rgb));
+                            rules_buf.push_str(&format!("<color rgb=\"{}\"/>", stop.color_rgb));
                         }
-                        out.push_str("</colorScale>");
-                        out.push_str("</cfRule>");
+                        rules_buf.push_str("</colorScale>");
+                        rules_buf.push_str("</cfRule>");
                     }
 
                     // TODO: future wave — emit fallback or continue
@@ -615,7 +616,14 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                 }
             }
 
-            out.push_str("</conditionalFormatting>");
+            if !rules_buf.is_empty() {
+                out.push_str(&format!(
+                    "<conditionalFormatting sqref=\"{}\">",
+                    xml_escape::attr(&cf.sqref)
+                ));
+                out.push_str(&rules_buf);
+                out.push_str("</conditionalFormatting>");
+            }
         }
     }
 }
@@ -1784,6 +1792,33 @@ mod tests {
         assert!(
             !text.contains("<cfRule type=\"containsText\""),
             "no containsText cfRule: {text}"
+        );
+    }
+
+    // --- 42b. CF wrapper omitted when every rule is a stub variant ---
+
+    #[test]
+    fn cf_all_stub_variants_no_wrapper() {
+        // When every rule in a ConditionalFormat hits a stub arm, we must
+        // skip the `<conditionalFormatting>` wrapper entirely. Excel treats
+        // an empty `<conditionalFormatting sqref="..."></conditionalFormatting>`
+        // as invalid and repairs the file on open.
+        let mut sheet = Worksheet::new("S");
+        let rules = vec![
+            make_rule(ConditionalKind::Duplicate, None, false),
+            make_rule(ConditionalKind::Unique, None, false),
+        ];
+        sheet.conditional_formats.push(make_cf("A1:A10", rules));
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            !text.contains("<conditionalFormatting"),
+            "no <conditionalFormatting> wrapper when all rules stubbed: {text}"
+        );
+        assert!(
+            !text.contains("</conditionalFormatting>"),
+            "no </conditionalFormatting> closing tag either: {text}"
         );
     }
 
