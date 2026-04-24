@@ -387,6 +387,10 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
     }
 }
 
+fn ooxml_attr_truthy(value: Option<&str>) -> bool {
+    matches!(value, Some(v) if v != "0" && !v.eq_ignore_ascii_case("false"))
+}
+
 /// Per-sheet cached data: style grid + layout dimensions.
 struct SheetCache {
     styles: StyleRange,
@@ -428,6 +432,14 @@ struct FreezePaneInfo {
     x_split: Option<i64>,
     y_split: Option<i64>,
     active_pane: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SheetVisibilityInfo {
+    hidden_rows: Vec<u32>,
+    hidden_columns: Vec<u32>,
+    row_outline_levels: Vec<(u32, u8)>,
+    column_outline_levels: Vec<(u32, u8)>,
 }
 
 #[derive(Clone, Debug)]
@@ -647,6 +659,7 @@ impl RecordFormatInfo {
 struct Tier2SheetCache {
     merged_ranges: Option<Vec<String>>,
     merged_bounds: Option<Vec<(u32, u32, u32, u32)>>,
+    visibility: Option<SheetVisibilityInfo>,
     hyperlinks: Option<Vec<HyperlinkInfo>>,
     comments: Option<Vec<CommentInfo>>,
     freeze_panes: Option<FreezePaneInfo>,
@@ -1059,6 +1072,7 @@ impl CalamineStyledBook {
         include_coordinate = true,
         include_style_id = true,
         include_extended_format = true,
+        include_cached_formula_value = false,
     ))]
     pub fn read_sheet_records(
         &mut self,
@@ -1072,6 +1086,7 @@ impl CalamineStyledBook {
         include_coordinate: bool,
         include_style_id: bool,
         include_extended_format: bool,
+        include_cached_formula_value: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         if include_format {
@@ -1157,6 +1172,13 @@ impl CalamineStyledBook {
 
                 if let Some(formula_text) = &formula {
                     record.set_item("formula", formula_text)?;
+                    if include_cached_formula_value {
+                        if let Some(v) = &value {
+                            if !matches!(v, Data::Empty) && !value_is_formula_placeholder {
+                                record.set_item("cached_value", data_to_plain_py(py, v)?)?;
+                            }
+                        }
+                    }
                 }
 
                 if should_emit_formula {
@@ -1246,6 +1268,58 @@ impl CalamineStyledBook {
             }
             None => Ok(py.None()),
         }
+    }
+
+    pub fn read_cached_formula_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+    ) -> PyResult<PyObject> {
+        self.ensure_sheet_exists(sheet)?;
+        self.ensure_value_caches(sheet)?;
+
+        let out = PyDict::new(py);
+        let formulas: Vec<(u32, u32)> = self
+            .formula_map_cache
+            .get(sheet)
+            .map(|m| m.keys().copied().collect())
+            .unwrap_or_default();
+        let Some(range) = self.range_cache.get(sheet) else {
+            return Ok(out.into());
+        };
+
+        let fmap = self.formula_map_cache.get(sheet);
+        for (row, col) in formulas {
+            let Some(value) = range.get_value((row, col)) else {
+                continue;
+            };
+            if matches!(value, Data::Empty) || is_uncached_formula_value(fmap, row, col, value) {
+                continue;
+            }
+            out.set_item(row_col_to_a1(row, col), data_to_plain_py(py, value)?)?;
+        }
+
+        Ok(out.into())
+    }
+
+    pub fn read_sheet_visibility(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        self.ensure_sheet_exists(sheet)?;
+
+        if let Some(info) = self
+            .tier2_cache
+            .get(sheet)
+            .and_then(|cache| cache.visibility.as_ref())
+        {
+            return Self::sheet_visibility_to_py(py, info);
+        }
+
+        let xml = self.sheet_xml_content(sheet)?;
+        let info = Self::parse_sheet_visibility_from_sheet_xml(&xml)?;
+        self.tier2_cache
+            .entry(sheet.to_string())
+            .or_default()
+            .visibility = Some(info.clone());
+        Self::sheet_visibility_to_py(py, &info)
     }
 
     pub fn read_cell_format(
@@ -2070,6 +2144,113 @@ impl CalamineStyledBook {
         }
 
         Ok(out)
+    }
+
+    fn sheet_visibility_to_py(py: Python<'_>, info: &SheetVisibilityInfo) -> PyResult<PyObject> {
+        let d = PyDict::new(py);
+        d.set_item("hidden_rows", info.hidden_rows.clone())?;
+        d.set_item("hidden_columns", info.hidden_columns.clone())?;
+
+        let row_levels = PyDict::new(py);
+        for (row, level) in &info.row_outline_levels {
+            row_levels.set_item(*row, *level)?;
+        }
+        d.set_item("row_outline_levels", row_levels)?;
+
+        let col_levels = PyDict::new(py);
+        for (col, level) in &info.column_outline_levels {
+            col_levels.set_item(*col, *level)?;
+        }
+        d.set_item("column_outline_levels", col_levels)?;
+
+        Ok(d.into())
+    }
+
+    fn parse_sheet_visibility_from_sheet_xml(xml: &str) -> PyResult<SheetVisibilityInfo> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
+        let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
+        let mut row_outline_levels: HashMap<u32, u8> = HashMap::new();
+        let mut column_outline_levels: HashMap<u32, u8> = HashMap::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"col" {
+                        let min_col = ooxml_util::attr_value(e, b"min")
+                            .and_then(|v| v.parse::<u32>().ok())
+                            .unwrap_or(1);
+                        let max_col = ooxml_util::attr_value(e, b"max")
+                            .and_then(|v| v.parse::<u32>().ok())
+                            .unwrap_or(min_col);
+                        let hidden =
+                            ooxml_attr_truthy(ooxml_util::attr_value(e, b"hidden").as_deref());
+                        let outline_level = ooxml_util::attr_value(e, b"outlineLevel")
+                            .and_then(|v| v.parse::<u8>().ok())
+                            .unwrap_or(0);
+                        for col in min_col..=max_col {
+                            hidden_columns.insert(col, hidden);
+                            if outline_level > 0 {
+                                column_outline_levels.insert(col, outline_level);
+                            } else {
+                                column_outline_levels.remove(&col);
+                            }
+                        }
+                    } else if name.as_ref() == b"row" {
+                        let Some(row) =
+                            ooxml_util::attr_value(e, b"r").and_then(|v| v.parse::<u32>().ok())
+                        else {
+                            buf.clear();
+                            continue;
+                        };
+                        let hidden =
+                            ooxml_attr_truthy(ooxml_util::attr_value(e, b"hidden").as_deref());
+                        hidden_rows.insert(row, hidden);
+                        let outline_level = ooxml_util::attr_value(e, b"outlineLevel")
+                            .and_then(|v| v.parse::<u8>().ok())
+                            .unwrap_or(0);
+                        if outline_level > 0 {
+                            row_outline_levels.insert(row, outline_level);
+                        } else {
+                            row_outline_levels.remove(&row);
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse worksheet XML for visibility: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        let mut info = SheetVisibilityInfo {
+            hidden_rows: hidden_rows
+                .into_iter()
+                .filter_map(|(row, hidden)| hidden.then_some(row))
+                .collect(),
+            hidden_columns: hidden_columns
+                .into_iter()
+                .filter_map(|(col, hidden)| hidden.then_some(col))
+                .collect(),
+            row_outline_levels: row_outline_levels.into_iter().collect(),
+            column_outline_levels: column_outline_levels.into_iter().collect(),
+        };
+
+        info.hidden_rows.sort_unstable();
+        info.hidden_columns.sort_unstable();
+        info.row_outline_levels
+            .sort_unstable_by_key(|(row, _)| *row);
+        info.column_outline_levels
+            .sort_unstable_by_key(|(col, _)| *col);
+
+        Ok(info)
     }
 
     fn parse_merged_range_bounds(range_ref: &str) -> Option<(u32, u32, u32, u32)> {
