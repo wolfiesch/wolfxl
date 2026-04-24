@@ -157,6 +157,10 @@ fn underline_str(u: &UnderlineStyle) -> Option<&'static str> {
     }
 }
 
+fn is_default_font_size(size: f64) -> bool {
+    (size - 11.0).abs() < f64::EPSILON
+}
+
 type XlsxReader = Xlsx<BufReader<File>>;
 
 // Excel stores column widths with font-metric padding included.
@@ -486,6 +490,159 @@ struct RawFontInfo {
     color: Option<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct RecordFormatInfo {
+    bold: bool,
+    italic: bool,
+    underline: Option<String>,
+    strikethrough: bool,
+    font_size: Option<f64>,
+    bg_color: Option<String>,
+    number_format: Option<String>,
+    h_align: Option<&'static str>,
+    v_align: Option<&'static str>,
+    wrap: bool,
+    rotation: Option<i64>,
+    indent: Option<u32>,
+    bottom_border_style: Option<&'static str>,
+    is_double_underline: bool,
+}
+
+impl RecordFormatInfo {
+    fn from_style(style: &Style) -> Self {
+        let mut info = Self::default();
+
+        if let Some(font) = &style.font {
+            if font.weight == FontWeight::Bold {
+                info.bold = true;
+            }
+            if font.style == FontStyle::Italic {
+                info.italic = true;
+            }
+            if let Some(u) = underline_str(&font.underline) {
+                info.underline = Some(u.to_string());
+            }
+            if font.strikethrough {
+                info.strikethrough = true;
+            }
+            if let Some(size) = font.size {
+                if !is_default_font_size(size) {
+                    info.font_size = Some(size);
+                }
+            }
+        }
+
+        if let Some(fill) = &style.fill {
+            if fill.pattern != FillPattern::None {
+                if let Some(color) = fill.get_color() {
+                    info.bg_color = Some(color_to_hex(&color));
+                }
+            }
+        }
+
+        if let Some(align) = &style.alignment {
+            info.h_align = h_align_str(&align.horizontal);
+            info.v_align = v_align_str(&align.vertical);
+            if align.wrap_text {
+                info.wrap = true;
+            }
+            match align.text_rotation {
+                TextRotation::None => {}
+                TextRotation::Degrees(deg) => {
+                    if deg != 0 {
+                        info.rotation = Some(deg as i64);
+                    }
+                }
+                TextRotation::Stacked => {
+                    info.rotation = Some(255);
+                }
+            }
+            if let Some(indent) = align.indent {
+                if indent > 0 {
+                    info.indent = Some(indent as u32);
+                }
+            }
+        }
+
+        if let Some(borders) = &style.borders {
+            let bottom_style = border_style_str(&borders.bottom.style);
+            if bottom_style != "none" {
+                info.bottom_border_style = Some(bottom_style);
+                info.is_double_underline = bottom_style == "double";
+            }
+        }
+
+        info
+    }
+
+    fn overlay_raw_font(&mut self, font: &RawFontInfo) {
+        if font.bold {
+            self.bold = true;
+        }
+        if font.italic {
+            self.italic = true;
+        }
+        if let Some(underline) = &font.underline {
+            self.underline = Some(underline.clone());
+        }
+        if font.strikethrough {
+            self.strikethrough = true;
+        }
+        if let Some(size) = font.size {
+            if !is_default_font_size(size) {
+                self.font_size = Some(size);
+            }
+        }
+    }
+
+    fn populate_dict(&self, d: &Bound<'_, PyDict>) -> PyResult<()> {
+        if self.bold {
+            d.set_item("bold", true)?;
+        }
+        if self.italic {
+            d.set_item("italic", true)?;
+        }
+        if let Some(underline) = &self.underline {
+            d.set_item("underline", underline)?;
+        }
+        if self.strikethrough {
+            d.set_item("strikethrough", true)?;
+        }
+        if let Some(size) = self.font_size {
+            d.set_item("font_size", size)?;
+        }
+        if let Some(color) = &self.bg_color {
+            d.set_item("bg_color", color)?;
+        }
+        if let Some(number_format) = &self.number_format {
+            d.set_item("number_format", number_format)?;
+        }
+        if let Some(h) = self.h_align {
+            d.set_item("h_align", h)?;
+        }
+        if let Some(v) = self.v_align {
+            d.set_item("v_align", v)?;
+        }
+        if self.wrap {
+            d.set_item("wrap", true)?;
+        }
+        if let Some(rotation) = self.rotation {
+            d.set_item("rotation", rotation)?;
+        }
+        if let Some(indent) = self.indent {
+            d.set_item("indent", indent)?;
+        }
+        if let Some(bottom_style) = self.bottom_border_style {
+            d.set_item("bottom_border_style", bottom_style)?;
+            d.set_item("has_bottom_border", true)?;
+            if self.is_double_underline {
+                d.set_item("is_double_underline", true)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct Tier2SheetCache {
     merged_ranges: Option<Vec<String>>,
@@ -531,6 +688,9 @@ pub struct CalamineStyledBook {
     cell_xfs: Option<Vec<XfEntry>>,
     /// Lazy cache: parsed fonts from xl/styles.xml.
     raw_fonts: Option<Vec<RawFontInfo>>,
+    /// Compact `cell_records()` format payloads keyed by
+    /// (workbook-global cellXfs style id, include extended style-grid fields).
+    record_format_cache: HashMap<(u32, bool), RecordFormatInfo>,
 }
 
 #[pymethods]
@@ -559,6 +719,7 @@ impl CalamineStyledBook {
             raw_number_formats: None,
             cell_xfs: None,
             raw_fonts: None,
+            record_format_cache: HashMap::new(),
         })
     }
 
@@ -896,6 +1057,8 @@ impl CalamineStyledBook {
         include_empty = false,
         include_formula_blanks = true,
         include_coordinate = true,
+        include_style_id = true,
+        include_extended_format = true,
     ))]
     pub fn read_sheet_records(
         &mut self,
@@ -907,13 +1070,39 @@ impl CalamineStyledBook {
         include_empty: bool,
         include_formula_blanks: bool,
         include_coordinate: bool,
+        include_style_id: bool,
+        include_extended_format: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
-        self.ensure_value_caches(sheet)?;
+        if include_format {
+            self.ensure_value_and_style_caches(sheet)?;
+        } else {
+            self.ensure_value_caches(sheet)?;
+        }
 
         let (start_row, start_col, end_row, end_col) = {
             let range = self.range_cache.get(sheet).unwrap();
-            Self::resolve_range_bounds(range, cell_range)?
+            if cell_range.is_none() {
+                let mut bounds: Option<(u32, u32, u32, u32)> = None;
+                let (height, width) = range.get_size();
+                if height > 0 && width > 0 {
+                    let start = range.start().unwrap_or((0, 0));
+                    update_bounds(&mut bounds, start.0, start.1);
+                    update_bounds(
+                        &mut bounds,
+                        start.0 + height as u32 - 1,
+                        start.1 + width as u32 - 1,
+                    );
+                }
+                if let Some(formulas) = self.formula_map_cache.get(sheet) {
+                    for &(row, col) in formulas.keys() {
+                        update_bounds(&mut bounds, row, col);
+                    }
+                }
+                bounds.unwrap_or((0, 0, 0, 0))
+            } else {
+                Self::resolve_range_bounds(range, cell_range)?
+            }
         };
 
         let records = PyList::empty(py);
@@ -984,7 +1173,17 @@ impl CalamineStyledBook {
                         record.set_item("data_type", "blank")?;
                         record.set_item("value", py.None())?;
                         if include_format {
-                            self.populate_record_format(py, sheet, row, col, &record)?;
+                            let style_id = self.record_style_id(sheet, row, col);
+                            self.populate_record_format_for_style_id(
+                                py,
+                                sheet,
+                                row,
+                                col,
+                                style_id,
+                                &record,
+                                include_style_id,
+                                include_extended_format,
+                            )?;
                         }
                         records.append(record)?;
                         continue;
@@ -997,7 +1196,17 @@ impl CalamineStyledBook {
                 }
 
                 if include_format {
-                    self.populate_record_format(py, sheet, row, col, &record)?;
+                    let style_id = self.record_style_id(sheet, row, col);
+                    self.populate_record_format_for_style_id(
+                        py,
+                        sheet,
+                        row,
+                        col,
+                        style_id,
+                        &record,
+                        include_style_id,
+                        include_extended_format,
+                    )?;
                 }
 
                 records.append(record)?;
@@ -1423,6 +1632,34 @@ impl CalamineStyledBook {
         Ok(())
     }
 
+    /// Ensure value/formula caches plus per-cell style ids for formatted bulk records.
+    fn ensure_value_and_style_caches(&mut self, sheet: &str) -> PyResult<()> {
+        if self.range_cache.contains_key(sheet) {
+            self.ensure_cell_style_ids(sheet)?;
+            return Ok(());
+        }
+
+        if !self.sheet_xml_content_cache.contains_key(sheet) {
+            let xml = self.sheet_xml_content(sheet)?;
+            let _ = xml;
+        }
+
+        let xml = self.sheet_xml_content_cache.get(sheet).unwrap();
+        let (formulas, style_ids) = Self::parse_formula_and_style_ids_from_sheet_xml(xml)?;
+        self.formula_map_cache.insert(sheet.to_string(), formulas);
+        self.tier2_cache
+            .entry(sheet.to_string())
+            .or_default()
+            .cell_style_ids = Some(style_ids);
+
+        let range = self.workbook.worksheet_range(sheet).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("Failed to read sheet {sheet}: {e}"))
+        })?;
+        self.range_cache.insert(sheet.to_string(), range);
+
+        Ok(())
+    }
+
     /// Get the Style for an absolute (row, col) position, or None if no style applied.
     fn get_style(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<Style>> {
         self.ensure_cache(sheet)?;
@@ -1488,57 +1725,83 @@ impl CalamineStyledBook {
         Ok(None)
     }
 
-    fn populate_record_format(
+    fn populate_record_format_for_style_id(
         &mut self,
-        py: Python<'_>,
+        _py: Python<'_>,
         sheet: &str,
         row: u32,
         col: u32,
+        style_id: Option<u32>,
         d: &Bound<'_, PyDict>,
+        include_style_id: bool,
+        include_extended_format: bool,
     ) -> PyResult<()> {
         if self.is_merged_subordinate(sheet, row, col)? {
             return Ok(());
         }
 
-        let style_id = self.cell_style_id(sheet, row, col)?;
-        if let Some(style_id) = style_id {
-            d.set_item("style_id", style_id)?;
+        if include_style_id {
+            if let Some(style_id) = style_id {
+                d.set_item("style_id", style_id)?;
+            }
         }
         if style_id.unwrap_or(0) == 0 {
             return Ok(());
         }
 
-        if let Some(style) = self.get_style(sheet, row, col)? {
-            if let Some(font) = &style.font {
-                Self::populate_font(py, d, font)?;
-            }
-            if let Some(style_id) = style_id {
-                self.populate_raw_font(style_id, d)?;
-            }
-            if let Some(fill) = &style.fill {
-                Self::populate_fill(py, d, fill)?;
-            }
-            if let Some(style_id) = style_id {
-                if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
-                    d.set_item("number_format", number_format)?;
-                }
-            }
-            if let Some(align) = &style.alignment {
-                Self::populate_alignment(py, d, align)?;
-            }
-            if let Some(borders) = &style.borders {
-                let bottom_style = border_style_str(&borders.bottom.style);
-                if bottom_style != "none" {
-                    d.set_item("bottom_border_style", bottom_style)?;
-                    d.set_item("has_bottom_border", true)?;
-                    if bottom_style == "double" {
-                        d.set_item("is_double_underline", true)?;
-                    }
-                }
-            }
+        if let Some(style_id) = style_id {
+            let info = self.record_format_info_for_style_id(
+                sheet,
+                row,
+                col,
+                style_id,
+                include_extended_format,
+            )?;
+            info.populate_dict(d)?;
         }
 
         Ok(())
+    }
+
+    fn record_style_id(&self, sheet: &str, row: u32, col: u32) -> Option<u32> {
+        self.tier2_cache
+            .get(sheet)
+            .and_then(|c| c.cell_style_ids.as_ref())
+            .and_then(|m| m.get(&(row, col)).copied())
+    }
+
+    fn record_format_info_for_style_id(
+        &mut self,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        style_id: u32,
+        include_extended_format: bool,
+    ) -> PyResult<RecordFormatInfo> {
+        let cache_key = (style_id, include_extended_format);
+        if let Some(info) = self.record_format_cache.get(&cache_key) {
+            return Ok(info.clone());
+        }
+
+        let mut info = if include_extended_format {
+            if let Some(style) = self.get_style(sheet, row, col)? {
+                RecordFormatInfo::from_style(&style)
+            } else {
+                RecordFormatInfo::default()
+            }
+        } else {
+            RecordFormatInfo::default()
+        };
+
+        if let Some(raw_font) = self.raw_font_for_style_id(style_id)? {
+            info.overlay_raw_font(&raw_font);
+        }
+        if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
+            info.number_format = Some(number_format);
+        }
+
+        self.record_format_cache.insert(cache_key, info.clone());
+        Ok(info)
     }
 
     fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
@@ -1911,6 +2174,89 @@ impl CalamineStyledBook {
         }
 
         Ok(out)
+    }
+
+    fn parse_formula_and_style_ids_from_sheet_xml(
+        xml: &str,
+    ) -> PyResult<(HashMap<(u32, u32), String>, HashMap<(u32, u32), u32>)> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut formulas: HashMap<(u32, u32), String> = HashMap::new();
+        let mut style_ids: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut current_cell: Option<(u32, u32)> = None;
+        let mut in_formula = false;
+        let mut formula_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"c" {
+                        let a1 = ooxml_util::attr_value(e, b"r").unwrap_or_default();
+                        current_cell = if a1.is_empty() {
+                            None
+                        } else {
+                            a1_to_row_col(&a1).ok()
+                        };
+                        if let Some(pos) = current_cell {
+                            let style_id = ooxml_util::attr_value(e, b"s")
+                                .and_then(|s| s.parse::<u32>().ok())
+                                .unwrap_or(0);
+                            if style_id != 0 {
+                                style_ids.insert(pos, style_id);
+                            }
+                        }
+                    } else if name.as_ref() == b"f" && current_cell.is_some() {
+                        in_formula = true;
+                        formula_text.clear();
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"f" && in_formula {
+                        in_formula = false;
+                        if let Some(pos) = current_cell {
+                            if !formula_text.is_empty() {
+                                formulas.insert(pos, formula_text.clone());
+                            }
+                        }
+                    } else if name.as_ref() == b"c" {
+                        current_cell = None;
+                    }
+                }
+                Ok(Event::Text(ref t)) if in_formula => {
+                    if let Ok(text) = t.unescape() {
+                        formula_text.push_str(&text);
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    if e.local_name().as_ref() == b"c" {
+                        let a1 = ooxml_util::attr_value(e, b"r").unwrap_or_default();
+                        if !a1.is_empty() {
+                            if let Ok(pos) = a1_to_row_col(&a1) {
+                                let style_id = ooxml_util::attr_value(e, b"s")
+                                    .and_then(|s| s.parse::<u32>().ok())
+                                    .unwrap_or(0);
+                                if style_id != 0 {
+                                    style_ids.insert(pos, style_id);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse worksheet XML for formulas/styles: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok((formulas, style_ids))
     }
 
     /// Fast formula-only parse: walk `<sheetData>` with quick_xml and extract
@@ -2461,7 +2807,7 @@ impl CalamineStyledBook {
         Ok(())
     }
 
-    fn cell_style_id(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<u32>> {
+    fn ensure_cell_style_ids(&mut self, sheet: &str) -> PyResult<()> {
         self.ensure_sheet_exists(sheet)?;
 
         let needs_load = self
@@ -2477,6 +2823,12 @@ impl CalamineStyledBook {
                 .or_default()
                 .cell_style_ids = Some(map);
         }
+
+        Ok(())
+    }
+
+    fn cell_style_id(&mut self, sheet: &str, row: u32, col: u32) -> PyResult<Option<u32>> {
+        self.ensure_cell_style_ids(sheet)?;
 
         Ok(self
             .tier2_cache
@@ -2717,7 +3069,7 @@ impl CalamineStyledBook {
         Ok(())
     }
 
-    fn populate_raw_font(&mut self, style_id: u32, d: &Bound<'_, PyDict>) -> PyResult<()> {
+    fn raw_font_for_style_id(&mut self, style_id: u32) -> PyResult<Option<RawFontInfo>> {
         self.ensure_cell_xfs()?;
         let Some(font_id) = self
             .cell_xfs
@@ -2725,15 +3077,19 @@ impl CalamineStyledBook {
             .and_then(|entries| entries.get(style_id as usize))
             .map(|xf| xf.font_id)
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         self.ensure_raw_fonts()?;
-        let Some(font) = self
+        Ok(self
             .raw_fonts
             .as_ref()
             .and_then(|fonts| fonts.get(font_id as usize))
-        else {
+            .cloned())
+    }
+
+    fn populate_raw_font(&mut self, style_id: u32, d: &Bound<'_, PyDict>) -> PyResult<()> {
+        let Some(font) = self.raw_font_for_style_id(style_id)? else {
             return Ok(());
         };
 

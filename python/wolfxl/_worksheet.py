@@ -511,6 +511,8 @@ class Worksheet:
         include_empty: bool = False,
         include_formula_blanks: bool = True,
         include_coordinate: bool = True,
+        include_style_id: bool = True,
+        include_extended_format: bool = True,
     ) -> Iterator[dict[str, Any]]:
         """Iterate populated cells as compact dictionaries.
 
@@ -525,7 +527,12 @@ class Worksheet:
         backing cached value are included by default; pass
         ``include_formula_blanks=False`` to skip those template-only formulas.
         Pass ``include_coordinate=False`` when row/column integers are enough
-        and avoiding A1 string allocation matters.
+        and avoiding A1 string allocation matters. Pass
+        ``include_style_id=False`` when semantic format fields are enough and
+        callers do not need workbook-internal style identifiers. Pass
+        ``include_extended_format=False`` to keep raw font flags and number
+        formats while skipping expensive style-grid fields such as fill,
+        alignment, and border cues.
         """
         if self._workbook._rust_reader is None:  # noqa: SLF001
             yield from self._iter_cell_records_python(
@@ -538,13 +545,27 @@ class Worksheet:
             )
             return
 
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
         reader = self._workbook._rust_reader  # noqa: SLF001
         effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
+        overlay = self._collect_pending_overlay()
+        unbounded_sparse_read = (
+            min_row is None
+            and max_row is None
+            and min_col is None
+            and max_col is None
+            and not include_empty
+            and not overlay
+        )
+        if unbounded_sparse_read:
+            r_min = c_min = 1
+            r_max = c_max = None
+            range_str = None
+        else:
+            r_min = min_row or 1
+            r_max = max_row or self._max_row()
+            c_min = min_col or 1
+            c_max = max_col or self._max_col()
+            range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
         records = reader.read_sheet_records(
             self._title,
             range_str,
@@ -553,6 +574,8 @@ class Worksheet:
             include_empty,
             include_formula_blanks,
             include_coordinate,
+            include_style_id,
+            include_extended_format,
         )
 
         # Modify mode can have pending Python-side edits the Rust reader
@@ -560,7 +583,6 @@ class Worksheet:
         # iterator reflects current worksheet state, not the last save.
         # The overlay is only built when something is dirty — pure read
         # mode pays no extra cost.
-        overlay = self._collect_pending_overlay()
         if not overlay:
             yield from records
             return
@@ -652,6 +674,8 @@ class Worksheet:
         include_empty: bool = False,
         include_formula_blanks: bool = True,
         include_coordinate: bool = True,
+        include_style_id: bool = True,
+        include_extended_format: bool = True,
     ) -> list[dict[str, Any]]:
         """Return ``iter_cell_records(...)`` as a list."""
         return list(
@@ -665,6 +689,8 @@ class Worksheet:
                 include_empty=include_empty,
                 include_formula_blanks=include_formula_blanks,
                 include_coordinate=include_coordinate,
+                include_style_id=include_style_id,
+                include_extended_format=include_extended_format,
             ),
         )
 

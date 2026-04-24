@@ -58,7 +58,10 @@ cached formula values instead; uncached formula blanks are skipped unless
 template formulas to inflate the record stream, pass
 `include_formula_blanks=False`. Pass `include_coordinate=False` when 1-based
 `row` / `column` integers are enough and you want to skip A1 coordinate string
-allocation.
+allocation. Pass `include_style_id=False` when you need semantic format fields
+but not workbook-internal style ids. Pass `include_extended_format=False` to
+keep raw font flags and number formats while skipping style-grid fields such as
+fill, alignment, and border cues.
 
 `calculate_dimension()` follows openpyxl's used-range shape. A blank sheet
 returns `A1:A1`; a sheet with only `C4` populated returns `C4:C4`; a sheet with
