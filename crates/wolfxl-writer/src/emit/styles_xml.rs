@@ -123,8 +123,9 @@ fn font_to_xml(spec: &FontSpec) -> String {
 fn fill_to_xml(spec: &FillSpec) -> String {
     if let Some(ref rgb) = spec.fg_color_rgb {
         format!(
-            "<fill><patternFill patternType=\"{}\"><fgColor rgb=\"{rgb}\"/></patternFill></fill>",
-            xml_escape::attr(&spec.pattern_type)
+            "<fill><patternFill patternType=\"{}\"><fgColor rgb=\"{}\"/></patternFill></fill>",
+            xml_escape::attr(&spec.pattern_type),
+            xml_escape::attr(rgb)
         )
     } else {
         format!(
@@ -138,8 +139,9 @@ fn border_side_xml(tag: &str, side: &BorderSideSpec) -> String {
     match (&side.style, &side.color_rgb) {
         (Some(style), Some(rgb)) => {
             format!(
-                "<{tag} style=\"{}\"><color rgb=\"{rgb}\"/></{tag}>",
-                xml_escape::attr(style)
+                "<{tag} style=\"{}\"><color rgb=\"{}\"/></{tag}>",
+                xml_escape::attr(style),
+                xml_escape::attr(rgb)
             )
         }
         (Some(style), None) => format!("<{tag} style=\"{}\"/>", xml_escape::attr(style)),
@@ -575,5 +577,49 @@ mod tests {
             text.contains("<left style=\"thin\"><color rgb=\"FF0000FF\"/></left>"),
             "border side with color not rendered correctly; got:\n{text}"
         );
+    }
+
+    // -------------------------------------------------------------------
+    // Test 16: border rgb with special chars is attr-escaped
+    // -------------------------------------------------------------------
+    #[test]
+    fn border_rgb_with_special_chars_is_attr_escaped() {
+        // A pathological RGB - real RGB is always hex but the emitter is
+        // defense-in-depth: if callers ever pass `"` or `&`, output stays valid.
+        let mut b = StylesBuilder::default();
+        let border = BorderSpec {
+            left: BorderSideSpec {
+                style: Some("thin".into()),
+                color_rgb: Some(r#"FF"00&00"#.into()),
+            },
+            ..Default::default()
+        };
+        b.intern_border(&border);
+        let text = String::from_utf8(emit(&b)).unwrap();
+        // Must not contain the raw quote or ampersand inside the attribute.
+        assert!(
+            text.contains(r#"<color rgb="FF&quot;00&amp;00"/>"#),
+            "got: {text}"
+        );
+        assert!(!text.contains(r#"rgb="FF"00"#), "raw quote leaked: {text}");
+    }
+
+    // -------------------------------------------------------------------
+    // Test 17: fgColor rgb with special chars is attr-escaped
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_fgcolor_rgb_with_special_chars_is_attr_escaped() {
+        let mut b = StylesBuilder::default();
+        b.intern_fill(&FillSpec {
+            pattern_type: "solid".into(),
+            fg_color_rgb: Some(r#"FF"00&00"#.into()),
+            ..Default::default()
+        });
+        let text = String::from_utf8(emit(&b)).unwrap();
+        assert!(
+            text.contains(r#"<fgColor rgb="FF&quot;00&amp;00"/>"#),
+            "got: {text}"
+        );
+        assert!(!text.contains(r#"rgb="FF"00"#), "raw quote leaked: {text}");
     }
 }
