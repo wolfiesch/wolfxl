@@ -176,6 +176,21 @@ class Workbook:
         self._evaluator = ev  # cache for recalculate()
         return result
 
+    def cached_formula_values(self) -> dict[str, Any]:
+        """Return Excel-saved cached formula results for every sheet.
+
+        Keys are workbook-qualified cell references like ``"Sheet1!B2"``.
+        This is a fast read-only path for ingestion workloads that need
+        Excel's last-calculated formula values without evaluating formulas in
+        Python. Cells whose formulas have no cached value are omitted.
+        """
+        if self._rust_reader is None:
+            return {}
+        values: dict[str, Any] = {}
+        for sheet_name in self._sheet_names:
+            values.update(self._sheets[sheet_name].cached_formula_values(qualified=True))
+        return values
+
     def recalculate(
         self,
         perturbations: dict[str, float | int],

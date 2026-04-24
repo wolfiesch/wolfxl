@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
-from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl._utils import a1_to_rowcol, column_index, rowcol_to_a1
 
 
 def _canonical_data_type(value: Any) -> str:
@@ -60,6 +60,14 @@ class _RowDimensionProxy:
     def __getitem__(self, row: int) -> _RowDimension:
         return _RowDimension(self._ws, row)
 
+    def get(self, row: int, default: Any = None) -> _RowDimension | Any:
+        if not isinstance(row, int):
+            return default
+        dimension = _RowDimension(self._ws, row)
+        if dimension.height is not None or dimension.hidden or dimension.outline_level:
+            return dimension
+        return default
+
 
 class _RowDimension:
     """Single row dimension with a readable/writable ``height`` property."""
@@ -81,6 +89,24 @@ class _RowDimension:
     def height(self, value: float | None) -> None:
         self._ws._row_heights[self._row] = value  # noqa: SLF001
 
+    @property
+    def hidden(self) -> bool:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is not None:  # noqa: SLF001
+            return self._row in self._ws.sheet_visibility()["hidden_rows"]
+        return False
+
+    @property
+    def outlineLevel(self) -> int:  # noqa: N802 - openpyxl public API
+        return self.outline_level
+
+    @property
+    def outline_level(self) -> int:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is not None:  # noqa: SLF001
+            return int(self._ws.sheet_visibility()["row_outline_levels"].get(self._row, 0))
+        return 0
+
 
 class _ColumnDimensionProxy:
     """Dict-like proxy: ``ws.column_dimensions['A'].width = 15``."""
@@ -92,6 +118,14 @@ class _ColumnDimensionProxy:
 
     def __getitem__(self, col_letter: str) -> _ColumnDimension:
         return _ColumnDimension(self._ws, col_letter.upper())
+
+    def get(self, col_letter: str, default: Any = None) -> _ColumnDimension | Any:
+        if not isinstance(col_letter, str):
+            return default
+        dimension = _ColumnDimension(self._ws, col_letter.upper())
+        if dimension.width is not None or dimension.hidden or dimension.outline_level:
+            return dimension
+        return default
 
 
 class _ColumnDimension:
@@ -113,6 +147,25 @@ class _ColumnDimension:
     @width.setter
     def width(self, value: float | None) -> None:
         self._ws._col_widths[self._col_letter] = value  # noqa: SLF001
+
+    @property
+    def hidden(self) -> bool:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is not None:  # noqa: SLF001
+            return column_index(self._col_letter) in self._ws.sheet_visibility()["hidden_columns"]
+        return False
+
+    @property
+    def outlineLevel(self) -> int:  # noqa: N802 - openpyxl public API
+        return self.outline_level
+
+    @property
+    def outline_level(self) -> int:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is not None:  # noqa: SLF001
+            col = column_index(self._col_letter)
+            return int(self._ws.sheet_visibility()["column_outline_levels"].get(col, 0))
+        return 0
 
 
 class _AutoFilter:
@@ -179,7 +232,7 @@ class Worksheet:
         "_append_buffer", "_append_buffer_start", "_bulk_writes",
         "_freeze_panes", "_auto_filter",
         "_row_heights", "_col_widths",
-        "_merged_ranges", "_print_area",
+        "_merged_ranges", "_print_area", "_sheet_visibility_cache",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -202,6 +255,7 @@ class Worksheet:
         self._col_widths: dict[str, float | None] = {}
         self._merged_ranges: set[str] = set()
         self._print_area: str | None = None
+        self._sheet_visibility_cache: dict[str, Any] | None = None
 
     @property
     def title(self) -> str:
@@ -513,6 +567,7 @@ class Worksheet:
         include_coordinate: bool = True,
         include_style_id: bool = True,
         include_extended_format: bool = True,
+        include_cached_formula_value: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """Iterate populated cells as compact dictionaries.
 
@@ -532,7 +587,9 @@ class Worksheet:
         callers do not need workbook-internal style identifiers. Pass
         ``include_extended_format=False`` to keep raw font flags and number
         formats while skipping expensive style-grid fields such as fill,
-        alignment, and border cues.
+        alignment, and border cues. Pass
+        ``include_cached_formula_value=True`` to include a ``cached_value`` key
+        on formula records that have a saved cached result.
         """
         if self._workbook._rust_reader is None:  # noqa: SLF001
             yield from self._iter_cell_records_python(
@@ -576,6 +633,7 @@ class Worksheet:
             include_coordinate,
             include_style_id,
             include_extended_format,
+            include_cached_formula_value,
         )
 
         # Modify mode can have pending Python-side edits the Rust reader
@@ -611,6 +669,7 @@ class Worksheet:
                 patched["formula"] = new_value[1:]
             else:
                 patched.pop("formula", None)
+            patched.pop("cached_value", None)
             yield patched
 
         # Yield pending edits that were inside the requested range but the
@@ -676,6 +735,7 @@ class Worksheet:
         include_coordinate: bool = True,
         include_style_id: bool = True,
         include_extended_format: bool = True,
+        include_cached_formula_value: bool = False,
     ) -> list[dict[str, Any]]:
         """Return ``iter_cell_records(...)`` as a list."""
         return list(
@@ -691,8 +751,48 @@ class Worksheet:
                 include_coordinate=include_coordinate,
                 include_style_id=include_style_id,
                 include_extended_format=include_extended_format,
+                include_cached_formula_value=include_cached_formula_value,
             ),
         )
+
+    def cached_formula_values(self, *, qualified: bool = False) -> dict[str, Any]:
+        """Return cached formula results for this sheet.
+
+        Keys are A1 coordinates by default. Pass ``qualified=True`` to return
+        ``"Sheet!A1"`` keys, matching :meth:`Workbook.cached_formula_values`.
+        Only formula cells with saved cached values are included; uncached
+        template formulas are omitted.
+        """
+        wb = self._workbook
+        if wb._rust_reader is None:  # noqa: SLF001
+            return {}
+        values = dict(wb._rust_reader.read_cached_formula_values(self._title))  # noqa: SLF001
+        if not qualified:
+            return values
+        return {f"{self._title}!{cell_ref}": value for cell_ref, value in values.items()}
+
+    def sheet_visibility(self) -> dict[str, Any]:
+        """Return hidden rows/columns and outline levels for this sheet.
+
+        Row and column identifiers are 1-based to mirror openpyxl's dimension
+        collections. The returned shape is:
+        ``hidden_rows``, ``hidden_columns``, ``row_outline_levels``, and
+        ``column_outline_levels``.
+        """
+        if self._sheet_visibility_cache is not None:
+            return self._sheet_visibility_cache
+
+        wb = self._workbook
+        if wb._rust_reader is None:  # noqa: SLF001
+            self._sheet_visibility_cache = {
+                "hidden_rows": [],
+                "hidden_columns": [],
+                "row_outline_levels": {},
+                "column_outline_levels": {},
+            }
+            return self._sheet_visibility_cache
+        self._sheet_visibility_cache = dict(wb._rust_reader.read_sheet_visibility(self._title))  # noqa: SLF001
+        return self._sheet_visibility_cache
 
     def _iter_cell_records_python(
         self,

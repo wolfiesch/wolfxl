@@ -993,6 +993,31 @@ class TestReadMode:
         assert cell_value == expected
         assert row_value == expected
 
+    def test_cached_formula_values_bulk_api(self) -> None:
+        from wolfxl import load_workbook
+
+        path = PARITY_FIXTURES / "time_series" / "ilpa_pe_fund_reporting_v1.1.xlsx"
+        if not path.exists():
+            pytest.skip("parity fixture not found")
+
+        with load_workbook(str(path)) as wb:
+            sheet_values = wb["Reporting Template"].cached_formula_values()
+            workbook_values = wb.cached_formula_values()
+            records = wb["Reporting Template"].cell_records(
+                min_row=4,
+                max_row=4,
+                min_col=5,
+                max_col=5,
+                include_format=False,
+                include_cached_formula_value=True,
+            )
+
+        expected = datetime(2015, 10, 1, 0, 0)
+        assert sheet_values["E4"] == expected
+        assert workbook_values["Reporting Template!E4"] == expected
+        assert records[0]["formula"] == "=P4"
+        assert records[0]["cached_value"] == expected
+
     def test_sheet_dimensions_follow_worksheet_dimension_ref(self) -> None:
         from wolfxl import load_workbook
 
@@ -2398,6 +2423,30 @@ class TestRowDimensions:
         assert abs(h - 25.0) < 1.0
         wb2.close()
 
+    def test_read_hidden_and_outline(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook as OpenPyxlWorkbook
+
+        from wolfxl import load_workbook
+
+        p = tmp_path / "row-visibility.xlsx"
+        wb = OpenPyxlWorkbook()
+        ws = wb.active
+        ws.title = "Visibility"
+        ws["A1"] = "header"
+        ws["A3"] = "hidden"
+        ws.row_dimensions[3].hidden = True
+        ws.row_dimensions[3].outlineLevel = 2
+        wb.save(p)
+
+        with load_workbook(str(p)) as wx_wb:
+            wx_ws = wx_wb["Visibility"]
+            visibility = wx_ws.sheet_visibility()
+            assert visibility["hidden_rows"] == [3]
+            assert visibility["row_outline_levels"] == {3: 2}
+            assert wx_ws.row_dimensions.get(3).hidden is True
+            assert wx_ws.row_dimensions[3].outlineLevel == 2
+            assert wx_ws.row_dimensions.get(2, "missing") == "missing"
+
 
 class TestColumnDimensions:
     """column_dimensions proxy on worksheets."""
@@ -2429,6 +2478,32 @@ class TestColumnDimensions:
         assert w is not None
         assert abs(w - 18.0) < 1.0
         wb2.close()
+
+    def test_read_hidden_and_outline_range(self, tmp_path: Path) -> None:
+        from openpyxl import Workbook as OpenPyxlWorkbook
+
+        from wolfxl import load_workbook
+
+        p = tmp_path / "column-visibility.xlsx"
+        wb = OpenPyxlWorkbook()
+        ws = wb.active
+        ws.title = "Visibility"
+        ws["A1"] = "left"
+        ws["D1"] = "right"
+        ws.column_dimensions["B"].hidden = True
+        ws.column_dimensions["B"].outlineLevel = 1
+        ws.column_dimensions["C"].hidden = True
+        ws.column_dimensions["C"].outlineLevel = 1
+        wb.save(p)
+
+        with load_workbook(str(p)) as wx_wb:
+            wx_ws = wx_wb["Visibility"]
+            visibility = wx_ws.sheet_visibility()
+            assert visibility["hidden_columns"] == [2, 3]
+            assert visibility["column_outline_levels"] == {2: 1, 3: 1}
+            assert wx_ws.column_dimensions.get("B").hidden is True
+            assert wx_ws.column_dimensions["C"].outlineLevel == 1
+            assert wx_ws.column_dimensions.get("D", "missing") == "missing"
 
 
 class TestAutoFilter:
