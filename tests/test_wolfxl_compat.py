@@ -335,11 +335,14 @@ class TestReadMode:
                 include_empty=False,
                 include_formula_blanks=True,
                 include_coordinate=False,
+                include_style_id=False,
+                include_extended_format=False,
             )
 
         assert len(records) == 1
         record = records[0]
         assert "coordinate" not in record
+        assert "style_id" not in record
         assert record["row"] == 2
         assert record["column"] == 2
         assert record["formula"] == "=SUM(A1:A1)"

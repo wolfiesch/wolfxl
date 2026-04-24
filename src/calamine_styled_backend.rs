@@ -157,6 +157,10 @@ fn underline_str(u: &UnderlineStyle) -> Option<&'static str> {
     }
 }
 
+fn is_default_font_size(size: f64) -> bool {
+    (size - 11.0).abs() < f64::EPSILON
+}
+
 type XlsxReader = Xlsx<BufReader<File>>;
 
 // Excel stores column widths with font-metric padding included.
@@ -486,6 +490,159 @@ struct RawFontInfo {
     color: Option<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct RecordFormatInfo {
+    bold: bool,
+    italic: bool,
+    underline: Option<String>,
+    strikethrough: bool,
+    font_size: Option<f64>,
+    bg_color: Option<String>,
+    number_format: Option<String>,
+    h_align: Option<&'static str>,
+    v_align: Option<&'static str>,
+    wrap: bool,
+    rotation: Option<i64>,
+    indent: Option<u32>,
+    bottom_border_style: Option<&'static str>,
+    is_double_underline: bool,
+}
+
+impl RecordFormatInfo {
+    fn from_style(style: &Style) -> Self {
+        let mut info = Self::default();
+
+        if let Some(font) = &style.font {
+            if font.weight == FontWeight::Bold {
+                info.bold = true;
+            }
+            if font.style == FontStyle::Italic {
+                info.italic = true;
+            }
+            if let Some(u) = underline_str(&font.underline) {
+                info.underline = Some(u.to_string());
+            }
+            if font.strikethrough {
+                info.strikethrough = true;
+            }
+            if let Some(size) = font.size {
+                if !is_default_font_size(size) {
+                    info.font_size = Some(size);
+                }
+            }
+        }
+
+        if let Some(fill) = &style.fill {
+            if fill.pattern != FillPattern::None {
+                if let Some(color) = fill.get_color() {
+                    info.bg_color = Some(color_to_hex(&color));
+                }
+            }
+        }
+
+        if let Some(align) = &style.alignment {
+            info.h_align = h_align_str(&align.horizontal);
+            info.v_align = v_align_str(&align.vertical);
+            if align.wrap_text {
+                info.wrap = true;
+            }
+            match align.text_rotation {
+                TextRotation::None => {}
+                TextRotation::Degrees(deg) => {
+                    if deg != 0 {
+                        info.rotation = Some(deg as i64);
+                    }
+                }
+                TextRotation::Stacked => {
+                    info.rotation = Some(255);
+                }
+            }
+            if let Some(indent) = align.indent {
+                if indent > 0 {
+                    info.indent = Some(indent as u32);
+                }
+            }
+        }
+
+        if let Some(borders) = &style.borders {
+            let bottom_style = border_style_str(&borders.bottom.style);
+            if bottom_style != "none" {
+                info.bottom_border_style = Some(bottom_style);
+                info.is_double_underline = bottom_style == "double";
+            }
+        }
+
+        info
+    }
+
+    fn overlay_raw_font(&mut self, font: &RawFontInfo) {
+        if font.bold {
+            self.bold = true;
+        }
+        if font.italic {
+            self.italic = true;
+        }
+        if let Some(underline) = &font.underline {
+            self.underline = Some(underline.clone());
+        }
+        if font.strikethrough {
+            self.strikethrough = true;
+        }
+        if let Some(size) = font.size {
+            if !is_default_font_size(size) {
+                self.font_size = Some(size);
+            }
+        }
+    }
+
+    fn populate_dict(&self, d: &Bound<'_, PyDict>) -> PyResult<()> {
+        if self.bold {
+            d.set_item("bold", true)?;
+        }
+        if self.italic {
+            d.set_item("italic", true)?;
+        }
+        if let Some(underline) = &self.underline {
+            d.set_item("underline", underline)?;
+        }
+        if self.strikethrough {
+            d.set_item("strikethrough", true)?;
+        }
+        if let Some(size) = self.font_size {
+            d.set_item("font_size", size)?;
+        }
+        if let Some(color) = &self.bg_color {
+            d.set_item("bg_color", color)?;
+        }
+        if let Some(number_format) = &self.number_format {
+            d.set_item("number_format", number_format)?;
+        }
+        if let Some(h) = self.h_align {
+            d.set_item("h_align", h)?;
+        }
+        if let Some(v) = self.v_align {
+            d.set_item("v_align", v)?;
+        }
+        if self.wrap {
+            d.set_item("wrap", true)?;
+        }
+        if let Some(rotation) = self.rotation {
+            d.set_item("rotation", rotation)?;
+        }
+        if let Some(indent) = self.indent {
+            d.set_item("indent", indent)?;
+        }
+        if let Some(bottom_style) = self.bottom_border_style {
+            d.set_item("bottom_border_style", bottom_style)?;
+            d.set_item("has_bottom_border", true)?;
+            if self.is_double_underline {
+                d.set_item("is_double_underline", true)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct Tier2SheetCache {
     merged_ranges: Option<Vec<String>>,
@@ -531,6 +688,9 @@ pub struct CalamineStyledBook {
     cell_xfs: Option<Vec<XfEntry>>,
     /// Lazy cache: parsed fonts from xl/styles.xml.
     raw_fonts: Option<Vec<RawFontInfo>>,
+    /// Compact `cell_records()` format payloads keyed by
+    /// (workbook-global cellXfs style id, include extended style-grid fields).
+    record_format_cache: HashMap<(u32, bool), RecordFormatInfo>,
 }
 
 #[pymethods]
@@ -559,6 +719,7 @@ impl CalamineStyledBook {
             raw_number_formats: None,
             cell_xfs: None,
             raw_fonts: None,
+            record_format_cache: HashMap::new(),
         })
     }
 
@@ -896,6 +1057,8 @@ impl CalamineStyledBook {
         include_empty = false,
         include_formula_blanks = true,
         include_coordinate = true,
+        include_style_id = true,
+        include_extended_format = true,
     ))]
     pub fn read_sheet_records(
         &mut self,
@@ -907,6 +1070,8 @@ impl CalamineStyledBook {
         include_empty: bool,
         include_formula_blanks: bool,
         include_coordinate: bool,
+        include_style_id: bool,
+        include_extended_format: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         self.ensure_value_caches(sheet)?;
@@ -984,7 +1149,15 @@ impl CalamineStyledBook {
                         record.set_item("data_type", "blank")?;
                         record.set_item("value", py.None())?;
                         if include_format {
-                            self.populate_record_format(py, sheet, row, col, &record)?;
+                            self.populate_record_format(
+                                py,
+                                sheet,
+                                row,
+                                col,
+                                &record,
+                                include_style_id,
+                                include_extended_format,
+                            )?;
                         }
                         records.append(record)?;
                         continue;
@@ -997,7 +1170,15 @@ impl CalamineStyledBook {
                 }
 
                 if include_format {
-                    self.populate_record_format(py, sheet, row, col, &record)?;
+                    self.populate_record_format(
+                        py,
+                        sheet,
+                        row,
+                        col,
+                        &record,
+                        include_style_id,
+                        include_extended_format,
+                    )?;
                 }
 
                 records.append(record)?;
@@ -1490,55 +1671,74 @@ impl CalamineStyledBook {
 
     fn populate_record_format(
         &mut self,
-        py: Python<'_>,
+        _py: Python<'_>,
         sheet: &str,
         row: u32,
         col: u32,
         d: &Bound<'_, PyDict>,
+        include_style_id: bool,
+        include_extended_format: bool,
     ) -> PyResult<()> {
         if self.is_merged_subordinate(sheet, row, col)? {
             return Ok(());
         }
 
         let style_id = self.cell_style_id(sheet, row, col)?;
-        if let Some(style_id) = style_id {
-            d.set_item("style_id", style_id)?;
+        if include_style_id {
+            if let Some(style_id) = style_id {
+                d.set_item("style_id", style_id)?;
+            }
         }
         if style_id.unwrap_or(0) == 0 {
             return Ok(());
         }
 
-        if let Some(style) = self.get_style(sheet, row, col)? {
-            if let Some(font) = &style.font {
-                Self::populate_font(py, d, font)?;
-            }
-            if let Some(style_id) = style_id {
-                self.populate_raw_font(style_id, d)?;
-            }
-            if let Some(fill) = &style.fill {
-                Self::populate_fill(py, d, fill)?;
-            }
-            if let Some(style_id) = style_id {
-                if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
-                    d.set_item("number_format", number_format)?;
-                }
-            }
-            if let Some(align) = &style.alignment {
-                Self::populate_alignment(py, d, align)?;
-            }
-            if let Some(borders) = &style.borders {
-                let bottom_style = border_style_str(&borders.bottom.style);
-                if bottom_style != "none" {
-                    d.set_item("bottom_border_style", bottom_style)?;
-                    d.set_item("has_bottom_border", true)?;
-                    if bottom_style == "double" {
-                        d.set_item("is_double_underline", true)?;
-                    }
-                }
-            }
+        if let Some(style_id) = style_id {
+            let info = self.record_format_info_for_style_id(
+                sheet,
+                row,
+                col,
+                style_id,
+                include_extended_format,
+            )?;
+            info.populate_dict(d)?;
         }
 
         Ok(())
+    }
+
+    fn record_format_info_for_style_id(
+        &mut self,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        style_id: u32,
+        include_extended_format: bool,
+    ) -> PyResult<RecordFormatInfo> {
+        let cache_key = (style_id, include_extended_format);
+        if let Some(info) = self.record_format_cache.get(&cache_key) {
+            return Ok(info.clone());
+        }
+
+        let mut info = if include_extended_format {
+            if let Some(style) = self.get_style(sheet, row, col)? {
+                RecordFormatInfo::from_style(&style)
+            } else {
+                RecordFormatInfo::default()
+            }
+        } else {
+            RecordFormatInfo::default()
+        };
+
+        if let Some(raw_font) = self.raw_font_for_style_id(style_id)? {
+            info.overlay_raw_font(&raw_font);
+        }
+        if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
+            info.number_format = Some(number_format);
+        }
+
+        self.record_format_cache.insert(cache_key, info.clone());
+        Ok(info)
     }
 
     fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
@@ -2717,7 +2917,7 @@ impl CalamineStyledBook {
         Ok(())
     }
 
-    fn populate_raw_font(&mut self, style_id: u32, d: &Bound<'_, PyDict>) -> PyResult<()> {
+    fn raw_font_for_style_id(&mut self, style_id: u32) -> PyResult<Option<RawFontInfo>> {
         self.ensure_cell_xfs()?;
         let Some(font_id) = self
             .cell_xfs
@@ -2725,15 +2925,19 @@ impl CalamineStyledBook {
             .and_then(|entries| entries.get(style_id as usize))
             .map(|xf| xf.font_id)
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         self.ensure_raw_fonts()?;
-        let Some(font) = self
+        Ok(self
             .raw_fonts
             .as_ref()
             .and_then(|fonts| fonts.get(font_id as usize))
-        else {
+            .cloned())
+    }
+
+    fn populate_raw_font(&mut self, style_id: u32, d: &Bound<'_, PyDict>) -> PyResult<()> {
+        let Some(font) = self.raw_font_for_style_id(style_id)? else {
             return Ok(());
         };
 

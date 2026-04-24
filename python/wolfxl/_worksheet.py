@@ -511,6 +511,8 @@ class Worksheet:
         include_empty: bool = False,
         include_formula_blanks: bool = True,
         include_coordinate: bool = True,
+        include_style_id: bool = True,
+        include_extended_format: bool = True,
     ) -> Iterator[dict[str, Any]]:
         """Iterate populated cells as compact dictionaries.
 
@@ -525,7 +527,12 @@ class Worksheet:
         backing cached value are included by default; pass
         ``include_formula_blanks=False`` to skip those template-only formulas.
         Pass ``include_coordinate=False`` when row/column integers are enough
-        and avoiding A1 string allocation matters.
+        and avoiding A1 string allocation matters. Pass
+        ``include_style_id=False`` when semantic format fields are enough and
+        callers do not need workbook-internal style identifiers. Pass
+        ``include_extended_format=False`` to keep raw font flags and number
+        formats while skipping expensive style-grid fields such as fill,
+        alignment, and border cues.
         """
         if self._workbook._rust_reader is None:  # noqa: SLF001
             yield from self._iter_cell_records_python(
@@ -553,6 +560,8 @@ class Worksheet:
             include_empty,
             include_formula_blanks,
             include_coordinate,
+            include_style_id,
+            include_extended_format,
         )
 
         # Modify mode can have pending Python-side edits the Rust reader
@@ -652,6 +661,8 @@ class Worksheet:
         include_empty: bool = False,
         include_formula_blanks: bool = True,
         include_coordinate: bool = True,
+        include_style_id: bool = True,
+        include_extended_format: bool = True,
     ) -> list[dict[str, Any]]:
         """Return ``iter_cell_records(...)`` as a list."""
         return list(
@@ -665,6 +676,8 @@ class Worksheet:
                 include_empty=include_empty,
                 include_formula_blanks=include_formula_blanks,
                 include_coordinate=include_coordinate,
+                include_style_id=include_style_id,
+                include_extended_format=include_extended_format,
             ),
         )
 
