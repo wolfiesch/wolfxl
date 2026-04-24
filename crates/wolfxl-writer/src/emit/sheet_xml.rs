@@ -536,9 +536,15 @@ fn emit_legacy_drawing(_out: &mut String, sheet: &Worksheet) {
 /// Emit `<tableParts count="N">…<tablePart r:id="rIdX"/>…</tableParts>`.
 /// rId starts after comments (offset = 2 iff comments exist, else 0),
 /// one rId per table in sheet-local order. Filled by W3B.
-fn emit_table_parts(_out: &mut String, sheet: &Worksheet) {
+fn emit_table_parts(out: &mut String, sheet: &Worksheet) {
     if !sheet.tables.is_empty() {
-        // W3B fills in
+        let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
+        out.push_str(&format!("<tableParts count=\"{}\">", sheet.tables.len()));
+        for (local_idx, _) in sheet.tables.iter().enumerate() {
+            let rid = comments_offset + local_idx as u32 + 1;
+            out.push_str(&format!("<tablePart r:id=\"rId{}\"/>", rid));
+        }
+        out.push_str("</tableParts>");
     }
 }
 
@@ -1240,5 +1246,86 @@ mod tests {
         );
         // The cell MUST emit because it has a style.
         assert!(text.contains("<c r=\"E10\" s=\"3\"/>"), "got: {text}");
+    }
+
+    // --- 34. table_parts_absent_when_no_tables ---
+
+    #[test]
+    fn table_parts_absent_when_no_tables() {
+        let sheet = Worksheet::new("S");
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(!text.contains("<tableParts"), "no tableParts when none: {text}");
+    }
+
+    // --- 35. table_parts_no_comments_starts_at_rid1 ---
+
+    #[test]
+    fn table_parts_no_comments_starts_at_rid1() {
+        use crate::model::table::{Table, TableColumn};
+        let mut sheet = Worksheet::new("S");
+        sheet.tables.push(Table {
+            name: "MyTable".into(),
+            display_name: None,
+            range: "A1:B10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<tableParts count=\"1\"><tablePart r:id=\"rId1\"/></tableParts>"),
+            "rId1 with no comments: {text}"
+        );
+    }
+
+    // --- 36. table_parts_with_comments_starts_at_rid3 ---
+
+    #[test]
+    fn table_parts_with_comments_starts_at_rid3() {
+        use crate::model::comment::Comment;
+        use crate::model::table::{Table, TableColumn};
+        let mut sheet = Worksheet::new("S");
+        // Add a comment — comments_offset = 2 (rId1=commentsN.xml, rId2=vmlDrawingN.vml)
+        sheet.comments.insert(
+            "A1".to_string(),
+            Comment {
+                author_id: 0,
+                text: "Note".into(),
+                width_pt: None,
+                height_pt: None,
+                visible: false,
+            },
+        );
+        sheet.tables.push(Table {
+            name: "MyTable".into(),
+            display_name: None,
+            range: "A1:B10".into(),
+            columns: vec![TableColumn {
+                name: "C1".into(),
+                totals_function: None,
+                totals_label: None,
+            }],
+            header_row: true,
+            totals_row: false,
+            style: None,
+            autofilter: true,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        // rId1=comments, rId2=VML, rId3=table[0]
+        assert!(
+            text.contains("<tableParts count=\"1\"><tablePart r:id=\"rId3\"/></tableParts>"),
+            "rId3 with comments: {text}"
+        );
     }
 }
