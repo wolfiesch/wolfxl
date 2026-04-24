@@ -103,7 +103,10 @@ fn emit_dimension(out: &mut String, sheet: &Worksheet) {
     let mut max_col = 0u32;
 
     for (&row_num, row) in &sheet.rows {
-        for &col_num in row.cells.keys() {
+        for (&col_num, cell) in &row.cells {
+            if matches!(cell.value, WriteCellValue::Blank) && cell.style_id.is_none() {
+                continue;
+            }
             min_row = min_row.min(row_num);
             max_row = max_row.max(row_num);
             min_col = min_col.min(col_num);
@@ -1154,5 +1157,41 @@ mod tests {
 
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
+    }
+
+    // --- 32. Dimension excludes unstyled blank cells ---
+
+    #[test]
+    fn dimension_excludes_unstyled_blank_cells() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(10, 5, WriteCell::new(WriteCellValue::Blank));
+        let mut sst = SstBuilder::default();
+        let styles = crate::model::format::StylesBuilder::default();
+        let bytes = emit(&sheet, 0, &mut sst, &styles);
+        let text = String::from_utf8(bytes).unwrap();
+        // The only cell is blank+unstyled — dimension should stay A1 (empty sheet).
+        assert!(text.contains("<dimension ref=\"A1\"/>"), "got: {text}");
+        // No <c> should be emitted either.
+        assert!(!text.contains("<c r="), "no cell should be emitted: {text}");
+    }
+
+    // --- 33. Dimension includes styled blank cells ---
+
+    #[test]
+    fn dimension_includes_styled_blank_cells() {
+        let mut sheet = Worksheet::new("S");
+        let styled_blank = WriteCell::new(WriteCellValue::Blank).with_style(3);
+        sheet.set_cell(10, 5, styled_blank);
+        let mut sst = SstBuilder::default();
+        let styles = crate::model::format::StylesBuilder::default();
+        let bytes = emit(&sheet, 0, &mut sst, &styles);
+        let text = String::from_utf8(bytes).unwrap();
+        // E10 is the single populated cell — A1:E10 bounding box (or just E10 for single-cell).
+        assert!(
+            text.contains("<dimension ref=\"E10\"/>") || text.contains("<dimension ref=\"A1:E10\"/>"),
+            "styled blank should still count toward dimension: {text}"
+        );
+        // The cell MUST emit because it has a style.
+        assert!(text.contains("<c r=\"E10\" s=\"3\"/>"), "got: {text}");
     }
 }
