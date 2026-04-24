@@ -35,6 +35,7 @@ pub mod emit;
 pub mod intern;
 pub mod model;
 pub mod refs;
+pub mod xml_escape;
 pub mod zip;
 
 #[cfg(test)]
