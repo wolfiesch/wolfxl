@@ -171,10 +171,13 @@ pub fn emit_app(wb: &Workbook) -> Vec<u8> {
     out.push_str("<LinksUpToDate>false</LinksUpToDate>");
     out.push_str("<SharedDoc>false</SharedDoc>");
     out.push_str("<HyperlinksChanged>false</HyperlinksChanged>");
-    out.push_str(&format!(
-        "<AppVersion>{}</AppVersion>",
-        env!("CARGO_PKG_VERSION")
-    ));
+    // OOXML §22.2.2.3 (ECMA-376): AppVersion must be dotted-decimal of form
+    // `XX.YYYY`, matching the application's major.minor build number — not
+    // a semver. openpyxl and Excel both emit this shape; validators (e.g.
+    // strict OOXML schema checks, some Excel repair paths) reject semver
+    // like "0.1.0". Track the wolfxl ABI here as one monotonic integer
+    // pair; bump on user-visible writer changes, not on Cargo patch bumps.
+    out.push_str("<AppVersion>1.0000</AppVersion>");
 
     out.push_str("</Properties>");
     out.into_bytes()
@@ -321,24 +324,17 @@ mod tests {
 
     #[test]
     fn current_timestamp_honors_test_epoch() {
-        // Guard mirrors the pattern used by zip::tests.
-        use std::sync::Mutex;
-        static ENV_LOCK: Mutex<()> = Mutex::new(());
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
-        unsafe {
-            std::env::set_var("WOLFXL_TEST_EPOCH", "0");
-        }
+        let _g = crate::test_utils::EpochGuard::set("0");
+        assert_eq!(current_timestamp_iso8601(), "1970-01-01T00:00:00Z");
+    }
 
-        let ts = current_timestamp_iso8601();
-
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
-                None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
-            }
-        }
-
-        assert_eq!(ts, "1970-01-01T00:00:00Z");
+    #[test]
+    fn app_version_is_ooxml_dotted_decimal_not_semver() {
+        // OOXML §22.2.2.3 forbids semver; validators reject "0.1.0".
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("A"));
+        let text = String::from_utf8(emit_app(&wb)).unwrap();
+        assert!(text.contains("<AppVersion>1.0000</AppVersion>"));
+        assert!(!text.contains("<AppVersion>0.1.0</AppVersion>"));
     }
 }

@@ -37,5 +37,8 @@ pub mod model;
 pub mod refs;
 pub mod zip;
 
+#[cfg(test)]
+mod test_utils;
+
 pub use model::workbook::Workbook;
 pub use model::worksheet::Worksheet;

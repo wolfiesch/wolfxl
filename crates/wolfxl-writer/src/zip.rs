@@ -134,42 +134,8 @@ fn zip_to_io(err: zip::result::ZipError) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::EpochGuard;
     use std::io::Read;
-    use std::sync::Mutex;
-
-    /// Serialize tests that mutate `WOLFXL_TEST_EPOCH` so one test doesn't
-    /// see another test's override.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Guard that restores `WOLFXL_TEST_EPOCH` to its prior state when dropped.
-    struct EpochGuard {
-        prev: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl EpochGuard {
-        fn set(value: &str) -> Self {
-            let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
-            // SAFETY: env mutation is serialized by ENV_LOCK; the guard
-            // is dropped before returning to the test harness.
-            unsafe {
-                std::env::set_var("WOLFXL_TEST_EPOCH", value);
-            }
-            Self { prev, _lock }
-        }
-    }
-
-    impl Drop for EpochGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prev {
-                    Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
-                    None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
-                }
-            }
-        }
-    }
 
     #[test]
     fn empty_input_produces_valid_empty_zip() {
