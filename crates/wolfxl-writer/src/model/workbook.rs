@@ -56,6 +56,35 @@ impl Workbook {
     pub fn sheet_by_name(&self, name: &str) -> Option<&Worksheet> {
         self.sheets.iter().find(|s| s.name == name)
     }
+
+    /// Look up a sheet by name and return a mutable reference. Used by the
+    /// pyclass when callers identify sheets by name rather than by index.
+    pub fn sheet_mut_by_name(&mut self, name: &str) -> Option<&mut Worksheet> {
+        self.sheets.iter_mut().find(|s| s.name == name)
+    }
+
+    /// Rename a sheet by its current name. Errors when no sheet matches
+    /// `old`, when the new name fails Excel validation, or when the new
+    /// name would collide with another existing sheet.
+    pub fn rename_sheet(&mut self, old: &str, new: String) -> Result<(), String> {
+        if old == new {
+            return Ok(());
+        }
+        if self.sheets.iter().any(|s| s.name == new) {
+            return Err(format!(
+                "sheet name {new:?} already exists in workbook"
+            ));
+        }
+        let sheet = self
+            .sheet_mut_by_name(old)
+            .ok_or_else(|| format!("no sheet named {old:?}"))?;
+        sheet.rename(new)
+    }
+
+    /// Replace the workbook-level document properties block.
+    pub fn set_doc_props(&mut self, props: DocProperties) {
+        self.doc_props = props;
+    }
 }
 
 /// Document properties surfaced in the two docProps parts.
@@ -81,4 +110,94 @@ pub struct DocProperties {
     /// Company / application metadata shown in `docProps/app.xml`.
     pub company: Option<String>,
     pub manager: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::worksheet::Worksheet;
+
+    fn wb_with(sheet_names: &[&str]) -> Workbook {
+        let mut wb = Workbook::new();
+        for name in sheet_names {
+            wb.add_sheet(Worksheet::new(*name));
+        }
+        wb
+    }
+
+    #[test]
+    fn rename_sheet_valid_updates_target_only() {
+        let mut wb = wb_with(&["Data", "Summary"]);
+        assert!(wb.rename_sheet("Data", "Inputs".to_string()).is_ok());
+        assert_eq!(wb.sheets[0].name, "Inputs");
+        assert_eq!(wb.sheets[1].name, "Summary");
+    }
+
+    #[test]
+    fn rename_sheet_missing_old_errors() {
+        let mut wb = wb_with(&["Data"]);
+        let err = wb
+            .rename_sheet("Nope", "Whatever".to_string())
+            .unwrap_err();
+        assert!(err.contains("Nope"), "msg should reference missing name: {err}");
+        assert_eq!(wb.sheets[0].name, "Data", "no sheet may change on Err");
+    }
+
+    #[test]
+    fn rename_sheet_collision_errors() {
+        let mut wb = wb_with(&["Data", "Summary"]);
+        let err = wb
+            .rename_sheet("Data", "Summary".to_string())
+            .unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(wb.sheets[0].name, "Data");
+        assert_eq!(wb.sheets[1].name, "Summary");
+    }
+
+    #[test]
+    fn rename_sheet_same_name_is_noop() {
+        let mut wb = wb_with(&["Data"]);
+        assert!(wb.rename_sheet("Data", "Data".to_string()).is_ok());
+        assert_eq!(wb.sheets[0].name, "Data");
+    }
+
+    #[test]
+    fn rename_sheet_propagates_validation_error() {
+        let mut wb = wb_with(&["Data"]);
+        // 32 chars — Worksheet::rename must reject this.
+        let too_long = "x".repeat(32);
+        assert!(wb.rename_sheet("Data", too_long).is_err());
+        assert_eq!(wb.sheets[0].name, "Data");
+    }
+
+    #[test]
+    fn sheet_mut_by_name_finds_and_misses() {
+        let mut wb = wb_with(&["Data", "Summary"]);
+        assert!(wb.sheet_mut_by_name("Summary").is_some());
+        assert!(wb.sheet_mut_by_name("Nope").is_none());
+        // Mutability check — we can write through the returned ref.
+        wb.sheet_mut_by_name("Data")
+            .unwrap()
+            .set_column_width(1, 25.0);
+        assert_eq!(wb.sheets[0].columns[&1].width, Some(25.0));
+    }
+
+    #[test]
+    fn set_doc_props_replaces_in_full() {
+        let mut wb = Workbook::new();
+        wb.set_doc_props(DocProperties {
+            title: Some("Q4 Report".to_string()),
+            creator: Some("Wolfgang".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(wb.doc_props.title.as_deref(), Some("Q4 Report"));
+        assert_eq!(wb.doc_props.creator.as_deref(), Some("Wolfgang"));
+        // Replacement (not merge) — old fields go away.
+        wb.set_doc_props(DocProperties {
+            subject: Some("New".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(wb.doc_props.title, None);
+        assert_eq!(wb.doc_props.subject.as_deref(), Some("New"));
+    }
 }

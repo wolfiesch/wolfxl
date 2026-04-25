@@ -2,11 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use super::cell::WriteCell;
+use super::cell::{WriteCell, WriteCellValue};
 use super::comment::Comment;
 use super::conditional::ConditionalFormat;
 use super::table::Table;
 use super::validation::DataValidation;
+use crate::refs;
 
 /// A single worksheet within a workbook.
 ///
@@ -96,6 +97,104 @@ impl Worksheet {
     pub fn merge(&mut self, range: Merge) {
         self.merges.push(range);
     }
+
+    /// Add a merge by A1 range string (e.g. `"A1:B2"`).
+    ///
+    /// Returns `Err` when the range fails A1 parsing — the pyclass surfaces
+    /// this to Python as `ValueError`.
+    pub fn merge_cells(&mut self, range: &str) -> Result<(), String> {
+        let ((r1, c1), (r2, c2)) =
+            refs::parse_range(range).ok_or_else(|| format!("invalid A1 range: {range:?}"))?;
+        self.merges.push(Merge {
+            top_row: r1,
+            left_col: c1,
+            bottom_row: r2,
+            right_col: c2,
+        });
+        Ok(())
+    }
+
+    /// Set or replace the freeze-pane configuration.
+    ///
+    /// `freeze_row` and `freeze_col` are 1-based; `0` means no freeze on that
+    /// axis. `top_left` is the cell scrolled into the bottom-right pane;
+    /// `None` lets the emitter default it.
+    pub fn set_freeze(&mut self, freeze_row: u32, freeze_col: u32, top_left: Option<(u32, u32)>) {
+        self.freeze = Some(FreezePane {
+            freeze_row,
+            freeze_col,
+            top_left,
+        });
+        self.split = None;
+    }
+
+    /// Set or replace the split-pane configuration. Mutually exclusive with
+    /// [`Worksheet::set_freeze`] — calling one clears the other.
+    pub fn set_split(&mut self, x_split: f64, y_split: f64, top_left: Option<(u32, u32)>) {
+        self.split = Some(SplitPane {
+            x_split,
+            y_split,
+            top_left,
+        });
+        self.freeze = None;
+    }
+
+    /// Set a column's width (in Excel "max-digit-width" units). Other column
+    /// metadata (hidden, style_id, outline_level) is preserved if already set.
+    pub fn set_column_width(&mut self, col: u32, width: f64) {
+        self.columns.entry(col).or_default().width = Some(width);
+    }
+
+    /// Set a cell by raw value + optional style id. Convenience wrapper over
+    /// [`Worksheet::set_cell`] that the pyclass uses on every Python-side
+    /// `write_cell_value` call without having to construct `WriteCell`.
+    pub fn write_cell(&mut self, row: u32, col: u32, value: WriteCellValue, style_id: Option<u32>) {
+        let cell = WriteCell {
+            value,
+            style_id,
+        };
+        self.set_cell(row, col, cell);
+    }
+
+    /// Rename this sheet, validating the name per Excel rules.
+    ///
+    /// Errors when the name is empty, longer than 31 chars, contains any of
+    /// `/\?*[]:`, or has leading/trailing `'`. Unlike
+    /// [`refs::sanitize_sheet_name`] (which silently strips bad chars), this
+    /// is the API path Python users hit — they want to know they passed a
+    /// bad name, not have it quietly mutated.
+    pub fn rename(&mut self, new_name: String) -> Result<(), String> {
+        validate_sheet_name(&new_name)?;
+        self.name = new_name;
+        Ok(())
+    }
+}
+
+/// Validate an Excel sheet name. Used by [`Worksheet::rename`] and the
+/// pyclass's `add_sheet` path. Returns `Err` with a human-readable message.
+pub fn validate_sheet_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("sheet name must not be empty".to_string());
+    }
+    if name.chars().count() > 31 {
+        return Err(format!(
+            "sheet name {name:?} exceeds Excel's 31-char limit ({})",
+            name.chars().count()
+        ));
+    }
+    for bad in ['/', '\\', '?', '*', '[', ']', ':'] {
+        if name.contains(bad) {
+            return Err(format!(
+                "sheet name {name:?} contains forbidden character {bad:?}"
+            ));
+        }
+    }
+    if name.starts_with('\'') || name.ends_with('\'') {
+        return Err(format!(
+            "sheet name {name:?} must not start or end with an apostrophe"
+        ));
+    }
+    Ok(())
 }
 
 /// One row's metadata and its cells.
@@ -184,4 +283,134 @@ pub enum SheetVisibility {
     Hidden,
     /// Very-hidden sheets can only be un-hidden via the Excel VBA editor.
     VeryHidden,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_cells_valid_range_pushes_struct() {
+        let mut s = Worksheet::new("S");
+        assert!(s.merge_cells("A1:C3").is_ok());
+        assert_eq!(s.merges.len(), 1);
+        assert_eq!(
+            s.merges[0],
+            Merge {
+                top_row: 1,
+                left_col: 1,
+                bottom_row: 3,
+                right_col: 3
+            }
+        );
+    }
+
+    #[test]
+    fn merge_cells_invalid_range_errors() {
+        let mut s = Worksheet::new("S");
+        assert!(s.merge_cells("not-a-range").is_err());
+        assert!(s.merge_cells("").is_err());
+        assert!(s.merges.is_empty());
+    }
+
+    #[test]
+    fn set_freeze_clears_existing_split() {
+        let mut s = Worksheet::new("S");
+        s.set_split(100.0, 50.0, None);
+        assert!(s.split.is_some());
+        s.set_freeze(2, 1, None);
+        assert!(s.freeze.is_some());
+        assert!(s.split.is_none(), "set_freeze must clear split");
+    }
+
+    #[test]
+    fn set_split_clears_existing_freeze() {
+        let mut s = Worksheet::new("S");
+        s.set_freeze(2, 1, None);
+        assert!(s.freeze.is_some());
+        s.set_split(100.0, 50.0, None);
+        assert!(s.split.is_some());
+        assert!(s.freeze.is_none(), "set_split must clear freeze");
+    }
+
+    #[test]
+    fn set_column_width_upserts() {
+        let mut s = Worksheet::new("S");
+        s.set_column_width(1, 12.5);
+        assert_eq!(s.columns[&1].width, Some(12.5));
+        // Replacing keeps other column metadata intact.
+        s.columns.get_mut(&1).unwrap().hidden = true;
+        s.set_column_width(1, 20.0);
+        assert_eq!(s.columns[&1].width, Some(20.0));
+        assert!(s.columns[&1].hidden, "hidden flag must survive width update");
+    }
+
+    #[test]
+    fn write_cell_upserts_and_overwrites() {
+        let mut s = Worksheet::new("S");
+        s.write_cell(1, 1, WriteCellValue::Number(1.0), None);
+        assert_eq!(
+            s.rows[&1].cells[&1].value,
+            WriteCellValue::Number(1.0)
+        );
+        s.write_cell(1, 1, WriteCellValue::String("hi".to_string()), Some(7));
+        assert_eq!(
+            s.rows[&1].cells[&1].value,
+            WriteCellValue::String("hi".to_string())
+        );
+        assert_eq!(s.rows[&1].cells[&1].style_id, Some(7));
+    }
+
+    #[test]
+    fn rename_valid_updates_name() {
+        let mut s = Worksheet::new("Old");
+        assert!(s.rename("New".to_string()).is_ok());
+        assert_eq!(s.name, "New");
+    }
+
+    #[test]
+    fn rename_too_long_errors() {
+        let mut s = Worksheet::new("Old");
+        let too_long = "x".repeat(32);
+        let err = s.rename(too_long).unwrap_err();
+        assert!(err.contains("31"), "msg should mention 31-char limit: {err}");
+        assert_eq!(s.name, "Old", "name must not change on Err");
+    }
+
+    #[test]
+    fn rename_empty_errors() {
+        let mut s = Worksheet::new("Old");
+        assert!(s.rename(String::new()).is_err());
+        assert_eq!(s.name, "Old");
+    }
+
+    #[test]
+    fn rename_forbidden_chars_each_error() {
+        for bad in ['/', '\\', '?', '*', '[', ']', ':'] {
+            let mut s = Worksheet::new("Old");
+            let name = format!("Bad{bad}Name");
+            assert!(
+                s.rename(name.clone()).is_err(),
+                "rename({name:?}) should error on {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rename_apostrophe_edges_errors() {
+        let mut s = Worksheet::new("Old");
+        assert!(s.rename("'leading".to_string()).is_err());
+        assert!(s.rename("trailing'".to_string()).is_err());
+        // Internal apostrophe is fine — Excel allows "O'Brien".
+        assert!(s.rename("O'Brien".to_string()).is_ok());
+        assert_eq!(s.name, "O'Brien");
+    }
+
+    #[test]
+    fn validate_sheet_name_accepts_31_char_max() {
+        let exactly_31 = "x".repeat(31);
+        assert!(validate_sheet_name(&exactly_31).is_ok());
+        let thirty_two = "x".repeat(32);
+        assert!(validate_sheet_name(&thirty_two).is_err());
+    }
 }

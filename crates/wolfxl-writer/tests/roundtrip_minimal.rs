@@ -16,10 +16,7 @@ use std::io::{Cursor, Read};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use wolfxl_writer::emit::{
-    comments_xml, content_types, doc_props, drawings_vml, rels, shared_strings_xml, sheet_xml,
-    styles_xml, tables_xml, workbook_xml,
-};
+use wolfxl_writer::emit_xlsx;
 use wolfxl_writer::model::cell::{FormulaResult, WriteCell, WriteCellValue};
 use wolfxl_writer::model::comment::Comment;
 use wolfxl_writer::model::conditional::{
@@ -33,7 +30,6 @@ use wolfxl_writer::model::validation::{
 };
 use wolfxl_writer::model::workbook::Workbook;
 use wolfxl_writer::model::worksheet::{FreezePane, Merge, Worksheet};
-use wolfxl_writer::zip::{package, ZipEntry};
 
 /// Build the fixture: two sheets, mixed cells, merge, freeze, one defined
 /// name, one styled cell. Returns the assembled `Workbook` *plus* the xf
@@ -129,94 +125,9 @@ fn build_fixture() -> (Workbook, u32) {
     (wb, style_id)
 }
 
-/// Emit every Wave 1+2+3 part, package the archive, return the raw xlsx bytes.
-fn emit_full_pipeline(wb: &mut Workbook) -> Vec<u8> {
-    // Sheet emission mutates the SST — must run before the SST emitter.
-    let mut sheet_parts: Vec<(String, Vec<u8>)> = Vec::new();
-    for (idx, sheet) in wb.sheets.iter().enumerate() {
-        let bytes = sheet_xml::emit(sheet, idx as u32, &mut wb.sst, &wb.styles);
-        sheet_parts.push((format!("xl/worksheets/sheet{}.xml", idx + 1), bytes));
-    }
-
-    // Canonical ZIP order — matches the one documented in zip.rs.
-    let mut entries: Vec<ZipEntry> = vec![
-        ZipEntry {
-            path: "[Content_Types].xml".to_string(),
-            bytes: content_types::emit(wb),
-        },
-        ZipEntry {
-            path: "_rels/.rels".to_string(),
-            bytes: rels::emit_root(wb),
-        },
-        ZipEntry {
-            path: "xl/workbook.xml".to_string(),
-            bytes: workbook_xml::emit(wb),
-        },
-        ZipEntry {
-            path: "xl/_rels/workbook.xml.rels".to_string(),
-            bytes: rels::emit_workbook(wb),
-        },
-    ];
-    for (path, bytes) in sheet_parts {
-        entries.push(ZipEntry { path, bytes });
-    }
-    // Per-sheet rels — only include non-empty ones (empty means no hyperlinks,
-    // comments, or tables).
-    for idx in 0..wb.sheets.len() {
-        let sheet_rels = rels::emit_sheet(wb, idx);
-        if !sheet_rels.is_empty() {
-            entries.push(ZipEntry {
-                path: format!("xl/worksheets/_rels/sheet{}.xml.rels", idx + 1),
-                bytes: sheet_rels,
-            });
-        }
-    }
-
-    // Wave 3 rich-feature parts: emit only for sheets that actually use them.
-    // Table files are globally numbered (table1.xml, table2.xml, ...) across
-    // all sheets — this counter mirrors the rels allocation logic.
-    let mut global_table_idx: usize = 1;
-    for (idx, sheet) in wb.sheets.iter().enumerate() {
-        if !sheet.comments.is_empty() {
-            entries.push(ZipEntry {
-                path: format!("xl/comments/comments{}.xml", idx + 1),
-                bytes: comments_xml::emit(sheet, &wb.comment_authors),
-            });
-            entries.push(ZipEntry {
-                path: format!("xl/drawings/vmlDrawing{}.vml", idx + 1),
-                bytes: drawings_vml::emit(sheet),
-            });
-        }
-        for table in &sheet.tables {
-            entries.push(ZipEntry {
-                path: format!("xl/tables/table{}.xml", global_table_idx),
-                bytes: tables_xml::emit(table, idx, global_table_idx),
-            });
-            global_table_idx += 1;
-        }
-    }
-
-    entries.extend([
-        ZipEntry {
-            path: "xl/styles.xml".to_string(),
-            bytes: styles_xml::emit(&wb.styles),
-        },
-        ZipEntry {
-            path: "xl/sharedStrings.xml".to_string(),
-            bytes: shared_strings_xml::emit(&wb.sst),
-        },
-        ZipEntry {
-            path: "docProps/core.xml".to_string(),
-            bytes: doc_props::emit_core(wb),
-        },
-        ZipEntry {
-            path: "docProps/app.xml".to_string(),
-            bytes: doc_props::emit_app(wb),
-        },
-    ]);
-
-    package(&entries).expect("zip package")
-}
+// `emit_full_pipeline` was promoted to `wolfxl_writer::emit_xlsx` in W4A's
+// contract sub-commit so the `NativeWorkbook` pyclass can call it directly.
+// The integration test now exercises the same code path Python users hit.
 
 /// Open an xlsx byte slice and return a map of path → bytes for every entry.
 fn read_archive(bytes: &[u8]) -> HashMap<String, Vec<u8>> {
@@ -284,7 +195,7 @@ fn parse_sst(bytes: &[u8]) -> Vec<String> {
 #[test]
 fn wave2_full_pipeline_roundtrip() {
     let (mut wb, style_id) = build_fixture();
-    let bytes = emit_full_pipeline(&mut wb);
+    let bytes = emit_xlsx(&mut wb);
 
     // 1. Archive is openable and contains every required part.
     let parts = read_archive(&bytes);
@@ -513,7 +424,7 @@ fn build_wave3_fixture() -> (Workbook, u32) {
 #[test]
 fn wave3_rich_features_roundtrip() {
     let (mut wb, _dxf_id) = build_wave3_fixture();
-    let bytes = emit_full_pipeline(&mut wb);
+    let bytes = emit_xlsx(&mut wb);
 
     // 1. Archive opens and contains the Wave 3 parts.
     let parts = read_archive(&bytes);

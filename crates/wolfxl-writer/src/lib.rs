@@ -43,3 +43,106 @@ mod test_utils;
 
 pub use model::workbook::Workbook;
 pub use model::worksheet::Worksheet;
+
+/// Render a complete `.xlsx` archive from the in-memory workbook.
+///
+/// This is the W4 entry point used by the `NativeWorkbook` pyclass and by
+/// the `tests/roundtrip_minimal.rs` integration test. It emits every Wave
+/// 1+2+3 part, packages them in canonical ZIP order, and returns the raw
+/// bytes — the caller writes them to disk (or hands them to a diff tool).
+///
+/// Mutates `wb` because sheet emission interns strings into the workbook's
+/// shared-string table; SST emission has to run AFTER all sheets to see
+/// the final intern set. The mutation is monotonic (only string indices
+/// are added) — calling `emit_xlsx` twice on the same workbook produces
+/// the same archive both times.
+pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
+    use crate::emit::{
+        comments_xml, content_types, doc_props, drawings_vml, rels, shared_strings_xml, sheet_xml,
+        styles_xml, tables_xml, workbook_xml,
+    };
+    use crate::zip::{package, ZipEntry};
+
+    // Sheet emission mutates the SST — must run before the SST emitter.
+    let mut sheet_parts: Vec<(String, Vec<u8>)> = Vec::new();
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        let bytes = sheet_xml::emit(sheet, idx as u32, &mut wb.sst, &wb.styles);
+        sheet_parts.push((format!("xl/worksheets/sheet{}.xml", idx + 1), bytes));
+    }
+
+    let mut entries: Vec<ZipEntry> = vec![
+        ZipEntry {
+            path: "[Content_Types].xml".to_string(),
+            bytes: content_types::emit(wb),
+        },
+        ZipEntry {
+            path: "_rels/.rels".to_string(),
+            bytes: rels::emit_root(wb),
+        },
+        ZipEntry {
+            path: "xl/workbook.xml".to_string(),
+            bytes: workbook_xml::emit(wb),
+        },
+        ZipEntry {
+            path: "xl/_rels/workbook.xml.rels".to_string(),
+            bytes: rels::emit_workbook(wb),
+        },
+    ];
+    for (path, bytes) in sheet_parts {
+        entries.push(ZipEntry { path, bytes });
+    }
+    for idx in 0..wb.sheets.len() {
+        let sheet_rels = rels::emit_sheet(wb, idx);
+        if !sheet_rels.is_empty() {
+            entries.push(ZipEntry {
+                path: format!("xl/worksheets/_rels/sheet{}.xml.rels", idx + 1),
+                bytes: sheet_rels,
+            });
+        }
+    }
+
+    // Wave 3 rich-feature parts: emit only for sheets that actually use them.
+    // Tables are globally numbered (table1.xml, table2.xml, ...) across all
+    // sheets — this counter mirrors the rels allocation logic in emit_sheet.
+    let mut global_table_idx: usize = 1;
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if !sheet.comments.is_empty() {
+            entries.push(ZipEntry {
+                path: format!("xl/comments/comments{}.xml", idx + 1),
+                bytes: comments_xml::emit(sheet, &wb.comment_authors),
+            });
+            entries.push(ZipEntry {
+                path: format!("xl/drawings/vmlDrawing{}.vml", idx + 1),
+                bytes: drawings_vml::emit(sheet),
+            });
+        }
+        for table in &sheet.tables {
+            entries.push(ZipEntry {
+                path: format!("xl/tables/table{}.xml", global_table_idx),
+                bytes: tables_xml::emit(table, idx, global_table_idx),
+            });
+            global_table_idx += 1;
+        }
+    }
+
+    entries.extend([
+        ZipEntry {
+            path: "xl/styles.xml".to_string(),
+            bytes: styles_xml::emit(&wb.styles),
+        },
+        ZipEntry {
+            path: "xl/sharedStrings.xml".to_string(),
+            bytes: shared_strings_xml::emit(&wb.sst),
+        },
+        ZipEntry {
+            path: "docProps/core.xml".to_string(),
+            bytes: doc_props::emit_core(wb),
+        },
+        ZipEntry {
+            path: "docProps/app.xml".to_string(),
+            bytes: doc_props::emit_app(wb),
+        },
+    ]);
+
+    package(&entries).expect("zip package")
+}

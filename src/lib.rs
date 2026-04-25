@@ -16,7 +16,10 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     info.set_item("package", "wolfxl")?;
     info.set_item("package_version", env!("CARGO_PKG_VERSION"))?;
 
-    let enabled = PyList::new(py, ["calamine-styles", "rust_xlsxwriter", "wolfxl"])?;
+    let enabled = PyList::new(
+        py,
+        ["calamine-styles", "rust_xlsxwriter", "wolfxl", "native"],
+    )?;
     info.set_item("enabled_backends", enabled)?;
 
     let versions = PyDict::new(py);
