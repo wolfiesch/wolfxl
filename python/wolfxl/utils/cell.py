@@ -1,7 +1,7 @@
 """openpyxl-shape coordinate utilities.
 
 These wrap WolfXL's existing primitives in ``wolfxl._utils`` while presenting
-the openpyxl API contract — error messages, value bounds, and tuple shapes
+the openpyxl API contract - error messages, value bounds, and tuple shapes
 match openpyxl 3.1.x.
 """
 
@@ -11,7 +11,7 @@ import re
 from functools import cache
 from string import ascii_uppercase
 
-# Verbatim from openpyxl/utils/cell.py — keep in sync if openpyxl changes the
+# Verbatim from openpyxl/utils/cell.py - keep in sync if openpyxl changes the
 # pattern. The whole point of this module is bug-for-bug compatibility.
 _RANGE_EXPR = r"""
 [$]?(?P<min_col>[A-Za-z]{1,3})?
@@ -29,7 +29,7 @@ _POWERS = (1, 26, 676)
 
 @cache
 def get_column_letter(col_idx: int) -> str:
-    """1-based column index → letter. Capped at 18278 (ZZZ) per openpyxl."""
+    """1-based column index -> letter. Capped at 18278 (ZZZ) per openpyxl."""
     if not 1 <= col_idx <= 18278:
         raise ValueError(f"Invalid column index {col_idx}")
 
@@ -48,7 +48,7 @@ def get_column_letter(col_idx: int) -> str:
 
 @cache
 def column_index_from_string(col: str) -> int:
-    """Column letter → 1-based index. Accepts up to 3 letters (A..ZZZ)."""
+    """Column letter -> 1-based index. Accepts up to 3 letters (A..ZZZ)."""
     error_msg = f"'{col}' is not a valid column name. Column names are from A to ZZZ"
     if len(col) > 3:
         raise ValueError(error_msg)
@@ -65,7 +65,7 @@ def column_index_from_string(col: str) -> int:
 
 
 def range_boundaries(range_string: str) -> tuple[int | None, int | None, int | None, int | None]:
-    """Parse ``'A1:D10'`` / ``'$A$1:$D$10'`` → ``(min_col, min_row, max_col, max_row)``.
+    """Parse ``'A1:D10'`` / ``'$A$1:$D$10'`` -> ``(min_col, min_row, max_col, max_row)``.
 
     Matches openpyxl's contract: degenerate single-cell refs return identical
     min/max; ``'A:A'`` returns ``(1, None, 1, None)``; ``'1:1'`` returns
@@ -99,9 +99,27 @@ def range_boundaries(range_string: str) -> tuple[int | None, int | None, int | N
 
 
 def coordinate_to_tuple(coordinate: str) -> tuple[int, int]:
-    """``'B3'`` → ``(3, 2)``. Returns ``(row, col)``, both 1-based."""
+    """``'B3'`` -> ``(3, 2)``. Returns ``(row, col)``, both 1-based."""
     m = _COORD_RE.match(coordinate)
     if not m:
         raise ValueError(f"Invalid cell coordinates ({coordinate})")
     col_letter, row_str = m.groups()
     return int(row_str), column_index_from_string(col_letter)
+
+
+# Re-export the higher-level helpers that live in wolfxl.utils so that
+# callers importing ``openpyxl.utils.cell`` as ``wolfxl.utils.cell`` get
+# the full surface: range_to_tuple, quote_sheetname, etc.
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    """Lazy re-export from ``wolfxl.utils`` to avoid circular import at load."""
+    if name in {
+        "absolute_coordinate",
+        "cols_from_range",
+        "get_column_interval",
+        "quote_sheetname",
+        "range_to_tuple",
+        "rows_from_range",
+    }:
+        import wolfxl.utils as _wu
+        return getattr(_wu, name)
+    raise AttributeError(name)

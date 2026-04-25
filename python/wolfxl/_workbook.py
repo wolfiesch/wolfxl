@@ -78,11 +78,31 @@ class Workbook:
         return list(self._sheet_names)
 
     @property
+    def worksheets(self) -> list[Worksheet]:
+        """List of Worksheet objects in sheet order — openpyxl alias."""
+        return [self._sheets[name] for name in self._sheet_names]
+
+    @property
     def active(self) -> Worksheet | None:
         """Return the first sheet, or None if no sheets exist."""
         if self._sheet_names:
             return self._sheets[self._sheet_names[0]]
         return None
+
+    @property
+    def read_only(self) -> bool:
+        """True if this workbook was opened read-only (no writer, no patcher)."""
+        return self._rust_reader is not None and self._rust_patcher is None
+
+    @property
+    def chartsheets(self) -> list[Any]:
+        """Chart sheets - always empty in T0 (wolfxl treats charts as preserved-only)."""
+        return []
+
+    @property
+    def named_styles(self) -> list[Any]:
+        """Named styles - always empty in T0 (construction lands in T2)."""
+        return []
 
     def __getitem__(self, name: str) -> Worksheet:
         if name not in self._sheets:
@@ -94,6 +114,41 @@ class Workbook:
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         return iter(self._sheet_names)
+
+    def get_sheet_by_name(self, name: str) -> Worksheet:
+        """Look up a sheet by name. Deprecated in openpyxl but still widely used."""
+        return self[name]
+
+    def index(self, worksheet: Worksheet) -> int:
+        """Return the 0-based index of ``worksheet`` in sheet order."""
+        return self._sheet_names.index(worksheet.title)
+
+    def remove(self, worksheet: Worksheet) -> None:
+        """Remove a worksheet from the workbook (write mode only).
+
+        In read mode, the on-disk sheet is untouched — raise instead so
+        callers don't assume a destructive edit succeeded. Modify mode does
+        not yet support sheet removal (the patcher has no ``remove_sheet``
+        API surface), so it also raises.
+        """
+        if self._rust_writer is None:
+            raise RuntimeError("remove requires write mode")
+        if worksheet.title not in self._sheets:
+            raise ValueError(f"Worksheet '{worksheet.title}' is not in this workbook")
+        title = worksheet.title
+        self._sheet_names.remove(title)
+        self._sheets.pop(title)
+        # If the Rust writer exposes remove_sheet, call it so the saved file
+        # doesn't include the now-dropped sheet. If the writer lacks the
+        # method, the Python bookkeeping still produces the right output
+        # because ``save()`` iterates our ``_sheets`` dict.
+        remove_fn = getattr(self._rust_writer, "remove_sheet", None)
+        if remove_fn is not None:
+            remove_fn(title)
+
+    def remove_sheet(self, worksheet: Worksheet) -> None:
+        """openpyxl alias for :meth:`remove` (deprecated there, kept for parity)."""
+        self.remove(worksheet)
 
     # ------------------------------------------------------------------
     # Named ranges
@@ -117,7 +172,6 @@ class Workbook:
             for entry in entries:
                 name = entry["name"]
                 refers_to = entry["refers_to"]
-                # Strip leading '=' if present
                 if refers_to.startswith("="):
                     refers_to = refers_to[1:]
                 result[name] = refers_to

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
 from wolfxl._utils import a1_to_rowcol, column_index, rowcol_to_a1
+from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
 
 def _canonical_data_type(value: Any) -> str:
@@ -233,6 +234,14 @@ class Worksheet:
         "_freeze_panes", "_auto_filter",
         "_row_heights", "_col_widths",
         "_merged_ranges", "_print_area", "_sheet_visibility_cache",
+        # T1 read caches — populated lazily on first access.
+        "_comments_cache", "_hyperlinks_cache",
+        "_tables_cache", "_data_validations_cache",
+        "_conditional_formatting_cache",
+        # T1 write-mode pending queues — flushed in _flush() on save().
+        "_pending_comments", "_pending_hyperlinks",
+        "_pending_tables", "_pending_data_validations",
+        "_pending_conditional_formats",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -256,6 +265,18 @@ class Worksheet:
         self._merged_ranges: set[str] = set()
         self._print_area: str | None = None
         self._sheet_visibility_cache: dict[str, Any] | None = None
+        # T1 read caches (None = not loaded yet; dict/list = loaded, possibly empty).
+        self._comments_cache: dict[str, Any] | None = None
+        self._hyperlinks_cache: dict[str, Any] | None = None
+        self._tables_cache: dict[str, Any] | None = None
+        self._data_validations_cache: Any | None = None
+        self._conditional_formatting_cache: Any | None = None
+        # T1 write-mode pending queues (flushed in _flush() on save()).
+        self._pending_comments: dict[str, Any] = {}
+        self._pending_hyperlinks: dict[str, Any] = {}
+        self._pending_tables: list[Any] = []
+        self._pending_data_validations: list[Any] = []
+        self._pending_conditional_formats: list[tuple[str, Any]] = []
 
     @property
     def title(self) -> str:
@@ -331,10 +352,118 @@ class Worksheet:
     # Cell access
     # ------------------------------------------------------------------
 
-    def __getitem__(self, key: str) -> Cell:
-        """``ws['A1']`` -> Cell."""
-        row, col = a1_to_rowcol(key)
-        return self._get_or_create_cell(row, col)
+    def __getitem__(self, key: Any) -> Any:
+        """openpyxl-compatible cell access.
+
+        Supports:
+        - ``ws["A1"]`` -> single Cell
+        - ``ws["A1:B2"]`` -> tuple of tuples of Cell (2D range)
+        - ``ws["A:B"]`` -> column range bounded by used range
+        - ``ws["1:3"]`` -> row range
+        - ``ws["A"]`` -> single column (tuple of Cell)
+        - ``ws["1"]`` -> single row (str key; tuple of Cell)
+        - ``ws[1]`` -> single row (int key; tuple of Cell)
+        - ``ws[1:3]`` -> row slice (tuple of tuples of Cell)
+        """
+        # Integer row access: ws[1] -> row 1 cells
+        if isinstance(key, int):
+            return self._get_row_tuple(key, key)[0]
+
+        # Integer slice: ws[1:3] -> rows 1..3 INCLUSIVE (openpyxl contract).
+        if isinstance(key, slice):
+            if key.start is None or key.stop is None:
+                raise ValueError("Row slice bounds must be specified")
+            return self._get_row_tuple(key.start, key.stop)
+
+        if isinstance(key, str):
+            return self._resolve_string_key(key)
+
+        raise TypeError(f"Worksheet indices must be str, int, or slice, not {type(key).__name__}")
+
+    def _resolve_string_key(self, key: str) -> Any:
+        """Resolve a string key to Cell / tuple / tuple-of-tuples."""
+        # Single A1 coord like "A1" — keep the fast path.
+        try:
+            row, col = a1_to_rowcol(key)
+        except ValueError:
+            pass
+        else:
+            return self._get_or_create_cell(row, col)
+
+        # Pure digits "3" -> single row.
+        if key.isdigit():
+            n = int(key)
+            return self._get_row_tuple(n, n)[0]
+
+        # Pure letters "A" -> single column.
+        try:
+            col_idx = column_index_from_string(key)
+        except ValueError:
+            col_idx = None
+        if col_idx is not None and not any(ch.isdigit() for ch in key):
+            return tuple(row for row in self._get_col_tuple(col_idx, col_idx))[0]
+
+        # Otherwise: range form ("A1:B2", "A:B", "1:3").
+        min_col, min_row, max_col, max_row = range_boundaries(key)
+
+        if min_row is None and max_row is None:
+            # Whole-column range like "A:B" -> openpyxl returns column-major
+            # (one tuple of cells per column). Bounded by the sheet's used rows.
+            bounded_max_row = self._max_row()
+            if min_col is None or max_col is None:
+                raise ValueError(f"Invalid range: {key!r}")
+            return self._get_col_tuple(min_col, max_col, 1, bounded_max_row)
+
+        if min_col is None and max_col is None:
+            # Whole-row range like "1:3" -> row-major
+            bounded_max_col = self._max_col()
+            if min_row is None or max_row is None:
+                raise ValueError(f"Invalid range: {key!r}")
+            return self._get_rect(min_row, 1, max_row, bounded_max_col)
+
+        if min_row is None or max_row is None or min_col is None or max_col is None:
+            raise ValueError(f"Invalid range: {key!r}")
+
+        # Degenerate single-cell range like "A1:A1" -> still return single Cell
+        # per openpyxl's contract for non-range strings — but a colon in the
+        # key means the user asked for a range, so return a 2D tuple.
+        return self._get_rect(min_row, min_col, max_row, max_col)
+
+    def _get_rect(
+        self, min_row: int, min_col: int, max_row: int, max_col: int,
+    ) -> tuple[tuple[Cell, ...], ...]:
+        """Return a 2D tuple of Cells for the inclusive rectangle."""
+        return tuple(
+            tuple(
+                self._get_or_create_cell(r, c) for c in range(min_col, max_col + 1)
+            )
+            for r in range(min_row, max_row + 1)
+        )
+
+    def _get_row_tuple(
+        self, min_row: int, max_row: int,
+    ) -> tuple[tuple[Cell, ...], ...]:
+        """Return a tuple of row-tuples for rows min_row..max_row inclusive."""
+        max_c = self._max_col()
+        return tuple(
+            tuple(self._get_or_create_cell(r, c) for c in range(1, max_c + 1))
+            for r in range(min_row, max_row + 1)
+        )
+
+    def _get_col_tuple(
+        self,
+        min_col: int,
+        max_col: int,
+        min_row: int | None = None,
+        max_row: int | None = None,
+    ) -> tuple[tuple[Cell, ...], ...]:
+        """Return a tuple of column-tuples for cols min_col..max_col inclusive."""
+        r_min = min_row if min_row is not None else 1
+        r_max = max_row if max_row is not None else self._max_row()
+        return tuple(
+            tuple(self._get_or_create_cell(r, c) for r in range(r_min, r_max + 1))
+            for c in range(min_col, max_col + 1)
+        )
 
     def __setitem__(self, key: str, value: Any) -> None:
         """``ws['A1'] = 42`` — shorthand for setting a cell's value."""
@@ -496,6 +625,113 @@ class Worksheet:
                 yield tuple(
                     self._get_or_create_cell(r, c) for c in range(c_min, c_max + 1)
                 )
+
+    def iter_cols(
+        self,
+        min_col: int | None = None,
+        max_col: int | None = None,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        values_only: bool = False,
+    ) -> Iterator[tuple[Any, ...]]:
+        """Iterate over columns in a range. Matches openpyxl's iter_cols API.
+
+        Unlike ``iter_rows``, the first-position arguments are column bounds.
+        Yields one tuple per column, each containing values (or Cells) for
+        every row in range.
+        """
+        # Fast bulk path: read-mode + values_only -> single Rust FFI call.
+        if values_only and self._workbook._rust_reader is not None:  # noqa: SLF001
+            yield from self._iter_cols_bulk(min_col, max_col, min_row, max_row)
+            return
+
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+
+        for c in range(c_min, c_max + 1):
+            if values_only:
+                yield tuple(
+                    self._get_or_create_cell(r, c).value for r in range(r_min, r_max + 1)
+                )
+            else:
+                yield tuple(
+                    self._get_or_create_cell(r, c) for r in range(r_min, r_max + 1)
+                )
+
+    def _iter_cols_bulk(
+        self,
+        min_col: int | None,
+        max_col: int | None,
+        min_row: int | None,
+        max_row: int | None,
+    ) -> Iterator[tuple[Any, ...]]:
+        """Bulk-read column values via a single Rust FFI call, then transpose.
+
+        Mirrors ``_iter_rows_bulk`` but yields column-major tuples. One
+        ``read_sheet_values_plain`` call reads the whole rectangle; transposition
+        happens in Python. This avoids per-cell Rust calls in the values_only
+        fast path and keeps parity with ``iter_rows`` performance characteristics.
+        """
+        from wolfxl._cell import _payload_to_python
+
+        reader = self._workbook._rust_reader  # noqa: SLF001
+        sheet = self._title
+        data_only = getattr(self._workbook, "_data_only", False)
+
+        r_min = min_row or 1
+        r_max = max_row or self._max_row()
+        c_min = min_col or 1
+        c_max = max_col or self._max_col()
+        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
+
+        use_plain = hasattr(reader, "read_sheet_values_plain")
+        if use_plain:
+            rows = reader.read_sheet_values_plain(sheet, range_str, data_only)
+        else:
+            rows = reader.read_sheet_values(sheet, range_str, data_only)
+
+        if not rows:
+            return
+
+        expected_cols = c_max - c_min + 1
+        expected_rows = r_max - r_min + 1
+
+        # Normalize every row to expected_cols width so transposition is safe.
+        normalized: list[list[Any]] = []
+        for row in rows:
+            if use_plain:
+                vals = list(row)
+            else:
+                vals = [_payload_to_python(cell) for cell in row]
+            n = len(vals)
+            if n >= expected_cols:
+                normalized.append(vals[:expected_cols])
+            else:
+                normalized.append(vals + [None] * (expected_cols - n))
+
+        # Pad rows if Rust returned fewer rows than requested.
+        while len(normalized) < expected_rows:
+            normalized.append([None] * expected_cols)
+
+        for c_offset in range(expected_cols):
+            yield tuple(normalized[r_offset][c_offset] for r_offset in range(expected_rows))
+
+    @property
+    def rows(self) -> Iterator[tuple[Any, ...]]:
+        """Iterator over rows (tuples of Cell) — openpyxl alias for ``iter_rows()``."""
+        return self.iter_rows()
+
+    @property
+    def columns(self) -> Iterator[tuple[Any, ...]]:
+        """Iterator over columns (tuples of Cell) — openpyxl alias for ``iter_cols()``."""
+        return self.iter_cols()
+
+    @property
+    def values(self) -> Iterator[tuple[Any, ...]]:
+        """Iterator over row values — openpyxl alias for ``iter_rows(values_only=True)``."""
+        return self.iter_rows(values_only=True)
 
     def _iter_rows_bulk(
         self,
@@ -994,6 +1230,50 @@ class Worksheet:
         return self._max_col()
 
     @property
+    def min_row(self) -> int:
+        """Always 1, matching openpyxl's contract (no real "first used" tracking)."""
+        return 1
+
+    @property
+    def min_column(self) -> int:
+        """Always 1, matching openpyxl's contract."""
+        return 1
+
+    @property
+    def dimensions(self) -> str:
+        """Used worksheet range in A1 form, e.g. ``"A1:C10"``."""
+        return self.calculate_dimension()
+
+    @property
+    def parent(self) -> Workbook:
+        """The containing Workbook."""
+        return self._workbook
+
+    @property
+    def sheet_state(self) -> str:
+        """Visibility state: ``"visible"``, ``"hidden"``, or ``"veryHidden"``.
+
+        Defaults to ``"visible"``. wolfxl doesn't yet wire through the
+        ``<sheet state="hidden">`` XML attribute; returning the default
+        matches openpyxl's value for a freshly-created sheet.
+        """
+        return "visible"
+
+    @property
+    def _charts(self) -> list[Any]:
+        """Empty list - matches openpyxl's default for sheets without charts.
+
+        Some code paths (e.g. ``len(ws._charts)``) read this even on
+        sheets that weren't constructed from a chart-bearing file.
+        """
+        return []
+
+    @property
+    def _images(self) -> list[Any]:
+        """Empty list - same rationale as ``_charts``."""
+        return []
+
+    @property
     def merged_cells(self) -> _MergedCellsProxy:
         """openpyxl-shape merged-cells accessor.
 
@@ -1388,6 +1668,79 @@ class Worksheet:
         # Print area (flush only if the Rust writer supports it)
         if self._print_area is not None and hasattr(writer, "set_print_area"):
             writer.set_print_area(sheet, self._print_area)
+
+        # T1 PR4: cell-level write features — hyperlinks, comments.
+        # Setters populate ``_pending_hyperlinks`` / ``_pending_comments`` and
+        # the Rust writer already has ``add_hyperlink`` / ``add_comment`` —
+        # we just translate the openpyxl-shaped dataclasses into the dict
+        # shapes those methods expect.
+        if self._pending_hyperlinks:
+            for coord, hl in self._pending_hyperlinks.items():
+                target = hl.target
+                internal = False
+                if target is None and hl.location is not None:
+                    target = hl.location
+                    internal = True
+                if not target:
+                    continue
+                writer.add_hyperlink(sheet, {
+                    "cell": coord,
+                    "target": target,
+                    "display": hl.display,
+                    "tooltip": hl.tooltip,
+                    "internal": internal,
+                })
+            self._pending_hyperlinks.clear()
+
+        if self._pending_comments:
+            for coord, c in self._pending_comments.items():
+                writer.add_comment(sheet, {
+                    "cell": coord,
+                    "text": c.text,
+                    "author": c.author,
+                })
+            self._pending_comments.clear()
+
+        # T1 PR5: worksheet-level writes — tables, DVs, conditional formats.
+        if self._pending_tables:
+            for t in self._pending_tables:
+                style_name = t.tableStyleInfo.name if t.tableStyleInfo else None
+                col_names = [c.name for c in t.tableColumns] if t.tableColumns else []
+                writer.add_table(sheet, {
+                    "name": t.name,
+                    "ref": t.ref,
+                    "style": style_name,
+                    "columns": col_names,
+                    "header_row": t.headerRowCount > 0,
+                    "totals_row": t.totalsRowCount > 0,
+                })
+            self._pending_tables.clear()
+
+        if self._pending_data_validations:
+            for dv in self._pending_data_validations:
+                writer.add_data_validation(sheet, {
+                    "range": dv.sqref,
+                    "validation_type": dv.type,
+                    "operator": dv.operator,
+                    "formula1": dv.formula1,
+                    "formula2": dv.formula2,
+                    "allow_blank": dv.allowBlank,
+                    "error_title": dv.errorTitle,
+                    "error": dv.error,
+                })
+            self._pending_data_validations.clear()
+
+        if self._pending_conditional_formats:
+            for range_string, rule in self._pending_conditional_formats:
+                formula = rule.formula[0] if rule.formula else None
+                writer.add_conditional_format(sheet, {
+                    "range": range_string,
+                    "rule_type": rule.type,
+                    "operator": rule.operator,
+                    "formula": formula,
+                    "stop_if_true": rule.stopIfTrue,
+                })
+            self._pending_conditional_formats.clear()
 
     # ------------------------------------------------------------------
     # wolfxl-core classifier bridge (delegates to the single Rust
