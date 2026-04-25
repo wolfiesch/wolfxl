@@ -552,14 +552,18 @@ fn dict_to_hyperlink(cfg: &Bound<'_, PyDict>) -> PyResult<Option<(String, Hyperl
         .get_item("tooltip")?
         .and_then(|v| v.extract::<String>().ok())
         .and_then(|s| if s.is_empty() { None } else { Some(s) });
-    let internal: bool = cfg
+    let is_internal: bool = cfg
         .get_item("internal")?
         .and_then(|v| v.extract::<bool>().ok())
         .unwrap_or(false);
 
-    // Internal links must start with '#'; external links are used as-is.
-    let target = if internal {
-        format!("#{}", raw_target.trim_start_matches('#'))
+    // The model's ``is_internal`` flag is the source of truth — see the
+    // doc comment on ``Hyperlink``. ``target`` always stores the bare
+    // form: a URL for external, a ``Sheet2!A1`` location for internal.
+    // We strip a stray leading ``#`` for backward compat with callers
+    // that wrote it both ways under the old prefix-sniffing convention.
+    let target = if is_internal {
+        raw_target.trim_start_matches('#').to_string()
     } else {
         raw_target
     };
@@ -568,6 +572,7 @@ fn dict_to_hyperlink(cfg: &Bound<'_, PyDict>) -> PyResult<Option<(String, Hyperl
         cell,
         Hyperlink {
             target,
+            is_internal,
             display,
             tooltip,
         },

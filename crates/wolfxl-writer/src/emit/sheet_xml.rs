@@ -459,15 +459,14 @@ fn emit_hyperlinks(out: &mut String, sheet: &Worksheet) {
     out.push_str("<hyperlinks>");
 
     for (cell_ref, hyperlink) in &sheet.hyperlinks {
-        let is_internal = hyperlink.target.starts_with('#');
-
-        if is_internal {
-            // Strip leading '#' for location attribute
-            let location = &hyperlink.target[1..];
+        if hyperlink.is_internal {
+            // Internal target: ``location`` is the bare ``Sheet2!A1`` form
+            // (no leading ``#``). Source of truth is the field, NOT a string
+            // prefix on ``target`` — see model::worksheet::Hyperlink docs.
             out.push_str(&format!(
                 "<hyperlink ref=\"{}\" location=\"{}\"",
                 xml_escape::attr(cell_ref),
-                xml_escape::attr(location)
+                xml_escape::attr(&hyperlink.target)
             ));
         } else {
             out.push_str(&format!(
@@ -1350,6 +1349,7 @@ mod tests {
             "A1".to_string(),
             Hyperlink {
                 target: "https://ex.com".into(),
+                is_internal: false,
                 display: None,
                 tooltip: None,
             },
@@ -1382,6 +1382,7 @@ mod tests {
             "B1".to_string(),
             Hyperlink {
                 target: "https://ex.com".into(),
+                is_internal: false,
                 display: None,
                 tooltip: None,
             },
@@ -1401,7 +1402,8 @@ mod tests {
         sheet.hyperlinks.insert(
             "A1".to_string(),
             Hyperlink {
-                target: "#Sheet2!A1".into(),
+                target: "Sheet2!A1".into(),
+                is_internal: true,
                 display: None,
                 tooltip: None,
             },
@@ -1506,6 +1508,7 @@ mod tests {
             "A1".to_string(),
             Hyperlink {
                 target: "https://example.com".into(),
+                is_internal: false,
                 display: Some("Example".into()),
                 tooltip: None,
             },
@@ -1513,7 +1516,8 @@ mod tests {
         sheet.hyperlinks.insert(
             "B1".to_string(),
             Hyperlink {
-                target: "#Sheet2!A1".into(),
+                target: "Sheet2!A1".into(),
+                is_internal: true,
                 display: None,
                 tooltip: Some("Go to sheet2".into()),
             },
@@ -2447,6 +2451,7 @@ mod tests {
             "C1".to_string(),
             Hyperlink {
                 target: "https://example.com".into(),
+                is_internal: false,
                 display: None,
                 tooltip: None,
             },

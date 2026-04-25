@@ -134,7 +134,7 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     let external_hyperlinks: Vec<(&String, &crate::model::worksheet::Hyperlink)> = sheet
         .hyperlinks
         .iter()
-        .filter(|(_, h)| !h.target.starts_with('#'))
+        .filter(|(_, h)| !h.is_internal)
         .collect();
     let has_tables = !sheet.tables.is_empty();
 
@@ -296,6 +296,7 @@ mod tests {
             "A1".into(),
             Hyperlink {
                 target: "https://example.com".into(),
+                is_internal: false,
                 display: None,
                 tooltip: None,
             },
@@ -313,7 +314,8 @@ mod tests {
         wb.sheets[0].hyperlinks.insert(
             "A1".into(),
             Hyperlink {
-                target: "#Sheet2!A1".into(),
+                target: "Sheet2!A1".into(),
+                is_internal: true,
                 display: None,
                 tooltip: None,
             },
@@ -386,6 +388,7 @@ mod tests {
             "B1".into(),
             Hyperlink {
                 target: "https://example.com/path?q=1&r=2".into(),
+                is_internal: false,
                 display: None,
                 tooltip: None,
             },

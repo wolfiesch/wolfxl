@@ -270,29 +270,36 @@ pub struct SplitPane {
 ///
 /// # Internal vs external targets
 ///
-/// The emitter at [`crate::emit::sheet_xml`] distinguishes the two cases by
-/// sniffing [`Hyperlink::target`]'s leading character:
+/// [`Hyperlink::is_internal`] is the source of truth for the routing
+/// decision. The emitter at [`crate::emit::sheet_xml`] reads the field
+/// directly:
 ///
-/// - **External** (target does NOT start with `'#'`): emitted as
+/// - `is_internal == false`: emitted as
 ///   `<hyperlink ref="A1" r:id="rIdN"/>` plus an external-target relationship
-///   in `xl/worksheets/_rels/sheetN.xml.rels`. Use this for `"https://…"`,
-///   `"mailto:…"`, `"file://…"`, etc.
+///   in `xl/worksheets/_rels/sheetN.xml.rels`. `target` is the URL
+///   (`"https://example.com/page#section"`, `"mailto:…"`, `"file://…"`, etc.)
+///   and is written verbatim into the relationship's `Target` attribute.
 ///
-/// - **Internal** (target starts with `'#'`): emitted as
-///   `<hyperlink ref="A1" location="Sheet2!A1"/>` with no relationship. The
-///   leading `'#'` is stripped on emission.
+/// - `is_internal == true`: emitted as
+///   `<hyperlink ref="A1" location="Sheet2!A1"/>` with no relationship.
+///   `target` stores the bare location (`"Sheet2!A1"`) — no `#` prefix.
 ///
-/// Callers converting from oracle-shape payloads (which use
-/// `"internal:<loc>"` as the convention) must translate: when the oracle's
-/// `internal=true` is set, the native-side target becomes
-/// `format!("#{}", raw.trim_start_matches('#'))`.
+/// **Why not sniff a `#` prefix?** Because external URLs may legitimately
+/// contain a `#` fragment (e.g. `https://example.com/page#section`). The
+/// previous implementation used `target.starts_with('#')` which classified
+/// such URLs correctly only because the fragment is mid-string, but any
+/// caller passing `"#Sheet2!A1"` with `internal=False` would have been
+/// silently misrouted. Making the routing explicit removes that footgun.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hyperlink {
-    /// Either an external URL (`"https://…"`, `"mailto:…"`) or an internal
-    /// workbook reference prefixed with `'#'` (e.g. `"#Sheet2!A1"`). The
-    /// leading `'#'` is how the emitter detects the internal case; do not
-    /// omit it for sheet-local targets.
+    /// External URL (when `is_internal == false`) or internal location
+    /// (`Sheet2!A1` form when `is_internal == true`). Internal targets are
+    /// stored *without* the leading `#` — the emitter writes them straight
+    /// into the `location` attribute.
     pub target: String,
+    /// Source-of-truth flag for the internal/external routing. Set by the
+    /// pyclass dict-to-Hyperlink converter from the user's `internal` key.
+    pub is_internal: bool,
     pub display: Option<String>,
     pub tooltip: Option<String>,
 }
