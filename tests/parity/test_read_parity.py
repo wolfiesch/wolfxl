@@ -71,22 +71,28 @@ def _diff_workbooks(
         _diff_sheet(report, op_wb[sheet], wx_wb[sheet], sheet)
 
     op_named = dict(op_wb.defined_names)
-    # wolfxl's defined_names is already dict[str, str]; openpyxl's is a
-    # DefinedNameDict where the values have a ``.value`` attribute.
-    op_named_resolved: dict[str, str] = {}
-    for name, defn in op_named.items():
+    # Both wolfxl (T1) and openpyxl now return DefinedName objects with
+    # a ``.value`` attribute — pull the refers_to string off both sides
+    # before comparing. Strip the leading ``=`` to normalize.
+    def _resolve(defn: Any) -> str | None:
         refers = getattr(defn, "value", defn)
         if isinstance(refers, str) and refers.startswith("="):
             refers = refers[1:]
-        op_named_resolved[name] = refers
+        return refers
 
-    wx_named = wx_wb.defined_names
-    for name in set(op_named_resolved) | set(wx_named):
+    op_named_resolved: dict[str, str | None] = {
+        name: _resolve(defn) for name, defn in op_named.items()
+    }
+    wx_named_raw = wx_wb.defined_names
+    wx_named_resolved: dict[str, str | None] = {
+        name: _resolve(defn) for name, defn in wx_named_raw.items()
+    }
+    for name in set(op_named_resolved) | set(wx_named_resolved):
         report.record(
             "defined_name.refers_to",
             f"defined_name:{name}",
             op_named_resolved.get(name),
-            wx_named.get(name),
+            wx_named_resolved.get(name),
         )
 
 
