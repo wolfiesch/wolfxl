@@ -89,12 +89,34 @@ Modify mode preserves everything it doesn't touch: charts, macros, images, pivot
 
 ## Supported Features
 
+Features marked **Preserved** are kept verbatim on modify-mode round-trip (open, edit other cells, save). Construction from Python code for those features is tracked below as roadmap items.
+
 | Category | Features |
 |----------|----------|
-| **Data** | Cell values (string, number, date, bool), formulas, hyperlinks, comments |
-| **Styling** | Font (bold, italic, underline, color, size), fills, borders, number formats, alignment |
-| **Structure** | Multiple sheets, merged cells, named ranges, freeze panes, tables |
-| **Advanced** | Data validation, conditional formatting |
+| **Data** | Cell values (string, number, date, bool), formulas, comments, hyperlinks |
+| **Styling** | Font (bold, italic, underline, color, size), fills, borders, number formats, alignment; `Color(theme=...)` and `Color(indexed=...)` accepted |
+| **Structure** | Multiple sheets, merged cells, defined names (read + write), freeze panes, row heights, column widths, document properties |
+| **Tables / Validation / CF** | `ws.tables`, `ws.add_table`, `ws.data_validations`, `ws.conditional_formatting` (read + write in `Workbook()` mode) |
+| **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
+| **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
+| **Preserved (read-only)** | Charts, images, pivot tables, macros (VBA) — round-trip cleanly through modify mode |
+
+### openpyxl compatibility status
+
+Modules that import from openpyxl generally work against wolfxl. Unsupported classes raise `NotImplementedError` with a clear hint at the construction site - no silent no-ops.
+
+| Class / API | Status |
+|-------------|--------|
+| `Font`, `PatternFill`, `Border`, `Side`, `Alignment`, `Color` | Full support |
+| `Comment`, `Hyperlink` | Read + write (write mode); modify-mode setters T1.5 |
+| `DataValidation`, `Table`, `TableStyleInfo`, `TableColumn` | Read + write (write mode); modify-mode setters T1.5 |
+| `CellIsRule`, `FormulaRule`, `ColorScaleRule`, `DataBarRule`, `IconSetRule` | Read + write (write mode); modify-mode setters T1.5 |
+| `DefinedName`, `DocumentProperties` | Read + write (write mode); modify-mode setters T1.5 |
+| `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Stub (raises `NotImplementedError`) |
+| `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | Stub - use modify mode to preserve existing charts |
+| `Image` (from `wolfxl.drawing.image`) | Stub - preserved on modify-mode round-trip |
+| `AutoFilter`, `PivotTable` | Stub - preserved on modify-mode round-trip |
+| `ws.insert_rows`, `ws.delete_rows`, `ws.move_range`, `wb.copy_worksheet`, `wb.move_sheet` | Not yet implemented (Phase 2 — RFCs 030/031/034/035/036) |
 
 ## Performance at Scale
 
