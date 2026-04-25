@@ -1,6 +1,6 @@
 """Workbook — multi-mode openpyxl-compatible wrapper.
 
-Write mode (``Workbook()``): creates a new workbook via RustXlsxWriterBook.
+Write mode (``Workbook()``): creates a new workbook via NativeWorkbook.
 Read mode (``Workbook._from_reader(path)``): opens an existing .xlsx via CalamineStyledBook.
 Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, save via XlsxPatcher.
 """

@@ -1149,7 +1149,7 @@ class Worksheet:
         font_to_format_dict: Any, fill_to_format_dict: Any,
         alignment_to_format_dict: Any, border_to_rust_dict: Any,
     ) -> None:
-        """Flush dirty cells to the RustXlsxWriterBook backend (write mode).
+        """Flush dirty cells to the NativeWorkbook backend (write mode).
 
         Values are batched into a single ``write_sheet_values()`` call when
         possible (int/float/str/None), eliminating per-cell FFI overhead.

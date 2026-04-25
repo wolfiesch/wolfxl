@@ -1,9 +1,7 @@
-"""W4E.P4 regression: ``contentStatus`` round-trips through both backends.
+"""W4E.P4 regression: ``contentStatus`` round-trips through the native writer.
 
 Before W4E.P4 the native writer silently dropped ``contentStatus`` because
-``DocProperties`` had no field for it. Oracle wired it via
-``rust_xlsxwriter``'s ``set_status`` so the dual-backend diff showed a
-divergence on every workbook that set a status. The fix adds
+``DocProperties`` had no field for it. The fix adds
 ``DocProperties.content_status`` and emits ``<cp:contentStatus>`` between
 ``<cp:category>`` and ``<dcterms:created>`` per the OOXML core-properties
 schema.
@@ -11,16 +9,16 @@ schema.
 from __future__ import annotations
 
 import os
+import subprocess
 import zipfile
 from pathlib import Path
 
 import pytest
 
 
-def _save_with_backend(backend: str, tmp_path: Path, status: str) -> Path:
-    monkey_env = {**os.environ, "WOLFXL_WRITER": backend, "WOLFXL_TEST_EPOCH": "0"}
-    out = tmp_path / f"out_{backend}.xlsx"
-    import subprocess
+def _save_with_status(tmp_path: Path, status: str) -> Path:
+    env = {**os.environ, "WOLFXL_TEST_EPOCH": "0"}
+    out = tmp_path / "out.xlsx"
     script = f"""
 import wolfxl
 wb = wolfxl.Workbook()
@@ -29,7 +27,7 @@ wb.save({str(out)!r})
 """
     subprocess.run(
         ["python", "-c", script],
-        env=monkey_env,
+        env=env,
         check=True,
         capture_output=True,
         text=True,
@@ -37,27 +35,23 @@ wb.save({str(out)!r})
     return out
 
 
-@pytest.mark.parametrize("backend", ["oracle", "native"])
-def test_content_status_emitted_in_core_props(
-    backend: str, tmp_path: Path,
-) -> None:
-    """Both backends must emit ``<cp:contentStatus>Draft</cp:contentStatus>``
-    in ``docProps/core.xml`` when ``contentStatus`` is set."""
-    out = _save_with_backend(backend, tmp_path, "Draft")
+def test_content_status_emitted_in_core_props(tmp_path: Path) -> None:
+    """The native writer must emit
+    ``<cp:contentStatus>Draft</cp:contentStatus>`` in ``docProps/core.xml``
+    when ``contentStatus`` is set."""
+    out = _save_with_status(tmp_path, "Draft")
     with zipfile.ZipFile(out) as zf:
         core = zf.read("docProps/core.xml").decode("utf-8")
     assert "<cp:contentStatus>Draft</cp:contentStatus>" in core, (
-        f"backend={backend} core.xml missing contentStatus:\n{core[:500]}"
+        f"core.xml missing contentStatus:\n{core[:500]}"
     )
 
 
-@pytest.mark.parametrize("backend", ["oracle", "native"])
 def test_content_status_omitted_when_unset(
-    backend: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without ``contentStatus`` in the props dict, neither backend should
+    """Without ``contentStatus`` in the props dict, the writer must not
     emit the element. Guards against accidental empty element emission."""
-    monkeypatch.setenv("WOLFXL_WRITER", backend)
     monkeypatch.setenv("WOLFXL_TEST_EPOCH", "0")
     import wolfxl
     wb = wolfxl.Workbook()
@@ -67,5 +61,5 @@ def test_content_status_omitted_when_unset(
     with zipfile.ZipFile(out) as zf:
         core = zf.read("docProps/core.xml").decode("utf-8")
     assert "<cp:contentStatus" not in core, (
-        f"backend={backend} core.xml has unexpected contentStatus:\n{core[:500]}"
+        f"core.xml has unexpected contentStatus:\n{core[:500]}"
     )

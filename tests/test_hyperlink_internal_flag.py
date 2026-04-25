@@ -8,13 +8,12 @@ would be silently re-routed to the internal-location code path,
 swallowing the relationship and producing a broken external link.
 
 The fix moves routing to an explicit ``is_internal: bool`` field. These
-tests pin the new contract:
+tests pin the new contract on the native writer:
 
 1. URLs with ``#`` fragments stay external (the canonical bug example).
 2. ``internal=True`` produces a ``location=`` attribute and zero rels.
 3. ``internal=False`` produces an ``r:id=`` attribute and one external
    relationship.
-4. Both backends agree on the wire format for an internal link.
 """
 from __future__ import annotations
 
@@ -24,11 +23,10 @@ from pathlib import Path
 import pytest
 
 
-def _save_with_backend(
-    backend: str, tmp_path: Path, payload: dict[str, object],
+def _save_hyperlink(
+    tmp_path: Path, payload: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-    monkeypatch.setenv("WOLFXL_WRITER", backend)
     monkeypatch.setenv("WOLFXL_TEST_EPOCH", "0")
     import wolfxl
     wb = wolfxl.Workbook()
@@ -36,7 +34,7 @@ def _save_with_backend(
     assert ws is not None
     ws.cell(row=1, column=1, value="probe")
     wb._rust_writer.add_hyperlink(ws.title, payload)
-    out = tmp_path / f"out_{backend}.xlsx"
+    out = tmp_path / "out.xlsx"
     wb.save(str(out))
     return out
 
@@ -52,8 +50,8 @@ def test_fragment_url_stays_external_native(
     """``https://example.com/page#section`` — ``#`` is mid-string. Even if
     the caller forgot ``internal=False`` (it defaults to false anyway), the
     URL must round-trip as an external relationship, not a sheet location."""
-    out = _save_with_backend(
-        "native", tmp_path,
+    out = _save_hyperlink(
+        tmp_path,
         {
             "cell": "A1",
             "target": "https://example.com/page#section",
@@ -79,8 +77,8 @@ def test_internal_target_uses_location(
     """``internal=True`` -> ``<hyperlink location="Sheet1!B2"/>`` with
     no relationship. Caller may pass ``Sheet1!B2`` or ``#Sheet1!B2`` —
     both forms are accepted and emit identically."""
-    out = _save_with_backend(
-        "native", tmp_path,
+    out = _save_hyperlink(
+        tmp_path,
         {"cell": "A1", "target": "Sheet!B2", "internal": True},
         monkeypatch,
     )
@@ -106,8 +104,8 @@ def test_internal_target_strips_legacy_hash_prefix(
     ``#`` prefix on the target — the convention under the old prefix-
     sniffing implementation — still work. The pyclass strips the leading
     ``#`` before storing in the model."""
-    out = _save_with_backend(
-        "native", tmp_path,
+    out = _save_hyperlink(
+        tmp_path,
         {"cell": "A1", "target": "#Sheet!C3", "internal": True},
         monkeypatch,
     )
@@ -118,30 +116,3 @@ def test_internal_target_strips_legacy_hash_prefix(
     assert "#Sheet" not in sheet, (
         f"raw # prefix leaked into output: {sheet[:500]}"
     )
-
-
-@pytest.mark.parametrize(
-    "payload,expects",
-    [
-        ({"cell": "A1", "target": "https://example.com"}, "external"),
-        ({"cell": "A1", "target": "Sheet!B2", "internal": True}, "internal"),
-    ],
-)
-def test_both_backends_agree_on_internal_flag(
-    payload: dict, expects: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Both backends must produce wire-equivalent hyperlinks. We don't
-    byte-diff (rIds and timestamp variations differ) — instead we assert
-    the same routing decision: external -> r:id present, internal ->
-    location present and r:id absent."""
-    paths = {}
-    for backend in ("oracle", "native"):
-        paths[backend] = _save_with_backend(backend, tmp_path, payload, monkeypatch)
-    for backend, p in paths.items():
-        sheet = _read_part(p, "xl/worksheets/sheet1.xml")
-        if expects == "external":
-            assert "r:id=" in sheet, f"{backend}: missing r:id\n{sheet[:300]}"
-            assert "location=" not in sheet, f"{backend}: stray location\n{sheet[:300]}"
-        else:
-            assert "location=" in sheet, f"{backend}: missing location\n{sheet[:300]}"
-            assert "r:id=" not in sheet, f"{backend}: stray r:id\n{sheet[:300]}"

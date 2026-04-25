@@ -2,13 +2,10 @@
 
 The fix: ``self.saved = true`` is set *before* the emit/write so a
 panic in ``emit_xlsx`` or ``fs::write`` cannot leave the workbook in
-a state where a retry would re-emit on partially-mutated data. This
-mirrors ``RustXlsxWriterBook::save()`` at
-``src/rust_xlsxwriter_backend.rs:2044``.
+a state where a retry would re-emit on partially-mutated data.
 
-These tests assert the consumed-on-save contract holds for the
-native pyclass. Both backends should now reject the second save()
-call regardless of whether the first one succeeded.
+These tests assert the consumed-on-save contract holds for the native
+pyclass — the sole write-mode backend as of W5.
 """
 from __future__ import annotations
 
@@ -17,16 +14,9 @@ from pathlib import Path
 import pytest
 
 
-@pytest.fixture
-def native_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WOLFXL_WRITER", "native")
-
-
-def test_second_save_raises_already_saved_native(
-    native_env: None, tmp_path: Path
-) -> None:
-    """Native pyclass: a successful save() consumes the workbook;
-    a second save() must raise (no silent overwrite, no retry path)."""
+def test_second_save_raises_already_saved_native(tmp_path: Path) -> None:
+    """A successful save() consumes the workbook; a second save() must
+    raise (no silent overwrite, no retry path)."""
     import wolfxl
 
     wb = wolfxl.Workbook()
@@ -46,39 +36,11 @@ def test_second_save_raises_already_saved_native(
     assert not out2.exists(), "second save() must not write any output"
 
 
-def test_second_save_raises_already_saved_oracle(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Oracle behavior is the regression baseline — the contract
-    should match between backends."""
-    monkeypatch.setenv("WOLFXL_WRITER", "oracle")
-    import wolfxl
-
-    wb = wolfxl.Workbook()
-    ws = wb.active
-    assert ws is not None
-    ws.cell(row=1, column=1, value="hello")
-    out1 = tmp_path / "first.xlsx"
-    wb.save(str(out1))
-    assert out1.exists() and out1.stat().st_size > 0
-
-    out2 = tmp_path / "second.xlsx"
-    with pytest.raises(Exception) as exc_info:
-        wb.save(str(out2))
-    assert "already saved" in str(exc_info.value).lower(), (
-        f"expected 'already saved' in error, got: {exc_info.value!r}"
-    )
-    assert not out2.exists(), "second save() must not write any output"
-
-
-def test_failed_save_still_consumes_workbook_native(
-    native_env: None, tmp_path: Path
-) -> None:
+def test_failed_save_still_consumes_workbook_native(tmp_path: Path) -> None:
     """W4E.P1 invariant: even if the first save() fails (e.g. unwritable
     path), the workbook is still marked saved. Retrying after a partial
     failure could re-emit on partially-mutated state — the lifecycle is
-    designed to fail loudly instead. Mirrors oracle's pre-emit
-    ``self.saved = true``.
+    designed to fail loudly instead.
     """
     import wolfxl
 

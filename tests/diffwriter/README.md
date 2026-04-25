@@ -1,30 +1,31 @@
 # Differential Writer Harness
 
-Runs oracle (`rust_xlsxwriter`) and native (`wolfxl-writer`) backends
-against the same build plan and diffs the output across four layers.
+Runs the native writer (`wolfxl-writer`) against the same build plan
+across one structural and one semantic layer plus an opt-in LibreOffice
+smoke. The legacy `rust_xlsxwriter` oracle was removed in W5; openpyxl
+now serves as the soft secondary oracle for re-parse sanity checks.
 
 ## Layers
 
 | Layer | What it checks | Gate |
 |-------|---------------|------|
-| 1 — byte | SHA-256 per-part after XML canonicalization + fuzzy strip | gold-star target (≥80%) |
-| 2 — XML structural | `lxml.etree` tree diff after sorting where spec permits | ship gate |
-| 3 — semantic | `tests/parity/_scoring.py` HARD/SOFT/INFO ratchet | ship gate |
-| 4 — LibreOffice smoke | `soffice --headless --convert-to xlsx` round-trip | gold-star (≥95%), opt-in |
+| 1 — semantic re-parse | openpyxl opens the native xlsx and iterates each sheet | ship gate |
+| 2 — LibreOffice smoke | `soffice --headless --convert-to xlsx` round-trip | gold-star (≥95%), opt-in |
+
+Byte-canonical and XML-tree comparisons against a committed golden
+fixture are tracked as a follow-up RFC; the W5 rip-out commit ships
+without them.
 
 ## Running
 
 ```bash
-# All cases, current backend routing from modules.toml
+# All cases on the native writer
 uv run pytest tests/diffwriter/
-
-# Force dual-backend comparison on every case
-WOLFXL_WRITER=both uv run pytest tests/diffwriter/
 ```
 
-## Layer 4 — LibreOffice smoke
+## Layer 2 — LibreOffice smoke
 
-Layer 4 is **opt-in**. Without `WOLFXL_RUN_LIBREOFFICE_SMOKE=1` the
+Layer 2 is **opt-in**. Without `WOLFXL_RUN_LIBREOFFICE_SMOKE=1` the
 `tests/diffwriter/soffice_smoke.py` tests skip cleanly, so the suite is
 harmless on machines that don't have LibreOffice installed.
 

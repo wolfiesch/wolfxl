@@ -1,12 +1,12 @@
-//! Native xlsx writer pyclass — Wave 4A.
+//! Native xlsx writer pyclass — sole write-mode backend (W5+).
 //!
-//! Sibling to [`crate::rust_xlsxwriter_backend::RustXlsxWriterBook`]. Mirrors
-//! the same 22 pymethods so [`python::wolfxl::_backend.make_writer`] can swap
-//! between the two without any other Python-side changes. The 13
-//! cell/format/structure pymethods + `save()` are real implementations
-//! that drive [`wolfxl_writer::Workbook`] and emit a complete xlsx via
-//! [`wolfxl_writer::emit_xlsx`]. The 8 rich-feature pymethods raise
-//! `NotImplementedError` until Wave 4B fills them in.
+//! Exposes the 22 pymethods that [`python::wolfxl::_backend.make_writer`]
+//! constructs for every `Workbook()`. The 13 cell/format/structure
+//! pymethods + `save()` drive [`wolfxl_writer::Workbook`] and emit a
+//! complete xlsx via [`wolfxl_writer::emit_xlsx`]. The legacy
+//! `rust_xlsxwriter`-backed sibling pyclass was removed in W5; the
+//! payload-shape contract documented below is preserved verbatim for
+//! Python-side compatibility.
 //!
 //! # Why mirror oracle exactly
 //!
@@ -107,9 +107,9 @@ fn parse_hex_color(input: &str) -> Option<String> {
 /// The Python flush path passes `python_value_to_payload(value)` which
 /// always returns a dict like `{"type": "string", "value": "x"}` (see
 /// `python/wolfxl/_cell.py:518`). We extract the `type` and decode
-/// `value` / `formula` per the oracle's mapping in `write_cell` at
-/// `src/rust_xlsxwriter_backend.rs:464`. Stays in lockstep with the
-/// oracle so flushed payloads work identically under both backends.
+/// `value` / `formula` per the historical oracle mapping (preserved
+/// verbatim from the W5-removed `rust_xlsxwriter_backend`'s `write_cell`)
+/// so any pre-W5 Python flush payload still routes correctly.
 fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
     let dict = payload
         .downcast::<PyDict>()
@@ -213,10 +213,10 @@ fn require_finite_f64(f: f64, context: &str) -> PyResult<f64> {
 }
 
 /// Coerce a raw Python value (from `write_sheet_values`'s 2-D list) to a
-/// `WriteCellValue`. Mirrors the oracle's order-of-attempts at
-/// `src/rust_xlsxwriter_backend.rs:1417`, but fixes a subtle bug: the
-/// oracle tries `f64` before `bool`, so `True`/`False` (which extract
-/// as `1.0`/`0.0`) silently become numbers. The Python flush path
+/// `WriteCellValue`. The order-of-attempts mirrors the historical
+/// `rust_xlsxwriter_backend` (removed in W5) but fixes a subtle bug: the
+/// legacy oracle tried `f64` before `bool`, so `True`/`False` (which
+/// extract as `1.0`/`0.0`) silently became numbers. The Python flush path
 /// avoids this by routing booleans through `write_cell_value` instead,
 /// but we tighten the rule here for correctness — bool first.
 ///
@@ -326,8 +326,9 @@ fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
     }
     if let Some(v) = dict.get_item("font_size")? {
         if let Ok(f) = v.extract::<f64>() {
-            // FontSpec stores u32 points. Clamp non-negative; the oracle
-            // (rust_xlsxwriter) accepts f64 but our schema is whole points.
+            // FontSpec stores u32 points. Clamp non-negative; OOXML/Excel
+            // round to whole points even though `<sz val="..."/>` accepts a
+            // floating-point literal.
             if f.is_finite() && f >= 0.0 {
                 font.size = Some(f.round() as u32);
                 font_touched = true;
@@ -927,9 +928,9 @@ fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> 
     let description: Option<String> =
         props.get_item("description")?.and_then(|v| v.extract().ok());
     let category: Option<String> = props.get_item("category")?.and_then(|v| v.extract().ok());
-    // Python passes the OOXML-canonical camelCase key. Oracle uses the same
-    // wire format at rust_xlsxwriter_backend.rs:2008 (`set_status`); native
-    // mirrors the Python -> emitter -> <cp:contentStatus> path verbatim.
+    // Python passes the OOXML-canonical camelCase key. The Python ->
+    // emitter -> <cp:contentStatus> path is preserved verbatim from the
+    // W5-removed legacy backend.
     let content_status: Option<String> = props
         .get_item("contentStatus")?
         .and_then(|v| v.extract().ok());
@@ -1281,8 +1282,7 @@ impl NativeWorkbook {
             ));
         }
         // Mark consumed BEFORE emit/write so a panic in emit_xlsx or fs::write
-        // leaves the workbook un-retryable on partially-mutated state. Mirrors
-        // RustXlsxWriterBook::save() at src/rust_xlsxwriter_backend.rs:2044.
+        // leaves the workbook un-retryable on partially-mutated state.
         self.saved = true;
         let bytes = wolfxl_writer::emit_xlsx(&mut self.inner);
         fs::write(path, bytes)

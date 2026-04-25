@@ -1,39 +1,25 @@
-"""W4F pre-rip-out invariant: modify mode must remain functional after
-``rust_xlsxwriter`` is removed in Wave 5.
+"""Modify mode is independent of the write-mode backend.
 
-The migration plan tracks one risk above all others for the rip-out: that
-``XlsxPatcher`` (modify mode) might have a hidden coupling to the writer
-backend — a direct call, a fall-through path, or env-var-conditional
-behavior — that would silently break when ``RustXlsxWriterBook`` is
-deleted.
+After the W5 rip-out, the only write-mode backend is ``NativeWorkbook``.
+The modify-mode patcher (``XlsxPatcher``) has its own ZIP-rewrite path
+and shares zero code with the writer. This test pins that property: if
+a future change introduces a fall-through from the patcher to the
+writer, the silent coupling is caught.
 
-The audit (2026-04-24) found no such coupling: ``src/wolfxl/`` imports
-zero ``rust_xlsxwriter::`` symbols, T1.5-deferred features raise
-``NotImplementedError`` instead of falling back to the writer, and
-``WOLFXL_WRITER`` is read only by ``_backend.make_writer()`` (write mode
-only). This test encodes that finding so any future change that breaks
-the invariant fails CI loudly.
-
-Three checks here:
+Two checks remain after rip-out:
 
 1. **Source-level**: ``src/wolfxl/`` contains no ``rust_xlsxwriter``
-   references. A grep of the canonical import shape catches future
-   accidental coupling.
+   references. The reference is gone, but a grep enforces the absence
+   in case anything reintroduces it.
 
-2. **Cross-backend invariance**: a modify-mode round-trip should produce
-   byte-identical output regardless of ``WOLFXL_WRITER``, because the
-   patcher is the active engine and it doesn't read the env var.
-
-3. **T1.5 raise-consistency**: T1.5-deferred features (rewriting doc
+2. **T1.5 raise-consistency**: T1.5-deferred features (rewriting doc
    properties, adding defined names to an existing file) raise
    ``NotImplementedError`` with a "T1.5" hint — not silent fall-through
    to the writer.
 """
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -45,10 +31,9 @@ FIXTURE = REPO / "tests" / "fixtures" / "minimal.xlsx"
 def test_xlsxpatcher_has_no_rust_xlsxwriter_references() -> None:
     """``src/wolfxl/`` must never import or call ``rust_xlsxwriter``.
 
-    Wave 5 will delete the rust_xlsxwriter dependency from Cargo.toml and
-    every reference in the codebase. If a future commit reintroduces a
-    coupling here (e.g. a debug helper that imports the crate), this
-    grep catches it before the rip-out lands.
+    The W5 rip-out removed the dependency entirely. If a future commit
+    reintroduces a coupling here (e.g. a debug helper that imports the
+    crate), this grep catches it.
     """
     target = REPO / "src" / "wolfxl"
     result = subprocess.run(
@@ -62,49 +47,6 @@ def test_xlsxpatcher_has_no_rust_xlsxwriter_references() -> None:
         "src/wolfxl/ has rust_xlsxwriter references — Wave 5 rip-out "
         "would silently break modify mode. Files with refs:\n"
         f"{result.stdout}"
-    )
-
-
-@pytest.mark.skipif(
-    not FIXTURE.exists(),
-    reason="hermetic fixture missing — regenerate via tests/fixtures/build.py",
-)
-def test_modify_mode_invariant_under_writer_backend(tmp_path: Path) -> None:
-    """Modify-mode output must be byte-identical regardless of
-    ``WOLFXL_WRITER``. The patcher path doesn't read the env var, so any
-    divergence here means a coupling we missed.
-
-    We use subprocess + ``WOLFXL_TEST_EPOCH=0`` so ZIP mtimes are
-    deterministic and the byte comparison is meaningful. The script
-    inside is intentionally minimal: load the fixture in modify mode,
-    overwrite one cell, save.
-    """
-    paths: dict[str, bytes] = {}
-    for backend in ("oracle", "native"):
-        out = tmp_path / f"out_{backend}.xlsx"
-        env = {
-            **os.environ,
-            "WOLFXL_WRITER": backend,
-            "WOLFXL_TEST_EPOCH": "0",
-        }
-        script = (
-            "from wolfxl import load_workbook\n"
-            f"wb = load_workbook(r'{FIXTURE}', modify=True)\n"
-            "wb.active['A1'] = 'modified'\n"
-            f"wb.save(r'{out}')\n"
-        )
-        subprocess.run(
-            [sys.executable, "-c", script],
-            env=env,
-            check=True,
-            capture_output=True,
-        )
-        paths[backend] = out.read_bytes()
-
-    assert paths["oracle"] == paths["native"], (
-        "modify-mode bytes differ between WOLFXL_WRITER=oracle and "
-        "WOLFXL_WRITER=native — the patcher should be invariant of the "
-        "writer selection. Wave 5 rip-out would expose this drift."
     )
 
 

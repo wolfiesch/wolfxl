@@ -10,7 +10,6 @@ authors = ["Wolfgang Schoenberger"]
 
 [workspace.dependencies]
 calamine-styles = { version = "0.1", features = ["dates"] }
-rust_xlsxwriter = { version = "0.79", features = ["chrono"] }
 indexmap = "2.2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
@@ -35,7 +34,6 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
 calamine-styles.workspace = true
-rust_xlsxwriter.workspace = true
 indexmap.workspace = true
 zip.workspace = true
 quick-xml.workspace = true

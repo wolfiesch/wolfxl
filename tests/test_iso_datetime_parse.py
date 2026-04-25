@@ -12,7 +12,7 @@ discard the offset (Excel's ``dcterms:created`` is tz-naive); only
 the local datetime survives, which is the documented Excel behavior.
 
 These tests round-trip via ``set_properties()`` + openpyxl reload to
-confirm the parser path is wired through both backends.
+confirm the parser path is wired through the native writer.
 """
 from __future__ import annotations
 
@@ -44,17 +44,13 @@ _FIXED_DT = datetime.datetime(2025, 1, 15, 10, 30, 45)
         "2025-01-15T10:30:45.123456-08:00",
     ],
 )
-@pytest.mark.parametrize("backend", ["native", "oracle"])
 def test_set_properties_created_accepts_tz_iso(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     iso_string: str,
-    backend: str,
 ) -> None:
-    """Both backends should accept tz-aware ISO datetimes via
+    """The native writer should accept tz-aware ISO datetimes via
     ``set_properties()`` and emit a non-empty ``dcterms:created`` that
     openpyxl parses back to the local datetime."""
-    monkeypatch.setenv("WOLFXL_WRITER", backend)
     import wolfxl
 
     wb = wolfxl.Workbook()
@@ -62,17 +58,17 @@ def test_set_properties_created_accepts_tz_iso(
     assert ws is not None
     ws.cell(row=1, column=1, value="probe")
     # Reach into the rust writer directly — set_properties() is the
-    # 4B/oracle pymethod that exercises parse_iso_datetime.
+    # native pymethod that exercises parse_iso_datetime.
     wb._rust_writer.set_properties({"created": iso_string})
 
-    out = tmp_path / f"{backend}.xlsx"
+    out = tmp_path / "out.xlsx"
     wb.save(str(out))
     assert out.exists() and out.stat().st_size > 0
 
     rb = openpyxl.load_workbook(out)
     got = rb.properties.created
     assert got is not None, (
-        f"{backend}: dcterms:created was empty after iso={iso_string!r} — "
+        f"dcterms:created was empty after iso={iso_string!r} — "
         f"parse_iso_datetime returned None and dropped the field"
     )
     # openpyxl returns a tz-naive datetime; compare local components
@@ -80,5 +76,5 @@ def test_set_properties_created_accepts_tz_iso(
     # Excel's dcterms:created spec).
     got_naive = got.replace(tzinfo=None, microsecond=0) if got.tzinfo else got.replace(microsecond=0)
     assert got_naive == _FIXED_DT, (
-        f"{backend}: iso={iso_string!r} expected={_FIXED_DT} got={got_naive}"
+        f"iso={iso_string!r} expected={_FIXED_DT} got={got_naive}"
     )

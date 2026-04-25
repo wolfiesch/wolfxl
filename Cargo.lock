@@ -681,16 +681,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
-name = "rust_xlsxwriter"
-version = "0.79.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c743cb9f2a4524676020e26ee5f298445a82d882b09956811b1e78ca7e42b440"
-dependencies = [
- "chrono",
- "zip 2.4.2",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -976,7 +966,6 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "quick-xml 0.37.5",
- "rust_xlsxwriter",
  "wolfxl-core",
  "wolfxl-writer",
  "zip 2.4.2",

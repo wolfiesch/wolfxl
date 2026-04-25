@@ -14,7 +14,7 @@ def _build_external_links(wb: Any) -> None:
     ws = wb.active
     ws["A1"] = "Anthropic"
     ws["A2"] = "Email"
-    w = wb._rust_writer  # DualWorkbook under WOLFXL_WRITER=both
+    w = wb._rust_writer  # NativeWorkbook (sole write backend after W5)
     w.add_hyperlink(ws.title, {
         "cell": "A1",
         "target": "https://anthropic.com",
