@@ -1,6 +1,17 @@
 //! `xl/worksheets/sheet{N}.xml` emitter — rows, cells, merges, freeze,
 //! columns, print area, and extension hooks for CF/DV. Wave 2B.
 //!
+//! # Element ordering
+//!
+//! CT_Worksheet's `<xsd:sequence>` declares 38 ordered child elements
+//! (ECMA-376 §18.3.1.99). This emitter walks them in the order pinned
+//! by [`wolfxl_merger::ct_worksheet_order::ECMA_ORDER`] — the same
+//! table the modify-mode merger uses to insert sibling blocks into an
+//! existing sheet. Section comments below cite the slot number from
+//! that table (e.g. `slot 6: <sheetData>`); if the spec is ever
+//! extended, update `ECMA_ORDER` once and both this emitter and the
+//! merger pick it up.
+//!
 //! # rId convention (must match [`crate::emit::rels::emit_sheet`])
 //!
 //! Sheet-level relationships are allocated in this order inside
@@ -52,52 +63,74 @@ pub fn emit(
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
     out.push_str("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
 
-    // 1. <dimension>
+    // Slot 2: <dimension>
     emit_dimension(&mut out, sheet);
 
-    // 2. <sheetViews>
+    // Slot 3: <sheetViews>
     emit_sheet_views(&mut out, sheet, sheet_idx);
 
-    // 3. <sheetFormatPr>
+    // Slot 4: <sheetFormatPr>
     out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
 
-    // 4. <cols> (only if non-empty)
+    // Slot 5: <cols> (only if non-empty)
     if !sheet.columns.is_empty() {
         emit_cols(&mut out, sheet);
     }
 
-    // 5. <sheetData>
+    // Slot 6: <sheetData>
     emit_sheet_data(&mut out, sheet, sst);
 
-    // 6. <mergeCells> (only if non-empty)
+    // Slot 15: <mergeCells> (only if non-empty)
     if !sheet.merges.is_empty() {
         emit_merges(&mut out, sheet);
     }
 
-    // EXT-W3C: conditional_formats — inserted between mergeCells and hyperlinks
+    // Slot 17: <conditionalFormatting> — EXT-W3C; 0..N elements per spec
     emit_conditional_formats(&mut out, sheet);
 
-    // EXT-W3C: data_validations — inserted between CF and hyperlinks
+    // Slot 18: <dataValidations> — EXT-W3C
     emit_data_validations(&mut out, sheet);
 
-    // 7. <hyperlinks> (only if any exist)
+    // Slot 19: <hyperlinks> (only if any exist)
     if !sheet.hyperlinks.is_empty() {
         emit_hyperlinks(&mut out, sheet);
     }
 
-    // 8. <pageMargins>
+    // Slot 21: <pageMargins>
     out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
 
-    // EXT-W3A: legacyDrawing — emitted iff !sheet.comments.is_empty(); rId via convention
+    // Slot 31: <legacyDrawing> — EXT-W3A; emitted iff !sheet.comments.is_empty(); rId via convention
     emit_legacy_drawing(&mut out, sheet);
 
-    // EXT-W3B: tableParts — one <tablePart r:id=...> per table
+    // Slot 37: <tableParts> — EXT-W3B; one <tablePart r:id=...> per table
     emit_table_parts(&mut out, sheet);
 
+    // Slot numbers above match wolfxl_merger::ct_worksheet_order::ECMA_ORDER
+    // (the merger crate's own tests assert the table is the canonical 38-slot
+    // §18.3.1.99 sequence; this emitter takes those numbers as the contract).
     out.push_str("</worksheet>");
 
     out.into_bytes()
 }
+
+/// Compile-time assertion that the slot numbers cited in `emit`'s section
+/// comments match `wolfxl_merger::ct_worksheet_order::ECMA_ORDER`. If a
+/// future ECMA extension renumbers a slot, this fails to compile until both
+/// this emitter and the merger are updated together.
+#[allow(dead_code)]
+const _PIN_SLOT_NUMBERS: () = {
+    let order = wolfxl_merger::ct_worksheet_order::ECMA_ORDER;
+    // Slots cited in `emit` above (zero-indexed positions in ECMA_ORDER).
+    assert!(order[1].1 == 2); // dimension
+    assert!(order[5].1 == 6); // sheetData
+    assert!(order[14].1 == 15); // mergeCells
+    assert!(order[16].1 == 17); // conditionalFormatting
+    assert!(order[17].1 == 18); // dataValidations
+    assert!(order[18].1 == 19); // hyperlinks
+    assert!(order[20].1 == 21); // pageMargins
+    assert!(order[30].1 == 31); // legacyDrawing
+    assert!(order[36].1 == 37); // tableParts
+};
 
 /// Compute bounding box of all populated cells and emit `<dimension ref="…"/>`.
 fn emit_dimension(out: &mut String, sheet: &Worksheet) {

@@ -12,6 +12,13 @@ indexmap.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
 wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
+# Used for the ECMA-376 §18.3.1.99 child-element ordering table referenced
+# from `emit/sheet_xml.rs` section comments. The writer does not call
+# `merge_blocks` — it has full model state and emits everything in one
+# pass — but referencing the same `ECMA_ORDER` table guarantees the
+# writer (commit-time) and merger (modify-time) cannot drift on slot
+# numbers as the spec evolves.
+wolfxl-merger = { path = "../wolfxl-merger", version = "0.1" }
 
 [dev-dependencies]
 # Integration tests re-parse the emitter output with quick-xml and crack open

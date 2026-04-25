@@ -1406,6 +1406,7 @@ dependencies = [
  "chrono",
  "indexmap",
  "quick-xml 0.37.5",
+ "wolfxl-merger",
  "wolfxl-rels",
  "zip 2.4.2",
 ]
