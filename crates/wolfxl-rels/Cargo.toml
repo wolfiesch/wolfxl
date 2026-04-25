@@ -8,3 +8,7 @@ description = "OOXML *.rels (Open Packaging Conventions Relationships) parser, m
 
 [dependencies]
 quick-xml.workspace = true
+
+[dev-dependencies]
+zip.workspace = true
+proptest = "1"

@@ -104,7 +104,7 @@ impl From<RelId> for String {
 /// against the part owning the rels file. `External` is set explicitly for
 /// hyperlinks, oleObject links, etc., and `Target` is treated as an opaque
 /// absolute URI (e.g. `https://...`, `mailto:...`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TargetMode {
     Internal,
     External,
