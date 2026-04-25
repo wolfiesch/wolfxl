@@ -133,18 +133,26 @@ fn font_to_xml(spec: &FontSpec) -> String {
 }
 
 fn fill_to_xml(spec: &FillSpec) -> String {
-    if let Some(ref rgb) = spec.fg_color_rgb {
-        format!(
-            "<fill><patternFill patternType=\"{}\"><fgColor rgb=\"{}\"/></patternFill></fill>",
-            xml_escape::attr(&spec.pattern_type),
-            xml_escape::attr(rgb)
-        )
-    } else {
-        format!(
-            "<fill><patternFill patternType=\"{}\"/></fill>",
-            xml_escape::attr(&spec.pattern_type)
-        )
+    // OOXML schema: `<patternFill>` may carry `<fgColor>` and/or `<bgColor>`
+    // children. Emit both when present, in spec order (fg before bg). When
+    // neither is present, self-close the element to match Excel's style.
+    let pattern_attr = xml_escape::attr(&spec.pattern_type);
+    let has_fg = spec.fg_color_rgb.is_some();
+    let has_bg = spec.bg_color_rgb.is_some();
+
+    if !has_fg && !has_bg {
+        return format!("<fill><patternFill patternType=\"{pattern_attr}\"/></fill>");
     }
+
+    let mut inner = format!("<patternFill patternType=\"{pattern_attr}\">");
+    if let Some(ref rgb) = spec.fg_color_rgb {
+        inner.push_str(&format!("<fgColor rgb=\"{}\"/>", xml_escape::attr(rgb)));
+    }
+    if let Some(ref rgb) = spec.bg_color_rgb {
+        inner.push_str(&format!("<bgColor rgb=\"{}\"/>", xml_escape::attr(rgb)));
+    }
+    inner.push_str("</patternFill>");
+    format!("<fill>{inner}</fill>")
 }
 
 fn border_side_xml(tag: &str, side: &BorderSideSpec) -> String {
@@ -766,6 +774,59 @@ mod tests {
         assert!(
             text.contains("<border diagonalUp=\"1\" diagonalDown=\"1\">"),
             "diagonalUp + diagonalDown attrs must land on <border>; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R3: fill bg_color_rgb must round-trip via `<bgColor>`
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_bg_color_emits_bg_element() {
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: "darkHorizontal".into(),
+            fg_color_rgb: None,
+            bg_color_rgb: Some("FFAABBCC".into()),
+        });
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        assert!(
+            text.contains("<bgColor rgb=\"FFAABBCC\"/>"),
+            "bg_color_rgb must round-trip; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R3: fg + bg colors both round-trip in spec order (fg before bg)
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_fg_and_bg_emits_both_in_order() {
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: "darkHorizontal".into(),
+            fg_color_rgb: Some("FF111111".into()),
+            bg_color_rgb: Some("FF222222".into()),
+        });
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        let fg_pos = text.find("<fgColor rgb=\"FF111111\"/>").expect("fg present");
+        let bg_pos = text.find("<bgColor rgb=\"FF222222\"/>").expect("bg present");
+        assert!(fg_pos < bg_pos, "fg must precede bg in OOXML; got:\n{text}");
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R3: empty fill (no fg, no bg) still self-closes — no regression
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_no_colors_self_closes() {
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: "gray0625".into(),
+            fg_color_rgb: None,
+            bg_color_rgb: None,
+        });
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        assert!(
+            text.contains("<patternFill patternType=\"gray0625\"/>"),
+            "empty pattern fill must self-close; got:\n{text}"
         );
     }
 
