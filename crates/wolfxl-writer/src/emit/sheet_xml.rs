@@ -362,11 +362,15 @@ fn emit_cell(
             let escaped_expr = xml_escape::text(expr);
             match result {
                 None => {
+                    // Emit a stub <v>0</v> so reader-only paths (calamine,
+                    // xlsx2csv) see *some* cached value. Without it, calamine
+                    // hands back `None` for every formula cell since it does
+                    // not evaluate expressions itself. Mirrors rust_xlsxwriter.
                     out.push_str(&format!("<c r=\"{}\"", cell_ref));
                     if let Some(s) = cell.style_id {
                         out.push_str(&format!(" s=\"{}\"", s));
                     }
-                    out.push_str(&format!("><f>{}</f></c>", escaped_expr));
+                    out.push_str(&format!("><f>{}</f><v>0</v></c>", escaped_expr));
                 }
                 Some(FormulaResult::Number(n)) => {
                     out.push_str(&format!("<c r=\"{}\"", cell_ref));
@@ -966,10 +970,13 @@ mod tests {
         );
     }
 
-    // --- 10. Formula without result has no <v> ---
+    // --- 10. Formula without result emits stub <v>0</v> ---
 
     #[test]
-    fn formula_without_result_has_no_v() {
+    fn formula_without_result_emits_stub_zero() {
+        // Without a stub <v>, calamine and xlsx2csv show None for every
+        // formula cell. rust_xlsxwriter writes <v>0</v> for the same reason;
+        // we mirror that so read-back paths keep working.
         let mut sheet = Worksheet::new("S");
         sheet.set_cell(
             5,
@@ -982,13 +989,10 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("<f>SUM(A1:A10)</f>"), "formula expr: {text}");
-        // The cell should not have a <v> sibling
-        // Check that there's no <v> inside the C5 cell
-        let cell_start = text.find("<c r=\"C5\"").expect("C5 cell");
-        let cell_end = text[cell_start..].find("</c>").expect("</c>") + cell_start;
-        let cell_xml = &text[cell_start..=cell_end + 3];
-        assert!(!cell_xml.contains("<v>"), "no <v> for formula without result: {cell_xml}");
+        assert!(
+            text.contains("<f>SUM(A1:A10)</f><v>0</v>"),
+            "formula+stub-v: {text}"
+        );
     }
 
     // --- 11. Formula with numeric result ---
