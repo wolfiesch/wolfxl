@@ -1910,6 +1910,11 @@ class Worksheet:
         # shapes those methods expect.
         if self._pending_hyperlinks:
             for coord, hl in self._pending_hyperlinks.items():
+                if hl is None:
+                    # Explicit-delete sentinel — there's nothing to flush
+                    # in write mode (no prior hyperlink existed). Modify
+                    # mode would honor this, but that's a T1.5 path.
+                    continue
                 target = hl.target
                 internal = False
                 if target is None and hl.location is not None:
@@ -1928,6 +1933,8 @@ class Worksheet:
 
         if self._pending_comments:
             for coord, c in self._pending_comments.items():
+                if c is None:
+                    continue
                 writer.add_comment(sheet, {
                     "cell": coord,
                     "text": c.text,
