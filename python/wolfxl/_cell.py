@@ -6,7 +6,9 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
+from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl.utils.numbers import is_date_format
 
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
@@ -58,6 +60,109 @@ class Cell:
     @property
     def column(self) -> int:
         return self._col
+
+    @property
+    def column_letter(self) -> str:
+        """Column letter (e.g. ``"A"``, ``"AA"``) — openpyxl alias."""
+        return _column_letter(self._col)
+
+    @property
+    def parent(self) -> Worksheet:
+        """The containing Worksheet — openpyxl alias."""
+        return self._ws
+
+    def offset(self, row: int = 0, column: int = 0) -> Cell:
+        """Return the cell ``row`` rows down and ``column`` columns right.
+
+        Matches openpyxl's ``Cell.offset(row=0, column=0)`` signature. Negative
+        offsets are allowed as long as the target row/col stays within Excel's
+        1-based address space.
+        """
+        return self._ws._get_or_create_cell(self._row + row, self._col + column)  # noqa: SLF001
+
+    @property
+    def data_type(self) -> str:
+        """openpyxl-compatible single-char type code.
+
+        Maps to openpyxl's tags:
+        - ``"s"``: string
+        - ``"n"``: number (openpyxl also uses this for blank cells)
+        - ``"b"``: boolean
+        - ``"d"``: date / datetime
+        - ``"f"``: formula
+        - ``"e"``: error
+        """
+        from wolfxl._worksheet import _canonical_data_type
+
+        canon = _canonical_data_type(self.value)
+        mapping = {
+            "string": "s",
+            "number": "n",
+            "boolean": "b",
+            "datetime": "d",
+            "date": "d",
+            "formula": "f",
+            "error": "e",
+            "blank": "n",
+        }
+        return mapping.get(canon, "n")
+
+    @property
+    def has_style(self) -> bool:
+        """True if any style attribute has been explicitly set on this cell.
+
+        In read mode, checks whether the on-disk format carries any non-default
+        style. In write mode, checks the dirty-flag sentinels so an unset cell
+        reads as False and a cell with ``font = Font(bold=True)`` reads as True.
+        """
+        if self._format_dirty:
+            return True
+        font = self._font if self._font is not _UNSET else None
+        fill = self._fill if self._fill is not _UNSET else None
+        border = self._border if self._border is not _UNSET else None
+        align = self._alignment if self._alignment is not _UNSET else None
+        nfmt = self._number_format if self._number_format is not _UNSET else None
+        if font and font != Font():
+            return True
+        if fill and fill != PatternFill():
+            return True
+        if border and border != Border():
+            return True
+        if align and align != Alignment():
+            return True
+        if nfmt and nfmt != "General":
+            return True
+        return False
+
+    @property
+    def is_date(self) -> bool:
+        """True if the value is a date/datetime or the number format is a date."""
+        value = self.value
+        if hasattr(value, "year") and hasattr(value, "month"):
+            return True
+        return is_date_format(self.number_format)
+
+    @property
+    def style(self) -> None:
+        """Named style name. Not yet supported; always returns None.
+
+        openpyxl uses this to look up ``NamedStyle`` objects in
+        ``wb.named_styles``. wolfxl hasn't implemented named styles yet
+        (tracked for T2). Setting it raises ``NotImplementedError``.
+        """
+        return None
+
+    @style.setter
+    def style(self, value: Any) -> None:  # noqa: ARG002
+        raise NotImplementedError(
+            "Named styles are not yet supported by wolfxl. "
+            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
+        )
+
+    @property
+    def protection(self) -> None:
+        """Read-only default (None). Cell protection is not supported."""
+        return None
 
     # ------------------------------------------------------------------
     # Value
