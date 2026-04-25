@@ -4,7 +4,61 @@
 //! compat tags) through verbatim.
 //!
 //! See `Plans/rfcs/011-xml-block-merger.md` for the full design rationale.
-//! Module-level invariants are pinned in commit 6 of the RFC-011 slice.
+//!
+//! # Invariants
+//!
+//! - **Streaming and memory-bounded.** [`merge_blocks`] does exactly one
+//!   pass through the source via `quick_xml::Reader`, writing every event
+//!   verbatim except where it skips a block being replaced or injects a
+//!   new one. Peak extra allocation is `O(input bytes)`, dominated by the
+//!   output buffer; the merger never builds a DOM. A 50 MB sheet produces
+//!   well under 4 MB peak heap above the input/output buffers (RFC-011
+//!   §6 test #11).
+//!
+//! - **Replace-all semantics for `<conditionalFormatting>`.** Slot 17 is
+//!   the only 0..N slot in CT_Worksheet. If any
+//!   [`SheetBlock::ConditionalFormatting`] is in the supplied `blocks`,
+//!   every existing `<conditionalFormatting>` element in the source is
+//!   removed before the supplied list is inserted. Callers that want to
+//!   preserve existing CF rules MUST read them out of the source first
+//!   and re-include them in `blocks`. RFC-011 §5.5 / INDEX Q4
+//!   (locked 2026-04-25).
+//!
+//! - **Verbatim pass-through for unknown elements.** Anything whose
+//!   local-name is not in [`ct_worksheet_order::ECMA_ORDER`] flows through
+//!   at its source position with attributes, prefix bindings, namespace
+//!   declarations, and entity escaping byte-identical. This includes
+//!   `extLst`-internal extensions (`x14:sparklineGroups`, icon-set
+//!   extensions, mc:Ignorable compat tags), x14ac extension attributes,
+//!   third-party tags, and any future MS schema extensions. The
+//!   byte-preservation property is guarded by the
+//!   `extlst_is_byte_preserved` test.
+//!
+//! - **Block payloads are opaque bytes.** The merger does NOT validate
+//!   that supplied bytes are well-formed XML, that they start with the
+//!   expected root element, or that any `r:id` references they contain
+//!   correspond to relationships that exist in the rels graph. Each is
+//!   the caller's responsibility — modify-mode RFCs (RFC-022/024/025/026)
+//!   own block content; the merger only owns ordering. Garbage in →
+//!   garbage out.
+//!
+//! - **Determinism.** With `WOLFXL_TEST_EPOCH=0` set, two saves of the
+//!   same workbook with the same queued blocks produce byte-identical
+//!   output. The merger has no time-dependent state; its determinism
+//!   contract is "identical inputs ⇒ identical bytes". `BTreeMap`-keyed
+//!   pending blocks ensure CF order matches caller insertion order.
+//!
+//! - **Single rewrite point.** The only place the merger ever rewrites
+//!   a non-block element is the `<worksheet>` open tag, and only when
+//!   needed to inject `xmlns:r=…` for a payload that uses the
+//!   `r:` prefix without the source declaring it (RFC-011 §8 risk #4).
+//!   Every other source element is passed through with its byte-slice
+//!   intact.
+//!
+//! - **Idempotent on empty `blocks`.** `merge_blocks(xml, vec![])` short-
+//!   circuits without invoking the parser; returns a `Vec` clone of the
+//!   input bytes byte-identical to the source. Even malformed XML
+//!   passes through.
 
 use std::collections::BTreeMap;
 
