@@ -162,12 +162,22 @@ fn border_side_xml(tag: &str, side: &BorderSideSpec) -> String {
 }
 
 fn border_to_xml(spec: &BorderSpec) -> String {
-    let mut out = String::from("<border>");
+    let mut diag_attrs = String::new();
+    if spec.diagonal_up {
+        diag_attrs.push_str(" diagonalUp=\"1\"");
+    }
+    if spec.diagonal_down {
+        diag_attrs.push_str(" diagonalDown=\"1\"");
+    }
+    let mut out = format!("<border{diag_attrs}>");
     out.push_str(&border_side_xml("left", &spec.left));
     out.push_str(&border_side_xml("right", &spec.right));
     out.push_str(&border_side_xml("top", &spec.top));
     out.push_str(&border_side_xml("bottom", &spec.bottom));
-    out.push_str("<diagonal/>");
+    // Diagonal goes through the same renderer as the other sides so its
+    // style + color flow through. Empty BorderSideSpec emits `<diagonal/>`
+    // which is valid OOXML; non-empty emits the full element.
+    out.push_str(&border_side_xml("diagonal", &spec.diagonal));
     out.push_str("</border>");
     out
 }
@@ -711,5 +721,77 @@ mod tests {
             "missing red color inside dxf: {text}"
         );
         assert!(text.contains("</dxfs>"), "missing </dxfs>: {text}");
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R2: diagonal style + color must round-trip through `<diagonal>`
+    // -------------------------------------------------------------------
+    #[test]
+    fn border_diagonal_style_and_color_emit() {
+        let mut styles = StylesBuilder::default();
+        let border = BorderSpec {
+            diagonal: BorderSideSpec {
+                style: Some("thin".into()),
+                color_rgb: Some("FF112233".into()),
+            },
+            ..Default::default()
+        };
+        styles.intern_border(&border);
+        let bytes = emit(&styles);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<diagonal style=\"thin\"><color rgb=\"FF112233\"/></diagonal>"),
+            "diagonal style + color must round-trip; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R2: diagonalUp / diagonalDown attrs land on the parent <border>
+    // -------------------------------------------------------------------
+    #[test]
+    fn border_diagonal_up_and_down_attrs_present() {
+        let mut styles = StylesBuilder::default();
+        let border = BorderSpec {
+            diagonal: BorderSideSpec {
+                style: Some("thin".into()),
+                color_rgb: None,
+            },
+            diagonal_up: true,
+            diagonal_down: true,
+            ..Default::default()
+        };
+        styles.intern_border(&border);
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        assert!(
+            text.contains("<border diagonalUp=\"1\" diagonalDown=\"1\">"),
+            "diagonalUp + diagonalDown attrs must land on <border>; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // W4E.R2: empty diagonal still emits valid `<diagonal/>` (no regression)
+    // -------------------------------------------------------------------
+    #[test]
+    fn border_empty_diagonal_emits_self_closing() {
+        let mut styles = StylesBuilder::default();
+        let border = BorderSpec {
+            left: BorderSideSpec {
+                style: Some("thin".into()),
+                color_rgb: None,
+            },
+            ..Default::default()
+        };
+        styles.intern_border(&border);
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        // No diagonalUp/diagonalDown when both are false.
+        assert!(
+            !text.contains("diagonalUp") && !text.contains("diagonalDown"),
+            "empty-diag border must not emit up/down attrs: {text}"
+        );
+        assert!(
+            text.contains("<diagonal/>"),
+            "empty diagonal must remain self-closing: {text}"
+        );
     }
 }
