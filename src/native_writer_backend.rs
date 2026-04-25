@@ -897,7 +897,12 @@ fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> 
     let description: Option<String> =
         props.get_item("description")?.and_then(|v| v.extract().ok());
     let category: Option<String> = props.get_item("category")?.and_then(|v| v.extract().ok());
-    // contentStatus has no field in DocProperties — silently ignored per spec.
+    // Python passes the OOXML-canonical camelCase key. Oracle uses the same
+    // wire format at rust_xlsxwriter_backend.rs:2008 (`set_status`); native
+    // mirrors the Python -> emitter -> <cp:contentStatus> path verbatim.
+    let content_status: Option<String> = props
+        .get_item("contentStatus")?
+        .and_then(|v| v.extract().ok());
 
     let created: Option<chrono::NaiveDateTime> =
         props.get_item("created")?.and_then(|v| {
@@ -916,6 +921,7 @@ fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> 
         keywords,
         description,
         category,
+        content_status,
         created,
         ..Default::default()
     })

@@ -110,6 +110,14 @@ pub fn emit_core(wb: &Workbook) -> Vec<u8> {
         xml_text_escape(&last_modified_by)
     ));
     push_optional_element(&mut out, "cp:category", props.category.as_deref());
+    // OOXML schema places <cp:contentStatus> after <cp:category> and before
+    // the dcterms:created/modified pair. Excel reads this case-sensitively;
+    // `xml_text_escape` handles the `<` / `&` Excel cares about.
+    push_optional_element(
+        &mut out,
+        "cp:contentStatus",
+        props.content_status.as_deref(),
+    );
 
     out.push_str(&format!(
         "<dcterms:created xsi:type=\"dcterms:W3CDTF\">{}</dcterms:created>",
@@ -228,6 +236,7 @@ mod tests {
         wb.doc_props.description = Some("A test file.".into());
         wb.doc_props.last_modified_by = Some("Bob".into());
         wb.doc_props.category = Some("Testing".into());
+        wb.doc_props.content_status = Some("Draft".into());
 
         let bytes = emit_core(&wb);
         parse_ok(&bytes);
@@ -239,6 +248,21 @@ mod tests {
         assert!(text.contains("<dc:description>A test file.</dc:description>"));
         assert!(text.contains("<cp:lastModifiedBy>Bob</cp:lastModifiedBy>"));
         assert!(text.contains("<cp:category>Testing</cp:category>"));
+        assert!(text.contains("<cp:contentStatus>Draft</cp:contentStatus>"));
+        // OOXML schema order: contentStatus immediately after category,
+        // before dcterms:created — guard the position so a future emitter
+        // refactor doesn't silently move it (Excel reads strictly).
+        let cat_pos = text.find("<cp:category>").unwrap();
+        let status_pos = text.find("<cp:contentStatus>").unwrap();
+        let created_pos = text.find("<dcterms:created").unwrap();
+        assert!(cat_pos < status_pos && status_pos < created_pos);
+    }
+
+    #[test]
+    fn core_omits_content_status_when_unset() {
+        let wb = Workbook::new();
+        let text = String::from_utf8(emit_core(&wb)).unwrap();
+        assert!(!text.contains("<cp:contentStatus"));
     }
 
     #[test]

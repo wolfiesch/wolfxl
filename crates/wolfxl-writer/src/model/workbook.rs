@@ -111,6 +111,10 @@ pub struct DocProperties {
     pub description: Option<String>,
     pub last_modified_by: Option<String>,
     pub category: Option<String>,
+    /// OOXML `<cp:contentStatus>` — free-form workflow tag (e.g. "Draft",
+    /// "Final", "Reviewed"). Mirrors oracle's `set_status()` and the
+    /// `contentStatus` key Python's `set_properties` accepts.
+    pub content_status: Option<String>,
 
     /// If `None`, the emitter uses the current wall-clock time (or the
     /// `WOLFXL_TEST_EPOCH` override for deterministic output).
