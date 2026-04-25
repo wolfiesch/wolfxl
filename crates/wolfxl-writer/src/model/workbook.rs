@@ -63,6 +63,16 @@ impl Workbook {
         self.sheets.iter_mut().find(|s| s.name == name)
     }
 
+    /// Look up a sheet by name and return its position in `self.sheets`.
+    ///
+    /// Used by `NativeWorkbook::add_named_range` to translate the oracle's
+    /// `scope="sheet"` + sheet name into the native
+    /// [`DefinedName::scope_sheet_index`]. Returns `None` when no sheet
+    /// matches — callers surface this to Python as a `ValueError`.
+    pub fn sheet_index_by_name(&self, name: &str) -> Option<usize> {
+        self.sheets.iter().position(|s| s.name == name)
+    }
+
     /// Rename a sheet by its current name. Errors when no sheet matches
     /// `old`, when the new name fails Excel validation, or when the new
     /// name would collide with another existing sheet.
@@ -180,6 +190,21 @@ mod tests {
             .unwrap()
             .set_column_width(1, 25.0);
         assert_eq!(wb.sheets[0].columns[&1].width, Some(25.0));
+    }
+
+    #[test]
+    fn sheet_index_by_name_returns_position() {
+        let wb = wb_with(&["Data", "Summary", "Notes"]);
+        assert_eq!(wb.sheet_index_by_name("Data"), Some(0));
+        assert_eq!(wb.sheet_index_by_name("Summary"), Some(1));
+        assert_eq!(wb.sheet_index_by_name("Notes"), Some(2));
+    }
+
+    #[test]
+    fn sheet_index_by_name_missing_returns_none() {
+        let wb = wb_with(&["Data"]);
+        assert_eq!(wb.sheet_index_by_name("Nope"), None);
+        assert_eq!(wb.sheet_index_by_name(""), None);
     }
 
     #[test]

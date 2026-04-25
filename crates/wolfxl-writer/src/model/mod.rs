@@ -16,14 +16,18 @@ pub mod workbook;
 pub mod worksheet;
 
 pub use cell::{WriteCell, WriteCellValue};
-pub use comment::{Comment, CommentAuthor};
-pub use conditional::{ConditionalFormat, ConditionalRule};
+pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
+pub use conditional::{
+    CellIsOperator, ColorScaleStop, ConditionalFormat, ConditionalKind, ConditionalRule,
+    ConditionalThreshold,
+};
 pub use date::to_excel_serial;
-pub use defined_name::DefinedName;
+pub use defined_name::{BuiltinName, DefinedName};
 pub use format::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, StylesBuilder,
+    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, FormatSpec,
+    StylesBuilder,
 };
 pub use table::{Table, TableColumn, TableStyle};
-pub use validation::{DataValidation, ValidationOperator, ValidationType};
+pub use validation::{DataValidation, ErrorStyle, ValidationOperator, ValidationType};
 pub use workbook::{DocProperties, Workbook};
-pub use worksheet::{Column, FreezePane, Row, SplitPane, Worksheet};
+pub use worksheet::{Column, FreezePane, Hyperlink, Row, SheetVisibility, SplitPane, Worksheet};

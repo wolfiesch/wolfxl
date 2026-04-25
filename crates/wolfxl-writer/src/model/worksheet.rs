@@ -267,10 +267,31 @@ pub struct SplitPane {
 }
 
 /// A hyperlink pointing from a cell (or range) to a target URL or location.
+///
+/// # Internal vs external targets
+///
+/// The emitter at [`crate::emit::sheet_xml`] distinguishes the two cases by
+/// sniffing [`Hyperlink::target`]'s leading character:
+///
+/// - **External** (target does NOT start with `'#'`): emitted as
+///   `<hyperlink ref="A1" r:id="rIdN"/>` plus an external-target relationship
+///   in `xl/worksheets/_rels/sheetN.xml.rels`. Use this for `"https://…"`,
+///   `"mailto:…"`, `"file://…"`, etc.
+///
+/// - **Internal** (target starts with `'#'`): emitted as
+///   `<hyperlink ref="A1" location="Sheet2!A1"/>` with no relationship. The
+///   leading `'#'` is stripped on emission.
+///
+/// Callers converting from oracle-shape payloads (which use
+/// `"internal:<loc>"` as the convention) must translate: when the oracle's
+/// `internal=true` is set, the native-side target becomes
+/// `format!("#{}", raw.trim_start_matches('#'))`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hyperlink {
-    /// Either an external URL or an internal workbook reference
-    /// (e.g. `"#Sheet2!A1"`).
+    /// Either an external URL (`"https://…"`, `"mailto:…"`) or an internal
+    /// workbook reference prefixed with `'#'` (e.g. `"#Sheet2!A1"`). The
+    /// leading `'#'` is how the emitter detects the internal case; do not
+    /// omit it for sheet-local targets.
     pub target: String,
     pub display: Option<String>,
     pub tooltip: Option<String>,
