@@ -62,6 +62,19 @@ _ORACLE_BUGS_DOCUMENTED: dict[str, str] = {
         "wave3_rich_features_roundtrip; this dual-backend comparison cannot "
         "pass and is xfailed so a passing result would also flag a regression."
     ),
+    "row_height_column_width_variable": (
+        "rust_xlsxwriter applies a pixel-padding heuristic on column widths "
+        "(25.5 -> 26.28515625, 8.0 -> 8.7109375) to mimic Excel's UI dialog "
+        "behavior, mutating user-supplied widths on save. Native preserves "
+        "openpyxl-compat: the value the caller assigned to "
+        "``ws.column_dimensions['A'].width`` round-trips verbatim. Verified "
+        "via openpyxl write/read of the same widths (which stores '25.5' "
+        "literally). This dual-backend comparison cannot pass; native-side "
+        "correctness is now measurable thanks to W4E.H3 wiring "
+        "``column_width`` into ``_compare_sheet`` before the 10k-cell early "
+        "return. A future native-side rounding regression would fail this "
+        "case for the right reason."
+    ),
 }
 
 

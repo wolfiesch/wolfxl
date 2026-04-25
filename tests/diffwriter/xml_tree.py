@@ -25,6 +25,7 @@ Three normalizations matter:
 from __future__ import annotations
 
 import posixpath
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -428,13 +429,12 @@ _METADATA_INFIX_PATTERNS: tuple[str, ...] = (
     "xl/styles.xml:/styleSheet/numFmts[1]: child count",
     "xl/styles.xml:/styleSheet/cellXfs[1]/xf[",
     "xl/styles.xml:/styleSheet/cellXfs[1]: child count",
-    # Per-cell @s attribute divergence inside sheets — when style indices
-    # differ but render identically (already covered by Layer 3's per-cell
-    # font/fill/border SOFT-tier checks), the @s position attr is cosmetic.
-    "/c[1]/@s",
-    "/c[2]/@s",
-    "/c[3]/@s",
-    "/c[1]/@t",
+    # Per-cell @s + @t attribute divergence: the index/type position attrs
+    # are cosmetic when Layer 3's per-cell font/fill/border SOFT-tier checks
+    # already prove the rendered cell matches. Caught via regex below — the
+    # earlier hard-coded ``/c[1]/@s`` ... ``/c[3]/@s`` only filtered cells in
+    # the first three columns, leaving columns 4+ silently noisy.
+    # See _METADATA_REGEX_PATTERNS for the replacement.
     # Worksheet <dimension> hint — Excel re-derives this when opening, so
     # it's purely a load-time optimization. Oracle computes it including
     # merged ranges; native uses populated cells only. Visually identical.
@@ -472,6 +472,21 @@ _METADATA_SUFFIX_PATTERNS: tuple[str, ...] = (
 )
 _METADATA_ATTR_SUFFIXES: tuple[str, ...] = (
     "/@spans:",  # ...whose attribute is @spans is the row hint
+)
+
+# Regex patterns matched against the full diff string. Used when an
+# emitter-cosmetic divergence appears at variable column indices that
+# can't be enumerated cheaply with substring matching.
+_METADATA_REGEX_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # H1 fix: per-cell @s (style index) and @t (cell type) attributes.
+    # The style index can differ across backends without a rendered-cell
+    # divergence (Layer 3's per-cell font/fill/border SOFT-tier checks
+    # cover the actual rendering); the @t type position attr is similarly
+    # cosmetic when the value matches. ``/c[NN]/@s:`` matches any column
+    # index (1+, single- or multi-digit) — a stricter pattern than the
+    # earlier hard-coded /c[1]/@s ... /c[3]/@s which silently let column
+    # 4+ divergences through.
+    re.compile(r"/c\[\d+\]/@[st]:"),
 )
 
 # Exact diff strings that document part-presence emitter asymmetries.
@@ -522,11 +537,25 @@ def _filter_known_gaps(diffs: list[str]) -> list[str]:
             skip = True
         # Sheet-level rels files: rId allocation order is emitter-cosmetic
         # (the ``r:id`` rewrite already normalizes references at the referrer
-        # parts). A real bad-target divergence would surface as a wrong
-        # ``r:id="@<target>"`` value at the referrer, which IS strictly
-        # diffed.
+        # parts). H4 fix: filter @Id, @Target, @TargetMode and child-count
+        # divergence — but @Type is strictly diffed because a wrong Type
+        # means the relationship is misclassified (e.g. comments rel
+        # pointing at a hyperlink Type, which would silently swallow
+        # data on cross-tool round-trip).
+        #
+        # @Target divergence: oracle places comments at xl/commentsN.xml;
+        # native places them at xl/comments/commentsN.xml. Both are valid
+        # OOXML — each side's rels Target resolves to its own file, and
+        # both Excel and LibreOffice load both conventions. The divergence
+        # is a documented emitter cosmetic, not a bug.
         if "/_rels/" in d and d.startswith("xl/worksheets/_rels/"):
-            skip = True
+            if (
+                "/@Id:" in d
+                or "/@Target:" in d  # path naming convention; emitter-cosmetic
+                or "/@TargetMode:" in d  # internal/external attr; cosmetic
+                or "child count differs" in d
+            ):
+                skip = True
         # Per-element emitter-cosmetic paths.
         for prefix in _METADATA_ELEMENT_PATHS:
             if d.startswith(prefix):
@@ -548,8 +577,17 @@ def _filter_known_gaps(diffs: list[str]) -> list[str]:
             s in d for s in _METADATA_ATTR_SUFFIXES
         ):
             continue
+        # Regex-matched cosmetic divergences (e.g. /c[NN]/@s for any column).
+        if any(rx.search(d) for rx in _METADATA_REGEX_PATTERNS):
+            continue
         out.append(d)
     return out
+
+    # H5 (deferred TODO): _METADATA_INFIX_PATTERNS includes
+    # ``/dataValidations[1]/dataValidation[1]/@showDropDown`` but the
+    # ``[1]`` is a positional index — multi-DV cases (only one in the
+    # current corpus) would silently noisy. Replace with a regex
+    # ``/dataValidation\[\d+\]/@showDropDown`` once the case set grows.
 
 
 def compute_diffs(

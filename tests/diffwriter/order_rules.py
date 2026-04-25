@@ -19,7 +19,12 @@ SORT_BY_ATTRIBUTE = {
     "mergeCell": ("ref", False),
     "definedName": ("name", False),
     "sheet": ("sheetId", True),
-    "Relationship": ("Id", False),
+    # Relationships are sorted by Target (the resolved part path) rather
+    # than Id, because Id (rId1, rId2, ...) is the very allocation-order
+    # difference between backends that we want comparison-invariant.
+    # Sorting by Target gives a set-based comparison: same logical
+    # relationship gets the same sort key on both sides.
+    "Relationship": ("Target", False),
     "Default": ("Extension", False),
     "Override": ("PartName", False),
     "numFmt": ("numFmtId", True),

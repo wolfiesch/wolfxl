@@ -45,6 +45,7 @@ DIMENSION_TIERS: dict[str, Tier] = {
     "freeze_panes": Tier.HARD,
     "defined_name.refers_to": Tier.HARD,
     "column_width": Tier.HARD,
+    "sheet_names": Tier.HARD,
     "utils.get_column_letter": Tier.HARD,
     "utils.column_index_from_string": Tier.HARD,
     "utils.range_boundaries": Tier.HARD,
@@ -231,6 +232,30 @@ def _compare_sheet(
     a_merged = {str(r) for r in ws_a.merged_cells.ranges}
     b_merged = {str(r) for r in ws_b.merged_cells.ranges}
     report.record("merged_cells", f"{sheet_name}:merged", a_merged, b_merged)
+
+    # Column widths must be measured BEFORE the cell loop — the
+    # ``_MAX_CELLS_PER_SHEET`` early return below skips anything that
+    # follows on large sheets, and ``column_width`` is HARD-tier so we
+    # cannot let it silently fall through. ``column_dimensions`` is a
+    # dict-like that lazily creates entries on key access; iterate the
+    # union of explicitly-set columns from both sides only.
+    a_widths = {
+        col: dim.width
+        for col, dim in ws_a.column_dimensions.items()
+        if dim.width is not None
+    }
+    b_widths = {
+        col: dim.width
+        for col, dim in ws_b.column_dimensions.items()
+        if dim.width is not None
+    }
+    for col in sorted(set(a_widths) | set(b_widths)):
+        report.record(
+            "column_width",
+            f"{sheet_name}:col:{col}",
+            a_widths.get(col),
+            b_widths.get(col),
+        )
 
     cells_seen = 0
     for row in ws_a.iter_rows():
