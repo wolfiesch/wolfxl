@@ -1,8 +1,39 @@
 //! `.rels` (Open Packaging Conventions Relationships) parser, mutable graph,
-//! and serializer.
+//! and serializer. Shared between the writer (`wolfxl-writer`) and the
+//! patcher (`src/wolfxl/`) so the OOXML rels grammar lives in exactly one
+//! place.
 //!
 //! See ECMA-376 Part 1 §15.2 (Open Packaging Conventions — Relationships) and
-//! `Plans/rfcs/010-rels-graph.md` for the design rationale.
+//! `Plans/rfcs/010-rels-graph.md` for the full design rationale.
+//!
+//! # Invariants
+//!
+//! - **`RelId` is opaque.** Allocated ids are returned by [`RelsGraph::add`]
+//!   and may be stored in any sibling part as `r:id="…"`. Callers must not
+//!   parse the numeric suffix or assume contiguity. Excel does not require
+//!   gap-free ids; we exploit that for monotonicity.
+//! - **`next_rid` is monotonic and never decreases.** [`RelsGraph::remove`]
+//!   does not free an id for re-use. This is the correctness fix over
+//!   openpyxl's `f"rId{len(self)}"` allocation: in modify mode the patcher
+//!   mixes existing-on-disk ids with freshly-allocated ones, so any id
+//!   re-use would silently re-aim an unrelated reference.
+//! - **Source order is preserved.** [`RelsGraph::parse`] pushes into a `Vec`
+//!   in document order; [`RelsGraph::serialize`] iterates that `Vec`. No
+//!   sort. Reordering would break the modify-mode "minimal diff" promise.
+//! - **`TargetMode` semantics.** `Internal` (default) means `Target` is a
+//!   ZIP-relative URI resolved against the part owning the rels file.
+//!   `External` means `Target` is an opaque absolute URI (e.g. `https://`,
+//!   `mailto:`); we never normalize, percent-encode, or otherwise rewrite it.
+//! - **`find_by_target` returns the first match by source order.** Callers
+//!   use this to dedupe — e.g. a hyperlink to the same external URL from
+//!   two cells should reuse one rId rather than allocating a fresh one.
+//! - **Lenient parser.** Missing `Id`/`Type`/`Target` on a `<Relationship>`
+//!   skips that entry silently (matches the legacy reader behavior in
+//!   `src/ooxml_util.rs::parse_relationship_targets`); only malformed XML
+//!   surfaces as an error.
+//! - **Deterministic serialization.** Always emits the canonical preamble,
+//!   one continuous body line, fixed attribute order (Id, Type, Target,
+//!   [TargetMode]). Required for `WOLFXL_TEST_EPOCH=0` golden files.
 
 use std::fmt;
 
