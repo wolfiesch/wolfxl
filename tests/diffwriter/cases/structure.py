@@ -34,8 +34,24 @@ def _build_row_height_column_width(wb: Any) -> None:
     ws.column_dimensions["B"].width = 8
 
 
+def _build_multi_sheet_names(wb: Any) -> None:
+    """W4E.H2 follow-on: exercise the ``sheet_names`` HARD dimension by
+    building a workbook with three uniquely-named sheets. Default
+    ``Workbook()`` ships one auto-named sheet; this case renames it and
+    adds two more so a divergence on sheet ordering or naming becomes
+    observable across backends.
+    """
+    wb.active.title = "Inputs"
+    wb.active["A1"] = "raw"
+    sheet2 = wb.create_sheet("Computed")
+    sheet2["A1"] = "result"
+    sheet3 = wb.create_sheet("Notes")
+    sheet3["A1"] = "scratch"
+
+
 CASES = [
     ("merges_single_and_multi", _build_merges),
     ("freeze_panes_row_col_both", _build_freeze),
     ("row_height_column_width_variable", _build_row_height_column_width),
+    ("structure_multi_sheet_names", _build_multi_sheet_names),
 ]

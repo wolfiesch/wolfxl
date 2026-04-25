@@ -9,8 +9,9 @@ Round-trips every native-emitted xlsx through ``soffice --headless
      (``zipfile.is_zipfile`` + parses central directory)
 
 Layer 4 is **gold-star, not blocking**. Acceptance gate is ≥95% pass rate
-across the full case set + 15 SynthGL fixtures (40 round-trips total).
-A single failing case indicates a real-world interop bug that nightly
+across the full case set (auto-discovered via ``_ALL_CASES``) + the 15
+SynthGL fixtures under ``tests/parity/fixtures/synthgl_snapshot``. A
+single failing case indicates a real-world interop bug that nightly
 nag-post or a follow-up slice should resolve, but does NOT gate Wave 5
 rip-out.
 

@@ -41,13 +41,30 @@ Run:
 WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run pytest tests/diffwriter/soffice_smoke.py -v
 ```
 
-Acceptance gate is ≥95% pass rate across the 25 hand-built cases + 15
-SynthGL fixtures (40 round-trips total). A handful of expected failures
-goes in `_SOFFICE_XFAIL_CASES` in `cases/__init__.py` so the layer
-remains green-by-default while documenting known LO incompatibilities.
+Acceptance gate is ≥95% pass rate across all hand-built cases (auto-discovered
+via `_ALL_CASES` — 28 as of W4G) + 15 SynthGL fixtures (43 round-trips total).
+A handful of expected failures goes in `_SOFFICE_XFAIL_CASES` in
+`cases/__init__.py` so the layer remains green-by-default while documenting
+known LO incompatibilities.
 
 Layer 4 is gold-star: a failing case indicates an interop bug worth
 chasing in a follow-up slice but does NOT block ship.
+
+### First-run results (W4G — 2026-04-25)
+
+| Metric | Value |
+|--------|-------|
+| LibreOffice version | 26.2.2.2 (Homebrew cask, macOS arm64) |
+| Native cases | 28 / 28 pass |
+| SynthGL fixtures | 15 / 15 pass |
+| Total round-trips | **43 / 43 pass (100%)** |
+| Wall-clock runtime | ~35 s (warm cache) |
+| `_SOFFICE_XFAIL_CASES` | empty — no LO-side incompatibilities surfaced |
+
+A clean first-run validates that the native writer's OOXML is interoperable
+with an OOXML parser (LO) developed entirely independently of openpyxl,
+calamine, and `rust_xlsxwriter`. Wave 5 rip-out is unblocked from this
+gate.
 
 ## Module status
 

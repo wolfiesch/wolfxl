@@ -418,14 +418,12 @@ _METADATA_INFIX_PATTERNS: tuple[str, ...] = (
     "xl/tables/table2.xml:/table/@id",
     "xl/tables/table3.xml:/table/@id",
     "/table/tableStyleInfo[1]/@name",
-    # dataValidation showDropDown / showInputMessage default-flip.
-    # TODO(W4E.H5): widen these patterns to ``/dataValidation\[\d+\]/@…``
-    # via _METADATA_REGEX_PATTERNS once the case corpus contains a multi-DV
-    # fixture. Today every case has exactly one DV, so the literal index 1
-    # path is sufficient — but the moment a second DV appears in any case
-    # we'd silently noisy-diff on its showDropDown/showInputMessage attrs.
-    "/dataValidations[1]/dataValidation[1]/@showDropDown",
-    "/dataValidations[1]/dataValidation[1]/@showInputMessage",
+    # dataValidation @showDropDown / @showInputMessage / @operator default-flip
+    # is suppressed via _METADATA_REGEX_PATTERNS so any DV index — not just
+    # ``[1]`` — is covered. The W4G ``data_validation_two_per_sheet`` case
+    # exercises the multi-DV path and surfaced @operator divergence on top
+    # of the originally documented two attrs (oracle omits when the default
+    # matches; native emits the caller-provided value verbatim).
     # numFmt id assignment order — oracle increments 165->166->167, native
     # uses different ids (10, 165, 4, ...). Both are valid; cells reference
     # them by id consistently within each file.
@@ -492,6 +490,17 @@ _METADATA_REGEX_PATTERNS: tuple[re.Pattern[str], ...] = (
     # earlier hard-coded /c[1]/@s ... /c[3]/@s which silently let column
     # 4+ divergences through.
     re.compile(r"/c\[\d+\]/@[st]:"),
+    # H5 fix: dataValidation default-flip attrs across any DV index.
+    # Oracle omits @showDropDown / @showInputMessage / @operator when the
+    # value matches the OOXML default; native emits whatever the caller
+    # provided. Both are spec-valid; the rendered behavior is identical.
+    # The W4G ``data_validation_two_per_sheet`` case proved this surfaces
+    # at index 2 once a sheet has more than one DV — widening the index
+    # match from a literal ``[1]`` to ``[\d+]`` covers every case.
+    re.compile(
+        r"/dataValidations\[\d+\]/dataValidation\[\d+\]/@"
+        r"(?:showDropDown|showInputMessage|operator):"
+    ),
 )
 
 # Exact diff strings that document part-presence emitter asymmetries.
