@@ -28,6 +28,7 @@ use zip::{ZipArchive, ZipWriter};
 use crate::ooxml_util;
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
+use wolfxl_rels::RelsGraph;
 
 // ---------------------------------------------------------------------------
 // PyO3 class
@@ -42,6 +43,12 @@ pub struct XlsxPatcher {
     value_patches: HashMap<(String, String), CellPatch>,
     /// Queued cell format changes: (sheet, "A1") → FormatSpec.
     format_patches: HashMap<(String, String), FormatSpec>,
+    /// Queued mutations to `*.rels` parts. Key: ZIP entry path (e.g.
+    /// `xl/worksheets/_rels/sheet1.xml.rels`). The save loop serializes the
+    /// graph and writes it in place of the original entry. Populated by
+    /// future Phase-3 RFCs (RFC-022 hyperlinks, RFC-023 comments, RFC-024
+    /// tables); empty in the current slice.
+    rels_patches: HashMap<String, RelsGraph>,
 }
 
 #[pymethods]
@@ -72,6 +79,7 @@ impl XlsxPatcher {
             sheet_paths,
             value_patches: HashMap::new(),
             format_patches: HashMap::new(),
+            rels_patches: HashMap::new(),
         })
     }
 
@@ -213,7 +221,10 @@ impl XlsxPatcher {
 
 impl XlsxPatcher {
     fn do_save(&self, output_path: &str) -> PyResult<()> {
-        if self.value_patches.is_empty() && self.format_patches.is_empty() {
+        if self.value_patches.is_empty()
+            && self.format_patches.is_empty()
+            && self.rels_patches.is_empty()
+        {
             // No changes — just copy
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
@@ -304,6 +315,13 @@ impl XlsxPatcher {
         // Add styles.xml patch if modified
         if let Some(ref sxml) = styles_xml {
             file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
+        }
+
+        // Serialize any mutated `*.rels` graphs into file_patches. This branch
+        // is dead code in the current slice (rels_patches is always empty);
+        // RFC-022/023/024 will populate it.
+        for (path, graph) in &self.rels_patches {
+            file_patches.insert(path.clone(), graph.serialize());
         }
 
         drop(zip);
