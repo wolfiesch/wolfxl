@@ -30,14 +30,16 @@
 
 use std::fs;
 
-use pyo3::exceptions::{PyIOError, PyNotImplementedError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, Worksheet,
-    WriteCellValue,
+    AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, Comment, CommentAuthorTable,
+    ConditionalFormat, ConditionalKind, ConditionalRule, DataValidation, DefinedName, DocProperties,
+    DxfRecord, ErrorStyle, FillSpec, FontSpec, FormatSpec, Hyperlink, StylesBuilder, Table,
+    TableColumn, TableStyle, ValidationType, ValidationOperator, Worksheet, WriteCellValue,
 };
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
@@ -508,6 +510,418 @@ fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Wo
 }
 
 // ---------------------------------------------------------------------------
+// Wave 4B conversion helpers
+// ---------------------------------------------------------------------------
+
+/// Unwrap an optional wrapper key: if `dict` has `wrapper_key` as a key whose
+/// value is a dict, return that inner dict. Otherwise return the original dict
+/// unchanged. Mirrors the oracle's "inner dict may be passed bare or wrapped"
+/// idiom used in all 8 rich-feature methods.
+fn unwrap_optional_wrapper<'py>(
+    dict: &'py Bound<'py, PyDict>,
+    wrapper_key: &str,
+) -> PyResult<Bound<'py, PyDict>> {
+    if let Some(v) = dict.get_item(wrapper_key)? {
+        if let Ok(inner) = v.downcast::<PyDict>() {
+            return Ok(inner.clone());
+        }
+    }
+    Ok(dict.clone())
+}
+
+/// Build a `(a1_ref, Hyperlink)` pair from a cfg dict, or `None` for silent no-op.
+fn dict_to_hyperlink(cfg: &Bound<'_, PyDict>) -> PyResult<Option<(String, Hyperlink)>> {
+    let cell: Option<String> = cfg
+        .get_item("cell")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let target: Option<String> = cfg
+        .get_item("target")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+    let (Some(cell), Some(raw_target)) = (cell, target) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let display: Option<String> = cfg
+        .get_item("display")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let tooltip: Option<String> = cfg
+        .get_item("tooltip")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let internal: bool = cfg
+        .get_item("internal")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(false);
+
+    // Internal links must start with '#'; external links are used as-is.
+    let target = if internal {
+        format!("#{}", raw_target.trim_start_matches('#'))
+    } else {
+        raw_target
+    };
+
+    Ok(Some((
+        cell,
+        Hyperlink {
+            target,
+            display,
+            tooltip,
+        },
+    )))
+}
+
+/// Build a `(a1_ref, Comment)` pair from a cfg dict, or `None` for silent no-op.
+/// Interns the author into `authors` before returning.
+fn dict_to_comment(
+    cfg: &Bound<'_, PyDict>,
+    authors: &mut CommentAuthorTable,
+) -> PyResult<Option<(String, Comment)>> {
+    let cell: Option<String> = cfg
+        .get_item("cell")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let text: Option<String> = cfg
+        .get_item("text")?
+        .and_then(|v| v.extract::<String>().ok());
+
+    let (Some(cell), Some(text)) = (cell, text) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let author_name: String = cfg
+        .get_item("author")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) })
+        .unwrap_or_default();
+
+    let author_id = authors.intern(author_name);
+
+    Ok(Some((
+        cell,
+        Comment {
+            text,
+            author_id,
+            width_pt: None,
+            height_pt: None,
+            visible: false,
+        },
+    )))
+}
+
+/// Build a `ConditionalFormat` from a cfg dict, or `None` for silent no-op.
+/// May intern a dxf into `styles` when `format.bg_color` is set.
+fn dict_to_conditional_format(
+    cfg: &Bound<'_, PyDict>,
+    styles: &mut StylesBuilder,
+) -> PyResult<Option<ConditionalFormat>> {
+    let range: Option<String> = cfg.get_item("range")?.and_then(|v| v.extract().ok());
+    let rule_type: Option<String> = cfg.get_item("rule_type")?.and_then(|v| v.extract().ok());
+
+    let (Some(range), Some(rule_type)) = (range, rule_type) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let operator: Option<String> = cfg.get_item("operator")?.and_then(|v| v.extract().ok());
+    let formula: Option<String> = cfg.get_item("formula")?.and_then(|v| v.extract().ok());
+    let stop_if_true: bool = cfg
+        .get_item("stop_if_true")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(false);
+
+    // Optional bg_color → intern a DxfRecord.
+    let mut bg_color: Option<String> = None;
+    if let Some(v) = cfg.get_item("format")? {
+        if let Ok(fd) = v.downcast::<PyDict>() {
+            bg_color = fd.get_item("bg_color")?.and_then(|x| x.extract().ok());
+        }
+    }
+    let dxf_id: Option<u32> = if let Some(ref hex) = bg_color {
+        parse_hex_color(hex).map(|rgb| {
+            let dxf = DxfRecord {
+                font: None,
+                fill: Some(FillSpec {
+                    pattern_type: "solid".to_string(),
+                    fg_color_rgb: Some(rgb.clone()),
+                    bg_color_rgb: Some(rgb),
+                }),
+                border: None,
+            };
+            styles.intern_dxf(&dxf)
+        })
+    } else {
+        None
+    };
+
+    // Map rule_type + operator → ConditionalKind.
+    let kind = match rule_type.as_str() {
+        "cellIs" | "cell_is" => {
+            let op_str = operator.as_deref().unwrap_or("equal");
+            let op = match op_str {
+                "equal" | "==" => CellIsOperator::Equal,
+                "notEqual" | "!=" => CellIsOperator::NotEqual,
+                "greaterThan" | ">" => CellIsOperator::GreaterThan,
+                "greaterThanOrEqual" | ">=" => CellIsOperator::GreaterThanOrEqual,
+                "lessThan" | "<" => CellIsOperator::LessThan,
+                "lessThanOrEqual" | "<=" => CellIsOperator::LessThanOrEqual,
+                "between" => CellIsOperator::Between,
+                "notBetween" => CellIsOperator::NotBetween,
+                _ => CellIsOperator::Equal,
+            };
+
+            let fstr = formula.as_deref().unwrap_or("").trim_start_matches('=');
+            let (formula_a, formula_b) =
+                if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
+                    // "formula1,formula2" convention — split on the first comma.
+                    if let Some(idx) = fstr.find(',') {
+                        (fstr[..idx].trim().to_string(), Some(fstr[idx + 1..].trim().to_string()))
+                    } else {
+                        (fstr.to_string(), None)
+                    }
+                } else {
+                    (fstr.to_string(), None)
+                };
+
+            ConditionalKind::CellIs {
+                operator: op,
+                formula_a,
+                formula_b,
+            }
+        }
+        "expression" | "formula" => {
+            let fstr = formula
+                .as_deref()
+                .unwrap_or("")
+                .trim_start_matches('=')
+                .to_string();
+            ConditionalKind::Expression { formula: fstr }
+        }
+        // TODO: future wave — color_scale, data_bar, icon_set, duplicates,
+        // unique, top, bottom, above_average, below_average, text_contains variants
+        _ => ConditionalKind::Expression {
+            formula: "FALSE()".to_string(),
+        },
+    };
+
+    let rule = ConditionalRule {
+        kind,
+        dxf_id,
+        stop_if_true,
+    };
+
+    Ok(Some(ConditionalFormat {
+        sqref: range,
+        rules: vec![rule],
+    }))
+}
+
+/// Build a `DataValidation` from a cfg dict, or `None` for silent no-op.
+fn dict_to_data_validation(cfg: &Bound<'_, PyDict>) -> PyResult<Option<DataValidation>> {
+    let range: Option<String> = cfg.get_item("range")?.and_then(|v| v.extract().ok());
+    let validation_type: Option<String> = cfg
+        .get_item("validation_type")?
+        .and_then(|v| v.extract().ok());
+
+    let (Some(range), Some(vtype_str)) = (range, validation_type) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let validation_type = match vtype_str.as_str() {
+        "whole" | "Whole" => ValidationType::Whole,
+        "decimal" | "Decimal" => ValidationType::Decimal,
+        "list" | "List" => ValidationType::List,
+        "date" | "Date" => ValidationType::Date,
+        "time" | "Time" => ValidationType::Time,
+        "textLength" | "TextLength" | "text_length" => ValidationType::TextLength,
+        "custom" | "Custom" => ValidationType::Custom,
+        _ => ValidationType::Any,
+    };
+
+    let operator: Option<String> = cfg.get_item("operator")?.and_then(|v| v.extract().ok());
+    let operator = match operator.as_deref().unwrap_or("between") {
+        "between" | "Between" => ValidationOperator::Between,
+        "notBetween" | "NotBetween" | "not_between" => ValidationOperator::NotBetween,
+        "equal" | "Equal" | "==" => ValidationOperator::Equal,
+        "notEqual" | "NotEqual" | "not_equal" | "!=" => ValidationOperator::NotEqual,
+        "greaterThan" | "GreaterThan" | "greater_than" | ">" => ValidationOperator::GreaterThan,
+        "lessThan" | "LessThan" | "less_than" | "<" => ValidationOperator::LessThan,
+        "greaterThanOrEqual" | "GreaterThanOrEqual" | ">=" => {
+            ValidationOperator::GreaterThanOrEqual
+        }
+        "lessThanOrEqual" | "LessThanOrEqual" | "<=" => ValidationOperator::LessThanOrEqual,
+        _ => ValidationOperator::Between,
+    };
+
+    let formula_a: Option<String> = cfg.get_item("formula1")?.and_then(|v| v.extract().ok());
+    let formula_b: Option<String> = cfg.get_item("formula2")?.and_then(|v| v.extract().ok());
+    let allow_blank: bool = cfg
+        .get_item("allow_blank")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(true); // oracle uses .unwrap_or(true)
+
+    let error_title: Option<String> = cfg
+        .get_item("error_title")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let error_message: Option<String> = cfg
+        .get_item("error")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+
+    Ok(Some(DataValidation {
+        sqref: range,
+        validation_type,
+        operator,
+        formula_a,
+        formula_b,
+        allow_blank,
+        show_dropdown: true,
+        show_error_message: true,
+        error_style: ErrorStyle::Stop,
+        error_title,
+        error_message,
+        show_input_message: false,
+        input_title: None,
+        input_message: None,
+    }))
+}
+
+/// Build a `Table` from a cfg dict, or `None` for silent no-op.
+fn dict_to_table(cfg: &Bound<'_, PyDict>) -> PyResult<Option<Table>> {
+    let name: Option<String> = cfg.get_item("name")?.and_then(|v| v.extract().ok());
+    let ref_range: Option<String> = cfg.get_item("ref")?.and_then(|v| v.extract().ok());
+
+    let (Some(name), Some(ref_range)) = (name, ref_range) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let style: Option<String> = cfg
+        .get_item("style")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let header_row: bool = cfg
+        .get_item("header_row")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(true);
+    let totals_row: bool = cfg
+        .get_item("totals_row")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(false);
+    let autofilter: bool = cfg
+        .get_item("autofilter")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(true);
+
+    let mut columns: Vec<TableColumn> = Vec::new();
+    if let Some(v) = cfg.get_item("columns")? {
+        if let Ok(list) = v.extract::<Vec<String>>() {
+            for col_name in list {
+                columns.push(TableColumn {
+                    name: col_name,
+                    totals_function: None,
+                    totals_label: None,
+                });
+            }
+        }
+    }
+
+    let table_style: Option<TableStyle> = style.map(|s| TableStyle {
+        name: s,
+        show_first_column: false,
+        show_last_column: false,
+        show_row_stripes: true,
+        show_column_stripes: false,
+    });
+
+    Ok(Some(Table {
+        name,
+        display_name: None,
+        range: ref_range,
+        columns,
+        header_row,
+        totals_row,
+        style: table_style,
+        autofilter,
+    }))
+}
+
+/// Build a `DefinedName` from a cfg dict. Returns `None` for silent no-op when
+/// required fields are missing. Returns `Err` when scope="sheet" but the sheet
+/// doesn't exist (that's a bug, not user input error).
+fn dict_to_defined_name(
+    wb: &Workbook,
+    sheet_name: &str,
+    cfg: &Bound<'_, PyDict>,
+) -> PyResult<Option<DefinedName>> {
+    let name: Option<String> = cfg.get_item("name")?.and_then(|v| v.extract().ok());
+    let refers_to: Option<String> = cfg.get_item("refers_to")?.and_then(|v| v.extract().ok());
+
+    let (Some(name), Some(refers_to)) = (name, refers_to) else {
+        return Ok(None); // silent no-op — match oracle
+    };
+
+    let scope: String = cfg
+        .get_item("scope")?
+        .and_then(|v| v.extract::<String>().ok())
+        .unwrap_or_else(|| "workbook".to_string());
+
+    let scope_sheet_index: Option<usize> = if scope == "sheet" {
+        let idx = wb.sheet_index_by_name(sheet_name).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "add_named_range: sheet {sheet_name:?} not found (scope=sheet requires the sheet to exist)"
+            ))
+        })?;
+        Some(idx)
+    } else {
+        None
+    };
+
+    Ok(Some(DefinedName {
+        name,
+        formula: refers_to,
+        scope_sheet_index,
+        builtin: None,
+        hidden: false,
+    }))
+}
+
+/// Build a `DocProperties` from a flat props dict.
+fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> {
+    let title: Option<String> = props.get_item("title")?.and_then(|v| v.extract().ok());
+    let subject: Option<String> = props.get_item("subject")?.and_then(|v| v.extract().ok());
+    let creator: Option<String> = props.get_item("creator")?.and_then(|v| v.extract().ok());
+    let keywords: Option<String> = props.get_item("keywords")?.and_then(|v| v.extract().ok());
+    let description: Option<String> =
+        props.get_item("description")?.and_then(|v| v.extract().ok());
+    let category: Option<String> = props.get_item("category")?.and_then(|v| v.extract().ok());
+    // contentStatus has no field in DocProperties — silently ignored per spec.
+
+    let created: Option<chrono::NaiveDateTime> =
+        props.get_item("created")?.and_then(|v| {
+            v.extract::<String>().ok().and_then(|s| {
+                // Try datetime first, then date-only (with midnight time).
+                parse_iso_datetime(&s).or_else(|| {
+                    parse_iso_date(&s).and_then(|d| d.and_hms_opt(0, 0, 0))
+                })
+            })
+        });
+
+    Ok(DocProperties {
+        title,
+        subject,
+        creator,
+        keywords,
+        description,
+        category,
+        created,
+        ..Default::default()
+    })
+}
+
+// ---------------------------------------------------------------------------
 // PyMethods
 // ---------------------------------------------------------------------------
 
@@ -838,83 +1252,122 @@ impl NativeWorkbook {
     }
 
     // =========================================================================
-    // 4B stubs — raise NotImplementedError; existence keeps Python imports working.
+    // Wave 4B rich-feature pymethods — real implementations.
     // =========================================================================
 
     pub fn add_hyperlink(
         &mut self,
-        _sheet: &str,
-        _link_dict: &Bound<'_, PyAny>,
+        sheet: &str,
+        link_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_hyperlink — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+        let dict = link_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("link must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "hyperlink")?;
+        let Some((a1, hyperlink)) = dict_to_hyperlink(&cfg)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.hyperlinks.insert(a1, hyperlink);
+        Ok(())
     }
 
     pub fn add_comment(
         &mut self,
-        _sheet: &str,
-        _comment_dict: &Bound<'_, PyAny>,
+        sheet: &str,
+        comment_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_comment — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+        let dict = comment_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("comment_dict must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "comment")?;
+        // Borrow authors first (resolution must happen before re-borrowing inner for sheet).
+        let Some((a1, comment)) = dict_to_comment(&cfg, &mut self.inner.comment_authors)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.comments.insert(a1, comment);
+        Ok(())
     }
 
-    pub fn set_print_area(&mut self, _sheet: &str, _range_str: &str) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.set_print_area — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+    pub fn set_print_area(&mut self, sheet: &str, range_str: &str) -> PyResult<()> {
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.print_area = Some(range_str.to_string());
+        Ok(())
     }
 
     pub fn add_conditional_format(
         &mut self,
-        _sheet: &str,
-        _rule_dict: &Bound<'_, PyAny>,
+        sheet: &str,
+        rule_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_conditional_format — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+        let dict = rule_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("rule must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "cf_rule")?;
+        // Resolve CF (may intern a dxf — borrows styles) before borrowing sheet.
+        let Some(cf) = dict_to_conditional_format(&cfg, &mut self.inner.styles)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.conditional_formats.push(cf);
+        Ok(())
     }
 
     pub fn add_data_validation(
         &mut self,
-        _sheet: &str,
-        _validation_dict: &Bound<'_, PyAny>,
+        sheet: &str,
+        validation_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_data_validation — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+        let dict = validation_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("validation must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "validation")?;
+        let Some(dv) = dict_to_data_validation(&cfg)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.validations.push(dv);
+        Ok(())
     }
 
     pub fn add_named_range(
         &mut self,
-        _sheet: &str,
-        _named_range: &Bound<'_, PyAny>,
+        sheet: &str,
+        named_range: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_named_range — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+        let dict = named_range
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("named_range must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "named_range")?;
+        // sheet_index_by_name borrows &self.inner immutably — do it before any &mut borrow.
+        let Some(dn) = dict_to_defined_name(&self.inner, sheet, &cfg)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        self.inner.defined_names.push(dn);
+        Ok(())
     }
 
-    pub fn add_table(&mut self, _sheet: &str, _table: &Bound<'_, PyAny>) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.add_table — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+    pub fn add_table(&mut self, sheet: &str, table: &Bound<'_, PyAny>) -> PyResult<()> {
+        let dict = table
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("table must be a dict"))?;
+        let cfg = unwrap_optional_wrapper(dict, "table")?;
+        let Some(tbl) = dict_to_table(&cfg)? else {
+            return Ok(()); // silent no-op — match oracle
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.tables.push(tbl);
+        Ok(())
     }
 
-    pub fn set_properties(&mut self, _props: &Bound<'_, PyAny>) -> PyResult<()> {
-        Err(PyNotImplementedError::new_err(
-            "NativeWorkbook.set_properties — Wave 4B (rich features). \
-             Set WOLFXL_WRITER=oracle to use the rust_xlsxwriter backend for now.",
-        ))
+    pub fn set_properties(&mut self, props: &Bound<'_, PyAny>) -> PyResult<()> {
+        let dict = props
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("props must be a dict"))?;
+        let doc_props = dict_to_doc_properties(dict)?;
+        self.inner.set_doc_props(doc_props);
+        Ok(())
     }
 }
 
