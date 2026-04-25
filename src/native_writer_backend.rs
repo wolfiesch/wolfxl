@@ -141,7 +141,10 @@ fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCell
                 .unwrap_or("0")
                 .parse()
                 .map_err(|_| PyValueError::new_err("number parse failed"))?;
-            Ok(WriteCellValue::Number(n))
+            // W4E.R5: reject non-finite values (NaN, +/-Infinity) at the
+            // boundary. Strings like "NaN" / "inf" parse to f64 successfully
+            // but have no OOXML representation.
+            Ok(WriteCellValue::Number(require_finite_f64(n, "number cell")?))
         }
         "boolean" => {
             let b = value_str.as_deref().map(parse_python_bool).unwrap_or(false);
@@ -194,6 +197,21 @@ fn parse_python_bool(s: &str) -> bool {
     )
 }
 
+/// Reject non-finite floats (NaN, +/-Infinity) at the pyclass boundary so
+/// the emitter never has to format them. OOXML has no representation for
+/// these values; without the guard, `format_number` in the writer would
+/// emit literal `"NaN"`/`"inf"` and Excel/LO would reject the file.
+/// Returns the value unchanged if finite, or a `PyValueError` otherwise.
+/// W4E.R5.
+fn require_finite_f64(f: f64, context: &str) -> PyResult<f64> {
+    if !f.is_finite() {
+        return Err(PyValueError::new_err(format!(
+            "{context}: non-finite floats (NaN, Infinity) are not representable in xlsx; got {f}",
+        )));
+    }
+    Ok(f)
+}
+
 /// Coerce a raw Python value (from `write_sheet_values`'s 2-D list) to a
 /// `WriteCellValue`. Mirrors the oracle's order-of-attempts at
 /// `src/rust_xlsxwriter_backend.rs:1417`, but fixes a subtle bug: the
@@ -201,49 +219,56 @@ fn parse_python_bool(s: &str) -> bool {
 /// as `1.0`/`0.0`) silently become numbers. The Python flush path
 /// avoids this by routing booleans through `write_cell_value` instead,
 /// but we tighten the rule here for correctness — bool first.
-fn raw_python_to_write_cell_value(value: &Bound<'_, PyAny>) -> Option<WriteCellValue> {
+///
+/// W4E.R5: returns `PyResult<Option<…>>` so non-finite floats can raise
+/// rather than silently emitting invalid `"NaN"`/`"inf"` text in the
+/// output XML. `Ok(None)` still means "no usable coercion, skip" (oracle
+/// parity); `Err(…)` means the value was a finite-violating float.
+fn raw_python_to_write_cell_value(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Option<WriteCellValue>> {
     if value.is_none() {
-        return None;
+        return Ok(None);
     }
     // Boolean check via `is_instance_of` (rather than `extract`) since
     // `extract::<bool>()` would succeed on `0`/`1` ints too.
     let py = value.py();
     let bool_type = py.get_type::<pyo3::types::PyBool>();
     if value.is_instance(&bool_type).unwrap_or(false) {
-        let b = value.extract::<bool>().ok()?;
-        return Some(WriteCellValue::Boolean(b));
+        let b = value.extract::<bool>()?;
+        return Ok(Some(WriteCellValue::Boolean(b)));
     }
     if let Ok(i) = value.extract::<i64>() {
-        return Some(WriteCellValue::Number(i as f64));
+        return Ok(Some(WriteCellValue::Number(i as f64)));
     }
     if let Ok(f) = value.extract::<f64>() {
-        return Some(WriteCellValue::Number(f));
+        return Ok(Some(WriteCellValue::Number(require_finite_f64(f, "cell value")?)));
     }
     if let Ok(s) = value.extract::<String>() {
         if s.starts_with('=') {
-            return Some(WriteCellValue::Formula {
+            return Ok(Some(WriteCellValue::Formula {
                 expr: s.trim_start_matches('=').to_string(),
                 result: None,
-            });
+            }));
         }
-        return Some(WriteCellValue::String(s));
+        return Ok(Some(WriteCellValue::String(s)));
     }
     // Datetime / date — best-effort via isoformat() if exposed.
     if let Ok(iso) = value.call_method0("isoformat") {
         if let Ok(s) = iso.extract::<String>() {
             if let Some(dt) = parse_iso_datetime(&s) {
                 if let Some(serial) = datetime_to_excel_serial(dt) {
-                    return Some(WriteCellValue::DateSerial(serial));
+                    return Ok(Some(WriteCellValue::DateSerial(serial)));
                 }
             }
             if let Some(d) = parse_iso_date(&s) {
                 if let Some(serial) = date_to_excel_serial(d) {
-                    return Some(WriteCellValue::DateSerial(serial));
+                    return Ok(Some(WriteCellValue::DateSerial(serial)));
                 }
             }
         }
     }
-    None
+    Ok(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,7 +1045,7 @@ impl NativeWorkbook {
                 }
                 let row = base_row + ri as u32;
                 let col = base_col + ci as u32;
-                if let Some(value) = raw_python_to_write_cell_value(val) {
+                if let Some(value) = raw_python_to_write_cell_value(val)? {
                     ws.write_cell(row, col, value, None);
                 }
                 // else: skip silently like the oracle does.

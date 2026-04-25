@@ -524,8 +524,18 @@ fn format_f64(n: f64) -> String {
 /// `<hyperlinks>`. Filled by W3C.
 fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
     use crate::model::conditional::{CellIsOperator, ConditionalKind};
+    use std::collections::BTreeSet;
 
     if !sheet.conditional_formats.is_empty() {
+        // R4 (W4E): track which stub variants we silently dropped per call so
+        // the user sees one warning per variant per sheet emit instead of a
+        // silent no-op. The wildcard arm below names each variant explicitly
+        // so future enum additions surface as a compiler error here, not a
+        // silent third-arm-of-the-fork.
+        // TODO(R4): replace with structured diagnostics + GH issue link once
+        // the CF expansion wave lands. See plan W4E.R4.
+        let mut dropped: BTreeSet<&'static str> = BTreeSet::new();
+
         for cf in &sheet.conditional_formats {
             // Buffer rule XML first; only emit the wrapper if at least one rule
             // produced output. Otherwise we'd emit an empty
@@ -617,12 +627,44 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                         rules_buf.push_str("</cfRule>");
                     }
 
-                    // TODO: future wave — emit fallback or continue
-                    _ => {
-                        // ContainsText, NotContainsText, BeginsWith, EndsWith,
-                        // Duplicate, Unique, Top10, AboveAverage, IconSet:
-                        // skip these stub variants; emitting them would produce
-                        // invalid elements that Excel would reject.
+                    // Stub variants — Excel would reject the synthetic XML
+                    // we'd produce for these, so skip them and remember which
+                    // names were dropped. One eprintln! per variant per sheet
+                    // emit (deduped via the BTreeSet above).
+                    ConditionalKind::ContainsText { .. } => {
+                        dropped.insert("ContainsText");
+                        continue;
+                    }
+                    ConditionalKind::NotContainsText { .. } => {
+                        dropped.insert("NotContainsText");
+                        continue;
+                    }
+                    ConditionalKind::BeginsWith { .. } => {
+                        dropped.insert("BeginsWith");
+                        continue;
+                    }
+                    ConditionalKind::EndsWith { .. } => {
+                        dropped.insert("EndsWith");
+                        continue;
+                    }
+                    ConditionalKind::Duplicate => {
+                        dropped.insert("Duplicate");
+                        continue;
+                    }
+                    ConditionalKind::Unique => {
+                        dropped.insert("Unique");
+                        continue;
+                    }
+                    ConditionalKind::Top10 { .. } => {
+                        dropped.insert("Top10");
+                        continue;
+                    }
+                    ConditionalKind::AboveAverage { .. } => {
+                        dropped.insert("AboveAverage");
+                        continue;
+                    }
+                    ConditionalKind::IconSet { .. } => {
+                        dropped.insert("IconSet");
                         continue;
                     }
                 }
@@ -636,6 +678,19 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                 out.push_str(&rules_buf);
                 out.push_str("</conditionalFormatting>");
             }
+        }
+
+        if !dropped.is_empty() {
+            let names: Vec<&str> = dropped.iter().copied().collect();
+            eprintln!(
+                "wolfxl-writer: dropped {} conditional-format rule kind{} on sheet {:?} \
+                 (variants: {}). Wave 3 ships only CellIs/Expression/DataBar/ColorScale; \
+                 other kinds are pending a future CF expansion wave.",
+                names.len(),
+                if names.len() == 1 { "" } else { "s" },
+                sheet.name,
+                names.join(", "),
+            );
         }
     }
 }

@@ -17,6 +17,11 @@ _VALID = ("oracle", "native", "both", "auto")
 
 def make_writer() -> Any:
     """Construct the active write-mode backend per ``WOLFXL_WRITER``."""
+    # TODO(W5): flip the default from "oracle" to "native" (or "auto",
+    # which currently aliases native) AFTER the 30-day soak is clean. Once
+    # ``RustXlsxWriterBook`` is removed in Wave 5, ``"oracle"`` and
+    # ``"both"`` arms must also be deleted — leaving them in would crash
+    # on the missing pyclass at the first ``make_writer()`` call.
     choice = os.environ.get("WOLFXL_WRITER", "oracle").lower()
     if choice == "oracle":
         return _rust.RustXlsxWriterBook()

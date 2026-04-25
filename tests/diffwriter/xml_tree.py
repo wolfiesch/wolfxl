@@ -419,6 +419,11 @@ _METADATA_INFIX_PATTERNS: tuple[str, ...] = (
     "xl/tables/table3.xml:/table/@id",
     "/table/tableStyleInfo[1]/@name",
     # dataValidation showDropDown / showInputMessage default-flip.
+    # TODO(W4E.H5): widen these patterns to ``/dataValidation\[\d+\]/@…``
+    # via _METADATA_REGEX_PATTERNS once the case corpus contains a multi-DV
+    # fixture. Today every case has exactly one DV, so the literal index 1
+    # path is sufficient — but the moment a second DV appears in any case
+    # we'd silently noisy-diff on its showDropDown/showInputMessage attrs.
     "/dataValidations[1]/dataValidation[1]/@showDropDown",
     "/dataValidations[1]/dataValidation[1]/@showInputMessage",
     # numFmt id assignment order — oracle increments 165->166->167, native
