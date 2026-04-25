@@ -32,6 +32,11 @@ class Workbook:
         self._sheets: dict[str, Worksheet] = {}
         self._sheets["Sheet"] = Worksheet(self, "Sheet")
         self._rust_writer.add_sheet("Sheet")
+        # T1 PR3 — workbook-level metadata + defined names.
+        self._properties_cache: Any | None = None
+        self._properties_dirty: bool = False
+        self._defined_names_cache: Any | None = None
+        self._pending_defined_names: dict[str, Any] = {}
 
     @classmethod
     def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
@@ -49,6 +54,10 @@ class Workbook:
         wb._sheets = {}
         for name in names:
             wb._sheets[name] = Worksheet(wb, name)
+        wb._properties_cache = None
+        wb._properties_dirty = False
+        wb._defined_names_cache = None
+        wb._pending_defined_names = {}
         return wb
 
     @classmethod
@@ -67,6 +76,10 @@ class Workbook:
         wb._sheets = {}
         for name in names:
             wb._sheets[name] = Worksheet(wb, name)
+        wb._properties_cache = None
+        wb._properties_dirty = False
+        wb._defined_names_cache = None
+        wb._pending_defined_names = {}
         return wb
 
     # ------------------------------------------------------------------
@@ -151,31 +164,106 @@ class Workbook:
         self.remove(worksheet)
 
     # ------------------------------------------------------------------
+    # Workbook-level metadata (T1 PR3)
+    # ------------------------------------------------------------------
+
+    @property
+    def properties(self) -> Any:
+        """Return the workbook's :class:`DocumentProperties` (lazy-loaded).
+
+        In read/modify mode, parses ``docProps/core.xml`` once via the
+        Rust reader and caches the result. In write mode, starts as an
+        empty (all-fields-None) ``DocumentProperties`` whose attribute
+        assignments flip ``self._properties_dirty`` so :meth:`save` knows
+        to flush them.
+        """
+        if self._properties_cache is not None:
+            return self._properties_cache
+        from wolfxl.packaging.core import DocumentProperties, _doc_props_from_dict
+
+        if self._rust_reader is not None:
+            try:
+                raw = self._rust_reader.read_doc_properties()
+            except Exception:
+                raw = {}
+            props = _doc_props_from_dict(raw)
+        else:
+            props = DocumentProperties()
+        # Attach the back-reference so subsequent ``props.title = "X"``
+        # marks the workbook dirty without further user action.
+        props._attach_workbook(self)  # noqa: SLF001
+        self._properties_cache = props
+        return props
+
+    @properties.setter
+    def properties(self, value: Any) -> None:
+        """Replace the entire properties object wholesale.
+
+        Used by callers that prefer to construct a fresh
+        ``DocumentProperties`` rather than mutate fields one at a time.
+        Sets the dirty flag unconditionally — replacing the object is by
+        definition a write intent.
+        """
+        from wolfxl.packaging.core import DocumentProperties
+
+        if not isinstance(value, DocumentProperties):
+            raise TypeError(
+                f"properties must be a DocumentProperties, got {type(value).__name__}"
+            )
+        value._attach_workbook(self)  # noqa: SLF001
+        self._properties_cache = value
+        self._properties_dirty = True
+
+    # ------------------------------------------------------------------
     # Named ranges
     # ------------------------------------------------------------------
 
     @property
-    def defined_names(self) -> dict[str, str]:
-        """Return all defined names as ``{NAME: refers_to}`` (case-preserved).
+    def defined_names(self) -> Any:
+        """Return the workbook's :class:`DefinedNameDict`.
 
-        Reads from the Rust backend (read mode) or returns empty (write mode).
+        Lazy-loaded on first access. The container is a ``dict``
+        subclass whose values are :class:`DefinedName` objects.
         Workbook-scoped names override sheet-scoped on collision.
+        Mutations (``wb.defined_names["X"] = DefinedName(...)``) queue
+        through to the Rust writer in write mode.
         """
-        if self._rust_reader is None:
-            return {}
-        result: dict[str, str] = {}
-        for sheet_name in self._sheet_names:
-            try:
-                entries = self._rust_reader.read_named_ranges(sheet_name)
-            except Exception:
-                continue
-            for entry in entries:
-                name = entry["name"]
-                refers_to = entry["refers_to"]
-                if refers_to.startswith("="):
-                    refers_to = refers_to[1:]
-                result[name] = refers_to
-        return result
+        if self._defined_names_cache is not None:
+            return self._defined_names_cache
+        from wolfxl.workbook import DefinedNameDict
+        from wolfxl.workbook.defined_name import DefinedName
+
+        dnd = DefinedNameDict()
+        if self._rust_reader is not None:
+            seen: set[str] = set()
+            for sheet_name in self._sheet_names:
+                try:
+                    entries = self._rust_reader.read_named_ranges(sheet_name)
+                except Exception:
+                    continue
+                for entry in entries:
+                    name = entry["name"]
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    refers_to = entry["refers_to"]
+                    if refers_to.startswith("="):
+                        refers_to = refers_to[1:]
+                    scope = entry.get("scope", "workbook")
+                    local_id: int | None = None
+                    if scope == "sheet":
+                        # The sheet-scope encoding in the Rust reader puts
+                        # the sheet name in the ``refers_to`` prefix; we
+                        # don't try to recover the original index.
+                        local_id = None
+                    dn = DefinedName(name=name, value=refers_to, localSheetId=local_id)
+                    # Bypass __setitem__'s queue side-effect — this is a
+                    # pure read, not a user write.
+                    dict.__setitem__(dnd, name, dn)
+        # Attach the workbook back-ref so subsequent user writes queue.
+        dnd._wb = self  # noqa: SLF001
+        self._defined_names_cache = dnd
+        return dnd
 
     # ------------------------------------------------------------------
     # Write-mode operations
@@ -223,17 +311,75 @@ class Workbook:
         """Flush all pending writes and save to disk."""
         filename = str(filename)
         if self._rust_patcher is not None:
-            # Modify mode — flush to patcher, then surgical save.
+            # Modify mode — workbook-level metadata writes don't have a
+            # patcher path yet (T1.5 follow-up). Surface the limitation
+            # before mutating the file rather than silently dropping the
+            # user's edits.
+            if self._properties_dirty:
+                raise NotImplementedError(
+                    "Mutating wb.properties on an existing file is a T1.5 follow-up. "
+                    "Workaround: open via Workbook() and re-author, or stop modifying "
+                    "wb.properties before save()."
+                )
+            if self._pending_defined_names:
+                raise NotImplementedError(
+                    "Mutating wb.defined_names on an existing file is a T1.5 follow-up. "
+                    "Workaround: open via Workbook() and re-author, or stop modifying "
+                    "wb.defined_names before save()."
+                )
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
-            # Write mode — flush to writer, then full save.
+            # Write mode — flush workbook-level writes, then sheets.
+            self._flush_workbook_writes()
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
             self._rust_writer.save(filename)
         else:
             raise RuntimeError("save requires write or modify mode")
+
+    def _flush_workbook_writes(self) -> None:
+        """Push workbook-level metadata + defined names into the Rust writer."""
+        writer = self._rust_writer
+        if writer is None:
+            return
+
+        if self._properties_dirty and self._properties_cache is not None:
+            props = self._properties_cache
+            payload = {
+                "title": props.title,
+                "subject": props.subject,
+                "creator": props.creator,
+                "keywords": props.keywords,
+                "description": props.description,
+                "lastModifiedBy": props.lastModifiedBy,
+                "category": props.category,
+                "contentStatus": props.contentStatus,
+                "identifier": props.identifier,
+                "language": props.language,
+                "revision": props.revision,
+                "version": props.version,
+                "created": props.created.isoformat() if props.created else None,
+                "modified": props.modified.isoformat() if props.modified else None,
+            }
+            writer.set_properties(payload)
+            self._properties_dirty = False
+
+        if self._pending_defined_names:
+            # The native writer's add_named_range expects a sheet hint —
+            # for workbook-scoped names we pick the first sheet; the Rust
+            # side reads ``localSheetId`` from the dict to override.
+            primary_sheet = self._sheet_names[0] if self._sheet_names else "Sheet"
+            for _, dn in self._pending_defined_names.items():
+                writer.add_named_range(primary_sheet, {
+                    "name": dn.name,
+                    "refers_to": dn.value,
+                    "comment": dn.comment,
+                    "local_sheet_id": dn.localSheetId,
+                    "hidden": dn.hidden,
+                })
+            self._pending_defined_names.clear()
 
     # ------------------------------------------------------------------
     # Formula evaluation (requires wolfxl.calc)

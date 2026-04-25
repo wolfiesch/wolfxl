@@ -704,6 +704,10 @@ pub struct CalamineStyledBook {
     /// Compact `cell_records()` format payloads keyed by
     /// (workbook-global cellXfs style id, include extended style-grid fields).
     record_format_cache: HashMap<(u32, bool), RecordFormatInfo>,
+    /// Lazy cache: parsed `docProps/core.xml` + `docProps/app.xml` metadata.
+    /// Stored as a Python dict so repeated `read_doc_properties` calls
+    /// return the same object without re-parsing XML or reopening the zip.
+    doc_properties_cache: Option<PyObject>,
 }
 
 #[pymethods]
@@ -733,6 +737,7 @@ impl CalamineStyledBook {
             cell_xfs: None,
             raw_fonts: None,
             record_format_cache: HashMap::new(),
+            doc_properties_cache: None,
         })
     }
 
@@ -1611,6 +1616,46 @@ impl CalamineStyledBook {
             .or_default()
             .tables = Some(tables.clone());
         Self::tables_to_py(py, &tables)
+    }
+
+    /// Parse `docProps/core.xml` and `docProps/app.xml` into a Python dict.
+    ///
+    /// Returns a dict shaped for ``DocumentProperties`` construction:
+    /// title/subject/creator/keywords/description/lastModifiedBy/
+    /// category/contentStatus/identifier/language/revision/version/
+    /// created (ISO 8601 string)/modified (ISO 8601 string).
+    ///
+    /// Missing files are tolerated — an xlsx without `docProps/core.xml`
+    /// (unusual but legal) returns an empty dict rather than raising.
+    /// Malformed XML also yields an empty dict so a corrupted metadata
+    /// file can't block reading the actual worksheet data.
+    ///
+    /// Cached on the workbook so repeated calls reuse the same PyObject.
+    pub fn read_doc_properties(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        if let Some(cached) = self.doc_properties_cache.as_ref() {
+            return Ok(cached.clone_ref(py));
+        }
+
+        let dict = PyDict::new(py);
+
+        let mut zip = self.open_zip()?;
+        let core_xml = ooxml_util::zip_read_to_string_opt(&mut zip, "docProps/core.xml")
+            .unwrap_or(None);
+        let app_xml = ooxml_util::zip_read_to_string_opt(&mut zip, "docProps/app.xml")
+            .unwrap_or(None);
+
+        if let Some(xml) = core_xml {
+            // Parse errors are swallowed here by design — a broken
+            // core.xml shouldn't make the workbook unreadable.
+            let _ = Self::parse_core_xml_into_dict(py, &xml, &dict);
+        }
+        if let Some(xml) = app_xml {
+            let _ = Self::parse_app_xml_into_dict(py, &xml, &dict);
+        }
+
+        let obj: PyObject = dict.into();
+        self.doc_properties_cache = Some(obj.clone_ref(py));
+        Ok(obj)
     }
 }
 
@@ -4018,5 +4063,145 @@ impl CalamineStyledBook {
             result.append(d)?;
         }
         Ok(result.into())
+    }
+
+    /// Parse `docProps/core.xml` (Dublin Core metadata) into `dict`.
+    ///
+    /// The XML looks like:
+    ///   <cp:coreProperties ...>
+    ///     <dc:title>My Report</dc:title>
+    ///     <dc:creator>Alice</dc:creator>
+    ///     <dcterms:created xsi:type="dcterms:W3CDTF">2024-01-15T10:00:00Z</dcterms:created>
+    ///     ...
+    ///   </cp:coreProperties>
+    ///
+    /// We key off the *local* element name (after namespace prefix) so we
+    /// don't need to track namespace bindings. Empty elements produce
+    /// empty-string values, which Python converts to None in
+    /// ``_doc_props_from_dict``.
+    fn parse_core_xml_into_dict(
+        _py: Python<'_>,
+        xml: &str,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut cur_tag: Option<Vec<u8>> = None;
+        let mut cur_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    cur_tag = Some(e.local_name().as_ref().to_vec());
+                    cur_text.clear();
+                }
+                Ok(Event::Text(e)) => {
+                    let t = e.unescape().unwrap_or_default().to_string();
+                    cur_text.push_str(&t);
+                }
+                Ok(Event::End(e)) => {
+                    let name = e.local_name();
+                    let name = name.as_ref();
+                    // Map local element name -> DocumentProperties field name.
+                    let py_key = match name {
+                        b"title" => Some("title"),
+                        b"subject" => Some("subject"),
+                        b"creator" => Some("creator"),
+                        b"keywords" => Some("keywords"),
+                        b"description" => Some("description"),
+                        b"lastModifiedBy" => Some("lastModifiedBy"),
+                        b"category" => Some("category"),
+                        b"contentStatus" => Some("contentStatus"),
+                        b"identifier" => Some("identifier"),
+                        b"language" => Some("language"),
+                        b"revision" => Some("revision"),
+                        b"version" => Some("version"),
+                        b"created" => Some("created"),
+                        b"modified" => Some("modified"),
+                        _ => None,
+                    };
+                    if let Some(key) = py_key {
+                        if cur_tag.as_deref() == Some(name) {
+                            let value = cur_text.trim();
+                            if !value.is_empty() {
+                                dict.set_item(key, value)?;
+                            }
+                        }
+                    }
+                    cur_tag = None;
+                    cur_text.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break, // Swallow parse errors: empty dict is fine.
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(())
+    }
+
+    /// Parse `docProps/app.xml` (extended properties) into `dict`.
+    ///
+    /// app.xml carries Application, Company, AppVersion, Manager, etc.
+    /// Only a subset maps onto openpyxl's DocumentProperties shape; we
+    /// emit the overlapping fields ("company") and ignore the rest.
+    fn parse_app_xml_into_dict(
+        _py: Python<'_>,
+        xml: &str,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut cur_tag: Option<Vec<u8>> = None;
+        let mut cur_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    cur_tag = Some(e.local_name().as_ref().to_vec());
+                    cur_text.clear();
+                }
+                Ok(Event::Text(e)) => {
+                    let t = e.unescape().unwrap_or_default().to_string();
+                    cur_text.push_str(&t);
+                }
+                Ok(Event::End(e)) => {
+                    let name = e.local_name();
+                    let name = name.as_ref();
+                    // app.xml fields that map 1:1 onto Python-side names.
+                    // Only emit when we haven't already seen the same
+                    // field from core.xml (core takes precedence for
+                    // overlapping fields — there aren't any in practice,
+                    // but the guard is cheap).
+                    let py_key = match name {
+                        b"Company" => Some("company"),
+                        b"Manager" => Some("manager"),
+                        b"Application" => Some("application"),
+                        _ => None,
+                    };
+                    if let Some(key) = py_key {
+                        if cur_tag.as_deref() == Some(name) {
+                            let value = cur_text.trim();
+                            if !value.is_empty() && !dict.contains(key)? {
+                                dict.set_item(key, value)?;
+                            }
+                        }
+                    }
+                    cur_tag = None;
+                    cur_text.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(())
     }
 }
