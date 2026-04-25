@@ -15,97 +15,63 @@
 //! The sheet-level rels file is only emitted when the sheet has at least
 //! one of: comments, external hyperlinks, tables. Otherwise [`emit_sheet`]
 //! returns an empty byte vector and the caller skips the file entirely.
+//!
+//! Relationship-type URIs and the `Relationship` model live in the shared
+//! `wolfxl-rels` crate so the writer and the patcher stay in lock-step.
 
 use crate::model::workbook::Workbook;
-
-// -- Relationship types ------------------------------------------------------
-const RT_OFFICE_DOC: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
-const RT_CORE_PROPS: &str =
-    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties";
-const RT_EXT_PROPS: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties";
-const RT_WORKSHEET: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
-const RT_STYLES: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
-const RT_SHARED_STRINGS: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
-const RT_COMMENTS: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
-const RT_VML_DRAWING: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing";
-const RT_TABLE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
-const RT_HYPERLINK: &str =
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
-
-const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
-
-fn rels_header() -> String {
-    let mut s = String::with_capacity(512);
-    s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
-    s.push_str(&format!("<Relationships xmlns=\"{RELS_NS}\">"));
-    s
-}
-
-fn push_relationship(s: &mut String, id: &str, rtype: &str, target: &str) {
-    s.push_str(&format!(
-        "<Relationship Id=\"{id}\" Type=\"{rtype}\" Target=\"{}\"/>",
-        xml_attr_escape(target),
-    ));
-}
-
-fn push_external_relationship(s: &mut String, id: &str, rtype: &str, target: &str) {
-    s.push_str(&format!(
-        "<Relationship Id=\"{id}\" Type=\"{rtype}\" Target=\"{}\" TargetMode=\"External\"/>",
-        xml_attr_escape(target),
-    ));
-}
-
-/// XML attribute-value escape. Relationships store URLs in `Target="…"`
-/// so `&`, `<`, `>`, and `"` must all be escaped.
-fn xml_attr_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
+use wolfxl_rels::{rt, RelId, RelsGraph, TargetMode};
 
 /// `_rels/.rels` — top-level relationships (workbook, core props, app props).
 pub fn emit_root(_wb: &Workbook) -> Vec<u8> {
-    let mut out = rels_header();
-    push_relationship(&mut out, "rId1", RT_OFFICE_DOC, "xl/workbook.xml");
-    push_relationship(&mut out, "rId2", RT_CORE_PROPS, "docProps/core.xml");
-    push_relationship(&mut out, "rId3", RT_EXT_PROPS, "docProps/app.xml");
-    out.push_str("</Relationships>");
-    out.into_bytes()
+    let mut g = RelsGraph::new();
+    g.add_with_id(
+        RelId("rId1".into()),
+        rt::OFFICE_DOC,
+        "xl/workbook.xml",
+        TargetMode::Internal,
+    );
+    g.add_with_id(
+        RelId("rId2".into()),
+        rt::CORE_PROPS,
+        "docProps/core.xml",
+        TargetMode::Internal,
+    );
+    g.add_with_id(
+        RelId("rId3".into()),
+        rt::EXT_PROPS,
+        "docProps/app.xml",
+        TargetMode::Internal,
+    );
+    g.serialize()
 }
 
 /// `xl/_rels/workbook.xml.rels` — workbook → sheets, styles, shared strings.
 pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
-    let mut out = rels_header();
+    let mut g = RelsGraph::new();
     let n_sheets = wb.sheets.len();
     for idx in 0..n_sheets {
         let sheet_n = idx + 1;
-        let rid = format!("rId{sheet_n}");
-        let target = format!("worksheets/sheet{sheet_n}.xml");
-        push_relationship(&mut out, &rid, RT_WORKSHEET, &target);
+        g.add_with_id(
+            RelId(format!("rId{sheet_n}")),
+            rt::WORKSHEET,
+            &format!("worksheets/sheet{sheet_n}.xml"),
+            TargetMode::Internal,
+        );
     }
-    // Styles is rId{N+1}, SharedStrings is rId{N+2}.
-    let styles_rid = format!("rId{}", n_sheets + 1);
-    push_relationship(&mut out, &styles_rid, RT_STYLES, "styles.xml");
-    let sst_rid = format!("rId{}", n_sheets + 2);
-    push_relationship(&mut out, &sst_rid, RT_SHARED_STRINGS, "sharedStrings.xml");
-    out.push_str("</Relationships>");
-    out.into_bytes()
+    g.add_with_id(
+        RelId(format!("rId{}", n_sheets + 1)),
+        rt::STYLES,
+        "styles.xml",
+        TargetMode::Internal,
+    );
+    g.add_with_id(
+        RelId(format!("rId{}", n_sheets + 2)),
+        rt::SHARED_STRINGS,
+        "sharedStrings.xml",
+        TargetMode::Internal,
+    );
+    g.serialize()
 }
 
 /// `xl/worksheets/_rels/sheet{N}.xml.rels` — sheet → comments, drawings,
@@ -146,53 +112,52 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     // this one, then assign 1-based ids starting from there + 1.
     let tables_before: usize = wb.sheets[..sheet_idx].iter().map(|s| s.tables.len()).sum();
 
-    let mut out = rels_header();
+    let mut g = RelsGraph::new();
     let mut rid_counter: u32 = 0;
+    let mut next_rid = || -> RelId {
+        rid_counter += 1;
+        RelId(format!("rId{rid_counter}"))
+    };
 
     // Comments + VML.
     if has_comments {
-        rid_counter += 1;
         let n = sheet_idx + 1;
-        push_relationship(
-            &mut out,
-            &format!("rId{rid_counter}"),
-            RT_COMMENTS,
+        g.add_with_id(
+            next_rid(),
+            rt::COMMENTS,
             &format!("../comments/comments{n}.xml"),
+            TargetMode::Internal,
         );
-        rid_counter += 1;
-        push_relationship(
-            &mut out,
-            &format!("rId{rid_counter}"),
-            RT_VML_DRAWING,
+        g.add_with_id(
+            next_rid(),
+            rt::VML_DRAWING,
             &format!("../drawings/vmlDrawing{n}.vml"),
+            TargetMode::Internal,
         );
     }
 
     // Tables.
     for (local_idx, _table) in sheet.tables.iter().enumerate() {
-        rid_counter += 1;
         let global_id = tables_before + local_idx + 1;
-        push_relationship(
-            &mut out,
-            &format!("rId{rid_counter}"),
-            RT_TABLE,
+        g.add_with_id(
+            next_rid(),
+            rt::TABLE,
             &format!("../tables/table{global_id}.xml"),
+            TargetMode::Internal,
         );
     }
 
     // External hyperlinks (URLs, not internal `#Sheet!A1` references).
     for (_cell_ref, hyperlink) in &external_hyperlinks {
-        rid_counter += 1;
-        push_external_relationship(
-            &mut out,
-            &format!("rId{rid_counter}"),
-            RT_HYPERLINK,
+        g.add_with_id(
+            next_rid(),
+            rt::HYPERLINK,
             &hyperlink.target,
+            TargetMode::External,
         );
     }
 
-    out.push_str("</Relationships>");
-    out.into_bytes()
+    g.serialize()
 }
 
 #[cfg(test)]

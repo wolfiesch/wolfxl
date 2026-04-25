@@ -11,6 +11,7 @@ chrono.workspace = true
 indexmap.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
+wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
 
 [dev-dependencies]
 # Integration tests re-parse the emitter output with quick-xml and crack open
