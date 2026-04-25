@@ -978,6 +978,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "rust_xlsxwriter",
  "wolfxl-core",
+ "wolfxl-writer",
  "zip 2.4.2",
 ]
 

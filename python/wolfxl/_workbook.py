@@ -21,9 +21,9 @@ class Workbook:
 
     def __init__(self) -> None:
         """Create a new workbook in write mode with a default 'Sheet'."""
-        from wolfxl import _rust
+        from wolfxl import _backend, _rust  # noqa: F401  (_rust kept for typing parity)
 
-        self._rust_writer: Any = _rust.RustXlsxWriterBook()
+        self._rust_writer: Any = _backend.make_writer()
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
         self._data_only = False
