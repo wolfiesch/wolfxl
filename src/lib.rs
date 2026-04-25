@@ -4,6 +4,7 @@ use pyo3::types::{PyDict, PyList};
 type PyObject = Py<PyAny>;
 
 mod calamine_styled_backend;
+mod native_writer_backend;
 mod ooxml_util;
 mod rust_xlsxwriter_backend;
 mod util;
@@ -16,7 +17,10 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     info.set_item("package", "wolfxl")?;
     info.set_item("package_version", env!("CARGO_PKG_VERSION"))?;
 
-    let enabled = PyList::new(py, ["calamine-styles", "rust_xlsxwriter", "wolfxl"])?;
+    let enabled = PyList::new(
+        py,
+        ["calamine-styles", "rust_xlsxwriter", "wolfxl", "native"],
+    )?;
     info.set_item("enabled_backends", enabled)?;
 
     let versions = PyDict::new(py);
@@ -39,6 +43,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
     m.add_class::<rust_xlsxwriter_backend::RustXlsxWriterBook>()?;
+    m.add_class::<native_writer_backend::NativeWorkbook>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;
     Ok(())

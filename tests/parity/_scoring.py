@@ -9,12 +9,18 @@ the set of attributes that participate and the tier that governs them:
 * ``INFO`` - reported only, not gated.
 
 See ``Plans`` section "Pass semantics" for the full table.
+
+W4C extension: ``compare_two_workbooks(path_a, path_b)`` reuses the same
+tier machinery for the differential writer harness — both args are read
+through openpyxl, then walked dimension-by-dimension. Layer 3 of
+``tests/diffwriter/`` calls this and asserts ``hard_failures() == []``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -39,6 +45,7 @@ DIMENSION_TIERS: dict[str, Tier] = {
     "freeze_panes": Tier.HARD,
     "defined_name.refers_to": Tier.HARD,
     "column_width": Tier.HARD,
+    "sheet_names": Tier.HARD,
     "utils.get_column_letter": Tier.HARD,
     "utils.column_index_from_string": Tier.HARD,
     "utils.range_boundaries": Tier.HARD,
@@ -146,3 +153,124 @@ def _values_equal(a: Any, b: Any) -> bool:
     if isinstance(b, float) and isinstance(a, int):
         return _values_equal(float(a), b)
     return a == b
+
+
+def _normalize_number_format(v: Any) -> Any:
+    """openpyxl returns ``'General'`` for unformatted cells; coerce ``None``
+    to match so the dual-backend comparison doesn't trip on that quirk."""
+    if v is None:
+        return "General"
+    return v
+
+
+def _resolve_defined_name(defn: Any) -> str | None:
+    """Strip the leading ``=`` from a ``DefinedName.value``-style ref string."""
+    refers = getattr(defn, "value", defn)
+    if isinstance(refers, str) and refers.startswith("="):
+        refers = refers[1:]
+    return refers
+
+
+def compare_two_workbooks(path_a: Path, path_b: Path) -> ParityReport:
+    """Open ``path_a`` and ``path_b`` via openpyxl and produce a tiered
+    ``ParityReport``. Used by the differential writer harness Layer 3.
+
+    Walks every common sheet, compares dimensions / freeze panes /
+    merged cells / per-cell value+number_format / defined names, and
+    feeds each comparison through ``ParityReport.record`` so the
+    HARD/SOFT/INFO tiers from ``DIMENSION_TIERS`` apply.
+    """
+    import openpyxl  # local import: keeps ``_scoring.py`` importable when
+                     # openpyxl isn't installed (e.g. minimal test runs).
+
+    wb_a = openpyxl.load_workbook(str(path_a), data_only=False)
+    wb_b = openpyxl.load_workbook(str(path_b), data_only=False)
+    report = ParityReport(fixture_id=f"{path_a.name}_vs_{path_b.name}")
+    try:
+        a_names = list(wb_a.sheetnames)
+        b_names = list(wb_b.sheetnames)
+        report.record("sheet_names", "workbook", a_names, b_names)
+
+        common = [n for n in a_names if n in b_names]
+        for sheet in common:
+            _compare_sheet(report, wb_a[sheet], wb_b[sheet], sheet)
+
+        a_named = {
+            name: _resolve_defined_name(defn) for name, defn in wb_a.defined_names.items()
+        }
+        b_named = {
+            name: _resolve_defined_name(defn) for name, defn in wb_b.defined_names.items()
+        }
+        for name in set(a_named) | set(b_named):
+            report.record(
+                "defined_name.refers_to",
+                f"defined_name:{name}",
+                a_named.get(name),
+                b_named.get(name),
+            )
+    finally:
+        wb_a.close()
+        wb_b.close()
+    return report
+
+
+_MAX_CELLS_PER_SHEET = 10_000
+
+
+def _compare_sheet(
+    report: ParityReport, ws_a: Any, ws_b: Any, sheet_name: str,
+) -> None:
+    report.record("max_row", f"{sheet_name}:dim", ws_a.max_row, ws_b.max_row)
+    report.record("max_col", f"{sheet_name}:dim", ws_a.max_column, ws_b.max_column)
+    report.record(
+        "freeze_panes",
+        f"{sheet_name}:freeze",
+        ws_a.freeze_panes,
+        ws_b.freeze_panes,
+    )
+
+    a_merged = {str(r) for r in ws_a.merged_cells.ranges}
+    b_merged = {str(r) for r in ws_b.merged_cells.ranges}
+    report.record("merged_cells", f"{sheet_name}:merged", a_merged, b_merged)
+
+    # Column widths must be measured BEFORE the cell loop — the
+    # ``_MAX_CELLS_PER_SHEET`` early return below skips anything that
+    # follows on large sheets, and ``column_width`` is HARD-tier so we
+    # cannot let it silently fall through. ``column_dimensions`` is a
+    # dict-like that lazily creates entries on key access; iterate the
+    # union of explicitly-set columns from both sides only.
+    a_widths = {
+        col: dim.width
+        for col, dim in ws_a.column_dimensions.items()
+        if dim.width is not None
+    }
+    b_widths = {
+        col: dim.width
+        for col, dim in ws_b.column_dimensions.items()
+        if dim.width is not None
+    }
+    for col in sorted(set(a_widths) | set(b_widths)):
+        report.record(
+            "column_width",
+            f"{sheet_name}:col:{col}",
+            a_widths.get(col),
+            b_widths.get(col),
+        )
+
+    cells_seen = 0
+    for row in ws_a.iter_rows():
+        for cell_a in row:
+            if cell_a.value is None and getattr(cell_a, "style_id", 0) == 0:
+                continue
+            if cells_seen >= _MAX_CELLS_PER_SHEET:
+                return
+            cells_seen += 1
+            coord = cell_a.coordinate
+            cell_b = ws_b[coord]
+            report.record("value", f"{sheet_name}!{coord}", cell_a.value, cell_b.value)
+            report.record(
+                "number_format",
+                f"{sheet_name}!{coord}",
+                _normalize_number_format(cell_a.number_format),
+                _normalize_number_format(cell_b.number_format),
+            )

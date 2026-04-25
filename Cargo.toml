@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wolfxl-core", "crates/wolfxl-cli"]
+members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer"]
 
 [workspace.package]
 edition = "2021"
@@ -41,6 +41,7 @@ zip.workspace = true
 quick-xml.workspace = true
 chrono.workspace = true
 wolfxl-core = { path = "crates/wolfxl-core", version = "0.8" }
+wolfxl-writer = { path = "crates/wolfxl-writer", version = "0.1" }
 
 [build-dependencies]
 pyo3-build-config = "0.28"

@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::IntoPyObject;
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime};
 
 type PyObject = Py<PyAny>;
 
@@ -59,8 +59,17 @@ pub(crate) fn parse_iso_date(s: &str) -> Option<NaiveDate> {
 }
 
 pub(crate) fn parse_iso_datetime(s: &str) -> Option<NaiveDateTime> {
+    // Try tz-aware first (RFC 3339): handles 'Z', '+HH:MM', '-HH:MM'
+    // suffixes that Python's datetime.isoformat() emits when tzinfo is
+    // set. Take the naive part (we don't carry tz through OOXML's
+    // dcterms:created — Excel itself stores naive datetimes).
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.naive_local());
+    }
+    // Fall back to naive parses for tz-naive inputs.
     let raw = s.trim_end_matches('Z');
     NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S")
         .ok()
         .or_else(|| NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f").ok())
 }
+

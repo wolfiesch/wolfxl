@@ -48,7 +48,12 @@ line-length = 100
 select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
-markers = ["slow: marks tests that are sensitive to CI timing"]
+markers = [
+    "slow: marks tests that are sensitive to CI timing",
+    "rich_features: tests that exercise Wave 4B rich-feature pymethods (hyperlinks, comments, named ranges, properties, tables, CF, DV, print area). Skipped under WOLFXL_WRITER=native via -k 'not rich' until 4B lands.",
+    "smoke: hand-rolled Layer 1/3 smoke gates for the native writer (precedes the W4C diff harness).",
+    "libreoffice_smoke: Layer 4 LibreOffice headless round-trip (gold-star, opt-in via WOLFXL_RUN_LIBREOFFICE_SMOKE=1).",
+]
 
 [tool.mypy]
 strict = true

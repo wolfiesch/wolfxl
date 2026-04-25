@@ -85,3 +85,36 @@ and documented here before the ratchet baseline is updated.
 - Writing encrypted xlsx. Decision: T3 per plan — document in migration guide.
 - Rich-text write. Decision: T3 — SynthGL has no current write use case.
 - Pivot tables, charts, images, data validation — not in SynthGL's openpyxl surface.
+
+## Modify mode — T1.5-deferred features (W4F audit)
+
+Modify mode (`load_workbook(path, modify=True)`) is served by `XlsxPatcher`,
+which surgically rewrites changed parts and copies everything else verbatim.
+Several mutation paths are intentionally deferred to a post-Wave-5 T1.5
+slice. Each raises `NotImplementedError` with "T1.5" in the message so
+callers see a clear migration hint rather than silent data loss.
+
+| Modify-mode mutation | Status |
+|---|---|
+| `wb.properties.title = ...` (any property mutation) on existing file | Raises — T1.5 |
+| `wb.defined_names[name] = DefinedName(...)` on existing file | Raises — T1.5 |
+| `cell.comment = Comment(...)` | Raises — T1.5 |
+| `cell.hyperlink = Hyperlink(...)` | Raises — T1.5 |
+| `ws.add_table(Table(...))` | Raises — T1.5 |
+| `ws.data_validations.append(...)` | Raises — T1.5 |
+| `ws.conditional_formatting.add(...)` | Raises — T1.5 |
+| Sheet/column/row structural mutations | Raises — T1.5 |
+
+Supported in modify mode (round-trips cleanly via `_flush_to_patcher`):
+
+- Cell values: string, number, boolean, formula, blank
+- Font (bold/italic/underline/strikethrough/size/name/color)
+- Fill (solid pattern bg color)
+- Alignment (horizontal/vertical/wrap/indent/rotation)
+- Number format
+- Borders (left/right/top/bottom — style + color)
+
+`tests/test_modify_mode_independence.py` encodes these contracts as
+pre-rip-out invariants: any future change that breaks the patcher's
+independence from the writer backend, or that silently falls through to
+the writer for a T1.5-deferred feature, fails CI immediately.
