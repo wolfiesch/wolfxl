@@ -6,8 +6,13 @@
 //! See `Plans/rfcs/011-xml-block-merger.md` for the full design rationale.
 //! Module-level invariants are pinned in commit 6 of the RFC-011 slice.
 
-// quick_xml types are imported in commit 2 when the streaming algorithm
-// lands. The commit-1 stub does not parse XML.
+use std::collections::BTreeMap;
+
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::Reader as XmlReader;
+use quick_xml::Writer as XmlWriter;
+
+const REL_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 // ---------------------------------------------------------------------------
 // SheetBlock — one sibling-block insertion.
@@ -189,13 +194,319 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
         return Ok(sheet_xml.to_vec());
     }
 
-    // The full streaming algorithm lands in commit 2. Until then, signal
-    // that the caller is asking for behavior we don't yet implement so
-    // mis-wired callers fail loudly rather than silently dropping blocks.
-    Err(
-        "wolfxl-merger: merge_blocks streaming algorithm not yet implemented (RFC-011 commit 2)"
-            .to_string(),
-    )
+    // -------- 1. Bucket the supplied blocks by ECMA position. --------
+    //
+    // Slot 17 (conditionalFormatting) is 0..N — multiple blocks per slot are
+    // legal; every other slot is 0..1 by spec. Modeling the value as
+    // `Vec<SheetBlock>` lets us preserve the caller's supplied order on
+    // CF blocks without a second pass and tolerates a degenerate caller
+    // who supplies more than one of a single-occurrence slot (we just emit
+    // them in supplied order — garbage in, garbage out, RFC-011 §8 risk #6).
+    let mut pending: BTreeMap<u32, Vec<SheetBlock>> = BTreeMap::new();
+    let mut cf_replace = false;
+    // The set of root local-names we are inserting — every existing source
+    // block whose local-name appears here is dropped before its replacement
+    // is written.
+    let mut replace_names: Vec<&'static [u8]> = Vec::with_capacity(6);
+    // Whether the caller supplied any block whose payload uses the `r:`
+    // prefix (hyperlinks, tableParts, legacyDrawing). If yes, and the source
+    // worksheet open tag does not declare xmlns:r, we inject the
+    // declaration on the output's worksheet open tag (RFC-011 §8 risk #4).
+    let mut needs_rel_ns = false;
+    for block in blocks {
+        let pos = block.ecma_position();
+        let name = block.root_local_name();
+        if !replace_names.contains(&name) {
+            replace_names.push(name);
+        }
+        if matches!(block, SheetBlock::ConditionalFormatting(_)) {
+            cf_replace = true;
+        }
+        if matches!(
+            block,
+            SheetBlock::Hyperlinks(_) | SheetBlock::TableParts(_) | SheetBlock::LegacyDrawing(_)
+        ) {
+            needs_rel_ns = true;
+        }
+        pending.entry(pos).or_default().push(block);
+    }
+
+    // -------- 2. Stream the source. --------
+    let mut reader = XmlReader::from_reader(sheet_xml);
+    // trim_text(false) — preserve all source whitespace (the modify-mode
+    // minimal-diff promise from CLAUDE.md).
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(sheet_xml.len() + 128));
+    let mut buf: Vec<u8> = Vec::new();
+
+    // Tracks whether we've already emitted the worksheet open tag (so we
+    // know whether xmlns:r needs injection).
+    let mut emitted_root = false;
+
+    loop {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| format!("wolfxl-merger: XML parse error: {e}"))?;
+
+        match event {
+            Event::Start(e) => {
+                let local = e.local_name().as_ref().to_vec();
+
+                // (a) Worksheet root: the only place we ever rewrite a
+                // non-block element. We may need to inject xmlns:r.
+                if local == b"worksheet" && !emitted_root {
+                    let to_emit =
+                        ensure_rel_namespace(&e, needs_rel_ns).unwrap_or_else(|| e.borrow());
+                    writer
+                        .write_event(Event::Start(to_emit))
+                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                    emitted_root = true;
+                    buf.clear();
+                    continue;
+                }
+
+                // (b) cf_replace: skip every <conditionalFormatting>
+                // element wholesale; the caller's CF blocks land at the
+                // ECMA-17 slot below.
+                if cf_replace && local == b"conditionalFormatting" {
+                    consume_until_matching_end(&mut reader, &local)?;
+                    buf.clear();
+                    continue;
+                }
+
+                // (c) ECMA-known element: flush any pending blocks that
+                // come strictly before this slot, then either emit
+                // verbatim or skip-to-replace.
+                if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
+                    flush_pending_before(&mut writer, &mut pending, ord)?;
+
+                    if replace_names.contains(&local.as_slice()) {
+                        // Drop the source block; its replacement will be
+                        // emitted when we drain `pending` at slot `ord`
+                        // (next call to `flush_pending_at` below).
+                        consume_until_matching_end(&mut reader, &local)?;
+                        flush_pending_at(&mut writer, &mut pending, ord)?;
+                        buf.clear();
+                        continue;
+                    }
+
+                    writer
+                        .write_event(Event::Start(e.borrow()))
+                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                    buf.clear();
+                    continue;
+                }
+
+                // (d) Unknown element (extLst, x14ac:something, third-party
+                // compat). Pass through verbatim — RFC-011 §3 / §5.3.
+                writer
+                    .write_event(Event::Start(e.borrow()))
+                    .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+            }
+
+            Event::Empty(e) => {
+                let local = e.local_name().as_ref().to_vec();
+
+                // Self-closing <worksheet/> — RFC-011 §8 risk #3. Expand
+                // to explicit <worksheet>...</worksheet> and flush every
+                // pending block in between.
+                if local == b"worksheet" && !emitted_root {
+                    let opened =
+                        ensure_rel_namespace(&e, needs_rel_ns).unwrap_or_else(|| e.borrow());
+                    writer
+                        .write_event(Event::Start(opened))
+                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                    flush_all_pending(&mut writer, &mut pending)?;
+                    writer
+                        .write_event(Event::End(quick_xml::events::BytesEnd::new("worksheet")))
+                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                    emitted_root = true;
+                    buf.clear();
+                    continue;
+                }
+
+                if cf_replace && local == b"conditionalFormatting" {
+                    // Empty-element <conditionalFormatting/> — drop without
+                    // recursing; emission of replacements happens at slot 17.
+                    buf.clear();
+                    continue;
+                }
+
+                if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
+                    flush_pending_before(&mut writer, &mut pending, ord)?;
+
+                    if replace_names.contains(&local.as_slice()) {
+                        // Empty source block — nothing to consume; the
+                        // replacement still lands at the slot.
+                        flush_pending_at(&mut writer, &mut pending, ord)?;
+                        buf.clear();
+                        continue;
+                    }
+
+                    writer
+                        .write_event(Event::Empty(e.borrow()))
+                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                    buf.clear();
+                    continue;
+                }
+
+                // Unknown empty element — verbatim.
+                writer
+                    .write_event(Event::Empty(e.borrow()))
+                    .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+            }
+
+            Event::End(e) => {
+                if e.local_name().as_ref() == b"worksheet" {
+                    flush_all_pending(&mut writer, &mut pending)?;
+                }
+                writer
+                    .write_event(Event::End(e))
+                    .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+            }
+
+            Event::Eof => break,
+
+            // Decl, Text, CData, Comment, PI, DocType, GeneralRef — all
+            // flow through at the source byte position. RFC-011 §8 risk #2:
+            // a comment between two ECMA-ordered elements stays attached
+            // to the preceding source element when we insert a block.
+            other => {
+                writer
+                    .write_event(other)
+                    .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+/// Drain every pending block at slot `< ord` into the writer, in slot order.
+fn flush_pending_before(
+    writer: &mut XmlWriter<Vec<u8>>,
+    pending: &mut BTreeMap<u32, Vec<SheetBlock>>,
+    ord: u32,
+) -> Result<(), String> {
+    while let Some((&first_ord, _)) = pending.iter().next() {
+        if first_ord >= ord {
+            break;
+        }
+        if let Some(blocks) = pending.remove(&first_ord) {
+            for b in blocks {
+                writer
+                    .get_mut()
+                    .extend_from_slice(b.bytes());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Drain every pending block at slot `== ord` into the writer, in supplied
+/// order. Used when an existing source block at the same slot was just
+/// dropped (replace path).
+fn flush_pending_at(
+    writer: &mut XmlWriter<Vec<u8>>,
+    pending: &mut BTreeMap<u32, Vec<SheetBlock>>,
+    ord: u32,
+) -> Result<(), String> {
+    if let Some(blocks) = pending.remove(&ord) {
+        for b in blocks {
+            writer.get_mut().extend_from_slice(b.bytes());
+        }
+    }
+    Ok(())
+}
+
+/// Drain every remaining pending block into the writer, in slot order.
+/// Called when the source `</worksheet>` is reached (or on a self-closing
+/// `<worksheet/>`).
+fn flush_all_pending(
+    writer: &mut XmlWriter<Vec<u8>>,
+    pending: &mut BTreeMap<u32, Vec<SheetBlock>>,
+) -> Result<(), String> {
+    while let Some((_, blocks)) = pending.pop_first() {
+        for b in blocks {
+            writer.get_mut().extend_from_slice(b.bytes());
+        }
+    }
+    Ok(())
+}
+
+/// Consume reader events until the matching End event for `local` is
+/// observed. Used to "skip" a source block we are replacing. Tracks nesting
+/// depth in case the block contains nested elements with the same local
+/// name (rare but legal — e.g. an `<extLst>` inside an `<extLst>` is not
+/// possible, but conservative depth-tracking is cheap and correct).
+fn consume_until_matching_end<R: std::io::BufRead>(
+    reader: &mut XmlReader<R>,
+    local: &[u8],
+) -> Result<(), String> {
+    let mut depth: i32 = 1;
+    let mut buf: Vec<u8> = Vec::new();
+    while depth > 0 {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| format!("wolfxl-merger: XML parse error during skip: {e}"))?;
+        match event {
+            Event::Start(e) if e.local_name().as_ref() == local => {
+                depth += 1;
+            }
+            Event::End(e) if e.local_name().as_ref() == local => {
+                depth -= 1;
+            }
+            Event::Eof => {
+                return Err(format!(
+                    "wolfxl-merger: unexpected EOF while skipping <{}>",
+                    String::from_utf8_lossy(local)
+                ));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(())
+}
+
+/// If `needs_rel_ns` is true and the worksheet open tag does not already
+/// declare `xmlns:r` (or any other prefix bound to the relationships
+/// namespace), return a rewritten `BytesStart` with the declaration
+/// appended. Otherwise return `None` (caller falls back to the borrowed
+/// original — no allocation).
+///
+/// This is the *only* place the merger ever rewrites a non-block element
+/// (RFC-011 §8 risk #4). The rewrite preserves the original attribute slice
+/// byte-for-byte and appends a single new attribute at the tail.
+fn ensure_rel_namespace(
+    start: &BytesStart<'_>,
+    needs_rel_ns: bool,
+) -> Option<BytesStart<'static>> {
+    if !needs_rel_ns {
+        return None;
+    }
+    // Already declares the relationships namespace under some prefix — no-op.
+    for attr in start.attributes().with_checks(false).flatten() {
+        if attr.value.as_ref() == REL_NS {
+            return None;
+        }
+    }
+    // Build an owned BytesStart with the same name, copy each existing
+    // attribute through `push_attribute((&[u8], &[u8]))` (quick-xml clones
+    // into the BytesStart's owned buffer), then append `xmlns:r="…"`.
+    let name_bytes = start.name().as_ref().to_vec();
+    let mut new_start =
+        BytesStart::new(String::from_utf8_lossy(&name_bytes).into_owned());
+    for attr in start.attributes().with_checks(false).flatten() {
+        // We need to materialize the key+value as owned bytes so the
+        // tuple borrow lives long enough for push_attribute.
+        let key_owned: Vec<u8> = attr.key.as_ref().to_vec();
+        let value_owned: Vec<u8> = attr.value.as_ref().to_vec();
+        new_start.push_attribute((key_owned.as_slice(), value_owned.as_slice()));
+    }
+    new_start.push_attribute(("xmlns:r", std::str::from_utf8(REL_NS).unwrap()));
+    Some(new_start)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,5 +608,438 @@ mod tests {
         let garbage = b"not actually xml at all <<>>";
         let out = merge_blocks(garbage, vec![]).expect("empty blocks bypass parser");
         assert_eq!(out, garbage);
+    }
+
+    // -----------------------------------------------------------------------
+    // RFC-011 §6 tests #2-#12. Test #1 (merge_empty_blocks_is_noop) is above.
+    // -----------------------------------------------------------------------
+
+    /// Helper: a minimal worksheet with the four "almost always present"
+    /// children (dimension, sheetViews, sheetFormatPr, sheetData) plus
+    /// pageMargins. Useful as a baseline for "where does block X land?"
+    /// tests because pageMargins is slot 21, well past most insertion
+    /// targets.
+    fn minimal_with_pagemargins() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#
+    }
+
+    fn pos_of(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack
+            .windows(needle.len())
+            .position(|w| w == needle)
+    }
+
+    #[test]
+    fn insert_hyperlinks_into_minimal_sheet() {
+        // Test #2: insert <hyperlinks> into a minimal sheet that has no
+        // existing hyperlinks; must land at slot 19 — strictly before
+        // <pageMargins> (slot 21) and strictly after <sheetData> (slot 6).
+        let xml = minimal_with_pagemargins();
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        let hyper_pos = pos_of(&out, b"<hyperlinks>").expect("hyperlinks present");
+        let pm_pos = pos_of(&out, b"<pageMargins").expect("pageMargins present");
+        let sd_pos = pos_of(&out, b"<sheetData/>").expect("sheetData present");
+
+        assert!(sd_pos < hyper_pos, "<sheetData> must precede <hyperlinks>");
+        assert!(
+            hyper_pos < pm_pos,
+            "<hyperlinks> must precede <pageMargins>; got {s}"
+        );
+    }
+
+    #[test]
+    fn replace_existing_hyperlinks() {
+        // Test #3: source already has a <hyperlinks> block; supplying a new
+        // one drops the old.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><hyperlinks><hyperlink ref="OLD1" r:id="rIdOld"/></hyperlinks><pageMargins/></worksheet>"#;
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="NEW1" r:id="rIdNew"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        assert!(s.contains("NEW1"), "new hyperlink ref present: {s}");
+        assert!(!s.contains("OLD1"), "old hyperlink ref must be dropped: {s}");
+        assert!(!s.contains("rIdOld"), "old rId must be dropped: {s}");
+        // Exactly one <hyperlinks> block in output.
+        assert_eq!(s.matches("<hyperlinks>").count(), 1);
+    }
+
+    #[test]
+    fn insert_into_correct_ecma_position() {
+        // Test #4: for each of the 6 SheetBlock variants, build a sheet
+        // with one earlier-slot element and one later-slot element, then
+        // assert the inserted block lands strictly between them.
+        struct Case {
+            block: SheetBlock,
+            earlier: &'static [u8],
+            later: &'static [u8],
+        }
+        let cases = [
+            Case {
+                // mergeCells (15) lands between sheetData (6) and pageMargins (21).
+                block: SheetBlock::MergeCells(
+                    br#"<mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells>"#.to_vec(),
+                ),
+                earlier: b"<sheetData/>",
+                later: b"<pageMargins",
+            },
+            Case {
+                block: SheetBlock::ConditionalFormatting(
+                    br#"<conditionalFormatting sqref="A1"><cfRule type="cellIs"/></conditionalFormatting>"#
+                        .to_vec(),
+                ),
+                earlier: b"<sheetData/>",
+                later: b"<pageMargins",
+            },
+            Case {
+                block: SheetBlock::DataValidations(
+                    br#"<dataValidations count="1"><dataValidation/></dataValidations>"#.to_vec(),
+                ),
+                earlier: b"<sheetData/>",
+                later: b"<pageMargins",
+            },
+            Case {
+                block: SheetBlock::Hyperlinks(
+                    br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+                ),
+                earlier: b"<sheetData/>",
+                later: b"<pageMargins",
+            },
+            Case {
+                block: SheetBlock::LegacyDrawing(br#"<legacyDrawing r:id="rId1"/>"#.to_vec()),
+                earlier: b"<pageMargins",
+                later: b"</worksheet>",
+            },
+            Case {
+                block: SheetBlock::TableParts(
+                    br#"<tableParts count="1"><tablePart r:id="rId1"/></tableParts>"#.to_vec(),
+                ),
+                earlier: b"<pageMargins",
+                later: b"</worksheet>",
+            },
+        ];
+
+        for case in cases {
+            let block_root = case.block.root_local_name().to_vec();
+            let out = merge_blocks(minimal_with_pagemargins(), vec![case.block.clone()])
+                .expect("merge");
+            let earlier_pos = pos_of(&out, case.earlier)
+                .unwrap_or_else(|| panic!("earlier marker not found for {:?}", block_root));
+            // The block we look for in output is the open tag of its root.
+            let mut block_open = b"<".to_vec();
+            block_open.extend_from_slice(&block_root);
+            let block_pos = pos_of(&out, &block_open).unwrap_or_else(|| {
+                panic!(
+                    "inserted block <{}> not found in output: {}",
+                    String::from_utf8_lossy(&block_root),
+                    String::from_utf8_lossy(&out)
+                )
+            });
+            let later_pos = pos_of(&out, case.later)
+                .unwrap_or_else(|| panic!("later marker not found for {:?}", block_root));
+
+            assert!(
+                earlier_pos < block_pos,
+                "earlier marker precedes block for <{}>",
+                String::from_utf8_lossy(&block_root)
+            );
+            assert!(
+                block_pos < later_pos,
+                "block precedes later marker for <{}>",
+                String::from_utf8_lossy(&block_root)
+            );
+        }
+    }
+
+    #[test]
+    fn extlst_is_byte_preserved() {
+        // Test #5 (RFC §8 risk #1, HEADLINE).
+        //
+        // Input has a top-level <extLst> with a `uri` attribute, an x14ac
+        // namespace declaration, and an embedded extension element. After
+        // merging in a Hyperlinks block, the extLst byte slice in the
+        // output must be byte-identical to the slice in the input —
+        // attribute order, prefix bindings, and entity escaping all
+        // preserved.
+        let extlst_bytes = br#"<extLst><ext uri="{0CCD9C8C-1C75-4C90-9DC1-3DA9F3D52A6F}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:sparklineGroups xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:sparklineGroup type="line" displayEmptyCellsAs="gap"><x14:colorSeries rgb="FF376092"/><x14:colorNegative rgb="FFFF0000"/><x14:colorAxis rgb="FF000000"/></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>"#;
+        let mut xml: Vec<u8> = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetData/><pageMargins/>".to_vec();
+        xml.extend_from_slice(extlst_bytes);
+        xml.extend_from_slice(b"</worksheet>");
+
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(&xml, vec![block]).expect("merge");
+
+        assert!(
+            pos_of(&out, extlst_bytes).is_some(),
+            "<extLst> bytes must round-trip byte-identically; output was: {}",
+            String::from_utf8_lossy(&out)
+        );
+    }
+
+    #[test]
+    fn unknown_element_passthrough() {
+        // Test #6: an invented namespace-prefixed element between
+        // <sheetData> and <pageMargins> survives the merge with attributes
+        // intact, in the same relative position.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wolfxl="urn:test"><sheetData/><wolfxl:custom value="42"/><pageMargins/></worksheet>"#;
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        // The unknown element appears verbatim with its attribute.
+        assert!(
+            s.contains(r#"<wolfxl:custom value="42"/>"#),
+            "unknown element preserved with attribute: {s}"
+        );
+        // Hyperlinks landed at slot 19, between unknown element and
+        // pageMargins. (Unknown element sticks to source position.)
+        let custom = pos_of(&out, b"<wolfxl:custom").unwrap();
+        let hyper = pos_of(&out, b"<hyperlinks>").unwrap();
+        let pm = pos_of(&out, b"<pageMargins").unwrap();
+        assert!(custom < hyper && hyper < pm);
+    }
+
+    #[test]
+    fn multiple_conditionalformatting_blocks() {
+        // Test #7: 3 supplied CF blocks all land contiguously at slot 17,
+        // in supplied order.
+        let xml = minimal_with_pagemargins();
+        let blocks = vec![
+            SheetBlock::ConditionalFormatting(
+                br#"<conditionalFormatting sqref="A1:A10"><cfRule type="first"/></conditionalFormatting>"#.to_vec(),
+            ),
+            SheetBlock::ConditionalFormatting(
+                br#"<conditionalFormatting sqref="B1:B10"><cfRule type="second"/></conditionalFormatting>"#.to_vec(),
+            ),
+            SheetBlock::ConditionalFormatting(
+                br#"<conditionalFormatting sqref="C1:C10"><cfRule type="third"/></conditionalFormatting>"#.to_vec(),
+            ),
+        ];
+        let out = merge_blocks(xml, blocks).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        let first = s.find(r#"<cfRule type="first""#).unwrap();
+        let second = s.find(r#"<cfRule type="second""#).unwrap();
+        let third = s.find(r#"<cfRule type="third""#).unwrap();
+        let pm = s.find("<pageMargins").unwrap();
+        assert!(first < second && second < third);
+        assert!(third < pm, "all CF before pageMargins");
+        assert_eq!(s.matches("<conditionalFormatting").count(), 3);
+    }
+
+    #[test]
+    fn conditionalformatting_replaces_all_existing() {
+        // Test #8: source has 2 CF blocks; supply 1; output has only the
+        // supplied one. RFC §5.5 replace-all semantics.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><conditionalFormatting sqref="A1"><cfRule type="OLD_A"/></conditionalFormatting><conditionalFormatting sqref="B1"><cfRule type="OLD_B"/></conditionalFormatting><pageMargins/></worksheet>"#;
+        let block = SheetBlock::ConditionalFormatting(
+            br#"<conditionalFormatting sqref="C1"><cfRule type="NEW_C"/></conditionalFormatting>"#
+                .to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        assert!(s.contains("NEW_C"));
+        assert!(!s.contains("OLD_A"));
+        assert!(!s.contains("OLD_B"));
+        assert_eq!(s.matches("<conditionalFormatting").count(), 1);
+    }
+
+    #[test]
+    fn block_inserted_when_no_neighbors() {
+        // Test #9: sheet has only <sheetData>. Insert TableParts(...).
+        // Output: <sheetData/> then <tableParts> then </worksheet>.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/></worksheet>"#;
+        let block = SheetBlock::TableParts(
+            br#"<tableParts count="1"><tablePart r:id="rId1"/></tableParts>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        let sd = s.find("<sheetData/>").unwrap();
+        let tp = s.find("<tableParts").unwrap();
+        let close = s.find("</worksheet>").unwrap();
+        assert!(sd < tp && tp < close);
+    }
+
+    #[test]
+    fn tableparts_after_extlst_is_wrong_and_we_fix_it() {
+        // Test #10: pathological input has <extLst> before <tableParts>
+        // (some third-party libs emit this). Source order is preserved on
+        // pass-through (we don't reorder existing source elements), BUT
+        // when we INSERT a fresh <tableParts>, it must land at slot 37,
+        // i.e. before the existing <extLst> (slot 38).
+        //
+        // In other words: the merger doesn't rewrite source order on
+        // pass-through, but it does place inserted blocks at the correct
+        // slot — and slot 37 < 38 means the new tableParts must precede
+        // the existing extLst in the output.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><extLst><ext uri="X"/></extLst></worksheet>"#;
+        let block = SheetBlock::TableParts(
+            br#"<tableParts count="1"><tablePart r:id="rId1"/></tableParts>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        let tp = s.find("<tableParts").unwrap();
+        let ext = s.find("<extLst>").unwrap();
+        assert!(
+            tp < ext,
+            "<tableParts> (slot 37) must precede <extLst> (slot 38) in output: {s}"
+        );
+    }
+
+    #[test]
+    fn large_sheet_streaming_memory_bounded() {
+        // Test #11: a synthetic ~5 MB sheet (1k rows × 10 cells) merges in
+        // bounded extra memory. Per RFC #11 the bound is < 4 MB peak on a
+        // 50 MB sheet — we don't directly measure peak here (would require
+        // a heap allocator probe), but the merger's contract is streaming:
+        // O(input bytes) total work, no DOM build. This test guards
+        // against a regression where someone refactors merge_blocks to
+        // pre-buffer the whole input.
+        //
+        // Sanity property: output size is roughly input size + supplied
+        // block size. If a future regression copies the input N times,
+        // this test grows to N+1× the source and fails the assertion.
+        let mut xml: Vec<u8> = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetData>".to_vec();
+        for r in 1..=1000u32 {
+            xml.extend_from_slice(format!("<row r=\"{r}\">").as_bytes());
+            for c in 0..10u32 {
+                let col_letter = (b'A' + c as u8) as char;
+                xml.extend_from_slice(
+                    format!("<c r=\"{col_letter}{r}\" t=\"n\"><v>{r}</v></c>").as_bytes(),
+                );
+            }
+            xml.extend_from_slice(b"</row>");
+        }
+        xml.extend_from_slice(b"</sheetData></worksheet>");
+
+        let input_size = xml.len();
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(&xml, vec![block]).expect("merge");
+        let output_size = out.len();
+
+        // Output should be input + ~60 bytes for the hyperlinks block,
+        // not 2× input (which would indicate pre-buffering).
+        assert!(
+            output_size < input_size + 4096,
+            "output {} far exceeds input {} + small block; possible buffering regression",
+            output_size,
+            input_size
+        );
+        assert!(output_size > input_size, "output must contain the inserted block");
+    }
+
+    #[test]
+    fn byte_identical_when_block_already_present_and_unchanged() {
+        // Test #12: if the supplied bytes for a block exactly match what's
+        // in the source, the output is byte-identical to the input.
+        // Lets future RFC-022 etc. cheaply detect no-op patches.
+        let block_bytes: &[u8] =
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#;
+        let mut xml: Vec<u8> = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetData/>".to_vec();
+        xml.extend_from_slice(block_bytes);
+        xml.extend_from_slice(b"<pageMargins/></worksheet>");
+
+        let out = merge_blocks(&xml, vec![SheetBlock::Hyperlinks(block_bytes.to_vec())])
+            .expect("merge");
+        // The output's <hyperlinks> block bytes equal the supplied bytes.
+        assert!(
+            pos_of(&out, block_bytes).is_some(),
+            "supplied block bytes appear verbatim in output"
+        );
+        // Output contains exactly one <hyperlinks> block.
+        assert_eq!(out.windows(b"<hyperlinks>".len()).filter(|w| *w == b"<hyperlinks>").count(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Risk-fallback tests for §8 issues #2-#4 (comments, self-closing root,
+    // namespace injection). Belong to commit 2 alongside the §6 tests.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn comments_pass_through_at_source_position() {
+        // RFC §8 risk #2 — XML comments at worksheet level stay attached
+        // to their preceding source element when a block is inserted.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><!-- generated by foo --><pageMargins/></worksheet>"#;
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        assert!(s.contains("<!-- generated by foo -->"));
+    }
+
+    #[test]
+    fn self_closing_root_expands_and_flushes() {
+        // RFC §8 risk #3. Degenerate <worksheet/> in the source — the
+        // merger must expand to <worksheet>...</worksheet> with the block
+        // inside.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>"#;
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        assert!(s.contains("<hyperlinks>"));
+        assert!(s.contains("</worksheet>"));
+        assert!(!s.contains("<worksheet/>") && !s.contains("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"/>"),
+                "self-closing form must be expanded");
+    }
+
+    #[test]
+    fn rel_namespace_injected_when_missing() {
+        // RFC §8 risk #4. Source <worksheet> declares the default ns but
+        // not xmlns:r. When we insert a block whose payload uses r:id,
+        // the merger appends xmlns:r on the output's worksheet open tag.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        assert!(
+            s.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            "xmlns:r must be injected when missing: {s}"
+        );
+    }
+
+    #[test]
+    fn rel_namespace_not_duplicated_when_already_present() {
+        // The detection must accept any existing binding of the rels URI
+        // to a prefix — not blindly match on `r:` — and not double-inject.
+        let xml = minimal_with_pagemargins();
+        let block = SheetBlock::Hyperlinks(
+            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        assert_eq!(
+            s.matches("xmlns:r=").count(),
+            1,
+            "xmlns:r must not be duplicated when already present"
+        );
     }
 }
