@@ -139,6 +139,32 @@ class Workbook:
         self._sheets[title] = ws
         return ws
 
+    def copy_worksheet(self, source: Worksheet) -> Worksheet:
+        """Duplicate *source* into a new sheet within this workbook.
+
+        Tracked by RFC-035 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/035-copy-worksheet.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Workbook.copy_worksheet is scheduled for WolfXL 1.1 (RFC-035). "
+            "See Plans/rfcs/035-copy-worksheet.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
+        """Move *sheet* by *offset* positions within the sheet order.
+
+        Tracked by RFC-036 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/036-move-sheet.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Workbook.move_sheet is scheduled for WolfXL 1.1 (RFC-036). "
+            "See Plans/rfcs/036-move-sheet.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
     def save(self, filename: str | os.PathLike[str]) -> None:
         """Flush all pending writes and save to disk."""
         filename = str(filename)

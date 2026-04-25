@@ -1025,6 +1025,87 @@ class Worksheet:
         self._merged_ranges.discard(range_string)
 
     # ------------------------------------------------------------------
+    # Structural ops — scheduled, not yet implemented
+    # ------------------------------------------------------------------
+    #
+    # Each stub raises NotImplementedError with an RFC pointer so users
+    # see a discoverable roadmap entry instead of an AttributeError. The
+    # workaround note targets the most common escape hatch: do the
+    # structural shuffle in openpyxl, then read the result with
+    # ``wolfxl.load_workbook`` for the heavy work.
+
+    def insert_rows(self, idx: int, amount: int = 1) -> None:
+        """Shift rows down to insert *amount* empty rows starting at *idx*.
+
+        Tracked by RFC-030 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/030-insert-delete-rows.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Worksheet.insert_rows is scheduled for WolfXL 1.1 (RFC-030). "
+            "See Plans/rfcs/030-insert-delete-rows.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    def delete_rows(self, idx: int, amount: int = 1) -> None:
+        """Delete *amount* rows starting at *idx*, shifting subsequent rows up.
+
+        Tracked by RFC-030 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/030-insert-delete-rows.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Worksheet.delete_rows is scheduled for WolfXL 1.1 (RFC-030). "
+            "See Plans/rfcs/030-insert-delete-rows.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    def insert_cols(self, idx: int, amount: int = 1) -> None:
+        """Shift columns right to insert *amount* empty columns at *idx*.
+
+        Tracked by RFC-031 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/031-insert-delete-cols.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Worksheet.insert_cols is scheduled for WolfXL 1.1 (RFC-031). "
+            "See Plans/rfcs/031-insert-delete-cols.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    def delete_cols(self, idx: int, amount: int = 1) -> None:
+        """Delete *amount* columns starting at *idx*, shifting subsequent columns left.
+
+        Tracked by RFC-031 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/031-insert-delete-cols.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Worksheet.delete_cols is scheduled for WolfXL 1.1 (RFC-031). "
+            "See Plans/rfcs/031-insert-delete-cols.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    def move_range(
+        self,
+        cell_range: Any,
+        rows: int = 0,
+        cols: int = 0,
+        translate: bool = False,
+    ) -> None:
+        """Move a rectangular block of cells by *rows* / *cols*.
+
+        Tracked by RFC-034 (Phase 4 / WolfXL 1.1). See
+        ``Plans/rfcs/034-move-range.md`` for the implementation plan.
+        """
+        raise NotImplementedError(
+            "Worksheet.move_range is scheduled for WolfXL 1.1 (RFC-034). "
+            "See Plans/rfcs/034-move-range.md for the implementation plan. "
+            "Workaround: use openpyxl for structural ops, then load the result "
+            "with wolfxl.load_workbook() to do the heavy reads."
+        )
+
+    # ------------------------------------------------------------------
     # Flush pending writes to Rust
     # ------------------------------------------------------------------
 

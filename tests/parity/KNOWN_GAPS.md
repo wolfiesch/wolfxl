@@ -103,7 +103,7 @@ callers see a clear migration hint rather than silent data loss.
 | `ws.add_table(Table(...))` | Raises — T1.5 |
 | `ws.data_validations.append(...)` | Raises — T1.5 |
 | `ws.conditional_formatting.add(...)` | Raises — T1.5 |
-| Sheet/column/row structural mutations | Raises — T1.5 |
+| Sheet/column/row structural mutations | Raises — RFC-030/031/034/035/036 (WolfXL 1.1) |
 
 Supported in modify mode (round-trips cleanly via `_flush_to_patcher`):
 
