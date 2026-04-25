@@ -446,12 +446,6 @@ _METADATA_INFIX_PATTERNS: tuple[str, ...] = (
     # SheetView pane child count — oracle emits selection sub-elements per
     # pane, native emits only the <pane> itself. Both freeze the same range.
     "/sheetViews[1]/sheetView[1]: child count",
-    # Freeze panes xSplit/ySplit — Wave 4A native emits the user's "B2" as
-    # xSplit=2/ySplit=2; oracle emits xSplit=1/ySplit=1 (frozen-row-count
-    # vs cell-coordinate interpretation). Filed as W4A-bug; filtered here
-    # so Wave 4C ships. TODO: track in plan, fix in W4A follow-up.
-    "/sheetViews[1]/sheetView[1]/pane[1]/@xSplit",
-    "/sheetViews[1]/sheetView[1]/pane[1]/@ySplit",
     # Column width unit conversion — oracle converts user input (25.5) to
     # Excel's max-digit-width units (~26.28); native passes through. Both
     # round-trip cleanly within a backend; cross-backend tolerance lives

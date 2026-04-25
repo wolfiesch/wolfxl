@@ -151,11 +151,22 @@ fn emit_sheet_views(out: &mut String, sheet: &Worksheet, sheet_idx: u32) {
 }
 
 /// Emit `<pane …/>` for a freeze pane.
+///
+/// OOXML pane semantics with `state="frozen"`:
+///   `xSplit` = number of columns frozen
+///   `ySplit` = number of rows frozen
+/// Our model stores the freeze CELL coordinate ("B2" -> row=2 col=2),
+/// so the spec count is `(coord - 1)`. A coord of 0 or 1 means no
+/// freeze on that axis (nothing above row 1 or left of col A).
 fn emit_freeze_pane(out: &mut String, freeze: &crate::model::worksheet::FreezePane) {
-    let has_row = freeze.freeze_row >= 1;
-    let has_col = freeze.freeze_col >= 1;
+    let y_split = freeze.freeze_row.saturating_sub(1);
+    let x_split = freeze.freeze_col.saturating_sub(1);
+    let has_row = y_split > 0;
+    let has_col = x_split > 0;
+    if !has_row && !has_col {
+        return; // freeze cell at A1 (or below) — degenerate, emit nothing.
+    }
 
-    // Determine top-left cell for the active pane
     let tl_row = freeze.top_left.map(|t| t.0).unwrap_or_else(|| {
         if has_row { freeze.freeze_row } else { 1 }
     });
@@ -172,14 +183,12 @@ fn emit_freeze_pane(out: &mut String, freeze: &crate::model::worksheet::FreezePa
     };
 
     out.push_str("<pane");
-
     if has_col {
-        out.push_str(&format!(" xSplit=\"{}\"", freeze.freeze_col));
+        out.push_str(&format!(" xSplit=\"{}\"", x_split));
     }
     if has_row {
-        out.push_str(&format!(" ySplit=\"{}\"", freeze.freeze_row));
+        out.push_str(&format!(" ySplit=\"{}\"", y_split));
     }
-
     let top_left_cell = refs::format_a1(tl_row, tl_col);
     out.push_str(&format!(" topLeftCell=\"{}\"", top_left_cell));
     out.push_str(&format!(" activePane=\"{}\"", active_pane));
@@ -1146,7 +1155,8 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("ySplit=\"3\""), "ySplit: {text}");
+        // OOXML: ySplit is the COUNT of frozen rows (= freeze_row - 1).
+        assert!(text.contains("ySplit=\"2\""), "ySplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
         assert!(text.contains("activePane=\"bottomLeft\""), "activePane: {text}");
         assert!(!text.contains("xSplit"), "no xSplit: {text}");
@@ -1165,7 +1175,8 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("xSplit=\"2\""), "xSplit: {text}");
+        // OOXML: xSplit is the COUNT of frozen columns (= freeze_col - 1).
+        assert!(text.contains("xSplit=\"1\""), "xSplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
         assert!(text.contains("activePane=\"topRight\""), "activePane: {text}");
         assert!(!text.contains("ySplit"), "no ySplit: {text}");
@@ -1184,10 +1195,68 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("xSplit=\"3\""), "xSplit: {text}");
-        assert!(text.contains("ySplit=\"2\""), "ySplit: {text}");
+        // OOXML counts: freeze_col=3 -> xSplit=2, freeze_row=2 -> ySplit=1.
+        assert!(text.contains("xSplit=\"2\""), "xSplit: {text}");
+        assert!(text.contains("ySplit=\"1\""), "ySplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
         assert!(text.contains("activePane=\"bottomRight\""), "activePane: {text}");
+    }
+
+    // --- 21a. B2 freeze emits count one (W4-polish regression) ---
+
+    #[test]
+    fn emit_freeze_pane_b2_emits_count_one() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 2,
+            freeze_col: 2,
+            top_left: None,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("xSplit=\"1\""), "xSplit count: {text}");
+        assert!(text.contains("ySplit=\"1\""), "ySplit count: {text}");
+        assert!(text.contains("topLeftCell=\"B2\""), "topLeftCell: {text}");
+        assert!(text.contains("activePane=\"bottomRight\""), "activePane: {text}");
+        // Negative: must NOT emit the cell coordinate as the count.
+        assert!(!text.contains("xSplit=\"2\""), "xSplit must not be 2: {text}");
+        assert!(!text.contains("ySplit=\"2\""), "ySplit must not be 2: {text}");
+    }
+
+    // --- 21b. C5 freeze emits asymmetric counts ---
+
+    #[test]
+    fn emit_freeze_pane_c5_emits_correct_counts() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 5,
+            freeze_col: 3,
+            top_left: None,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("xSplit=\"2\""), "xSplit: {text}");
+        assert!(text.contains("ySplit=\"4\""), "ySplit: {text}");
+        assert!(text.contains("topLeftCell=\"C5\""), "topLeftCell: {text}");
+    }
+
+    // --- 21c. A1 freeze is a no-op (degenerate) ---
+
+    #[test]
+    fn emit_freeze_pane_a1_is_no_op() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 1,
+            freeze_col: 1,
+            top_left: None,
+        });
+        let (bytes, _) = emit_sheet(&sheet, 0);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        // Both splits collapse to zero — emit no <pane> at all.
+        assert!(!text.contains("<pane"), "must not emit pane for A1 freeze: {text}");
     }
 
     // --- 22. Split pane is not frozen ---

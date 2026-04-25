@@ -96,8 +96,9 @@ fn build_fixture() -> (Workbook, u32) {
         bottom_row: 1,
         right_col: 2,
     });
+    // Freeze cell at A2 = freeze the first row (1 row frozen, ySplit=1).
     s1.freeze = Some(FreezePane {
-        freeze_row: 1,
+        freeze_row: 2,
         freeze_col: 0,
         top_left: None,
     });
