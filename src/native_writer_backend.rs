@@ -1244,10 +1244,13 @@ impl NativeWorkbook {
                 "Workbook already saved (NativeWorkbook is consumed-on-save)",
             ));
         }
+        // Mark consumed BEFORE emit/write so a panic in emit_xlsx or fs::write
+        // leaves the workbook un-retryable on partially-mutated state. Mirrors
+        // RustXlsxWriterBook::save() at src/rust_xlsxwriter_backend.rs:2044.
+        self.saved = true;
         let bytes = wolfxl_writer::emit_xlsx(&mut self.inner);
         fs::write(path, bytes)
             .map_err(|e| PyIOError::new_err(format!("failed to write {path}: {e}")))?;
-        self.saved = true;
         Ok(())
     }
 
