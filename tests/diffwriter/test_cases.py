@@ -91,6 +91,17 @@ def test_dual_backend_parity(
     assert oracle_path.exists(), f"{case_id}: oracle xlsx missing at {oracle_path}"
     assert native_path.exists(), f"{case_id}: native xlsx missing at {native_path}"
 
+    # W4E.P6 gate: DualWorkbook captures asymmetric exceptions instead of
+    # re-raising. If oracle accepted a call that native rejected (or vice
+    # versa), the divergence is recorded but didn't kill fan-out — we
+    # surface it here so the harness can't falsely report "clean."
+    assert dual._oracle_errors == [], (
+        f"{case_id}: oracle raised on fan-out: {dual._oracle_errors}"
+    )
+    assert dual._native_errors == [], (
+        f"{case_id}: native raised on fan-out: {dual._native_errors}"
+    )
+
     if case_id in _ORACLE_BUGS_DOCUMENTED:
         pytest.xfail(_ORACLE_BUGS_DOCUMENTED[case_id])
 

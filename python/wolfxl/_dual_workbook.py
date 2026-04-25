@@ -15,13 +15,38 @@ to ``<stem>.native.xlsx`` (the original path is not written). The harness
 fixture in ``tests/diffwriter/conftest.py`` reads the two attributes after
 ``save()`` returns. Diff triggering lives in the test runner — keeping
 ``DualWorkbook`` decoupled from harness internals.
+
+Native-side errors are captured rather than re-raised: if oracle accepts
+a call but native rejects it (or vice versa), the divergence shows up in
+``self._native_errors`` / ``self._oracle_errors`` rather than killing the
+fan-out mid-flight. The harness asserts both lists are empty as part of
+the per-case gate. Without capture, an asymmetric rejection would crash
+the test on whichever backend was called second, and the diff harness
+would never run on the surviving file — so the diff would falsely
+report "clean" because there was nothing to compare.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from . import _rust  # type: ignore[attr-defined]
+
+
+@dataclass
+class _CapturedError:
+    """A method-call exception captured during DualWorkbook fan-out."""
+    method: str
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    exception: BaseException
+
+    def __repr__(self) -> str:
+        return (
+            f"_CapturedError(method={self.method!r}, "
+            f"exception={type(self.exception).__name__}: {self.exception})"
+        )
 
 
 class DualWorkbook:
@@ -32,6 +57,10 @@ class DualWorkbook:
         self._native: Any = _rust.NativeWorkbook()
         self._oracle_path: str | None = None
         self._native_path: str | None = None
+        # Captured exceptions from fan-out — the harness asserts both
+        # are empty after ``save()`` to detect asymmetric rejection.
+        self._oracle_errors: list[_CapturedError] = []
+        self._native_errors: list[_CapturedError] = []
 
         # Sanity gate — both backends must expose the same pymethod surface.
         # Drift here means a future pymethod was added to one backend but
@@ -51,8 +80,9 @@ class DualWorkbook:
     def __getattr__(self, name: str) -> Any:
         # ``__getattr__`` only fires on the normal-lookup miss path. Anything
         # set in ``__init__`` (``_oracle``, ``_native``, ``_oracle_path``,
-        # ``_native_path``) and anything defined on the class (``save``) is
-        # found by normal lookup before this runs.
+        # ``_native_path``, ``_oracle_errors``, ``_native_errors``) and
+        # anything defined on the class (``save``) is found by normal
+        # lookup before this runs.
         oracle_attr = getattr(self._oracle, name)
         native_attr = getattr(self._native, name)
         if not callable(oracle_attr):
@@ -62,8 +92,33 @@ class DualWorkbook:
             return oracle_attr
 
         def fan_out(*args: Any, **kwargs: Any) -> Any:
-            o_result = oracle_attr(*args, **kwargs)
-            native_attr(*args, **kwargs)
+            # Capture each side's exception independently so the other
+            # side still runs. Without this, a backend-specific bug
+            # would prevent the diff harness from ever comparing the
+            # two outputs — silently masking divergence as "clean."
+            o_result = None
+            o_exc: BaseException | None = None
+            try:
+                o_result = oracle_attr(*args, **kwargs)
+            except BaseException as exc:  # noqa: BLE001 — capture EVERYTHING
+                o_exc = exc
+                self._oracle_errors.append(
+                    _CapturedError(name, args, dict(kwargs), exc)
+                )
+
+            try:
+                native_attr(*args, **kwargs)
+            except BaseException as exc:  # noqa: BLE001
+                self._native_errors.append(
+                    _CapturedError(name, args, dict(kwargs), exc)
+                )
+
+            # If oracle raised, propagate that to the caller — the test
+            # body still sees the same behavior it would under
+            # ``WOLFXL_WRITER=oracle`` alone. Native errors are captured
+            # only; the harness inspects ``_native_errors`` post-fan-out.
+            if o_exc is not None:
+                raise o_exc
             return o_result
 
         fan_out.__name__ = name
