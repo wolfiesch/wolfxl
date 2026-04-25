@@ -2601,7 +2601,6 @@ class TestPrintArea:
         ws.print_area = None
         assert ws.print_area is None
 
-    @pytest.mark.rich_features
     def test_roundtrip(self, tmp_path: Path) -> None:
         """print_area survives save to xlsx (verified via XML inspection)."""
         import zipfile
