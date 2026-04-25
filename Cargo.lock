@@ -1351,6 +1351,7 @@ dependencies = [
  "pyo3-build-config",
  "quick-xml 0.37.5",
  "wolfxl-core",
+ "wolfxl-merger",
  "wolfxl-rels",
  "wolfxl-writer",
  "zip 2.4.2",

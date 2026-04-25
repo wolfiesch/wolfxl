@@ -28,6 +28,7 @@ use zip::{ZipArchive, ZipWriter};
 use crate::ooxml_util;
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
+use wolfxl_merger::SheetBlock;
 use wolfxl_rels::RelsGraph;
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,14 @@ pub struct XlsxPatcher {
     /// future Phase-3 RFCs (RFC-022 hyperlinks, RFC-023 comments, RFC-024
     /// tables); empty in the current slice.
     rels_patches: HashMap<String, RelsGraph>,
+    /// Queued sibling-block insertions on `xl/worksheets/sheet*.xml` parts.
+    /// Key: sheet XML path (e.g. `xl/worksheets/sheet1.xml`). The save
+    /// loop calls `wolfxl_merger::merge_blocks` after `sheet_patcher`
+    /// runs, so cell-level patches and block-level patches compose
+    /// without conflict. Populated by future Phase-3 RFCs (RFC-022
+    /// hyperlinks, RFC-024 tables, RFC-025 data validations, RFC-026
+    /// conditional formatting); empty in the current slice.
+    queued_blocks: HashMap<String, Vec<SheetBlock>>,
 }
 
 #[pymethods]
@@ -80,6 +89,7 @@ impl XlsxPatcher {
             value_patches: HashMap::new(),
             format_patches: HashMap::new(),
             rels_patches: HashMap::new(),
+            queued_blocks: HashMap::new(),
         })
     }
 
@@ -224,6 +234,7 @@ impl XlsxPatcher {
         if self.value_patches.is_empty()
             && self.format_patches.is_empty()
             && self.rels_patches.is_empty()
+            && self.queued_blocks.is_empty()
         {
             // No changes — just copy
             std::fs::copy(&self.file_path, output_path)
@@ -303,13 +314,46 @@ impl XlsxPatcher {
         }
 
         // --- Phase 3: Patch worksheet XMLs ---
+        //
+        // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
+        // sibling-block insertions via `wolfxl_merger`. The two passes
+        // commute (cells live inside <sheetData>, blocks are siblings) so
+        // composing them is straightforward. The merger pass is dead code
+        // at HEAD because `queued_blocks` is always empty; RFC-022/024/
+        // 025/026 will populate it.
         let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
 
-        for (sheet_path, patches) in &sheet_cell_patches {
+        // Sheets that have either kind of patch.
+        let mut all_sheet_paths: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        all_sheet_paths.extend(sheet_cell_patches.keys().cloned());
+        all_sheet_paths.extend(self.queued_blocks.keys().cloned());
+
+        for sheet_path in &all_sheet_paths {
             let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
-            let patched = sheet_patcher::patch_worksheet(&xml, patches)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Patch failed: {e}")))?;
-            file_patches.insert(sheet_path.clone(), patched.into_bytes());
+
+            // Pass 1: cell-level patches.
+            let after_cells: Vec<u8> = if let Some(patches) = sheet_cell_patches.get(sheet_path) {
+                sheet_patcher::patch_worksheet(&xml, patches)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Patch failed: {e}")))?
+                    .into_bytes()
+            } else {
+                xml.into_bytes()
+            };
+
+            // Pass 2: sibling-block insertions.
+            let after_blocks = if let Some(blocks) = self.queued_blocks.get(sheet_path) {
+                if blocks.is_empty() {
+                    after_cells
+                } else {
+                    wolfxl_merger::merge_blocks(&after_cells, blocks.clone())
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("Merge failed: {e}")))?
+                }
+            } else {
+                after_cells
+            };
+
+            file_patches.insert(sheet_path.clone(), after_blocks);
         }
 
         // Add styles.xml patch if modified
