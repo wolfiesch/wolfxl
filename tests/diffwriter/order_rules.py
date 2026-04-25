@@ -25,6 +25,15 @@ SORT_BY_ATTRIBUTE = {
     "numFmt": ("numFmtId", True),
     "si": (None, False),  # sharedStrings: order is load-bearing, don't sort
     "xf": (None, False),  # cellXfs index is the identity, don't sort
+    # W4C extensions ----------------------------------------------------
+    "col": ("min", True),    # column blocks ordered by min attr (1-based int)
+    "tablePart": (
+        # tablePart elements identified by their relationship id
+        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id",
+        False,
+    ),
+    "comment": ("ref", False),  # commentList: BTreeMap-A1 keys, deterministic
+    "cfRule": ("priority", True),  # conditionalFormatting rules are 1-indexed
 }
 
 # Elements whose children are never sorted (order is semantic).
@@ -38,4 +47,8 @@ PRESERVE_ORDER = {
     "conditionalFormatting",
     "dataValidations",
     "cfRule",
+    # W4C extensions ----------------------------------------------------
+    # IndexMap insertion order on <author> siblings is the contract that
+    # fixes the rust_xlsxwriter BTreeMap bug. Sorting masks regressions.
+    "authors",
 }
