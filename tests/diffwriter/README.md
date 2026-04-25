@@ -1,7 +1,7 @@
 # Differential Writer Harness
 
 Runs oracle (`rust_xlsxwriter`) and native (`wolfxl-writer`) backends
-against the same build plan and diffs the output across three layers.
+against the same build plan and diffs the output across four layers.
 
 ## Layers
 
@@ -10,7 +10,7 @@ against the same build plan and diffs the output across three layers.
 | 1 — byte | SHA-256 per-part after XML canonicalization + fuzzy strip | gold-star target (≥80%) |
 | 2 — XML structural | `lxml.etree` tree diff after sorting where spec permits | ship gate |
 | 3 — semantic | `tests/parity/_scoring.py` HARD/SOFT/INFO ratchet | ship gate |
-| 4 — LibreOffice smoke | `soffice --headless --convert-to xlsx` round-trip | nightly CI |
+| 4 — LibreOffice smoke | `soffice --headless --convert-to xlsx` round-trip | gold-star (≥95%), opt-in |
 
 ## Running
 
@@ -21,6 +21,33 @@ uv run pytest tests/diffwriter/
 # Force dual-backend comparison on every case
 WOLFXL_WRITER=both uv run pytest tests/diffwriter/
 ```
+
+## Layer 4 — LibreOffice smoke
+
+Layer 4 is **opt-in**. Without `WOLFXL_RUN_LIBREOFFICE_SMOKE=1` the
+`tests/diffwriter/soffice_smoke.py` tests skip cleanly, so the suite is
+harmless on machines that don't have LibreOffice installed.
+
+Install LibreOffice locally:
+
+```bash
+brew install --cask libreoffice    # macOS
+apt-get install libreoffice        # Linux
+```
+
+Run:
+
+```bash
+WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run pytest tests/diffwriter/soffice_smoke.py -v
+```
+
+Acceptance gate is ≥95% pass rate across the 25 hand-built cases + 15
+SynthGL fixtures (40 round-trips total). A handful of expected failures
+goes in `_SOFFICE_XFAIL_CASES` in `cases/__init__.py` so the layer
+remains green-by-default while documenting known LO incompatibilities.
+
+Layer 4 is gold-star: a failing case indicates an interop bug worth
+chasing in a follow-up slice but does NOT block ship.
 
 ## Module status
 
