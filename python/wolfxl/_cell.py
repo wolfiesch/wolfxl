@@ -159,6 +159,53 @@ class Cell:
             "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
         )
 
+    # ------------------------------------------------------------------
+    # T1 PR1: hyperlink / comment read access (write-mode setters land in PR4)
+    #
+    # Reads pull from per-worksheet lazy maps populated on first access.
+    # Cells without a hyperlink/comment return None (matches openpyxl).
+    # Setters raise NotImplementedError with a T1.5 pointer when the file
+    # was opened via load_workbook(...) (no rust writer); write-mode
+    # implementations land in PR4.
+    # ------------------------------------------------------------------
+
+    @property
+    def hyperlink(self) -> Any:
+        return self._ws._get_hyperlinks_map().get(self.coordinate)  # noqa: SLF001
+
+    @hyperlink.setter
+    def hyperlink(self, value: Any) -> None:
+        ws = self._ws
+        wb = ws._workbook  # noqa: SLF001
+        writer = wb._rust_writer  # noqa: SLF001
+        if writer is None:
+            raise NotImplementedError(
+                "Setting cell.hyperlink on an existing file is a T1.5 follow-up. "
+                "Write mode (Workbook() + save) is supported via T1 PR4 — "
+                "open the file via Workbook() rather than load_workbook()."
+            )
+        raise NotImplementedError(
+            "Write-mode cell.hyperlink setter ships in T1 PR4 (next commit)."
+        )
+
+    @property
+    def comment(self) -> Any:
+        return self._ws._get_comments_map().get(self.coordinate)  # noqa: SLF001
+
+    @comment.setter
+    def comment(self, value: Any) -> None:
+        ws = self._ws
+        wb = ws._workbook  # noqa: SLF001
+        writer = wb._rust_writer  # noqa: SLF001
+        if writer is None:
+            raise NotImplementedError(
+                "Setting cell.comment on an existing file is a T1.5 follow-up. "
+                "Write mode (Workbook() + save) is supported via T1 PR4."
+            )
+        raise NotImplementedError(
+            "Write-mode cell.comment setter ships in T1 PR4 (next commit)."
+        )
+
     @property
     def protection(self) -> None:
         """Read-only default (None). Cell protection is not supported."""

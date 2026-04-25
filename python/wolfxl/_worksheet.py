@@ -1386,6 +1386,78 @@ class Worksheet:
         )
 
     # ------------------------------------------------------------------
+    # T1 PR1 read maps — lazy + per-sheet cached
+    # ------------------------------------------------------------------
+    #
+    # Each method caches the fully-materialized result in a per-worksheet
+    # slot on first access. That single FFI hop populates the cache;
+    # subsequent calls (including per-cell lookups like ``cell.comment``)
+    # are O(1) dict probes in Python. The Rust reader memoizes too, so
+    # even a cold cache is cheap — but avoiding PyObject conversion on
+    # every cell-level access is the dominant win here.
+
+    def _get_comments_map(self) -> dict[str, Any]:
+        """Return ``{cell_ref: Comment}`` for this sheet, cached per instance."""
+        if self._comments_cache is not None:
+            return self._comments_cache
+        from wolfxl.comments import Comment
+
+        wb = self._workbook
+        if wb._rust_reader is None:  # noqa: SLF001
+            self._comments_cache = {}
+            return self._comments_cache
+        try:
+            entries = wb._rust_reader.read_comments(self._title)  # noqa: SLF001
+        except Exception:
+            entries = []
+        result: dict[str, Any] = {}
+        for e in entries:
+            cell_ref = e.get("cell")
+            if not cell_ref:
+                continue
+            result[cell_ref] = Comment(
+                text=e.get("text", ""),
+                author=e.get("author") or None,
+            )
+        self._comments_cache = result
+        return result
+
+    def _get_hyperlinks_map(self) -> dict[str, Any]:
+        """Return ``{cell_ref: Hyperlink}`` for this sheet, cached per instance."""
+        if self._hyperlinks_cache is not None:
+            return self._hyperlinks_cache
+        from wolfxl.worksheet.hyperlink import Hyperlink
+
+        wb = self._workbook
+        if wb._rust_reader is None:  # noqa: SLF001
+            self._hyperlinks_cache = {}
+            return self._hyperlinks_cache
+        try:
+            entries = wb._rust_reader.read_hyperlinks(self._title)  # noqa: SLF001
+        except Exception:
+            entries = []
+        result: dict[str, Any] = {}
+        for e in entries:
+            cell_ref = e.get("cell")
+            if not cell_ref:
+                continue
+            # Rust marks intra-workbook refs with ``internal=True`` and
+            # puts the destination in ``target``. openpyxl splits the two:
+            # external links use ``target``, internal use ``location``.
+            is_internal = bool(e.get("internal", False))
+            raw_target = e.get("target")
+            hl = Hyperlink(
+                ref=cell_ref,
+                target=None if is_internal else raw_target,
+                location=raw_target if is_internal else None,
+                display=e.get("display") or None,
+                tooltip=e.get("tooltip") or None,
+            )
+            result[cell_ref] = hl
+        self._hyperlinks_cache = result
+        return result
+
+    # ------------------------------------------------------------------
     # Flush pending writes to Rust
     # ------------------------------------------------------------------
 
