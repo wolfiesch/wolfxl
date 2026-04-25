@@ -78,33 +78,16 @@ pub fn parse_workbook_sheet_rids(xml: &str) -> PyResult<Vec<(String, String)>> {
 }
 
 pub fn parse_relationship_targets(xml: &str) -> PyResult<HashMap<String, String>> {
-    let mut reader = XmlReader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf: Vec<u8> = Vec::new();
-    let mut out: HashMap<String, String> = HashMap::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                if e.local_name().as_ref() == b"Relationship" {
-                    let id = attr_value(&e, b"Id");
-                    let target = attr_value(&e, b"Target");
-                    if let (Some(i), Some(t)) = (id, target) {
-                        out.insert(i, t);
-                    }
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => {
-                return Err(PyErr::new::<PyIOError, _>(format!(
-                    "Failed to parse rels: {e}"
-                )))
-            }
-            _ => {}
-        }
-        buf.clear();
+    // Body-only swap: the wolfxl-rels crate is the single source of truth
+    // for the rels grammar. Signature (and lenient skipping of malformed
+    // entries) are preserved so call sites in calamine_styled_backend.rs
+    // and src/wolfxl/mod.rs need not change.
+    let graph = wolfxl_rels::RelsGraph::parse(xml.as_bytes())
+        .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to parse rels: {e}")))?;
+    let mut out: HashMap<String, String> = HashMap::with_capacity(graph.len());
+    for r in graph.iter() {
+        out.insert(r.id.0.clone(), r.target.clone());
     }
-
     Ok(out)
 }
 
