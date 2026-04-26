@@ -22,7 +22,7 @@ pub mod properties;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -138,6 +138,15 @@ pub struct XlsxPatcher {
     /// RFC-013's `file_adds` primitive. Populated by
     /// [`Self::queue_properties`].
     queued_props: Option<properties::DocPropertiesPayload>,
+    /// Per-sheet hyperlink ops pending flush (RFC-022). Outer key is
+    /// sheet name; inner is coordinate → op. `BTreeMap` for the inner
+    /// gives deterministic flush ordering when a single save touches
+    /// multiple cells. Phase 2.5e drains this map: it reads the
+    /// existing `<hyperlinks>` block + sheet rels, merges the queued
+    /// ops, and pushes a `SheetBlock::Hyperlinks` plus mutates
+    /// `rels_patches`. `None` value (delete sentinel) lands here as
+    /// `HyperlinkOp::Delete` per INDEX decision #5.
+    queued_hyperlinks: HashMap<String, BTreeMap<String, hyperlinks::HyperlinkOp>>,
 }
 
 #[pymethods]
@@ -185,6 +194,7 @@ impl XlsxPatcher {
             ancillary: ancillary::AncillaryPartRegistry::new(),
             queued_content_type_ops: HashMap::new(),
             queued_props: None,
+            queued_hyperlinks: HashMap::new(),
         })
     }
 
@@ -404,6 +414,52 @@ impl XlsxPatcher {
     /// `keywords`, `description`, `last_modified_by`, `category`,
     /// `content_status`, `created_iso`, `modified_iso`, `sheet_names`
     /// (`list[str]`).
+    /// Queue a hyperlink set/update for `sheet[cell]` (RFC-022).
+    ///
+    /// `payload` keys (all optional but at least one of `target` /
+    /// `location` MUST be present): `target` (external URL — http/mailto/
+    /// file), `location` (internal sheet anchor like `'Sheet2'!A1`),
+    /// `tooltip`, `display`. Drained by Phase 2.5e during `do_save`.
+    fn queue_hyperlink(
+        &mut self,
+        sheet: &str,
+        cell: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let target = extract_str(payload, "target")?;
+        let location = extract_str(payload, "location")?;
+        let tooltip = extract_str(payload, "tooltip")?;
+        let display = extract_str(payload, "display")?;
+        if target.is_none() && location.is_none() {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_hyperlink: at least one of 'target' or 'location' must be set",
+            ));
+        }
+        let patch = hyperlinks::HyperlinkPatch {
+            coordinate: cell.to_string(),
+            target,
+            location,
+            tooltip,
+            display,
+        };
+        self.queued_hyperlinks
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), hyperlinks::HyperlinkOp::Set(patch));
+        Ok(())
+    }
+
+    /// Queue a hyperlink delete for `sheet[cell]` (RFC-022). Idempotent:
+    /// running on a cell that had no source hyperlink is a no-op at
+    /// flush time.
+    fn queue_hyperlink_delete(&mut self, sheet: &str, cell: &str) -> PyResult<()> {
+        self.queued_hyperlinks
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), hyperlinks::HyperlinkOp::Delete);
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -566,6 +622,107 @@ impl XlsxPatcher {
             .map(|a| a.hyperlinks_rels.iter().map(|r| r.0.clone()).collect())
             .unwrap_or_default()
     }
+
+    // -------------------------------------------------------------------
+    // RFC-022 test-only hooks.
+    // -------------------------------------------------------------------
+
+    /// Inject a Set op directly into `queued_hyperlinks`. Mirrors
+    /// `queue_hyperlink` but bypasses the validator so tests can set up
+    /// odd shapes (e.g. tooltip-only) deliberately.
+    fn _test_inject_hyperlink(
+        &mut self,
+        sheet: &str,
+        coord: &str,
+        target: Option<String>,
+        location: Option<String>,
+        tooltip: Option<String>,
+        display: Option<String>,
+    ) {
+        let patch = hyperlinks::HyperlinkPatch {
+            coordinate: coord.to_string(),
+            target,
+            location,
+            tooltip,
+            display,
+        };
+        self.queued_hyperlinks
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(coord.to_string(), hyperlinks::HyperlinkOp::Set(patch));
+    }
+
+    /// Inject a Delete op directly into `queued_hyperlinks`.
+    fn _test_inject_hyperlink_delete(&mut self, sheet: &str, coord: &str) {
+        self.queued_hyperlinks
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(coord.to_string(), hyperlinks::HyperlinkOp::Delete);
+    }
+
+    /// Run `extract_hyperlinks` on the source ZIP's current sheet XML
+    /// and return `(coord, target_or_location)` pairs in BTreeMap order
+    /// for assertion in pytest.
+    fn _test_get_extracted_hyperlinks(
+        &mut self,
+        sheet: &str,
+    ) -> PyResult<Vec<(String, String)>> {
+        let sheet_path = self
+            .sheet_paths
+            .get(sheet)
+            .cloned()
+            .ok_or_else(|| PyErr::new::<PyValueError, _>(format!("no such sheet: {sheet}")))?;
+        let f = File::open(&self.file_path).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
+        })?;
+        let mut zip = ZipArchive::new(f)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+        let rels_path = sheet_rels_path_for(&sheet_path);
+        let rels = load_or_empty_rels(&mut zip, &rels_path)?;
+        let xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
+        let extracted = hyperlinks::extract_hyperlinks(xml.as_bytes(), &rels);
+        Ok(extracted
+            .into_iter()
+            .map(|(coord, h)| {
+                let val = h
+                    .target
+                    .or(h.location)
+                    .unwrap_or_default();
+                (coord, val)
+            })
+            .collect())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers used by Phase 2.5e (hyperlinks) — small wrappers over
+// `wolfxl_rels::rels_path_for` and the ZIP entry reader so the per-sheet
+// flush stays terse.
+// ---------------------------------------------------------------------------
+
+/// Maps a sheet XML path (`xl/worksheets/sheet1.xml`) to its rels
+/// sidecar (`xl/worksheets/_rels/sheet1.xml.rels`). Wraps
+/// `wolfxl_rels::rels_path_for`; falls back to a synthesized path on
+/// the (impossible-in-OOXML) input that has no `/`.
+fn sheet_rels_path_for(sheet_path: &str) -> String {
+    wolfxl_rels::rels_path_for(sheet_path)
+        .unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
+}
+
+/// Read an existing `.rels` part out of `zip` and parse it; if the
+/// part doesn't exist (sheet has no rels yet), return `RelsGraph::new()`.
+/// Other read/parse errors propagate as `PyIOError`. Constrained to
+/// `ZipArchive<File>` because `ooxml_util::zip_read_to_string_opt` is
+/// not generic; matches every caller in this module.
+fn load_or_empty_rels(
+    zip: &mut ZipArchive<File>,
+    path: &str,
+) -> PyResult<RelsGraph> {
+    match ooxml_util::zip_read_to_string_opt(zip, path)? {
+        Some(xml) => RelsGraph::parse(xml.as_bytes())
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse for '{path}': {e}"))),
+        None => Ok(RelsGraph::new()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -584,11 +741,13 @@ impl XlsxPatcher {
             && self.file_deletes.is_empty()
             && self.queued_content_type_ops.is_empty()
             && self.queued_props.is_none()
+            && self.queued_hyperlinks.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
-            // `file_deletes`, `queued_content_type_ops`, and RFC-020's
-            // `queued_props` so a no-op save remains byte-identical
-            // even after these primitives land.
+            // `file_deletes`, `queued_content_type_ops`, RFC-020's
+            // `queued_props`, and RFC-022's `queued_hyperlinks` so a
+            // no-op save remains byte-identical even after these
+            // primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -760,6 +919,72 @@ impl XlsxPatcher {
             };
             let updated = conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
             styles_xml = Some(updated);
+        }
+
+        // --- Phase 2.5e: Hyperlinks (RFC-022) ---
+        //
+        // Per-sheet flush. For each sheet with queued hyperlink ops:
+        //   1. Lazy-populate the ancillary registry so we know which
+        //      rIds in the sheet's rels are hyperlinks (vs tables /
+        //      comments / vmlDrawings).
+        //   2. Get-or-load the rels graph into `rels_patches`. Phase 3's
+        //      rels-serialization loop picks up the mutated graph.
+        //   3. Read the source sheet XML, extract any existing
+        //      `<hyperlinks>` block (resolving rIds → URLs via the rels
+        //      graph), and merge with the queued ops.
+        //   4. Push a `SheetBlock::Hyperlinks` (slot 19) into
+        //      `local_blocks` so Phase 3's merge_blocks call inserts it.
+        //
+        // No `ContentTypeOp`s are emitted here — the worksheet content
+        // type is already declared in every source ZIP, and external
+        // hyperlinks live in the sheet's rels (which Phase 3 already
+        // serializes). An empty `block_bytes` (all hyperlinks deleted
+        // and the source had a block) is signaled to the merger by
+        // pushing `SheetBlock::Hyperlinks(Vec::new())` — it drops the
+        // existing block with no replacement.
+        //
+        // Cloning `sheet_order` into a local Vec sidesteps the
+        // immutable-borrow-on-self-while-mutating-self.{ancillary,
+        // rels_patches} conflict (same trick as Phase 2.5d).
+        let sheet_order_local: Vec<String> = self.sheet_order.clone();
+        for sheet_name in &sheet_order_local {
+            let ops = match self.queued_hyperlinks.get(sheet_name) {
+                Some(o) if !o.is_empty() => o.clone(),
+                _ => continue,
+            };
+            let sheet_path = match self.sheet_paths.get(sheet_name).cloned() {
+                Some(p) => p,
+                None => continue, // unknown sheet name — silently skip
+            };
+            let rels_path = sheet_rels_path_for(&sheet_path);
+            self.ancillary
+                .populate_for_sheet(&mut zip, sheet_name, &sheet_path)
+                .map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!(
+                        "ancillary populate for '{sheet_name}': {e}"
+                    ))
+                })?;
+            if !self.rels_patches.contains_key(&rels_path) {
+                let g = load_or_empty_rels(&mut zip, &rels_path)?;
+                self.rels_patches.insert(rels_path.clone(), g);
+            }
+            let rels = self
+                .rels_patches
+                .get_mut(&rels_path)
+                .expect("just inserted above");
+            let xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
+            let existing = hyperlinks::extract_hyperlinks(xml.as_bytes(), rels);
+            let had_existing = !existing.is_empty();
+            let (block_bytes, _deleted_rids) =
+                hyperlinks::build_hyperlinks_block(existing, &ops, rels);
+            // No-op if there was nothing to delete and nothing to add.
+            if block_bytes.is_empty() && !had_existing {
+                continue;
+            }
+            local_blocks
+                .entry(sheet_path.clone())
+                .or_default()
+                .push(SheetBlock::Hyperlinks(block_bytes));
         }
 
         // --- Phase 3: Patch worksheet XMLs ---
