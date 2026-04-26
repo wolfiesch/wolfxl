@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — Sprint Ε (Phase 4a follow-ups + Phase 4b)
+## Unreleased — RFC-035 (in progress)
+
+`Workbook.copy_worksheet(source, name=None)` (modify mode) — being
+shipped in parallel by Sprint Ε Pods α/β/γ/δ. Will be folded into
+the `1.1.0` section below at tag time.
+
+## wolfxl 1.1.0 (TBD) — Full structural parity
+
+User-facing release notes: `docs/release-notes-1.1.md`.
 
 ### Added
 
@@ -17,24 +25,6 @@
   New crate module: `crates/wolfxl-structural/src/range_move.rs`.
   Patcher Phase 2.5j drain in `src/wolfxl/mod.rs`. Tests:
   `tests/test_move_range_modify.py` (15 cases).
-
-### Fixed
-
-- **RFC-031 round 2** — `<tableColumns>` on `tableN.xml` now
-  correctly grows / shrinks when `insert_cols` / `delete_cols`
-  overlap the table's column band. Previously the `count="N"`
-  attribute and `<tableColumn>` element list stayed at the
-  pre-shift size, producing an xlsx that Excel and openpyxl
-  refused to load. Fixed by `crates/wolfxl-structural/src/shift_workbook.rs`
-  (`extract_table_col_band` + `rewrite_table_columns_block`).
-  Regression: `tests/test_col_shift_modify.py::test_rfc031_round2_*`
-  (4 cases). Also closes the corresponding action items in
-  `Plans/followups/rfc-030-031-api-coordination.md`.
-
-## Unreleased — Sprint Δ Phase 4a (Structural ops)
-
-### Added
-
 - **RFC-001** — Removed leftover `rust_xlsxwriter` workspace dependency. Native writer (RFC W5 replacement) has been the sole xlsx-write path since Phase 2; the dep was unused.
 - **RFC-036** — `Workbook.move_sheet(sheet, offset)` (modify mode).
   Reorders sheets in-place; updates `<sheets>` order in workbook.xml
@@ -53,6 +43,19 @@
   and deletes. `idx` accepts either a 1-based int or an Excel
   column letter.
 
+### Fixed
+
+- **RFC-031 round 2** — `<tableColumns>` on `tableN.xml` now
+  correctly grows / shrinks when `insert_cols` / `delete_cols`
+  overlap the table's column band. Previously the `count="N"`
+  attribute and `<tableColumn>` element list stayed at the
+  pre-shift size, producing an xlsx that Excel and openpyxl
+  refused to load. Fixed by `crates/wolfxl-structural/src/shift_workbook.rs`
+  (`extract_table_col_band` + `rewrite_table_columns_block`).
+  Regression: `tests/test_col_shift_modify.py::test_rfc031_round2_*`
+  (4 cases). Also closes the corresponding action items in
+  `Plans/followups/rfc-030-031-api-coordination.md`.
+
 ### Notes
 
 - Phase-4a (RFC-030, RFC-031, RFC-036) was dispatched as three
@@ -60,6 +63,10 @@
   `<col>` splitter onto RFC-030's crate layout — sprint retro now
   documents the rule "if two pods touch a shared crate, sequence
   them, don't parallelize."
+- Fuzz / property test for `apply_workbook_shift` added under
+  `crates/wolfxl-structural/tests/prop_apply_workbook_shift.rs`
+  (5000 deterministic iterations on a small fixture; asserts
+  no panic + well-formed XML output).
 
 ## wolfxl 0.5.0 (2026-04-20) - PyPI cdylib parity release
 
