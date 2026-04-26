@@ -6,7 +6,7 @@ WolfXL 1.2 closes the open follow-ups from 1.1's RFC-035 landing
 and hardens the `copy_worksheet` cross-RFC composition surface.
 The three biggest user-visible changes are: write-mode
 `copy_worksheet` (the §3 OQ-a `NotImplementedError` is gone),
-opt-in image deep-clone via `CopyOptions(deep_clone_images=True)`,
+opt-in image deep-clone via `wb.copy_options.deep_copy_images = True`,
 and a wolfxl-side `xl/calcChain.xml` rebuild so external readers no
 longer wait for Excel to fix the chain on first open.
 
@@ -46,32 +46,38 @@ fresh sheet appended at the end of the tab list.
 Behaviour matches the modify-mode contract (§5.4 sheet-scoped
 defined-name fan-out, §5.5 table-name auto-rename `_{N}`, §10
 sheet-scoped vs. workbook-scoped name divergence). The new tests
-in `tests/test_copy_worksheet_write.py` mirror the modify-mode
+in `tests/test_copy_worksheet_write_mode.py` mirror the modify-mode
 harness so any divergence surfaces immediately.
 
-<!-- TBD: Sprint Θ Pod-C1 commit sha when integrated -->
+Pod-C1 commit: `46862b9` (`feat(rfc-035): write-mode copy_worksheet`).
 
 ### Image deep-clone via `CopyOptions` (Sprint Θ Pod-C2, RFC-035 §5.3 / §8 risk #2)
 
 ```python
-from wolfxl import CopyOptions
+from wolfxl import CopyOptions   # also exported at the top level
 
-clone = wb.copy_worksheet(
-    template,
-    options=CopyOptions(deep_clone_images=True),    # additive; default False
-)
+wb.copy_options.deep_copy_images = True            # workbook-level setting
+clone = wb.copy_worksheet(template)                # picks up the flag at call time
 ```
 
-The new `CopyOptions` keyword controls how embedded image media
-(`xl/media/image*.png` / `.jpg`) is treated on copy:
+The new `CopyOptions` dataclass controls how embedded image media
+(`xl/media/image*.png` / `.jpg`) is treated on copy. It hangs off
+the workbook (`wb.copy_options`) rather than being passed per-call,
+so a single flip applies to every subsequent `copy_worksheet` in the
+same save:
 
-- **`deep_clone_images=False`** (default): preserves 1.1's URL-string
+- **`deep_copy_images=False`** (default): preserves 1.1's URL-string
   alias behaviour — the cloned drawing rels point at the source's
   `xl/media/imageN.png`. Byte-identical to 1.1.
-- **`deep_clone_images=True`**: duplicates the image part on the way
+- **`deep_copy_images=True`**: duplicates the image part on the way
   out. The clone's drawing rels point at a fresh
   `xl/media/imageM.png` with byte-identical content but a new
   `<Relationship Id>`.
+
+The flag is **snapshot at `copy_worksheet()` call time**, so toggling
+`wb.copy_options.deep_copy_images` between two `copy_worksheet`
+calls produces two clones with different image strategies in the
+same save. Once queued, a copy's strategy is fixed.
 
 The default stays `False` to preserve 1.1's byte-stability golden
 test. Enable deep-clone when you need to mutate the copy's images
@@ -79,7 +85,8 @@ independently of the source (e.g. swapping a logo per quarterly
 report). The opt-in trades 50× bloat on logo-heavy workbooks for
 mutation independence — the right knob for the job.
 
-<!-- TBD: Sprint Θ Pod-C2 commit sha when integrated -->
+Pod-C2 commit: `89fb68f`
+(`feat(rfc-035): wb.copy_options.deep_copy_images for image deep-clone`).
 
 ### `xl/calcChain.xml` rebuild post-copy (Sprint Θ Pod-C3, RFC-035 §10 / §8 risk #9)
 
@@ -91,28 +98,34 @@ auditors, third-party xlsx tooling) saw an incomplete chain.
 1.2 walks the cloned sheet's formula cells in a post-Phase-2.7 pass
 and emits the matching `<c>` entries into `xl/calcChain.xml` so the
 chain is complete on the wolfxl-emitted file — no Excel round-trip
-needed.
+needed. The patcher gains a Phase 2.8 walk that scans every sheet's
+post-mutation XML for `<f>` cells and emits the matching
+`xl/calcChain.xml`; the native writer mirrors the behaviour at write
+time. Workbooks with zero formulas omit the part entirely.
 
-<!-- TBD: Sprint Θ Pod-C3 commit sha when integrated -->
+Pod-C3 commit: `d6524c2` (`feat(rfc-035): rebuild calcChain.xml on save`).
 
 ### Phase 2.7 splice: self-closing `<sheets/>` and CDATA fuzz (Sprint Θ Pods A + B)
 
 The two RFC-035 cross-RFC composition bugs that 1.1 deferred are
 now closed:
 
-- **Pod-A — bug #4 (`test_p_self_closing_sheets_block`)**: the Phase
-  2.7 splice now handles a synthesized self-closing `<sheets/>`
-  workbook.xml correctly. The fix lives at the splice unit-test
-  level; integration through the public `load_workbook` loader path
-  remains gated behind a future `permissive=True` mode (real Excel
-  never emits `<sheets/>` for a non-empty workbook).
-  <!-- TBD: Sprint Θ Pod-A commit sha when integrated -->
+- **Pod-A — bug #4 (`test_p_self_closing_sheets_block`)**:
+  `wolfxl.load_workbook(path, permissive=True)` is the new opt-in
+  flag for slightly-malformed workbook.xml inputs. When the
+  `<sheets>` block is empty / self-closing, the loader walks
+  `xl/_rels/workbook.xml.rels` to discover worksheet targets,
+  synthesises titles (`Sheet1`, `Sheet2`, …), and rewrites the
+  in-memory workbook.xml so downstream phases see a well-formed
+  document. The flag defaults to `False`; well-formed inputs are
+  unaffected. Pod-A commit: `c6f94fc`.
 - **Pod-B — bug #6 (`test_r_cdata_pi_fuzz_fakeout`)**: the byte-level
   workbook.xml splice locator is replaced with an XML-aware scan
   (`quick-xml` reader pass) that respects element nesting. A
   workbook.xml comment containing literal `</sheets>` no longer
-  fools the locator.
-  <!-- TBD: Sprint Θ Pod-B commit sha when integrated -->
+  fools the locator. Five new Rust unit tests pin the invariant
+  (normal, self-closing, comment fakeout, CDATA fakeout, malformed).
+  Pod-B commit: `b27d177`.
 
 After 1.2, `tests/test_copy_worksheet_modify.py` ships zero
 `xfail(strict=True)` markers; every case passes.
@@ -185,17 +198,15 @@ mutations as ✅ Shipped (the W4F audit is closed) plus the new
 
 Sprint Θ ("Theta") pods that landed 1.2:
 
-- **Pod-A — RFC-035 bug #4** (self-closing `<sheets/>` splice).
-  <!-- TBD: pod sha when integrated -->
+- **Pod-A — RFC-035 bug #4** (`permissive=True` loader mode +
+  self-closing `<sheets/>` splice). `c6f94fc`
 - **Pod-B — RFC-035 bug #6** (XML-aware splice replacing byte-level
-  locator).
-  <!-- TBD: pod sha when integrated -->
-- **Pod-C1 — write-mode `copy_worksheet`** (lifts §3 OQ-a).
-  <!-- TBD: pod sha when integrated -->
-- **Pod-C2 — image deep-clone** (`CopyOptions(deep_clone_images=True)`).
-  <!-- TBD: pod sha when integrated -->
-- **Pod-C3 — calcChain rebuild** (post-Phase-2.7 chain emit).
-  <!-- TBD: pod sha when integrated -->
+  locator). `b27d177`
+- **Pod-C1 — write-mode `copy_worksheet`** (lifts §3 OQ-a). `46862b9`
+- **Pod-C2 — image deep-clone**
+  (`wb.copy_options.deep_copy_images = True`). `89fb68f`
+- **Pod-C3 — calcChain rebuild** (Phase 2.8 chain emit + write-mode
+  emitter). `d6524c2`
 - **Pod-D (this release)** — KNOWN_GAPS T1.5 reconciliation,
   RFC-035 §8.5 Sprint Θ deliverables section, 1.2 release notes
   scaffold.

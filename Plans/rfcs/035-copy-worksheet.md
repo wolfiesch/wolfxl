@@ -1,6 +1,6 @@
 # RFC-035: `Workbook.copy_worksheet` (clone an existing sheet within a workbook)
 
-Status: Shipped (1.1 modify-mode core; 1.2 Sprint Θ closes follow-ups — see §8.5)
+Status: Shipped (1.1 modify-mode core; 1.2 Sprint Θ closes all follow-ups — see §8.5)
 Owner: pod-035
 Phase: 4
 Estimate: XL
@@ -802,11 +802,33 @@ and merge through `feat/native-writer`.
 
 **Status snapshot (this branch)**:
 
-<!-- TBD: Sprint Θ Pod-A status — bug-#4 fix commit + sha -->
-<!-- TBD: Sprint Θ Pod-B status — bug-#6 fix commit + sha -->
-<!-- TBD: Sprint Θ Pod-C1 status — write-mode copy_worksheet commit + sha -->
-<!-- TBD: Sprint Θ Pod-C2 status — image deep-clone commit + sha -->
-<!-- TBD: Sprint Θ Pod-C3 status — calcChain rebuild commit + sha -->
+- **Pod-A — bug #4 closed** via `c6f94fc`
+  (`fix(rfc-035): add permissive=True loader mode, close bug #4
+  self-closing <sheets/>`). The fix lands at the **public** loader
+  level — the §10 row "loader does not accept synthesized
+  `<sheets/>` fixtures" is no longer accurate. Flag default `False`
+  preserves 1.1 strictness for non-opting callers.
+- **Pod-B — bug #6 closed** via `b27d177`
+  (`fix(rfc-035): replace naive splice with quick-xml SAX scan`).
+  Five Rust unit tests in `src/wolfxl/mod.rs::rfc013_tests` cover
+  normal, self-closing, comment fakeout, CDATA fakeout, and
+  malformed inputs.
+- **Pod-C1 — write-mode `copy_worksheet` shipped** via `46862b9`
+  (`feat(rfc-035): write-mode copy_worksheet`). The §3 OQ-a
+  `NotImplementedError` is gone; the new
+  `tests/test_copy_worksheet_write_mode.py` mirrors the modify-mode
+  harness for the seven core scenarios.
+- **Pod-C2 — image deep-clone shipped** via `89fb68f`
+  (`feat(rfc-035): wb.copy_options.deep_copy_images for image deep-
+  clone`). API materialised as a workbook-level dataclass
+  (`wb.copy_options.deep_copy_images`) rather than a per-call
+  keyword — see release notes "Migration guide" for rationale.
+  Default stays `False`, preserving 1.1 byte-stability.
+- **Pod-C3 — calcChain rebuild shipped** via `d6524c2`
+  (`feat(rfc-035): rebuild calcChain.xml on save`). New patcher
+  Phase 2.8 + native-writer emit module
+  (`crates/wolfxl-writer/src/emit/calc_chain_xml.rs`). Workbooks
+  with zero formulas omit the part entirely.
 
 Once all five pods land, the §3 OQ-a "modify-mode-only" caveat in
 the Status header above is lifted, the §10 "Out of scope" entries

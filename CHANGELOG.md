@@ -1,5 +1,92 @@
 # Changelog
 
+## wolfxl 1.2.0 (2026-04-26) — RFC-035 follow-ups + composition hardening
+
+User-facing release notes: `docs/release-notes-1.2.md`.
+
+Sprint Θ ("Theta") closes every RFC-035 follow-up that 1.1 deferred,
+landing in four parallel pods (A, B, C, D). The `copy_worksheet`
+surface now ships zero `xfail(strict=True)` markers in
+`tests/test_copy_worksheet_modify.py`.
+
+### Added
+
+- **RFC-035 §3 OQ-a — Write-mode `copy_worksheet`** (Sprint Θ Pod-C1, `46862b9`).
+  `Workbook.copy_worksheet(source, name=None)` now works in pure
+  write mode (Workbook() + create_sheet + copy_worksheet, never
+  loaded from disk). Walks the in-memory `NativeWorkbook` model and
+  clones every sub-record (cells, styles, tables, DV, CF,
+  hyperlinks, comments, defined names) into a fresh sheet appended
+  at end. New tests under `tests/test_copy_worksheet_write_mode.py`
+  (7 cases). The §3 OQ-a `NotImplementedError` is gone.
+- **RFC-035 §5.3 — Image deep-clone via `wb.copy_options`**
+  (Sprint Θ Pod-C2, `89fb68f`). New `CopyOptions` dataclass exposed
+  as `wb.copy_options` with the `deep_copy_images: bool` field
+  (default `False`, preserving 1.1's alias behaviour). When set
+  before `copy_worksheet()`, the planner duplicates `xl/media/
+  imageN.png` parts and re-points the cloned drawing rels at the
+  fresh `xl/media/imageM.png`. The flag is snapshot at queue time
+  so toggling between calls produces clones with different image
+  strategies in the same save. New tests under
+  `tests/test_copy_worksheet_deep_clone_images.py` (4 cases).
+- **RFC-035 §10 — `xl/calcChain.xml` rebuild** (Sprint Θ Pod-C3,
+  `d6524c2`). The patcher gains a Phase 2.8 walk that scans every
+  sheet's post-mutation XML for `<f>` cells and emits the matching
+  `xl/calcChain.xml`; the native writer mirrors the behaviour at
+  write time. Workbooks with zero formulas omit the part entirely.
+  External readers that consume `calcChain.xml` directly no longer
+  see a stale chain after `copy_worksheet`. New tests under
+  `tests/test_calcchain_rebuild.py` (7 cases). New module
+  `src/wolfxl/calcchain.rs` and crate-level emitter
+  `crates/wolfxl-writer/src/emit/calc_chain_xml.rs`.
+- **`load_workbook(..., permissive=True)` mode** (Sprint Θ Pod-A,
+  `c6f94fc`). New opt-in flag for slightly-malformed workbook.xml
+  inputs. When the `<sheets>` block is empty / self-closing, the
+  loader walks `xl/_rels/workbook.xml.rels` to discover worksheet
+  targets, synthesises titles (`Sheet1`, `Sheet2`, …), and rewrites
+  the in-memory workbook.xml so downstream phases see a well-formed
+  document. The flag defaults to `False`; well-formed inputs are
+  unaffected. Closes RFC-035 KNOWN_GAPS bug #4
+  (`test_p_self_closing_sheets_block`).
+
+### Fixed
+
+- **RFC-035 KNOWN_GAPS bug #6** (Sprint Θ Pod-B, `b27d177`).
+  Replaces the naive byte-substring `</sheets>` locator in
+  `splice_into_sheets_block` with a `quick-xml` SAX scan that
+  respects element nesting. Comments, CDATA sections, and PIs
+  containing the literal `</sheets>` token can no longer fool the
+  splice. Five new Rust unit tests in `src/wolfxl/mod.rs::rfc013_tests`
+  pin the invariant (normal, self-closing, comment fakeout, CDATA
+  fakeout, malformed). As a side-fix, the test fixture helper
+  `_inject_comment_with_sheets_token` was anchoring on `?>` (XML
+  declaration close) — but openpyxl-saved workbooks omit the XML
+  decl, so the injection was a silent no-op that masked the bug.
+  Helper now anchors on `<workbook ...>` via regex.
+
+### Documentation
+
+- `tests/parity/KNOWN_GAPS.md` — Sprint Θ Pod-D1 reconciled the
+  stale "Modify mode — T1.5-deferred features" table. Phase 3
+  shipped every entry (RFC-020/021/022/023/024/025/026); the table
+  is now an audit log of ✅ Shipped rows pointing at the per-RFC
+  modify-mode test files. Bug #4 and #6 moved from "Deferred to
+  1.2" to "Fixed in 1.2 (Sprint Θ Pods A + B)". The "Deferred queue
+  (post-1.2)" section is now empty.
+- `Plans/rfcs/035-copy-worksheet.md` — new §8.5 "Sprint Θ
+  deliverables (1.2)" subsection populated with per-pod commit
+  references.
+- `docs/release-notes-1.2.md` — user-facing 1.2 release notes
+  (~210 lines) covering every Sprint Θ deliverable + carry-forward
+  limitations.
+
+### Test totals (post-1.2)
+
+- `cargo test --workspace --exclude wolfxl`: ~648 green.
+- `pytest tests/`: **1038 passed, 16 skipped, 0 xfailed** (1.1 had
+  2 xfails; both flipped to PASS in 1.2).
+- `pytest tests/parity`: **102 passed, 2 skipped, 0 failures**.
+
 ## wolfxl 1.1.0 (2026-04-26) — Full structural parity
 
 User-facing release notes: `docs/release-notes-1.1.md`.
