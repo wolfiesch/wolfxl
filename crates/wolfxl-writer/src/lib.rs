@@ -58,8 +58,8 @@ pub use model::worksheet::Worksheet;
 /// the same archive both times.
 pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
     use crate::emit::{
-        comments_xml, content_types, doc_props, drawings_vml, rels, shared_strings_xml, sheet_xml,
-        styles_xml, tables_xml, workbook_xml,
+        calc_chain_xml, comments_xml, content_types, doc_props, drawings_vml, rels,
+        shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
     };
     use crate::zip::{package, ZipEntry};
 
@@ -151,6 +151,17 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             bytes: doc_props::emit_app(wb),
         },
     ]);
+
+    // Sprint Θ Pod-C3: write-mode calcChain. Only emit when the
+    // workbook has at least one formula cell — Excel transparently
+    // works without it, so an empty workbook should ship without the
+    // part (matching openpyxl's behaviour).
+    if let Some(cc_bytes) = calc_chain_xml::emit(wb) {
+        entries.push(ZipEntry {
+            path: "xl/calcChain.xml".to_string(),
+            bytes: cc_bytes,
+        });
+    }
 
     package(&entries).expect("zip package")
 }

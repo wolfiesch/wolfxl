@@ -104,6 +104,16 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
+    // Sprint Θ Pod-C3: calcChain.xml override, only when the workbook
+    // has at least one formula (matches the emit-side gate in
+    // `emit_xlsx`).
+    if crate::emit::calc_chain_xml::has_any_formula(wb) {
+        out.push_str(&format!(
+            "<Override PartName=\"/xl/calcChain.xml\" ContentType=\"{}\"/>",
+            crate::emit::calc_chain_xml::CT_CALC_CHAIN
+        ));
+    }
+
     out.push_str(&format!(
         "<Override PartName=\"/docProps/core.xml\" ContentType=\"{CT_CORE_PROPS}\"/>"
     ));

@@ -46,7 +46,8 @@ pub fn emit_root(_wb: &Workbook) -> Vec<u8> {
     g.serialize()
 }
 
-/// `xl/_rels/workbook.xml.rels` — workbook → sheets, styles, shared strings.
+/// `xl/_rels/workbook.xml.rels` — workbook → sheets, styles, shared strings,
+/// (optional) calcChain.
 pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
     let mut g = RelsGraph::new();
     let n_sheets = wb.sheets.len();
@@ -59,18 +60,31 @@ pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
             TargetMode::Internal,
         );
     }
+    let mut next_rid = n_sheets + 1;
     g.add_with_id(
-        RelId(format!("rId{}", n_sheets + 1)),
+        RelId(format!("rId{next_rid}")),
         rt::STYLES,
         "styles.xml",
         TargetMode::Internal,
     );
+    next_rid += 1;
     g.add_with_id(
-        RelId(format!("rId{}", n_sheets + 2)),
+        RelId(format!("rId{next_rid}")),
         rt::SHARED_STRINGS,
         "sharedStrings.xml",
         TargetMode::Internal,
     );
+    next_rid += 1;
+    // Sprint Θ Pod-C3: calcChain rel, only when the workbook has at
+    // least one formula (matches the gate in `emit_xlsx`).
+    if crate::emit::calc_chain_xml::has_any_formula(wb) {
+        g.add_with_id(
+            RelId(format!("rId{next_rid}")),
+            crate::emit::calc_chain_xml::REL_CALC_CHAIN,
+            "calcChain.xml",
+            TargetMode::Internal,
+        );
+    }
     g.serialize()
 }
 
