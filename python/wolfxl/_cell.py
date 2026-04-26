@@ -231,13 +231,13 @@ class Cell:
 
         ws = self._ws
         wb = ws._workbook  # noqa: SLF001
-        writer = wb._rust_writer  # noqa: SLF001
-        if writer is None:
-            raise NotImplementedError(
-                "Setting cell.comment on an existing file is a T1.5 follow-up. "
-                "Write mode (Workbook() + save) is supported — open the file "
-                "via Workbook() rather than load_workbook()."
-            )
+        # RFC-023: cell.comment round-trips in both write and modify
+        # mode. Both backends consume the same _pending_comments dict;
+        # the workbook flush dispatches to writer.add_comment (write)
+        # or patcher.queue_comment (modify). None is the explicit-
+        # delete sentinel.
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("cell.comment requires write or modify mode")
         coord = self.coordinate
         if value is None:
             ws._pending_comments[coord] = None  # noqa: SLF001

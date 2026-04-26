@@ -334,6 +334,8 @@ class Workbook:
             # rIds when build_tables iterates rels.iter() to assemble
             # the merged <tableParts> block.
             self._flush_pending_tables_to_patcher()
+            # RFC-023: comments + VML drawings.
+            self._flush_pending_comments_to_patcher()
             # RFC-025: flush worksheet-level setters that the patcher
             # accepts. The cell-level _flush above handles values +
             # formats; data validations are a separate patcher API
@@ -434,6 +436,36 @@ class Workbook:
                         "show_column_stripes": bool(t.tableStyleInfo.showColumnStripes),
                     }
                 patcher.queue_table(ws.title, payload)
+            pending.clear()
+
+    def _flush_pending_comments_to_patcher(self) -> None:
+        """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
+
+        Modify-mode counterpart to the writer-side flush at
+        ``_worksheet.py:1934``. Each ``Comment`` is converted to the
+        patcher's flat-dict shape and routed to ``queue_comment``;
+        the ``None`` sentinel routes to ``queue_comment_delete``.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_comments  # noqa: SLF001
+            if not pending:
+                continue
+            for coord, c in pending.items():
+                if c is None:
+                    patcher.queue_comment_delete(ws.title, coord)
+                    continue
+                payload: dict[str, Any] = {
+                    "text": c.text,
+                    "author": c.author or "wolfxl",
+                }
+                if getattr(c, "width", None) is not None:
+                    payload["width_pt"] = float(c.width)
+                if getattr(c, "height", None) is not None:
+                    payload["height_pt"] = float(c.height)
+                patcher.queue_comment(ws.title, coord, payload)
             pending.clear()
 
     def _flush_pending_data_validations_to_patcher(self) -> None:

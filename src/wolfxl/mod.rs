@@ -23,6 +23,7 @@ pub mod properties;
 pub mod hyperlinks;
 pub mod defined_names;
 pub mod tables;
+pub mod comments;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -169,6 +170,14 @@ pub struct XlsxPatcher {
     /// `SheetBlock::TableParts` per sheet. Insertion order via Vec
     /// matches openpyxl's "first add → first slot" semantics.
     queued_tables: HashMap<String, Vec<tables::TablePatch>>,
+    /// Per-sheet comment ops pending flush (RFC-023). Outer key is
+    /// sheet name; inner is coordinate → op. `Set` adds/replaces a
+    /// comment with the supplied text/author/width/height; `Delete`
+    /// removes any existing comment at that coordinate. Drained by
+    /// Phase 2.5h during `do_save`. Workbook-scope author dedup
+    /// happens in `comments::CommentAuthorTable`, shared across all
+    /// sheets touched in a single save.
+    queued_comments: HashMap<String, BTreeMap<String, comments::CommentOp>>,
 }
 
 #[pymethods]
@@ -219,6 +228,7 @@ impl XlsxPatcher {
             queued_hyperlinks: HashMap::new(),
             queued_defined_names: Vec::new(),
             queued_tables: HashMap::new(),
+            queued_comments: HashMap::new(),
         })
     }
 
@@ -589,6 +599,47 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a comment set/update for `sheet[cell]` (RFC-023).
+    ///
+    /// `payload` keys: `text` (required), `author` (optional — defaults
+    /// to `"wolfxl"` to match the writer), `width_pt` / `height_pt`
+    /// (optional, in OOXML points). Drained by Phase 2.5g during
+    /// `do_save`.
+    fn queue_comment(
+        &mut self,
+        sheet: &str,
+        cell: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let text = extract_str(payload, "text")?.unwrap_or_default();
+        let author = extract_str(payload, "author")?.unwrap_or_else(|| "wolfxl".to_string());
+        let width_pt = extract_f64(payload, "width_pt")?;
+        let height_pt = extract_f64(payload, "height_pt")?;
+        let patch = comments::CommentPatch {
+            coordinate: cell.to_string(),
+            author,
+            text,
+            width_pt,
+            height_pt,
+        };
+        self.queued_comments
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), comments::CommentOp::Set(patch));
+        Ok(())
+    }
+
+    /// Queue a comment delete for `sheet[cell]` (RFC-023). Idempotent:
+    /// running on a cell that had no source comment is a no-op at
+    /// flush time.
+    fn queue_comment_delete(&mut self, sheet: &str, cell: &str) -> PyResult<()> {
+        self.queued_comments
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), comments::CommentOp::Delete);
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -838,6 +889,15 @@ fn sheet_rels_path_for(sheet_path: &str) -> String {
         .unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
 }
 
+/// Parse the trailing integer N out of an OOXML part path like
+/// `xl/comments3.xml` (with `prefix="xl/comments"`, `suffix=".xml"`).
+/// Returns `None` if either the prefix/suffix don't match or the
+/// substring between them doesn't parse as `u32`.
+fn parse_n_from_part_path(path: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let mid = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    mid.parse::<u32>().ok()
+}
+
 /// Read an existing `.rels` part out of `zip` and parse it; if the
 /// part doesn't exist (sheet has no rels yet), return `RelsGraph::new()`.
 /// Other read/parse errors propagate as `PyIOError`. Constrained to
@@ -873,11 +933,13 @@ impl XlsxPatcher {
             && self.queued_hyperlinks.is_empty()
             && self.queued_defined_names.is_empty()
             && self.queued_tables.is_empty()
+            && self.queued_comments.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
             // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
-            // `queued_defined_names`, and RFC-024's `queued_tables` so
+            // `queued_defined_names`, RFC-024's `queued_tables`, and
+            // RFC-023's `queued_comments` so
             // a no-op save remains
             // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
@@ -1223,6 +1285,223 @@ impl XlsxPatcher {
             }
         }
 
+        // --- Phase 2.5g: Comments + VML drawings (RFC-023) ---
+        //
+        // Per-sheet flush. For each sheet with queued comment ops:
+        //   1. Lazy-populate the ancillary registry to learn the
+        //      sheet's existing comments part path / VML part path
+        //      (if any).
+        //   2. Get-or-load the rels graph into `rels_patches`.
+        //   3. Read the existing commentsN.xml + vmlDrawingN.vml (if
+        //      any), merge in the queued ops, re-emit fresh bytes.
+        //   4. Choose a workbook-wide unique `comments_n` / `vml_n`
+        //      for sheets gaining their first comments part.
+        //   5. Push a `SheetBlock::LegacyDrawing` (slot 31) into
+        //      `local_blocks` so the merger injects it (deletes the
+        //      tag if the rel was removed and the sheet had one).
+        //   6. Route comment/vml part bytes:
+        //      - if `merged.is_empty()` and no preserved VML shapes
+        //        → schedule deletion via `file_deletes`.
+        //      - otherwise patch (existing) or add (new) the bytes.
+        //   7. Emit `[Content_Types].xml` ops (Override for the
+        //      comments part; Default for the vml extension).
+        //
+        // Workbook-scope author table (`comment_authors`) lives on
+        // the stack so all sheets share dedup. Two parallel counters
+        // (`next_comments_n`, `next_vml_n`) start at the highest
+        // existing index + 1 and increment as new parts are minted.
+        let mut comment_authors = comments::CommentAuthorTable::new();
+        // Seed the workbook-wide N counters: start above the highest
+        // existing comments<N>.xml / vmlDrawing<N>.vml in the source.
+        let mut next_comments_n: u32 = 1;
+        let mut next_vml_n: u32 = 1;
+        for sheet_name in &sheet_order_local {
+            let sp = match self.sheet_paths.get(sheet_name).cloned() {
+                Some(p) => p,
+                None => continue,
+            };
+            let _ = self.ancillary.populate_for_sheet(&mut zip, sheet_name, &sp);
+            if let Some(anc) = self.ancillary.get(sheet_name) {
+                if let Some(p) = &anc.comments_part {
+                    if let Some(n) = parse_n_from_part_path(p, "xl/comments", ".xml") {
+                        if n + 1 > next_comments_n {
+                            next_comments_n = n + 1;
+                        }
+                    }
+                }
+                if let Some(p) = &anc.vml_drawing_part {
+                    if let Some(n) =
+                        parse_n_from_part_path(p, "xl/drawings/vmlDrawing", ".vml")
+                    {
+                        if n + 1 > next_vml_n {
+                            next_vml_n = n + 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut comments_file_writes: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut comments_file_deletes: HashSet<String> = HashSet::new();
+        let mut comments_ct_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+        let mut vml_default_added = false;
+
+        for sheet_name in &sheet_order_local {
+            let ops = match self.queued_comments.get(sheet_name) {
+                Some(o) if !o.is_empty() => o.clone(),
+                _ => continue,
+            };
+            let sheet_path = match self.sheet_paths.get(sheet_name).cloned() {
+                Some(p) => p,
+                None => continue,
+            };
+            let rels_path = sheet_rels_path_for(&sheet_path);
+            self.ancillary
+                .populate_for_sheet(&mut zip, sheet_name, &sheet_path)
+                .map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!(
+                        "ancillary populate for '{sheet_name}': {e}"
+                    ))
+                })?;
+            let (existing_comments_path, existing_vml_path) = {
+                let anc = self
+                    .ancillary
+                    .get(sheet_name)
+                    .cloned()
+                    .unwrap_or_default();
+                (anc.comments_part, anc.vml_drawing_part)
+            };
+            if !self.rels_patches.contains_key(&rels_path) {
+                let g = load_or_empty_rels(&mut zip, &rels_path)?;
+                self.rels_patches.insert(rels_path.clone(), g);
+            }
+
+            // Read existing parts (if any) before we mutate the rels graph.
+            let existing_comments_xml: Option<Vec<u8>> = match &existing_comments_path {
+                Some(p) => Some(
+                    ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes(),
+                ),
+                None => None,
+            };
+            let existing_vml_xml: Option<Vec<u8>> = match &existing_vml_path {
+                Some(p) => Some(
+                    ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes(),
+                ),
+                None => None,
+            };
+            let sheet_xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
+
+            // Decide N values: reuse existing-part N if any, else mint new.
+            let comments_n = match &existing_comments_path {
+                Some(p) => {
+                    parse_n_from_part_path(p, "xl/comments", ".xml").unwrap_or_else(|| {
+                        let n = next_comments_n;
+                        next_comments_n += 1;
+                        n
+                    })
+                }
+                None => {
+                    let n = next_comments_n;
+                    next_comments_n += 1;
+                    n
+                }
+            };
+            let vml_n = match &existing_vml_path {
+                Some(p) => {
+                    parse_n_from_part_path(p, "xl/drawings/vmlDrawing", ".vml")
+                        .unwrap_or_else(|| {
+                            let n = next_vml_n;
+                            next_vml_n += 1;
+                            n
+                        })
+                }
+                None => {
+                    let n = next_vml_n;
+                    next_vml_n += 1;
+                    n
+                }
+            };
+
+            let rels = self
+                .rels_patches
+                .get_mut(&rels_path)
+                .expect("just inserted above");
+
+            let (result, _comments_rid_opt, vml_rid_opt) = comments::build_comments(
+                existing_comments_xml.as_deref(),
+                existing_vml_xml.as_deref(),
+                &ops,
+                sheet_xml.as_bytes(),
+                rels,
+                &mut comment_authors,
+                comments_n,
+                vml_n,
+            );
+
+            // Route comments part bytes.
+            let comments_path = existing_comments_path
+                .clone()
+                .unwrap_or_else(|| format!("xl/comments{comments_n}.xml"));
+            if result.comments_xml.is_empty() {
+                // All comments deleted; remove the part entirely.
+                if existing_comments_path.is_some() {
+                    comments_file_deletes.insert(comments_path.clone());
+                }
+            } else {
+                comments_file_writes.insert(comments_path.clone(), result.comments_xml);
+                if existing_comments_path.is_none() {
+                    comments_ct_ops.push(content_types::ContentTypeOp::AddOverride(
+                        format!("/{}", comments_path),
+                        comments::CT_COMMENTS.to_string(),
+                    ));
+                }
+            }
+
+            // Route vml drawing part bytes.
+            let vml_path = existing_vml_path
+                .clone()
+                .unwrap_or_else(|| format!("xl/drawings/vmlDrawing{vml_n}.vml"));
+            if result.vml_drawing.is_empty() {
+                if existing_vml_path.is_some() {
+                    comments_file_deletes.insert(vml_path.clone());
+                }
+            } else {
+                comments_file_writes.insert(vml_path.clone(), result.vml_drawing);
+                if existing_vml_path.is_none() && !vml_default_added {
+                    comments_ct_ops.push(content_types::ContentTypeOp::EnsureDefault(
+                        "vml".to_string(),
+                        comments::CT_VML.to_string(),
+                    ));
+                    vml_default_added = true;
+                }
+            }
+
+            // Emit a legacyDrawing block (slot 31) when the sheet
+            // has a vml rel — or an empty payload to drop it when
+            // every comment was deleted and no other VML shapes
+            // remain.
+            let legacy_block: Vec<u8> = match &result.legacy_drawing_rid {
+                Some(rid) => format!(r#"<legacyDrawing r:id="{}"/>"#, rid.0).into_bytes(),
+                None => Vec::new(),
+            };
+            local_blocks
+                .entry(sheet_path.clone())
+                .or_default()
+                .push(SheetBlock::LegacyDrawing(legacy_block));
+
+            // suppress unused_variable warning on vml_rid_opt
+            let _ = vml_rid_opt;
+        }
+
+        // Merge comments_ct_ops into queued_content_type_ops under a
+        // synthetic per-workbook key so Phase 2.5c picks them up.
+        if !comments_ct_ops.is_empty() {
+            self.queued_content_type_ops
+                .entry("__rfc023_comments__".to_string())
+                .or_default()
+                .extend(comments_ct_ops);
+        }
+
         // --- Phase 3: Patch worksheet XMLs ---
         //
         // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
@@ -1372,6 +1651,21 @@ impl XlsxPatcher {
             } else {
                 self.file_adds.insert("docProps/app.xml".into(), app_bytes);
             }
+        }
+
+        // Route RFC-023 comments/vml part bytes into the right
+        // primitive (in-place patch vs. new add) and delete dropped
+        // parts. Done after Phase 2.5d so we already know which paths
+        // exist in the source ZIP.
+        for (path, bytes) in comments_file_writes.drain() {
+            if zip.by_name(&path).is_ok() {
+                file_patches.insert(path, bytes);
+            } else {
+                self.file_adds.insert(path, bytes);
+            }
+        }
+        for path in comments_file_deletes.drain() {
+            self.file_deletes.insert(path);
         }
 
         drop(zip);
@@ -1893,6 +2187,10 @@ fn extract_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
 
 fn extract_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
     d.get_item(key)?.map(|v| v.extract::<u32>()).transpose()
+}
+
+fn extract_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
+    d.get_item(key)?.map(|v| v.extract::<f64>()).transpose()
 }
 
 /// Normalize "#RRGGBB" or "RRGGBB" to "FFRRGGBB" (OOXML ARGB format).

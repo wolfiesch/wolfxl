@@ -137,9 +137,10 @@ def test_per_sheet_cache_is_single_shot(fixture_with_comments_and_links: Path) -
     )
 
 
-def test_modify_mode_comment_setter_raises(fixture_with_comments_and_links: Path) -> None:
-    """Modify mode does not yet support new comments — T1.5."""
+def test_modify_mode_comment_setter_queues(fixture_with_comments_and_links: Path) -> None:
+    """RFC-023: cell.comment is now supported in modify mode."""
     wb = Workbook._from_patcher(str(fixture_with_comments_and_links))
     ws = wb.active
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws["C1"].comment = Comment(text="new", author="x")
+    ws["C1"].comment = Comment(text="new", author="x")
+    # Pending dict captured the assignment.
+    assert ws._pending_comments["C1"].text == "new"  # noqa: SLF001

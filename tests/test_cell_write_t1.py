@@ -93,11 +93,11 @@ def test_comment_assign_none_removes(tmp_path: Path) -> None:
     assert ws["A1"].comment is None
 
 
-def test_modify_mode_raises_with_t15_hint(tmp_path: Path) -> None:
-    """Opening an existing file → comment setter still points at T1.5.
+def test_modify_mode_comment_is_now_supported(tmp_path: Path) -> None:
+    """Opening an existing file → comment setter queues the change.
 
-    Hyperlink setter shipped in RFC-022; comments remain a T1.5 follow-up
-    (RFC-023). Test narrowed to comments-only after RFC-022 landed.
+    Both ``cell.hyperlink`` (RFC-022) and ``cell.comment`` (RFC-023)
+    are now active in modify mode; this test guards the wiring.
     """
     path = tmp_path / "exists.xlsx"
     op_wb = openpyxl.Workbook()
@@ -106,6 +106,6 @@ def test_modify_mode_raises_with_t15_hint(tmp_path: Path) -> None:
 
     wb = Workbook._from_patcher(str(path))
     ws = wb.active
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws["A1"].comment = Comment(text="nope", author="me")
+    ws["A1"].comment = Comment(text="now works", author="me")
+    assert ws._pending_comments["A1"].text == "now works"  # noqa: SLF001
     wb.close()
