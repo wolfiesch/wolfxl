@@ -1,15 +1,17 @@
 """Structural-op stub tests.
 
 Pin the contract for the structural ops that openpyxl exposes but wolfxl
-has not yet implemented. Until the corresponding RFCs ship (RFC-030 / 031 /
-034 / 035), each call must raise ``NotImplementedError`` with a message
-that points at the right RFC. The point is to give users a discoverable
-roadmap entry instead of an ``AttributeError``.
+has not yet implemented. Until the corresponding RFCs ship, each call
+must raise ``NotImplementedError`` with a message that points at the
+right RFC.
 
-RFC-036 (``Workbook.move_sheet``) and RFC-034 (``Worksheet.move_range``)
-shipped in WolfXL 1.1; their tests live in ``test_move_sheet_modify.py``
-and ``test_move_range_modify.py``. Only ``copy_worksheet`` remains
-stubbed at the workbook level.
+RFC-035 ships in 1.1 — ``copy_worksheet`` now works in modify mode (see
+``test_copy_worksheet_smoke.py``). The write-mode path is still tracked
+as a stub raising ``NotImplementedError`` per RFC-035 §3 OQ-a.
+
+RFC-036 (``Workbook.move_sheet``), RFC-034 (``Worksheet.move_range``),
+and RFC-030 / 031 (``insert_rows`` / ``delete_rows`` / ``insert_cols``
+/ ``delete_cols``) all shipped in WolfXL 1.1.
 """
 
 from __future__ import annotations
@@ -19,14 +21,12 @@ import pytest
 import wolfxl
 
 # All worksheet-level structural-op stubs have shipped (RFC-030, 031, 034).
-# This list intentionally stays empty — adding entries here marks "not
-# yet implemented" surfaces; removing them marks "shipped".
 WORKSHEET_STUBS: list[tuple[str, tuple, str]] = []
 
-
-WORKBOOK_STUBS = [
-    ("copy_worksheet", "RFC-035"),
-]
+# RFC-035 ships in 1.1 — copy_worksheet now works in modify mode.
+# Write-mode is still stubbed pending RFC-035 §3 OQ-a follow-up;
+# coverage for that path lives in test_copy_worksheet_smoke.py.
+WORKBOOK_STUBS: list[tuple[str, str]] = []
 
 
 def _fresh_active() -> tuple[wolfxl.Workbook, wolfxl.Worksheet]:
@@ -45,12 +45,6 @@ def test_worksheet_stub_raises_with_rfc_pointer(
     fn = getattr(ws, method)
     with pytest.raises(NotImplementedError, match=rfc):
         fn(*args)
-
-
-def test_workbook_copy_worksheet_stub() -> None:
-    wb, ws = _fresh_active()
-    with pytest.raises(NotImplementedError, match="RFC-035"):
-        wb.copy_worksheet(ws)
 
 
 @pytest.mark.parametrize(("method", "_rfc"), WORKBOOK_STUBS)

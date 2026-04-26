@@ -25,7 +25,7 @@ pub mod defined_names;
 pub mod sheet_order;
 pub mod tables;
 pub mod comments;
-#[allow(dead_code)] // RFC-035 Pod-α: planner only; Pod-β wires Phase 2.7
+// RFC-035 Pod-β: Phase 2.7 (do_save) consumes plan_sheet_copy from this re-export.
 pub mod sheet_copy;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -204,6 +204,21 @@ pub struct XlsxPatcher {
     /// is applied in source order against the post-shift coordinate
     /// space.
     queued_range_moves: Vec<RangeMove>,
+    /// Per-workbook sheet-copy queue (RFC-035). Each entry is a
+    /// `(src_title, dst_title)` pair in user-call order. Drained by
+    /// Phase 2.7 during `do_save`, BEFORE every per-sheet phase so
+    /// the cloned sheet is visible to downstream phases as if it
+    /// had always been part of the source workbook.
+    queued_sheet_copies: Vec<SheetCopyOp>,
+}
+
+/// One queued sheet-copy op (RFC-035).
+#[derive(Debug, Clone)]
+pub struct SheetCopyOp {
+    /// Source sheet title (must exist in `self.sheet_paths`).
+    pub src_title: String,
+    /// Destination sheet title (pre-deduped by the Python coordinator).
+    pub dst_title: String,
 }
 
 /// One queued axis-shift op (RFC-030/031).
@@ -290,6 +305,7 @@ impl XlsxPatcher {
             queued_sheet_moves: Vec::new(),
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
+            queued_sheet_copies: Vec::new(),
         })
     }
 
@@ -798,6 +814,46 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a sheet-copy op (RFC-035 Phase 7.3).
+    ///
+    /// Validates eagerly that `src_title` exists in `self.sheet_paths`,
+    /// `dst_title` is non-empty, `dst_title` is not already a sheet
+    /// name in `self.sheet_paths`, and `dst_title` is not already
+    /// queued by an earlier `queue_sheet_copy` call. On success
+    /// appends to `queued_sheet_copies` (drained by Phase 2.7 in
+    /// append order during `do_save`).
+    fn queue_sheet_copy(&mut self, src_title: &str, dst_title: &str) -> PyResult<()> {
+        if !self.sheet_paths.contains_key(src_title) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: source sheet '{src_title}' not found in workbook"
+            )));
+        }
+        if dst_title.is_empty() {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_sheet_copy: destination title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(dst_title) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: destination sheet '{dst_title}' already exists"
+            )));
+        }
+        if self
+            .queued_sheet_copies
+            .iter()
+            .any(|op| op.dst_title == dst_title)
+        {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: destination sheet '{dst_title}' is already queued"
+            )));
+        }
+        self.queued_sheet_copies.push(SheetCopyOp {
+            src_title: src_title.to_string(),
+            dst_title: dst_title.to_string(),
+        });
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -1095,6 +1151,7 @@ impl XlsxPatcher {
             && self.queued_sheet_moves.is_empty()
             && self.queued_axis_shifts.is_empty()
             && self.queued_range_moves.is_empty()
+            && self.queued_sheet_copies.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
@@ -1115,6 +1172,65 @@ impl XlsxPatcher {
         })?;
         let mut zip = ZipArchive::new(f)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+
+        // Centralized part-suffix allocator (RFC-035 §5.2 / §8 risk #1).
+        // Built once per save; seeded from the source ZIP's part listing
+        // so freshly minted tableN / commentsN / vmlDrawingN / sheetN
+        // suffixes never collide with source entries. Shared by Phase
+        // 2.7 (sheet copies), Phase 2.5f (tables), and Phase 2.5g
+        // (comments + VML).
+        let mut part_id_allocator: wolfxl_rels::PartIdAllocator = {
+            let names: Vec<String> = (0..zip.len())
+                .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+                .collect();
+            wolfxl_rels::PartIdAllocator::from_zip_parts(names.iter().map(|s| s.as_str()))
+        };
+
+        // RFC-035 §8 risk #6: when Phase 2.7 clones tables onto cloned
+        // sheets, those new table names must be visible to Phase 2.5f's
+        // collision-scan so a user `add_table` in the same save against
+        // an as-yet-unflushed cloned name surfaces a clean error rather
+        // than a silent rId/file collision.
+        let mut cloned_table_names: HashSet<String> = HashSet::new();
+
+        // `file_patches` is the running map of source-ZIP entries that
+        // will be REPLACED on emit. Phase 2.7 (RFC-035) is the first
+        // phase to write into it (workbook.xml + workbook.xml.rels).
+        // Phase 3 mutates it further with per-sheet rewrites.
+        let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
+
+        // --- Phase 2.7: Sheet copies (RFC-035) ---
+        //
+        // Drains `queued_sheet_copies` in append order. For each
+        // `(src_title, dst_title)` op:
+        //   1. Build source rels graph from the ZIP (or from
+        //      `rels_patches` / `file_patches` if already mutated).
+        //   2. Pre-load source ZIP parts map for the planner.
+        //   3. Read workbook.xml (from `file_patches` if already
+        //      mutated, else from the source ZIP).
+        //   4. Call `wolfxl_structural::sheet_copy::plan_sheet_copy`.
+        //   5. Allocate a workbook-rels rId for the new sheet.
+        //   6. Apply mutations: insert sheet/rels/ancillary into
+        //      `file_adds`; splice `<sheet>` into workbook.xml's
+        //      `<sheets>` block; queue cloned sheet-scoped defined
+        //      names through `queued_defined_names`; forward
+        //      content-type ops through `queued_content_type_ops`;
+        //      update `self.sheet_paths` + `self.sheet_order`.
+        //
+        // Phase-ordering invariant: any new per-sheet phase MUST run
+        // AFTER 2.7 (per RFC-035 §8 risk #7). 2.7 runs before Phase
+        // 2 / 2.5* so cloned sheets are visible to every downstream
+        // per-sheet drain (cell patches, DV, CF, hyperlinks, tables,
+        // comments, axis shifts, range moves) as if they had always
+        // been part of the source workbook.
+        if !self.queued_sheet_copies.is_empty() {
+            self.apply_sheet_copies_phase(
+                &mut file_patches,
+                &mut zip,
+                &mut part_id_allocator,
+                &mut cloned_table_names,
+            )?;
+        }
 
         // --- Phase 1: Parse styles.xml if we have format patches ---
         let mut styles_xml: Option<String> = None;
@@ -1196,19 +1312,12 @@ impl XlsxPatcher {
         // and safe to compose with future block-producing setters.
         let mut local_blocks: HashMap<String, Vec<SheetBlock>> = self.queued_blocks.clone();
 
-        // Centralized part-suffix allocator (RFC-035 §5.2 / §8 risk #1).
-        // One instance per save; seeded by scanning the source ZIP's
-        // listing once. Shared by Phase 2.5f (tables) and Phase 2.5g
-        // (comments + VML); RFC-035's upcoming Phase 2.7 sheet-copy
-        // planner will consume it too. Keeps tableN / commentsN /
-        // vmlDrawingN suffixes workbook-unique across all subsystems
-        // running in this save.
-        let mut part_id_allocator: wolfxl_rels::PartIdAllocator = {
-            let names: Vec<String> = (0..zip.len())
-                .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
-                .collect();
-            wolfxl_rels::PartIdAllocator::from_zip_parts(names.iter().map(|s| s.as_str()))
-        };
+        // Note: `part_id_allocator` is now built earlier (before
+        // Phase 2.7) so the centralized allocator can mint cloned-sheet
+        // suffixes for RFC-035. Phase 2.5f (tables) + Phase 2.5g
+        // (comments + VML) consume the same instance below so
+        // workbook-wide suffix uniqueness is preserved across phases.
+
         for (sheet_name, patches) in &self.queued_dv_patches {
             let sheet_path = match self.sheet_paths.get(sheet_name) {
                 Some(p) => p,
@@ -1394,6 +1503,15 @@ impl XlsxPatcher {
         if !self.queued_tables.is_empty() {
             let mut tables_inventory = tables::scan_existing_tables(&mut zip)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
+
+            // RFC-024 collision-scan extension (RFC-035 §8 risk #6):
+            // include cloned table names from in-flight Phase 2.7
+            // sheet copies so a user `add_table(name="Sales_2")` in
+            // the same save against an as-yet-unflushed clone surfaces
+            // a clean error rather than a silent duplicate.
+            for n in &cloned_table_names {
+                tables_inventory.names.insert(n.clone());
+            }
 
             // Iterate sheets in source-document order so allocations
             // are deterministic across runs.
@@ -1653,7 +1771,10 @@ impl XlsxPatcher {
         // sibling-block insertions via `wolfxl_merger`. The two passes
         // commute (cells live inside <sheetData>, blocks are siblings) so
         // composing them is straightforward.
-        let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
+        //
+        // `file_patches` was declared early (before Phase 2.7) so RFC-035
+        // can write workbook.xml + workbook.xml.rels into it before the
+        // per-sheet phases run.
 
         // Sheets that have either kind of patch.
         let mut all_sheet_paths: std::collections::HashSet<String> =
@@ -2105,6 +2226,309 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Phase 2.7 — drive `wolfxl_structural::sheet_copy::plan_sheet_copy`
+    /// across every queued sheet-copy op (RFC-035).
+    ///
+    /// For each `(src_title, dst_title)` op:
+    ///   1. Look up the source sheet path; build the source rels graph
+    ///      from the ZIP (or `rels_patches` if already mutated).
+    ///   2. Pre-load the source ZIP parts map for the planner (sheet
+    ///      bytes + every reachable ancillary part + nested rels).
+    ///   3. Read workbook.xml from `file_patches` if already mutated,
+    ///      else from the source ZIP.
+    ///   4. Call `plan_sheet_copy`. Returned `SheetCopyMutations` is
+    ///      pure data; we apply it atomically.
+    ///   5. Allocate a real workbook-rels rId for the new sheet, then
+    ///      string-replace the planner's
+    ///      `__SHEET_RID_PLACEHOLDER_<N>__` token in
+    ///      `workbook_sheets_append` and `workbook_rels_to_add[0].0`.
+    ///   6. Splice the new `<sheet>` element into workbook.xml's
+    ///      `<sheets>` block, persist into `file_patches`.
+    ///   7. Update `xl/_rels/workbook.xml.rels` via `rels_patches`.
+    ///   8. Insert new sheet xml + ancillary parts into `file_adds`.
+    ///   9. Forward content-type ops into `queued_content_type_ops`
+    ///      under a synthetic key so Phase 2.5c picks them up.
+    ///   10. Queue cloned sheet-scoped defined names through
+    ///       `queued_defined_names` so RFC-021's merger handles them.
+    ///   11. Update `self.sheet_order`, `self.sheet_paths`, and the
+    ///       running `cloned_table_names` accumulator.
+    ///
+    /// Phase-ordering invariant: any new per-sheet phase MUST run
+    /// AFTER 2.7 (per RFC-035 §8 risk #7).
+    fn apply_sheet_copies_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
+        cloned_table_names: &mut HashSet<String>,
+    ) -> PyResult<()> {
+        // Helper: get bytes for a path (current rewrite if any, else source).
+        fn get_bytes(
+            file_patches: &HashMap<String, Vec<u8>>,
+            file_adds: &HashMap<String, Vec<u8>>,
+            zip: &mut ZipArchive<File>,
+            path: &str,
+        ) -> Option<Vec<u8>> {
+            if let Some(b) = file_patches.get(path) {
+                return Some(b.clone());
+            }
+            if let Some(b) = file_adds.get(path) {
+                return Some(b.clone());
+            }
+            let mut entry = match zip.by_name(path) {
+                Ok(e) => e,
+                Err(_) => return None,
+            };
+            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+            std::io::copy(&mut entry, &mut buf).ok()?;
+            Some(buf)
+        }
+
+        // RFC-035 §5.5: existing-table-name set at the start of Phase
+        // 2.7 includes every name from the source ZIP plus any name
+        // already queued by `queue_table` (RFC-024 user adds running
+        // in the same save). We compute the union once up front.
+        let mut existing_table_names: HashSet<String> = HashSet::new();
+        // Source ZIP table parts.
+        let table_inv = tables::scan_existing_tables(zip)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
+        for n in &table_inv.names {
+            existing_table_names.insert(n.clone());
+        }
+        // In-flight user-queued tables (from RFC-024).
+        for patches in self.queued_tables.values() {
+            for p in patches {
+                existing_table_names.insert(p.name.clone());
+            }
+        }
+
+        // Workbook rels graph: get-or-load. We will mutate it (add a
+        // worksheet rel per copy), then on save the existing serialize
+        // path picks up the mutated graph and routes it through
+        // `file_patches` (or `file_adds` if the entry is missing,
+        // though `xl/_rels/workbook.xml.rels` is always present).
+        let workbook_rels_path = "xl/_rels/workbook.xml.rels".to_string();
+        if !self.rels_patches.contains_key(&workbook_rels_path) {
+            let g = load_or_empty_rels(zip, &workbook_rels_path)?;
+            self.rels_patches.insert(workbook_rels_path.clone(), g);
+        }
+
+        // Process each queued op in append order. Each iteration sees
+        // the running mutated state (so copies-of-copies and
+        // copy-then-edit-the-copy work).
+        let ops = self.queued_sheet_copies.clone();
+        for op in ops {
+            // Look up source sheet path. We re-check existence here
+            // because copy-of-copy runs AFTER an earlier op already
+            // updated `sheet_paths`, so a `src_title` that names an
+            // earlier in-flight clone is valid.
+            let src_sheet_path = match self.sheet_paths.get(&op.src_title).cloned() {
+                Some(p) => p,
+                None => {
+                    return Err(PyErr::new::<PyValueError, _>(format!(
+                        "Phase 2.7: source sheet '{}' missing at flush time",
+                        op.src_title
+                    )));
+                }
+            };
+
+            // Load source rels graph. Prefer in-memory rels_patches
+            // (an earlier phase or copy already touched it), else parse
+            // from the source ZIP.
+            let src_rels_path = sheet_rels_path_for(&src_sheet_path);
+            let source_rels: RelsGraph = if let Some(g) = self.rels_patches.get(&src_rels_path) {
+                g.clone()
+            } else {
+                load_or_empty_rels(zip, &src_rels_path)?
+            };
+
+            // Walk reachable parts (one level + nested via rels file
+            // probes) so we can pre-load the planner's input map. We
+            // duplicate the planner's resolver here only to discover
+            // which paths need pre-loading; the planner itself does
+            // its own walk on the same data.
+            let subgraph = wolfxl_rels::walk_sheet_subgraph_with_nested(
+                &source_rels,
+                &src_sheet_path,
+                |part_path: &str| {
+                    let rels_path = wolfxl_rels::rels_path_for(part_path)?;
+                    let bytes = get_bytes(file_patches, &self.file_adds, zip, &rels_path)?;
+                    RelsGraph::parse(&bytes).ok()
+                },
+            );
+
+            // Pre-load source ZIP parts map. Includes the sheet itself,
+            // every reachable ancillary, and any per-part rels file
+            // we need (drawing rels for image aliasing).
+            let mut source_zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
+            for part_path in &subgraph.reachable_parts {
+                if let Some(bytes) = get_bytes(file_patches, &self.file_adds, zip, part_path) {
+                    source_zip_parts.insert(part_path.clone(), bytes);
+                }
+                // Each reachable ancillary may have its own rels file
+                // (drawings → images). The planner's resolver expects
+                // those to be in the parts map keyed by rels path.
+                if let Some(rp) = wolfxl_rels::rels_path_for(part_path) {
+                    if let Some(bytes) = get_bytes(file_patches, &self.file_adds, zip, &rp) {
+                        source_zip_parts.insert(rp, bytes);
+                    }
+                }
+            }
+
+            // Read workbook.xml.
+            let workbook_xml = match get_bytes(
+                file_patches,
+                &self.file_adds,
+                zip,
+                "xl/workbook.xml",
+            ) {
+                Some(b) => b,
+                None => {
+                    return Err(PyErr::new::<PyIOError, _>(
+                        "Phase 2.7: xl/workbook.xml missing from source ZIP",
+                    ));
+                }
+            };
+
+            // Build planner inputs.
+            let inputs = wolfxl_structural::sheet_copy::SheetCopyInputs {
+                src_title: op.src_title.clone(),
+                dst_title: op.dst_title.clone(),
+                src_sheet_path: src_sheet_path.clone(),
+                source_zip_parts: &source_zip_parts,
+                source_rels: &source_rels,
+                workbook_xml: &workbook_xml,
+                allocator: part_id_allocator,
+                existing_table_names: &existing_table_names,
+            };
+            let mutations =
+                wolfxl_structural::sheet_copy::plan_sheet_copy(inputs).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Phase 2.7: plan_sheet_copy failed for '{}'→'{}': {}",
+                        op.src_title, op.dst_title, e
+                    ))
+                })?;
+
+            // Allocate the workbook-rels rId for the new sheet. The
+            // planner's `workbook_rels_to_add[0]` is
+            // `(placeholder, rel_type, target)`. We add it to the
+            // workbook's rels graph (via add()) which mints the rId,
+            // and string-replace the placeholder afterwards.
+            let (placeholder, rel_type, target) = mutations
+                .workbook_rels_to_add
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "Phase 2.7: planner returned no workbook_rels_to_add entry",
+                    )
+                })?;
+            let new_rid = {
+                let g = self
+                    .rels_patches
+                    .get_mut(&workbook_rels_path)
+                    .expect("workbook rels graph loaded above");
+                g.add(&rel_type, &target, wolfxl_rels::TargetMode::Internal)
+            };
+
+            // Replace placeholder in workbook_sheets_append.
+            let sheets_append: Vec<u8> = {
+                let s = String::from_utf8_lossy(&mutations.workbook_sheets_append);
+                s.replace(&placeholder, &new_rid.0).into_bytes()
+            };
+
+            // Splice the new <sheet> element into workbook.xml's
+            // <sheets> block (insert before </sheets>).
+            let new_workbook_xml = splice_into_sheets_block(&workbook_xml, &sheets_append)?;
+            file_patches.insert("xl/workbook.xml".to_string(), new_workbook_xml);
+
+            // Drop new sheet xml into file_adds.
+            self.file_adds
+                .insert(mutations.new_sheet_path.clone(), mutations.new_sheet_xml);
+
+            // Drop ancillary parts into file_adds.
+            for (path, bytes) in mutations.new_ancillary_parts {
+                self.file_adds.insert(path, bytes);
+            }
+
+            // Forward content-type ops. Use a synthetic per-workbook
+            // key so Phase 2.5c (which iterates `sheet_order`) picks
+            // them up via the existing aggregator.
+            let ct_ops_for_sheet = self
+                .queued_content_type_ops
+                .entry("__rfc035_sheet_copy__".to_string())
+                .or_default();
+            for (part_path, content_type) in mutations.content_type_overrides_to_add {
+                // VML default-extension shows up as a content-type op
+                // too: any path ending in `.vml` should ensure the
+                // extension default is in place rather than emit an
+                // Override. The planner currently emits Override-only
+                // for non-VML parts (vml is omitted from
+                // content_type_overrides_to_add); but we add a
+                // safety net here for forward compat.
+                if part_path.ends_with(".vml") {
+                    ct_ops_for_sheet.push(content_types::ContentTypeOp::EnsureDefault(
+                        "vml".to_string(),
+                        comments::CT_VML.to_string(),
+                    ));
+                } else {
+                    ct_ops_for_sheet
+                        .push(content_types::ContentTypeOp::AddOverride(part_path, content_type));
+                }
+            }
+            // The planner does NOT emit a vml Default itself (RFC-035
+            // §5.6 routes VML through a Default-extension). If any of
+            // the cloned ancillary parts is a vmlDrawing, ensure the
+            // workbook's content-types graph has the vml Default.
+            // (Idempotent — Phase 2.5c's aggregator absorbs duplicates.)
+            // We detect VML by examining the file_adds we just
+            // populated.
+            let needs_vml_default = self
+                .file_adds
+                .keys()
+                .any(|k| k.starts_with("xl/drawings/vmlDrawing") && k.ends_with(".vml"));
+            if needs_vml_default {
+                ct_ops_for_sheet.push(content_types::ContentTypeOp::EnsureDefault(
+                    "vml".to_string(),
+                    comments::CT_VML.to_string(),
+                ));
+            }
+
+            // Cloned sheet-scoped defined names: queue through
+            // RFC-021's merger so workbook.xml's <definedNames> block
+            // gets the new entries on save.
+            for dn in mutations.defined_names_to_add {
+                self.queued_defined_names.push(defined_names::DefinedNameMut {
+                    name: dn.name,
+                    formula: dn.formula,
+                    local_sheet_id: Some(dn.local_sheet_id),
+                    hidden: None,
+                    comment: None,
+                });
+            }
+
+            // Update running cloned-table-names accumulator (RFC-024
+            // collision-scan extension — see §8 risk #6).
+            for n in &mutations.new_table_names {
+                cloned_table_names.insert(n.clone());
+                existing_table_names.insert(n.clone());
+            }
+
+            // Update patcher's tab list + path map. Append the new
+            // sheet at the end (RFC-035 §5.7: tab order = source order
+            // + new entry at end).
+            self.sheet_order.push(op.dst_title.clone());
+            self.sheet_paths
+                .insert(op.dst_title.clone(), mutations.new_sheet_path);
+        }
+
+        // Drain the queue so a subsequent save() on the same patcher
+        // doesn't re-emit (parallels RFC-030 / RFC-034).
+        self.queued_sheet_copies.clear();
+
+        Ok(())
+    }
+
     /// Phase 2.5j — drive `wolfxl_structural::apply_range_move`
     /// across every queued range-move op. Reads from `file_patches`
     /// when an earlier phase already mutated a part; falls back to
@@ -2172,6 +2596,54 @@ fn source_zip_has_entry<R: Read + std::io::Seek>(
     name: &str,
 ) -> bool {
     zip.by_name(name).is_ok()
+}
+
+/// Insert `new_sheet_element` (an `<sheet …/>` byte sequence) into the
+/// `<sheets>` block of `xl/workbook.xml`, immediately before the
+/// closing `</sheets>` tag (RFC-035 §5.7). Source bytes flow through
+/// verbatim outside the splice point. Returns an error if the source
+/// has no `<sheets>` element (malformed workbook).
+fn splice_into_sheets_block(
+    workbook_xml: &[u8],
+    new_sheet_element: &[u8],
+) -> PyResult<Vec<u8>> {
+    // ECMA-376 allows `<sheets>` to be self-closing in theory, but no
+    // real workbook writes it that way (Excel always emits at least
+    // one child `<sheet>`). We support both forms defensively.
+    let needle = b"</sheets>";
+    if let Some(pos) = find_subslice(workbook_xml, needle) {
+        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len());
+        out.extend_from_slice(&workbook_xml[..pos]);
+        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(&workbook_xml[pos..]);
+        return Ok(out);
+    }
+    // Self-closing `<sheets/>` form: rewrite to an open/close pair
+    // wrapping the new element.
+    let needle_self = b"<sheets/>";
+    if let Some(pos) = find_subslice(workbook_xml, needle_self) {
+        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        out.extend_from_slice(&workbook_xml[..pos]);
+        out.extend_from_slice(b"<sheets>");
+        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(b"</sheets>");
+        out.extend_from_slice(&workbook_xml[pos + needle_self.len()..]);
+        return Ok(out);
+    }
+    Err(PyErr::new::<PyIOError, _>(
+        "Phase 2.7: workbook.xml has no <sheets> block",
+    ))
+}
+
+/// Naive byte-substring search (workbook.xml is small enough that the
+/// allocator overhead of memchr-shaped algorithms is overkill).
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|w| w == needle)
 }
 
 /// Return a `zip::DateTime` honoring `WOLFXL_TEST_EPOCH` when set.

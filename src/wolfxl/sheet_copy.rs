@@ -14,7 +14,6 @@
 //! See `Plans/rfcs/035-copy-worksheet.md` §4.2 for the contract and
 //! §7.1 / §7.2 for the slicing.
 
-#[allow(unused_imports)] // Phase 7.3 wires up the consumer in Pod-β
 pub use wolfxl_structural::sheet_copy::{
     plan_sheet_copy, DefinedNameClone, SheetCopyError, SheetCopyInputs, SheetCopyMutations,
 };
