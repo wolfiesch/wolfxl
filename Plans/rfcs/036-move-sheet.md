@@ -1,6 +1,6 @@
 # RFC-036: `Workbook.move_sheet` (reorder)
 
-Status: Researched
+Status: Shipped
 Owner: pod-036
 Phase: 4
 Estimate: M
@@ -414,4 +414,9 @@ Total: ~3-4 days, well within the M bucket.
 
 ## Acceptance
 
-(Filled in after Shipped.)
+- Commit: `5b11f1c` — docs(rfc): RFC-036 move_sheet — research
+- Commit: `340ad11` — feat(rfc-036): add sheet_order patcher module + queue_sheet_move
+- Commit: `7f29b05` — feat(rfc-036): wire Workbook.move_sheet end-to-end + tests
+- Verification: `python scripts/verify_rfc.py --rfc 036 --quick` GREEN at `7f29b05`
+- Pytest: `tests/test_move_sheet_modify.py` 18/18 passed; `tests/parity/` 97 passed + 1 skipped (baseline preserved)
+- Date: 2026-04-25
