@@ -219,6 +219,12 @@ pub struct SheetCopyOp {
     pub src_title: String,
     /// Destination sheet title (pre-deduped by the Python coordinator).
     pub dst_title: String,
+    /// Sprint Θ Pod-C2 — workbook-level
+    /// `wb.copy_options.deep_copy_images` snapshot at queue time.
+    /// `false` preserves the historical RFC-035 §5.3 alias-by-target
+    /// behaviour. Read by the planner via
+    /// [`SheetCopyInputs::deep_copy_images`].
+    pub deep_copy_images: bool,
 }
 
 /// One queued axis-shift op (RFC-030/031).
@@ -822,7 +828,18 @@ impl XlsxPatcher {
     /// queued by an earlier `queue_sheet_copy` call. On success
     /// appends to `queued_sheet_copies` (drained by Phase 2.7 in
     /// append order during `do_save`).
-    fn queue_sheet_copy(&mut self, src_title: &str, dst_title: &str) -> PyResult<()> {
+    ///
+    /// `deep_copy_images` is the workbook-level
+    /// `wb.copy_options.deep_copy_images` flag, snapshot at queue
+    /// time. Defaults to `false` to preserve historical RFC-035 §5.3
+    /// alias-by-target behaviour for callers that omit it.
+    #[pyo3(signature = (src_title, dst_title, deep_copy_images=false))]
+    fn queue_sheet_copy(
+        &mut self,
+        src_title: &str,
+        dst_title: &str,
+        deep_copy_images: bool,
+    ) -> PyResult<()> {
         if !self.sheet_paths.contains_key(src_title) {
             return Err(PyErr::new::<PyValueError, _>(format!(
                 "queue_sheet_copy: source sheet '{src_title}' not found in workbook"
@@ -850,6 +867,7 @@ impl XlsxPatcher {
         self.queued_sheet_copies.push(SheetCopyOp {
             src_title: src_title.to_string(),
             dst_title: dst_title.to_string(),
+            deep_copy_images,
         });
         Ok(())
     }
@@ -2453,6 +2471,7 @@ impl XlsxPatcher {
                 workbook_xml: &workbook_xml,
                 allocator: part_id_allocator,
                 existing_table_names: &existing_table_names,
+                deep_copy_images: op.deep_copy_images,
             };
             let mutations =
                 wolfxl_structural::sheet_copy::plan_sheet_copy(inputs).map_err(|e| {

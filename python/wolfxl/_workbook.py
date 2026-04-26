@@ -8,9 +8,28 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._worksheet import Worksheet
+
+
+@dataclass
+class CopyOptions:
+    """Per-workbook flags controlling :meth:`Workbook.copy_worksheet`.
+
+    Attributes:
+        deep_copy_images: When ``True``, drawings reachable from a
+            cloned sheet have their referenced ``xl/media/imageN.<ext>``
+            targets DEEP-CLONED into freshly numbered media parts.
+            When ``False`` (default), the cloned drawing rels point at
+            the same image bytes as the source — Excel's historical
+            RFC-035 §5.3 alias behaviour. Modify-mode only;
+            write-mode ignores this flag (write-mode clones run via
+            in-memory replay, not the modify-mode planner).
+    """
+
+    deep_copy_images: bool = False
 
 if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
@@ -47,8 +66,13 @@ class Workbook:
             tuple[str, int, int, int, int, int, int, bool]
         ] = []
         # RFC-035 — append-order list of sheet-copy ops.
-        # Tuple shape: ``(src_title, dst_title)``.
-        self._pending_sheet_copies: list[tuple[str, str]] = []
+        # Tuple shape: ``(src_title, dst_title, deep_copy_images)``.
+        # The deep_copy_images flag is snapshot at copy_worksheet()
+        # call time so a later toggle of wb.copy_options doesn't
+        # retroactively affect already-queued copies.
+        self._pending_sheet_copies: list[tuple[str, str, bool]] = []
+        # Sprint Θ Pod-C2 — workbook-level copy options.
+        self.copy_options: CopyOptions = CopyOptions()
 
     @classmethod
     def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
@@ -73,6 +97,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb.copy_options = CopyOptions()
         return wb
 
     @classmethod
@@ -98,6 +123,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb.copy_options = CopyOptions()
         return wb
 
     # ------------------------------------------------------------------
@@ -354,8 +380,13 @@ class Workbook:
 
         if self._rust_patcher is not None:
             # Modify-mode path — queue + tab-list update; ZIP-level clone
-            # happens during save() via Phase 2.7.
-            self._pending_sheet_copies.append((source.title, new_title))
+            # happens during save() via Phase 2.7. Snapshot the
+            # deep_copy_images flag at queue time so a later toggle
+            # of wb.copy_options doesn't retroactively affect this
+            # already-queued copy.
+            self._pending_sheet_copies.append(
+                (source.title, new_title, bool(self.copy_options.deep_copy_images))
+            )
             self._sheet_names.append(new_title)
             ws = Worksheet(self, new_title)
             self._sheets[new_title] = ws
@@ -838,8 +869,8 @@ class Workbook:
         patcher = self._rust_patcher
         if patcher is None or not self._pending_sheet_copies:
             return
-        for src_title, dst_title in self._pending_sheet_copies:
-            patcher.queue_sheet_copy(src_title, dst_title)
+        for src_title, dst_title, deep_copy_images in self._pending_sheet_copies:
+            patcher.queue_sheet_copy(src_title, dst_title, deep_copy_images)
         self._pending_sheet_copies.clear()
 
     def _flush_defined_names_to_patcher(self) -> None:

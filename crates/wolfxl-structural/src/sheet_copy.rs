@@ -70,6 +70,16 @@ pub struct SheetCopyInputs<'a> {
     /// Workbook-wide set of table `name`/`displayName` values that are
     /// already taken (for §5.5 dedup).
     pub existing_table_names: &'a HashSet<String>,
+    /// Sprint Θ Pod-C2 — when `true`, drawings reachable from the
+    /// source sheet have their referenced `xl/media/imageN.<ext>`
+    /// targets DEEP-CLONED into freshly numbered media parts. The
+    /// cloned drawing's nested rels file is rewritten to point at
+    /// the new paths and the image bytes are added to
+    /// `new_ancillary_parts`.
+    ///
+    /// The default (`false`) preserves the historical RFC-035 §5.3
+    /// alias-by-target behaviour.
+    pub deep_copy_images: bool,
 }
 
 /// One cloned defined-name (RFC-035 §5.4). The planner returns the
@@ -306,7 +316,7 @@ pub fn plan_sheet_copy(
                 let new_rid = dest_rels.add(rt::VML_DRAWING, &new_target, TargetMode::Internal);
                 rid_remap.insert(old_rid, new_rid.0);
             }
-            // ------ DrawingML drawings (own rels file → image alias) ------
+            // ------ DrawingML drawings (own rels file → image alias OR deep-clone) ------
             t if t == rt::DRAWING => {
                 let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_drawing();
@@ -318,13 +328,47 @@ pub fn plan_sheet_copy(
                 let new_target = format!("../drawings/drawing{new_n}.xml");
                 let new_rid = dest_rels.add(rt::DRAWING, &new_target, TargetMode::Internal);
                 rid_remap.insert(old_rid, new_rid.0);
-                // Clone the drawing's own rels file IF present, aliasing
-                // images (per RFC-035 §5.3 step 4). The image targets stay
-                // pointed at the same xl/media/imageN.{ext} paths.
+                // Clone the drawing's own rels file IF present.
+                //
+                // - Default (alias) mode: the image target stays
+                //   pointed at the same xl/media/imageN.{ext} path
+                //   (RFC-035 §5.3).
+                // - Deep-copy mode (Sprint Θ Pod-C2): allocate a
+                //   fresh `xl/media/imageM.<ext>` per image rel,
+                //   copy its bytes into `new_ancillary_parts`, and
+                //   re-point the cloned drawing rel at the new
+                //   target.
                 if let Some(nested) = nested_rels_cache.get(&resolved) {
                     let mut cloned = RelsGraph::new();
                     for nrel in nested.iter() {
-                        cloned.add(&nrel.rel_type, &nrel.target, nrel.mode);
+                        if inputs.deep_copy_images && nrel.rel_type == rt::IMAGE {
+                            let resolved_image = resolve_relative(
+                                parent_dir(&resolved),
+                                &nrel.target,
+                            );
+                            // Determine the original extension; fall
+                            // back to "png" if the original had none
+                            // (rare in practice but keeps us safe).
+                            let ext = resolved_image
+                                .rsplit_once('.')
+                                .map(|(_, e)| e.to_string())
+                                .unwrap_or_else(|| "png".to_string());
+                            let new_image_n = inputs.allocator.alloc_image();
+                            let new_image_path =
+                                format!("xl/media/image{new_image_n}.{ext}");
+                            // Copy the original bytes if present.
+                            if let Some(bytes) = zip_parts.get(&resolved_image).cloned() {
+                                new_ancillary_parts.push((new_image_path.clone(), bytes));
+                            }
+                            // The rel's `target` is drawing-relative
+                            // ("../media/imageN.<ext>"); we rewrite
+                            // it to the new suffix.
+                            let new_rel_target =
+                                format!("../media/image{new_image_n}.{ext}");
+                            cloned.add(&nrel.rel_type, &new_rel_target, nrel.mode);
+                        } else {
+                            cloned.add(&nrel.rel_type, &nrel.target, nrel.mode);
+                        }
                     }
                     let nested_rels_path = format!(
                         "xl/drawings/_rels/drawing{new_n}.xml.rels"
@@ -946,6 +990,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -998,6 +1043,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1051,6 +1097,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1088,6 +1135,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1133,6 +1181,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1175,6 +1224,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1229,6 +1279,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1266,6 +1317,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1290,6 +1342,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect_err("duplicate dst should error");
         match err {
@@ -1316,6 +1369,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect_err("missing src should error");
         assert!(matches!(err, SheetCopyError::MissingSourceTitle(_)));
@@ -1338,6 +1392,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect_err("missing src bytes should error");
         assert!(matches!(err, SheetCopyError::MissingSourceSheetBytes(_)));
@@ -1372,6 +1427,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1420,6 +1476,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1448,6 +1505,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan 1 ok");
         // Second call: the workbook_xml argument is the same (caller hasn't
@@ -1461,6 +1519,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan 2 ok");
 
@@ -1498,6 +1557,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
         assert!(mutations.defined_names_to_add.is_empty());
@@ -1523,6 +1583,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
+        deep_copy_images: false,
         })
         .expect("plan ok");
         // The rId is in the remap (aliased into dest rels graph).
