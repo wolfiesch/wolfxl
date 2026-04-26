@@ -94,7 +94,11 @@ def test_comment_assign_none_removes(tmp_path: Path) -> None:
 
 
 def test_modify_mode_raises_with_t15_hint(tmp_path: Path) -> None:
-    """Opening an existing file → setter points at T1.5."""
+    """Opening an existing file → comment setter still points at T1.5.
+
+    Hyperlink setter shipped in RFC-022; comments remain a T1.5 follow-up
+    (RFC-023). Test narrowed to comments-only after RFC-022 landed.
+    """
     path = tmp_path / "exists.xlsx"
     op_wb = openpyxl.Workbook()
     op_wb.active["A1"] = "seed"
@@ -104,6 +108,4 @@ def test_modify_mode_raises_with_t15_hint(tmp_path: Path) -> None:
     ws = wb.active
     with pytest.raises(NotImplementedError, match="T1.5"):
         ws["A1"].comment = Comment(text="nope", author="me")
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws["A1"].hyperlink = Hyperlink(target="https://example.com")
     wb.close()

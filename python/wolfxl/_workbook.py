@@ -327,6 +327,11 @@ class Workbook:
                 )
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
+            # RFC-022: hyperlinks share the sheet rels graph with future
+            # rels-touching writers (RFC-024 tables, RFC-023 comments).
+            # Flush them first so DV/CF (which don't touch rels) run
+            # afterward against an already-stable rels graph.
+            self._flush_pending_hyperlinks_to_patcher()
             # RFC-025: flush worksheet-level setters that the patcher
             # accepts. The cell-level _flush above handles values +
             # formats; data validations are a separate patcher API
@@ -345,6 +350,41 @@ class Workbook:
             self._rust_writer.save(filename)
         else:
             raise RuntimeError("save requires write or modify mode")
+
+    def _flush_pending_hyperlinks_to_patcher(self) -> None:
+        """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
+
+        Modify-mode counterpart to the writer-side flush at
+        ``_worksheet.py:1911``. Each ``Hyperlink`` is converted to the
+        patcher's flat-dict shape and routed to ``queue_hyperlink``;
+        the ``None`` sentinel routes to ``queue_hyperlink_delete``
+        (INDEX decision #5 — never use ``pop()``).
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_hyperlinks  # noqa: SLF001
+            if not pending:
+                continue
+            for coord, hl in pending.items():
+                if hl is None:
+                    patcher.queue_hyperlink_delete(ws.title, coord)
+                    continue
+                payload: dict[str, Any] = {}
+                if hl.target is not None:
+                    payload["target"] = hl.target
+                if hl.location is not None:
+                    payload["location"] = hl.location
+                if hl.tooltip is not None:
+                    payload["tooltip"] = hl.tooltip
+                if hl.display is not None:
+                    payload["display"] = hl.display
+                patcher.queue_hyperlink(ws.title, coord, payload)
+            pending.clear()
 
     def _flush_pending_data_validations_to_patcher(self) -> None:
         """Drain ``_pending_data_validations`` on every sheet into the patcher.

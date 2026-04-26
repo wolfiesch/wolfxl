@@ -188,16 +188,15 @@ class Cell:
 
         ws = self._ws
         wb = ws._workbook  # noqa: SLF001
-        writer = wb._rust_writer  # noqa: SLF001
-        if writer is None:
-            raise NotImplementedError(
-                "Setting cell.hyperlink on an existing file is a T1.5 follow-up. "
-                "Write mode (Workbook() + save) is supported — open the file "
-                "via Workbook() rather than load_workbook()."
-            )
+        # RFC-022: cell.hyperlink rounds-trips in BOTH write and modify
+        # mode. Both backends consume the same _pending_hyperlinks dict;
+        # the workbook flush dispatches to writer.add_hyperlink (write)
+        # or patcher.queue_hyperlink (modify). None is the explicit-delete
+        # sentinel per INDEX decision #5 — never use pop().
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("cell.hyperlink requires write or modify mode")
         coord = self.coordinate
         if value is None:
-            # Explicit delete sentinel; pre-save reads return None.
             ws._pending_hyperlinks[coord] = None  # noqa: SLF001
             return
         if isinstance(value, str):
@@ -207,6 +206,13 @@ class Cell:
                 f"hyperlink must be a Hyperlink or str, got {type(value).__name__}"
             )
         ws._pending_hyperlinks[coord] = value  # noqa: SLF001
+        # openpyxl parity: if the cell has no value yet, surface the
+        # target/location as the visible cell value so a freshly-set
+        # hyperlink is also visibly clickable text.
+        if self.value is None:
+            display_value = value.display or value.target or value.location
+            if display_value is not None:
+                self.value = display_value
 
     @property
     def comment(self) -> Any:
