@@ -46,6 +46,9 @@ class Workbook:
         self._pending_range_moves: list[
             tuple[str, int, int, int, int, int, int, bool]
         ] = []
+        # RFC-035 — append-order list of sheet-copy ops.
+        # Tuple shape: ``(src_title, dst_title)``.
+        self._pending_sheet_copies: list[tuple[str, str]] = []
 
     @classmethod
     def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
@@ -69,6 +72,7 @@ class Workbook:
         wb._pending_defined_names = {}
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
+        wb._pending_sheet_copies = []
         return wb
 
     @classmethod
@@ -93,6 +97,7 @@ class Workbook:
         wb._pending_defined_names = {}
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
+        wb._pending_sheet_copies = []
         return wb
 
     # ------------------------------------------------------------------
@@ -294,18 +299,68 @@ class Workbook:
         self._sheets[title] = ws
         return ws
 
-    def copy_worksheet(self, source: Worksheet) -> Worksheet:
-        """Duplicate *source* into a new sheet within this workbook.
+    def copy_worksheet(
+        self, source: Worksheet, *, name: str | None = None
+    ) -> Worksheet:
+        """Duplicate *source* into a new sheet within this workbook (RFC-035).
 
-        Tracked by RFC-035 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/035-copy-worksheet.md`` for the implementation plan.
+        Modify-mode-only in WolfXL 1.1 (RFC-035 §3 OQ-a). Write-mode is
+        tracked for 1.2 — calling this on a write-mode workbook raises
+        ``NotImplementedError``.
+
+        The new sheet appends at the end of the tab list. The default
+        title is ``f"{source.title} Copy"``; on collision an incrementing
+        suffix (`Copy 2`, `Copy 3`, …) is appended until unique. An
+        explicit ``name`` keyword argument overrides the default and
+        must not collide with any existing sheet name.
+
+        The returned ``Worksheet`` is a fresh proxy bound to the cloned
+        title. The actual ZIP-level clone runs at ``save()`` time via
+        Phase 2.7 of the patcher.
         """
-        raise NotImplementedError(
-            "Workbook.copy_worksheet is scheduled for WolfXL 1.1 (RFC-035). "
-            "See Plans/rfcs/035-copy-worksheet.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
-        )
+        if not isinstance(source, Worksheet):
+            raise TypeError(
+                f"copy_worksheet: source must be a Worksheet, got {type(source).__name__}"
+            )
+        if source._workbook is not self:  # noqa: SLF001
+            raise ValueError(
+                "copy_worksheet: source must belong to this workbook"
+            )
+        if self._rust_patcher is None:
+            raise NotImplementedError(
+                "Workbook.copy_worksheet is modify-mode-only in WolfXL 1.1; "
+                "pass modify=True to load_workbook(...). Tracked for 1.2 in "
+                "RFC-035 §3 OQ-a. "
+                "Workaround: use openpyxl for structural ops, then load the "
+                "result with wolfxl.load_workbook() to do the heavy reads."
+            )
+
+        # Compute the new title. Explicit `name` wins; otherwise dedup
+        # against the running tab list.
+        if name is not None:
+            if not isinstance(name, str) or not name:
+                raise ValueError("copy_worksheet: name must be a non-empty string")
+            if name in self._sheets:
+                raise ValueError(f"copy_worksheet: sheet '{name}' already exists")
+            new_title = name
+        else:
+            base = f"{source.title} Copy"
+            new_title = base
+            suffix = 2
+            while new_title in self._sheets:
+                new_title = f"{base} {suffix}"
+                suffix += 1
+
+        # Queue on the Python side; the patcher consumes the queue
+        # during save() via _flush_pending_sheet_copies_to_patcher.
+        self._pending_sheet_copies.append((source.title, new_title))
+
+        # Update the in-memory tab list + sheet map immediately so
+        # subsequent reads see the new sheet without a save round-trip.
+        self._sheet_names.append(new_title)
+        ws = Worksheet(self, new_title)
+        self._sheets[new_title] = ws
+        return ws
 
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
         """Move *sheet* by *offset* positions within the workbook tab list.
@@ -396,6 +451,12 @@ class Workbook:
                 self._flush_defined_names_to_patcher()
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
+            # RFC-035: sheet copies must flush BEFORE every per-sheet
+            # phase so cloned sheets are visible to downstream drains
+            # (cell patches, hyperlinks, tables, comments, axis shifts,
+            # range moves) as if they had always been part of the
+            # source workbook.
+            self._flush_pending_sheet_copies_to_patcher()
             # RFC-022: hyperlinks share the sheet rels graph with future
             # rels-touching writers (RFC-024 tables, RFC-023 comments).
             # Flush them first so DV/CF (which don't touch rels) run
@@ -675,6 +736,27 @@ class Workbook:
                 translate,
             )
         self._pending_range_moves.clear()
+
+    def _flush_pending_sheet_copies_to_patcher(self) -> None:
+        """Drain ``_pending_sheet_copies`` into the patcher (RFC-035).
+
+        Each ``(src_title, dst_title)`` pair forwards to
+        ``_rust_patcher.queue_sheet_copy(src, dst)``. The patcher's
+        Phase 2.7 drains the queue in append order during ``save()``,
+        BEFORE every per-sheet phase so the cloned sheets are visible
+        to downstream drains.
+
+        Empty queue is the no-op identity path — patcher is not
+        called, no FFI hop, no file mutation. Cleared after queueing
+        so a subsequent ``save()`` on the same workbook doesn't
+        double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None or not self._pending_sheet_copies:
+            return
+        for src_title, dst_title in self._pending_sheet_copies:
+            patcher.queue_sheet_copy(src_title, dst_title)
+        self._pending_sheet_copies.clear()
 
     def _flush_defined_names_to_patcher(self) -> None:
         """Drain ``_pending_defined_names`` into the patcher (RFC-021).
