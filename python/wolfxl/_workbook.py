@@ -315,12 +315,10 @@ class Workbook:
             # patcher path yet (T1.5 follow-up). Surface the limitation
             # before mutating the file rather than silently dropping the
             # user's edits.
+            # RFC-020: properties round-trip (Phase 2.5d in the patcher).
+            # Workbook-level, so it flushes before the per-sheet drains.
             if self._properties_dirty:
-                raise NotImplementedError(
-                    "Mutating wb.properties on an existing file is a T1.5 follow-up. "
-                    "Workaround: open via Workbook() and re-author, or stop modifying "
-                    "wb.properties before save()."
-                )
+                self._flush_properties_to_patcher()
             if self._pending_defined_names:
                 raise NotImplementedError(
                     "Mutating wb.defined_names on an existing file is a T1.5 follow-up. "
@@ -412,6 +410,47 @@ class Workbook:
                     ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
                 )
             pending.clear()
+
+    def _flush_properties_to_patcher(self) -> None:
+        """Drain dirty document properties into the patcher (RFC-020).
+
+        Modify-mode counterpart to ``_flush_workbook_writes``'s
+        property branch. Builds a flat dict keyed with the patcher's
+        snake_case schema (``last_modified_by``, ``content_status``,
+        ``created_iso``, ``modified_iso``) and filters ``None`` before
+        crossing the PyO3 boundary so ``extract_str`` sees a clean
+        "missing key" rather than a Python ``None``.
+
+        Resets ``_properties_dirty`` so a subsequent ``save()`` on the
+        same workbook doesn't double-emit. ``modified_iso`` is left
+        unset on this side — the Rust patcher stamps it via
+        ``current_timestamp_iso8601`` (or ``WOLFXL_TEST_EPOCH=0`` →
+        ``1970-01-01T00:00:00Z`` for byte-identical save tests). If the
+        user explicitly set ``props.modified``, that value wins.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        props = self._properties_cache
+        if props is None:
+            self._properties_dirty = False
+            return
+        payload: dict[str, Any] = {
+            "title": props.title,
+            "subject": props.subject,
+            "creator": props.creator,
+            "keywords": props.keywords,
+            "description": props.description,
+            "last_modified_by": props.lastModifiedBy,
+            "category": props.category,
+            "content_status": props.contentStatus,
+            "created_iso": props.created.isoformat() if props.created else None,
+            "modified_iso": props.modified.isoformat() if props.modified else None,
+            "sheet_names": list(self._sheet_names),
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        patcher.queue_properties(payload)
+        self._properties_dirty = False
 
     def _flush_workbook_writes(self) -> None:
         """Push workbook-level metadata + defined names into the Rust writer."""

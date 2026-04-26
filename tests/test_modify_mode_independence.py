@@ -12,10 +12,11 @@ Two checks remain after rip-out:
    references. The reference is gone, but a grep enforces the absence
    in case anything reintroduces it.
 
-2. **T1.5 raise-consistency**: T1.5-deferred features (rewriting doc
-   properties, adding defined names to an existing file) raise
-   ``NotImplementedError`` with a "T1.5" hint — not silent fall-through
-   to the writer.
+2. **T1.5 raise-consistency**: T1.5-deferred features (adding defined
+   names to an existing file) raise ``NotImplementedError`` with a
+   "T1.5" hint - not silent fall-through to the writer. Properties
+   mutation is no longer T1.5: RFC-020 shipped the patcher round-trip,
+   so it's exercised in ``tests/test_modify_properties.py`` instead.
 """
 from __future__ import annotations
 
@@ -52,12 +53,15 @@ def test_xlsxpatcher_has_no_rust_xlsxwriter_references() -> None:
 
 def test_modify_mode_t15_features_raise_with_pointer(tmp_path: Path) -> None:
     """T1.5-deferred modify-mode operations must raise
-    ``NotImplementedError`` with "T1.5" in the message — never silent
+    ``NotImplementedError`` with "T1.5" in the message - never silent
     fall-through to the writer backend.
 
-    Currently tracks two paths:
-    - rewriting workbook properties on an existing file
-    - adding defined names to an existing file
+    Currently tracks one path:
+    - adding defined names to an existing file (RFC-021, not yet shipped)
+
+    Properties mutation used to be on this list but RFC-020 shipped the
+    patcher round-trip; positive coverage is in
+    ``tests/test_modify_properties.py``.
 
     If a new T1.5-deferred feature lands, append it here so the
     raise-contract is enforced at CI time.
@@ -68,16 +72,8 @@ def test_modify_mode_t15_features_raise_with_pointer(tmp_path: Path) -> None:
     import wolfxl
     from wolfxl.workbook.defined_name import DefinedName
 
-    # Path 1 — mutating wb.properties dirties properties; save raises.
-    out_props = tmp_path / "props.xlsx"
-    wb = wolfxl.load_workbook(str(FIXTURE), modify=True)
-    wb.properties.title = "T1.5 probe"
-    with pytest.raises(NotImplementedError, match=r"T1\.5"):
-        wb.save(str(out_props))
-
-    # Path 2 — adding a defined name queues a pending entry; save raises.
     out_dn = tmp_path / "dn.xlsx"
-    wb2 = wolfxl.load_workbook(str(FIXTURE), modify=True)
-    wb2.defined_names["probe"] = DefinedName(name="probe", value="Sheet1!$A$1")
+    wb = wolfxl.load_workbook(str(FIXTURE), modify=True)
+    wb.defined_names["probe"] = DefinedName(name="probe", value="Sheet1!$A$1")
     with pytest.raises(NotImplementedError, match=r"T1\.5"):
-        wb2.save(str(out_dn))
+        wb.save(str(out_dn))

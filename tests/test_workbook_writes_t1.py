@@ -1,7 +1,8 @@
 """T1 PR6 — Workbook writes: DocumentProperties + DefinedName.
 
 Write mode accepts ``wb.properties.title = ...`` and ``wb.defined_names[k] = DefinedName(...)``.
-Modify mode raises ``NotImplementedError`` with a T1.5 pointer for both.
+Modify mode now ships properties round-trip (RFC-020); ``defined_names`` is
+still T1.5 (RFC-021) so its raise-contract test stays.
 """
 
 from __future__ import annotations
@@ -106,18 +107,23 @@ def test_defined_names_empty_workbook_saves(tmp_path: Path) -> None:
     assert len(rb.defined_names) == 0
 
 
-def test_properties_modify_mode_raises(tmp_path: Path) -> None:
-    """The patcher can't rewrite docProps/core.xml — raise with T1.5 hint."""
-    path = tmp_path / "exists_props.xlsx"
-    openpyxl.Workbook().save(path)
-    wb = Workbook._from_patcher(str(path))
-    # We don't gate the assignment itself (attribute-mutation on the
-    # DocumentProperties object is allowed), but save() must raise
-    # when there are dirty properties and no writer.
+def test_properties_modify_mode_round_trips(tmp_path: Path) -> None:
+    """RFC-020: the patcher rewrites docProps/core.xml in modify mode.
+
+    Replaces the prior T1.5-raise contract. The full positive-coverage
+    surface lives in tests/test_modify_properties.py; this one just
+    pins the contract that save() does NOT raise.
+    """
+    src = tmp_path / "exists_props.xlsx"
+    out = tmp_path / "out_props.xlsx"
+    openpyxl.Workbook().save(src)
+    wb = Workbook._from_patcher(str(src))
     wb.properties.title = "new"
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        wb.save(str(path))
+    wb.save(str(out))
     wb.close()
+    # Re-open via openpyxl to verify the title round-trips.
+    wb_check = openpyxl.load_workbook(str(out))
+    assert wb_check.properties.title == "new"
 
 
 def test_defined_names_modify_mode_raises(tmp_path: Path) -> None:
