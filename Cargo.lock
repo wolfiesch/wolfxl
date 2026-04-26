@@ -1411,6 +1411,7 @@ dependencies = [
 name = "wolfxl-structural"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "quick-xml 0.37.5",
  "wolfxl-formula",
 ]

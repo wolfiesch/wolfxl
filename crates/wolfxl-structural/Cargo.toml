@@ -11,3 +11,4 @@ wolfxl-formula = { path = "../wolfxl-formula", version = "0.1" }
 quick-xml.workspace = true
 
 [dev-dependencies]
+proptest = "1"
