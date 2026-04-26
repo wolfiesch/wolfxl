@@ -55,11 +55,23 @@ verbatim.
 |---|---|---|
 | `openpyxl.load_workbook(path, ...)` on encrypted file | Phase 2 | Add `password=` kwarg; dispatch through `msoffcrypto-tool` → `CalamineStyledBook.open_bytes()`. |
 
-### Phase 3 — T2 Rich-text reads
+### Phase 3 — T2 Rich-text reads (✅ SHIPPED in 1.3, Sprint Ι Pod-α)
 
-| openpyxl path | phase | note |
-|---|---|---|
-| `Cell.value` when backing is `CellRichText` | Phase 3 | Currently wolfxl flattens rich text to plain. Add `Cell.rich_text` property (iter-compatible with `openpyxl.cell.rich_text.CellRichText`). |
+Both reads and writes round-trip via the new
+``wolfxl.cell.rich_text.{CellRichText, TextBlock, InlineFont}``
+shims (matching openpyxl's iteration / equality protocol).
+
+* ``Cell.rich_text`` always returns the structured runs (or ``None``
+  for plain cells), regardless of how the workbook was opened.
+* ``Cell.value`` keeps its prior contract by default — flattens
+  rich-text to plain ``str`` so existing call sites are
+  unaffected.  Pass ``load_workbook(..., rich_text=True)`` to
+  flip ``Cell.value`` to return ``CellRichText`` for cells whose
+  backing string carries `<r>` runs (matches openpyxl 3.x's own
+  ``rich_text=True`` flag).
+* Setting ``cell.value = CellRichText([...])`` round-trips in both
+  write mode (native writer emits inline-string runs) and modify mode
+  (patcher emits inline-string runs, SST left untouched).
 
 ### Phase 4 — T2 Streaming reads
 
@@ -83,8 +95,18 @@ and documented here before the ratchet baseline is updated.
 ## Out of scope (documented, not planned)
 
 - Writing encrypted xlsx. Decision: T3 per plan — document in migration guide.
-- Rich-text write. Decision: T3 — SynthGL has no current write use case.
 - Pivot tables, charts, images, data validation — not in SynthGL's openpyxl surface.
+
+## Closed in 1.3 (Sprint Ι Pod-α)
+
+- ✅ **Rich-text read** — Phase 3 row above is now SHIPPED.
+- ✅ **Rich-text write** — was previously listed as out-of-scope T3.
+  Sprint Ι Pod-α shipped both write-mode (native writer) and
+  modify-mode (patcher) inline-string emit paths, so user code that
+  builds a workbook with rich-text cells round-trips end-to-end via
+  wolfxl's writer.  The SST is intentionally left untouched — runs
+  are emitted as inline strings (`t="inlineStr"` + `<is>`), matching
+  openpyxl's own write path verbatim.
 
 ## Modify mode — T1.5 audit (now closed) and structural extensions
 
