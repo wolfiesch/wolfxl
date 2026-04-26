@@ -1,5 +1,116 @@
 # Changelog
 
+## wolfxl 1.3.0 (2026-04-26) — Read-side parity (rich text + streaming + password)
+
+User-facing release notes: `docs/release-notes-1.3.md`.
+
+Sprint Ι ("Iota") closes the three highest-impact read-side gaps from
+KNOWN_GAPS Phase 2/3/4 and lifts the implicit T3 rich-text-write
+deferral. Four parallel pods landed; the parity ratchet is re-engaged
+with the closed rows flipped to `wolfxl_supported=True` and tagged
+`shipped-1.3`.
+
+### Added
+
+- **RFC-040 — Rich-text reads + writes (round-trip)** (Sprint Ι Pod-α,
+  `381813a`). New `python/wolfxl/cell/rich_text.py` ships
+  `CellRichText`, `TextBlock`, `InlineFont` shims that match openpyxl's
+  iteration / equality / constructor contract without pulling openpyxl
+  as a runtime dep. `Cell.rich_text` always exposes structured runs
+  (or `None` for plain cells). `Cell.value` flips to `CellRichText`
+  only under `load_workbook(rich_text=True)`, matching openpyxl's
+  flag-gated default. Inline-string emit on write
+  (`<c t="inlineStr"><is>...</is></c>`) sidesteps SST mutation
+  entirely; `crates/wolfxl-writer/src/rich_text.rs` is the single
+  source of truth for run grammar (parse + emit, 13 cargo unit tests).
+  Round-trip verified wolfxl→openpyxl, openpyxl→wolfxl, wolfxl→wolfxl
+  via 24 new pytest cases.
+- **RFC-041 — SAX streaming reads (values + styles)** (Sprint Ι Pod-β,
+  `75de628`). New `src/streaming.rs` Rust module + `python/wolfxl/_streaming.py`
+  expose a true SAX path activated via `load_workbook(read_only=True)`
+  or auto-triggered for sheets > 50000 rows. `iter_rows()` yields
+  read-only `StreamingCell` proxies with full
+  `.font/.fill/.border/.alignment/.number_format` access (lazy O(1)
+  styles-table lookup). `iter_rows(values_only=True)` yields plain
+  tuples. Mutation centralized in `__setattr__` raises
+  `RuntimeError` immediately. Benchmark on 100k-row × 10-col
+  fixture: wolfxl `read_only=True` is **~5.7× faster** than openpyxl
+  `read_only=True` on wall time (0.700 s vs 4.017 s), and ~2× faster
+  than wolfxl's bulk-FFI eager path. 22 new pytest cases (16
+  streaming + 5 parity + 1 modified workbook-compat assertion).
+- **RFC-042 — Password-protected reads via msoffcrypto-tool** (Sprint
+  Ι Pod-γ, `f0ea2d1`). New `password=` kwarg on
+  `wolfxl.load_workbook(...)` lazy-imports
+  `msoffcrypto-tool` (optional dep, install via
+  `pip install wolfxl[encrypted]`) and dispatches the decrypted bytes
+  through a tracked tempfile to the existing path-based readers.
+  Tempfile cleaned up by `Workbook.close()`. Modify mode + password
+  works: `load_workbook(path, password=..., modify=True)` →
+  mutate → `wb.save(out)` emits plaintext. Write-side encryption
+  out of scope (raises `NotImplementedError` if `password=` passed
+  to `save()`). 9 new pytest cases.
+- **Workbook.defined_names `__setitem__`** (Sprint Ι Pod-δ D4,
+  `b64c364`). Closes KNOWN_GAPS Phase 1 row.
+  `wb.defined_names["MyName"] = DefinedName(name="MyName",
+  attr_text="Sheet1!$A$1")` now routes through the existing Rust
+  `add_named_range` path with Excel-compliant name validation
+  (no whitespace, no leading digit, not an A1 ref, not R/C R1C1
+  reserved tokens). Sheet-scope names (`localSheetId` set) route via
+  `scope=sheet` plus the resolved sheet name. 11 new pytest cases.
+
+### Fixed
+
+- **Native-writer VML margin honors per-column widths** (Sprint Ι
+  Pod-δ D3, `92c901d`).
+  `crates/wolfxl-writer/src/emit/drawings_vml.rs::compute_margin` was
+  hard-coding `COL_WIDTH_PT = 48.0`; sheets with custom column widths
+  rendered comment popups over the wrong cell area. New
+  `compute_margin_with_widths` walks `worksheet.columns` and sums
+  per-column widths in points, mirroring the modify-mode patcher's
+  helper. Empty `<cols>` falls back to the legacy math so existing
+  fixtures stay byte-stable. 3 new Rust unit tests + 2 Python
+  round-trip tests. Closes
+  `Plans/followups/native-writer-vml-margin-fix.md`.
+
+### Internal / infra
+
+- **Parity ratchet re-engaged** (Sprint Ι Pod-δ D1 `751760f` +
+  integrator flip-up `71d1d4f`). `tests/parity/openpyxl_surface.py`
+  now carries five fine-grained `_GAP_ENTRIES` rows. The three
+  Sprint-Ι-closed rows (rich text, streaming, password) are flipped
+  to `wolfxl_supported=True` and tagged `shipped-1.3`. The two
+  remaining Phase-5 rows (`.xls` / `.xlsb`) keep
+  `wolfxl_supported=False` and continue to xfail strictly via
+  `test_known_gap_still_gaps` so a future closer flips the test
+  green.
+- **Custom pytest marks registered** (Sprint Ι Pod-δ D2, `ce9dda3`).
+  `rfc035`, `rfc031`, `rfc036`, and `manual` are added to
+  `pyproject.toml`'s `[tool.pytest.ini_options].markers`, silencing
+  the recurring `PytestUnknownMarkWarning` noise.
+- **uv.lock updated** for msoffcrypto-tool 6.0.0 + olefile + pycparser
+  transitive deps (introduced as an optional dep, not a runtime dep).
+
+### Documentation
+
+- `Plans/rfcs/040-rich-text.md` — Pod-α RFC (~210 lines).
+- `Plans/rfcs/041-streaming-reads.md` — Pod-β RFC (~225 lines).
+- `Plans/rfcs/042-password-reads.md` — Pod-γ RFC (~230 lines).
+- `Plans/rfcs/INDEX.md` bumped 16 → 19 RFCs.
+- `Plans/followups/native-writer-vml-margin-fix.md` marked Closed.
+- `tests/parity/KNOWN_GAPS.md` — Phase 2/3/4 rows moved to "Shipped"
+  status; T3 rich-text-write entry retired.
+- `docs/release-notes-1.3.md` — user-facing 1.3 release notes
+  (~310 lines).
+
+### Test totals (post-1.3)
+
+- `cargo test --workspace --exclude wolfxl`: ~660 green.
+- `pytest tests/`: **1106 passed, 15 skipped, 2 xfailed** (1.2 had
+  0 xfails; 1.3 adds 2 from the parity ratchet pinning .xls/.xlsb
+  Phase-5 deferred items).
+- 100k-row × 10-col streaming benchmark: ~5.7× faster than openpyxl
+  `read_only=True`.
+
 ## wolfxl 1.2.0 (2026-04-26) — RFC-035 follow-ups + composition hardening
 
 User-facing release notes: `docs/release-notes-1.2.md`.

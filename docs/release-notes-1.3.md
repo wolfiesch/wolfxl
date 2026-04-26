@@ -51,8 +51,20 @@ stringifying a `CellRichText` concatenates run text in document
 order so callers that only need the flat string can keep using
 `cell.value`.
 
-Pod-α commit: <!-- TBD: Pod-α commit sha when integrated -->.
-RFC: `Plans/rfcs/040-rich-text.md`.
+Pod-α also ships **rich-text writes** (round-trip):
+`cell.value = CellRichText([...])` works in both write mode and
+modify mode. Inline strings (`<c t="inlineStr"><is>...</is></c>`)
+are emitted on the way out — the SST stays untouched, matching
+openpyxl's own rich-text emit path verbatim and sidestepping
+SST-dedup complexity. Round-trip tests verify wolfxl→openpyxl,
+openpyxl→wolfxl, and wolfxl→wolfxl preserve runs byte-for-byte.
+
+Optional reader flag: pass `load_workbook(path, rich_text=True)` to
+make `Cell.value` return `CellRichText` directly for rich cells
+(matches openpyxl's flag-gated behaviour). Without the flag,
+`Cell.value` keeps flattening to `str` for backwards compatibility.
+
+Pod-α commit: `381813a`. RFC: `Plans/rfcs/040-rich-text.md`.
 
 ### Streaming reads on huge sheets (Sprint Ι Pod-β, RFC-041)
 
@@ -85,8 +97,27 @@ Streaming-mode workbooks are read-only — `cell.value = …`,
 cell reads (`ws["B7"]`) raise per openpyxl. Match the openpyxl
 contract end-to-end.
 
-Pod-β commit: <!-- TBD: Pod-β commit sha when integrated -->.
-RFC: `Plans/rfcs/041-streaming-reads.md`.
+Streaming cells expose **values + styles** (richer than openpyxl's
+`values_only=True`-only mode): `iter_rows()` yields read-only
+`StreamingCell` proxies with full `.font` / `.fill` / `.border` /
+`.alignment` / `.number_format` access, backed by the upfront-loaded
+styles table for O(1) lookups. `iter_rows(values_only=True)` yields
+plain tuples, matching openpyxl's contract.
+
+Benchmark on a 100k-row × 10-col fixture (single M-series run):
+
+| config              | wall (s) |
+|---|---:|
+| openpyxl eager      | 3.980 |
+| openpyxl read_only  | 4.017 |
+| wolfxl eager        | 1.422 |
+| **wolfxl read_only**| **0.700** |
+
+WolfXL's streaming path is **~5.7× faster** than openpyxl
+`read_only=True` on wall time and **~2× faster** than wolfxl's
+own bulk-FFI eager path.
+
+Pod-β commit: `75de628`. RFC: `Plans/rfcs/041-streaming-reads.md`.
 
 ### Password-protected reads via `msoffcrypto-tool` (Sprint Ι Pod-γ, RFC-042)
 
@@ -98,34 +129,37 @@ wb = wolfxl.load_workbook("budget.xlsx", password="hunter2")
 # and parses the plaintext through CalamineStyledBook.open_bytes.
 ```
 
-Add the optional `crypto` extra to your install:
+Add the optional `encrypted` extra to your install:
 
 ```bash
-pip install 'wolfxl[crypto]'
+pip install 'wolfxl[encrypted]'
 # or, if you maintain pinned deps directly:
 # msoffcrypto-tool>=5.4,<6
 ```
 
 `load_workbook(path, password=...)` decrypts the .xlsx via
-`msoffcrypto-tool` and feeds the plaintext through the existing
-`CalamineStyledBook.open_bytes()` reader. `password=None` (default)
-short-circuits — no msoffcrypto import, no perf hit on the common
-unencrypted path.
+`msoffcrypto-tool` (lazy-imported only when `password=` is non-None,
+so users on the common unencrypted path pay no import cost) and
+dispatches the plaintext bytes through a tempfile to the existing
+path-based readers. The tempfile is tracked on the workbook and
+removed via `Workbook.close()`.
+
+**Modify mode + password works**:
+`load_workbook(path, password=..., modify=True)` → mutate → `wb.save(out)`
+emits a plaintext xlsx. Write-side encryption is explicitly out of
+scope; passing `password=` to `wb.save()` raises
+`NotImplementedError`.
 
 Errors:
 
-- Wrong password → `wolfxl.PasswordError` (subclass of `ValueError`)
-  with the file path.
-- Missing `crypto` extra → `RuntimeError("password kwarg requires
-  the 'crypto' extra: pip install wolfxl[crypto]")`.
-- Other msoffcrypto errors propagate as-is (corrupt envelope, etc.).
+- Wrong password → `msoffcrypto.exceptions.InvalidKeyError`
+  surfaces as-is.
+- Missing `encrypted` extra → `ImportError("password reads require
+  msoffcrypto-tool; install with: pip install wolfxl[encrypted]")`.
+- `password=` on a non-encrypted file → silently ignored (matches
+  openpyxl's behavior).
 
-`save()` on a workbook opened with `password=` raises until the
-post-1.3 follow-up RFC ships re-encryption. Decryption-then-save
-to a *plaintext* file works in modify mode today.
-
-Pod-γ commit: <!-- TBD: Pod-γ commit sha when integrated -->.
-RFC: `Plans/rfcs/042-password-reads.md`.
+Pod-γ commit: `f0ea2d1`. RFC: `Plans/rfcs/042-password-reads.md`.
 
 ### Pod-δ — sweep and follow-ups
 
@@ -161,8 +195,10 @@ Four small, independent items that round out the release:
   Pod-δ commit: `b64c364`. Closes the Phase 1 KNOWN_GAPS row.
 
 Pod-δ also ships RFC-040 / 041 / 042 spec drafts (commit
-`6bc120c`) and this release-notes scaffold (commit
-<!-- TBD: D6 commit sha when committed -->).
+`6bc120c`) and this release-notes scaffold (commit `93fe1c7`).
+The integrator's ratchet flip-up (`71d1d4f`) moves the three
+landed gap rows from `wolfxl_supported=False` → `True` as the
+matching pods merged.
 
 ## Breaking changes
 
@@ -205,11 +241,12 @@ every Pod-α / β / γ / δ change is additive. Optional adjustments:
   one `RuntimeWarning` per huge workbook; suppress with
   `warnings.simplefilter("ignore", RuntimeWarning)` or pass
   `read_only=False` to opt out.
-- **Password-protected files**: `pip install 'wolfxl[crypto]'` and
-  pass `password=`. Existing pipelines that detected the encrypted
-  file via the previous `CalamineError` should switch to the
-  pre-flight `msoffcrypto.OfficeFile(...).is_encrypted()` check or
-  catch the new `wolfxl.PasswordError`.
+- **Password-protected files**: `pip install 'wolfxl[encrypted]'`
+  and pass `password=`. Existing pipelines that detected the
+  encrypted file via the previous `CalamineError` should switch to
+  the pre-flight `msoffcrypto.OfficeFile(...).is_encrypted()`
+  check or catch the underlying
+  `msoffcrypto.exceptions.InvalidKeyError` directly.
 - **VML comment positioning**: if you re-saved a file with
   `wolfxl.Workbook()` (write mode) and noticed comment popups in
   the wrong place when columns had custom widths, the bug is
@@ -257,14 +294,14 @@ See `tests/parity/KNOWN_GAPS.md` for the full per-feature gap list.
 
 Sprint Ι ("Iota") pods that landed 1.3:
 
-- **Pod-α — RFC-040 rich-text reads.** <!-- TBD: Pod-α commit sha when integrated -->
-- **Pod-β — RFC-041 streaming reads.** <!-- TBD: Pod-β commit sha when integrated -->
-- **Pod-γ — RFC-042 password-protected reads.** <!-- TBD: Pod-γ commit sha when integrated -->
+- **Pod-α — RFC-040 rich-text reads + writes (round-trip).** `381813a`
+- **Pod-β — RFC-041 streaming reads (values + styles).** `75de628`
+- **Pod-γ — RFC-042 password-protected reads (msoffcrypto-tool).** `f0ea2d1`
 - **Pod-δ (this release scaffold)** — D1 ratchet (`751760f`),
   D2 pytest marks (`ce9dda3`), D3 VML margin fix (`92c901d`),
   D4 `defined_names.__setitem__` (`b64c364`), D5 RFC drafts
   (`6bc120c`), D6 release-notes scaffold
-  (<!-- TBD: D6 commit sha when committed -->).
+  (`93fe1c7`).
 
 Specs: `Plans/rfcs/040-rich-text.md`,
 `Plans/rfcs/041-streaming-reads.md`,
