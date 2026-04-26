@@ -61,11 +61,38 @@ verbatim.
 |---|---|---|
 | `Cell.value` when backing is `CellRichText` | Phase 3 | Currently wolfxl flattens rich text to plain. Add `Cell.rich_text` property (iter-compatible with `openpyxl.cell.rich_text.CellRichText`). |
 
-### Phase 4 — T2 Streaming reads
+### Phase 4 — T2 Streaming reads (SHIPPED — Sprint Ι Pod-β)
 
-| openpyxl path | phase | note |
-|---|---|---|
-| `openpyxl.load_workbook(path, read_only=True)` + `ws.iter_rows(values_only=True)` on 1M-cell sheets | Phase 4 | WolfXL accepts the kwarg but reads the full sheet into memory. Add a SAX fast path for `read_only=True` or sheets > 50k rows. |
+`load_workbook(path, read_only=True)` now activates a true SAX fast
+path on `Worksheet.iter_rows`. The path is also auto-engaged for
+sheets with > 50k rows even when the caller didn't opt in (see
+`wolfxl._streaming.AUTO_STREAM_ROW_THRESHOLD`). Cells yielded in
+streaming mode are
+`wolfxl._streaming.StreamingCell` proxies that surface
+`value`, `coordinate`, `row`, `column`, `font`, `fill`, `border`,
+`alignment`, and `number_format` — every setter raises
+`RuntimeError("read_only=True: ...")` immediately. Style attributes
+defer to the existing eager `CalamineStyledBook` style table for
+O(1) lookups; the streaming layer parses sheet XML directly via a
+hand-rolled byte scanner driven by `quick-xml`-style lookahead, plus
+`xl/sharedStrings.xml` once at construction time.
+
+Implementation: `src/streaming.rs` (Rust SAX scanner), exposed via
+`wolfxl._rust.StreamingSheetReader`; `python/wolfxl/_streaming.py`
+(Python generator + `StreamingCell`). Tests:
+`tests/test_streaming_reads.py` (16 cases), `tests/parity/
+test_streaming_parity.py` (5 cases vs openpyxl `read_only=True`),
+`tests/test_streaming_perf.py` (slow — 100k-row benchmark).
+
+Documented divergences (out of scope for Pod-β, tracked elsewhere):
+
+- Datetime cells surface as Excel serial floats in `values_only`
+  mode, not as Python `datetime` objects (openpyxl's read_only path
+  returns the converted datetime). Closing this requires the
+  streaming reader to consult the styles table for the cell's
+  number format. Tracked under Phase 3 rich-text follow-ups.
+- Rich-text cells flatten to plain strings (matches the existing
+  Phase 3 row).
 
 ### Phase 5 — T1 .xls / .xlsb
 

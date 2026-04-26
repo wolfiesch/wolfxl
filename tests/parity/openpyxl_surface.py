@@ -295,7 +295,12 @@ _RANGE_ENTRIES: tuple[SurfaceEntry, ...] = (
         ),
         parity_note=(
             "Signature: ``iter_rows(min_row, max_row, min_col, max_col, "
-            "values_only)``. ``values_only=True`` yields tuples of raw values."
+            "values_only)``. ``values_only=True`` yields tuples of raw values. "
+            "Sprint Ι Pod-β: when the workbook was opened with "
+            "``read_only=True`` (or the sheet has > 50k rows), the call "
+            "becomes a true SAX-streaming generator backed by the Rust "
+            "``StreamingSheetReader``; cells yielded from the streaming "
+            "path are read-only ``StreamingCell`` proxies."
         ),
         tags=frozenset({"hard"}),
     ),
