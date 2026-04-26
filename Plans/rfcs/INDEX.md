@@ -21,7 +21,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 021 | T1.5 — Defined names mutation | Researched | 3 | M | 011, 012 | 030, 031, 034, 035, 036 |
 | 022 | T1.5 — Hyperlinks | Shipped | 3 | M | 010, 011, 013 | 030, 031, 035 |
 | 023 | T1.5 — Comments + VML drawings | Researched | 3 | L | 010, 011, 013 | 030, 031, 035 |
-| 024 | T1.5 — Tables | Researched | 3 | M | 010, 011, 013 | 030, 031, 035 |
+| 024 | T1.5 — Tables | Shipped | 3 | M | 010, 011, 013 | 030, 031, 035 |
 | 025 | T1.5 — Data validations | Shipped | 3 | M | 011 | 030, 031, 035 |
 | 026 | T1.5 — Conditional formatting | Shipped | 3 | M | 011 | 030, 031, 035 |
 | 030 | Structural — insert_rows / delete_rows | Researched | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
