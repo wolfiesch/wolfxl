@@ -17,7 +17,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 011 | Infra — XML-block-merger primitive | Researched | 2 | M | 001 | 022, 023, 024, 025, 026 |
 | 012 | Infra — formula reference translator | Researched | 2 | L | 001 | 021, 030, 031, 034, 035 |
 | 013 | Infra — patcher extensions (ZIP-add, ancillary parts, two-phase flush) | Shipped | 2 | M | 001 | 022, 023, 024, 035 |
-| 020 | T1.5 — Document properties | Researched | 3 | S | — | — |
+| 020 | T1.5 — Document properties | Shipped | 3 | S | 013 | — |
 | 021 | T1.5 — Defined names mutation | Researched | 3 | M | 011, 012 | 030, 031, 034, 035, 036 |
 | 022 | T1.5 — Hyperlinks | Researched | 3 | M | 010, 011, 013 | 030, 031, 035 |
 | 023 | T1.5 — Comments + VML drawings | Researched | 3 | L | 010, 011, 013 | 030, 031, 035 |

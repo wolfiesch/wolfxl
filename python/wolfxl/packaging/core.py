@@ -51,14 +51,24 @@ class DocumentProperties:
         wb = self.__dict__.get("_wb")
         if wb is not None and name != "_wb":
             wb._properties_dirty = True  # noqa: SLF001
+            # Track per-field user mutations so the modify-mode flush
+            # can distinguish "user explicitly set X" from "X was
+            # hydrated from the source on first read". Required for
+            # ``modified``: a dirty save re-stamps it to save-time
+            # unless the user supplied a specific datetime.
+            user_set: set[str] = self.__dict__.setdefault("_user_set", set())
+            user_set.add(name)
 
     def _attach_workbook(self, wb: Any) -> None:
         """Link this properties object to its owning Workbook.
 
         After this call, every subsequent attribute assignment flips
         ``wb._properties_dirty = True`` — transparent to the user.
+        Also resets the per-field user-mutation set so cache hydration
+        prior to attach is not counted as a user mutation.
         """
         object.__setattr__(self, "_wb", wb)
+        object.__setattr__(self, "_user_set", set())
 
 
 def _doc_props_from_dict(raw: dict[str, Any] | None) -> DocumentProperties:

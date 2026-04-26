@@ -435,6 +435,17 @@ class Workbook:
         if props is None:
             self._properties_dirty = False
             return
+        # Per-field "user explicitly set this" set, populated by
+        # ``DocumentProperties.__setattr__`` after ``_attach_workbook``.
+        # Used below to decide whether to forward ``modified``: by
+        # default a dirty save re-stamps it to save-time (Rust side),
+        # which is what users expect. The cache hydrates ``modified``
+        # from the source on first ``wb.properties`` read — we'd
+        # otherwise echo the source's old timestamp forever.
+        user_set: set[str] = getattr(props, "_user_set", set())
+        modified_iso: str | None = None
+        if "modified" in user_set and props.modified is not None:
+            modified_iso = props.modified.isoformat()
         payload: dict[str, Any] = {
             "title": props.title,
             "subject": props.subject,
@@ -445,7 +456,7 @@ class Workbook:
             "category": props.category,
             "content_status": props.contentStatus,
             "created_iso": props.created.isoformat() if props.created else None,
-            "modified_iso": props.modified.isoformat() if props.modified else None,
+            "modified_iso": modified_iso,
             "sheet_names": list(self._sheet_names),
         }
         payload = {k: v for k, v in payload.items() if v is not None}
