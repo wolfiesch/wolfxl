@@ -21,6 +21,7 @@ pub mod ancillary;
 pub mod properties;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
+pub mod defined_names;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -147,6 +148,16 @@ pub struct XlsxPatcher {
     /// `rels_patches`. `None` value (delete sentinel) lands here as
     /// `HyperlinkOp::Delete` per INDEX decision #5.
     queued_hyperlinks: HashMap<String, BTreeMap<String, hyperlinks::HyperlinkOp>>,
+    /// Defined-name upserts pending flush (RFC-021). Drained by
+    /// Phase 2.5f, which parses `xl/workbook.xml`, merges these
+    /// entries via `defined_names::merge_defined_names`, and writes
+    /// the result back through `file_patches`. Empty queue → no
+    /// rewrite of `xl/workbook.xml` (modify-mode no-op invariant).
+    /// Order is insertion order from the Python coordinator (which
+    /// itself iterates a regular dict — Python 3.7+ preserves
+    /// insertion order). Within a save, the merger upserts by
+    /// `(name, local_sheet_id)` so duplicates collapse to last-wins.
+    queued_defined_names: Vec<defined_names::DefinedNameMut>,
 }
 
 #[pymethods]
@@ -195,6 +206,7 @@ impl XlsxPatcher {
             queued_content_type_ops: HashMap::new(),
             queued_props: None,
             queued_hyperlinks: HashMap::new(),
+            queued_defined_names: Vec::new(),
         })
     }
 
@@ -446,6 +458,44 @@ impl XlsxPatcher {
             .entry(sheet.to_string())
             .or_default()
             .insert(cell.to_string(), hyperlinks::HyperlinkOp::Set(patch));
+        Ok(())
+    }
+
+    /// Queue a defined-name upsert (RFC-021).
+    ///
+    /// `payload` keys (`name` + `formula` required; rest optional):
+    ///   - `name`            (str)  — defined name. Includes any `_xlnm.` prefix verbatim.
+    ///   - `formula`         (str)  — XML text content (no leading `=`).
+    ///   - `local_sheet_id`  (int?) — `None` = workbook-scope; 0-based sheet position otherwise.
+    ///   - `hidden`          (bool?)— `True` emits `hidden="1"`.
+    ///   - `comment`         (str?) — defined-name `comment` attribute.
+    ///
+    /// Drained by Phase 2.5f during `do_save`. Upsert key is
+    /// `(name, local_sheet_id)` — two entries with the same name but
+    /// different scopes coexist independently.
+    fn queue_defined_name(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let name = extract_str(payload, "name")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("queue_defined_name: 'name' is required"))?;
+        let formula = extract_str(payload, "formula")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>(
+                "queue_defined_name: 'formula' is required",
+            ))?;
+        let local_sheet_id = match payload.get_item("local_sheet_id")? {
+            Some(v) if !v.is_none() => Some(v.extract::<u32>()?),
+            _ => None,
+        };
+        let hidden = match payload.get_item("hidden")? {
+            Some(v) if !v.is_none() => Some(v.extract::<bool>()?),
+            _ => None,
+        };
+        let comment = extract_str(payload, "comment")?;
+        self.queued_defined_names.push(defined_names::DefinedNameMut {
+            name,
+            formula,
+            local_sheet_id,
+            hidden,
+            comment,
+        });
         Ok(())
     }
 
@@ -742,12 +792,13 @@ impl XlsxPatcher {
             && self.queued_content_type_ops.is_empty()
             && self.queued_props.is_none()
             && self.queued_hyperlinks.is_empty()
+            && self.queued_defined_names.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
-            // `queued_props`, and RFC-022's `queued_hyperlinks` so a
-            // no-op save remains byte-identical even after these
-            // primitives land.
+            // `queued_props`, RFC-022's `queued_hyperlinks`, and
+            // RFC-021's `queued_defined_names` so a no-op save remains
+            // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -1031,6 +1082,25 @@ impl XlsxPatcher {
         // Add styles.xml patch if modified
         if let Some(ref sxml) = styles_xml {
             file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
+        }
+
+        // --- Phase 2.5f: Defined names (RFC-021) ---
+        //
+        // Workbook-level (single XML part), not per-sheet. When the
+        // queue is non-empty we read `xl/workbook.xml`, splice the
+        // `<definedNames>` block (or inject one after `</sheets>` if
+        // missing), and route the result through `file_patches`.
+        // Empty queue is the no-op identity path — workbook.xml is
+        // not touched. The merger preserves all unrelated children of
+        // `<workbook>` byte-for-byte.
+        if !self.queued_defined_names.is_empty() {
+            let wb_xml = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+            let updated = defined_names::merge_defined_names(
+                wb_xml.as_bytes(),
+                &self.queued_defined_names,
+            )
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("defined-names merge: {e}")))?;
+            file_patches.insert("xl/workbook.xml".to_string(), updated);
         }
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether

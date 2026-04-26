@@ -126,11 +126,19 @@ def test_properties_modify_mode_round_trips(tmp_path: Path) -> None:
     assert wb_check.properties.title == "new"
 
 
-def test_defined_names_modify_mode_raises(tmp_path: Path) -> None:
-    path = tmp_path / "exists_names.xlsx"
-    openpyxl.Workbook().save(path)
-    wb = Workbook._from_patcher(str(path))
+def test_defined_names_modify_mode_round_trip(tmp_path: Path) -> None:
+    """RFC-021 — modify mode now supports defined-name mutation. The
+    former NotImplementedError("T1.5") guard at this site is replaced
+    by a real round-trip via the patcher's Phase 2.5f. See
+    ``tests/test_defined_names_modify.py`` for the broader matrix."""
+    src = tmp_path / "exists_names.xlsx"
+    dst = tmp_path / "out.xlsx"
+    openpyxl.Workbook().save(src)
+    wb = Workbook._from_patcher(str(src))
     wb.defined_names["New"] = DefinedName(name="New", value="Sheet!$A$1")
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        wb.save(str(path))
+    wb.save(str(dst))
     wb.close()
+
+    rt = openpyxl.load_workbook(dst)
+    assert "New" in rt.defined_names
+    assert rt.defined_names["New"].attr_text == "Sheet!$A$1"
