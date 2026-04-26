@@ -329,6 +329,11 @@ class Workbook:
                 )
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
+            # RFC-025: flush worksheet-level setters that the patcher
+            # accepts. The cell-level _flush above handles values +
+            # formats; data validations are a separate patcher API
+            # because they live in a sibling block, not in <sheetData>.
+            self._flush_pending_data_validations_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -338,6 +343,33 @@ class Workbook:
             self._rust_writer.save(filename)
         else:
             raise RuntimeError("save requires write or modify mode")
+
+    def _flush_pending_data_validations_to_patcher(self) -> None:
+        """Drain ``_pending_data_validations`` on every sheet into the patcher.
+
+        Modify-mode counterpart to the writer flush at
+        ``_worksheet.py:1960`` — same drain semantics, different
+        backend. Each DV is converted to the patcher's flat-dict
+        payload via ``_dv_to_patcher_dict``. Per-sheet drain happens
+        in ``ws.title`` order; within a sheet, append order wins so
+        the final ``<dataValidations>`` block reflects the order the
+        user appended them.
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        from wolfxl.worksheet.datavalidation import _dv_to_patcher_dict
+
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_data_validations  # noqa: SLF001
+            if not pending:
+                continue
+            for dv in pending:
+                patcher.queue_data_validation(ws.title, _dv_to_patcher_dict(dv))
+            pending.clear()
 
     def _flush_workbook_writes(self) -> None:
         """Push workbook-level metadata + defined names into the Rust writer."""

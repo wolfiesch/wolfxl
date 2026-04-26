@@ -207,13 +207,20 @@ def test_dv_list_append_queues_in_write_mode() -> None:
     assert len(dvs) == 1
 
 
-def test_dv_list_append_in_modify_mode_raises(rich_fixture: Path) -> None:
+def test_dv_list_append_works_in_modify_mode(rich_fixture: Path) -> None:
+    """RFC-025 shipped: ``append`` queues onto ``_pending_data_validations``
+    in modify mode, same as write mode. The patcher flushes them on
+    ``save()``. This test only asserts the queue side; round-trip
+    coverage lives in ``tests/test_modify_data_validations.py``.
+    """
     wb = Workbook._from_patcher(str(rich_fixture))
     ws = wb["Data"]
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws.data_validations.append(
-            DataValidation(type="whole", operator="greaterThan", formula1="=10", sqref="B1:B10")
-        )
+    before = len(ws.data_validations)
+    ws.data_validations.append(
+        DataValidation(type="whole", operator="greaterThan", formula1="=10", sqref="B1:B10")
+    )
+    assert len(ws.data_validations) == before + 1
+    assert len(ws._pending_data_validations) == 1  # noqa: SLF001
 
 
 def test_cf_add_in_modify_mode_raises(rich_fixture: Path) -> None:

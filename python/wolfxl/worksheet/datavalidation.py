@@ -2,8 +2,13 @@
 
 ``DataValidation`` is a real dataclass. ``DataValidationList`` mimics
 openpyxl's container — the user iterates ``.dataValidation`` (a list)
-and appends new DVs with ``.append(dv)``. Reads land in PR2, writes
-(append in write mode) in PR5.
+and appends new DVs with ``.append(dv)``.
+
+Append works in both write mode (``Workbook()`` → native writer) and
+modify mode (``load_workbook(path, modify=True)`` → patcher). The
+divergence happens at ``save()`` time, not at ``append()`` — both modes
+queue onto ``ws._pending_data_validations`` here; the workbook's
+``save()`` routes to the writer or the patcher accordingly.
 """
 
 from __future__ import annotations
@@ -82,21 +87,52 @@ class DataValidationList:
     def append(self, dv: DataValidation) -> None:
         """Attach a new data validation.
 
-        Wired up in T1 PR5. The import is lazy so construction of this
-        container in read mode (where ``append`` just raises) doesn't
-        force loading the writer helpers.
+        Works in write mode and modify mode. Pure read mode (no writer,
+        no patcher) raises — there is no path for the change to flow to
+        disk. Both writable modes queue here; ``Workbook.save`` routes
+        to the right backend.
         """
         ws = self._ws
         if ws is None:
             raise RuntimeError("DataValidationList is not attached to a worksheet")
         wb = ws._workbook  # noqa: SLF001
-        if wb._rust_writer is None:  # noqa: SLF001
-            raise NotImplementedError(
-                "Appending data validations to existing files is a T1.5 follow-up. "
-                "Write mode (Workbook() + save) is supported."
-            )
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("DataValidationList is not attached to a workbook")
         self.dataValidation.append(dv)
         ws._pending_data_validations.append(dv)  # noqa: SLF001
 
 
-__all__ = ["DataValidation", "DataValidationList"]
+def _dv_to_patcher_dict(dv: DataValidation) -> dict[str, Any]:
+    """Convert an openpyxl-shaped ``DataValidation`` into the patcher's payload.
+
+    The patcher's PyO3 method (``XlsxPatcher.queue_data_validation``)
+    accepts a flat dict whose key names match RFC-025 §4.2's
+    ``DataValidationPatch`` fields. Unknown keys are ignored on the
+    Rust side, so this helper can over-supply safely; we surface the
+    keys the patcher actually consumes.
+
+    ``showDropDown`` and ``errorStyle`` aren't on ``DataValidation``
+    today (see field list at lines 35-46). They're sent as defaults so
+    the patcher round-trip stays predictable; if either field is added
+    to the dataclass later, the helper picks them up automatically via
+    ``getattr``.
+    """
+    return {
+        "sqref": dv.sqref,
+        "validation_type": dv.type or "none",
+        "operator": dv.operator,
+        "formula1": dv.formula1,
+        "formula2": dv.formula2,
+        "allow_blank": bool(dv.allowBlank),
+        "show_dropdown": bool(getattr(dv, "showDropDown", False)),
+        "show_input_message": bool(dv.showInputMessage),
+        "show_error_message": bool(dv.showErrorMessage),
+        "error_style": getattr(dv, "errorStyle", None),
+        "error_title": dv.errorTitle,
+        "error": dv.error,
+        "prompt_title": dv.promptTitle,
+        "prompt": dv.prompt,
+    }
+
+
+__all__ = ["DataValidation", "DataValidationList", "_dv_to_patcher_dict"]

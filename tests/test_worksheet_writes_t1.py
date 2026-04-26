@@ -112,15 +112,19 @@ def test_modify_mode_raises_on_add_table(tmp_path: Path) -> None:
     wb.close()
 
 
-def test_modify_mode_raises_on_dv_append(tmp_path: Path) -> None:
+def test_modify_mode_dv_append_queues(tmp_path: Path) -> None:
+    """RFC-025 shipped: DV append works in modify mode. The queue lands in
+    ``_pending_data_validations``; ``save()`` flushes it through the
+    patcher. Round-trip coverage in ``tests/test_modify_data_validations.py``.
+    """
     path = tmp_path / "exists_dv.xlsx"
     openpyxl.Workbook().save(path)
 
     wb = Workbook._from_patcher(str(path))
     ws = wb.active
     dv = DataValidation(type="list", formula1='"a,b"', sqref="A1:A2")
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws.data_validations.append(dv)
+    ws.data_validations.append(dv)
+    assert len(ws._pending_data_validations) == 1  # noqa: SLF001
     wb.close()
 
 
