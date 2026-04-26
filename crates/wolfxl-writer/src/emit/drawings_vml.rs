@@ -5,6 +5,16 @@
 //! comment boxes and form controls. Modern OOXML uses DrawingML for
 //! everything else, but comments still need VML to show Excel a
 //! yellow-rectangle shape anchored to a cell.
+//!
+//! ## Per-column width handling (Sprint Ι Pod-δ D3)
+//!
+//! [`compute_margin_with_widths`] mirrors the modify-mode patcher's
+//! `compute_margin_with_widths` in `src/wolfxl/comments.rs`: when a
+//! sheet has a `<cols>` block with overrides, the comment's
+//! `margin-left` is summed from per-column widths (in points) instead
+//! of multiplying by the OOXML default of 48pt. The two helpers must
+//! stay in agreement — see the parity test in
+//! `tests/test_native_writer_comments.py`.
 
 use crate::model::worksheet::Worksheet;
 use crate::refs;
@@ -33,9 +43,50 @@ fn compute_anchor(row0: u32, col0: u32) -> (u32, u32, u32, u32, u32, u32, u32, u
     (col_left, 15, row_top, 10, col_right, 15, row_bottom, 4)
 }
 
-/// Compute the `(margin-left, margin-top)` shape origin in points for a
-/// comment anchored to the cell at 0-based `(row0, col0)`. Matches
-/// `rust_xlsxwriter`'s formula assuming default column width / row height.
+/// Convert Excel "max-digit-width" column units to points. Mirrors
+/// `src/wolfxl/comments.rs::col_units_to_pt` so writer-side and
+/// patcher-side margin math agree.
+fn col_units_to_pt(units: f64) -> f64 {
+    let px = ((units * 7.0 + 5.0) / 7.0 * 7.0 + 5.0).trunc();
+    px * 72.0 / 96.0
+}
+
+/// Compute the `(margin-left, margin-top)` shape origin in points,
+/// honoring any per-column width overrides on `sheet`. When the
+/// sheet has no `<cols>` overrides, falls back to the legacy
+/// `col0 * 48pt` math — keeps byte-identical output for the common
+/// case while fixing the visual mispositioning when the user set a
+/// non-default width on any column to the LEFT of the comment.
+fn compute_margin_with_widths(sheet: &Worksheet, row0: u32, col0: u32) -> (f64, f64) {
+    let margin_top = (row0 as f64) * ROW_HEIGHT_PT + ORIGIN_TOP_PT;
+
+    // Fast path: no overrides at all → legacy math byte-stable.
+    if sheet.columns.is_empty() {
+        let margin_left = (col0 as f64) * COL_WIDTH_PT + ORIGIN_LEFT_PT;
+        return (margin_left, margin_top);
+    }
+
+    // Slow path: walk every column 0..col0 and sum its width in pt.
+    // Columns without an override contribute the OOXML default. The
+    // 1-based-vs-0-based conversion lives here because the model
+    // stores `columns` keyed by 1-based index.
+    let mut margin_left = ORIGIN_LEFT_PT;
+    for c0 in 0..col0 {
+        let width_pt = sheet
+            .columns
+            .get(&(c0 + 1))
+            .and_then(|col| col.width)
+            .map(col_units_to_pt)
+            .unwrap_or(COL_WIDTH_PT);
+        margin_left += width_pt;
+    }
+    (margin_left, margin_top)
+}
+
+/// Legacy fixed-width margin computation, kept for tests that pin the
+/// historical math without going through a `Worksheet`. Callers that
+/// have a `Worksheet` should prefer [`compute_margin_with_widths`].
+#[allow(dead_code)]
 fn compute_margin(row0: u32, col0: u32) -> (f64, f64) {
     let margin_left = (col0 as f64) * COL_WIDTH_PT + ORIGIN_LEFT_PT;
     let margin_top = (row0 as f64) * ROW_HEIGHT_PT + ORIGIN_TOP_PT;
@@ -92,7 +143,7 @@ pub fn emit(sheet: &Worksheet) -> Vec<u8> {
             None => "55.5pt".to_string(),
         };
 
-        let (margin_left, margin_top) = compute_margin(row0, col0);
+        let (margin_left, margin_top) = compute_margin_with_widths(sheet, row0, col0);
 
         out.push_str(&format!(
             "<v:shape id=\"_x0000_s{}\" type=\"#_x0000_t202\"\
@@ -301,6 +352,71 @@ mod tests {
         assert!(
             text.contains("margin-left:203.25pt") && text.contains("margin-top:52.5pt"),
             "D5 margin cell-relative: {text}"
+        );
+    }
+
+    // 13. D3: margin honors per-column widths when sheet has <cols> overrides.
+    #[test]
+    fn margin_left_uses_per_column_widths() {
+        use crate::model::worksheet::Column;
+
+        // Sheet with column 1 set to width=4 (max-digit-width units),
+        // and a comment at B1 (col0=1). The legacy fixed-width math
+        // would put margin-left at 1 * 48 + 59.25 = 107.25pt. With
+        // the override, column 1 contributes col_units_to_pt(4) ≈ 32pt,
+        // so margin-left = 59.25 + 32 = 91.25pt.
+        let mut sheet = Worksheet::new("S");
+        sheet.set_column(1, Column { width: Some(4.0), ..Default::default() });
+        sheet.comments.insert("B1".to_string(), make_comment(false, None, None));
+
+        let (ml, _mt) = compute_margin_with_widths(&sheet, 0, 1);
+        let expected = ORIGIN_LEFT_PT + col_units_to_pt(4.0);
+        assert!(
+            (ml - expected).abs() < 1e-6,
+            "margin-left expected {expected} got {ml}"
+        );
+
+        // emit() should reflect the same margin in the rendered output.
+        let bytes = emit(&sheet);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains(&format!("margin-left:{}pt", expected)),
+            "rendered margin-left should match per-column math: {text}"
+        );
+    }
+
+    // 14. D3: empty <cols> map keeps the legacy default-width math
+    // byte-stable so existing fixtures don't break.
+    #[test]
+    fn empty_cols_map_uses_legacy_default_math() {
+        let mut sheet = Worksheet::new("S");
+        sheet.comments.insert("D5".to_string(), make_comment(false, None, None));
+        let (ml, mt) = compute_margin_with_widths(&sheet, 4, 3);
+        // 3 * 48 + 59.25 = 203.25; 4 * 12.75 + 1.5 = 52.5
+        assert!((ml - 203.25).abs() < 1e-6, "ml {ml}");
+        assert!((mt - 52.5).abs() < 1e-6, "mt {mt}");
+    }
+
+    // 15. D3 parity: matches the patcher's behavior when only some
+    // columns to the left of the comment have overrides — the rest
+    // contribute the OOXML default.
+    #[test]
+    fn mixed_overrides_use_default_for_uncustomized_cols() {
+        use crate::model::worksheet::Column;
+
+        let mut sheet = Worksheet::new("S");
+        // Column 1 has a custom width; column 2 does not.
+        sheet.set_column(1, Column { width: Some(4.0), ..Default::default() });
+        sheet.comments.insert("D1".to_string(), make_comment(false, None, None));
+        // D1 is col0=3 → walks columns 1,2,3 (1-based).
+        // col1 = col_units_to_pt(4)
+        // col2 = COL_WIDTH_PT
+        // col3 = COL_WIDTH_PT
+        let expected = ORIGIN_LEFT_PT + col_units_to_pt(4.0) + COL_WIDTH_PT + COL_WIDTH_PT;
+        let (ml, _) = compute_margin_with_widths(&sheet, 0, 3);
+        assert!(
+            (ml - expected).abs() < 1e-6,
+            "margin-left expected {expected} got {ml}"
         );
     }
 }

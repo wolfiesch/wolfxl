@@ -55,6 +55,10 @@ markers = [
     "libreoffice_smoke: Layer 4 LibreOffice headless round-trip (gold-star, opt-in via WOLFXL_RUN_LIBREOFFICE_SMOKE=1).",
     "rfc030: RFC-030 — insert_rows / delete_rows in modify mode.",
     "rfc034: RFC-034 — Worksheet.move_range in modify mode.",
+    "rfc035: RFC-035 — Workbook.copy_worksheet in modify+write mode.",
+    "rfc031: RFC-031 — insert_cols/delete_cols in modify mode.",
+    "rfc036: RFC-036 — Workbook.move_sheet in modify mode.",
+    "manual: tests requiring manual environment setup (e.g. LibreOffice path).",
 ]
 
 [tool.mypy]
