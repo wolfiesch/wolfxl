@@ -24,7 +24,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 024 | T1.5 — Tables | Shipped | 3 | M | 010, 011, 013 | 030, 031, 035 |
 | 025 | T1.5 — Data validations | Shipped | 3 | M | 011 | 030, 031, 035 |
 | 026 | T1.5 — Conditional formatting | Shipped | 3 | M | 011 | 030, 031, 035 |
-| 030 | Structural — insert_rows / delete_rows | Researched | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
+| 030 | Structural — insert_rows / delete_rows | Shipped | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
 | 031 | Structural — insert_cols / delete_cols | Researched | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
 | 034 | Structural — move_range | Researched | 4 | L | 012, 030, 031 | — |
 | 035 | Structural — copy_worksheet | Researched | 4 | XL | 010, 012, 013, 021, 022, 023, 024, 025, 026 | — |

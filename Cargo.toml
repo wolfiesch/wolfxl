@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer", "crates/wolfxl-rels", "crates/wolfxl-merger", "crates/wolfxl-formula"]
+members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer", "crates/wolfxl-rels", "crates/wolfxl-merger", "crates/wolfxl-formula", "crates/wolfxl-structural"]
 
 [workspace.package]
 edition = "2021"
@@ -42,6 +42,7 @@ wolfxl-core = { path = "crates/wolfxl-core", version = "0.8" }
 wolfxl-writer = { path = "crates/wolfxl-writer", version = "0.1" }
 wolfxl-rels = { path = "crates/wolfxl-rels", version = "0.1" }
 wolfxl-merger = { path = "crates/wolfxl-merger", version = "0.1" }
+wolfxl-structural = { path = "crates/wolfxl-structural", version = "0.1" }
 
 [build-dependencies]
 pyo3-build-config = "0.28"

@@ -37,6 +37,9 @@ class Workbook:
         self._properties_dirty: bool = False
         self._defined_names_cache: Any | None = None
         self._pending_defined_names: dict[str, Any] = {}
+        # RFC-030 / RFC-031 — append-order list of structural shift ops.
+        # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
+        self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
 
     @classmethod
     def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
@@ -58,6 +61,7 @@ class Workbook:
         wb._properties_dirty = False
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
+        wb._pending_axis_shifts = []
         return wb
 
     @classmethod
@@ -80,6 +84,7 @@ class Workbook:
         wb._properties_dirty = False
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
+        wb._pending_axis_shifts = []
         return wb
 
     # ------------------------------------------------------------------
@@ -405,6 +410,10 @@ class Workbook:
             # block (slot 17). Cross-sheet dxfId allocation happens
             # inside the patcher's Phase-2.5b on the Rust side.
             self._flush_pending_conditional_formats_to_patcher()
+            # RFC-030 / RFC-031: structural axis shifts (insert/delete
+            # rows/cols). Drained LAST so it sees the per-cell + per-block
+            # rewrites from the earlier flush calls and shifts them too.
+            self._flush_pending_axis_shifts_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -592,6 +601,27 @@ class Workbook:
                     ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
                 )
             pending.clear()
+
+    def _flush_pending_axis_shifts_to_patcher(self) -> None:
+        """Drain ``_pending_axis_shifts`` into the patcher (RFC-030 / RFC-031).
+
+        Each tuple ``(sheet_title, axis, idx, n)`` is forwarded to
+        ``_rust_patcher.queue_axis_shift(sheet, axis, idx, n)``. The
+        patcher's Phase 2.5i drains the queue in append order during
+        ``save()``.
+
+        Empty queue is the no-op identity path — patcher is not
+        called, no FFI hop, no file mutation.
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None or not self._pending_axis_shifts:
+            return
+        for sheet_title, axis, idx, n in self._pending_axis_shifts:
+            patcher.queue_axis_shift(sheet_title, axis, idx, n)
+        self._pending_axis_shifts.clear()
 
     def _flush_defined_names_to_patcher(self) -> None:
         """Drain ``_pending_defined_names`` into the patcher (RFC-021).

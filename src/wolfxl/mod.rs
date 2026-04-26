@@ -188,6 +188,26 @@ pub struct XlsxPatcher {
     /// workbook.xml whose tab indices already reflect the move.
     /// Empty queue → no `xl/workbook.xml` touch.
     queued_sheet_moves: Vec<(String, i32)>,
+    /// Per-workbook structural-shift queue (RFC-030 / RFC-031). Each
+    /// entry is `(sheet, axis, idx, n)` where `axis` is "row" or "col"
+    /// and `n` is signed (positive = insert, negative = delete).
+    /// Drained by Phase 2.5i during `do_save`. Order is append order
+    /// — the Python coordinator validates `idx >= 1` and `amount >= 1`
+    /// before queueing.
+    queued_axis_shifts: Vec<AxisShift>,
+}
+
+/// One queued axis-shift op (RFC-030/031).
+#[derive(Debug, Clone)]
+pub struct AxisShift {
+    /// Sheet name (NOT path).
+    pub sheet: String,
+    /// `"row"` or `"col"`.
+    pub axis: String,
+    /// 1-based index where shifting begins.
+    pub idx: u32,
+    /// Signed shift count. Positive = insert; negative = delete.
+    pub n: i32,
 }
 
 #[pymethods]
@@ -240,6 +260,7 @@ impl XlsxPatcher {
             queued_tables: HashMap::new(),
             queued_comments: HashMap::new(),
             queued_sheet_moves: Vec::new(),
+            queued_axis_shifts: Vec::new(),
         })
     }
 
@@ -666,6 +687,42 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a structural axis shift for `sheet` (RFC-030 / RFC-031).
+    ///
+    /// `axis` must be `"row"` or `"col"`. `idx` is 1-based; `n` is
+    /// signed (positive = insert; negative = delete). The Python
+    /// coordinator validates `idx >= 1` and `amount >= 1` before
+    /// queueing so this method does NOT re-validate.
+    ///
+    /// Drained by Phase 2.5i during `do_save`. Order is append order
+    /// — multi-op sequencing matters (each op runs in the coordinate
+    /// space produced by the previous op).
+    fn queue_axis_shift(
+        &mut self,
+        sheet: &str,
+        axis: &str,
+        idx: u32,
+        n: i32,
+    ) -> PyResult<()> {
+        if axis != "row" && axis != "col" {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_axis_shift: axis must be 'row' or 'col', got '{axis}'"
+            )));
+        }
+        if idx < 1 {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_axis_shift: idx must be >= 1",
+            ));
+        }
+        self.queued_axis_shifts.push(AxisShift {
+            sheet: sheet.to_string(),
+            axis: axis.to_string(),
+            idx,
+            n,
+        });
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -961,13 +1018,15 @@ impl XlsxPatcher {
             && self.queued_tables.is_empty()
             && self.queued_comments.is_empty()
             && self.queued_sheet_moves.is_empty()
+            && self.queued_axis_shifts.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
             // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
             // `queued_defined_names`, RFC-024's `queued_tables`,
-            // RFC-023's `queued_comments`, and RFC-036's
-            // `queued_sheet_moves` so a no-op save remains
+            // RFC-023's `queued_comments`, RFC-036's
+            // `queued_sheet_moves`, and RFC-030/031's
+            // `queued_axis_shifts` so a no-op save remains
             // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
@@ -1733,6 +1792,30 @@ impl XlsxPatcher {
             self.file_deletes.insert(path);
         }
 
+        // --- Phase 2.5i: Structural axis shifts (RFC-030 / RFC-031) ---
+        //
+        // Drains `queued_axis_shifts` in append order. For each op:
+        //   1. Read sheet XML from `file_patches` if already mutated,
+        //      else from the source ZIP.
+        //   2. Read every table part attached to the sheet (via the
+        //      ancillary registry's source-side scan).
+        //   3. Read every comments/vmlDrawing part attached to the sheet.
+        //   4. Read `xl/workbook.xml` once (cached across ops in this
+        //      flush block) for defined-name shifts.
+        //   5. Build `wolfxl_structural::SheetXmlInputs` and call
+        //      `apply_workbook_shift` with this single op.
+        //   6. Merge the returned `file_patches` back into our
+        //      `file_patches`.
+        //
+        // The empty-queue path is the no-op identity: a workbook with
+        // zero queued shifts produces byte-identical output (the
+        // outer `is_empty()` short-circuit at the top of `do_save`
+        // handles the global no-op case; this block handles the
+        // partial case where some other RFC also queued ops).
+        if !self.queued_axis_shifts.is_empty() {
+            self.apply_axis_shifts_phase(&mut file_patches, &mut zip)?;
+        }
+
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
@@ -1829,6 +1912,124 @@ impl XlsxPatcher {
         out.finish()
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP finalize error: {e}")))?;
 
+        Ok(())
+    }
+
+    /// Phase 2.5i — drive `wolfxl_structural::apply_workbook_shift`
+    /// across every queued op. Reads from `file_patches` when an
+    /// earlier phase already mutated a part; falls back to source ZIP
+    /// otherwise. Writes the result back into `file_patches`.
+    fn apply_axis_shifts_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        // Helper: get bytes for a path (current rewrite if any, else source).
+        fn get_bytes(
+            file_patches: &HashMap<String, Vec<u8>>,
+            zip: &mut ZipArchive<File>,
+            path: &str,
+        ) -> Option<Vec<u8>> {
+            if let Some(b) = file_patches.get(path) {
+                return Some(b.clone());
+            }
+            let mut entry = match zip.by_name(path) {
+                Ok(e) => e,
+                Err(_) => return None,
+            };
+            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+            std::io::copy(&mut entry, &mut buf).ok()?;
+            Some(buf)
+        }
+
+        // Build sheet name → 0-based position map (for definedName scope).
+        let sheet_positions: BTreeMap<String, u32> = self
+            .sheet_order
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.clone(), i as u32))
+            .collect();
+
+        // Discover table parts via the rels graph for each sheet.
+        // We need this lazy + per-sheet because each op may operate
+        // on a different sheet.
+        for op in self.queued_axis_shifts.clone() {
+            let sheet_path = match self.sheet_paths.get(&op.sheet) {
+                Some(p) => p.clone(),
+                None => continue, // unknown sheet — silently skip
+            };
+
+            let axis = match op.axis.as_str() {
+                "row" => wolfxl_structural::Axis::Row,
+                "col" => wolfxl_structural::Axis::Col,
+                _ => continue,
+            };
+
+            // Read sheet XML.
+            let sheet_xml = match get_bytes(file_patches, zip, &sheet_path) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            // Read workbook.xml.
+            let wb_xml = get_bytes(file_patches, zip, "xl/workbook.xml");
+
+            // Discover this sheet's rels graph (for table/comments/vml lookups).
+            // Use the ancillary registry to get the part paths.
+            let _ = self.ancillary.populate_for_sheet(zip, &op.sheet, &sheet_path);
+
+            let (comments_part, vml_part, table_paths) = {
+                let anc = self.ancillary.get(&op.sheet).cloned().unwrap_or_default();
+                (anc.comments_part, anc.vml_drawing_part, anc.table_parts.clone())
+            };
+
+            // Read each.
+            let comments_bytes: Option<(String, Vec<u8>)> = comments_part
+                .as_ref()
+                .and_then(|p| get_bytes(file_patches, zip, p).map(|b| (p.clone(), b)));
+            let vml_bytes: Option<(String, Vec<u8>)> = vml_part
+                .as_ref()
+                .and_then(|p| get_bytes(file_patches, zip, p).map(|b| (p.clone(), b)));
+            let mut table_bytes: Vec<(String, Vec<u8>)> = Vec::new();
+            for tp in &table_paths {
+                if let Some(b) = get_bytes(file_patches, zip, tp) {
+                    table_bytes.push((tp.clone(), b));
+                }
+            }
+
+            // Build inputs.
+            let mut inputs = wolfxl_structural::SheetXmlInputs::empty();
+            inputs.sheets.insert(op.sheet.clone(), sheet_xml.as_slice());
+            inputs.sheet_paths.insert(op.sheet.clone(), sheet_path.clone());
+            if let Some(ref wb) = wb_xml {
+                inputs.workbook_xml = Some(wb.as_slice());
+            }
+            if !table_bytes.is_empty() {
+                let parts: Vec<(String, &[u8])> = table_bytes
+                    .iter()
+                    .map(|(p, b)| (p.clone(), b.as_slice()))
+                    .collect();
+                inputs.tables.insert(op.sheet.clone(), parts);
+            }
+            if let Some((ref p, ref b)) = comments_bytes {
+                inputs.comments.insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+            }
+            if let Some((ref p, ref b)) = vml_bytes {
+                inputs.vml.insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+            }
+            inputs.sheet_positions = sheet_positions.clone();
+
+            let ops_one = vec![wolfxl_structural::AxisShiftOp {
+                sheet: op.sheet.clone(),
+                axis,
+                idx: op.idx,
+                n: op.n,
+            }];
+            let mutations = wolfxl_structural::apply_workbook_shift(inputs, &ops_one);
+            for (path, bytes) in mutations.file_patches {
+                file_patches.insert(path, bytes);
+            }
+        }
         Ok(())
     }
 }
