@@ -176,13 +176,34 @@ fakeouts).
   and Pod-β's last-write-wins-on-the-USER invariant). Test flips
   xfail (strict, AssertionError) → PASS.
 
+#### Fixed in 1.2 (Sprint Θ Pod-B)
+
+- ✅ **#6 `test_r_cdata_pi_fuzz_fakeout`** —
+  fixed by Sprint Θ Pod-B commit `fix(rfc-035): replace naive splice
+  with quick-xml SAX scan, close bug #6 CDATA fakeout`. The Phase 2.7
+  `splice_into_sheets_block` helper now drives a `quick_xml::Reader`
+  over `xl/workbook.xml` and locates the real `<sheets>` open/close
+  by event-stream nesting depth rather than byte-substring search.
+  Comments, CDATA sections, and processing instructions surface as
+  separate quick-xml events and are ignored, so a workbook.xml
+  comment containing the literal `</sheets>` token no longer
+  perturbs the splice point. Five new Rust unit tests pin the
+  invariant (normal, self-closing, comment fakeout, CDATA fakeout,
+  malformed). Test flips xfail → PASS.
+
+  As a side-fix, the test fixture helper
+  `_inject_comment_with_sheets_token` was anchoring on `?>` (XML
+  declaration close) — but openpyxl-saved workbooks omit the XML
+  decl, so the injection was a silent no-op that masked the bug.
+  The helper now anchors on the `<workbook ...>` opening tag via
+  regex.
+
 #### Deferred to 1.2
 
 | # | Failing case | Symptom | Why deferred |
 |---|---|---|---|
 | 4 | `test_p_self_closing_sheets_block` | wolfxl loader rejects synthesized `<sheets/>` workbook.xml fixtures, so the splice's self-closing branch is unreachable through the public API. | Real Excel never emits a self-closing `<sheets/>` for a non-empty workbook. Reachable only via direct ZIP edit. 1.2 follow-up: add a Rust-level Phase 2.7 unit test that exercises the splice on a self-closing input directly when the loader gains a `permissive=True` mode. |
-| 6 | `test_r_cdata_pi_fuzz_fakeout` | Phase 2.7 splice is naive — a workbook.xml comment containing literal `</sheets>` may fool the byte-level locator. | Acknowledged in Pod-β's handoff note as "acceptable for 1.1 since no real Excel-emitted workbook contains it". 1.2 follow-up: promote the splice to a SAX/quick-xml-driven scan that respects element nesting. |
 
-Tracked by: `tests/test_copy_worksheet_modify.py` — the two remaining
-deferred cases are still pinned with `xfail(strict=True)`. When a
+Tracked by: `tests/test_copy_worksheet_modify.py` — the remaining
+deferred case is still pinned with `xfail(strict=True)`. When a
 fix lands, remove the xfail marker and update this table.

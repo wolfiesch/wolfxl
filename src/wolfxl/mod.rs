@@ -2676,31 +2676,107 @@ fn source_zip_has_entry<R: Read + std::io::Seek>(
 /// closing `</sheets>` tag (RFC-035 §5.7). Source bytes flow through
 /// verbatim outside the splice point. Returns an error if the source
 /// has no `<sheets>` element (malformed workbook).
+///
+/// **Why SAX, not byte search**: a workbook.xml comment containing the
+/// literal string `</sheets>` (e.g. `<!-- closes </sheets> here -->`),
+/// a CDATA section, or a processing instruction can fool a naive
+/// byte-substring scan. We walk the document with `quick_xml::Reader`
+/// so comments/CDATA/PIs surface as their own events and are ignored
+/// when locating the splice point. Bug #6 in
+/// `tests/parity/KNOWN_GAPS.md`'s "RFC-035 cross-RFC composition gaps"
+/// section tracked this — closed in Sprint Θ Pod-B.
 fn splice_into_sheets_block(
     workbook_xml: &[u8],
     new_sheet_element: &[u8],
 ) -> PyResult<Vec<u8>> {
-    // ECMA-376 allows `<sheets>` to be self-closing in theory, but no
-    // real workbook writes it that way (Excel always emits at least
-    // one child `<sheet>`). We support both forms defensively.
-    let needle = b"</sheets>";
-    if let Some(pos) = find_subslice(workbook_xml, needle) {
+    use quick_xml::events::Event as XmlEvent;
+    use quick_xml::Reader as XmlReader;
+
+    // quick-xml works on `&str`, so reject non-UTF-8 input up front
+    // with a stable error. workbook.xml is always UTF-8 per ECMA-376.
+    let s = std::str::from_utf8(workbook_xml).map_err(|_| {
+        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml is not valid UTF-8")
+    })?;
+    let mut reader = XmlReader::from_str(s);
+    reader.config_mut().trim_text(false);
+
+    // Track the byte position right before each event and right after,
+    // mirroring `sheet_order::scan_workbook_layout`. Depth tracks
+    // element nesting so we ignore any spurious `<sheets>` that might
+    // appear nested (defensive — no Excel writer emits that, but the
+    // scan is cheap).
+    let mut depth: i32 = 0;
+    // For the `Start`/`End` form: record where to splice (just before
+    // the closing `</sheets>` tag).
+    let mut splice_pos: Option<usize> = None;
+    let mut sheets_open_depth: Option<i32> = None;
+    // For the `Empty` self-closing form: record the byte range of
+    // `<sheets/>` so we can replace it with `<sheets>NEW</sheets>`.
+    let mut self_closing_range: Option<(usize, usize)> = None;
+
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let pre = reader.buffer_position() as usize;
+        let evt = reader.read_event_into(&mut buf);
+        let post = reader.buffer_position() as usize;
+        match evt {
+            Ok(XmlEvent::Start(ref e)) => {
+                if e.local_name().as_ref() == b"sheets" && sheets_open_depth.is_none() {
+                    sheets_open_depth = Some(depth);
+                }
+                depth += 1;
+            }
+            Ok(XmlEvent::End(ref e)) => {
+                depth -= 1;
+                if e.local_name().as_ref() == b"sheets"
+                    && Some(depth) == sheets_open_depth
+                    && splice_pos.is_none()
+                {
+                    // `pre` is the byte offset of `<` in `</sheets>`,
+                    // i.e. exactly where the new `<sheet…/>` element
+                    // should be inserted.
+                    splice_pos = Some(pre);
+                    break;
+                }
+            }
+            Ok(XmlEvent::Empty(ref e)) => {
+                // Self-closing `<sheets/>` (rare but ECMA-376-legal).
+                // Note we DON'T increment depth — `Empty` is open+close.
+                if e.local_name().as_ref() == b"sheets" && self_closing_range.is_none() {
+                    self_closing_range = Some((pre, post));
+                    break;
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            // `Comment`, `CData`, `PI`, `DocType`, `Decl`, `Text` —
+            // surface as their own events; we ignore them, which is
+            // exactly the property that defeats the bug-#6 fakeout.
+            Ok(_) => {}
+            Err(_) => {
+                // Fall through to the not-found branch — preserves
+                // the historical error message for malformed inputs
+                // that don't surface a `<sheets>` element.
+                break;
+            }
+        }
+        buf.clear();
+    }
+
+    if let Some(pos) = splice_pos {
         let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len());
         out.extend_from_slice(&workbook_xml[..pos]);
         out.extend_from_slice(new_sheet_element);
         out.extend_from_slice(&workbook_xml[pos..]);
         return Ok(out);
     }
-    // Self-closing `<sheets/>` form: rewrite to an open/close pair
-    // wrapping the new element.
-    let needle_self = b"<sheets/>";
-    if let Some(pos) = find_subslice(workbook_xml, needle_self) {
-        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
-        out.extend_from_slice(&workbook_xml[..pos]);
+    if let Some((start, end)) = self_closing_range {
+        let mut out =
+            Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        out.extend_from_slice(&workbook_xml[..start]);
         out.extend_from_slice(b"<sheets>");
         out.extend_from_slice(new_sheet_element);
         out.extend_from_slice(b"</sheets>");
-        out.extend_from_slice(&workbook_xml[pos + needle_self.len()..]);
+        out.extend_from_slice(&workbook_xml[end..]);
         return Ok(out);
     }
     Err(PyErr::new::<PyIOError, _>(
@@ -2710,6 +2786,9 @@ fn splice_into_sheets_block(
 
 /// Naive byte-substring search (workbook.xml is small enough that the
 /// allocator overhead of memchr-shaped algorithms is overkill).
+/// Sprint Θ Pod-B: Phase 2.7's splice no longer uses this helper —
+/// retained for other potential callers per the RFC-035 follow-up note.
+#[allow(dead_code)]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
@@ -2927,6 +3006,125 @@ mod rfc013_tests {
         assert!(
             idx_styles < idx_comments,
             "new overrides append after source ones, not interleaved",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Sprint Θ Pod-B: SAX-driven `splice_into_sheets_block`.
+    //
+    // The naive byte-substring locator was fooled by a workbook.xml
+    // comment containing the literal `</sheets>` token (KNOWN_GAPS bug
+    // #6). These tests pin the SAX rewrite: comments, CDATA, and PIs
+    // surfaced as separate quick-xml events MUST NOT influence the
+    // splice point.
+    // -----------------------------------------------------------------
+
+    const NEW_SHEET: &[u8] = br#"<sheet name="Copy" sheetId="2" r:id="rId99"/>"#;
+
+    #[test]
+    fn splice_normal_sheets_block_inserts_before_close() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        // The new entry appears right before </sheets>, after the
+        // existing Sheet1 entry, and only once.
+        let rid1 = s.find("r:id=\"rId1\"").unwrap();
+        let rid99 = s.find("r:id=\"rId99\"").unwrap();
+        let close = s.find("</sheets>").unwrap();
+        assert!(rid1 < rid99, "new sheet appended after Sheet1");
+        assert!(rid99 < close, "new sheet inserted BEFORE </sheets>");
+        assert_eq!(
+            s.matches("</sheets>").count(),
+            1,
+            "exactly one </sheets> in output",
+        );
+    }
+
+    #[test]
+    fn splice_handles_self_closing_sheets() {
+        // `<sheets/>` is rare but ECMA-376-legal. We rewrite it to an
+        // open/close pair wrapping the new element.
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets/>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(s.contains("<sheets>"), "open tag emitted");
+        assert!(s.contains("</sheets>"), "close tag emitted");
+        assert!(s.contains("rId99"), "new sheet entry inserted");
+        // The original `<sheets/>` is gone — exactly one open and one close.
+        assert_eq!(s.matches("<sheets>").count(), 1);
+        assert_eq!(s.matches("</sheets>").count(), 1);
+        assert!(!s.contains("<sheets/>"));
+    }
+
+    #[test]
+    fn splice_ignores_fake_close_tag_inside_comment() {
+        // Bug #6 from KNOWN_GAPS.md. A comment containing the literal
+        // `</sheets>` MUST NOT fool the locator. The new sheet must
+        // land inside the real <sheets> block (between the existing
+        // <sheet …/> and the real </sheets>).
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<!-- FUZZTOKEN: this fakeout closes </sheets> here, naive splice would bite -->
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        // FUZZTOKEN comment survives.
+        assert!(s.contains("FUZZTOKEN"), "comment survives splice");
+        // New sheet appears between real <sheets> open and close.
+        let open = s.find("<sheets>").expect("real <sheets> open");
+        // The fakeout `</sheets>` token in the comment counts as a
+        // string match, so use the LAST occurrence as the real close.
+        let close = s.rfind("</sheets>").expect("real </sheets> close");
+        let rid99 = s.find("rId99").expect("new entry present");
+        assert!(open < rid99, "new entry after real <sheets> open");
+        assert!(rid99 < close, "new entry before real </sheets> close");
+    }
+
+    #[test]
+    fn splice_ignores_fake_close_tag_inside_cdata() {
+        // CDATA section containing `</sheets>` — also must not fool
+        // the locator. Note: workbook.xml almost never has CDATA in
+        // practice, but quick-xml's event model handles it for free.
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"><![CDATA[fake </sheets> token]]></sheet></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        // The new entry must come AFTER the CDATA (i.e. past the
+        // </sheet> close inside the real block) and BEFORE the
+        // real </sheets>.
+        let rid99 = s.find("rId99").expect("new entry present");
+        let cdata_close = s.find("]]>").expect("cdata close");
+        let real_close = s.rfind("</sheets>").expect("real close");
+        assert!(cdata_close < rid99, "new entry follows CDATA");
+        assert!(rid99 < real_close, "new entry before real </sheets>");
+    }
+
+    #[test]
+    fn splice_returns_error_when_no_sheets_block() {
+        // Malformed input: no <sheets> at all. Preserve the historical
+        // error message for callers.
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+        let err = splice_into_sheets_block(xml, NEW_SHEET).unwrap_err();
+        // PyErr message lookup needs Python; check the type instead.
+        // The string check is loose: match the error text via Display.
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no <sheets>"),
+            "preserves historical error message, got: {msg}"
         );
     }
 }
