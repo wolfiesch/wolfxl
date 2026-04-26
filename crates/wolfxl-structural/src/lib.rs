@@ -33,6 +33,7 @@
 
 pub mod axis;
 pub mod cols;
+pub mod range_move;
 pub mod shift_anchors;
 pub mod shift_cells;
 pub mod shift_formulas;
@@ -43,6 +44,7 @@ mod tests;
 
 pub use axis::{Axis, ShiftPlan};
 pub use cols::{shift_sheet_cols_block, split_col_spans, ColSpan};
+pub use range_move::{apply_range_move, RangeMovePlan};
 pub use shift_anchors::{shift_anchor, shift_sqref};
 pub use shift_cells::shift_sheet_cells;
 pub use shift_formulas::{shift_formula, shift_formula_with_meta};
