@@ -17,6 +17,8 @@ pub mod conditional_formatting;
 pub mod validations;
 #[allow(dead_code)] // RFC-013: ContentTypesGraph wired into do_save in commit 4
 pub mod content_types;
+#[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
+pub mod ancillary;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -108,6 +110,14 @@ pub struct XlsxPatcher {
     /// now keeps the short-circuit predicate and rewrite loop forward-
     /// compatible without a follow-up patcher refactor.
     file_deletes: HashSet<String>,
+    /// Per-sheet inventory of ancillary parts (comments, VML drawings,
+    /// tables, hyperlinks) lazily populated from the source ZIP's
+    /// `_rels/sheetN.xml.rels` files (RFC-013). Scaffolding-only this
+    /// slice — `ancillary::AncillaryPartRegistry::populate_for_sheet`
+    /// has no live caller yet. RFC-022 (Hyperlinks) is the first
+    /// consumer; RFC-023/024 follow.
+    #[allow(dead_code)]
+    ancillary: ancillary::AncillaryPartRegistry,
 }
 
 #[pymethods]
@@ -152,6 +162,7 @@ impl XlsxPatcher {
             sheet_order,
             file_adds: HashMap::new(),
             file_deletes: HashSet::new(),
+            ancillary: ancillary::AncillaryPartRegistry::new(),
         })
     }
 
