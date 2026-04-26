@@ -295,17 +295,77 @@ class Workbook:
         )
 
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
-        """Move *sheet* by *offset* positions within the sheet order.
+        """Move *sheet* by *offset* positions within the workbook tab list.
 
-        Tracked by RFC-036 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/036-move-sheet.md`` for the implementation plan.
+        Mirrors openpyxl's ``Workbook.move_sheet`` (RFC-036). The new
+        position is ``current_index + offset``, clamped to ``[0, n-1]``
+        where ``n`` is the current sheet count. The in-memory tab list
+        (``self._sheet_names``) is updated immediately so subsequent
+        reads of ``wb.sheetnames`` / ``wb.worksheets`` see the post-move
+        order, regardless of whether the workbook is in write or modify
+        mode.
+
+        In modify mode, the move is queued on the patcher (along with
+        any previous moves in this save() session); on save the patcher
+        rewrites ``xl/workbook.xml``'s ``<sheets>`` order and re-points
+        every sheet-scoped ``<definedName localSheetId>`` accordingly
+        (RFC-036 §5).
+
+        Args:
+            sheet: A ``Worksheet`` instance or sheet name string.
+            offset: Integer count of positions to shift.
+
+        Raises:
+            TypeError: ``sheet`` is neither a ``Worksheet`` nor a
+                ``str``; or ``offset`` is not an integer (``bool``
+                is rejected explicitly).
+            KeyError: the resolved sheet name is not in this workbook.
         """
-        raise NotImplementedError(
-            "Workbook.move_sheet is scheduled for WolfXL 1.1 (RFC-036). "
-            "See Plans/rfcs/036-move-sheet.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
-        )
+        # Type-check sheet.
+        if isinstance(sheet, Worksheet):
+            name = sheet.title
+        elif isinstance(sheet, str):
+            name = sheet
+        else:
+            raise TypeError(
+                f"move_sheet: 'sheet' must be a Worksheet or str, got {type(sheet).__name__}"
+            )
+
+        # Reject bool explicitly (isinstance(True, int) is True in Python,
+        # which would silently treat True as 1 / False as 0).
+        if isinstance(offset, bool) or not isinstance(offset, int):
+            raise TypeError(
+                f"move_sheet: 'offset' must be an int, got {type(offset).__name__}"
+            )
+
+        # Validate sheet name.
+        if name not in self._sheet_names:
+            raise KeyError(name)
+
+        n = len(self._sheet_names)
+        idx = self._sheet_names.index(name)
+        new_pos = idx + offset
+        # Clamp to [0, n-1], matching the patcher-side rule. Python's
+        # list.insert clamps too, but we do it explicitly so the queued
+        # offset matches the position the patcher will compute.
+        if new_pos < 0:
+            new_pos = 0
+        if new_pos > n - 1:
+            new_pos = n - 1
+
+        # Update the in-memory tab list. Even when no actual position
+        # change happens (offset=0 or clamped no-op), we still walk the
+        # patcher-queue path so a downstream caller observing the queue
+        # matches the user's intent.
+        del self._sheet_names[idx]
+        self._sheet_names.insert(new_pos, name)
+
+        # Queue the move on the patcher in modify mode. The Rust side
+        # re-resolves the offset against its own running tab list, so
+        # we pass the user's original offset (not the clamped one) for
+        # symmetry with the openpyxl signature.
+        if self._rust_patcher is not None:
+            self._flush_pending_sheet_moves_to_patcher(name, offset)
 
     def save(self, filename: str | os.PathLike[str]) -> None:
         """Flush all pending writes and save to disk."""
@@ -568,6 +628,26 @@ class Workbook:
                 payload["comment"] = dn.comment
             patcher.queue_defined_name(payload)
         self._pending_defined_names.clear()
+
+    def _flush_pending_sheet_moves_to_patcher(self, name: str, offset: int) -> None:
+        """Queue a single sheet-reorder on the patcher (RFC-036).
+
+        Called eagerly from ``move_sheet`` rather than batched at
+        ``save()`` time: each ``move_sheet`` call queues exactly one
+        entry, and the patcher composes them in queue order against
+        its own running tab list (which is initialised from the
+        source ZIP's ``xl/workbook.xml`` and updated in place by
+        Phase 2.5h on save).
+
+        The empty-queue invariant lives on the Rust side: an unused
+        ``move_sheet`` call (i.e. modify-mode workbook never touched)
+        means ``queued_sheet_moves`` is empty, which in turn keeps
+        ``xl/workbook.xml`` byte-identical with the source.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        patcher.queue_sheet_move(name, offset)
 
     def _flush_properties_to_patcher(self) -> None:
         """Drain dirty document properties into the patcher (RFC-020).

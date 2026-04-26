@@ -1,10 +1,14 @@
 """Structural-op stub tests.
 
-Pin the contract for the 7 structural ops that openpyxl exposes but wolfxl
+Pin the contract for the structural ops that openpyxl exposes but wolfxl
 has not yet implemented. Until the corresponding RFCs ship (RFC-030 / 031 /
-034 / 035 / 036), each call must raise ``NotImplementedError`` with a message
+034 / 035), each call must raise ``NotImplementedError`` with a message
 that points at the right RFC. The point is to give users a discoverable
 roadmap entry instead of an ``AttributeError``.
+
+RFC-036 (``Workbook.move_sheet``) shipped in WolfXL 1.1; its tests live in
+``test_move_sheet_modify.py``. Only ``copy_worksheet`` remains stubbed at
+the workbook level.
 """
 
 from __future__ import annotations
@@ -25,7 +29,6 @@ WORKSHEET_STUBS = [
 
 WORKBOOK_STUBS = [
     ("copy_worksheet", "RFC-035"),
-    ("move_sheet", "RFC-036"),
 ]
 
 
@@ -51,12 +54,6 @@ def test_workbook_copy_worksheet_stub() -> None:
     wb, ws = _fresh_active()
     with pytest.raises(NotImplementedError, match="RFC-035"):
         wb.copy_worksheet(ws)
-
-
-def test_workbook_move_sheet_stub() -> None:
-    wb, ws = _fresh_active()
-    with pytest.raises(NotImplementedError, match="RFC-036"):
-        wb.move_sheet(ws, 1)
 
 
 @pytest.mark.parametrize(("method", "_rfc"), WORKBOOK_STUBS)
