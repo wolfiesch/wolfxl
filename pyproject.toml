@@ -54,6 +54,7 @@ markers = [
     "smoke: hand-rolled Layer 1/3 smoke gates for the native writer (precedes the W4C diff harness).",
     "libreoffice_smoke: Layer 4 LibreOffice headless round-trip (gold-star, opt-in via WOLFXL_RUN_LIBREOFFICE_SMOKE=1).",
     "rfc030: RFC-030 — insert_rows / delete_rows in modify mode.",
+    "rfc034: RFC-034 — Worksheet.move_range in modify mode.",
 ]
 
 [tool.mypy]

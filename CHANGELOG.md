@@ -2,6 +2,22 @@
 
 ## Unreleased — Sprint Ε (Phase 4a follow-ups + Phase 4b)
 
+### Added
+
+- **RFC-034** — `Worksheet.move_range(cell_range, rows=0, cols=0,
+  translate=False)` (modify mode). Paste-style relocation of a
+  rectangular block of cells. Formulas inside the moved block are
+  paste-translated (`respect_dollar=true` per RFC-012 §5.5):
+  relative refs shift by `(rows, cols)`; `$`-marked refs do NOT
+  shift. With `translate=True`, formulas in cells outside the
+  moved block that reference cells inside the source rectangle
+  are also re-anchored. MergeCells / hyperlinks / DV-CF sqref
+  pieces fully inside the source rectangle shift with the block;
+  pieces straddling the boundary or outside are left in place.
+  New crate module: `crates/wolfxl-structural/src/range_move.rs`.
+  Patcher Phase 2.5j drain in `src/wolfxl/mod.rs`. Tests:
+  `tests/test_move_range_modify.py` (15 cases).
+
 ### Fixed
 
 - **RFC-031 round 2** — `<tableColumns>` on `tableN.xml` now

@@ -1428,14 +1428,82 @@ class Worksheet:
     ) -> None:
         """Move a rectangular block of cells by *rows* / *cols*.
 
-        Tracked by RFC-034 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/034-move-range.md`` for the implementation plan.
+        Implements RFC-034. Paste-style relocation: every cell whose
+        A1 coordinate falls inside *cell_range* is physically moved
+        to ``(row + rows, col + cols)``. Existing cells at the
+        destination are silently overwritten (matches openpyxl).
+
+        Formulas inside the moved block are paste-translated:
+        relative refs shift by ``(rows, cols)``; absolute refs (``$A$1``)
+        DO NOT shift. With ``translate=True``, formulas in cells
+        outside the moved block that reference cells inside the source
+        rectangle are also re-anchored to the new location.
+
+        ``cell_range`` accepts an A1 range string (``"C3:E10"``) or a
+        single-cell string (``"A1"``). Validates ``rows`` and
+        ``cols`` are ints (signed). Raises ``ValueError`` if the
+        destination would land outside Excel's coordinate space
+        (rows ``1..1_048_576``, cols ``1..16_384``).
+
+        ``rows == 0 and cols == 0`` is a no-op (matches openpyxl).
+        Empty queue → byte-identical save.
         """
-        raise NotImplementedError(
-            "Worksheet.move_range is scheduled for WolfXL 1.1 (RFC-034). "
-            "See Plans/rfcs/034-move-range.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
+        from wolfxl.utils.cell import range_boundaries
+
+        if not isinstance(rows, int) or isinstance(rows, bool):
+            raise TypeError(
+                f"move_range: rows must be an int, got {type(rows).__name__}"
+            )
+        if not isinstance(cols, int) or isinstance(cols, bool):
+            raise TypeError(
+                f"move_range: cols must be an int, got {type(cols).__name__}"
+            )
+        if not isinstance(cell_range, str):
+            # Best-effort coercion for openpyxl `CellRange`-style objects.
+            cell_range = str(cell_range)
+        try:
+            min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+        except Exception as exc:
+            raise ValueError(
+                f"move_range: cell_range must be a valid A1 range string, "
+                f"got {cell_range!r}: {exc}"
+            ) from exc
+        if min_col is None or min_row is None or max_col is None or max_row is None:
+            raise ValueError(
+                f"move_range: cell_range must have all four corners "
+                f"(rows + cols), got {cell_range!r}"
+            )
+        if rows == 0 and cols == 0:
+            return
+        # Validate destination bounds. Excel: rows 1..1_048_576,
+        # cols 1..16_384 (1-based, inclusive).
+        dst_min_row = min_row + rows
+        dst_max_row = max_row + rows
+        dst_min_col = min_col + cols
+        dst_max_col = max_col + cols
+        if dst_min_row < 1 or dst_max_row > 1_048_576:
+            raise ValueError(
+                f"move_range: destination row range "
+                f"[{dst_min_row}, {dst_max_row}] is out of bounds "
+                f"(must be in [1, 1048576])"
+            )
+        if dst_min_col < 1 or dst_max_col > 16_384:
+            raise ValueError(
+                f"move_range: destination column range "
+                f"[{dst_min_col}, {dst_max_col}] is out of bounds "
+                f"(must be in [1, 16384])"
+            )
+        self._workbook._pending_range_moves.append(  # noqa: SLF001
+            (
+                self.title,
+                int(min_col),
+                int(min_row),
+                int(max_col),
+                int(max_row),
+                int(rows),
+                int(cols),
+                bool(translate),
+            )
         )
 
     # ------------------------------------------------------------------

@@ -6,9 +6,10 @@ has not yet implemented. Until the corresponding RFCs ship (RFC-030 / 031 /
 that points at the right RFC. The point is to give users a discoverable
 roadmap entry instead of an ``AttributeError``.
 
-RFC-036 (``Workbook.move_sheet``) shipped in WolfXL 1.1; its tests live in
-``test_move_sheet_modify.py``. Only ``copy_worksheet`` remains stubbed at
-the workbook level.
+RFC-036 (``Workbook.move_sheet``) and RFC-034 (``Worksheet.move_range``)
+shipped in WolfXL 1.1; their tests live in ``test_move_sheet_modify.py``
+and ``test_move_range_modify.py``. Only ``copy_worksheet`` remains
+stubbed at the workbook level.
 """
 
 from __future__ import annotations
@@ -17,12 +18,10 @@ import pytest
 
 import wolfxl
 
-WORKSHEET_STUBS = [
-    # RFC-030 / RFC-031 ship in this branch — insert_rows / delete_rows /
-    # insert_cols / delete_cols now work in modify mode. Remaining stubs
-    # are tracked by their RFCs.
-    ("move_range", ("A1:B2",), "RFC-034"),
-]
+# All worksheet-level structural-op stubs have shipped (RFC-030, 031, 034).
+# This list intentionally stays empty — adding entries here marks "not
+# yet implemented" surfaces; removing them marks "shipped".
+WORKSHEET_STUBS: list[tuple[str, tuple, str]] = []
 
 
 WORKBOOK_STUBS = [

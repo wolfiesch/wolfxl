@@ -195,6 +195,13 @@ pub struct XlsxPatcher {
     /// — the Python coordinator validates `idx >= 1` and `amount >= 1`
     /// before queueing.
     queued_axis_shifts: Vec<AxisShift>,
+    /// Per-workbook range-move queue (RFC-034). Each entry describes
+    /// one paste-style relocation of a rectangular block. Drained by
+    /// Phase 2.5j during `do_save`, AFTER axis shifts so a sequence
+    /// like `insert_rows(2, 3)` then `move_range("C3:E10", rows=5)`
+    /// is applied in source order against the post-shift coordinate
+    /// space.
+    queued_range_moves: Vec<RangeMove>,
 }
 
 /// One queued axis-shift op (RFC-030/031).
@@ -208,6 +215,25 @@ pub struct AxisShift {
     pub idx: u32,
     /// Signed shift count. Positive = insert; negative = delete.
     pub n: i32,
+}
+
+/// One queued range-move op (RFC-034).
+#[derive(Debug, Clone)]
+pub struct RangeMove {
+    /// Sheet name (NOT path).
+    pub sheet: String,
+    /// 1-based inclusive source rectangle corners.
+    pub src_min_col: u32,
+    pub src_min_row: u32,
+    pub src_max_col: u32,
+    pub src_max_row: u32,
+    /// Signed delta. Positive shifts down/right; negative up/left.
+    pub d_row: i32,
+    pub d_col: i32,
+    /// If true, formulas in cells OUTSIDE the source rectangle that
+    /// reference cells INSIDE `src` are also re-anchored. Cells
+    /// INSIDE `src` are always paste-translated.
+    pub translate: bool,
 }
 
 #[pymethods]
@@ -261,6 +287,7 @@ impl XlsxPatcher {
             queued_comments: HashMap::new(),
             queued_sheet_moves: Vec::new(),
             queued_axis_shifts: Vec::new(),
+            queued_range_moves: Vec::new(),
         })
     }
 
@@ -723,6 +750,52 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a paste-style range relocation for `sheet` (RFC-034).
+    ///
+    /// The source rectangle is given by 1-based inclusive corners
+    /// `(src_min_col, src_min_row)..=(src_max_col, src_max_row)` and
+    /// the destination delta by `(d_row, d_col)`. `translate` controls
+    /// whether external formulas pointing INTO `src` also re-anchor
+    /// (default false — matches openpyxl). The Python coordinator
+    /// validates corners and destination bounds before queueing.
+    ///
+    /// Drained by Phase 2.5j during `do_save`. Ops apply in append
+    /// order; each op runs against the post-previous-op bytes.
+    #[allow(clippy::too_many_arguments)]
+    fn queue_range_move(
+        &mut self,
+        sheet: &str,
+        src_min_col: u32,
+        src_min_row: u32,
+        src_max_col: u32,
+        src_max_row: u32,
+        d_row: i32,
+        d_col: i32,
+        translate: bool,
+    ) -> PyResult<()> {
+        if src_min_col < 1 || src_min_row < 1 {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_range_move: source corners must be >= 1",
+            ));
+        }
+        if src_min_col > src_max_col || src_min_row > src_max_row {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_range_move: src_min must be <= src_max on both axes",
+            ));
+        }
+        self.queued_range_moves.push(RangeMove {
+            sheet: sheet.to_string(),
+            src_min_col,
+            src_min_row,
+            src_max_col,
+            src_max_row,
+            d_row,
+            d_col,
+            translate,
+        });
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -1019,14 +1092,16 @@ impl XlsxPatcher {
             && self.queued_comments.is_empty()
             && self.queued_sheet_moves.is_empty()
             && self.queued_axis_shifts.is_empty()
+            && self.queued_range_moves.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
             // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
             // `queued_defined_names`, RFC-024's `queued_tables`,
             // RFC-023's `queued_comments`, RFC-036's
-            // `queued_sheet_moves`, and RFC-030/031's
-            // `queued_axis_shifts` so a no-op save remains
+            // `queued_sheet_moves`, RFC-030/031's
+            // `queued_axis_shifts`, and RFC-034's
+            // `queued_range_moves` so a no-op save remains
             // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
@@ -1816,6 +1891,19 @@ impl XlsxPatcher {
             self.apply_axis_shifts_phase(&mut file_patches, &mut zip)?;
         }
 
+        // --- Phase 2.5j: Range moves (RFC-034) ---
+        //
+        // Drains `queued_range_moves` in append order. Each op reads
+        // the affected sheet XML from `file_patches` if already
+        // mutated (e.g. by Phase 2.5i axis shifts), else from the
+        // source ZIP, and routes through
+        // `wolfxl_structural::apply_range_move`. Multi-op sequencing
+        // mirrors Phase 2.5i: each op runs against the post-previous
+        // bytes.
+        if !self.queued_range_moves.is_empty() {
+            self.apply_range_moves_phase(&mut file_patches, &mut zip)?;
+        }
+
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
@@ -2028,6 +2116,59 @@ impl XlsxPatcher {
             let mutations = wolfxl_structural::apply_workbook_shift(inputs, &ops_one);
             for (path, bytes) in mutations.file_patches {
                 file_patches.insert(path, bytes);
+            }
+        }
+        Ok(())
+    }
+
+    /// Phase 2.5j — drive `wolfxl_structural::apply_range_move`
+    /// across every queued range-move op. Reads from `file_patches`
+    /// when an earlier phase already mutated a part; falls back to
+    /// source ZIP otherwise. Writes the result back into
+    /// `file_patches` so subsequent ops see the rewritten bytes.
+    fn apply_range_moves_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        fn get_bytes(
+            file_patches: &HashMap<String, Vec<u8>>,
+            zip: &mut ZipArchive<File>,
+            path: &str,
+        ) -> Option<Vec<u8>> {
+            if let Some(b) = file_patches.get(path) {
+                return Some(b.clone());
+            }
+            let mut entry = match zip.by_name(path) {
+                Ok(e) => e,
+                Err(_) => return None,
+            };
+            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+            std::io::copy(&mut entry, &mut buf).ok()?;
+            Some(buf)
+        }
+
+        for op in self.queued_range_moves.clone() {
+            let sheet_path = match self.sheet_paths.get(&op.sheet) {
+                Some(p) => p.clone(),
+                None => continue, // unknown sheet — silently skip
+            };
+
+            let sheet_xml = match get_bytes(file_patches, zip, &sheet_path) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            let plan = wolfxl_structural::RangeMovePlan {
+                src_lo: (op.src_min_row, op.src_min_col),
+                src_hi: (op.src_max_row, op.src_max_col),
+                d_row: op.d_row,
+                d_col: op.d_col,
+                translate: op.translate,
+            };
+            let new_bytes = wolfxl_structural::apply_range_move(&sheet_xml, &plan);
+            if new_bytes != sheet_xml {
+                file_patches.insert(sheet_path, new_bytes);
             }
         }
         Ok(())

@@ -40,6 +40,12 @@ class Workbook:
         # RFC-030 / RFC-031 — append-order list of structural shift ops.
         # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
         self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
+        # RFC-034 — append-order list of range-move ops.
+        # Tuple shape: ``(sheet_title, src_min_col, src_min_row,
+        # src_max_col, src_max_row, d_row, d_col, translate)``.
+        self._pending_range_moves: list[
+            tuple[str, int, int, int, int, int, int, bool]
+        ] = []
 
     @classmethod
     def _from_reader(cls, path: str, *, data_only: bool = False) -> Workbook:
@@ -62,6 +68,7 @@ class Workbook:
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
         wb._pending_axis_shifts = []
+        wb._pending_range_moves = []
         return wb
 
     @classmethod
@@ -85,6 +92,7 @@ class Workbook:
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
         wb._pending_axis_shifts = []
+        wb._pending_range_moves = []
         return wb
 
     # ------------------------------------------------------------------
@@ -414,6 +422,11 @@ class Workbook:
             # rows/cols). Drained LAST so it sees the per-cell + per-block
             # rewrites from the earlier flush calls and shifts them too.
             self._flush_pending_axis_shifts_to_patcher()
+            # RFC-034: range moves. Drained AFTER axis shifts so a
+            # sequence like `insert_rows(2, 3)` then
+            # `move_range("C3:E10", rows=5)` is applied in source order
+            # against the post-shift coordinate space.
+            self._flush_pending_range_moves_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -622,6 +635,46 @@ class Workbook:
         for sheet_title, axis, idx, n in self._pending_axis_shifts:
             patcher.queue_axis_shift(sheet_title, axis, idx, n)
         self._pending_axis_shifts.clear()
+
+    def _flush_pending_range_moves_to_patcher(self) -> None:
+        """Drain ``_pending_range_moves`` into the patcher (RFC-034).
+
+        Each tuple ``(sheet_title, src_min_col, src_min_row,
+        src_max_col, src_max_row, d_row, d_col, translate)`` is
+        forwarded to ``_rust_patcher.queue_range_move(...)``. The
+        patcher's Phase 2.5j drains the queue in append order during
+        ``save()``.
+
+        Empty queue is the no-op identity path — patcher is not
+        called, no FFI hop, no file mutation.
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None or not self._pending_range_moves:
+            return
+        for (
+            sheet_title,
+            src_min_col,
+            src_min_row,
+            src_max_col,
+            src_max_row,
+            d_row,
+            d_col,
+            translate,
+        ) in self._pending_range_moves:
+            patcher.queue_range_move(
+                sheet_title,
+                src_min_col,
+                src_min_row,
+                src_max_col,
+                src_max_row,
+                d_row,
+                d_col,
+                translate,
+            )
+        self._pending_range_moves.clear()
 
     def _flush_defined_names_to_patcher(self) -> None:
         """Drain ``_pending_defined_names`` into the patcher (RFC-021).
