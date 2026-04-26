@@ -103,7 +103,7 @@ callers see a clear migration hint rather than silent data loss.
 | `ws.add_table(Table(...))` | Raises — T1.5 |
 | `ws.data_validations.append(...)` | Raises — T1.5 |
 | `ws.conditional_formatting.add(...)` | Raises — T1.5 |
-| Sheet/column/row structural mutations | Raises — RFC-030/031/034/036 (WolfXL 1.1) |
+| Sheet/column/row structural mutations | **SHIPPED in WolfXL 1.1** — `insert_rows`/`delete_rows` (RFC-030), `insert_cols`/`delete_cols` (RFC-031), `Worksheet.move_range` (RFC-034), `Workbook.move_sheet` (RFC-036). |
 | `wb.copy_worksheet(...)` | **Modify-mode only — SHIPPED in WolfXL 1.1 (RFC-035)**. See divergence section below. Write-mode raises `NotImplementedError` per §3 OQ-a, tracked for 1.2. |
 
 Supported in modify mode (round-trips cleanly via `_flush_to_patcher`):
@@ -137,24 +137,52 @@ ratchet-tracked record of WHY wolfxl preserves what openpyxl drops.
 | Image media | Aliased — cloned drawing rels point at the same `xl/media/imageN.png` as the source. | Deep-copied — pillow re-encodes the image binary on the clone. | Avoids 50× bloat on workbooks with logo images and many sheet copies. RFC-035 §5.3 documents the contract; future "modify a copy's image" RFC will deep-clone. |
 | Calc chain (`xl/calcChain.xml`) | Not mutated — Excel rebuilds it on next open. | Same. | calcChain is a perf optimization, not a correctness contract. |
 
-### RFC-035 cross-RFC composition gaps (BUGS — escalate to Pod-δ)
+### RFC-035 cross-RFC composition gaps
 
 Surfaced by Pod-γ's full harness (`tests/test_copy_worksheet_modify.py`,
-six xfail cases). These are NOT divergences from openpyxl — they are
-defects in the wolfxl implementation that block downstream pod-δ
-verification.
+originally six xfail cases). Pod-δ closed four of the six in
+Sprint Ζ; two remain as documented 1.2 follow-ups (low real-world
+impact — only reachable through synthesized fixtures or naive-splice
+fakeouts).
 
-| # | Failing case | Symptom | Root cause | Suggested fix |
-|---|---|---|---|---|
-| 1 | `test_i_copy_and_edit_copy_in_same_save` | `OSError: Missing zip entry xl/worksheets/sheetN.xml` at save time. | `Workbook.save()` runs `for ws in self._sheets.values(): ws._flush()` BEFORE `_flush_pending_sheet_copies_to_patcher`; cell mutations on the clone target a sheet path Phase 2.7 has not created yet. | Move `_flush_pending_sheet_copies_to_patcher` BEFORE the per-sheet flush loop, OR seed `patcher.sheet_paths` for the clone at queue time. |
-| 2 | `test_j_copy_then_move_sheet_in_same_save` | `wb.move_sheet(clone_title, ...)` after `copy_worksheet` causes the clone to vanish from the saved workbook.xml. | Phase 2.5h reads workbook.xml from `file_patches`; Phase 2.7's `<sheet>` append is overwritten by 2.5h's reorder pass. | Sequence Phase 2.7 → Phase 2.5h via `file_patches` handoff, OR merge 2.7's `<sheets>` append into 2.5h's reorder pass. RFC-035 §5.4 specifies the intended composition. |
-| 3 | `test_k_copy_then_add_table_to_copy` | Same `OSError: Missing zip entry xl/worksheets/sheetN.xml`. | Same root cause as #1: per-sheet table flush runs before Phase 2.7. | Same fix as #1. |
-| 4 | `test_p_self_closing_sheets_block` | wolfxl loader rejects synthesized `<sheets/>` workbook.xml fixtures, so the splice's self-closing branch is unreachable through the public API. | Loader-level validation; not a Phase 2.7 issue per se. | Add a Rust-level Phase 2.7 unit test that exercises the splice on a self-closing input directly. |
-| 5 | `test_q_defined_names_upsert_collision` | User's queued defined name with `(name, localSheetId) == clone's` produces TWO `<definedName>` entries, both carrying the planner's value (user's value lost). | `_flush_pending_defined_names_to_patcher` runs before Phase 2.7; planner's later emit shadows the user's entry without an upsert merge. | Phase 2.7 must route its defined-name additions through the same merger queue (RFC-035 §5.4 Composability note) instead of splicing directly into workbook.xml. |
-| 6 | `test_r_cdata_pi_fuzz_fakeout` | Phase 2.7 splice is naive — a workbook.xml comment containing literal `</sheets>` may fool the byte-level locator. | Acknowledged in Pod-β's handoff note as "acceptable for 1.1 since no real Excel-emitted workbook contains it". | Promote the splice to a SAX/quick-xml-driven scan that respects element nesting. Low priority. |
+#### Fixed in 1.1 (Sprint Ζ Pod-δ)
 
-Tracked by: `tests/test_copy_worksheet_modify.py` (six xfail cases
-each carry an explicit `BUG SURFACED BY POD-γ HARNESS` reason
-string; `strict=True` so any subsequent fix flips the xfail to a
-pass and surfaces visibly). When a fix lands, remove the xfail
-marker and update this table.
+- ✅ **#1 `test_i_copy_and_edit_copy_in_same_save`** —
+  fixed by Pod-δ commit `fix(rfc-035): patch cloned-sheet bytes through
+  file_adds, not zip`. Phase 3 now reads cloned-sheet bytes from
+  `file_adds` / `file_patches` first, falling back to the source ZIP
+  only for genuine source-side sheets, and routes the rewrite back to
+  `file_adds` for cloned paths so Phase 4's new-entry pass picks up the
+  patched bytes. Test flips xfail (strict, OSError) → PASS.
+- ✅ **#2 `test_j_copy_then_move_sheet_in_same_save`** —
+  fixed by Pod-δ commit `fix(rfc-035): seed Phase 2.5h workbook.xml
+  read from file_patches`. Phase 2.5h's reorder pass now prefers
+  `file_patches["xl/workbook.xml"]` over the source-ZIP read so the
+  Phase 2.7 → Phase 2.5h handoff happens through the shared
+  `file_patches` map (the intended composition per RFC-035 §5.4).
+  Test flips xfail (strict, AssertionError) → PASS.
+- ✅ **#3 `test_k_copy_then_add_table_to_copy`** —
+  fixed by the same commit as #1 (shared root cause). The Phase 2.5f
+  rels-graph load also probes `file_adds` / `file_patches` first so a
+  user `add_table` on a cloned sheet sees the cloned rels graph
+  rather than an empty fallback. Test flips xfail (strict, OSError)
+  → PASS.
+- ✅ **#5 `test_q_defined_names_upsert_collision`** —
+  fixed by Pod-δ commit `fix(rfc-035): route cloned defined names
+  through RFC-021 merger`. Phase 2.7's `defined_names_to_add` push
+  now scans `queued_defined_names` for a matching
+  `(name, local_sheet_id)` key and skips on hit so the user's
+  explicit upsert wins over the planner's default (per RFC-035 §5.4
+  and Pod-β's last-write-wins-on-the-USER invariant). Test flips
+  xfail (strict, AssertionError) → PASS.
+
+#### Deferred to 1.2
+
+| # | Failing case | Symptom | Why deferred |
+|---|---|---|---|
+| 4 | `test_p_self_closing_sheets_block` | wolfxl loader rejects synthesized `<sheets/>` workbook.xml fixtures, so the splice's self-closing branch is unreachable through the public API. | Real Excel never emits a self-closing `<sheets/>` for a non-empty workbook. Reachable only via direct ZIP edit. 1.2 follow-up: add a Rust-level Phase 2.7 unit test that exercises the splice on a self-closing input directly when the loader gains a `permissive=True` mode. |
+| 6 | `test_r_cdata_pi_fuzz_fakeout` | Phase 2.7 splice is naive — a workbook.xml comment containing literal `</sheets>` may fool the byte-level locator. | Acknowledged in Pod-β's handoff note as "acceptable for 1.1 since no real Excel-emitted workbook contains it". 1.2 follow-up: promote the splice to a SAX/quick-xml-driven scan that respects element nesting. |
+
+Tracked by: `tests/test_copy_worksheet_modify.py` — the two remaining
+deferred cases are still pinned with `xfail(strict=True)`. When a
+fix lands, remove the xfail marker and update this table.

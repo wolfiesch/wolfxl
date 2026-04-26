@@ -1,6 +1,6 @@
 # RFC-035: `Workbook.copy_worksheet` (clone an existing sheet within a workbook)
 
-Status: Researched
+Status: Shipped
 Owner: pod-035
 Phase: 4
 Estimate: XL
@@ -972,8 +972,22 @@ commit before Phase 7.1 starts.
 
 ## Acceptance
 
-(Filled in after Shipped.)
+Sprint Ζ — Sprint Z (RFC-035 critical path) closed across four pods:
+- Pod-α (Phase 7.1 + 7.2): structural planner crate
+  (`wolfxl-structural::sheet_copy::plan_sheet_copy`).
+- Pod-β (Phase 7.3 + 7.4): patcher Phase 2.7 + Python coordinator
+  (`Workbook.copy_worksheet` end-to-end).
+- Pod-γ (Phase 7.5 + 7.6): full pytest harness (19 cases) + openpyxl
+  parity test + byte-stability golden + LibreOffice cross-renderer
+  procedure. Six cases pinned `xfail(strict=True)` — surfaced four
+  cross-RFC composition bugs for Pod-δ.
+- Pod-δ (Phase 7.7 / Sprint Ζ closeout): closed bugs #1, #2, #3, #5
+  from KNOWN_GAPS "RFC-035 cross-RFC composition gaps". Bugs #4 and
+  #6 deferred to 1.2 (only reachable via synthesized fixtures).
 
-- Commit: `<sha>` — feat(rfc-035): wire Workbook.copy_worksheet end-to-end
-- Verification: `python scripts/verify_rfc.py --rfc 035` GREEN at `<sha>`
-- Date: TBD
+- Commit: `8566e5f` — Sprint Ζ Pod-δ HEAD on `feat/rfc-035-bugfixes-and-status`
+  (after the four bug-fix + KNOWN_GAPS commits land on `feat/native-writer`).
+- Verification: 1017 pytest pass, 2 xfail (deferred bugs #4 + #6),
+  cargo test --workspace --exclude wolfxl green,
+  cargo test -p wolfxl-structural --release green (116 unit + 2 proptests).
+- Date: 2026-04-26

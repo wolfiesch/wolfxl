@@ -1,17 +1,29 @@
 # Changelog
 
-## Unreleased — RFC-035 (in progress)
-
-`Workbook.copy_worksheet(source, name=None)` (modify mode) — being
-shipped in parallel by Sprint Ε Pods α/β/γ/δ. Will be folded into
-the `1.1.0` section below at tag time.
-
-## wolfxl 1.1.0 (TBD) — Full structural parity
+## wolfxl 1.1.0 (2026-04-26) — Full structural parity
 
 User-facing release notes: `docs/release-notes-1.1.md`.
 
 ### Added
 
+- **RFC-035** — `Workbook.copy_worksheet(source, name=None)` (modify
+  mode). Clones an entire sheet subgraph: sheet XML + ancillary parts
+  (tables, comments + VML, drawings, hyperlinks, DV, CF) + rels +
+  content-types + workbook entry + sheet-scoped defined names. Image
+  media is aliased rather than deep-copied per RFC-035 §5.3 (avoids
+  50× bloat on workbooks with logos). Tables are auto-renamed
+  (`{base}_{N}`, N starts at 2 per RFC-035 §3 OQ-b) so the workbook-
+  wide `displayName` uniqueness constraint holds. Sheet-scoped
+  defined names (e.g. `_xlnm.Print_Area`) get fresh entries with
+  `localSheetId == new_idx`, routed through RFC-021's merger queue.
+  See `tests/parity/KNOWN_GAPS.md` "RFC-035 — copy_worksheet
+  divergences from openpyxl (SHIPPED 1.1)" for the five places where
+  wolfxl deliberately preserves what openpyxl drops. Sprint Ζ
+  collaboration: Pod-α (planner crate `wolfxl-structural::sheet_copy`),
+  Pod-β (patcher Phase 2.7 + Python coordinator), Pod-γ (19-case
+  pytest harness + openpyxl parity + byte-stability + LibreOffice
+  cross-renderer), Pod-δ (4 cross-RFC composition bug-fixes +
+  `KNOWN_GAPS` cleanup + status flip).
 - **RFC-034** — `Worksheet.move_range(cell_range, rows=0, cols=0,
   translate=False)` (modify mode). Paste-style relocation of a
   rectangular block of cells. Formulas inside the moved block are
@@ -55,6 +67,48 @@ User-facing release notes: `docs/release-notes-1.1.md`.
   Regression: `tests/test_col_shift_modify.py::test_rfc031_round2_*`
   (4 cases). Also closes the corresponding action items in
   `Plans/followups/rfc-030-031-api-coordination.md`.
+- **RFC-035 cross-RFC composition (Sprint Ζ Pod-δ)** — closed four
+  composition defects surfaced by Pod-γ's full harness and tracked in
+  `tests/parity/KNOWN_GAPS.md`:
+  - `copy_worksheet` + cell edit on the clone in the same `save()`
+    no longer raises `OSError: Missing zip entry
+    xl/worksheets/sheetN.xml`. Phase 3 reads cloned-sheet bytes from
+    `file_adds` / `file_patches` first and routes the rewrite back to
+    `file_adds` for cloned paths.
+    (`tests/test_copy_worksheet_modify.py::test_i_…`)
+  - `copy_worksheet` + `move_sheet(clone_title, …)` in the same
+    `save()` no longer drops the cloned `<sheet>` from
+    `xl/workbook.xml`. Phase 2.5h's reorder pass now reads from
+    `file_patches["xl/workbook.xml"]` so the Phase 2.7 → Phase 2.5h
+    handoff happens through the shared `file_patches` map per
+    RFC-035 §5.4. (`tests/test_copy_worksheet_modify.py::test_j_…`)
+  - `copy_worksheet` + `add_table` on the clone no longer raises
+    `OSError`. Same root-cause fix as the cell-edit case, plus a
+    `file_adds` / `file_patches` probe in the Phase 2.5f rels-graph
+    load. (`tests/test_copy_worksheet_modify.py::test_k_…`)
+  - User-queued sheet-scoped defined name colliding on
+    `(name, localSheetId)` with the `copy_worksheet` planner's emit
+    no longer produces two `<definedName>` entries with the
+    planner's value silently winning. Phase 2.7 now skips its push
+    when the user has already queued a matching key — user wins
+    (per RFC-035 §5.4 and Pod-β's last-write-wins-on-the-USER
+    invariant). (`tests/test_copy_worksheet_modify.py::test_q_…`)
+
+### Known issues (RFC-035 — deferred to 1.2)
+
+Two corner cases from Pod-γ's harness remain pinned `xfail` and are
+tracked in `tests/parity/KNOWN_GAPS.md`:
+
+- **Self-closing `<sheets/>` workbook.xml fixtures** — wolfxl's
+  loader rejects them, so Phase 2.7's self-closing splice branch is
+  unreachable through the public API. Real Excel never emits
+  `<sheets/>` for a non-empty workbook; reachable only via direct
+  ZIP edit. (`test_p_self_closing_sheets_block`)
+- **CDATA / processing-instruction fakeout** — a workbook.xml
+  comment containing the literal `</sheets>` token can fool the
+  byte-level locator for the `<sheets>` block. Acknowledged in
+  Pod-β's handoff note as acceptable for 1.1 since no real Excel-
+  emitted workbook contains it. (`test_r_cdata_pi_fuzz_fakeout`)
 
 ### Notes
 

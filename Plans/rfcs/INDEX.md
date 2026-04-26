@@ -27,7 +27,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 030 | Structural — insert_rows / delete_rows | Shipped | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
 | 031 | Structural — insert_cols / delete_cols | Shipped | 4 | L | 012, 021, 022, 024, 025, 026 | 034 |
 | 034 | Structural — move_range | Shipped | 4 | L | 012, 030, 031 | — |
-| 035 | Structural — copy_worksheet | Researched | 4 | XL | 010, 012, 013, 021, 022, 023, 024, 025, 026 | — |
+| 035 | Structural — copy_worksheet | Shipped | 4 | XL | 010, 012, 013, 021, 022, 023, 024, 025, 026 | — |
 | 036 | Structural — move_sheet | Shipped | 4 | M | 021 | — |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
