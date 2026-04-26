@@ -18,6 +18,8 @@ pub mod validations;
 pub mod content_types;
 #[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
 pub mod ancillary;
+#[allow(dead_code)] // RFC-020: rewrite_core_props/rewrite_app_props wired into do_save in commit 7
+pub mod properties;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
