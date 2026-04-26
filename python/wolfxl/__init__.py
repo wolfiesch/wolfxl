@@ -52,6 +52,7 @@ def load_workbook(
     modify: bool = False,
     permissive: bool = False,
     rich_text: bool = False,
+    password: str | bytes | None = None,
 ) -> Workbook:
     """Open an .xlsx file for reading or modification.
 
@@ -73,6 +74,16 @@ def load_workbook(
         inputs round-trip unchanged. Added in Sprint Θ Pod-A; tracked in
         tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
         #4).
+    password : str | bytes | None
+        Decryption password for OOXML-encrypted workbooks. When provided,
+        wolfxl lazy-imports ``msoffcrypto-tool`` (install via
+        ``pip install wolfxl[encrypted]``), decrypts the file into an
+        in-memory buffer, then dispatches through the standard reader
+        (or patcher, when ``modify=True``). On a non-encrypted file the
+        password is silently ignored, matching openpyxl's behaviour.
+        Wrong / missing passwords surface as ``ValueError``. Write-side
+        encryption is **not** supported; saving a workbook opened with
+        ``password=`` produces a plaintext output.
 
     rich_text : bool
         Sprint Ι Pod-α: if True, ``Cell.value`` returns a
@@ -93,13 +104,22 @@ def load_workbook(
     ``data_only=True`` returns cached formula results when they exist.
     ``keep_links`` remains a no-op compatibility shim.
     """
-    if modify:
+    path_str = str(filename)
+    if password is not None:
+        wb = Workbook._from_encrypted(  # noqa: SLF001
+            path_str,
+            password=password,
+            data_only=data_only,
+            permissive=permissive,
+            modify=modify,
+        )
+    elif modify:
         wb = Workbook._from_patcher(  # noqa: SLF001
-            str(filename), data_only=data_only, permissive=permissive
+            path_str, data_only=data_only, permissive=permissive
         )
     else:
         wb = Workbook._from_reader(  # noqa: SLF001
-            str(filename),
+            path_str,
             data_only=data_only,
             permissive=permissive,
             read_only=read_only,

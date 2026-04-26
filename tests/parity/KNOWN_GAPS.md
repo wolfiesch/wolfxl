@@ -49,11 +49,14 @@ verbatim.
 |---|---|---|
 | `Workbook.defined_names["X"] = DefinedName(...)` | Phase 1 | Rust side (`add_named_range`) already exists; just expose `__setitem__` in the Python proxy. |
 
-### Phase 2 — T0 Password-protected reads
+### Phase 2 — T0 Password-protected reads (SHIPPED — Sprint Ι Pod-γ)
 
-| openpyxl path | phase | note |
-|---|---|---|
-| `openpyxl.load_workbook(path, ...)` on encrypted file | Phase 2 | Add `password=` kwarg; dispatch through `msoffcrypto-tool` → `CalamineStyledBook.open_bytes()`. |
+`load_workbook(path, password=...)` decrypts OOXML-encrypted xlsx files via
+the optional `msoffcrypto-tool` dependency (install with
+`pip install wolfxl[encrypted]`). Modify mode + password also works in
+this release; the on-save output is plaintext (write-side encryption is
+documented T3 out-of-scope). See `tests/test_password_reads.py` for the
+full coverage matrix.
 
 ### Phase 3 — T2 Rich-text reads (✅ SHIPPED in 1.3, Sprint Ι Pod-α)
 

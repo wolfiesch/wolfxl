@@ -127,6 +127,136 @@ class Workbook:
         return wb
 
     @classmethod
+    def _from_encrypted(
+        cls,
+        path: str,
+        *,
+        password: str | bytes,
+        data_only: bool = False,
+        permissive: bool = False,
+        modify: bool = False,
+    ) -> Workbook:
+        """Open an OOXML-encrypted .xlsx via msoffcrypto-tool (Sprint Ι Pod-γ).
+
+        Decrypts the source file in memory, materialises the plaintext
+        bytes to a temporary path (the calamine reader and the patcher
+        are both path-based — RFC-035 zip reopens use ``self.file_path``),
+        then dispatches through the existing read or modify path. On a
+        non-encrypted file the password is silently ignored and the
+        normal path is used (matches openpyxl).
+
+        Wrong / missing passwords raise ``ValueError`` with a clear
+        message; ``ImportError`` (with install hint) surfaces when
+        ``msoffcrypto-tool`` isn't installed.
+
+        Modify mode + password works because the decrypted bytes are
+        materialised to disk; on save the result is plaintext (write-
+        side encryption is documented T3 out-of-scope).
+        """
+        # Lazy import — users without the optional dep pay no cost.
+        try:
+            import msoffcrypto  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise ImportError(
+                "password reads require msoffcrypto-tool; install with: "
+                "pip install wolfxl[encrypted]"
+            ) from exc
+
+        import io
+
+        pw_str: str
+        if isinstance(password, bytes):
+            pw_str = password.decode("utf-8")
+        else:
+            pw_str = password
+
+        with open(path, "rb") as src_fp:
+            office = msoffcrypto.OfficeFile(src_fp)
+            try:
+                is_encrypted = office.is_encrypted()
+            except Exception:
+                # Some msoffcrypto versions raise on non-OOXML inputs.
+                is_encrypted = False
+
+            if not is_encrypted:
+                # openpyxl-style: silently ignore password on a
+                # non-encrypted file.
+                if modify:
+                    return cls._from_patcher(
+                        path, data_only=data_only, permissive=permissive
+                    )
+                return cls._from_reader(
+                    path, data_only=data_only, permissive=permissive
+                )
+
+            try:
+                office.load_key(password=pw_str)
+            except Exception as exc:
+                raise ValueError(
+                    f"failed to load decryption key: {exc}"
+                ) from exc
+
+            buf = io.BytesIO()
+            try:
+                office.decrypt(buf)
+            except Exception as exc:
+                # msoffcrypto raises InvalidKeyError on wrong password;
+                # normalise to ValueError so callers don't have to import
+                # msoffcrypto just to except.
+                raise ValueError(
+                    f"failed to decrypt workbook (wrong password?): {exc}"
+                ) from exc
+            buf.seek(0)
+
+        return cls._from_bytes(
+            buf.getvalue(),
+            data_only=data_only,
+            permissive=permissive,
+            modify=modify,
+        )
+
+    @classmethod
+    def _from_bytes(
+        cls,
+        data: bytes | bytearray | memoryview,
+        *,
+        data_only: bool = False,
+        permissive: bool = False,
+        modify: bool = False,
+    ) -> Workbook:
+        """Open an .xlsx blob from memory (Sprint Ι Pod-γ).
+
+        Materialises the bytes to a tempfile and dispatches through the
+        path-based reader / patcher. The tempfile is left on disk for
+        the lifetime of the returned ``Workbook`` because the Rust
+        reader's Tier 2 features reopen the source zip via
+        ``self.file_path`` (see ``CalamineStyledBook::open_zip``); the
+        same applies to the patcher. ``Workbook.close()`` removes the
+        tempfile.
+        """
+        import tempfile
+
+        # delete=False so the file persists across the close-on-exit of
+        # the NamedTemporaryFile context manager. We track the path on
+        # the workbook and remove it from ``close()``.
+        with tempfile.NamedTemporaryFile(
+            prefix="wolfxl-", suffix=".xlsx", delete=False
+        ) as tmp:
+            tmp.write(bytes(data))
+            tmp_path = tmp.name
+
+        if modify:
+            wb = cls._from_patcher(
+                tmp_path, data_only=data_only, permissive=permissive
+            )
+        else:
+            wb = cls._from_reader(
+                tmp_path, data_only=data_only, permissive=permissive
+            )
+        wb._tempfile_path = tmp_path
+        return wb
+
+    @classmethod
     def _from_patcher(
         cls,
         path: str,
@@ -600,8 +730,24 @@ class Workbook:
         if self._rust_patcher is not None:
             self._flush_pending_sheet_moves_to_patcher(name, offset)
 
-    def save(self, filename: str | os.PathLike[str]) -> None:
-        """Flush all pending writes and save to disk."""
+    def save(
+        self,
+        filename: str | os.PathLike[str],
+        *,
+        password: str | bytes | None = None,
+    ) -> None:
+        """Flush all pending writes and save to disk.
+
+        ``password=`` is reserved for a future write-side encryption
+        feature; in this release it raises ``NotImplementedError``.
+        Saving a workbook that was opened with ``password=`` produces a
+        plaintext output (T3 out-of-scope per Sprint Ι Pod-γ).
+        """
+        if password is not None:
+            raise NotImplementedError(
+                "write-side encryption is not yet supported; "
+                "see docs/encryption.md (tracked as T3 out-of-scope)"
+            )
         filename = str(filename)
         if self._rust_patcher is not None:
             # Modify mode — workbook-level metadata writes don't have a
@@ -1153,6 +1299,16 @@ class Workbook:
         self._rust_reader = None
         self._rust_writer = None
         self._rust_patcher = None
+        # Sprint Ι Pod-γ: clean up the decryption tempfile, if any.
+        tmp_path = getattr(self, "_tempfile_path", None)
+        if tmp_path is not None:
+            import os
+
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            self._tempfile_path = None
 
     def __enter__(self) -> Workbook:
         return self
