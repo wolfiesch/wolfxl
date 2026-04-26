@@ -19,6 +19,8 @@ pub mod content_types;
 #[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
 pub mod ancillary;
 pub mod properties;
+#[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
+pub mod hyperlinks;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
