@@ -6,6 +6,7 @@ type PyObject = Py<PyAny>;
 mod calamine_styled_backend;
 mod native_writer_backend;
 mod ooxml_util;
+mod streaming;
 mod util;
 mod wolfxl;
 mod wolfxl_core_bridge;
@@ -35,6 +36,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
     m.add_class::<native_writer_backend::NativeWorkbook>()?;
+    m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;
     Ok(())
