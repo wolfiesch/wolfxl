@@ -1414,6 +1414,7 @@ dependencies = [
  "proptest",
  "quick-xml 0.37.5",
  "wolfxl-formula",
+ "wolfxl-rels",
 ]
 
 [[package]]

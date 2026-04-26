@@ -8,6 +8,7 @@ description = "Structural worksheet operations (insert/delete rows + cols) — p
 
 [dependencies]
 wolfxl-formula = { path = "../wolfxl-formula", version = "0.1" }
+wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
 quick-xml.workspace = true
 
 [dev-dependencies]

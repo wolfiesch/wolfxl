@@ -24,7 +24,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use zip::ZipArchive;
 
-use wolfxl_rels::{rt, RelId, RelsGraph, TargetMode};
+use wolfxl_rels::{rt, PartIdAllocator, RelId, RelsGraph, TargetMode};
 use wolfxl_writer::emit::tables_xml as writer_tables_xml;
 use wolfxl_writer::model::table::{Table, TableColumn, TableStyle};
 
@@ -243,10 +243,18 @@ fn next_available_id(ids: &HashSet<u32>) -> u32 {
 /// `rels` is mutated as a side effect: one new TABLE rel is allocated
 /// per patch, with `Target` pointing at the new part path relative to
 /// the sheet's rels parent (e.g. `"../tables/table5.xml"`).
+///
+/// When `allocator` is `Some`, `tableN.xml` part filenames are minted
+/// via [`PartIdAllocator::alloc_table`] (centralized; shared with
+/// RFC-035 sheet copy and other subsystems that mint part suffixes in
+/// the same save). When `None`, falls back to the legacy
+/// `inventory.count + 1` allocation — used by tests and any caller
+/// that has not yet adopted the centralized allocator.
 pub fn build_tables(
     patches: &[TablePatch],
     inventory: &ExistingTablesInventory,
     rels: &mut RelsGraph,
+    allocator: Option<&mut PartIdAllocator>,
 ) -> Result<TablesResult, String> {
     let mut result = TablesResult::default();
     if patches.is_empty() {
@@ -257,7 +265,12 @@ pub fn build_tables(
     // batch don't collide with each other.
     let mut ids = inventory.ids.clone();
     let mut names = inventory.names.clone();
-    let mut next_part_idx = inventory.count + 1;
+    // Fallback path: when no allocator is supplied, advance a local
+    // counter from `inventory.count + 1` (legacy behaviour preserved
+    // for tests and callers not yet migrated). Otherwise, every
+    // `part_idx` comes from the shared allocator.
+    let mut legacy_next_part_idx = inventory.count + 1;
+    let mut allocator = allocator;
 
     for patch in patches {
         if names.contains(&patch.name) {
@@ -266,13 +279,20 @@ pub fn build_tables(
                 patch.name
             ));
         }
-        // Allocate workbook-unique id (lowest free) and a sequential
-        // part-filename index (count + 1, +1, …).
+        // Allocate workbook-unique id (lowest free) and a part-filename
+        // index (centralized via PartIdAllocator if supplied; legacy
+        // count-based fallback otherwise).
         let new_id = next_available_id(&ids);
         ids.insert(new_id);
         names.insert(patch.name.clone());
-        let part_idx = next_part_idx;
-        next_part_idx += 1;
+        let part_idx = match allocator.as_deref_mut() {
+            Some(alloc) => alloc.alloc_table(),
+            None => {
+                let n = legacy_next_part_idx;
+                legacy_next_part_idx += 1;
+                n
+            }
+        };
 
         // Build the writer-model Table and serialize via the writer's
         // emitter (so write-mode and modify-mode produce byte-identical
@@ -431,7 +451,7 @@ mod tests {
     fn build_tables_empty_patches_yields_empty_result() {
         let inventory = ExistingTablesInventory::default();
         let mut rels = RelsGraph::new();
-        let r = build_tables(&[], &inventory, &mut rels).unwrap();
+        let r = build_tables(&[], &inventory, &mut rels, None).unwrap();
         assert!(r.table_parts.is_empty());
         assert!(r.table_parts_block.is_empty());
         assert!(r.new_rels.is_empty());
@@ -443,7 +463,7 @@ mod tests {
         let inventory = ExistingTablesInventory::default();
         let mut rels = RelsGraph::new();
         let patches = vec![simple_patch("Sales", "A1:C10", &["Region", "Q1", "Q2"])];
-        let r = build_tables(&patches, &inventory, &mut rels).unwrap();
+        let r = build_tables(&patches, &inventory, &mut rels, None).unwrap();
         assert_eq!(r.table_parts.len(), 1);
         assert_eq!(r.table_parts[0].0, "xl/tables/table1.xml");
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
@@ -476,7 +496,7 @@ mod tests {
         inventory.count = 2;
         let mut rels = RelsGraph::new();
         let patches = vec![simple_patch("New", "D1:D5", &["X"])];
-        let r = build_tables(&patches, &inventory, &mut rels).unwrap();
+        let r = build_tables(&patches, &inventory, &mut rels, None).unwrap();
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
         assert!(xml.contains("id=\"2\""), "expected id=2, got: {xml}");
         // Part filename is sequential, not id-mapped
@@ -489,7 +509,7 @@ mod tests {
         inventory.names.insert("Existing".into());
         let mut rels = RelsGraph::new();
         let patches = vec![simple_patch("Existing", "A1:B2", &["A", "B"])];
-        let err = build_tables(&patches, &inventory, &mut rels).unwrap_err();
+        let err = build_tables(&patches, &inventory, &mut rels, None).unwrap_err();
         assert!(err.contains("Existing"), "{err}");
     }
 
@@ -501,7 +521,7 @@ mod tests {
             simple_patch("T1", "A1:A5", &["A"]),
             simple_patch("T2", "B1:B5", &["B"]),
         ];
-        let r = build_tables(&patches, &inventory, &mut rels).unwrap();
+        let r = build_tables(&patches, &inventory, &mut rels, None).unwrap();
         assert_eq!(r.table_parts.len(), 2);
         assert_eq!(r.table_parts[0].0, "xl/tables/table1.xml");
         assert_eq!(r.table_parts[1].0, "xl/tables/table2.xml");
@@ -535,7 +555,7 @@ mod tests {
         );
 
         let patches = vec![simple_patch("Added", "C1:C5", &["X"])];
-        let r = build_tables(&patches, &inventory, &mut rels).unwrap();
+        let r = build_tables(&patches, &inventory, &mut rels, None).unwrap();
 
         // Two TABLE rels in the graph now.
         let table_rels: Vec<_> = rels.iter().filter(|r| r.rel_type == rt::TABLE).collect();
@@ -562,7 +582,7 @@ mod tests {
             show_row_stripes: false,
             show_column_stripes: true,
         });
-        let r = build_tables(&[patch], &inventory, &mut rels).unwrap();
+        let r = build_tables(&[patch], &inventory, &mut rels, None).unwrap();
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
         assert!(xml.contains("name=\"TableStyleLight1\""), "{xml}");
         assert!(xml.contains("showFirstColumn=\"1\""), "{xml}");
@@ -575,7 +595,7 @@ mod tests {
         let mut rels = RelsGraph::new();
         let mut patch = simple_patch("Foo", "A1:B5", &["A", "B"]);
         patch.display_name = String::new(); // simulate "not provided"
-        let r = build_tables(&[patch], &inventory, &mut rels).unwrap();
+        let r = build_tables(&[patch], &inventory, &mut rels, None).unwrap();
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
         assert!(xml.contains("displayName=\"Foo\""), "{xml}");
     }
@@ -586,7 +606,7 @@ mod tests {
         let mut rels = RelsGraph::new();
         let mut patch = simple_patch("NoFilter", "A1:B5", &["A", "B"]);
         patch.autofilter = false;
-        let r = build_tables(&[patch], &inventory, &mut rels).unwrap();
+        let r = build_tables(&[patch], &inventory, &mut rels, None).unwrap();
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
         assert!(!xml.contains("<autoFilter"), "{xml}");
     }
@@ -597,7 +617,7 @@ mod tests {
         let mut rels = RelsGraph::new();
         let mut patch = simple_patch("Totals", "A1:B10", &["A", "B"]);
         patch.totals_row_shown = true;
-        let r = build_tables(&[patch], &inventory, &mut rels).unwrap();
+        let r = build_tables(&[patch], &inventory, &mut rels, None).unwrap();
         let xml = std::str::from_utf8(&r.table_parts[0].1).unwrap();
         assert!(xml.contains("totalsRowShown=\"1\""), "{xml}");
     }
