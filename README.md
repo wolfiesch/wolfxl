@@ -116,7 +116,11 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 | `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | Stub - use modify mode to preserve existing charts |
 | `Image` (from `wolfxl.drawing.image`) | Stub - preserved on modify-mode round-trip |
 | `AutoFilter`, `PivotTable` | Stub - preserved on modify-mode round-trip |
-| `ws.insert_rows`, `ws.delete_rows`, `ws.move_range`, `wb.copy_worksheet`, `wb.move_sheet` | Not yet implemented (Phase 2 — RFCs 030/031/034/035/036) |
+| `ws.insert_rows`, `ws.delete_rows` | **Full support** (modify mode, 1.1+) — RFC-030 |
+| `ws.insert_cols`, `ws.delete_cols` | **Full support** (modify mode, 1.1+) — RFC-031 |
+| `ws.move_range` | **Full support** (modify mode, 1.1+) — RFC-034 |
+| `wb.move_sheet` | **Full support** (modify mode, 1.1+) — RFC-036 |
+| `wb.copy_worksheet` | **Full support** (modify mode only, 1.1+) — RFC-035 |
 
 ## Performance at Scale
 
