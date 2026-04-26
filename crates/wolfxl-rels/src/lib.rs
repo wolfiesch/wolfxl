@@ -40,6 +40,9 @@ use std::fmt;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
+mod part_id_allocator;
+pub use part_id_allocator::PartIdAllocator;
+
 // ---------------------------------------------------------------------------
 // Relationship-type URIs.
 //
