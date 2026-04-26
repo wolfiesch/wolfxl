@@ -1033,11 +1033,19 @@ impl XlsxPatcher {
             file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
         }
 
-        // Serialize any mutated `*.rels` graphs into file_patches. This branch
-        // is dead code in the current slice (rels_patches is always empty);
-        // RFC-022/023/024 will populate it.
+        // Serialize any mutated `*.rels` graphs. Routing depends on whether
+        // the path already exists in the source ZIP:
+        //   - present → `file_patches` replaces it in place (RFC-020 precedent)
+        //   - absent  → `file_adds` appends a brand-new entry (RFC-013)
+        // The "absent" branch is the common case for RFC-022 on a clean
+        // file that had zero hyperlinks before.
         for (path, graph) in &self.rels_patches {
-            file_patches.insert(path.clone(), graph.serialize());
+            let bytes = graph.serialize();
+            if zip.by_name(path).is_ok() {
+                file_patches.insert(path.clone(), bytes);
+            } else {
+                self.file_adds.insert(path.clone(), bytes);
+            }
         }
 
         // --- Phase 2.5c: Content-types aggregation (RFC-013) ---
