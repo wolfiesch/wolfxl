@@ -96,6 +96,48 @@ def run(cmd: list[str], env_extra: dict[str, str] | None = None) -> tuple[bool, 
     return ok, "\n".join(tail)
 
 
+def rfc_touched_python_paths(rfc_id: str) -> list[str]:
+    """Return Python paths touched by commits referencing this RFC.
+
+    Used to narrow the layer-6 ruff scope to files this RFC actually
+    changed, rather than the whole tree (which inherits unrelated
+    pre-existing lint failures from other branches).
+    """
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "log",
+                "--all",
+                "--name-only",
+                "--pretty=format:",
+                "--grep",
+                f"RFC-{rfc_id}",
+            ],
+            cwd=REPO,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return []
+    paths: list[str] = []
+    seen: set[str] = set()
+    for line in out.stdout.splitlines():
+        line = line.strip()
+        if not line or line in seen:
+            continue
+        seen.add(line)
+        if (line.startswith("python/") or line.startswith("tests/")) and (
+            line.endswith(".py") or line.endswith(".pyi")
+        ):
+            full = REPO / line
+            if full.exists():
+                paths.append(line)
+    return paths
+
+
 def layers_for(rfc: RfcSpec, quick: bool) -> list[Layer]:
     layers = [
         Layer(
@@ -133,15 +175,25 @@ def layers_for(rfc: RfcSpec, quick: bool) -> list[Layer]:
             f"5. cross-mode pytest (-k {rfc.pytest_marker})",
             ["pytest", "tests/", "-q", "-k", rfc.pytest_marker or rfc.rfc_id],
         ),
-        Layer(
-            "6. ruff lint",
-            (
-                ["ruff", "check", "python/", "tests/"]
-                if shutil.which("ruff") is not None
-                else ["uvx", "ruff", "check", "python/", "tests/"]
-            ),
-        ),
     ]
+    # Layer 6 — ruff scoped to RFC-touched files. Falls back to the
+    # whole-tree sweep if no touched files are detected (typical for
+    # pure-Rust RFCs with no Python surface).
+    touched = rfc_touched_python_paths(rfc.rfc_id)
+    ruff_paths = touched if touched else ["python/", "tests/"]
+    ruff_label = (
+        f"6. ruff lint ({len(touched)} RFC-touched files)" if touched else "6. ruff lint (whole tree)"
+    )
+    layers.append(
+        Layer(
+            ruff_label,
+            (
+                ["ruff", "check", *ruff_paths]
+                if shutil.which("ruff") is not None
+                else ["uvx", "ruff", "check", *ruff_paths]
+            ),
+        )
+    )
     return layers
 
 

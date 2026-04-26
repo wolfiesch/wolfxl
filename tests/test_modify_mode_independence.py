@@ -67,8 +67,9 @@ def test_t15_defined_names_round_trip_in_modify_mode(tmp_path: Path) -> None:
     if not FIXTURE.exists():
         pytest.skip("hermetic fixture missing")
 
-    import wolfxl
     from wolfxl.workbook.defined_name import DefinedName
+
+    import wolfxl
 
     out_dn = tmp_path / "dn.xlsx"
     wb = wolfxl.load_workbook(str(FIXTURE), modify=True)
