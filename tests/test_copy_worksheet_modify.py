@@ -740,28 +740,6 @@ def test_p_self_closing_sheets_block(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG SURFACED BY POD-γ HARNESS — escalate to Pod-δ. "
-        "RFC-035 + RFC-021 defined-names merger does not handle "
-        "the (name, localSheetId) upsert collision that arises when "
-        "the user queues a defined name with the SAME identity the "
-        "Phase 2.7 planner is about to emit for the clone. "
-        "Observed: two `<definedName name=\"_xlnm.Print_Area\" "
-        "localSheetId=\"N\">` entries co-exist in workbook.xml, "
-        "BOTH carrying the planner's value — the user's value is "
-        "discarded silently. Likely root cause: "
-        "`_flush_pending_defined_names_to_patcher` runs before "
-        "Phase 2.7, so the planner's later emit shadows the user's "
-        "entry without an upsert merge. Fix: Phase 2.7 must route "
-        "its defined-name additions THROUGH the same merger queue "
-        "(per RFC-035 §5.4 Composability note) rather than splicing "
-        "directly into workbook.xml. Last-write-wins on (name, "
-        "localSheetId) was Pod-β's stated invariant."
-    ),
-    raises=AssertionError,
-    strict=True,
-)
 def test_q_defined_names_upsert_collision(tmp_path: Path) -> None:
     """If the user queues a defined name with the same (name,
     localSheetId) that the copy will produce, the merger must converge

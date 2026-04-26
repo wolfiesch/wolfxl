@@ -2496,8 +2496,28 @@ impl XlsxPatcher {
 
             // Cloned sheet-scoped defined names: queue through
             // RFC-021's merger so workbook.xml's <definedNames> block
-            // gets the new entries on save.
+            // gets the new entries on save (RFC-035 §5.4
+            // Composability with RFC-021).
+            //
+            // Upsert-collision rule (Pod-δ fix for KNOWN_GAPS bug #5):
+            // if the user has ALREADY queued a defined name with the
+            // SAME `(name, local_sheet_id)` key, the user's entry
+            // wins — don't push the planner's value (it would land
+            // last in the merger's BTreeMap and shadow the user's
+            // upsert silently). Per Pod-β's stated invariant
+            // "last-write-wins" should converge on the USER's value,
+            // not the planner's; the planner is the default, the user
+            // is the explicit override.
             for dn in mutations.defined_names_to_add {
+                let key_name = dn.name.as_str();
+                let key_lsid = Some(dn.local_sheet_id);
+                let already_queued = self
+                    .queued_defined_names
+                    .iter()
+                    .any(|q| q.name == key_name && q.local_sheet_id == key_lsid);
+                if already_queued {
+                    continue;
+                }
                 self.queued_defined_names.push(defined_names::DefinedNameMut {
                     name: dn.name,
                     formula: dn.formula,
