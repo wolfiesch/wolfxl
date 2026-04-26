@@ -1,8 +1,8 @@
 # Follow-up — Native writer VML margin uses default column widths
 
 **Source:** RFC-023 (Comments + VML drawings) — INDEX decision #8
-**Status:** Open (post-1.0)
-**Owner:** TBD
+**Status:** Closed (Sprint Ι Pod-δ D3 — fixed in `crates/wolfxl-writer/src/emit/drawings_vml.rs::compute_margin_with_widths`; round-trip coverage in `tests/test_native_writer_comments.py`).
+**Owner:** Sprint Ι Pod-δ
 
 ## Problem
 
