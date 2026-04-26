@@ -82,10 +82,16 @@ def load_workbook(
         (matches openpyxl 3.x's default).  Use ``Cell.rich_text``
         directly to read structured runs without flipping this flag.
 
-    Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
-    accepted for openpyxl compatibility. ``data_only=True`` returns cached
-    formula results when they exist; ``read_only`` and ``keep_links`` remain
-    no-op compatibility shims.
+    ``read_only=True`` (Sprint Ι Pod-β) activates the SAX streaming
+    read path: ``Worksheet.iter_rows`` becomes a true generator that
+    walks ``xl/worksheets/sheetN.xml`` one row at a time without
+    materializing the whole sheet. Cells in this mode are immutable —
+    assignment raises ``RuntimeError`` immediately. The flag also
+    auto-engages transparently for sheets with > 50000 rows so callers
+    don't have to opt in just to scale to large workbooks.
+
+    ``data_only=True`` returns cached formula results when they exist.
+    ``keep_links`` remains a no-op compatibility shim.
     """
     if modify:
         wb = Workbook._from_patcher(  # noqa: SLF001
@@ -93,7 +99,10 @@ def load_workbook(
         )
     else:
         wb = Workbook._from_reader(  # noqa: SLF001
-            str(filename), data_only=data_only, permissive=permissive
+            str(filename),
+            data_only=data_only,
+            permissive=permissive,
+            read_only=read_only,
         )
     wb._rich_text = rich_text  # noqa: SLF001
     return wb

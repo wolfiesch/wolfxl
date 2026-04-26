@@ -75,6 +75,9 @@ class Workbook:
         self._pending_sheet_copies: list[tuple[str, str, bool]] = []
         # Sprint Θ Pod-C2 — workbook-level copy options.
         self.copy_options: CopyOptions = CopyOptions()
+        # Sprint Ι Pod-β — streaming read flag (write mode never streams).
+        self._read_only: bool = False
+        self._source_path: str | None = None
 
     @classmethod
     def _from_reader(
@@ -83,12 +86,19 @@ class Workbook:
         *,
         data_only: bool = False,
         permissive: bool = False,
+        read_only: bool = False,
     ) -> Workbook:
         """Open an existing .xlsx file in read mode.
 
         ``permissive`` plumbs through to the Rust reader and triggers a
         rels-graph fallback when ``<sheets>`` is empty/self-closing.
-        See :func:`wolfxl.load_workbook` for details.
+
+        ``read_only`` activates the SAX streaming fast path on
+        ``iter_rows`` (Sprint Ι Pod-β). The CalamineStyledBook reader
+        is still constructed for style/format lookups (used by the
+        non-streaming Cell properties), but the streaming reader
+        bypasses calamine's eager materialization for the large-sheet
+        scan path. See :func:`wolfxl.load_workbook` for details.
         """
         from wolfxl import _rust
 
@@ -99,6 +109,8 @@ class Workbook:
         wb._rich_text = False
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
+        wb._read_only = read_only
+        wb._source_path = path
         names = [str(n) for n in wb._rust_reader.sheet_names()]
         wb._sheet_names = names
         wb._sheets = {}
@@ -137,6 +149,8 @@ class Workbook:
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
         wb._rust_patcher = _rust.XlsxPatcher.open(path, permissive)
+        wb._read_only = False
+        wb._source_path = path
         names = [str(n) for n in wb._rust_reader.sheet_names()]
         wb._sheet_names = names
         wb._sheets = {}
@@ -174,8 +188,18 @@ class Workbook:
 
     @property
     def read_only(self) -> bool:
-        """True if this workbook was opened read-only (no writer, no patcher)."""
-        return self._rust_reader is not None and self._rust_patcher is None
+        """True if this workbook was opened with ``read_only=True``.
+
+        Sprint Ι Pod-β changes the semantics of this flag: it now
+        reflects the *explicit* ``read_only=True`` opt-in passed to
+        :func:`wolfxl.load_workbook`, not the historic
+        "no-writer-no-patcher" inference. The streaming
+        ``iter_rows`` fast path keys off the explicit flag (or the
+        > 50k row auto-trigger). Workbooks opened in plain read mode
+        (``read_only=False``, the default) retain the historic
+        in-memory behaviour for ``__getitem__`` / mutation paths.
+        """
+        return bool(getattr(self, "_read_only", False))
 
     @property
     def chartsheets(self) -> list[Any]:

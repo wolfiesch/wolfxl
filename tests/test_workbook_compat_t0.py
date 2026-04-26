@@ -38,10 +38,18 @@ def test_read_only_false_for_write_mode() -> None:
 
 
 def test_read_only_true_for_read_mode(tmp_path: Path) -> None:
+    # Sprint Ι Pod-β: ``Workbook.read_only`` now reflects the *explicit*
+    # ``read_only=True`` opt-in passed to ``load_workbook`` (matching
+    # openpyxl's contract), not the historic "no writer, no patcher"
+    # inference. Plain read mode (the default) is no longer
+    # automatically tagged as read_only — callers who want the
+    # streaming fast path opt in by passing ``read_only=True``.
     path = tmp_path / "t.xlsx"
     wolfxl.Workbook().save(path)
-    wb = wolfxl.load_workbook(path)
-    assert wb.read_only is True
+    wb_default = wolfxl.load_workbook(path)
+    assert wb_default.read_only is False
+    wb_explicit = wolfxl.load_workbook(path, read_only=True)
+    assert wb_explicit.read_only is True
 
 
 def test_read_only_false_for_modify_mode(tmp_path: Path) -> None:
