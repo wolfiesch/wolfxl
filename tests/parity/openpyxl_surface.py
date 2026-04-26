@@ -591,58 +591,65 @@ _UTILS_ENTRIES: tuple[SurfaceEntry, ...] = (
 # closer for them — that's the signal for the integrator to flip the
 # flag and remove the matching KNOWN_GAPS.md row.
 #
-# Sprint Ι: Pods α (rich text), β (streaming), γ (password) close the
-# first three rows below. Phase 5 (.xls / .xlsb) stays open into a
-# future release.
+# Sprint Ι: Pods α (rich text), β (streaming), γ (password) closed
+# the first three rows in 1.3 — they're now reflected with
+# ``wolfxl_supported=True`` and a ``shipped-1.3`` tag, kept as
+# regression pins. Phase 5 (.xls / .xlsb) stays open into a future
+# release.
 # ---------------------------------------------------------------------------
 _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
     SurfaceEntry(
         openpyxl_path="openpyxl.cell.rich_text.CellRichText",
-        wolfxl_path=None,
+        wolfxl_path="wolfxl.cell.rich_text.CellRichText",
         category=SurfaceCategory.CELL_READ,
         synthgl_usage=(),
         parity_note=(
-            "Phase 3 (Pod-α): rich-text reads. Currently wolfxl flattens "
-            "<r>/<rPr> runs to plain text on the way through ``Cell.value``. "
-            "When Pod-α lands, expose ``Cell.rich_text`` (and ``wolfxl.cell."
-            "rich_text.CellRichText``) iter-compatible with openpyxl's "
-            "``CellRichText``. Until then, ``wolfxl_path`` stays ``None`` so "
-            "the parity ratchet keeps the gap visible."
+            "Phase 3 closed in 1.3 by Sprint Ι Pod-α. Reads expose "
+            "``Cell.rich_text`` always; ``Cell.value`` returns "
+            "``CellRichText`` only under ``load_workbook(rich_text=True)`` "
+            "(matches openpyxl's flag-gated behaviour). Round-trip "
+            "verified wolfxl→openpyxl, openpyxl→wolfxl, wolfxl→wolfxl."
         ),
-        wolfxl_supported=False,
-        tags=frozenset({"hard", "missing", "phase-3"}),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-3", "shipped-1.3"}),
     ),
     SurfaceEntry(
-        openpyxl_path="openpyxl.load_workbook(read_only=True)",
-        wolfxl_path=None,
+        openpyxl_path="openpyxl.load_workbook (read_only=True kwarg)",
+        wolfxl_path="wolfxl.load_workbook (read_only=True kwarg)",
         category=SurfaceCategory.WORKBOOK_OPEN,
         synthgl_usage=(),
         parity_note=(
-            "Phase 4 (Pod-β): streaming reads. WolfXL accepts the kwarg "
-            "today but reads the full sheet into memory. The gap closes "
-            "when Pod-β lands a SAX fast path that auto-engages on "
-            "``read_only=True`` or sheets > 50k rows. Until then there is "
-            "no streaming entry-point symbol to import — ``wolfxl_path`` "
-            "stays ``None`` so the ratchet remains visible."
+            "Phase 4 closed in 1.3 by Sprint Ι Pod-β. SAX-backed "
+            "``Worksheet.iter_rows`` auto-engages on "
+            "``read_only=True`` or sheets > 50k rows. Streaming cells "
+            "carry full style access (font/fill/border/alignment/number_"
+            "format) via lazy lookup; mutation raises. ~5.7× faster "
+            "than openpyxl read_only on a 100k-row × 10-col fixture. "
+            "The ``(read_only=True kwarg)`` annotation is a parametric "
+            "marker; the smoke test strips it via ``split(' ')[0]`` and "
+            "verifies the bare ``load_workbook`` symbol resolves."
         ),
-        wolfxl_supported=False,
-        tags=frozenset({"hard", "missing", "phase-4"}),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-4", "shipped-1.3"}),
     ),
     SurfaceEntry(
-        openpyxl_path="openpyxl.load_workbook(password=...)",
-        wolfxl_path=None,
+        openpyxl_path="openpyxl.load_workbook (password kwarg)",
+        wolfxl_path="wolfxl.load_workbook (password kwarg)",
         category=SurfaceCategory.WORKBOOK_OPEN,
         synthgl_usage=(),
         parity_note=(
-            "Phase 2 (Pod-γ): password-protected xlsx reads. Currently "
-            "wolfxl rejects encrypted files with a CalamineError. Pod-γ "
-            "dispatches through ``msoffcrypto-tool`` to decrypt into a "
-            "buffer and feed the plaintext into ``CalamineStyledBook."
-            "open_bytes()``. Until then ``wolfxl_path`` stays ``None`` so "
-            "the ratchet keeps the gap visible."
+            "Phase 2 closed in 1.3 by Sprint Ι Pod-γ. ``msoffcrypto-tool`` "
+            "is a lazy optional dep (install via "
+            "``pip install wolfxl[encrypted]``); decrypted bytes route "
+            "through a tempfile to the existing path-based readers. "
+            "Modify mode + password works; saved output is plaintext "
+            "(write-side encryption explicitly raises NotImplementedError). "
+            "The ``(password kwarg)`` annotation is a parametric marker; "
+            "the smoke test strips it via ``split(' ')[0]`` and verifies "
+            "the bare ``load_workbook`` symbol resolves."
         ),
-        wolfxl_supported=False,
-        tags=frozenset({"hard", "missing", "phase-2"}),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-2", "shipped-1.3"}),
     ),
     SurfaceEntry(
         openpyxl_path="openpyxl.load_workbook('foo.xlsb')",
