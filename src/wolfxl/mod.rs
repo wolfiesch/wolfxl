@@ -25,7 +25,7 @@ pub mod defined_names;
 pub mod sheet_order;
 pub mod tables;
 pub mod comments;
-#[allow(dead_code)] // RFC-035 Pod-α: planner only; Pod-β wires Phase 2.7
+// RFC-035 Pod-β: Phase 2.7 (do_save) consumes plan_sheet_copy from this re-export.
 pub mod sheet_copy;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -204,6 +204,21 @@ pub struct XlsxPatcher {
     /// is applied in source order against the post-shift coordinate
     /// space.
     queued_range_moves: Vec<RangeMove>,
+    /// Per-workbook sheet-copy queue (RFC-035). Each entry is a
+    /// `(src_title, dst_title)` pair in user-call order. Drained by
+    /// Phase 2.7 during `do_save`, BEFORE every per-sheet phase so
+    /// the cloned sheet is visible to downstream phases as if it
+    /// had always been part of the source workbook.
+    queued_sheet_copies: Vec<SheetCopyOp>,
+}
+
+/// One queued sheet-copy op (RFC-035).
+#[derive(Debug, Clone)]
+pub struct SheetCopyOp {
+    /// Source sheet title (must exist in `self.sheet_paths`).
+    pub src_title: String,
+    /// Destination sheet title (pre-deduped by the Python coordinator).
+    pub dst_title: String,
 }
 
 /// One queued axis-shift op (RFC-030/031).
@@ -290,6 +305,7 @@ impl XlsxPatcher {
             queued_sheet_moves: Vec::new(),
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
+            queued_sheet_copies: Vec::new(),
         })
     }
 
@@ -798,6 +814,46 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a sheet-copy op (RFC-035 Phase 7.3).
+    ///
+    /// Validates eagerly that `src_title` exists in `self.sheet_paths`,
+    /// `dst_title` is non-empty, `dst_title` is not already a sheet
+    /// name in `self.sheet_paths`, and `dst_title` is not already
+    /// queued by an earlier `queue_sheet_copy` call. On success
+    /// appends to `queued_sheet_copies` (drained by Phase 2.7 in
+    /// append order during `do_save`).
+    fn queue_sheet_copy(&mut self, src_title: &str, dst_title: &str) -> PyResult<()> {
+        if !self.sheet_paths.contains_key(src_title) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: source sheet '{src_title}' not found in workbook"
+            )));
+        }
+        if dst_title.is_empty() {
+            return Err(PyErr::new::<PyValueError, _>(
+                "queue_sheet_copy: destination title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(dst_title) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: destination sheet '{dst_title}' already exists"
+            )));
+        }
+        if self
+            .queued_sheet_copies
+            .iter()
+            .any(|op| op.dst_title == dst_title)
+        {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "queue_sheet_copy: destination sheet '{dst_title}' is already queued"
+            )));
+        }
+        self.queued_sheet_copies.push(SheetCopyOp {
+            src_title: src_title.to_string(),
+            dst_title: dst_title.to_string(),
+        });
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -1095,6 +1151,7 @@ impl XlsxPatcher {
             && self.queued_sheet_moves.is_empty()
             && self.queued_axis_shifts.is_empty()
             && self.queued_range_moves.is_empty()
+            && self.queued_sheet_copies.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
