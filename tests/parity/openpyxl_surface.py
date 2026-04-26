@@ -577,6 +577,99 @@ _UTILS_ENTRIES: tuple[SurfaceEntry, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# KNOWN GAPS — variants of supported symbols that are NOT yet shipped.
+#
+# These are the still-open KNOWN_GAPS.md rows in fine-grained shape. They
+# carry ``wolfxl_supported=False`` so the parity ratchet
+# (``test_known_gap_still_gaps``) goes RED the moment a Pod lands a
+# closer for them — that's the signal for the integrator to flip the
+# flag and remove the matching KNOWN_GAPS.md row.
+#
+# Sprint Ι: Pods α (rich text), β (streaming), γ (password) close the
+# first three rows below. Phase 5 (.xls / .xlsb) stays open into a
+# future release.
+# ---------------------------------------------------------------------------
+_GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
+    SurfaceEntry(
+        openpyxl_path="openpyxl.cell.rich_text.CellRichText",
+        wolfxl_path=None,
+        category=SurfaceCategory.CELL_READ,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 3 (Pod-α): rich-text reads. Currently wolfxl flattens "
+            "<r>/<rPr> runs to plain text on the way through ``Cell.value``. "
+            "When Pod-α lands, expose ``Cell.rich_text`` (and ``wolfxl.cell."
+            "rich_text.CellRichText``) iter-compatible with openpyxl's "
+            "``CellRichText``. Until then, ``wolfxl_path`` stays ``None`` so "
+            "the parity ratchet keeps the gap visible."
+        ),
+        wolfxl_supported=False,
+        tags=frozenset({"hard", "missing", "phase-3"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook(read_only=True)",
+        wolfxl_path=None,
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 4 (Pod-β): streaming reads. WolfXL accepts the kwarg "
+            "today but reads the full sheet into memory. The gap closes "
+            "when Pod-β lands a SAX fast path that auto-engages on "
+            "``read_only=True`` or sheets > 50k rows. Until then there is "
+            "no streaming entry-point symbol to import — ``wolfxl_path`` "
+            "stays ``None`` so the ratchet remains visible."
+        ),
+        wolfxl_supported=False,
+        tags=frozenset({"hard", "missing", "phase-4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook(password=...)",
+        wolfxl_path=None,
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 2 (Pod-γ): password-protected xlsx reads. Currently "
+            "wolfxl rejects encrypted files with a CalamineError. Pod-γ "
+            "dispatches through ``msoffcrypto-tool`` to decrypt into a "
+            "buffer and feed the plaintext into ``CalamineStyledBook."
+            "open_bytes()``. Until then ``wolfxl_path`` stays ``None`` so "
+            "the ratchet keeps the gap visible."
+        ),
+        wolfxl_supported=False,
+        tags=frozenset({"hard", "missing", "phase-2"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook('foo.xlsb')",
+        wolfxl_path=None,
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 5: openpyxl itself doesn't read xlsb; the parity target "
+            "is pandas-style 'same values come out'. Closing this gap "
+            "requires migrating WolfXL from ``calamine-styles`` to "
+            "upstream ``calamine`` (xlsb native). Stays open into a "
+            "future release."
+        ),
+        wolfxl_supported=False,
+        tags=frozenset({"hard", "missing", "phase-5"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook('foo.xls')",
+        wolfxl_path=None,
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 5: openpyxl itself doesn't read xls. Parity target is "
+            "xlrd behaviour. Stays open into a future release alongside "
+            "xlsb."
+        ),
+        wolfxl_supported=False,
+        tags=frozenset({"hard", "missing", "phase-5"}),
+    ),
+)
+
+
 SURFACE_ENTRIES: tuple[SurfaceEntry, ...] = (
     *_OPEN_ENTRIES,
     *_SHEET_ENTRIES,
@@ -586,6 +679,7 @@ SURFACE_ENTRIES: tuple[SurfaceEntry, ...] = (
     *_WRITE_ENTRIES,
     *_STYLE_ENTRIES,
     *_UTILS_ENTRIES,
+    *_GAP_ENTRIES,
 )
 
 
