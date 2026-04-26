@@ -111,6 +111,8 @@ def layers_for(rfc: RfcSpec, quick: bool) -> list[Layer]:
                 "wolfxl-rels",
                 "-p",
                 "wolfxl-merger",
+                "-p",
+                "wolfxl-formula",
                 "--quiet",
             ],
         ),
