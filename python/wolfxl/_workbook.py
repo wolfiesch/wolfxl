@@ -332,6 +332,12 @@ class Workbook:
             # Flush them first so DV/CF (which don't touch rels) run
             # afterward against an already-stable rels graph.
             self._flush_pending_hyperlinks_to_patcher()
+            # RFC-024: tables also touch the rels graph + add new ZIP
+            # parts + content-type Overrides. Flush after hyperlinks
+            # so the rels graph already carries any external-hyperlink
+            # rIds when build_tables iterates rels.iter() to assemble
+            # the merged <tableParts> block.
+            self._flush_pending_tables_to_patcher()
             # RFC-025: flush worksheet-level setters that the patcher
             # accepts. The cell-level _flush above handles values +
             # formats; data validations are a separate patcher API
@@ -384,6 +390,54 @@ class Workbook:
                 if hl.display is not None:
                     payload["display"] = hl.display
                 patcher.queue_hyperlink(ws.title, coord, payload)
+            pending.clear()
+
+    def _flush_pending_tables_to_patcher(self) -> None:
+        """Drain ``_pending_tables`` on every sheet into the patcher (RFC-024).
+
+        Modify-mode counterpart to the writer flush at
+        ``_worksheet.py:1946``. Each ``Table`` is converted to the
+        patcher's flat-dict shape and routed to ``queue_table``. The
+        patcher allocates a workbook-unique table ``id`` at save time
+        (any explicit ``id`` on the Python ``Table`` object is
+        ignored), serializes ``xl/tables/tableN.xml``, splices a
+        ``<tableParts>`` block into the sheet XML, mutates the sheet
+        rels, and adds a ``[Content_Types].xml`` Override.
+
+        Per-sheet drain happens in workbook tab order; within a sheet,
+        append order wins (which matches openpyxl's first-add → first-
+        slot semantics).
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_tables  # noqa: SLF001
+            if not pending:
+                continue
+            for t in pending:
+                payload: dict[str, Any] = {
+                    "name": t.name,
+                    "ref": t.ref,
+                    "columns": [c.name for c in t.tableColumns] if t.tableColumns else [],
+                    "header_row_count": int(t.headerRowCount or 0),
+                    "totals_row_shown": bool(t.totalsRowCount and t.totalsRowCount > 0),
+                    "autofilter": True,
+                }
+                if t.displayName and t.displayName != t.name:
+                    payload["display_name"] = t.displayName
+                if t.tableStyleInfo is not None and t.tableStyleInfo.name:
+                    payload["style"] = {
+                        "name": t.tableStyleInfo.name,
+                        "show_first_column": bool(t.tableStyleInfo.showFirstColumn),
+                        "show_last_column": bool(t.tableStyleInfo.showLastColumn),
+                        "show_row_stripes": bool(t.tableStyleInfo.showRowStripes),
+                        "show_column_stripes": bool(t.tableStyleInfo.showColumnStripes),
+                    }
+                patcher.queue_table(ws.title, payload)
             pending.clear()
 
     def _flush_pending_data_validations_to_patcher(self) -> None:

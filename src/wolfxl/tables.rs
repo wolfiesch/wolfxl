@@ -174,8 +174,10 @@ fn is_table_part_path(p: &str) -> bool {
 }
 
 /// Parse the `id` and `name` attributes off the root `<table>` element.
-/// Tolerant: returns `(None, None)` on any malformation.
-fn parse_table_root_attrs(xml: &[u8]) -> (Option<u32>, Option<String>) {
+/// Tolerant: returns `(None, None)` on any malformation. Public so
+/// the patcher can re-derive the id of a freshly-emitted part without
+/// duplicating the parser.
+pub fn parse_table_root_attrs(xml: &[u8]) -> (Option<u32>, Option<String>) {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(true);
     let mut buf: Vec<u8> = Vec::new();
