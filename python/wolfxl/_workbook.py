@@ -320,11 +320,7 @@ class Workbook:
             if self._properties_dirty:
                 self._flush_properties_to_patcher()
             if self._pending_defined_names:
-                raise NotImplementedError(
-                    "Mutating wb.defined_names on an existing file is a T1.5 follow-up. "
-                    "Workaround: open via Workbook() and re-author, or stop modifying "
-                    "wb.defined_names before save()."
-                )
+                self._flush_defined_names_to_patcher()
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
             # RFC-022: hyperlinks share the sheet rels graph with future
@@ -450,6 +446,42 @@ class Workbook:
                     ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
                 )
             pending.clear()
+
+    def _flush_defined_names_to_patcher(self) -> None:
+        """Drain ``_pending_defined_names`` into the patcher (RFC-021).
+
+        Modify-mode counterpart to ``_flush_workbook_writes``'s
+        defined-name branch. Each ``DefinedName`` is converted to the
+        patcher's flat-dict shape and routed to
+        ``_rust_patcher.queue_defined_name``. ``None``-valued optional
+        fields are filtered out before crossing the PyO3 boundary so
+        the Rust extractors see a clean "missing key" rather than a
+        Python ``None`` (matches the convention in
+        ``_flush_properties_to_patcher``).
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit. Empty queue is a no-op (the Rust
+        side's no-op guard is the second line of defence — workbook.xml
+        is left untouched if no upserts arrive).
+        """
+        patcher = self._rust_patcher
+        if patcher is None or not self._pending_defined_names:
+            return
+        for _, dn in self._pending_defined_names.items():
+            payload: dict[str, Any] = {
+                "name": dn.name,
+                "formula": dn.value,
+            }
+            if dn.localSheetId is not None:
+                payload["local_sheet_id"] = dn.localSheetId
+            if dn.hidden:
+                # Only forward when truthy — the Rust side treats
+                # missing-key and `None` as "preserve / omit".
+                payload["hidden"] = True
+            if dn.comment is not None:
+                payload["comment"] = dn.comment
+            patcher.queue_defined_name(payload)
+        self._pending_defined_names.clear()
 
     def _flush_properties_to_patcher(self) -> None:
         """Drain dirty document properties into the patcher (RFC-020).
