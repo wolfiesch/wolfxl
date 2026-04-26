@@ -4,6 +4,7 @@
 
 ### Added
 
+- **RFC-001** — Removed leftover `rust_xlsxwriter` workspace dependency. Native writer (RFC W5 replacement) has been the sole xlsx-write path since Phase 2; the dep was unused.
 - **RFC-036** — `Workbook.move_sheet(sheet, offset)` (modify mode).
   Reorders sheets in-place; updates `<sheets>` order in workbook.xml
   and any internal references that depend on tab index.
