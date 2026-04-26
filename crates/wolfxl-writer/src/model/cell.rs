@@ -43,6 +43,11 @@ pub enum WriteCellValue {
     /// exists so higher-level code can keep track of which numbers are
     /// dates for style-application decisions.
     DateSerial(f64),
+
+    /// Sprint Ι Pod-α: inline rich-text runs.  Emitted as
+    /// `<c t="inlineStr"><is><r><rPr/><t/></r>…</is></c>` so the SST
+    /// stays untouched (matches openpyxl's rich-text emit path).
+    InlineRichText(Vec<crate::rich_text::RichTextRun>),
 }
 
 /// The cached result of a formula.

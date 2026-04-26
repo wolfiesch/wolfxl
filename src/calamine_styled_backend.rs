@@ -22,7 +22,10 @@ use quick_xml::Reader as XmlReader;
 use zip::ZipArchive;
 
 use crate::ooxml_util;
-use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
+use crate::util::{
+    a1_to_row_col, cell_blank, cell_with_value, column_letter_from_zero_based, parse_iso_date,
+    parse_iso_datetime,
+};
 use crate::wolfxl::styles::XfEntry;
 
 fn map_error_value(err_str: &str) -> &'static str {
@@ -708,6 +711,12 @@ pub struct CalamineStyledBook {
     /// Stored as a Python dict so repeated `read_doc_properties` calls
     /// return the same object without re-parsing XML or reopening the zip.
     doc_properties_cache: Option<PyObject>,
+    /// Sprint Ι Pod-α: lazy cache of parsed SST entries with their
+    /// rich-text run structure.  ``None`` for an entry means "plain
+    /// text — no `<r>` runs, fall back to the flat
+    /// `parse_shared_strings()` result"; ``Some(runs)`` exposes the
+    /// structured runs that Cell.rich_text returns.
+    sst_runs_cache: Option<Vec<Option<Vec<crate::rich_text::RichTextRun>>>>,
 }
 
 #[pymethods]
@@ -772,6 +781,7 @@ impl CalamineStyledBook {
             raw_fonts: None,
             record_format_cache: HashMap::new(),
             doc_properties_cache: None,
+            sst_runs_cache: None,
         })
     }
 
@@ -1309,6 +1319,76 @@ impl CalamineStyledBook {
         }
     }
 
+    /// Sprint Ι Pod-α: structured rich-text reader.
+    ///
+    /// Returns a list of ``(text, font_dict_or_none)`` tuples when the
+    /// cell's backing string carries `<r>` runs (either via the SST or
+    /// inline `<is>`).  Returns ``None`` for cells that are plain text
+    /// (single `<t>` or non-string types) — the caller (Python
+    /// ``Cell.rich_text``) propagates that as ``None`` so user code can
+    /// distinguish "no runs" from "one run".
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        self.ensure_sheet_exists(sheet)?;
+        // Pull the raw `<c .../>` XML so we can detect t="s" vs t="inlineStr".
+        let runs_opt = self.cell_rich_text_runs(sheet, row, col)?;
+        let Some(runs) = runs_opt else {
+            return Ok(py.None());
+        };
+        let out = PyList::empty(py);
+        for run in &runs {
+            let tup = PyList::empty(py);
+            tup.append(&run.text)?;
+            match &run.font {
+                None => tup.append(py.None())?,
+                Some(font) => {
+                    let d = PyDict::new(py);
+                    if let Some(b) = font.bold {
+                        d.set_item("b", b)?;
+                    }
+                    if let Some(i) = font.italic {
+                        d.set_item("i", i)?;
+                    }
+                    if let Some(s) = font.strike {
+                        d.set_item("strike", s)?;
+                    }
+                    if let Some(u) = &font.underline {
+                        d.set_item("u", u)?;
+                    }
+                    if let Some(sz) = font.size {
+                        d.set_item("sz", sz)?;
+                    }
+                    if let Some(c) = &font.color {
+                        d.set_item("color", c)?;
+                    }
+                    if let Some(name) = &font.name {
+                        d.set_item("rFont", name)?;
+                    }
+                    if let Some(family) = font.family {
+                        d.set_item("family", family)?;
+                    }
+                    if let Some(charset) = font.charset {
+                        d.set_item("charset", charset)?;
+                    }
+                    if let Some(va) = &font.vert_align {
+                        d.set_item("vertAlign", va)?;
+                    }
+                    if let Some(sc) = &font.scheme {
+                        d.set_item("scheme", sc)?;
+                    }
+                    tup.append(d)?;
+                }
+            }
+            out.append(tup)?;
+        }
+        Ok(out.into())
+    }
+
     pub fn read_cached_formula_values(
         &mut self,
         py: Python<'_>,
@@ -1695,6 +1775,220 @@ impl CalamineStyledBook {
 
 // Non-Python helper methods.
 impl CalamineStyledBook {
+    /// Sprint Ι Pod-α: parse `xl/sharedStrings.xml` once, structurally,
+    /// into a per-index `Vec<Option<Vec<RichTextRun>>>`.  ``None`` at
+    /// an index means "this SST entry is plain text — no `<r>` runs",
+    /// matching openpyxl's "flatten to str" default.
+    fn ensure_sst_runs_cache(&mut self) -> PyResult<()> {
+        if self.sst_runs_cache.is_some() {
+            return Ok(());
+        }
+        let mut zip = self.open_zip()?;
+        let xml_opt = ooxml_util::zip_read_to_string_opt(&mut zip, "xl/sharedStrings.xml")?;
+        let mut entries: Vec<Option<Vec<crate::rich_text::RichTextRun>>> = Vec::new();
+        if let Some(xml) = xml_opt {
+            // Walk the XML once and feed each `<si>...</si>` substring
+            // through `parse_runs_in_element`.  We rely on the wrapper
+            // tag (`si`) so the rich-text parser self-terminates at
+            // each closing tag.
+            let mut reader = XmlReader::from_str(&xml);
+            reader.config_mut().trim_text(false);
+            let mut buf: Vec<u8> = Vec::new();
+            let bytes = xml.as_bytes();
+            loop {
+                let pos_before = reader.buffer_position() as usize;
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(e)) if e.local_name().as_ref() == b"si" => {
+                        // `pos_before` points just before the `<si>` tag start.
+                        // Find the matching `</si>` by scanning forward
+                        // through the XML tokens.
+                        let start = bytes[..pos_before]
+                            .iter()
+                            .rposition(|&b| b == b'<')
+                            .unwrap_or(pos_before);
+                        // Read until matching </si>.
+                        let mut depth = 1u32;
+                        loop {
+                            match reader.read_event_into(&mut buf) {
+                                Ok(Event::Start(s)) if s.local_name().as_ref() == b"si" => {
+                                    depth += 1;
+                                }
+                                Ok(Event::End(en)) if en.local_name().as_ref() == b"si" => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                Ok(Event::Eof) => break,
+                                Err(err) => {
+                                    return Err(PyErr::new::<PyIOError, _>(format!(
+                                        "Failed to parse sharedStrings.xml: {err}"
+                                    )));
+                                }
+                                _ => {}
+                            }
+                            buf.clear();
+                        }
+                        let end = reader.buffer_position() as usize;
+                        let slice = &xml[start..end];
+                        let runs = crate::rich_text::parse_runs_in_element(slice, b"si")
+                            .map_err(|e| PyErr::new::<PyIOError, _>(format!(
+                                "Failed to parse SST entry: {e}"
+                            )))?;
+                        entries.push(runs);
+                    }
+                    Ok(Event::Empty(e)) if e.local_name().as_ref() == b"si" => {
+                        // Self-closing <si/> — empty plain text entry.
+                        entries.push(None);
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(err) => {
+                        return Err(PyErr::new::<PyIOError, _>(format!(
+                            "Failed to parse sharedStrings.xml: {err}"
+                        )));
+                    }
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+        self.sst_runs_cache = Some(entries);
+        Ok(())
+    }
+
+    /// Sprint Ι Pod-α: locate cell ``(row, col)`` in the sheet XML and
+    /// return its rich-text runs (if any).
+    ///
+    /// Walks the sheet XML once looking for the matching
+    /// ``<c r="A1" .../>`` element, then dispatches:
+    /// * ``t="inlineStr"`` → parse the `<is>` child directly
+    /// * ``t="s"`` → resolve the `<v>` index against the cached SST
+    /// * other → return ``None`` (plain / typed value)
+    fn cell_rich_text_runs(
+        &mut self,
+        sheet: &str,
+        target_row: u32,
+        target_col: u32,
+    ) -> PyResult<Option<Vec<crate::rich_text::RichTextRun>>> {
+        // Snapshot the sheet XML up-front so we don't re-borrow `self`
+        // mid-walk.
+        let xml_owned = self.sheet_xml_content(sheet)?;
+        // Build the target A1 string once; this matches the `r=`
+        // attribute Excel writes verbatim.
+        let target_a1 = {
+            let col_letter = column_letter_from_zero_based(target_col);
+            format!("{col_letter}{}", target_row + 1)
+        };
+
+        // Two-pass: walk the XML, find the cell start, capture a slice
+        // that ends at the cell's `</c>`.  Then inspect the slice.
+        let bytes = xml_owned.as_bytes();
+        let mut reader = XmlReader::from_str(&xml_owned);
+        reader.config_mut().trim_text(false);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut found: Option<(usize, String, Option<String>)> = None; // (start_byte, t_attr, ref_attr)
+        loop {
+            let pos_before = reader.buffer_position() as usize;
+            match reader
+                .read_event_into(&mut buf)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet xml: {e}")))?
+            {
+                Event::Start(e) | Event::Empty(e) => {
+                    if e.local_name().as_ref() == b"c" {
+                        let r_attr = ooxml_util::attr_value(&e, b"r");
+                        if r_attr.as_deref() == Some(target_a1.as_str()) {
+                            // Capture the byte position of the `<` that started this tag.
+                            let start = bytes[..pos_before]
+                                .iter()
+                                .rposition(|&b| b == b'<')
+                                .unwrap_or(pos_before);
+                            let t_attr = ooxml_util::attr_value(&e, b"t").unwrap_or_default();
+                            // Self-closing `<c .../>` → no children, definitely no rich text.
+                            if matches!(reader.read_event_into(&mut buf), Ok(Event::Empty(_))) {
+                                // (will not happen because we already consumed the start)
+                            }
+                            // Walk until we hit the matching </c>.
+                            let mut depth: u32 = 1;
+                            // For self-closing `<c.../>`, the loop body
+                            // will see Eof or the next sibling — we
+                            // handle that by returning None below.
+                            // Detect via attempting to find </c>.
+                            loop {
+                                match reader
+                                    .read_event_into(&mut buf)
+                                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet xml: {e}")))?
+                                {
+                                    Event::Start(s) if s.local_name().as_ref() == b"c" => {
+                                        depth += 1;
+                                    }
+                                    Event::End(en) if en.local_name().as_ref() == b"c" => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            break;
+                                        }
+                                    }
+                                    Event::Eof => return Ok(None),
+                                    _ => {}
+                                }
+                                buf.clear();
+                            }
+                            let end = reader.buffer_position() as usize;
+                            let slice = xml_owned[start..end].to_string();
+                            found = Some((start, t_attr, Some(slice)));
+                            break;
+                        }
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        let Some((_, t_attr, slice)) = found else {
+            return Ok(None);
+        };
+        let Some(slice) = slice else {
+            return Ok(None);
+        };
+
+        if t_attr == "inlineStr" {
+            // Find the inline `<is>` block and parse it.
+            // Locate `<is>` ... `</is>` substring.
+            if let Some(is_start) = slice.find("<is") {
+                if let Some(is_end_rel) = slice[is_start..].find("</is>") {
+                    let body = &slice[is_start..is_start + is_end_rel + "</is>".len()];
+                    let runs = crate::rich_text::parse_runs_in_element(body, b"is")
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("inlineStr: {e}")))?;
+                    return Ok(runs);
+                }
+            }
+            return Ok(None);
+        }
+
+        if t_attr == "s" {
+            // Pull the SST index from `<v>...</v>`.
+            let Some(v_start) = slice.find("<v>") else {
+                return Ok(None);
+            };
+            let Some(v_end) = slice[v_start..].find("</v>") else {
+                return Ok(None);
+            };
+            let idx_str = &slice[v_start + "<v>".len()..v_start + v_end];
+            let Ok(idx) = idx_str.trim().parse::<usize>() else {
+                return Ok(None);
+            };
+            self.ensure_sst_runs_cache()?;
+            let cache = self.sst_runs_cache.as_ref().unwrap();
+            if idx >= cache.len() {
+                return Ok(None);
+            }
+            return Ok(cache[idx].clone());
+        }
+
+        Ok(None)
+    }
+
     fn resolve_range_bounds(
         range: &Range<Data>,
         cell_range: Option<&str>,

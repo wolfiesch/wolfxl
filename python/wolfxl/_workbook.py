@@ -46,6 +46,8 @@ class Workbook:
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
         self._data_only = False
+        # Sprint Ι Pod-α — flipped to True via load_workbook(rich_text=True).
+        self._rich_text: bool = False
         self._evaluator: Any = None
         self._sheet_names: list[str] = ["Sheet"]
         self._sheets: dict[str, Worksheet] = {}
@@ -94,6 +96,7 @@ class Workbook:
         wb._rust_writer = None
         wb._rust_patcher = None
         wb._data_only = data_only
+        wb._rich_text = False
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
         names = [str(n) for n in wb._rust_reader.sheet_names()]
@@ -130,6 +133,7 @@ class Workbook:
         wb = object.__new__(cls)
         wb._rust_writer = None
         wb._data_only = data_only
+        wb._rich_text = False
         wb._evaluator = None
         wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
         wb._rust_patcher = _rust.XlsxPatcher.open(path, permissive)

@@ -51,6 +51,7 @@ def load_workbook(
     keep_links: bool = True,
     modify: bool = False,
     permissive: bool = False,
+    rich_text: bool = False,
 ) -> Workbook:
     """Open an .xlsx file for reading or modification.
 
@@ -73,15 +74,26 @@ def load_workbook(
         tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
         #4).
 
+    rich_text : bool
+        Sprint Ι Pod-α: if True, ``Cell.value`` returns a
+        :class:`wolfxl.cell.rich_text.CellRichText` for cells whose
+        backing string carries `<r>` runs.  Default is ``False`` so
+        existing call sites keep returning flattened ``str`` values
+        (matches openpyxl 3.x's default).  Use ``Cell.rich_text``
+        directly to read structured runs without flipping this flag.
+
     Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
     accepted for openpyxl compatibility. ``data_only=True`` returns cached
     formula results when they exist; ``read_only`` and ``keep_links`` remain
     no-op compatibility shims.
     """
     if modify:
-        return Workbook._from_patcher(  # noqa: SLF001
+        wb = Workbook._from_patcher(  # noqa: SLF001
             str(filename), data_only=data_only, permissive=permissive
         )
-    return Workbook._from_reader(  # noqa: SLF001
-        str(filename), data_only=data_only, permissive=permissive
-    )
+    else:
+        wb = Workbook._from_reader(  # noqa: SLF001
+            str(filename), data_only=data_only, permissive=permissive
+        )
+    wb._rich_text = rich_text  # noqa: SLF001
+    return wb

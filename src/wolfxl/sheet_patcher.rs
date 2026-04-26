@@ -33,6 +33,9 @@ pub enum CellValue {
     Boolean(bool),
     /// Formula string (e.g. `"SUM(A1:A2)"`).
     Formula(String),
+    /// Rich-text runs — emitted as `t="inlineStr"` with `<is>...</is>`
+    /// containing one `<r><rPr/><t/></r>` per run.  Sprint Ι Pod-α.
+    RichText(Vec<wolfxl_writer::rich_text::RichTextRun>),
 }
 
 /// A single cell modification.
@@ -418,6 +421,32 @@ fn write_patched_cell<W: Write>(
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
                 .write_event(Event::End(BytesEnd::new("f")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("c")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+        }
+        Some(CellValue::RichText(runs)) => {
+            // Sprint Ι Pod-α: rich-text writes use inline strings so
+            // the SST never has to be touched.  This matches openpyxl's
+            // own rich-text emit path (see the test fixture in the
+            // Sprint Ι Pod-α task brief).
+            elem.push_attribute(("t", "inlineStr"));
+            // Emit the start tag, then hand-write the `<is>` body so
+            // we can leverage the run-emitter from `wolfxl_writer::rich_text`
+            // verbatim (xml-escape, xml:space=preserve, etc).
+            writer
+                .write_event(Event::Start(elem))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            let body = wolfxl_writer::rich_text::emit_runs(runs);
+            let raw = format!("<is>{body}</is>");
+            // BytesText would re-escape; we want the run XML emitted
+            // verbatim. quick-xml's `Writer::get_mut()` lets us drop in
+            // raw bytes between events without breaking the surrounding
+            // structure.
+            writer
+                .get_mut()
+                .write_all(raw.as_bytes())
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
                 .write_event(Event::End(BytesEnd::new("c")))

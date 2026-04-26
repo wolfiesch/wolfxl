@@ -261,13 +261,110 @@ class Cell:
     def value(self) -> Any:
         if self._value is _UNSET:
             self._value = self._read_value()
+        # Sprint Ι Pod-α: when the workbook was opened with
+        # ``rich_text=True``, surface ``CellRichText`` for cells whose
+        # backing string carries `<r>` runs.  Default load mode mirrors
+        # openpyxl 3.x, which flattens to plain ``str`` unless the user
+        # opts in via the same flag.
+        if isinstance(self._value, str):
+            wb = self._ws._workbook  # noqa: SLF001
+            if getattr(wb, "_rich_text", False):
+                rt = self.rich_text
+                if rt is not None:
+                    return rt
         return self._value
 
     @value.setter
     def value(self, val: Any) -> None:
+        # Accept CellRichText pass-through: if the user assigns a
+        # CellRichText, defer rich-text serialization to the writer.
+        # Plain strings keep the existing fast path.
         self._value = val
         self._value_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        # Pod-α: when a CellRichText is assigned, also stash it on the
+        # worksheet's pending-rich-text map so the flush layer can pick
+        # it up (write-mode and modify-mode both consume the same map).
+        from wolfxl.cell.rich_text import CellRichText  # local import — avoids cycles
+
+        ws = self._ws
+        if isinstance(val, CellRichText):
+            ws._pending_rich_text[(self._row, self._col)] = val  # noqa: SLF001
+        else:
+            # Clearing or replacing with plain — drop any prior rich entry.
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    # ------------------------------------------------------------------
+    # Rich text
+    # ------------------------------------------------------------------
+
+    @property
+    def rich_text(self) -> Any:
+        """Structured rich-text runs for this cell, or ``None``.
+
+        Returns a :class:`wolfxl.cell.rich_text.CellRichText` object
+        when the on-disk cell carries `<r>` runs (either via the SST
+        or as inline-string runs).  Returns ``None`` for plain-text
+        cells, non-string types, and brand-new cells with no on-disk
+        backing.
+
+        Parity with openpyxl: openpyxl exposes the same data via
+        ``Cell.value`` *only* when the workbook is loaded with
+        ``rich_text=True``.  WolfXL goes one step further and always
+        surfaces the structured representation through this side
+        channel — defaulting ``Cell.value`` to flattened ``str`` so
+        existing user code keeps working unchanged.
+        """
+        from wolfxl.cell.rich_text import CellRichText, InlineFont, TextBlock
+
+        ws = self._ws
+        # Pre-save visibility for write/modify-mode setters.
+        pending = ws._pending_rich_text.get((self._row, self._col))  # noqa: SLF001
+        if pending is not None:
+            return pending
+
+        wb = ws._workbook  # noqa: SLF001
+        reader = getattr(wb, "_rust_reader", None)
+        if reader is None:
+            return None
+        payload = reader.read_cell_rich_text(ws.title, self.coordinate)
+        if payload is None:
+            return None
+        out = CellRichText()
+        for entry in payload:
+            text, font_dict = entry[0], entry[1]
+            if font_dict is None:
+                out.append(text)
+            else:
+                out.append(
+                    TextBlock(
+                        InlineFont(
+                            rFont=font_dict.get("rFont"),
+                            charset=font_dict.get("charset"),
+                            family=font_dict.get("family"),
+                            b=font_dict.get("b"),
+                            i=font_dict.get("i"),
+                            strike=font_dict.get("strike"),
+                            color=font_dict.get("color"),
+                            sz=font_dict.get("sz"),
+                            u=font_dict.get("u"),
+                            vertAlign=font_dict.get("vertAlign"),
+                            scheme=font_dict.get("scheme"),
+                        ),
+                        text,
+                    )
+                )
+        return out
+
+    @rich_text.setter
+    def rich_text(self, val: Any) -> None:
+        """Setter alias for ``cell.value = CellRichText(...)``.
+
+        Lets users round-trip via ``cell.rich_text = ...`` even if they
+        never touch ``cell.value`` directly — handy in code that wants
+        to add/edit runs without disturbing other state.
+        """
+        self.value = val
 
     # ------------------------------------------------------------------
     # Font
