@@ -402,6 +402,118 @@ impl XlsxPatcher {
         }
         Ok(())
     }
+
+    // -------------------------------------------------------------------
+    // RFC-013 test-only hooks.
+    //
+    // These methods drive the new patcher primitives (`file_adds`,
+    // `queued_content_type_ops`, `ancillary`) directly so pytest
+    // integration tests can verify behavior end-to-end. They are
+    // intentionally `_test_`-prefixed (Python convention for "internal
+    // testing API") and have NO live caller in `python/wolfxl/`. RFC-022
+    // / RFC-023 / RFC-024 will add the real public callers; until then,
+    // these hooks are how `tests/test_patcher_infra.py` exercises the
+    // plumbing.
+    // -------------------------------------------------------------------
+
+    /// Inject a brand-new ZIP entry that will be emitted on the next
+    /// `save()`. Used by `tests/test_patcher_infra.py` to verify that
+    /// `file_adds` round-trips through `do_save`.
+    fn _test_inject_file_add(&mut self, path: &str, bytes: Vec<u8>) {
+        self.file_adds.insert(path.to_string(), bytes);
+    }
+
+    /// Queue a content-type op against a sheet. `kind` is `"add_override"`
+    /// or `"ensure_default"`; `key` is the part path or extension; `value`
+    /// is the content type. The next `save()` aggregates queued ops
+    /// across all sheets in `sheet_order` and writes one rewritten
+    /// `[Content_Types].xml`.
+    fn _test_queue_content_type_op(
+        &mut self,
+        sheet: &str,
+        kind: &str,
+        key: &str,
+        value: &str,
+    ) -> PyResult<()> {
+        let op = match kind {
+            "add_override" => content_types::ContentTypeOp::AddOverride(
+                key.to_string(),
+                value.to_string(),
+            ),
+            "ensure_default" => content_types::ContentTypeOp::EnsureDefault(
+                key.to_string(),
+                value.to_string(),
+            ),
+            other => {
+                return Err(PyErr::new::<PyValueError, _>(format!(
+                    "unknown ContentTypeOp kind '{other}' (expected 'add_override' or 'ensure_default')"
+                )));
+            }
+        };
+        self.queued_content_type_ops
+            .entry(sheet.to_string())
+            .or_default()
+            .push(op);
+        Ok(())
+    }
+
+    /// Lazily populate the ancillary registry for one sheet by name. After
+    /// this call, `_test_ancillary_*` accessors return the classified
+    /// `_rels/sheetN.xml.rels` contents.
+    fn _test_populate_ancillary(&mut self, sheet: &str) -> PyResult<()> {
+        let path = self
+            .sheet_paths
+            .get(sheet)
+            .cloned()
+            .ok_or_else(|| PyErr::new::<PyValueError, _>(format!("no such sheet: {sheet}")))?;
+        let f = File::open(&self.file_path).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
+        })?;
+        let mut zip = ZipArchive::new(f)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+        self.ancillary
+            .populate_for_sheet(&mut zip, sheet, &path)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ancillary populate: {e}")))?;
+        Ok(())
+    }
+
+    /// Has the ancillary registry been populated for `sheet`? Returns
+    /// `False` for unknown sheets and for sheets whose rels file has not
+    /// been read yet.
+    fn _test_ancillary_is_populated(&self, sheet: &str) -> bool {
+        self.ancillary.get(sheet).is_some()
+    }
+
+    /// Cached comments-part path for `sheet`, or `None` if the sheet has
+    /// none / has not been populated.
+    fn _test_ancillary_comments_part(&self, sheet: &str) -> Option<String> {
+        self.ancillary
+            .get(sheet)
+            .and_then(|a| a.comments_part.clone())
+    }
+
+    /// Cached VML drawing part path for `sheet`.
+    fn _test_ancillary_vml_drawing_part(&self, sheet: &str) -> Option<String> {
+        self.ancillary
+            .get(sheet)
+            .and_then(|a| a.vml_drawing_part.clone())
+    }
+
+    /// Cached table-part paths for `sheet`, in source order.
+    fn _test_ancillary_table_parts(&self, sheet: &str) -> Vec<String> {
+        self.ancillary
+            .get(sheet)
+            .map(|a| a.table_parts.clone())
+            .unwrap_or_default()
+    }
+
+    /// Cached hyperlink `rId`s for `sheet`, in source order.
+    fn _test_ancillary_hyperlink_rids(&self, sheet: &str) -> Vec<String> {
+        self.ancillary
+            .get(sheet)
+            .map(|a| a.hyperlinks_rels.iter().map(|r| r.0.clone()).collect())
+            .unwrap_or_default()
+    }
 }
 
 // ---------------------------------------------------------------------------

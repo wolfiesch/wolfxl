@@ -13,10 +13,10 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | ID | Title | Status | Phase | Estimate | Depends-on | Unblocks |
 |---|---|---|---|---|---|---|
 | 001 | W5 — rust_xlsxwriter rip-out | Researched | 2 | S | — | (clean baseline) |
-| 010 | Infra — rels graph parser/serializer | Researched | 2 | M | 001 | 022, 023, 024, 035 |
+| 010 | Infra — rels graph parser/serializer | Shipped | 2 | M | 001 | 022, 023, 024, 035 |
 | 011 | Infra — XML-block-merger primitive | Researched | 2 | M | 001 | 022, 023, 024, 025, 026 |
 | 012 | Infra — formula reference translator | Researched | 2 | L | 001 | 021, 030, 031, 034, 035 |
-| 013 | Infra — patcher extensions (ZIP-add, ancillary parts, two-phase flush) | Researched | 2 | M | 001 | 022, 023, 024, 035 |
+| 013 | Infra — patcher extensions (ZIP-add, ancillary parts, two-phase flush) | Shipped | 2 | M | 001 | 022, 023, 024, 035 |
 | 020 | T1.5 — Document properties | Researched | 3 | S | — | — |
 | 021 | T1.5 — Defined names mutation | Researched | 3 | M | 011, 012 | 030, 031, 034, 035, 036 |
 | 022 | T1.5 — Hyperlinks | Researched | 3 | M | 010, 011, 013 | 030, 031, 035 |
