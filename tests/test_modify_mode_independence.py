@@ -6,17 +6,18 @@ and shares zero code with the writer. This test pins that property: if
 a future change introduces a fall-through from the patcher to the
 writer, the silent coupling is caught.
 
-Two checks remain after rip-out:
+One check remains after rip-out:
 
 1. **Source-level**: ``src/wolfxl/`` contains no ``rust_xlsxwriter``
    references. The reference is gone, but a grep enforces the absence
    in case anything reintroduces it.
 
-2. **T1.5 raise-consistency**: T1.5-deferred features (adding defined
-   names to an existing file) raise ``NotImplementedError`` with a
-   "T1.5" hint - not silent fall-through to the writer. Properties
-   mutation is no longer T1.5: RFC-020 shipped the patcher round-trip,
-   so it's exercised in ``tests/test_modify_properties.py`` instead.
+The T1.5 raise-consistency test was removed once Phase-3 shipped: the
+last T1.5-deferred features (RFC-021 defined names, RFC-022 hyperlinks,
+RFC-023 comments, RFC-024 tables, RFC-025 data validations, RFC-026
+conditional formatting, RFC-020 properties) all now round-trip
+cleanly. Positive coverage lives in the per-RFC modify-mode test
+files (``tests/test_defined_names_modify.py`` etc.).
 """
 from __future__ import annotations
 
@@ -51,20 +52,17 @@ def test_xlsxpatcher_has_no_rust_xlsxwriter_references() -> None:
     )
 
 
-def test_modify_mode_t15_features_raise_with_pointer(tmp_path: Path) -> None:
-    """T1.5-deferred modify-mode operations must raise
-    ``NotImplementedError`` with "T1.5" in the message - never silent
-    fall-through to the writer backend.
+def test_t15_defined_names_round_trip_in_modify_mode(tmp_path: Path) -> None:
+    """RFC-021 — adding defined names to an existing file must
+    round-trip cleanly in modify mode. This is the inverse of the
+    historical raise-test (preserved at git history before commit
+    e2a344b for the audit trail). It catches accidental regressions
+    that would re-route the patcher path back through the writer.
 
-    Currently tracks one path:
-    - adding defined names to an existing file (RFC-021, not yet shipped)
-
-    Properties mutation used to be on this list but RFC-020 shipped the
-    patcher round-trip; positive coverage is in
-    ``tests/test_modify_properties.py``.
-
-    If a new T1.5-deferred feature lands, append it here so the
-    raise-contract is enforced at CI time.
+    Positive coverage of all RFC-021 paths (add, update, preserve,
+    localSheetId, builtin, no-op) lives in
+    ``tests/test_defined_names_modify.py``; this test only pins the
+    contract that the operation no longer raises.
     """
     if not FIXTURE.exists():
         pytest.skip("hermetic fixture missing")
@@ -75,5 +73,5 @@ def test_modify_mode_t15_features_raise_with_pointer(tmp_path: Path) -> None:
     out_dn = tmp_path / "dn.xlsx"
     wb = wolfxl.load_workbook(str(FIXTURE), modify=True)
     wb.defined_names["probe"] = DefinedName(name="probe", value="Sheet1!$A$1")
-    with pytest.raises(NotImplementedError, match=r"T1\.5"):
-        wb.save(str(out_dn))
+    wb.save(str(out_dn))  # must not raise — RFC-021 shipped.
+    assert out_dn.exists()
