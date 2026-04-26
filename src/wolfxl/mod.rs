@@ -21,6 +21,8 @@ pub mod ancillary;
 pub mod properties;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
+#[allow(dead_code)] // RFC-024: live caller wires up alongside the patcher integration commit
+pub mod tables;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
