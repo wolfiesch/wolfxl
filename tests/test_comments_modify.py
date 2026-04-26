@@ -23,9 +23,9 @@ from pathlib import Path
 
 import openpyxl
 import pytest
+from wolfxl.comments import Comment
 
 from wolfxl import load_workbook
-from wolfxl.comments import Comment
 
 
 @pytest.fixture(autouse=True)
