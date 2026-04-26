@@ -210,6 +210,14 @@ pub struct XlsxPatcher {
     /// the cloned sheet is visible to downstream phases as if it
     /// had always been part of the source workbook.
     queued_sheet_copies: Vec<SheetCopyOp>,
+    /// Sprint Θ Pod-A: pre-seeded `file_patches` entries produced by
+    /// permissive-mode load-time normalization (e.g. rewriting an
+    /// empty `<sheets/>` block in `xl/workbook.xml`). Empty in the
+    /// non-permissive path. Drained into the actual `file_patches`
+    /// map at the start of `do_save` so every downstream phase
+    /// (Phase 2.7 splice, defined-names merger, …) sees the
+    /// rewritten bytes.
+    permissive_seed_file_patches: HashMap<String, Vec<u8>>,
 }
 
 /// One queued sheet-copy op (RFC-035).
@@ -256,8 +264,18 @@ pub struct RangeMove {
 #[pymethods]
 impl XlsxPatcher {
     /// Open an xlsx file for surgical patching.
+    ///
+    /// When `permissive` is true and the parsed `xl/workbook.xml`
+    /// declares no `<sheet>` children (e.g. a self-closing `<sheets/>`
+    /// produced by a malformed but still loadable workbook), this
+    /// fallback registers every worksheet target in
+    /// `xl/_rels/workbook.xml.rels` under a synthesized title
+    /// (`Sheet1`, `Sheet2`, ...). This unblocks the Phase 2.7
+    /// self-closing-`<sheets/>` splice path and is gated behind the
+    /// flag so well-formed inputs are unaffected. See Sprint Θ Pod-A.
     #[staticmethod]
-    fn open(path: &str) -> PyResult<Self> {
+    #[pyo3(signature = (path, permissive = false))]
+    fn open(path: &str, permissive: bool) -> PyResult<Self> {
         let f = File::open(path)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Cannot open '{path}': {e}")))?;
         let mut zip = ZipArchive::new(f)
@@ -280,6 +298,93 @@ impl XlsxPatcher {
             if let Some(target) = rel_targets.get(&rid) {
                 sheet_paths.insert(name.clone(), ooxml_util::join_and_normalize("xl/", target));
                 sheet_order.push(name);
+            }
+        }
+
+        // Sprint Θ Pod-A: permissive fallback for malformed workbooks
+        // whose <sheets> block is self-closing (no <sheet> children)
+        // even though the rels graph still references worksheet parts.
+        // We synthesize "Sheet1", "Sheet2", ... in rels iteration order
+        // for every worksheet relationship target. This makes the
+        // Phase 2.7 splice exercisable through the public API.
+        //
+        // We also normalize `xl/workbook.xml` in-memory: the empty
+        // `<sheets/>` block is rewritten to `<sheets>...</sheets>`
+        // populated with `<sheet>` entries that mirror the synthesized
+        // titles + the rIds we recovered from the rels graph. The
+        // rewrite is queued through the standard `file_patches` map,
+        // which means downstream phases (Phase 2.7 splice, defined-
+        // names merger, etc.) all see a well-formed workbook.xml. This
+        // does NOT mutate the source file on disk; it only affects the
+        // copy emitted by `save()`.
+        let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
+        if permissive && sheet_order.is_empty() {
+            const WORKSHEET_REL_TYPE: &str =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+            // Re-parse rels via wolfxl_rels so we can filter by type
+            // and reuse the relationship rId on the synthesized
+            // <sheet> element (Excel requires r:id to match a real
+            // relationship).
+            let graph = wolfxl_rels::RelsGraph::parse(rels_xml.as_bytes())
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to parse rels: {e}")))?;
+            let mut idx: usize = 1;
+            // Collected (synthesized_name, rId) pairs in rels order.
+            let mut synthesized: Vec<(String, String)> = Vec::new();
+            for r in graph.iter() {
+                if r.rel_type == WORKSHEET_REL_TYPE {
+                    let synth_name = format!("Sheet{idx}");
+                    let path_in_zip = ooxml_util::join_and_normalize("xl/", &r.target);
+                    sheet_paths.insert(synth_name.clone(), path_in_zip);
+                    sheet_order.push(synth_name.clone());
+                    synthesized.push((synth_name, r.id.0.clone()));
+                    idx += 1;
+                }
+            }
+
+            if !synthesized.is_empty() {
+                // Build <sheet name="..." sheetId="N" r:id="..."/> entries.
+                let mut entries = String::new();
+                for (i, (name, rid)) in synthesized.iter().enumerate() {
+                    let sheet_id = i + 1;
+                    entries.push_str(&format!(
+                        "<sheet name=\"{}\" sheetId=\"{}\" r:id=\"{}\"/>",
+                        xml_escape_attr(name),
+                        sheet_id,
+                        xml_escape_attr(rid)
+                    ));
+                }
+                let new_block = format!("<sheets>{entries}</sheets>");
+                let rewritten = if let Some(replaced) =
+                    replace_first_occurrence(&wb_xml, "<sheets/>", &new_block)
+                {
+                    replaced
+                } else if let Some(replaced) =
+                    replace_first_occurrence(&wb_xml, "<sheets />", &new_block)
+                {
+                    replaced
+                } else {
+                    // No empty <sheets> marker to replace — workbook
+                    // already has an open/close form but contains no
+                    // <sheet> children. Inject our entries before
+                    // </sheets>.
+                    if let Some(close_pos) = wb_xml.find("</sheets>") {
+                        let mut s = String::with_capacity(wb_xml.len() + entries.len());
+                        s.push_str(&wb_xml[..close_pos]);
+                        s.push_str(&entries);
+                        s.push_str(&wb_xml[close_pos..]);
+                        s
+                    } else {
+                        // Workbook has no <sheets> block at all; this
+                        // is too far gone for permissive mode. Fall
+                        // through without rewriting workbook.xml; the
+                        // splice will report MissingSourceTitle if it
+                        // needs the synthesized name.
+                        wb_xml.clone()
+                    }
+                };
+                if rewritten != wb_xml {
+                    file_patches.insert("xl/workbook.xml".to_string(), rewritten.into_bytes());
+                }
             }
         }
 
@@ -306,6 +411,7 @@ impl XlsxPatcher {
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
             queued_sheet_copies: Vec::new(),
+            permissive_seed_file_patches: file_patches,
         })
     }
 
@@ -1198,6 +1304,14 @@ impl XlsxPatcher {
         // phase to write into it (workbook.xml + workbook.xml.rels).
         // Phase 3 mutates it further with per-sheet rewrites.
         let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
+
+        // Sprint Θ Pod-A: pre-seed `file_patches` with any permissive-
+        // mode rewrites that `XlsxPatcher::open` produced (e.g. the
+        // `<sheets/>` → `<sheets>...</sheets>` normalization). We move
+        // (`drain`) rather than clone because the seed is one-shot.
+        for (k, v) in self.permissive_seed_file_patches.drain() {
+            file_patches.insert(k, v);
+        }
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //
@@ -2717,6 +2831,41 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|w| w == needle)
+}
+
+/// Sprint Θ Pod-A — XML attribute-value escape used by the permissive
+/// load-time workbook.xml rewrite. Covers the five characters
+/// disallowed by the XML 1.0 production for an `AttValue` (double-quote
+/// terminated form). Synthesized titles are always `SheetN` so the
+/// escape is mostly a guard for future callers, but the rId we recover
+/// from the rels graph could in principle contain `&`.
+fn xml_escape_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Sprint Θ Pod-A — replace the first occurrence of `needle` in
+/// `haystack` with `replacement`. Returns `None` if the needle is not
+/// found, mirroring the contract of `str::replacen` but with a single
+/// allocation (and without the `Cow` allocation `str::replacen` does
+/// when no match exists).
+fn replace_first_occurrence(haystack: &str, needle: &str, replacement: &str) -> Option<String> {
+    let idx = haystack.find(needle)?;
+    let mut out = String::with_capacity(haystack.len() - needle.len() + replacement.len());
+    out.push_str(&haystack[..idx]);
+    out.push_str(replacement);
+    out.push_str(&haystack[idx + needle.len()..]);
+    Some(out)
 }
 
 /// Return a `zip::DateTime` honoring `WOLFXL_TEST_EPOCH` when set.

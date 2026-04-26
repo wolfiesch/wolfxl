@@ -49,6 +49,7 @@ def load_workbook(
     data_only: bool = False,
     keep_links: bool = True,
     modify: bool = False,
+    permissive: bool = False,
 ) -> Workbook:
     """Open an .xlsx file for reading or modification.
 
@@ -58,6 +59,18 @@ def load_workbook(
         If True, enable read-modify-write mode.  Values and formats can be
         changed and saved back to disk via ``wb.save(path)``.  Uses the WolfXL
         engine (surgical ZIP patching) instead of a full DOM rewrite.
+    permissive : bool
+        If True, fall back to the workbook rels graph when
+        ``xl/workbook.xml``'s ``<sheets>`` block is empty or
+        self-closing. Each worksheet relationship target is registered
+        under a synthesized title (``Sheet1``, ``Sheet2``, ...). This
+        unblocks workflows that need to operate on technically-malformed
+        (but Excel-tolerant) workbooks — e.g. a self-closing
+        ``<sheets/>`` whose rels still reference
+        ``xl/worksheets/sheet1.xml``. Default is ``False`` so well-formed
+        inputs round-trip unchanged. Added in Sprint Θ Pod-A; tracked in
+        tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
+        #4).
 
     Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
     accepted for openpyxl compatibility. ``data_only=True`` returns cached
@@ -65,5 +78,9 @@ def load_workbook(
     no-op compatibility shims.
     """
     if modify:
-        return Workbook._from_patcher(str(filename), data_only=data_only)  # noqa: SLF001
-    return Workbook._from_reader(str(filename), data_only=data_only)  # noqa: SLF001
+        return Workbook._from_patcher(  # noqa: SLF001
+            str(filename), data_only=data_only, permissive=permissive
+        )
+    return Workbook._from_reader(  # noqa: SLF001
+        str(filename), data_only=data_only, permissive=permissive
+    )

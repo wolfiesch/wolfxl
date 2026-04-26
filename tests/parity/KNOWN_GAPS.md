@@ -144,9 +144,9 @@ ratchet-tracked record of WHY wolfxl preserves what openpyxl drops.
 
 Surfaced by Pod-γ's full harness (`tests/test_copy_worksheet_modify.py`,
 originally six xfail cases). Pod-δ closed four of the six in
-Sprint Ζ; two remain as documented 1.2 follow-ups (low real-world
-impact — only reachable through synthesized fixtures or naive-splice
-fakeouts).
+Sprint Ζ; Sprint Θ Pod-A closed bug #4 via the new
+``permissive=True`` loader flag. One case (#6) remains as a
+documented 1.2 follow-up.
 
 #### Fixed in 1.1 (Sprint Ζ Pod-δ)
 
@@ -179,13 +179,28 @@ fakeouts).
   and Pod-β's last-write-wins-on-the-USER invariant). Test flips
   xfail (strict, AssertionError) → PASS.
 
+#### Fixed in 1.2 (Sprint Θ Pod-A)
+
+- ✅ **#4 `test_p_self_closing_sheets_block`** —
+  fixed by Sprint Θ Pod-A commit `fix(rfc-035): add permissive=True
+  loader mode, close bug #4 self-closing <sheets/>`.
+  `wolfxl.load_workbook(..., permissive=True)` now falls back to the
+  workbook rels graph when `xl/workbook.xml`'s `<sheets>` block is
+  empty / self-closing: each worksheet relationship target is
+  registered under a synthesized title (`Sheet1`, `Sheet2`, ...) and
+  the in-memory workbook.xml is rewritten to expose the synthesized
+  `<sheet>` entries so downstream phases (Phase 2.7 splice, defined-
+  names merger) see a well-formed workbook. The flag defaults to
+  `False`; well-formed inputs are unaffected. Test flips xfail →
+  PASS end-to-end (load → copy_worksheet → save → reload via
+  openpyxl).
+
 #### Deferred to 1.2
 
 | # | Failing case | Symptom | Why deferred |
 |---|---|---|---|
-| 4 | `test_p_self_closing_sheets_block` | wolfxl loader rejects synthesized `<sheets/>` workbook.xml fixtures, so the splice's self-closing branch is unreachable through the public API. | Real Excel never emits a self-closing `<sheets/>` for a non-empty workbook. Reachable only via direct ZIP edit. 1.2 follow-up: add a Rust-level Phase 2.7 unit test that exercises the splice on a self-closing input directly when the loader gains a `permissive=True` mode. |
 | 6 | `test_r_cdata_pi_fuzz_fakeout` | Phase 2.7 splice is naive — a workbook.xml comment containing literal `</sheets>` may fool the byte-level locator. | Acknowledged in Pod-β's handoff note as "acceptable for 1.1 since no real Excel-emitted workbook contains it". 1.2 follow-up: promote the splice to a SAX/quick-xml-driven scan that respects element nesting. |
 
-Tracked by: `tests/test_copy_worksheet_modify.py` — the two remaining
-deferred cases are still pinned with `xfail(strict=True)`. When a
+Tracked by: `tests/test_copy_worksheet_modify.py` — the one remaining
+deferred case is still pinned with `xfail(strict=True)`. When a
 fix lands, remove the xfail marker and update this table.
