@@ -355,3 +355,108 @@ def test_rfc031_idx_must_be_positive(tmp_path: Path) -> None:
         ws.insert_cols(0)
     with pytest.raises(ValueError, match=">= 1"):
         ws.delete_cols(0)
+
+
+# ---------------------------------------------------------------------------
+# RFC-031 round 2: <tableColumns> insert / delete (was: count out of sync,
+# producing corrupt xlsx). See Plans/followups/rfc-030-031-api-coordination.md.
+# ---------------------------------------------------------------------------
+
+
+def _make_table_fixture(path: Path) -> None:
+    """5x5 grid + a Table A1:E5 with header row and 5 named columns."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    assert ws is not None
+    for r in range(1, 6):
+        for c in range(1, 6):
+            ws.cell(r, c, f"H{c}" if r == 1 else f"R{r}C{c}")
+    from openpyxl.worksheet.table import Table
+
+    ws.add_table(Table(displayName="TBL", ref="A1:E5"))
+    wb.save(str(path))
+
+
+def test_rfc031_round2_insert_cols_inside_table_grows_table_columns(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_table_fixture(src)
+
+    wb = load_workbook(str(src), modify=True)
+    ws = wb.active
+    assert ws is not None
+    ws.insert_cols(3, 2)
+    wb.save(str(dst))
+
+    with zipfile.ZipFile(str(dst)) as z:
+        table_xml = z.read("xl/tables/table1.xml").decode("utf-8")
+    assert 'ref="A1:G5"' in table_xml, f"got: {table_xml}"
+    assert '<tableColumns count="7">' in table_xml, f"got: {table_xml}"
+    # New placeholder columns at positions 3 and 4 (Column<NEW>).
+    assert table_xml.count("<tableColumn ") == 7, f"got: {table_xml}"
+
+
+def test_rfc031_round2_delete_cols_inside_table_shrinks_table_columns(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_table_fixture(src)
+
+    wb = load_workbook(str(src), modify=True)
+    ws = wb.active
+    assert ws is not None
+    ws.delete_cols(3, 2)
+    wb.save(str(dst))
+
+    with zipfile.ZipFile(str(dst)) as z:
+        table_xml = z.read("xl/tables/table1.xml").decode("utf-8")
+    assert 'ref="A1:C5"' in table_xml, f"got: {table_xml}"
+    assert '<tableColumns count="3">' in table_xml, f"got: {table_xml}"
+    # Surviving columns: H1, H2, H5 (H3 and H4 dropped).
+    assert 'name="H1"' in table_xml, f"got: {table_xml}"
+    assert 'name="H2"' in table_xml, f"got: {table_xml}"
+    assert 'name="H5"' in table_xml, f"got: {table_xml}"
+    assert 'name="H3"' not in table_xml, f"got: {table_xml}"
+    assert 'name="H4"' not in table_xml, f"got: {table_xml}"
+
+
+def test_rfc031_round2_insert_cols_after_table_does_not_change_columns(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_table_fixture(src)
+
+    wb = load_workbook(str(src), modify=True)
+    ws = wb.active
+    assert ws is not None
+    ws.insert_cols(7, 2)  # past column E (col 5)
+    wb.save(str(dst))
+
+    with zipfile.ZipFile(str(dst)) as z:
+        table_xml = z.read("xl/tables/table1.xml").decode("utf-8")
+    assert 'ref="A1:E5"' in table_xml, f"got: {table_xml}"
+    assert '<tableColumns count="5">' in table_xml, f"got: {table_xml}"
+
+
+def test_rfc031_round2_row_axis_does_not_touch_table_columns(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_table_fixture(src)
+
+    wb = load_workbook(str(src), modify=True)
+    ws = wb.active
+    assert ws is not None
+    ws.insert_rows(3, 2)
+    wb.save(str(dst))
+
+    with zipfile.ZipFile(str(dst)) as z:
+        table_xml = z.read("xl/tables/table1.xml").decode("utf-8")
+    # Row axis only shifts the ref's row part; tableColumns must stay.
+    assert 'ref="A1:E7"' in table_xml, f"got: {table_xml}"
+    assert '<tableColumns count="5">' in table_xml, f"got: {table_xml}"

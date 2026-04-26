@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Sprint Ε (Phase 4a follow-ups + Phase 4b)
+
+### Fixed
+
+- **RFC-031 round 2** — `<tableColumns>` on `tableN.xml` now
+  correctly grows / shrinks when `insert_cols` / `delete_cols`
+  overlap the table's column band. Previously the `count="N"`
+  attribute and `<tableColumn>` element list stayed at the
+  pre-shift size, producing an xlsx that Excel and openpyxl
+  refused to load. Fixed by `crates/wolfxl-structural/src/shift_workbook.rs`
+  (`extract_table_col_band` + `rewrite_table_columns_block`).
+  Regression: `tests/test_col_shift_modify.py::test_rfc031_round2_*`
+  (4 cases). Also closes the corresponding action items in
+  `Plans/followups/rfc-030-031-api-coordination.md`.
+
 ## Unreleased — Sprint Δ Phase 4a (Structural ops)
 
 ### Added

@@ -97,13 +97,37 @@ land alongside the patcher-block shifts above.
 
 ## Action items
 
-- [ ] pod-030: rebase onto pod-031's `feat/rfc-031-insert-delete-cols`
+- [x] pod-030: rebase onto pod-031's `feat/rfc-031-insert-delete-cols`
   branch, fill in the `Axis::Row` paths in
   `crates/wolfxl-structural/src/sheet_shift.rs`, and confirm the
   `AxisShift` / `apply_axis_shift` signature matches expectations.
-- [ ] pod-030 or follow-up pod: implement the patcher-block shifts
+  → Done in Sprint Δ; the merged `wolfxl-structural` crate uses
+  `ShiftPlan { axis, idx, n }` and both axes ship.
+- [x] pod-030 or follow-up pod: implement the patcher-block shifts
   (hyperlinks / DV / CF / tables / `<tableColumn>` removal).
-- [ ] pod-030 or follow-up pod: implement `apply_workbook_shift`
+  → Sprint Ε Pod-A: hyperlink/DV/CF blocks are already shifted
+  in-place by `shift_cells.rs` (proven by probe scripts); the only
+  real bug was `<tableColumns>` count + `<tableColumn>` add/remove
+  on Col-axis shifts. Fixed in `shift_workbook.rs` via the new
+  `extract_table_col_band` + `rewrite_table_columns_block` helpers.
+  Regression covered by `tests/test_col_shift_modify.py`
+  (`test_rfc031_round2_*`).
+- [x] pod-030 or follow-up pod: implement `apply_workbook_shift`
   for defined names.
-- [ ] Update RFC-031 §5 and §10 once the follow-ups land; promote
+  → Already worked correctly in the merged Sprint Δ code (proven
+  by probe — both row and col axes shift `<definedName>` formulas
+  via `shift_defined_names`). False positive in this followups doc.
+- [x] Update RFC-031 §5 and §10 once the follow-ups land; promote
   the spec deviations from "deferred" to "shipped".
+  → Sprint Ε wave 1 ships the only outstanding deviation
+  (`<tableColumn>` removal).
+
+## Resolution
+
+Closed 2026-04-26 — all action items addressed in Sprint Ε. The
+hyperlink/DV/CF claim in §"Open question — patcher-block shifts" was
+investigated and proven false: the existing Phase-2.6 (now Phase-2.5i)
+axis-shift pass already walks the merged sheet XML and rewrites those
+blocks, because Phase 3 (sheet patching with `wolfxl_merger`) runs
+BEFORE Phase 2.5i. The only real RFC-031 §5.4 gap was `<tableColumn>`
+add/remove on column-band overlaps, which Sprint Ε Pod-A landed.

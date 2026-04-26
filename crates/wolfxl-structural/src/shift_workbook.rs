@@ -234,11 +234,29 @@ pub fn apply_workbook_shift(
 }
 
 /// Rewrite a `xl/tables/tableN.xml` part: `<table ref>`, `<autoFilter ref>`,
-/// and `<calculatedColumnFormula>` text.
+/// `<calculatedColumnFormula>` text, plus the `<tableColumns>` block on
+/// Col-axis shifts (insert spawns new `<tableColumn>` entries, delete
+/// removes them; `count=` and `id=` are renumbered — RFC-031 §5.4).
 pub fn shift_table_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     if plan.is_noop() {
         return xml.to_vec();
     }
+    // Capture pre-shift table column band so we can rewrite
+    // `<tableColumns>` after the standard ref/autoFilter shift.
+    let pre_band: Option<(u32, u32)> = if plan.axis == Axis::Col {
+        extract_table_col_band(xml)
+    } else {
+        None
+    };
+    let shifted = shift_table_xml_inner(xml, plan);
+    if let Some((t_lo, t_hi)) = pre_band {
+        rewrite_table_columns_block(&shifted, plan, t_lo, t_hi)
+    } else {
+        shifted
+    }
+}
+
+fn shift_table_xml_inner(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     let xml_str = match std::str::from_utf8(xml) {
         Ok(s) => s,
         Err(_) => return xml.to_vec(),
@@ -311,6 +329,211 @@ pub fn shift_table_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     }
 
     writer.into_inner().into_inner()
+}
+
+/// Parse the `<table ref="A1:E5">` attribute and return the
+/// 1-based [col_lo, col_hi] band. Returns None if no `<table>` ref
+/// or the ref is malformed.
+fn extract_table_col_band(xml: &[u8]) -> Option<(u32, u32)> {
+    let s = std::str::from_utf8(xml).ok()?;
+    // Find `<table ` (note trailing space — distinguishes from `<tableColumn`
+    // and `<tableColumns`).
+    let i = s.find("<table ")?;
+    let close = s[i..].find('>')?;
+    let elt = &s[i..i + close];
+    let r_idx = elt.find(" ref=\"")?;
+    let v_start = r_idx + " ref=\"".len();
+    let v_end = elt[v_start..].find('"')?;
+    let r = &elt[v_start..v_start + v_end];
+    parse_ref_col_band(r)
+}
+
+/// Parse "A1:E5" → (1, 5). Single cell "B3" → (2, 2).
+fn parse_ref_col_band(r: &str) -> Option<(u32, u32)> {
+    let (lo, hi) = match r.find(':') {
+        Some(c) => (&r[..c], &r[c + 1..]),
+        None => (r, r),
+    };
+    let lo_col = parse_col_letters(lo)?;
+    let hi_col = parse_col_letters(hi)?;
+    Some((lo_col, hi_col))
+}
+
+fn parse_col_letters(cell: &str) -> Option<u32> {
+    let mut n = 0u32;
+    let bytes = cell.as_bytes();
+    let mut i = 0;
+    if bytes.get(i)? == &b'$' {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        n = n.checked_mul(26)?.checked_add(
+            (bytes[i].to_ascii_uppercase() - b'A' + 1) as u32,
+        )?;
+        i += 1;
+    }
+    if n == 0 { None } else { Some(n) }
+}
+
+/// Rewrite the `<tableColumns count="N">...</tableColumns>` block to
+/// reflect a Col-axis insert/delete that overlaps the table band.
+///
+/// Inputs:
+/// - `shifted` — XML *after* `shift_table_xml_inner` has rewritten refs.
+/// - `plan` — the col-axis ShiftPlan.
+/// - `t_lo`, `t_hi` — the table's PRE-shift 1-based col band.
+fn rewrite_table_columns_block(
+    shifted: &[u8],
+    plan: &ShiftPlan,
+    t_lo: u32,
+    t_hi: u32,
+) -> Vec<u8> {
+    let s = match std::str::from_utf8(shifted) {
+        Ok(s) => s.to_owned(),
+        Err(_) => return shifted.to_vec(),
+    };
+    let block_start = match s.find("<tableColumns") {
+        Some(i) => i,
+        None => return shifted.to_vec(),
+    };
+    let block_end = match s[block_start..].find("</tableColumns>") {
+        Some(i) => block_start + i + "</tableColumns>".len(),
+        None => return shifted.to_vec(),
+    };
+    let block = &s[block_start..block_end];
+
+    // Parse out each `<tableColumn .../>` element in source order.
+    let mut entries: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while let Some(start_rel) = block[i..].find("<tableColumn ") {
+        let abs_start = i + start_rel;
+        // Self-closing; find next "/>" or "</tableColumn>" tag end.
+        let end = match block[abs_start..].find("/>") {
+            Some(e) => abs_start + e + 2,
+            None => break,
+        };
+        entries.push(block[abs_start..end].to_string());
+        i = end;
+    }
+
+    // Apply the plan to the per-table positional list.
+    let new_entries: Vec<String> = if plan.is_insert() {
+        let n = plan.n as u32;
+        // Insert n empty cols at position (plan.idx - t_lo + 1) within the
+        // table, but ONLY if the insert pivot lands STRICTLY INSIDE the
+        // table's pre-shift band (t_lo .. t_hi). Insert at exactly t_lo+1
+        // counts; insert at t_hi+1 is "after the table" and adds no cols.
+        if plan.idx > t_hi || plan.idx <= t_lo {
+            // Outside band → no col change; just renumber ids in case
+            // (no-op for renumbering, but keeps the contract clean).
+            renumber_ids(entries)
+        } else {
+            let insert_pos = (plan.idx - t_lo) as usize; // 0-based slot
+            let mut out: Vec<String> = Vec::with_capacity(entries.len() + n as usize);
+            out.extend_from_slice(&entries[..insert_pos]);
+            // Compose new placeholder entries. Names must be unique within
+            // the table — use a fresh "ColumnNNN" pattern. id is renumbered
+            // below, so emit a placeholder.
+            // Find max existing id-suffix to avoid name clashes.
+            let mut max_n = 0u32;
+            for e in &entries {
+                if let Some(name) = extract_attr(e, "name") {
+                    if let Some(rest) = name.strip_prefix("Column") {
+                        if let Ok(k) = rest.parse::<u32>() {
+                            if k > max_n {
+                                max_n = k;
+                            }
+                        }
+                    }
+                }
+            }
+            for k in 0..n {
+                let new_name = format!("Column{}", max_n + 1 + k);
+                out.push(format!(r#"<tableColumn id="0" name="{new_name}"/>"#));
+            }
+            out.extend_from_slice(&entries[insert_pos..]);
+            renumber_ids(out)
+        }
+    } else if plan.is_delete() {
+        let n = plan.abs_n();
+        // Band [plan.idx, plan.idx + n - 1]. Drop entries whose 1-based
+        // table-position lies inside the band.
+        let band_lo = plan.idx;
+        let band_hi = plan.idx + n - 1;
+        let kept: Vec<String> = entries
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                let col = t_lo + i as u32; // 1-based workbook col of this table column
+                if col >= band_lo && col <= band_hi {
+                    None
+                } else {
+                    Some(e)
+                }
+            })
+            .collect();
+        renumber_ids(kept)
+    } else {
+        renumber_ids(entries)
+    };
+
+    let new_count = new_entries.len();
+    let mut new_block = format!(r#"<tableColumns count="{new_count}">"#);
+    for e in &new_entries {
+        new_block.push_str(e);
+    }
+    new_block.push_str("</tableColumns>");
+
+    let mut out = Vec::with_capacity(shifted.len());
+    out.extend_from_slice(s[..block_start].as_bytes());
+    out.extend_from_slice(new_block.as_bytes());
+    out.extend_from_slice(s[block_end..].as_bytes());
+    out
+}
+
+/// Renumber `id="N"` on every `<tableColumn .../>` element so they're
+/// 1, 2, 3, ... in source order.
+fn renumber_ids(entries: Vec<String>) -> Vec<String> {
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let id = (i + 1) as u32;
+            replace_attr_value(&e, "id", &id.to_string())
+        })
+        .collect()
+}
+
+/// Replace the value of attribute `key` in `elt` (or insert if absent).
+fn replace_attr_value(elt: &str, key: &str, new_val: &str) -> String {
+    let pat = format!(" {key}=\"");
+    if let Some(start) = elt.find(&pat) {
+        let v_start = start + pat.len();
+        if let Some(rel_end) = elt[v_start..].find('"') {
+            let v_end = v_start + rel_end;
+            let mut out = String::with_capacity(elt.len() + new_val.len());
+            out.push_str(&elt[..v_start]);
+            out.push_str(new_val);
+            out.push_str(&elt[v_end..]);
+            return out;
+        }
+    }
+    // Insert before "/>" if absent.
+    if let Some(close) = elt.rfind("/>") {
+        let mut out = String::with_capacity(elt.len() + key.len() + new_val.len() + 4);
+        out.push_str(&elt[..close]);
+        out.push_str(&format!(" {key}=\"{new_val}\""));
+        out.push_str(&elt[close..]);
+        return out;
+    }
+    elt.to_string()
+}
+
+fn extract_attr(elt: &str, key: &str) -> Option<String> {
+    let pat = format!(" {key}=\"");
+    let start = elt.find(&pat)? + pat.len();
+    let rel_end = elt[start..].find('"')?;
+    Some(elt[start..start + rel_end].to_string())
 }
 
 /// Rewrite a `xl/comments*.xml` part: `<comment ref>`.
@@ -856,5 +1079,84 @@ mod tests {
         let out = shift_defined_names(xml.as_bytes(), &p, "Sheet1", Some(0));
         let s = String::from_utf8_lossy(&out);
         assert!(s.contains(r#"sheet name="Sheet1""#));
+    }
+
+    // --- RFC-031 §5.4: <tableColumns> insert/delete on Col axis -----------
+
+    const TBL_5COL: &str = r#"<?xml version="1.0"?><table id="1" name="T" displayName="T" ref="A1:E5"><autoFilter ref="A1:E5"/><tableColumns count="5"><tableColumn id="1" name="H1"/><tableColumn id="2" name="H2"/><tableColumn id="3" name="H3"/><tableColumn id="4" name="H4"/><tableColumn id="5" name="H5"/></tableColumns></table>"#;
+
+    #[test]
+    fn table_insert_inside_band_adds_columns_and_renumbers() {
+        // insert_cols(3, 2) on table A1:E5 → ref A1:G5, count=7,
+        // ids 1..7, names H1, H2, Column<NEW>, Column<NEW>, H3, H4, H5.
+        let plan = ShiftPlan::insert(Axis::Col, 3, 2);
+        let out = shift_table_xml(TBL_5COL.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="A1:G5""#), "got: {s}");
+        assert!(s.contains(r#"<tableColumns count="7">"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="1" name="H1"/>"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="2" name="H2"/>"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="3" name="Column"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="4" name="Column"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="5" name="H3"/>"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="7" name="H5"/>"#), "got: {s}");
+    }
+
+    #[test]
+    fn table_delete_inside_band_removes_columns_and_renumbers() {
+        // delete_cols(3, 2) on A1:E5 → ref A1:C5, count=3, ids 1,2,3
+        // names H1, H2, H5 (H3, H4 dropped).
+        let plan = ShiftPlan::delete(Axis::Col, 3, 2);
+        let out = shift_table_xml(TBL_5COL.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="A1:C5""#), "got: {s}");
+        assert!(s.contains(r#"<tableColumns count="3">"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="1" name="H1"/>"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="2" name="H2"/>"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="3" name="H5"/>"#), "got: {s}");
+        assert!(!s.contains(r#"name="H3""#), "got: {s}");
+        assert!(!s.contains(r#"name="H4""#), "got: {s}");
+    }
+
+    #[test]
+    fn table_insert_after_band_does_not_change_columns() {
+        // insert_cols(7, 2) on A1:E5 — entirely outside table → ref unchanged,
+        // tableColumns unchanged (count stays 5).
+        let plan = ShiftPlan::insert(Axis::Col, 7, 2);
+        let out = shift_table_xml(TBL_5COL.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="A1:E5""#), "got: {s}");
+        assert!(s.contains(r#"<tableColumns count="5">"#), "got: {s}");
+    }
+
+    #[test]
+    fn table_insert_before_band_shifts_ref_but_keeps_columns() {
+        // insert_cols(1, 2) before the table — ref shifts to C1:G5, but
+        // the table still has 5 cols (cols just renumbered in the workbook).
+        let plan = ShiftPlan::insert(Axis::Col, 1, 2);
+        let out = shift_table_xml(TBL_5COL.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="C1:G5""#), "got: {s}");
+        assert!(s.contains(r#"<tableColumns count="5">"#), "got: {s}");
+    }
+
+    #[test]
+    fn row_axis_shift_does_not_touch_table_columns() {
+        // insert_rows(3, 2) — table_columns block must be untouched
+        // because it's a column-axis quirk.
+        let plan = ShiftPlan::insert(Axis::Row, 3, 2);
+        let out = shift_table_xml(TBL_5COL.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"<tableColumns count="5">"#), "got: {s}");
+        assert!(s.contains(r#"<tableColumn id="3" name="H3"/>"#), "got: {s}");
+        assert!(s.contains(r#"ref="A1:E7""#), "got: {s}");
+    }
+
+    #[test]
+    fn parse_ref_col_band_handles_dollar_and_single_cell() {
+        assert_eq!(parse_ref_col_band("A1:E5"), Some((1, 5)));
+        assert_eq!(parse_ref_col_band("$A$1:$E$5"), Some((1, 5)));
+        assert_eq!(parse_ref_col_band("B3"), Some((2, 2)));
+        assert_eq!(parse_ref_col_band("AA1:AB1"), Some((27, 28)));
     }
 }
