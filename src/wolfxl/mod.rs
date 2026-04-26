@@ -13,7 +13,6 @@ pub mod shared_strings;
 pub mod sheet_patcher;
 #[allow(dead_code)] // Styles parser/appender used in Phase 3 (format patching)
 pub mod styles;
-#[allow(dead_code)] // wired to do_save in commit 2 of RFC-026 ship slice
 pub mod conditional_formatting;
 pub mod validations;
 
@@ -29,6 +28,9 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::ooxml_util;
+use conditional_formatting::{
+    CfRuleKind, CfRulePatch, CfvoPatch, ColorScaleStop, ConditionalFormattingPatch, DxfPatch,
+};
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
 use validations::DataValidationPatch;
@@ -75,6 +77,15 @@ pub struct XlsxPatcher {
     /// the queued patches are appended. The combined block is then
     /// handed to `wolfxl_merger` as `SheetBlock::DataValidations`.
     queued_dv_patches: HashMap<String, Vec<DataValidationPatch>>,
+    /// Queued conditional-formatting patches per sheet name (RFC-026).
+    /// Each entry becomes one or more `<conditionalFormatting>` blocks
+    /// during save. Existing CF blocks in the source sheet XML are
+    /// extracted byte-for-byte and prepended (because the merger's
+    /// replace-all CF semantics drop them otherwise — RFC-011 §5.5).
+    /// `dxfId` allocation threads through a workbook-wide counter so
+    /// CF added on multiple sheets in one save() session lands in a
+    /// single coordinated `xl/styles.xml` mutation.
+    queued_cf_patches: HashMap<String, Vec<ConditionalFormattingPatch>>,
 }
 
 #[pymethods]
@@ -108,6 +119,7 @@ impl XlsxPatcher {
             rels_patches: HashMap::new(),
             queued_blocks: HashMap::new(),
             queued_dv_patches: HashMap::new(),
+            queued_cf_patches: HashMap::new(),
         })
     }
 
@@ -240,6 +252,58 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a conditional-formatting patch on a sheet (RFC-026).
+    ///
+    /// `payload` is a flat dict shaped like:
+    ///   {"sqref": "A1:A10",
+    ///    "rules": [
+    ///      {"kind": "cellIs"|"expression"|"colorScale"|"dataBar",
+    ///       "operator": "greaterThan",          # cellIs only
+    ///       "formula_a": "5", "formula_b": "10", # cellIs / expression
+    ///       "formula":   "...",                  # expression only
+    ///       "stops": [{"cfvo_type": "min", "val": None,
+    ///                  "color_rgb": "FFF8696B"}, ...],   # colorScale
+    ///       "min_cfvo_type": "min", "min_val": None,     # dataBar
+    ///       "max_cfvo_type": "max", "max_val": None,
+    ///       "color_rgb": "FF638EC6",                     # dataBar
+    ///       "stop_if_true": false,
+    ///       "dxf": { ... } | None,
+    ///      }, ...]}
+    ///
+    /// Mirrors the writer's `add_conditional_format` shape but nests rules
+    /// under one wrapper per sqref so priority ordering within a wrapper
+    /// is preserved.
+    fn queue_conditional_formatting(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let sqref = extract_str(payload, "sqref")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("conditional formatting requires 'sqref'"))?;
+
+        let rules_obj = payload
+            .get_item("rules")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("conditional formatting requires 'rules'"))?;
+        let rules_list = rules_obj
+            .downcast::<pyo3::types::PyList>()
+            .map_err(|_| PyErr::new::<PyValueError, _>("'rules' must be a list of dicts"))?;
+
+        let mut rules: Vec<CfRulePatch> = Vec::with_capacity(rules_list.len());
+        for item in rules_list.iter() {
+            let rd = item
+                .downcast::<PyDict>()
+                .map_err(|_| PyErr::new::<PyValueError, _>("each rule must be a dict"))?;
+            rules.push(extract_cf_rule(rd)?);
+        }
+
+        let patch = ConditionalFormattingPatch { sqref, rules };
+        self.queued_cf_patches
+            .entry(sheet.to_string())
+            .or_default()
+            .push(patch);
+        Ok(())
+    }
+
     /// Queue a cell border change.
     fn queue_border(
         &mut self,
@@ -292,6 +356,7 @@ impl XlsxPatcher {
             && self.rels_patches.is_empty()
             && self.queued_blocks.is_empty()
             && self.queued_dv_patches.is_empty()
+            && self.queued_cf_patches.is_empty()
         {
             // No changes — just copy
             std::fs::copy(&self.file_path, output_path)
@@ -397,6 +462,74 @@ impl XlsxPatcher {
                 .entry(sheet_path.clone())
                 .or_default()
                 .push(SheetBlock::DataValidations(block_bytes));
+        }
+
+        // --- Phase 2.5b: Build <conditionalFormatting> blocks from
+        // queued CF patches (RFC-026). Cross-sheet coordination: a
+        // single workbook-wide `dxf_count` allocates dxfId values
+        // across every sheet's patches in deterministic (sorted) sheet
+        // order, and the resulting new `<dxf>` entries are folded into
+        // a single `xl/styles.xml` mutation at the end.
+        //
+        // The merger uses replace-all semantics for slot 17 (RFC-011
+        // §5.5) — supplying any CF block drops every existing CF block
+        // in the source. We therefore call `extract_existing_cf_blocks`
+        // first and re-include them verbatim at the head of each
+        // sheet's payload so byte-preservation of unchanged CF rules
+        // is not a side-effect of our setter call.
+        let mut new_dxfs_total: Vec<DxfPatch> = Vec::new();
+        let mut styles_loaded: Option<String> = None;
+        let mut running_dxf_count: u32 = 0;
+        let mut cf_sheet_names: Vec<&String> = self.queued_cf_patches.keys().collect();
+        cf_sheet_names.sort();
+        for sheet_name in cf_sheet_names {
+            let patches = &self.queued_cf_patches[sheet_name];
+            let sheet_path = match self.sheet_paths.get(sheet_name) {
+                Some(p) => p,
+                None => continue,
+            };
+            let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
+
+            if styles_loaded.is_none() {
+                let raw = ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")?
+                    .unwrap_or_else(|| minimal_styles_xml());
+                running_dxf_count = conditional_formatting::count_dxfs(&raw);
+                styles_loaded = Some(raw);
+            }
+
+            let existing = conditional_formatting::extract_existing_cf_blocks(&xml);
+            let pmax = conditional_formatting::scan_max_cf_priority(&xml);
+            let result = conditional_formatting::build_cf_blocks(
+                &existing,
+                patches,
+                pmax,
+                running_dxf_count,
+            );
+            running_dxf_count += result.new_dxfs.len() as u32;
+            new_dxfs_total.extend(result.new_dxfs);
+            local_blocks
+                .entry(sheet_path.clone())
+                .or_default()
+                .push(SheetBlock::ConditionalFormatting(result.block_bytes));
+        }
+        // If CF patches added new <dxf> entries, fold them into the
+        // styles.xml that Phase 1's format patching may have already
+        // mutated. We share `styles_xml` so a single save with both
+        // cell-format edits and CF rules produces one styles.xml write.
+        if !new_dxfs_total.is_empty() {
+            let new_dxfs_xml: String = new_dxfs_total
+                .iter()
+                .map(conditional_formatting::dxf_to_xml)
+                .collect::<Vec<_>>()
+                .join("");
+            let base = match styles_xml.take() {
+                Some(s) => s,
+                None => styles_loaded
+                    .clone()
+                    .unwrap_or_else(|| minimal_styles_xml()),
+            };
+            let updated = conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
+            styles_xml = Some(updated);
         }
 
         // --- Phase 3: Patch worksheet XMLs ---
@@ -600,6 +733,93 @@ fn dict_to_border_spec(d: &Bound<'_, PyDict>) -> PyResult<styles::BorderSpec> {
         right: extract_side(d, "right")?,
         top: extract_side(d, "top")?,
         bottom: extract_side(d, "bottom")?,
+    })
+}
+
+fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
+    let kind_tag = extract_str(d, "kind")?
+        .ok_or_else(|| PyErr::new::<PyValueError, _>("CF rule requires 'kind'"))?;
+
+    let kind = match kind_tag.as_str() {
+        "cellIs" => CfRuleKind::CellIs {
+            operator: extract_str(d, "operator")?.unwrap_or_else(|| "equal".to_string()),
+            formula_a: extract_str(d, "formula_a")?.unwrap_or_default(),
+            formula_b: extract_str(d, "formula_b")?,
+        },
+        "expression" => CfRuleKind::Expression {
+            formula: extract_str(d, "formula")?.unwrap_or_default(),
+        },
+        "colorScale" => {
+            let stops_obj = d.get_item("stops")?.ok_or_else(|| {
+                PyErr::new::<PyValueError, _>("colorScale rule requires 'stops'")
+            })?;
+            let stops_list = stops_obj.downcast::<pyo3::types::PyList>().map_err(|_| {
+                PyErr::new::<PyValueError, _>("'stops' must be a list of dicts")
+            })?;
+            let mut stops: Vec<ColorScaleStop> = Vec::with_capacity(stops_list.len());
+            for s in stops_list.iter() {
+                let sd = s
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyErr::new::<PyValueError, _>("each stop must be a dict"))?;
+                stops.push(ColorScaleStop {
+                    cfvo: CfvoPatch {
+                        cfvo_type: extract_str(sd, "cfvo_type")?
+                            .unwrap_or_else(|| "min".to_string()),
+                        val: extract_str(sd, "val")?,
+                    },
+                    color_rgb: extract_str(sd, "color_rgb")?.unwrap_or_default(),
+                });
+            }
+            CfRuleKind::ColorScale { stops }
+        }
+        "dataBar" => CfRuleKind::DataBar {
+            min: CfvoPatch {
+                cfvo_type: extract_str(d, "min_cfvo_type")?
+                    .unwrap_or_else(|| "min".to_string()),
+                val: extract_str(d, "min_val")?,
+            },
+            max: CfvoPatch {
+                cfvo_type: extract_str(d, "max_cfvo_type")?
+                    .unwrap_or_else(|| "max".to_string()),
+                val: extract_str(d, "max_val")?,
+            },
+            color_rgb: extract_str(d, "color_rgb")?.unwrap_or_default(),
+        },
+        other => {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "unsupported CF rule kind: '{other}'"
+            )));
+        }
+    };
+
+    let dxf = match d.get_item("dxf")? {
+        Some(v) if !v.is_none() => {
+            let dd = v.downcast::<PyDict>().map_err(|_| {
+                PyErr::new::<PyValueError, _>("'dxf' must be a dict or None")
+            })?;
+            Some(extract_dxf_patch(dd)?)
+        }
+        _ => None,
+    };
+
+    Ok(CfRulePatch {
+        kind,
+        dxf,
+        stop_if_true: extract_bool(d, "stop_if_true")?.unwrap_or(false),
+    })
+}
+
+fn extract_dxf_patch(d: &Bound<'_, PyDict>) -> PyResult<DxfPatch> {
+    Ok(DxfPatch {
+        font_bold: extract_bool(d, "font_bold")?,
+        font_italic: extract_bool(d, "font_italic")?,
+        font_color_rgb: extract_str(d, "font_color_rgb")?.map(|c| normalize_color(&c)),
+        fill_pattern_type: extract_str(d, "fill_pattern_type")?,
+        fill_fg_color_rgb: extract_str(d, "fill_fg_color_rgb")?.map(|c| normalize_color(&c)),
+        border_top_style: extract_str(d, "border_top_style")?,
+        border_bottom_style: extract_str(d, "border_bottom_style")?,
+        border_left_style: extract_str(d, "border_left_style")?,
+        border_right_style: extract_str(d, "border_right_style")?,
     })
 }
 
