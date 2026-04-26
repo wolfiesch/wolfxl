@@ -461,25 +461,6 @@ def test_i_copy_and_edit_copy_in_same_save(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG SURFACED BY POD-γ HARNESS — escalate to Pod-δ. "
-        "RFC-035 + RFC-036 do not compose: after `copy_worksheet` + "
-        "`move_sheet(new_ws.title, ...)` in the same save(), the "
-        "saved xlsx contains only the source sheet — the cloned "
-        "sheet entry is lost in workbook.xml. Likely root cause: "
-        "Phase 2.5h (sheet-order rewriter) reads workbook.xml from "
-        "`file_patches` but Phase 2.7's <sheet> append goes through "
-        "a separate code path that 2.5h overwrites. Fix: the "
-        "workbook.xml mutation produced by Phase 2.7 must be "
-        "visible to 2.5h's read (either by sequencing 2.7 → 2.5h "
-        "with file_patches as the handoff, or by merging 2.7's "
-        "<sheets> append into 2.5h's reorder pass). RFC-035 §5.4 "
-        "Composability note specifies the intended composition."
-    ),
-    raises=AssertionError,
-    strict=True,
-)
 def test_j_copy_then_move_sheet_in_same_save(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     out = tmp_path / "out.xlsx"

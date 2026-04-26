@@ -1868,9 +1868,21 @@ impl XlsxPatcher {
         // post-move tab list.
         let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
         if !self.queued_sheet_moves.is_empty() {
-            let src_wb_xml = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+            // RFC-035 + RFC-036 composition (Pod-δ fix for KNOWN_GAPS
+            // bug #2): Phase 2.7 writes the cloned <sheet> entry into
+            // file_patches["xl/workbook.xml"]. If we re-read from the
+            // source ZIP here, the reorder would operate on the
+            // pre-clone bytes and the new <sheet> would be silently
+            // dropped from the saved workbook.xml. Prefer file_patches
+            // so 2.7 → 2.5h compose via the file_patches handoff that
+            // RFC-035 §5.4 specifies.
+            let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
+                Some(b) => b.clone(),
+                None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
+                    .into_bytes(),
+            };
             let result = sheet_order::merge_sheet_moves(
-                src_wb_xml.as_bytes(),
+                &wb_bytes,
                 &self.queued_sheet_moves,
             )
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet-reorder merge: {e}")))?;
