@@ -423,6 +423,34 @@ impl XlsxPatcher {
         })
     }
 
+    /// Sprint Ι Pod-α: queue a rich-text value for a cell.
+    ///
+    /// `runs` is a list of `(text, font_dict_or_none)` tuples.  Each
+    /// font dict mirrors `wolfxl.cell.rich_text.InlineFont` field
+    /// names (`b`, `i`, `strike`, `u`, `sz`, `color`, `rFont`,
+    /// `family`, `charset`, `vertAlign`, `scheme`).  The patcher
+    /// emits an inline-string cell (`t="inlineStr"`) — so the SST
+    /// never has to be modified.
+    fn queue_rich_text_value(
+        &mut self,
+        sheet: &str,
+        cell: &str,
+        runs: &Bound<'_, pyo3::types::PyList>,
+    ) -> PyResult<()> {
+        let parsed = py_runs_to_rust(runs)?;
+        let (row, col) =
+            crate::util::a1_to_row_col(cell).map_err(|e| PyErr::new::<PyValueError, _>(e))?;
+        let patch = CellPatch {
+            row: row + 1,
+            col: col + 1,
+            value: Some(CellValue::RichText(parsed)),
+            style_index: None,
+        };
+        self.value_patches
+            .insert((sheet.to_string(), cell.to_string()), patch);
+        Ok(())
+    }
+
     /// Queue a cell value change.
     ///
     /// `payload` is a dict matching the ExcelBench cell payload format:
@@ -3474,6 +3502,96 @@ mod rfc013_tests {
 // ---------------------------------------------------------------------------
 // Dict → spec conversion helpers
 // ---------------------------------------------------------------------------
+
+/// Sprint Ι Pod-α: convert the Python rich-text payload (a list of
+/// ``(text, font_dict_or_None)`` tuples) into the Rust ``RichTextRun``
+/// vector that the patcher and the writer both consume.
+fn py_runs_to_rust(
+    runs: &Bound<'_, pyo3::types::PyList>,
+) -> PyResult<Vec<wolfxl_writer::rich_text::RichTextRun>> {
+    use wolfxl_writer::rich_text::{InlineFontProps, RichTextRun};
+    let mut out: Vec<RichTextRun> = Vec::with_capacity(runs.len());
+    for entry in runs.iter() {
+        // Each entry is a (text, font_or_none) 2-tuple — accept lists too.
+        let seq: &Bound<'_, pyo3::types::PySequence> = entry.downcast()?;
+        if seq.len()? < 2 {
+            return Err(PyErr::new::<PyValueError, _>(
+                "rich-text run must be a (text, font_or_none) pair",
+            ));
+        }
+        let text: String = seq.get_item(0)?.extract()?;
+        let font_obj = seq.get_item(1)?;
+        let font = if font_obj.is_none() {
+            None
+        } else {
+            let d: &Bound<'_, PyDict> = font_obj.downcast()?;
+            let mut props = InlineFontProps::default();
+            if let Some(v) = d.get_item("b")? {
+                if !v.is_none() {
+                    props.bold = Some(v.extract::<bool>()?);
+                }
+            }
+            if let Some(v) = d.get_item("i")? {
+                if !v.is_none() {
+                    props.italic = Some(v.extract::<bool>()?);
+                }
+            }
+            if let Some(v) = d.get_item("strike")? {
+                if !v.is_none() {
+                    props.strike = Some(v.extract::<bool>()?);
+                }
+            }
+            if let Some(v) = d.get_item("u")? {
+                if !v.is_none() {
+                    let s: String = v.extract()?;
+                    props.underline = Some(s);
+                }
+            }
+            if let Some(v) = d.get_item("sz")? {
+                if !v.is_none() {
+                    props.size = Some(v.extract::<f64>()?);
+                }
+            }
+            if let Some(v) = d.get_item("color")? {
+                if !v.is_none() {
+                    let s: String = v.extract()?;
+                    props.color = Some(s);
+                }
+            }
+            if let Some(v) = d.get_item("rFont")? {
+                if !v.is_none() {
+                    let s: String = v.extract()?;
+                    props.name = Some(s);
+                }
+            }
+            if let Some(v) = d.get_item("family")? {
+                if !v.is_none() {
+                    props.family = Some(v.extract::<i32>()?);
+                }
+            }
+            if let Some(v) = d.get_item("charset")? {
+                if !v.is_none() {
+                    props.charset = Some(v.extract::<i32>()?);
+                }
+            }
+            if let Some(v) = d.get_item("vertAlign")? {
+                if !v.is_none() {
+                    let s: String = v.extract()?;
+                    props.vert_align = Some(s);
+                }
+            }
+            if let Some(v) = d.get_item("scheme")? {
+                if !v.is_none() {
+                    let s: String = v.extract()?;
+                    props.scheme = Some(s);
+                }
+            }
+            Some(props)
+        };
+        out.push(RichTextRun { text, font });
+    }
+    Ok(out)
+}
 
 fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
     let mut spec = FormatSpec::default();

@@ -67,6 +67,48 @@ def _canonical_data_type(value: Any) -> str:
         return "datetime"
     return "string"
 
+def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | None]]:
+    """Sprint Ι Pod-α: convert a ``CellRichText`` into the Rust-side
+    payload (a list of ``(text, font_dict_or_None)`` tuples).
+
+    This lives at module scope so both the write-mode and modify-mode
+    flush paths can share it.  The Rust side reconstructs runs via
+    ``py_runs_to_rust`` in ``src/wolfxl/mod.rs``.
+    """
+    out: list[tuple[str, dict[str, Any] | None]] = []
+    for item in crt:
+        if isinstance(item, str):
+            out.append((item, None))
+            continue
+        # TextBlock — pull font props.
+        font = item.font
+        d: dict[str, Any] = {}
+        if font.b is not None:
+            d["b"] = bool(font.b)
+        if font.i is not None:
+            d["i"] = bool(font.i)
+        if font.strike is not None:
+            d["strike"] = bool(font.strike)
+        if font.u is not None:
+            d["u"] = font.u
+        if font.sz is not None:
+            d["sz"] = float(font.sz)
+        if font.color is not None:
+            d["color"] = font.color
+        if font.rFont is not None:
+            d["rFont"] = font.rFont
+        if font.family is not None:
+            d["family"] = int(font.family)
+        if font.charset is not None:
+            d["charset"] = int(font.charset)
+        if font.vertAlign is not None:
+            d["vertAlign"] = font.vertAlign
+        if font.scheme is not None:
+            d["scheme"] = font.scheme
+        out.append((item.text, d if d else None))
+    return out
+
+
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
 
@@ -263,6 +305,10 @@ class Worksheet:
         "_pending_comments", "_pending_hyperlinks",
         "_pending_tables", "_pending_data_validations",
         "_pending_conditional_formats",
+        # Sprint Ι Pod-α — pending rich-text values keyed by
+        # (row, col).  Both write-mode (NativeWorkbook flush) and
+        # modify-mode (XlsxPatcher flush) consume this map.
+        "_pending_rich_text",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -295,6 +341,9 @@ class Worksheet:
         # T1 write-mode pending queues (flushed in _flush() on save()).
         self._pending_comments: dict[str, Any] = {}
         self._pending_hyperlinks: dict[str, Any] = {}
+        # Sprint Ι Pod-α — keyed by (row, col) so the flush layer can
+        # look it up by sparse coordinate without coordinate-string round-trip.
+        self._pending_rich_text: dict[tuple[int, int], Any] = {}
         self._pending_tables: list[Any] = []
         self._pending_data_validations: list[Any] = []
         self._pending_conditional_formats: list[tuple[str, Any]] = []
@@ -1886,9 +1935,27 @@ class Worksheet:
             writer.write_sheet_values(self._title, start, grid)
 
         # -- Per-cell value writes for non-batchable types --------------------
+        from wolfxl.cell.rich_text import CellRichText
+
         for _row, _col, cell in indiv_vals:
             coord = rowcol_to_a1(cell._row, cell._col)  # noqa: SLF001
-            payload = python_value_to_payload(cell._value)  # noqa: SLF001
+            val = cell._value  # noqa: SLF001
+            if isinstance(val, CellRichText):
+                # Sprint Ι Pod-α: write-mode rich-text.  The native
+                # writer doesn't expose a structured rich-text API yet,
+                # so we flatten to plain text here and surface the
+                # structured form via a separate `add_rich_text_cell`
+                # call once the writer's model gains a RichText cell
+                # type.  Until then, write-mode rich-text round-trips
+                # only via modify mode.
+                if hasattr(writer, "write_cell_rich_text"):
+                    runs_payload = _cellrichtext_to_runs_payload(val)
+                    writer.write_cell_rich_text(self._title, coord, runs_payload)
+                else:
+                    payload = python_value_to_payload(str(val))
+                    writer.write_cell_value(self._title, coord, payload)
+                continue
+            payload = python_value_to_payload(val)
             writer.write_cell_value(self._title, coord, payload)
 
         # -- Batch format / border writes -----------------------------------------
@@ -1970,6 +2037,7 @@ class Worksheet:
     ) -> None:
         """Flush dirty cells to the XlsxPatcher backend (modify mode)."""
         from wolfxl._cell import _UNSET
+        from wolfxl.cell.rich_text import CellRichText
 
         for row, col in self._dirty:
             cell = self._cells.get((row, col))
@@ -1978,8 +2046,13 @@ class Worksheet:
             coord = rowcol_to_a1(row, col)
 
             if cell._value_dirty:  # noqa: SLF001
-                payload = python_value_to_payload(cell._value)  # noqa: SLF001
-                patcher.queue_value(self._title, coord, payload)
+                val = cell._value  # noqa: SLF001
+                if isinstance(val, CellRichText):
+                    runs_payload = _cellrichtext_to_runs_payload(val)
+                    patcher.queue_rich_text_value(self._title, coord, runs_payload)
+                else:
+                    payload = python_value_to_payload(val)
+                    patcher.queue_value(self._title, coord, payload)
 
             if cell._format_dirty:  # noqa: SLF001
                 fmt: dict[str, Any] = {}

@@ -459,6 +459,19 @@ fn emit_cell(
             }
             out.push_str(&format!("><v>{}</v></c>", format_number(*f)));
         }
+
+        WriteCellValue::InlineRichText(runs) => {
+            // Sprint Ι Pod-α: emit `<c t="inlineStr"><is>...</is></c>`
+            // so the SST never gets touched (matches openpyxl's
+            // rich-text emit path verbatim).
+            out.push_str(&format!("<c r=\"{}\" t=\"inlineStr\"", cell_ref));
+            if let Some(s) = cell.style_id {
+                out.push_str(&format!(" s=\"{}\"", s));
+            }
+            out.push_str("><is>");
+            out.push_str(&crate::rich_text::emit_runs(runs));
+            out.push_str("</is></c>");
+        }
     }
 }
 

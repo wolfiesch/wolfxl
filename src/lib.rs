@@ -10,6 +10,11 @@ mod util;
 mod wolfxl;
 mod wolfxl_core_bridge;
 
+// Re-export the rich-text helpers (parse/emit) from the writer crate so
+// the calamine read path and the modify-mode patcher can both reach
+// them without depending on the cdylib crate's own modules.
+pub(crate) use wolfxl_writer::rich_text;
+
 #[pyfunction]
 fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     let info = PyDict::new(py);
