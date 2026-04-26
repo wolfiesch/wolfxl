@@ -13,6 +13,7 @@ pub mod shared_strings;
 pub mod sheet_patcher;
 #[allow(dead_code)] // Styles parser/appender used in Phase 3 (format patching)
 pub mod styles;
+pub mod validations;
 
 use std::collections::HashMap;
 use std::fs::File;
