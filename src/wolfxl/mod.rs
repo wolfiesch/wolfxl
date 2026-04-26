@@ -16,7 +16,7 @@ pub mod styles;
 pub mod conditional_formatting;
 pub mod validations;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -86,6 +86,26 @@ pub struct XlsxPatcher {
     /// CF added on multiple sheets in one save() session lands in a
     /// single coordinated `xl/styles.xml` mutation.
     queued_cf_patches: HashMap<String, Vec<ConditionalFormattingPatch>>,
+    /// Sheet names in source-document order (RFC-013). Populated in
+    /// `open()` from `xl/workbook.xml`'s `<sheet>` order. Replaces
+    /// `sheet_paths.keys()` for any caller that needs deterministic
+    /// iteration (RFC-020's `app.xml` regen, RFC-026's CF aggregation
+    /// when it migrates off the temporary sorted-keys path).
+    sheet_order: Vec<String>,
+    /// Brand-new ZIP entries to emit on save (RFC-013). Parallel to
+    /// `file_patches`: `file_patches` REPLACES an existing source entry
+    /// in place; `file_adds` APPENDS a new entry that wasn't in the
+    /// source ZIP. Collisions with source-ZIP names are a hard panic
+    /// (caller bug — see RFC-013 §8 risk #2). First user is RFC-020's
+    /// optional `docProps/core.xml` add path; RFC-022/023/024 will be
+    /// the volume callers.
+    file_adds: HashMap<String, Vec<u8>>,
+    /// Source ZIP entries to skip during the save loop (RFC-013).
+    /// Reserved for future use; v1 is unused. RFC-035 (copy_worksheet
+    /// + delete-sheet) will be the first caller. Including the field
+    /// now keeps the short-circuit predicate and rewrite loop forward-
+    /// compatible without a follow-up patcher refactor.
+    file_deletes: HashSet<String>,
 }
 
 #[pymethods]
@@ -105,9 +125,16 @@ impl XlsxPatcher {
         let rel_targets = ooxml_util::parse_relationship_targets(&rels_xml)?;
 
         let mut sheet_paths: HashMap<String, String> = HashMap::new();
+        // RFC-013: capture sheet names in source-document order. The
+        // `parse_workbook_sheet_rids` call above returns a Vec in
+        // document order; iterating it here preserves that ordering
+        // and skips any sheet whose rId target is missing (mirroring
+        // the legacy lenient-parse contract).
+        let mut sheet_order: Vec<String> = Vec::with_capacity(sheet_rids.len());
         for (name, rid) in sheet_rids {
             if let Some(target) = rel_targets.get(&rid) {
-                sheet_paths.insert(name, ooxml_util::join_and_normalize("xl/", target));
+                sheet_paths.insert(name.clone(), ooxml_util::join_and_normalize("xl/", target));
+                sheet_order.push(name);
             }
         }
 
@@ -120,6 +147,9 @@ impl XlsxPatcher {
             queued_blocks: HashMap::new(),
             queued_dv_patches: HashMap::new(),
             queued_cf_patches: HashMap::new(),
+            sheet_order,
+            file_adds: HashMap::new(),
+            file_deletes: HashSet::new(),
         })
     }
 
@@ -320,8 +350,14 @@ impl XlsxPatcher {
     }
 
     /// Return the list of sheet names discovered in the workbook.
+    ///
+    /// Returned in source-document order (the order Excel rendered the
+    /// tabs). Switched from `sheet_paths.keys()` to `sheet_order` in
+    /// RFC-013 so callers that thread the sheet list into output
+    /// (RFC-020's `app.xml` `<TitlesOfParts>`) get the right ordering
+    /// without re-parsing `xl/workbook.xml`.
     fn sheet_names(&self) -> Vec<String> {
-        self.sheet_paths.keys().cloned().collect()
+        self.sheet_order.clone()
     }
 
     /// Save patched file to a new path.
@@ -357,8 +393,14 @@ impl XlsxPatcher {
             && self.queued_blocks.is_empty()
             && self.queued_dv_patches.is_empty()
             && self.queued_cf_patches.is_empty()
+            && self.file_adds.is_empty()
+            && self.file_deletes.is_empty()
         {
-            // No changes — just copy
+            // No changes — just copy. Includes RFC-013's `file_adds`
+            // and `file_deletes` so a no-op save remains byte-identical
+            // even after these primitives land. Future predicates
+            // (RFC-013 §2.5c content-types ops, RFC-020 queued props)
+            // extend this guard further.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -599,11 +641,22 @@ impl XlsxPatcher {
         })?;
         let mut out = ZipWriter::new(dst);
 
+        // RFC-013: collect the source-entry names so we can sanity-check
+        // that no file_adds collides with one (caller bug per §8 risk #2).
+        let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());
         for i in 0..zip.len() {
             let mut file = zip
                 .by_index(i)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP entry read error: {e}")))?;
             let name = file.name().to_string();
+            source_names.insert(name.clone());
+
+            // RFC-013: skip source entries explicitly marked for deletion
+            // (reserved for future RFC-035; v1 callers leave file_deletes
+            // empty so this branch is dead in the current slice).
+            if self.file_deletes.contains(&name) {
+                continue;
+            }
 
             let mut opts = SimpleFileOptions::default().compression_method(file.compression());
             if let Some(dt) = file.last_modified() {
@@ -634,10 +687,163 @@ impl XlsxPatcher {
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
         }
 
+        // RFC-013: emit file_adds entries after the source-entry pass.
+        // Collisions with source entries are a hard panic — callers
+        // should be using `file_patches` (REPLACE) when the entry
+        // already exists. The mtime stamp honors WOLFXL_TEST_EPOCH so
+        // golden-file tests stay deterministic.
+        if !self.file_adds.is_empty() {
+            for new_path in self.file_adds.keys() {
+                assert!(
+                    !source_names.contains(new_path),
+                    "file_adds collision with source entry: {new_path} — \
+                     caller bug; use file_patches to REPLACE existing entries"
+                );
+            }
+            // Iterate in sorted order so a single save with multiple new
+            // entries produces deterministic ZIP output (the ZIP spec does
+            // not require a particular entry order, but byte-identical
+            // re-runs do).
+            let mut new_paths: Vec<&String> = self.file_adds.keys().collect();
+            new_paths.sort();
+            let dt = epoch_or_now();
+            for new_path in new_paths {
+                let bytes = &self.file_adds[new_path];
+                let opts = SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated)
+                    .last_modified_time(dt);
+                out.start_file(new_path, opts).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}"))
+                })?;
+                out.write_all(bytes)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
+            }
+        }
+
         out.finish()
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP finalize error: {e}")))?;
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RFC-013 helpers — deterministic-when-test-epoch-is-set datetime stamping
+// for `file_adds` ZIP entries.
+// ---------------------------------------------------------------------------
+
+/// Return a `zip::DateTime` honoring `WOLFXL_TEST_EPOCH` when set.
+///
+/// When the env var parses to an `i64`, that value is treated as a Unix
+/// epoch second count and clamped to ZIP's representable range
+/// (1980..=2107). Otherwise falls back to current UTC time. Mirrors the
+/// behavior of `wolfxl_writer::zip::test_epoch_override` so the patcher
+/// and the writer produce byte-stable output under the same env flag.
+fn epoch_or_now() -> zip::DateTime {
+    use chrono::{Datelike, Timelike};
+    let secs = std::env::var("WOLFXL_TEST_EPOCH")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok());
+    let dt = match secs.and_then(|s| chrono::DateTime::<chrono::Utc>::from_timestamp(s, 0)) {
+        Some(d) => d,
+        None => chrono::Utc::now(),
+    };
+    let naive = dt.naive_utc();
+    let year = naive.year();
+    if year < 1980 {
+        return zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0)
+            .unwrap_or_else(|_| zip::DateTime::default());
+    }
+    if year > 2107 {
+        return zip::DateTime::from_date_and_time(2107, 12, 31, 23, 59, 58)
+            .unwrap_or_else(|_| zip::DateTime::default());
+    }
+    zip::DateTime::from_date_and_time(
+        year as u16,
+        naive.month() as u8,
+        naive.day() as u8,
+        naive.hour() as u8,
+        naive.minute() as u8,
+        naive.second() as u8,
+    )
+    .unwrap_or_else(|_| zip::DateTime::default())
+}
+
+#[cfg(test)]
+mod rfc013_tests {
+    //! RFC-013 unit tests for pure-Rust patcher helpers. The patcher's
+    //! end-to-end ZIP-add behavior is covered by `tests/test_patcher_infra.py`
+    //! (commit 5) — those tests can construct a real `XlsxPatcher` via the
+    //! PyO3 boundary, which `cargo test` cannot link against.
+    use super::*;
+
+    #[test]
+    fn epoch_or_now_honors_test_epoch_zero() {
+        // `WOLFXL_TEST_EPOCH=0` falls below ZIP's representable range
+        // (1980-01-01); the helper clamps to that floor. The point is
+        // determinism, not the specific year.
+        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt = epoch_or_now();
+        // Restore the env so we don't leak into other tests.
+        match prev {
+            Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
+            None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
+        }
+        // Two back-to-back calls under the same epoch produce identical
+        // ZIP datetimes — that's the byte-identical-save guarantee.
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt2 = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        // `zip::DateTime` doesn't impl PartialEq, so compare via the
+        // `(year, month, day, hour, minute, second)` quintuple.
+        assert_eq!(
+            (dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), dt.second()),
+            (dt2.year(), dt2.month(), dt2.day(), dt2.hour(), dt2.minute(), dt2.second()),
+        );
+    }
+
+    #[test]
+    fn epoch_or_now_clamps_pre_1980_floor() {
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        assert_eq!(dt.year(), 1980);
+        assert_eq!(dt.month(), 1);
+        assert_eq!(dt.day(), 1);
+    }
+
+    #[test]
+    fn epoch_or_now_handles_recent_timestamp() {
+        // 2024-01-01T00:00:00Z = 1_704_067_200 — well within the
+        // ZIP-representable range, so no clamping.
+        std::env::set_var("WOLFXL_TEST_EPOCH", "1704067200");
+        let dt = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.month(), 1);
+        assert_eq!(dt.day(), 1);
+    }
+
+    #[test]
+    fn sheet_order_parser_preserves_workbook_xml_order() {
+        // Smoke: the helper that drives `XlsxPatcher::sheet_order` is
+        // `parse_workbook_sheet_rids`, which is supposed to return
+        // sheets in document order. Touch-test that here so a future
+        // refactor that swaps it for a HashMap-keyed parser fails this
+        // gate before it breaks RFC-020's `app.xml` regen.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Apples"  sheetId="1" r:id="rId1"/>
+    <sheet name="Bananas" sheetId="2" r:id="rId2"/>
+    <sheet name="Cherries" sheetId="3" r:id="rId3"/>
+  </sheets>
+</workbook>"#;
+        let pairs = ooxml_util::parse_workbook_sheet_rids(xml).unwrap();
+        let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["Apples", "Bananas", "Cherries"]);
     }
 }
 
