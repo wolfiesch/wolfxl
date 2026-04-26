@@ -1504,6 +1504,15 @@ impl XlsxPatcher {
             let mut tables_inventory = tables::scan_existing_tables(&mut zip)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
 
+            // RFC-024 collision-scan extension (RFC-035 §8 risk #6):
+            // include cloned table names from in-flight Phase 2.7
+            // sheet copies so a user `add_table(name="Sales_2")` in
+            // the same save against an as-yet-unflushed clone surfaces
+            // a clean error rather than a silent duplicate.
+            for n in &cloned_table_names {
+                tables_inventory.names.insert(n.clone());
+            }
+
             // Iterate sheets in source-document order so allocations
             // are deterministic across runs.
             for sheet_name in &sheet_order_local {
