@@ -626,7 +626,31 @@ class Worksheet:
         max_col: int | None = None,
         values_only: bool = False,
     ) -> Iterator[tuple[Any, ...]]:
-        """Iterate over rows in a range. Matches openpyxl's iter_rows API."""
+        """Iterate over rows in a range. Matches openpyxl's iter_rows API.
+
+        Sprint Ι Pod-β: when the workbook was opened with
+        ``read_only=True`` (or when this sheet has more than
+        :data:`wolfxl._streaming.AUTO_STREAM_ROW_THRESHOLD` rows) this
+        method becomes a true SAX-streaming generator backed by the
+        Rust ``StreamingSheetReader``. Cells yielded in that path are
+        :class:`wolfxl._streaming.StreamingCell` instances —
+        immutable read-only proxies whose ``font`` / ``fill`` /
+        ``border`` / ``alignment`` / ``number_format`` properties
+        delegate to the existing eager style table. ``values_only=True``
+        yields plain value tuples and never instantiates a cell object.
+        """
+        wb = self._workbook  # noqa: SLF001
+        # Sprint Ι Pod-β — streaming fast path (read_only=True OR auto-trigger).
+        if wb._rust_reader is not None and getattr(wb, "_source_path", None):  # noqa: SLF001
+            from wolfxl._streaming import should_auto_stream, stream_iter_rows
+
+            stream_now = bool(getattr(wb, "_read_only", False)) or should_auto_stream(self)
+            if stream_now:
+                yield from stream_iter_rows(
+                    self, min_row, max_row, min_col, max_col, values_only=values_only
+                )
+                return
+
         # Fast bulk path: read-mode + values_only -> single Rust FFI call.
         if values_only and self._workbook._rust_reader is not None:  # noqa: SLF001
             yield from self._iter_rows_bulk(min_row, max_row, min_col, max_col)

@@ -73,15 +73,25 @@ def load_workbook(
         tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
         #4).
 
-    Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
-    accepted for openpyxl compatibility. ``data_only=True`` returns cached
-    formula results when they exist; ``read_only`` and ``keep_links`` remain
-    no-op compatibility shims.
+    ``read_only=True`` activates the SAX streaming read path
+    (Sprint Ι Pod-β): ``Worksheet.iter_rows`` becomes a true generator
+    that walks ``xl/worksheets/sheetN.xml`` one row at a time without
+    materializing the whole sheet. Cells in this mode are immutable —
+    assignment raises ``RuntimeError`` immediately. The flag also
+    auto-engages transparently for sheets with > 50000 rows so callers
+    don't have to opt in just to scale to large workbooks. See
+    ``tests/parity/KNOWN_GAPS.md`` for the original gap-row.
+
+    ``data_only=True`` returns cached formula results when they exist.
+    ``keep_links`` remains a no-op compatibility shim.
     """
     if modify:
         return Workbook._from_patcher(  # noqa: SLF001
             str(filename), data_only=data_only, permissive=permissive
         )
     return Workbook._from_reader(  # noqa: SLF001
-        str(filename), data_only=data_only, permissive=permissive
+        str(filename),
+        data_only=data_only,
+        permissive=permissive,
+        read_only=read_only,
     )
