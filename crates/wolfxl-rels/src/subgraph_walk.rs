@@ -29,7 +29,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::{rels_path_for, RelsGraph, TargetMode};
+use crate::{RelsGraph, TargetMode};
 
 /// All parts reachable from a single source sheet via its rels graph,
 /// plus a copy of the sheet's edges and any nested edges discovered by
@@ -372,7 +372,7 @@ mod tests {
         // The walker shares parent_dir/resolve_relative with rels_path_for
         // semantics — quick sanity check that we wired in the right module.
         assert_eq!(
-            rels_path_for("xl/worksheets/sheet1.xml"),
+            crate::rels_path_for("xl/worksheets/sheet1.xml"),
             Some("xl/worksheets/_rels/sheet1.xml.rels".into())
         );
     }

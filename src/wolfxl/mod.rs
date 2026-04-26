@@ -25,6 +25,8 @@ pub mod defined_names;
 pub mod sheet_order;
 pub mod tables;
 pub mod comments;
+#[allow(dead_code)] // RFC-035 Pod-α: planner only; Pod-β wires Phase 2.7
+pub mod sheet_copy;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
