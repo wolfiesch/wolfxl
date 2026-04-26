@@ -157,11 +157,40 @@ Each is flagged with the RFC that surfaced it. Listed by reverse impact. Decisio
 
 ## Next Steps (after research → execution handoff)
 
-0. **Pre-step (gates RFC-012 only)**: Manual 5-minute Excel verification of `$A$1` shift behavior for question #3. Open Excel, type `=$A$1+$B$1` in `B5`, right-click row 3 → Insert, observe whether `B6`'s formula reads `=$A$1+$B$1` (no shift, default `respect_dollar=true`) or `=$A$2+$B$2` (shift, default `respect_dollar=false`). If shifted: keep RFC-012 §5.5 default `false`. If not: flip default to `true` and update RFC-012 §5.5 + RFC-030 + RFC-031 reference-rewriting paths. Do not start RFC-012 without this check.
-1. **Decisions**: Resolved 2026-04-25 for 7 of 8 questions above. Question #3 is the only outstanding decision; it gates RFC-012 only (everything else can proceed).
-2. **P0 fix-it commit**: Shipped — see commit `1af6ba3` (`feat(api): add NotImplementedError stubs for 7 structural ops`).
-3. **Phase 2 kickoff**: `runplan Plans/rfcs/001-w5-rip-out.md` first (RFC-001 shipped in `4a840e9`); then dispatch 010/011/013 in parallel pods (each pod: implementer → spec-reviewer → code-quality-reviewer per `superpowers:subagent-driven-development`). RFC-012 starts after step 0 above.
-4. **Phase 3 dispatch**: Once Phase 2 lands, fan out 7 T1.5 RFCs in parallel pods; bottleneck is review, not coding.
-5. **Phase 4 dispatch**: Sequenced — 030/031 in parallel first, then 034/035/036.
+### Sprint Δ — Phase 3 close + Phase 4 critical-path unblock (2026-04-26)
 
-The dependency DAG above is the source of truth for scheduling. Anything blocking 012 (formula translator) is on the critical path.
+Wave A + Wave B of the next-slice sprint shipped in a single dispatch
+of four parallel pods. The merge happened on `feat/native-writer`
+(commits 6a50873 → 1c51233):
+
+| RFC | Status | Branch | Merge commit |
+|---|---|---|---|
+| 021 — defined names | Shipped | `feat/rfc-021-defined-names` | `6a50873` |
+| 024 — tables | Shipped | `feat/rfc-024-tables` | `f99b169` |
+| 023 — comments + VML | Shipped | `feat/rfc-023-comments` | `de0f7c0` |
+| 012 — formula xlator | Shipped | `feat/rfc-012-formula-xlator` | `876fae0` |
+
+Verification: 914 pytest passed (1 deselected env-dep, 11 pre-existing
+skips); 5 workspace cargo crates green;
+`pytest tests/parity/ -q -x` → 97 passed + 1 skipped.
+
+**Phase 3 is closed.** The codebase is ready to ship as **WolfXL 1.0
+— full modify-mode parity with openpyxl**.
+
+### Outstanding (carried into Phase 4 kickoff)
+
+0. **Pre-step (gates RFC-030/031/034)**: Manual 5-minute Excel
+   verification of `$A$1` shift behavior. See
+   `Plans/rfcs/notes/excel-respect-dollar-check.md`. RFC-012 shipped
+   with `ShiftPlan::respect_dollar` as a required field with no
+   `Default`; the verification result determines what default RFC-030
+   / RFC-031 wire up at the patcher boundary. RFC-012 itself does not
+   need it.
+1. **Phase 4a dispatch**: 030 + 031 in parallel (now unblocked by 012,
+   021, 022, 024, 025, 026 all shipped). Estimated 2 weeks calendar.
+2. **Phase 4b dispatch**: 034, 035, 036 — sequenced after 030/031;
+   035 is XL critical path.
+3. **Phase 4c hardening**: fuzz, golden expansion,
+   `KNOWN_GAPS.md` cleanup, release notes.
+
+The dependency DAG above is the source of truth for scheduling.
