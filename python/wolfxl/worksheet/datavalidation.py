@@ -117,22 +117,30 @@ def _dv_to_patcher_dict(dv: DataValidation) -> dict[str, Any]:
     to the dataclass later, the helper picks them up automatically via
     ``getattr``.
     """
-    return {
+    # Bools and the required ``sqref`` always go in. Optional strings are
+    # only included if non-None — the patcher's PyO3 layer expects either
+    # a real string or absence (Option::None on the Rust side); a Python
+    # ``None`` value would fail the ``.extract::<String>()`` cast.
+    payload: dict[str, Any] = {
         "sqref": dv.sqref,
         "validation_type": dv.type or "none",
-        "operator": dv.operator,
-        "formula1": dv.formula1,
-        "formula2": dv.formula2,
         "allow_blank": bool(dv.allowBlank),
         "show_dropdown": bool(getattr(dv, "showDropDown", False)),
         "show_input_message": bool(dv.showInputMessage),
         "show_error_message": bool(dv.showErrorMessage),
+    }
+    optional = {
+        "operator": dv.operator,
+        "formula1": dv.formula1,
+        "formula2": dv.formula2,
         "error_style": getattr(dv, "errorStyle", None),
         "error_title": dv.errorTitle,
         "error": dv.error,
         "prompt_title": dv.promptTitle,
         "prompt": dv.prompt,
     }
+    payload.update({k: v for k, v in optional.items() if v is not None})
+    return payload
 
 
 __all__ = ["DataValidation", "DataValidationList", "_dv_to_patcher_dict"]
