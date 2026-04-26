@@ -1193,6 +1193,20 @@ impl XlsxPatcher {
         // RFCs).  A local map keeps this slice's wiring contained
         // and safe to compose with future block-producing setters.
         let mut local_blocks: HashMap<String, Vec<SheetBlock>> = self.queued_blocks.clone();
+
+        // Centralized part-suffix allocator (RFC-035 §5.2 / §8 risk #1).
+        // One instance per save; seeded by scanning the source ZIP's
+        // listing once. Shared by Phase 2.5f (tables) and Phase 2.5g
+        // (comments + VML); RFC-035's upcoming Phase 2.7 sheet-copy
+        // planner will consume it too. Keeps tableN / commentsN /
+        // vmlDrawingN suffixes workbook-unique across all subsystems
+        // running in this save.
+        let mut part_id_allocator: wolfxl_rels::PartIdAllocator = {
+            let names: Vec<String> = (0..zip.len())
+                .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+                .collect();
+            wolfxl_rels::PartIdAllocator::from_zip_parts(names.iter().map(|s| s.as_str()))
+        };
         for (sheet_name, patches) in &self.queued_dv_patches {
             let sheet_path = match self.sheet_paths.get(sheet_name) {
                 Some(p) => p,
@@ -1399,8 +1413,13 @@ impl XlsxPatcher {
                     .rels_patches
                     .get_mut(&rels_path)
                     .expect("just inserted above");
-                let result = tables::build_tables(&patches, &tables_inventory, rels)
-                    .map_err(|e| PyErr::new::<PyValueError, _>(e))?;
+                let result = tables::build_tables(
+                    &patches,
+                    &tables_inventory,
+                    rels,
+                    Some(&mut part_id_allocator),
+                )
+                .map_err(|e| PyErr::new::<PyValueError, _>(e))?;
 
                 // Update the running inventory so subsequent sheets'
                 // build_tables calls see this sheet's allocations.
@@ -1468,38 +1487,19 @@ impl XlsxPatcher {
         //      comments part; Default for the vml extension).
         //
         // Workbook-scope author table (`comment_authors`) lives on
-        // the stack so all sheets share dedup. Two parallel counters
-        // (`next_comments_n`, `next_vml_n`) start at the highest
-        // existing index + 1 and increment as new parts are minted.
+        // the stack so all sheets share dedup. New `comments<N>.xml`
+        // and `vmlDrawing<N>.vml` suffixes come from the shared
+        // `part_id_allocator` (RFC-035 §5.2) — already pre-seeded by
+        // a single pass over the source ZIP listing earlier in
+        // Phase 2.5, so this loop only needs to populate the
+        // ancillary registry for path-lookup purposes.
         let mut comment_authors = comments::CommentAuthorTable::new();
-        // Seed the workbook-wide N counters: start above the highest
-        // existing comments<N>.xml / vmlDrawing<N>.vml in the source.
-        let mut next_comments_n: u32 = 1;
-        let mut next_vml_n: u32 = 1;
         for sheet_name in &sheet_order_local {
             let sp = match self.sheet_paths.get(sheet_name).cloned() {
                 Some(p) => p,
                 None => continue,
             };
             let _ = self.ancillary.populate_for_sheet(&mut zip, sheet_name, &sp);
-            if let Some(anc) = self.ancillary.get(sheet_name) {
-                if let Some(p) = &anc.comments_part {
-                    if let Some(n) = parse_n_from_part_path(p, "xl/comments", ".xml") {
-                        if n + 1 > next_comments_n {
-                            next_comments_n = n + 1;
-                        }
-                    }
-                }
-                if let Some(p) = &anc.vml_drawing_part {
-                    if let Some(n) =
-                        parse_n_from_part_path(p, "xl/drawings/vmlDrawing", ".vml")
-                    {
-                        if n + 1 > next_vml_n {
-                            next_vml_n = n + 1;
-                        }
-                    }
-                }
-            }
         }
 
         let mut comments_file_writes: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1552,35 +1552,17 @@ impl XlsxPatcher {
             };
             let sheet_xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
 
-            // Decide N values: reuse existing-part N if any, else mint new.
+            // Decide N values: reuse existing-part N if any, else mint new
+            // via the shared allocator (RFC-035 §5.2).
             let comments_n = match &existing_comments_path {
-                Some(p) => {
-                    parse_n_from_part_path(p, "xl/comments", ".xml").unwrap_or_else(|| {
-                        let n = next_comments_n;
-                        next_comments_n += 1;
-                        n
-                    })
-                }
-                None => {
-                    let n = next_comments_n;
-                    next_comments_n += 1;
-                    n
-                }
+                Some(p) => parse_n_from_part_path(p, "xl/comments", ".xml")
+                    .unwrap_or_else(|| part_id_allocator.alloc_comments()),
+                None => part_id_allocator.alloc_comments(),
             };
             let vml_n = match &existing_vml_path {
-                Some(p) => {
-                    parse_n_from_part_path(p, "xl/drawings/vmlDrawing", ".vml")
-                        .unwrap_or_else(|| {
-                            let n = next_vml_n;
-                            next_vml_n += 1;
-                            n
-                        })
-                }
-                None => {
-                    let n = next_vml_n;
-                    next_vml_n += 1;
-                    n
-                }
+                Some(p) => parse_n_from_part_path(p, "xl/drawings/vmlDrawing", ".vml")
+                    .unwrap_or_else(|| part_id_allocator.alloc_vml_drawing()),
+                None => part_id_allocator.alloc_vml_drawing(),
             };
 
             let rels = self
