@@ -334,6 +334,10 @@ class Workbook:
             # formats; data validations are a separate patcher API
             # because they live in a sibling block, not in <sheetData>.
             self._flush_pending_data_validations_to_patcher()
+            # RFC-026: conditional formatting also lives in a sibling
+            # block (slot 17). Cross-sheet dxfId allocation happens
+            # inside the patcher's Phase-2.5b on the Rust side.
+            self._flush_pending_conditional_formats_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -369,6 +373,44 @@ class Workbook:
                 continue
             for dv in pending:
                 patcher.queue_data_validation(ws.title, _dv_to_patcher_dict(dv))
+            pending.clear()
+
+    def _flush_pending_conditional_formats_to_patcher(self) -> None:
+        """Drain ``_pending_conditional_formats`` on every sheet into the patcher.
+
+        Modify-mode counterpart to the writer flush at
+        ``_worksheet.py:1974`` — same drain semantics, different backend.
+        Rules sharing a sqref are coalesced into a single
+        ``ConditionalFormattingPatch`` (one wrapper per range) so
+        priority ordering within a wrapper reflects insertion order.
+        Multiple ``add()`` calls with different sqrefs produce multiple
+        patches; the patcher then emits them in encounter order while
+        threading the workbook-wide ``running_dxf_count`` through
+        Phase-2.5b on the Rust side.
+
+        Cleared after queueing so a subsequent ``save()`` on the same
+        workbook doesn't double-emit.
+        """
+        from wolfxl.formatting import _cf_to_patcher_dict
+
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_conditional_formats  # noqa: SLF001
+            if not pending:
+                continue
+            by_sqref: dict[str, list[Any]] = {}
+            order: list[str] = []
+            for sqref, rule in pending:
+                if sqref not in by_sqref:
+                    by_sqref[sqref] = []
+                    order.append(sqref)
+                by_sqref[sqref].append(rule)
+            for sqref in order:
+                patcher.queue_conditional_formatting(
+                    ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
+                )
             pending.clear()
 
     def _flush_workbook_writes(self) -> None:

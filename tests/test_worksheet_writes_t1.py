@@ -128,12 +128,12 @@ def test_modify_mode_dv_append_queues(tmp_path: Path) -> None:
     wb.close()
 
 
-def test_modify_mode_raises_on_cf_add(tmp_path: Path) -> None:
+def test_modify_mode_queues_cf_add(tmp_path: Path) -> None:
     path = tmp_path / "exists_cf.xlsx"
     openpyxl.Workbook().save(path)
 
     wb = Workbook._from_patcher(str(path))
     ws = wb.active
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws.conditional_formatting.add("A1:A10", CellIsRule(operator="equal", formula=["1"]))
+    ws.conditional_formatting.add("A1:A10", CellIsRule(operator="equal", formula=["1"]))
+    assert len(ws._pending_conditional_formats) == 1  # noqa: SLF001
     wb.close()

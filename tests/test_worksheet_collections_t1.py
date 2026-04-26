@@ -223,13 +223,15 @@ def test_dv_list_append_works_in_modify_mode(rich_fixture: Path) -> None:
     assert len(ws._pending_data_validations) == 1  # noqa: SLF001
 
 
-def test_cf_add_in_modify_mode_raises(rich_fixture: Path) -> None:
+def test_cf_add_in_modify_mode_queues(rich_fixture: Path) -> None:
+    """RFC-026: ``ws.conditional_formatting.add`` queues onto
+    ``_pending_conditional_formats`` in modify mode (no longer raises).
+    The patcher's Phase-2.5b drains that list at ``save()`` time."""
     wb = Workbook._from_patcher(str(rich_fixture))
     ws = wb["Data"]
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws.conditional_formatting.add(
-            "D2:D10", FormulaRule(formula=["$D2>0"])
-        )
+    before_pending = len(ws._pending_conditional_formats)  # noqa: SLF001
+    ws.conditional_formatting.add("D2:D10", FormulaRule(formula=["$D2>0"]))
+    assert len(ws._pending_conditional_formats) == before_pending + 1  # noqa: SLF001
 
 
 def test_rule_types_round_trip() -> None:
