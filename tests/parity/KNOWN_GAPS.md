@@ -86,25 +86,28 @@ and documented here before the ratchet baseline is updated.
 - Rich-text write. Decision: T3 — SynthGL has no current write use case.
 - Pivot tables, charts, images, data validation — not in SynthGL's openpyxl surface.
 
-## Modify mode — T1.5-deferred features (W4F audit)
+## Modify mode — T1.5 audit (now closed) and structural extensions
 
 Modify mode (`load_workbook(path, modify=True)`) is served by `XlsxPatcher`,
 which surgically rewrites changed parts and copies everything else verbatim.
-Several mutation paths are intentionally deferred to a post-Wave-5 T1.5
-slice. Each raises `NotImplementedError` with "T1.5" in the message so
-callers see a clear migration hint rather than silent data loss.
+The W4F audit originally enumerated seven mutation paths that were deferred
+to a post-Wave-5 T1.5 slice. **All seven shipped in WolfXL 1.1's Phase 3**
+(per `tests/test_modify_mode_independence.py` lines 14-21 and the per-RFC
+modify-mode test files). Structural mutations and `copy_worksheet` followed.
+This table is now a status snapshot, not a deferred-work list.
 
 | Modify-mode mutation | Status |
 |---|---|
-| `wb.properties.title = ...` (any property mutation) on existing file | Raises — T1.5 |
-| `wb.defined_names[name] = DefinedName(...)` on existing file | Raises — T1.5 |
-| `cell.comment = Comment(...)` | Raises — T1.5 |
-| `cell.hyperlink = Hyperlink(...)` | Raises — T1.5 |
-| `ws.add_table(Table(...))` | Raises — T1.5 |
-| `ws.data_validations.append(...)` | Raises — T1.5 |
-| `ws.conditional_formatting.add(...)` | Raises — T1.5 |
-| Sheet/column/row structural mutations | **SHIPPED in WolfXL 1.1** — `insert_rows`/`delete_rows` (RFC-030), `insert_cols`/`delete_cols` (RFC-031), `Worksheet.move_range` (RFC-034), `Workbook.move_sheet` (RFC-036). |
-| `wb.copy_worksheet(...)` | **Modify-mode only — SHIPPED in WolfXL 1.1 (RFC-035)**. See divergence section below. Write-mode raises `NotImplementedError` per §3 OQ-a, tracked for 1.2. |
+| `wb.properties.title = ...` (any property mutation) on existing file | ✅ Shipped — RFC-020 (`tests/test_modify_properties.py`, `tests/test_workbook_properties_t1.py`) |
+| `wb.defined_names[name] = DefinedName(...)` on existing file | ✅ Shipped — RFC-021 (`tests/test_defined_names_modify.py`). The `__setitem__` proxy is exposed; round-trip verified end-to-end. |
+| `cell.comment = Comment(...)` | ✅ Shipped — RFC-023 (`tests/test_comments_modify.py`) |
+| `cell.hyperlink = Hyperlink(...)` | ✅ Shipped — RFC-022 (`tests/test_modify_hyperlinks.py`, `tests/test_hyperlink_internal_flag.py`) |
+| `ws.add_table(Table(...))` | ✅ Shipped — RFC-024 (`tests/test_tables_modify.py`) |
+| `ws.data_validations.append(...)` | ✅ Shipped — RFC-025 (`tests/test_modify_data_validations.py`) |
+| `ws.conditional_formatting.add(...)` | ✅ Shipped — RFC-026 (`tests/test_modify_conditional_formatting.py`) |
+| Sheet/column/row structural mutations | ✅ Shipped — `insert_rows`/`delete_rows` (RFC-030), `insert_cols`/`delete_cols` (RFC-031), `Worksheet.move_range` (RFC-034), `Workbook.move_sheet` (RFC-036). |
+| `wb.copy_worksheet(...)` (modify mode) | ✅ Shipped — RFC-035 in 1.1 (Sprint Ζ Pod-δ closed four of six composition gaps; two remain xfail per "RFC-035 cross-RFC composition gaps" below). See divergence section below. |
+| `wb.copy_worksheet(...)` (write mode) | ✅ Shipped — Sprint Θ (1.2) Pod-C1 lifts the §3 OQ-a `NotImplementedError`. |
 
 Supported in modify mode (round-trips cleanly via `_flush_to_patcher`):
 

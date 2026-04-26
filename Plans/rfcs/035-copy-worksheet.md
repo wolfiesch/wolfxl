@@ -1,6 +1,6 @@
 # RFC-035: `Workbook.copy_worksheet` (clone an existing sheet within a workbook)
 
-Status: Shipped
+Status: Shipped (1.1 modify-mode core; 1.2 Sprint Θ closes follow-ups — see §8.5)
 Owner: pod-035
 Phase: 4
 Estimate: XL
@@ -785,6 +785,35 @@ are the verification commits.
 | 8 | **External images shared via the URL string**: hyperlinks of `TargetMode::External` are aliased by URL (per §5.3 row 2). If a future API mutates a hyperlink target on the copy (e.g. `new_ws["B5"].hyperlink = "https://other.com"`), no source-side mutation occurs because it's a fresh `<Relationship>`. ✅ Not actually a risk — the rels graph clone gives the copy its own `<Relationship>` entry; only the URL string is shared, and strings are immutable. | low | low | Documented in §5.3; no mitigation needed. Listed for symmetry with risk #2. |
 | 9 | **Calc chain staleness**: `xl/calcChain.xml` references cells of the source sheet but not the copy's cells. Excel rebuilds it on next open, but a test that reads `calcChain.xml` directly would see incomplete data. | low | low | §10 documents this as a known-staleness; the calcChain is a perf optimization for Excel, not a correctness contract. No mitigation needed for 1.1. |
 | 10 | **Sheet IDs vs. position indices** confusion: `<sheet sheetId>` and `<definedName localSheetId>` are different things. A naive implementation might use `sheetId` where it needs `localSheetId` (a 0-based position) or vice versa. | low | high | Reuse RFC-036 §2's documented rule (`localSheetId` is position, `sheetId` is workbook-unique stable id). Unit test: parse a fixture with non-monotonic `sheetId` (e.g. sheets in order with sheetIds `[1, 5, 3]`) and assert that the COPY's `<definedName localSheetId>` references position 3 (not sheetId 3). |
+
+## 8.5 Sprint Θ deliverables (1.2)
+
+Sprint Θ ("Theta") closes the 1.1 follow-ups (§3 OQ-a write-mode,
+deferred composition bugs #4 and #6, and §5.3 image deep-clone +
+§10 calcChain rebuild). Five pods land in parallel on `feat/sprint-theta-pod-*`
+and merge through `feat/native-writer`.
+
+| Pod | Deliverable | Closes |
+|---|---|---|
+| **A** | Bug #4 — `test_p_self_closing_sheets_block`. Add a Rust-level Phase 2.7 unit test that exercises the `<sheets/>` self-closing splice on a synthesized input directly (the public `load_workbook` loader path remains strict — see §10). Flips the xfail to PASS at the splice unit level; integration test stays gated behind a future `permissive=True` loader mode. | RFC-035 §10 deferred bug #4 |
+| **B** | Bug #6 — `test_r_cdata_pi_fuzz_fakeout`. Promote the Phase 2.7 splice from a byte-level locator to an XML-aware scan (likely `quick-xml` reader pass) that respects element nesting, so a workbook.xml comment containing literal `</sheets>` no longer fools the locator. Flips the xfail to PASS. | RFC-035 §10 deferred bug #6 |
+| **C1** | **Write-mode `copy_worksheet`** — replaces the §3 OQ-a `NotImplementedError` in write mode. Walks the in-memory `NativeWorkbook` model and clones every sub-record (cells, styles, tables, DV, CF, hyperlinks, comments, defined names) into a new sheet appended at end. New tests under `tests/test_copy_worksheet_write.py`. | RFC-035 §3 OQ-a, §10 "copy_worksheet in write mode" |
+| **C2** | **Image deep-clone** — replaces §5.3 row 2's URL-string aliasing for embedded image media. New `CopyOptions(deep_clone_images=True)` keyword (additive, default `False` to preserve 1.1 byte-stability). When set, `xl/media/imageN.png` parts are duplicated and the cloned drawing rels point at the fresh part. | RFC-035 §5.3 / §8 risk #2, §10 "Deep-cloning images / media" |
+| **C3** | **calcChain rebuild** — replaces §10 / §8 risk #9's "Excel rebuilds it on next open" with a wolfxl-side rebuild. Phase 2.5* (post-2.7) walks the cloned sheet's formula cells and emits the matching `<c>` entries into `xl/calcChain.xml` so external readers see a complete chain immediately. | RFC-035 §10 "`xl/calcChain.xml` invalidation", §8 risk #9 |
+
+**Status snapshot (this branch)**:
+
+<!-- TBD: Sprint Θ Pod-A status — bug-#4 fix commit + sha -->
+<!-- TBD: Sprint Θ Pod-B status — bug-#6 fix commit + sha -->
+<!-- TBD: Sprint Θ Pod-C1 status — write-mode copy_worksheet commit + sha -->
+<!-- TBD: Sprint Θ Pod-C2 status — image deep-clone commit + sha -->
+<!-- TBD: Sprint Θ Pod-C3 status — calcChain rebuild commit + sha -->
+
+Once all five pods land, the §3 OQ-a "modify-mode-only" caveat in
+the Status header above is lifted, the §10 "Out of scope" entries
+for write mode / image deep-clone / calcChain are reframed as
+shipped with §8.5 forward-pointers, and KNOWN_GAPS' RFC-035 row
+flips its 1.2 follow-ups to ✅ Closed.
 
 ## 9. References (Codebase entry/exit points)
 
