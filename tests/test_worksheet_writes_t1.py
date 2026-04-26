@@ -100,15 +100,19 @@ def test_add_table_rejects_non_table() -> None:
         ws.add_table("not a table")  # type: ignore[arg-type]
 
 
-def test_modify_mode_raises_on_add_table(tmp_path: Path) -> None:
+def test_modify_mode_add_table_queues(tmp_path: Path) -> None:
+    """RFC-024 shipped: add_table works in modify mode. The queue lands
+    in ``_pending_tables``; ``save()`` flushes it through the patcher.
+    Round-trip coverage in ``tests/test_tables_modify.py``.
+    """
     path = tmp_path / "exists.xlsx"
     openpyxl.Workbook().save(path)
 
     wb = Workbook._from_patcher(str(path))
     ws = wb.active
     t = Table(name="X", ref="A1:B2")
-    with pytest.raises(NotImplementedError, match="T1.5"):
-        ws.add_table(t)
+    ws.add_table(t)
+    assert len(ws._pending_tables) == 1  # noqa: SLF001
     wb.close()
 
 

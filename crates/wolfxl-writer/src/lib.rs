@@ -117,9 +117,17 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             });
         }
         for table in &sheet.tables {
+            // The path counter is 1-based (table1.xml, table2.xml, …);
+            // `tables_xml::emit` interprets its third argument as a
+            // 0-based `table_idx` and emits `id="(idx+1)"`. Subtract
+            // one so the emitted `id` matches the part filename
+            // (RFC-024 cross-mode parity gate; modify-mode allocates
+            // workbook-unique ids starting at 1, which matches the
+            // emit fn's contract from
+            // `tables_xml::tests::table_id_uses_idx_plus_one`).
             entries.push(ZipEntry {
                 path: format!("xl/tables/table{}.xml", global_table_idx),
-                bytes: tables_xml::emit(table, idx, global_table_idx),
+                bytes: tables_xml::emit(table, idx, global_table_idx - 1),
             });
             global_table_idx += 1;
         }

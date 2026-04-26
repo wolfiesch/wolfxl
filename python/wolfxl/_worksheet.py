@@ -1515,21 +1515,22 @@ class Worksheet:
     def add_table(self, table: Any) -> None:
         """Attach a table to this worksheet.
 
-        Write mode: queues the table for emit on ``save()``. Modify mode
-        raises with a T1.5 pointer — adding tables to existing files is
-        a follow-up.
+        Both write mode (``Workbook()``) and modify mode
+        (``load_workbook(path, modify=True)``) queue the table on
+        ``self._pending_tables``; the ``Workbook.save`` coordinator
+        routes the queue to the right backend. RFC-024 (modify mode)
+        flushes through the patcher's ``queue_table`` PyO3 setter,
+        which in turn allocates a workbook-unique ``id`` at save time
+        — any explicit ``id`` set by the user on the ``Table`` dataclass
+        is ignored to avoid cross-sheet collisions in the rare case
+        where the user opens a multi-table file and re-uses a numeric
+        id by accident.
         """
         from wolfxl.worksheet.table import Table
 
         if not isinstance(table, Table):
             raise TypeError(
                 f"add_table() expects a wolfxl.worksheet.table.Table, got {type(table).__name__}"
-            )
-        wb = self._workbook
-        if wb._rust_writer is None:  # noqa: SLF001
-            raise NotImplementedError(
-                "Adding tables to existing files is a T1.5 follow-up. "
-                "Write mode (Workbook() + save) is supported."
             )
         # Make sure the cache exists so ws.tables[name] sees the queued one.
         if self._tables_cache is None:

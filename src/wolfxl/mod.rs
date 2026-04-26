@@ -22,6 +22,7 @@ pub mod properties;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
 pub mod defined_names;
+pub mod tables;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -158,6 +159,16 @@ pub struct XlsxPatcher {
     /// insertion order). Within a save, the merger upserts by
     /// `(name, local_sheet_id)` so duplicates collapse to last-wins.
     queued_defined_names: Vec<defined_names::DefinedNameMut>,
+    /// Per-sheet table-add patches pending flush (RFC-024). Drained
+    /// by Phase 2.5g: scans the source ZIP for the workbook's
+    /// existing-table inventory (across ALL sheets, since `id` and
+    /// `name` are workbook-unique), allocates fresh ids + sequential
+    /// part filenames, mutates `rels_patches`, queues the
+    /// `[Content_Types].xml` Override entries through
+    /// `queued_content_type_ops`, and pushes a
+    /// `SheetBlock::TableParts` per sheet. Insertion order via Vec
+    /// matches openpyxl's "first add → first slot" semantics.
+    queued_tables: HashMap<String, Vec<tables::TablePatch>>,
 }
 
 #[pymethods]
@@ -207,6 +218,7 @@ impl XlsxPatcher {
             queued_props: None,
             queued_hyperlinks: HashMap::new(),
             queued_defined_names: Vec::new(),
+            queued_tables: HashMap::new(),
         })
     }
 
@@ -510,6 +522,73 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a table addition on `sheet` (RFC-024).
+    ///
+    /// `payload` keys (`name`, `ref`, and `columns` are required;
+    /// other keys default sensibly):
+    ///   - `name`              (str)
+    ///   - `display_name`      (str?, defaults to `name`)
+    ///   - `ref`               (str)  — A1 range, e.g. `"A1:E10"`
+    ///   - `columns`           (list[str]) — column names in order
+    ///   - `style`             (dict?) — `name`, `show_first_column`,
+    ///                          `show_last_column`, `show_row_stripes`,
+    ///                          `show_column_stripes`
+    ///   - `header_row_count`  (int?, defaults to 1)
+    ///   - `totals_row_shown`  (bool?, defaults to `false`)
+    ///   - `autofilter`        (bool?, defaults to `true`)
+    ///
+    /// Workbook-unique id allocation, name-collision detection,
+    /// part-file emission, sheet-rels mutation, content-type
+    /// override, and `<tableParts>` block insertion all happen at
+    /// `save()` time during Phase-2.5f.
+    fn queue_table(&mut self, sheet: &str, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let name = extract_str(payload, "name")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("table requires 'name'"))?;
+        let display_name = extract_str(payload, "display_name")?.unwrap_or_else(|| name.clone());
+        let ref_range = extract_str(payload, "ref")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("table requires 'ref'"))?;
+        let columns_obj = payload
+            .get_item("columns")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("table requires 'columns'"))?;
+        let columns: Vec<String> = columns_obj.extract::<Vec<String>>()?;
+        let header_row_count = extract_u32(payload, "header_row_count")?.unwrap_or(1);
+        let totals_row_shown = extract_bool(payload, "totals_row_shown")?.unwrap_or(false);
+        let autofilter = extract_bool(payload, "autofilter")?.unwrap_or(true);
+
+        let style = match payload.get_item("style")? {
+            Some(v) if !v.is_none() => {
+                let d = v
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyErr::new::<PyValueError, _>("'style' must be a dict or None"))?;
+                let style_name = extract_str(d, "name")?.unwrap_or_default();
+                Some(tables::TableStylePatch {
+                    name: style_name,
+                    show_first_column: extract_bool(d, "show_first_column")?.unwrap_or(false),
+                    show_last_column: extract_bool(d, "show_last_column")?.unwrap_or(false),
+                    show_row_stripes: extract_bool(d, "show_row_stripes")?.unwrap_or(false),
+                    show_column_stripes: extract_bool(d, "show_column_stripes")?.unwrap_or(false),
+                })
+            }
+            _ => None,
+        };
+
+        let patch = tables::TablePatch {
+            name,
+            display_name,
+            ref_range,
+            columns,
+            style,
+            header_row_count,
+            totals_row_shown,
+            autofilter,
+        };
+        self.queued_tables
+            .entry(sheet.to_string())
+            .or_default()
+            .push(patch);
+        Ok(())
+    }
+
     fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let title = extract_str(payload, "title")?;
         let subject = extract_str(payload, "subject")?;
@@ -793,11 +872,13 @@ impl XlsxPatcher {
             && self.queued_props.is_none()
             && self.queued_hyperlinks.is_empty()
             && self.queued_defined_names.is_empty()
+            && self.queued_tables.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
-            // `queued_props`, RFC-022's `queued_hyperlinks`, and
-            // RFC-021's `queued_defined_names` so a no-op save remains
+            // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
+            // `queued_defined_names`, and RFC-024's `queued_tables` so
+            // a no-op save remains
             // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
@@ -1036,6 +1117,110 @@ impl XlsxPatcher {
                 .entry(sheet_path.clone())
                 .or_default()
                 .push(SheetBlock::Hyperlinks(block_bytes));
+        }
+
+        // --- Phase 2.5f: Tables (RFC-024) ---
+        //
+        // Per-sheet flush. The workbook's existing-table inventory is
+        // scanned ONCE up front (table `id` and `name` are
+        // workbook-unique, not sheet-scoped, so per-sheet flushes
+        // would otherwise risk allocating duplicate ids when two
+        // sheets are flushed in the same save). For each sheet with
+        // queued tables:
+        //   1. Get-or-load the rels graph into `rels_patches` so the
+        //      Phase-3 rels-serialization loop picks up the new
+        //      TABLE rels we add.
+        //   2. Call `tables::build_tables`, which serializes each
+        //      patch into `xl/tables/tableN.xml` bytes (reusing the
+        //      writer's emitter), allocates fresh rIds in the rels
+        //      graph, queues `[Content_Types].xml` Override entries
+        //      for each new part, and emits a merged `<tableParts>`
+        //      block that includes any pre-existing TABLE rIds plus
+        //      the new ones.
+        //   3. Inject the new part bytes into `file_adds`.
+        //   4. Forward content-type ops into `queued_content_type_ops`
+        //      so Phase 2.5c aggregates them into one
+        //      `[Content_Types].xml` mutation.
+        //   5. Push `SheetBlock::TableParts(block_bytes)` (slot 37)
+        //      into `local_blocks` so Phase-3's `merge_blocks` call
+        //      replaces the sheet's existing `<tableParts>` (if any)
+        //      with the merged block.
+        //
+        // Inventory + ID allocation across sheets: `build_tables`
+        // takes a mutable inventory cloned per sheet only — but we
+        // thread the names/ids/count manually here so concurrent
+        // sheet flushes still see each others' allocations and
+        // collisions surface deterministically. (Same trick as the
+        // CF cross-sheet dxfId counter in Phase 2.5b.)
+        if !self.queued_tables.is_empty() {
+            let mut tables_inventory = tables::scan_existing_tables(&mut zip)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
+
+            // Iterate sheets in source-document order so allocations
+            // are deterministic across runs.
+            for sheet_name in &sheet_order_local {
+                let patches = match self.queued_tables.get(sheet_name) {
+                    Some(p) if !p.is_empty() => p.clone(),
+                    _ => continue,
+                };
+                let sheet_path = match self.sheet_paths.get(sheet_name).cloned() {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let rels_path = sheet_rels_path_for(&sheet_path);
+                if !self.rels_patches.contains_key(&rels_path) {
+                    let g = load_or_empty_rels(&mut zip, &rels_path)?;
+                    self.rels_patches.insert(rels_path.clone(), g);
+                }
+                let rels = self
+                    .rels_patches
+                    .get_mut(&rels_path)
+                    .expect("just inserted above");
+                let result = tables::build_tables(&patches, &tables_inventory, rels)
+                    .map_err(|e| PyErr::new::<PyValueError, _>(e))?;
+
+                // Update the running inventory so subsequent sheets'
+                // build_tables calls see this sheet's allocations.
+                for (path, _bytes) in &result.table_parts {
+                    tables_inventory.count += 1;
+                    tables_inventory.paths.push(path.clone());
+                }
+                for patch in &patches {
+                    tables_inventory.names.insert(patch.name.clone());
+                }
+                for (path, bytes) in result.table_parts {
+                    self.file_adds.insert(path, bytes);
+                }
+                // Reflect the freshly-allocated ids in the inventory's
+                // `ids` set. We re-derive them by parsing the emitted
+                // XML's id attribute — cheaper than threading them out
+                // of build_tables and keeps that API surface narrow.
+                for path in &tables_inventory.paths {
+                    if let Some(bytes) = self.file_adds.get(path) {
+                        let (id_opt, _) = tables::parse_table_root_attrs(bytes);
+                        if let Some(id) = id_opt {
+                            tables_inventory.ids.insert(id);
+                        }
+                    }
+                }
+                // Content-type Override per new part — funnel through
+                // the existing Phase-2.5c aggregator.
+                let ct_ops_for_sheet = self
+                    .queued_content_type_ops
+                    .entry(sheet_name.clone())
+                    .or_default();
+                for (part_name, ct) in result.new_content_types {
+                    ct_ops_for_sheet.push(content_types::ContentTypeOp::AddOverride(
+                        part_name, ct,
+                    ));
+                }
+                if !result.table_parts_block.is_empty() {
+                    local_blocks
+                        .entry(sheet_path.clone())
+                        .or_default()
+                        .push(SheetBlock::TableParts(result.table_parts_block));
+                }
+            }
         }
 
         // --- Phase 3: Patch worksheet XMLs ---
