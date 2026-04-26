@@ -24,7 +24,7 @@ import os
 from wolfxl._cell import Cell
 from wolfxl._rust import __version__, classify_format
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
-from wolfxl._workbook import Workbook
+from wolfxl._workbook import CopyOptions, Workbook
 from wolfxl._worksheet import Worksheet
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "Border",
     "Cell",
     "Color",
+    "CopyOptions",
     "Font",
     "PatternFill",
     "Side",

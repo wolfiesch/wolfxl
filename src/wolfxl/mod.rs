@@ -27,6 +27,8 @@ pub mod tables;
 pub mod comments;
 // RFC-035 Pod-β: Phase 2.7 (do_save) consumes plan_sheet_copy from this re-export.
 pub mod sheet_copy;
+// Sprint Θ Pod-C3: Phase 2.8 (do_save) rebuilds xl/calcChain.xml.
+pub mod calcchain;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -227,6 +229,12 @@ pub struct SheetCopyOp {
     pub src_title: String,
     /// Destination sheet title (pre-deduped by the Python coordinator).
     pub dst_title: String,
+    /// Sprint Θ Pod-C2 — workbook-level
+    /// `wb.copy_options.deep_copy_images` snapshot at queue time.
+    /// `false` preserves the historical RFC-035 §5.3 alias-by-target
+    /// behaviour. Read by the planner via
+    /// [`SheetCopyInputs::deep_copy_images`].
+    pub deep_copy_images: bool,
 }
 
 /// One queued axis-shift op (RFC-030/031).
@@ -928,7 +936,18 @@ impl XlsxPatcher {
     /// queued by an earlier `queue_sheet_copy` call. On success
     /// appends to `queued_sheet_copies` (drained by Phase 2.7 in
     /// append order during `do_save`).
-    fn queue_sheet_copy(&mut self, src_title: &str, dst_title: &str) -> PyResult<()> {
+    ///
+    /// `deep_copy_images` is the workbook-level
+    /// `wb.copy_options.deep_copy_images` flag, snapshot at queue
+    /// time. Defaults to `false` to preserve historical RFC-035 §5.3
+    /// alias-by-target behaviour for callers that omit it.
+    #[pyo3(signature = (src_title, dst_title, deep_copy_images=false))]
+    fn queue_sheet_copy(
+        &mut self,
+        src_title: &str,
+        dst_title: &str,
+        deep_copy_images: bool,
+    ) -> PyResult<()> {
         if !self.sheet_paths.contains_key(src_title) {
             return Err(PyErr::new::<PyValueError, _>(format!(
                 "queue_sheet_copy: source sheet '{src_title}' not found in workbook"
@@ -956,6 +975,7 @@ impl XlsxPatcher {
         self.queued_sheet_copies.push(SheetCopyOp {
             src_title: src_title.to_string(),
             dst_title: dst_title.to_string(),
+            deep_copy_images,
         });
         Ok(())
     }
@@ -2176,6 +2196,23 @@ impl XlsxPatcher {
             self.apply_range_moves_phase(&mut file_patches, &mut zip)?;
         }
 
+        // --- Phase 2.8: calcChain.xml rebuild (Sprint Θ Pod-C3) ---
+        //
+        // Walk every sheet in `sheet_order`, scan each sheet's
+        // post-mutation XML for formula cells, and emit a fresh
+        // `xl/calcChain.xml`. Excel transparently rebuilds this file
+        // on next open if it's stale, so the rebuild is a perf-only
+        // hint — it never changes correctness. We still do it because
+        // (a) it makes Excel's first-open faster, (b) external tools
+        // that read calcChain directly see the right cells, and (c)
+        // it keeps WolfXL output closer to a freshly-saved Excel
+        // file.
+        //
+        // The no-op short-circuit at the top of `do_save` already
+        // bypasses this whole flush, so byte-identical no-op saves
+        // are unaffected.
+        self.rebuild_calc_chain_phase(&mut file_patches, &mut zip)?;
+
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
@@ -2567,6 +2604,7 @@ impl XlsxPatcher {
                 workbook_xml: &workbook_xml,
                 allocator: part_id_allocator,
                 existing_table_names: &existing_table_names,
+                deep_copy_images: op.deep_copy_images,
             };
             let mutations =
                 wolfxl_structural::sheet_copy::plan_sheet_copy(inputs).map_err(|e| {
@@ -2766,6 +2804,161 @@ impl XlsxPatcher {
                 file_patches.insert(sheet_path, new_bytes);
             }
         }
+        Ok(())
+    }
+
+    /// Phase 2.8 — rebuild `xl/calcChain.xml` (Sprint Θ Pod-C3).
+    ///
+    /// Walks every sheet in `sheet_order`, scans the post-mutation XML for
+    /// formula cells, and emits a fresh `xl/calcChain.xml`. The rebuild
+    /// runs unconditionally inside the flush phase — the no-op
+    /// short-circuit at the top of `do_save` already bypasses this phase
+    /// when there are zero queued ops, so byte-identical no-op saves are
+    /// unaffected.
+    ///
+    /// Behaviour:
+    /// - At least one formula across all sheets → emit a fresh
+    ///   `xl/calcChain.xml` (overwriting any source copy in
+    ///   `file_patches` or adding a new entry via `file_adds`).
+    ///   Adds a `[Content_Types].xml` `<Override>` for it if not
+    ///   already present, and adds a workbook→calcChain rel if not
+    ///   already present.
+    /// - Zero formulas across all sheets → if the source contained a
+    ///   `xl/calcChain.xml`, mark it for deletion (`file_deletes`) so
+    ///   the saved file is consistent with the workbook content.
+    fn rebuild_calc_chain_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        fn get_bytes(
+            file_patches: &HashMap<String, Vec<u8>>,
+            file_adds: &HashMap<String, Vec<u8>>,
+            zip: &mut ZipArchive<File>,
+            path: &str,
+        ) -> Option<Vec<u8>> {
+            if let Some(b) = file_patches.get(path) {
+                return Some(b.clone());
+            }
+            if let Some(b) = file_adds.get(path) {
+                return Some(b.clone());
+            }
+            let mut entry = match zip.by_name(path) {
+                Ok(e) => e,
+                Err(_) => return None,
+            };
+            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+            std::io::copy(&mut entry, &mut buf).ok()?;
+            Some(buf)
+        }
+
+        const CALC_CHAIN_PATH: &str = "xl/calcChain.xml";
+        let source_has_calc_chain = zip.by_name(CALC_CHAIN_PATH).is_ok();
+
+        // Walk sheets in tab order, scanning each.
+        let mut all_entries: Vec<calcchain::CalcChainEntry> = Vec::new();
+        let order = self.sheet_order.clone();
+        for (i, sheet_name) in order.iter().enumerate() {
+            let sheet_path = match self.sheet_paths.get(sheet_name) {
+                Some(p) => p.clone(),
+                None => continue,
+            };
+            let sheet_xml = match get_bytes(file_patches, &self.file_adds, zip, &sheet_path) {
+                Some(b) => b,
+                None => continue,
+            };
+            let sheet_index_1based = (i as u32) + 1;
+            let entries = calcchain::scan_sheet_for_formulas(&sheet_xml, sheet_index_1based);
+            all_entries.extend(entries);
+        }
+
+        match calcchain::render_calc_chain(&all_entries) {
+            Some(bytes) => {
+                // Route the rewrite based on whether the source ZIP
+                // already had a calcChain.xml entry.
+                if source_has_calc_chain {
+                    file_patches.insert(CALC_CHAIN_PATH.to_string(), bytes);
+                } else {
+                    self.file_adds.insert(CALC_CHAIN_PATH.to_string(), bytes);
+                }
+                // Ensure content-type Override + workbook rel.
+                self.ensure_calc_chain_metadata(file_patches, zip)?;
+            }
+            None => {
+                // Zero formulas in the workbook. If the source had a
+                // calcChain.xml, delete it (it would be stale and Excel
+                // would emit a parse warning if it pointed at missing
+                // cells).
+                if source_has_calc_chain {
+                    self.file_deletes.insert(CALC_CHAIN_PATH.to_string());
+                    file_patches.remove(CALC_CHAIN_PATH);
+                }
+                // No-op for content-types / workbook rels: leaving stale
+                // metadata is benign because the part is gone, and many
+                // Excel-generated files keep both ends in sync naturally
+                // (we only remove our own rebuild output).
+            }
+        }
+        Ok(())
+    }
+
+    /// Ensure `[Content_Types].xml` has an `<Override>` for
+    /// `xl/calcChain.xml` and `xl/_rels/workbook.xml.rels` has a
+    /// workbook→calcChain rel. Idempotent: existing entries are left
+    /// untouched.
+    fn ensure_calc_chain_metadata(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        // Content types.
+        let ct_xml: Vec<u8> = if let Some(b) = file_patches.get("[Content_Types].xml") {
+            b.clone()
+        } else {
+            ooxml_util::zip_read_to_string(zip, "[Content_Types].xml")?
+                .as_bytes()
+                .to_vec()
+        };
+        let mut graph = content_types::ContentTypesGraph::parse(&ct_xml).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}"))
+        })?;
+        graph.add_override("/xl/calcChain.xml", calcchain::CT_CALC_CHAIN);
+        file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
+
+        // Workbook rels.
+        let wb_rels_path = "xl/_rels/workbook.xml.rels";
+        let wb_rels_bytes_opt: Option<Vec<u8>> = if let Some(b) = file_patches.get(wb_rels_path) {
+            Some(b.clone())
+        } else if let Some(g) = self.rels_patches.get(wb_rels_path) {
+            Some(g.serialize())
+        } else if let Ok(mut entry) = zip.by_name(wb_rels_path) {
+            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+            if std::io::copy(&mut entry, &mut buf).is_ok() {
+                Some(buf)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(bytes) = wb_rels_bytes_opt {
+            let mut graph = wolfxl_rels::RelsGraph::parse(&bytes).unwrap_or_else(|_| wolfxl_rels::RelsGraph::new());
+            // Idempotent: only add if no existing rel of this type
+            // already targets calcChain.xml.
+            let already = graph.iter().any(|r| {
+                r.rel_type == calcchain::REL_CALC_CHAIN
+                    && (r.target == "calcChain.xml" || r.target == "/xl/calcChain.xml")
+            });
+            if !already {
+                graph.add(
+                    calcchain::REL_CALC_CHAIN,
+                    "calcChain.xml",
+                    wolfxl_rels::TargetMode::Internal,
+                );
+                file_patches.insert(wb_rels_path.to_string(), graph.serialize());
+            }
+        }
+
         Ok(())
     }
 }

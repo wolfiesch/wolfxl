@@ -8,9 +8,28 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._worksheet import Worksheet
+
+
+@dataclass
+class CopyOptions:
+    """Per-workbook flags controlling :meth:`Workbook.copy_worksheet`.
+
+    Attributes:
+        deep_copy_images: When ``True``, drawings reachable from a
+            cloned sheet have their referenced ``xl/media/imageN.<ext>``
+            targets DEEP-CLONED into freshly numbered media parts.
+            When ``False`` (default), the cloned drawing rels point at
+            the same image bytes as the source — Excel's historical
+            RFC-035 §5.3 alias behaviour. Modify-mode only;
+            write-mode ignores this flag (write-mode clones run via
+            in-memory replay, not the modify-mode planner).
+    """
+
+    deep_copy_images: bool = False
 
 if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
@@ -47,8 +66,13 @@ class Workbook:
             tuple[str, int, int, int, int, int, int, bool]
         ] = []
         # RFC-035 — append-order list of sheet-copy ops.
-        # Tuple shape: ``(src_title, dst_title)``.
-        self._pending_sheet_copies: list[tuple[str, str]] = []
+        # Tuple shape: ``(src_title, dst_title, deep_copy_images)``.
+        # The deep_copy_images flag is snapshot at copy_worksheet()
+        # call time so a later toggle of wb.copy_options doesn't
+        # retroactively affect already-queued copies.
+        self._pending_sheet_copies: list[tuple[str, str, bool]] = []
+        # Sprint Θ Pod-C2 — workbook-level copy options.
+        self.copy_options: CopyOptions = CopyOptions()
 
     @classmethod
     def _from_reader(
@@ -84,6 +108,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb.copy_options = CopyOptions()
         return wb
 
     @classmethod
@@ -120,6 +145,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb.copy_options = CopyOptions()
         return wb
 
     # ------------------------------------------------------------------
@@ -326,9 +352,8 @@ class Workbook:
     ) -> Worksheet:
         """Duplicate *source* into a new sheet within this workbook (RFC-035).
 
-        Modify-mode-only in WolfXL 1.1 (RFC-035 §3 OQ-a). Write-mode is
-        tracked for 1.2 — calling this on a write-mode workbook raises
-        ``NotImplementedError``.
+        Supported in BOTH modify mode and write mode (Sprint Θ Pod-C1).
+        Read-only mode raises ``RuntimeError``.
 
         The new sheet appends at the end of the tab list. The default
         title is ``f"{source.title} Copy"``; on collision an incrementing
@@ -336,9 +361,15 @@ class Workbook:
         explicit ``name`` keyword argument overrides the default and
         must not collide with any existing sheet name.
 
-        The returned ``Worksheet`` is a fresh proxy bound to the cloned
-        title. The actual ZIP-level clone runs at ``save()`` time via
-        Phase 2.7 of the patcher.
+        Modify mode: the returned ``Worksheet`` is a fresh proxy bound
+        to the cloned title. The actual ZIP-level clone runs at
+        ``save()`` time via Phase 2.7 of the patcher.
+
+        Write mode: the source's pending writes are materialized
+        immediately and replayed onto a freshly-created destination
+        sheet (cell values, formats, row heights, column widths, merged
+        ranges, freeze pane). Native-writer-tracked features added by
+        the API after `copy_worksheet` returns flow through normally.
         """
         if not isinstance(source, Worksheet):
             raise TypeError(
@@ -348,13 +379,9 @@ class Workbook:
             raise ValueError(
                 "copy_worksheet: source must belong to this workbook"
             )
-        if self._rust_patcher is None:
-            raise NotImplementedError(
-                "Workbook.copy_worksheet is modify-mode-only in WolfXL 1.1; "
-                "pass modify=True to load_workbook(...). Tracked for 1.2 in "
-                "RFC-035 §3 OQ-a. "
-                "Workaround: use openpyxl for structural ops, then load the "
-                "result with wolfxl.load_workbook() to do the heavy reads."
+        if self._rust_patcher is None and self._rust_writer is None:
+            raise RuntimeError(
+                "copy_worksheet requires write or modify mode"
             )
 
         # Compute the new title. Explicit `name` wins; otherwise dedup
@@ -373,16 +400,104 @@ class Workbook:
                 new_title = f"{base} {suffix}"
                 suffix += 1
 
-        # Queue on the Python side; the patcher consumes the queue
-        # during save() via _flush_pending_sheet_copies_to_patcher.
-        self._pending_sheet_copies.append((source.title, new_title))
+        if self._rust_patcher is not None:
+            # Modify-mode path — queue + tab-list update; ZIP-level clone
+            # happens during save() via Phase 2.7. Snapshot the
+            # deep_copy_images flag at queue time so a later toggle
+            # of wb.copy_options doesn't retroactively affect this
+            # already-queued copy.
+            self._pending_sheet_copies.append(
+                (source.title, new_title, bool(self.copy_options.deep_copy_images))
+            )
+            self._sheet_names.append(new_title)
+            ws = Worksheet(self, new_title)
+            self._sheets[new_title] = ws
+            return ws
 
-        # Update the in-memory tab list + sheet map immediately so
-        # subsequent reads see the new sheet without a save round-trip.
-        self._sheet_names.append(new_title)
-        ws = Worksheet(self, new_title)
-        self._sheets[new_title] = ws
-        return ws
+        # Write-mode path (Sprint Θ Pod-C1).
+        return self._copy_worksheet_write_mode(source, new_title)
+
+    def _copy_worksheet_write_mode(
+        self, source: Worksheet, new_title: str
+    ) -> Worksheet:
+        """Clone an in-memory worksheet into a fresh sheet (write mode).
+
+        Materialises any pending append/bulk-write buffers on the source
+        so every cell lives in ``source._cells`` first, then walks that
+        map and replays each cell's value + format/border onto the
+        destination's lazily-allocated ``Cell`` objects. Sheet-scope
+        attributes (row heights, column widths, merged ranges, freeze
+        pane) are copied verbatim. The destination sheet is registered
+        with the native writer via ``create_sheet`` so that downstream
+        save/flush passes see it like any other sheet.
+        """
+        from wolfxl._cell import _UNSET
+
+        # 1. Materialise the source's pending buffers so every value is
+        #    in `_cells` and discoverable. These helpers are idempotent.
+        if source._append_buffer:  # noqa: SLF001
+            source._materialize_append_buffer()  # noqa: SLF001
+        if source._bulk_writes:  # noqa: SLF001
+            source._materialize_bulk_writes()  # noqa: SLF001
+
+        # 2. Add a fresh destination sheet. Use the public-ish helper so
+        #    the Rust writer gets the new sheet registered first.
+        dst = self.create_sheet(new_title)
+
+        # 3. Walk the source's cell map. We iterate `_cells` (not
+        #    `_dirty`) because cells materialised from append/bulk
+        #    buffers go through `cell(...)` which writes via the
+        #    public setter that flips `_value_dirty` — so they're in
+        #    `_dirty` too — but a future caller might construct cells
+        #    via direct attribute writes. Using `_cells` is the
+        #    superset and makes the snapshot deterministic.
+        for (row, col), src_cell in source._cells.items():  # noqa: SLF001
+            value = src_cell._value  # noqa: SLF001
+            has_value = value is not _UNSET and src_cell._value_dirty  # noqa: SLF001
+            font = src_cell._font  # noqa: SLF001
+            fill = src_cell._fill  # noqa: SLF001
+            border = src_cell._border  # noqa: SLF001
+            alignment = src_cell._alignment  # noqa: SLF001
+            number_format = src_cell._number_format  # noqa: SLF001
+            has_format = src_cell._format_dirty  # noqa: SLF001
+
+            if not has_value and not has_format:
+                # Cell exists only because it was probed for read; do
+                # not propagate (would inflate destination dimensions).
+                continue
+
+            # Use cell() which builds a Cell, so the value/format
+            # setters mark dirty correctly for downstream `_flush`.
+            dst_cell = dst.cell(row=row, column=col)
+            if has_value:
+                dst_cell.value = value
+            if font is not _UNSET:
+                dst_cell.font = font  # type: ignore[assignment]
+            if fill is not _UNSET:
+                dst_cell.fill = fill  # type: ignore[assignment]
+            if border is not _UNSET:
+                dst_cell.border = border  # type: ignore[assignment]
+            if alignment is not _UNSET:
+                dst_cell.alignment = alignment  # type: ignore[assignment]
+            if number_format is not _UNSET:
+                dst_cell.number_format = number_format  # type: ignore[assignment]
+
+        # 4. Sheet-scope properties.
+        for r, h in source._row_heights.items():  # noqa: SLF001
+            dst._row_heights[r] = h  # noqa: SLF001
+        for letter, w in source._col_widths.items():  # noqa: SLF001
+            dst._col_widths[letter] = w  # noqa: SLF001
+        # Merges: round-trip through merge_cells so the Rust writer
+        # also gets the merge — `_merged_ranges` is just the Python
+        # mirror set; the writer needs an explicit call to record it.
+        for rng in source._merged_ranges:  # noqa: SLF001
+            dst.merge_cells(rng)
+        if source._freeze_panes is not None:  # noqa: SLF001
+            dst._freeze_panes = source._freeze_panes  # noqa: SLF001
+        if source._print_area is not None:  # noqa: SLF001
+            dst._print_area = source._print_area  # noqa: SLF001
+
+        return dst
 
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
         """Move *sheet* by *offset* positions within the workbook tab list.
@@ -776,8 +891,8 @@ class Workbook:
         patcher = self._rust_patcher
         if patcher is None or not self._pending_sheet_copies:
             return
-        for src_title, dst_title in self._pending_sheet_copies:
-            patcher.queue_sheet_copy(src_title, dst_title)
+        for src_title, dst_title, deep_copy_images in self._pending_sheet_copies:
+            patcher.queue_sheet_copy(src_title, dst_title, deep_copy_images)
         self._pending_sheet_copies.clear()
 
     def _flush_defined_names_to_patcher(self) -> None:

@@ -237,13 +237,12 @@ File: `python/wolfxl/_workbook.py:289-300`. Replace the
    strings (openpyxl rejects strings too — the param is a worksheet
    object). Reject if `source._workbook is not self` (cross-workbook
    copy — also matches openpyxl).
-2. **Mode precondition**: `copy_worksheet` is **modify-mode-only** in
-   the first slice (§3 open question (a) below). Raise a clear
-   `NotImplementedError("write-mode copy_worksheet is RFC-XXX")` for
-   write-mode workbooks. Read-only mode (`load_workbook` without
-   `modify=True`) raises `RuntimeError` because there is no patcher
-   or writer to record the copy on. See §3 OQ-a for the rationale and
-   the alternative.
+2. **Mode precondition**: `copy_worksheet` works in BOTH modify mode
+   and write mode (Sprint Θ Pod-C1 lifted the modify-only
+   restriction; see "Sprint Θ updates" at the end of this RFC).
+   Read-only mode (`load_workbook` without `modify=True`) raises
+   `RuntimeError` because there is no patcher or writer to record
+   the copy on.
 3. Compute the new title: `f"{source.title} Copy"` initially. If that
    collides with an existing sheet name in `self._sheet_names`, append
    ` 1`, ` 2`, … until unique. (Same algorithm `create_sheet` uses.)
@@ -907,18 +906,18 @@ side-effect of RFC-035:
   are aliased (preserved-on-source) for now; a future RFC owns chart
   re-pointing.
 
-- **Deep-cloning images / media**: §5.3 / §8 risk #2 — image parts
-  are aliased. A "deep clone" would dup `xl/media/image*.png` per
-  copy and update every drawing rels accordingly. Out of scope; no
-  current API exposes per-copy image mutation.
+- ~~**Deep-cloning images / media**~~: opt-in via
+  `wb.copy_options.deep_copy_images = True` as of Sprint Θ Pod-C2.
+  Default remains alias-by-target (`False`). See "Sprint Θ updates"
+  at the end of this RFC.
 
 - **Re-pointing formula text references to the source sheet's name**
   (`='Template'!A1` on a cell in the copy continues to read from the
   source sheet `Template`, not from the copy). Matches Excel's
   copy-tab UI behaviour; documented as a §3 OQ note above.
 
-- **`xl/calcChain.xml` invalidation**: not mutated. Excel rebuilds
-  it on next open. (Risk #9.)
+- ~~**`xl/calcChain.xml` invalidation**~~: rebuilt on save as of
+  Sprint Θ Pod-C3. See "Sprint Θ updates" at the end of this RFC.
 
 - **Pivot tables and pivot caches** (`xl/pivotTables/`,
   `xl/pivotCache/`). Pivot definitions reference cell ranges; cloning
@@ -1019,4 +1018,51 @@ Sprint Ζ — Sprint Z (RFC-035 critical path) closed across four pods:
 - Verification: 1017 pytest pass, 2 xfail (deferred bugs #4 + #6),
   cargo test --workspace --exclude wolfxl green,
   cargo test -p wolfxl-structural --release green (116 unit + 2 proptests).
+- Date: 2026-04-26
+
+## Sprint Θ updates
+
+Sprint Θ Pod-C lands three follow-ups on top of the Sprint Ζ baseline:
+
+- **C1 — Write-mode `copy_worksheet`** (was: deferred to 1.2 / §3 OQ-a).
+  `Workbook.copy_worksheet` now works in both modify and write mode.
+  In write mode the implementation materialises the source's pending
+  append/bulk buffers, registers a fresh sheet via the native writer,
+  and replays each cell's value + format/border + sheet-scope
+  properties (row heights, column widths, merges, freeze pane). The
+  rejection branch on `_rust_patcher is None` is replaced by a real
+  clone path. Added: `tests/test_copy_worksheet_write_mode.py` (7
+  cases). Removed: the now-stale rejection test in
+  `tests/test_copy_worksheet_modify.py::test_n_write_mode_raises`.
+
+- **C2 — `wb.copy_options.deep_copy_images`** (was: §5.3 / §8 risk #2
+  / "Deep-cloning images / media" deferred). A new `CopyOptions`
+  dataclass exposes `deep_copy_images: bool = False`. When `True`,
+  the modify-mode planner allocates a fresh
+  `xl/media/imageM.<ext>` per image rel reachable from the cloned
+  sheet's drawings, copies the original image bytes into the new
+  ancillary parts, and re-points the cloned drawing's nested rels
+  file. The default (`False`) preserves the historical alias-by-
+  target behaviour, so this is strictly additive. The flag is
+  snapshot at `copy_worksheet()` call time so a later toggle of
+  `wb.copy_options` does not retroactively affect already-queued
+  copies. Added: `tests/test_copy_worksheet_deep_clone_images.py` (4
+  cases) + `PartIdAllocator::alloc_image` in `wolfxl-rels`.
+
+- **C3 — `xl/calcChain.xml` rebuild on save** (was: out of scope per
+  §10 / risk #9 — Excel rebuilds it on next open). WolfXL now writes
+  a fresh `xl/calcChain.xml` whenever the modify-mode flush phase
+  fires (no-op short-circuit still bypasses) or whenever write-mode
+  `emit_xlsx` runs. Excel-open is faster, external tools that read
+  calcChain directly see the right cells, and structural ops
+  (`insert_rows`, `move_range`, etc.) compose correctly because the
+  scan happens after every other flush phase. Spans RFC-035 and
+  RFC-030/031/034 (the structural ops); not strictly an RFC-035
+  scope item but ships in the same pod. Added:
+  `crates/wolfxl-writer/src/emit/calc_chain_xml.rs`,
+  `src/wolfxl/calcchain.rs`, `tests/test_calcchain_rebuild.py` (7
+  cases).
+
+- Verification: 1036 pytest pass, 2 xfail (carried over),
+  cargo test --workspace --exclude wolfxl green (~640 cases).
 - Date: 2026-04-26

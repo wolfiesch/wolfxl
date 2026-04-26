@@ -553,16 +553,9 @@ def test_m_cross_workbook_rejected(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Case N — Write-mode rejection (RFC-035 §3 OQ-a).
+# Case N — Write-mode is now SUPPORTED (Sprint Θ Pod-C1).
+#   Positive coverage moved to ``tests/test_copy_worksheet_write_mode.py``.
 # ---------------------------------------------------------------------------
-
-
-def test_n_write_mode_raises() -> None:
-    wb = Workbook()
-    ws = wb.active
-    assert ws is not None
-    with pytest.raises(NotImplementedError, match="modify-mode-only"):
-        wb.copy_worksheet(ws)
 
 
 # ---------------------------------------------------------------------------

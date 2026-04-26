@@ -58,6 +58,7 @@ pub struct PartIdAllocator {
     next_drawing: u32,
     next_sheet: u32,
     next_chart: u32,
+    next_image: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -76,6 +77,7 @@ impl PartIdAllocator {
             next_drawing: 1,
             next_sheet: 1,
             next_chart: 1,
+            next_image: 1,
         }
     }
 
@@ -113,6 +115,15 @@ impl PartIdAllocator {
             self.bump(Counter::Sheet, n);
         } else if let Some(n) = parse_n(path, "xl/charts/chart", ".xml") {
             self.bump(Counter::Chart, n);
+        } else if path.starts_with("xl/media/image") {
+            // Images use heterogeneous extensions (png/jpeg/gif/...) so a
+            // generic strip+parse covers all of them.
+            if let Some(stem) = path.strip_prefix("xl/media/image") {
+                let mid: String = stem.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(n) = mid.parse::<u32>() {
+                    self.bump(Counter::Image, n);
+                }
+            }
         }
     }
 
@@ -124,6 +135,7 @@ impl PartIdAllocator {
             Counter::Drawing => &mut self.next_drawing,
             Counter::Sheet => &mut self.next_sheet,
             Counter::Chart => &mut self.next_chart,
+            Counter::Image => &mut self.next_image,
         };
         if n + 1 > *slot {
             *slot = n + 1;
@@ -172,9 +184,19 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `imageN` suffix for `xl/media/imageN.<ext>`;
+    /// returns `N` (≥1). Used by RFC-035 §5.3 deep-copy mode (Sprint Θ
+    /// Pod-C2). Extensions vary (png/jpeg/gif/…) so callers append the
+    /// extension themselves.
+    pub fn alloc_image(&mut self) -> u32 {
+        let n = self.next_image;
+        self.next_image += 1;
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
-    fn peek(&self) -> [u32; 6] {
+    fn peek(&self) -> [u32; 7] {
         [
             self.next_table,
             self.next_comments,
@@ -182,6 +204,7 @@ impl PartIdAllocator {
             self.next_drawing,
             self.next_sheet,
             self.next_chart,
+            self.next_image,
         ]
     }
 }
@@ -193,6 +216,7 @@ enum Counter {
     Drawing,
     Sheet,
     Chart,
+    Image,
 }
 
 // ---------------------------------------------------------------------------
@@ -274,10 +298,22 @@ mod tests {
             "xl/_rels/workbook.xml.rels",
             "xl/worksheets/_rels/sheet1.xml.rels",
             "docProps/core.xml",
-            "xl/media/image1.png",
         ];
         let a = PartIdAllocator::from_zip_parts(parts.iter().copied());
-        assert_eq!(a.peek(), [1, 1, 1, 1, 1, 1]);
+        // Layout: [table, comments, vml, drawing, sheet, chart, image].
+        assert_eq!(a.peek(), [1, 1, 1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn image_seed_from_xl_media_imageN_ext() {
+        let parts = [
+            "xl/media/image1.png",
+            "xl/media/image2.jpeg",
+            "xl/media/image5.gif",
+        ];
+        let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
+        // Highest seen is 5 → next free is 6.
+        assert_eq!(a.alloc_image(), 6);
     }
 
     #[test]
