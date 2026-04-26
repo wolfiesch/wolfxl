@@ -424,8 +424,9 @@ write-mode path can be added then. Documented as a follow-up below.
 
 ## Acceptance
 
-(Filled in after Shipped.)
-
-- Commit: `<sha>` — feat/rfc-030 commit subject(s)
-- Verification: `python scripts/verify_rfc.py --rfc 030 --quick` GREEN at `<sha>`
-- Date: 2026-04-26
+- Commit `c4011d0` — `docs(rfc-030): recreate insert/delete-rows spec from template`
+- Commit `da8f158` — `feat(rfc-030): add wolfxl-structural workspace crate`
+- Commit `9e42342` — `feat(rfc-030): wire insert_rows / delete_rows end-to-end`
+- Verification: `python scripts/verify_rfc.py --rfc 030 --quick` GREEN at `9e42342`
+- Tests: `tests/test_axis_shift_modify.py` 16/16 pass; `tests/parity/` 97/97 pass
+- Date: 2026-04-25
