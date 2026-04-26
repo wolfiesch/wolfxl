@@ -29,6 +29,7 @@ use zip::{ZipArchive, ZipWriter};
 use crate::ooxml_util;
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
+use validations::DataValidationPatch;
 use wolfxl_merger::SheetBlock;
 use wolfxl_rels::RelsGraph;
 
@@ -56,9 +57,22 @@ pub struct XlsxPatcher {
     /// loop calls `wolfxl_merger::merge_blocks` after `sheet_patcher`
     /// runs, so cell-level patches and block-level patches compose
     /// without conflict. Populated by future Phase-3 RFCs (RFC-022
-    /// hyperlinks, RFC-024 tables, RFC-025 data validations, RFC-026
-    /// conditional formatting); empty in the current slice.
+    /// hyperlinks, RFC-024 tables, RFC-026 conditional formatting);
+    /// empty in the current slice.
+    ///
+    /// Note: RFC-025 (data validations) does NOT populate this map
+    /// directly. It builds blocks on-demand inside `do_save` from
+    /// `queued_dv_patches` so that the existing `<dataValidations>`
+    /// block (read out of the source sheet XML at save time) can be
+    /// merged with the queued patches before the merger is invoked.
     queued_blocks: HashMap<String, Vec<SheetBlock>>,
+    /// Queued data-validation rules per sheet name (NOT path — we
+    /// resolve to path inside `do_save`). Each entry becomes a single
+    /// `<dataValidations>` block during save: any pre-existing block
+    /// in the source sheet XML is read out, prepended verbatim, and
+    /// the queued patches are appended. The combined block is then
+    /// handed to `wolfxl_merger` as `SheetBlock::DataValidations`.
+    queued_dv_patches: HashMap<String, Vec<DataValidationPatch>>,
 }
 
 #[pymethods]
@@ -91,6 +105,7 @@ impl XlsxPatcher {
             format_patches: HashMap::new(),
             rels_patches: HashMap::new(),
             queued_blocks: HashMap::new(),
+            queued_dv_patches: HashMap::new(),
         })
     }
 
@@ -185,6 +200,44 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a data-validation rule on a sheet (RFC-025).
+    ///
+    /// `payload` is a dict of openpyxl-shaped fields. `sqref` is required;
+    /// every other key is optional. Booleans default to `false`. Unknown
+    /// keys are ignored to keep the Python side forward-compatible.
+    fn queue_data_validation(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let sqref = extract_str(payload, "sqref")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("data validation requires 'sqref'"))?;
+
+        let patch = DataValidationPatch {
+            validation_type: extract_str(payload, "validation_type")?
+                .unwrap_or_else(|| "none".to_string()),
+            operator: extract_str(payload, "operator")?,
+            formula1: extract_str(payload, "formula1")?,
+            formula2: extract_str(payload, "formula2")?,
+            sqref,
+            allow_blank: extract_bool(payload, "allow_blank")?.unwrap_or(false),
+            show_dropdown: extract_bool(payload, "show_dropdown")?.unwrap_or(false),
+            show_input_message: extract_bool(payload, "show_input_message")?.unwrap_or(false),
+            show_error_message: extract_bool(payload, "show_error_message")?.unwrap_or(false),
+            error_style: extract_str(payload, "error_style")?,
+            error_title: extract_str(payload, "error_title")?,
+            error: extract_str(payload, "error")?,
+            prompt_title: extract_str(payload, "prompt_title")?,
+            prompt: extract_str(payload, "prompt")?,
+        };
+
+        self.queued_dv_patches
+            .entry(sheet.to_string())
+            .or_default()
+            .push(patch);
+        Ok(())
+    }
+
     /// Queue a cell border change.
     fn queue_border(
         &mut self,
@@ -236,6 +289,7 @@ impl XlsxPatcher {
             && self.format_patches.is_empty()
             && self.rels_patches.is_empty()
             && self.queued_blocks.is_empty()
+            && self.queued_dv_patches.is_empty()
         {
             // No changes — just copy
             std::fs::copy(&self.file_path, output_path)
@@ -314,21 +368,48 @@ impl XlsxPatcher {
             }
         }
 
+        // --- Phase 2.5: Build <dataValidations> blocks from queued DV
+        // patches (RFC-025).  Each queued sheet gets exactly one
+        // SheetBlock::DataValidations entry whose bytes are the
+        // (existing block's children, verbatim) + (new patches,
+        // freshly serialized), wrapped in a single <dataValidations
+        // count="N">…</dataValidations>.  We read the source sheet
+        // XML here so the existing block can flow through unchanged.
+        //
+        // Pushed into a *local* clone of queued_blocks rather than
+        // self — do_save takes &self, and self.queued_blocks is
+        // reserved for setters that produce blocks pre-save (future
+        // RFCs).  A local map keeps this slice's wiring contained
+        // and safe to compose with future block-producing setters.
+        let mut local_blocks: HashMap<String, Vec<SheetBlock>> = self.queued_blocks.clone();
+        for (sheet_name, patches) in &self.queued_dv_patches {
+            let sheet_path = match self.sheet_paths.get(sheet_name) {
+                Some(p) => p,
+                None => continue, // unknown sheet name — silently skip (mirrors value/format paths)
+            };
+            let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
+            let existing = validations::extract_existing_dv_block(&xml);
+            let block_bytes =
+                validations::build_data_validations_block(existing.as_deref(), patches);
+            local_blocks
+                .entry(sheet_path.clone())
+                .or_default()
+                .push(SheetBlock::DataValidations(block_bytes));
+        }
+
         // --- Phase 3: Patch worksheet XMLs ---
         //
         // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
         // sibling-block insertions via `wolfxl_merger`. The two passes
         // commute (cells live inside <sheetData>, blocks are siblings) so
-        // composing them is straightforward. The merger pass is dead code
-        // at HEAD because `queued_blocks` is always empty; RFC-022/024/
-        // 025/026 will populate it.
+        // composing them is straightforward.
         let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
 
         // Sheets that have either kind of patch.
         let mut all_sheet_paths: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         all_sheet_paths.extend(sheet_cell_patches.keys().cloned());
-        all_sheet_paths.extend(self.queued_blocks.keys().cloned());
+        all_sheet_paths.extend(local_blocks.keys().cloned());
 
         for sheet_path in &all_sheet_paths {
             let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
@@ -343,7 +424,7 @@ impl XlsxPatcher {
             };
 
             // Pass 2: sibling-block insertions.
-            let after_blocks = if let Some(blocks) = self.queued_blocks.get(sheet_path) {
+            let after_blocks = if let Some(blocks) = local_blocks.get(sheet_path) {
                 if blocks.is_empty() {
                     after_cells
                 } else {
