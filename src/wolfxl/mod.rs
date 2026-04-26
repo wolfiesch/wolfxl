@@ -18,7 +18,6 @@ pub mod validations;
 pub mod content_types;
 #[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
 pub mod ancillary;
-#[allow(dead_code)] // RFC-020: rewrite_core_props/rewrite_app_props wired into do_save in commit 7
 pub mod properties;
 
 use std::collections::{HashMap, HashSet};
@@ -129,6 +128,14 @@ pub struct XlsxPatcher {
     /// one parse + serialize. Empty in this slice (RFC-022/023/024
     /// will be the first volume callers).
     queued_content_type_ops: HashMap<String, Vec<content_types::ContentTypeOp>>,
+    /// Document properties pending flush (RFC-020). When `Some(_)`,
+    /// `do_save` rewrites both `docProps/core.xml` and
+    /// `docProps/app.xml` from the payload's fields. Routing depends
+    /// on whether each part already exists in the source ZIP — present
+    /// → patches it through `file_patches`; absent → adds it via
+    /// RFC-013's `file_adds` primitive. Populated by
+    /// [`Self::queue_properties`].
+    queued_props: Option<properties::DocPropertiesPayload>,
 }
 
 #[pymethods]
@@ -175,6 +182,7 @@ impl XlsxPatcher {
             file_deletes: HashSet::new(),
             ancillary: ancillary::AncillaryPartRegistry::new(),
             queued_content_type_ops: HashMap::new(),
+            queued_props: None,
         })
     }
 
@@ -385,13 +393,53 @@ impl XlsxPatcher {
         self.sheet_order.clone()
     }
 
+    /// Queue a document-properties update (RFC-020). The payload is the
+    /// flat dict produced by `python/wolfxl/_workbook.py`'s
+    /// `_flush_properties_to_patcher`; absent fields stay `None` and
+    /// don't appear in the rewritten core.xml.
+    ///
+    /// Recognized keys (all optional): `title`, `subject`, `creator`,
+    /// `keywords`, `description`, `last_modified_by`, `category`,
+    /// `content_status`, `created_iso`, `modified_iso`, `sheet_names`
+    /// (`list[str]`).
+    fn queue_properties(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let title = extract_str(payload, "title")?;
+        let subject = extract_str(payload, "subject")?;
+        let creator = extract_str(payload, "creator")?;
+        let keywords = extract_str(payload, "keywords")?;
+        let description = extract_str(payload, "description")?;
+        let last_modified_by = extract_str(payload, "last_modified_by")?;
+        let category = extract_str(payload, "category")?;
+        let content_status = extract_str(payload, "content_status")?;
+        let created_iso = extract_str(payload, "created_iso")?;
+        let modified_iso = extract_str(payload, "modified_iso")?;
+        let sheet_names: Vec<String> = match payload.get_item("sheet_names")? {
+            Some(v) => v.extract::<Vec<String>>()?,
+            None => Vec::new(),
+        };
+        self.queued_props = Some(properties::DocPropertiesPayload {
+            title,
+            subject,
+            creator,
+            keywords,
+            description,
+            last_modified_by,
+            category,
+            content_status,
+            created_iso,
+            modified_iso,
+            sheet_names,
+        });
+        Ok(())
+    }
+
     /// Save patched file to a new path.
-    fn save(&self, path: &str) -> PyResult<()> {
+    fn save(&mut self, path: &str) -> PyResult<()> {
         self.do_save(path)
     }
 
     /// Save in-place (atomic tmp+rename).
-    fn save_in_place(&self) -> PyResult<()> {
+    fn save_in_place(&mut self) -> PyResult<()> {
         let tmp_path = format!("{}.wolfxl.tmp", self.file_path);
         self.do_save(&tmp_path)?;
 
@@ -523,7 +571,7 @@ impl XlsxPatcher {
 // ---------------------------------------------------------------------------
 
 impl XlsxPatcher {
-    fn do_save(&self, output_path: &str) -> PyResult<()> {
+    fn do_save(&mut self, output_path: &str) -> PyResult<()> {
         if self.value_patches.is_empty()
             && self.format_patches.is_empty()
             && self.rels_patches.is_empty()
@@ -533,12 +581,12 @@ impl XlsxPatcher {
             && self.file_adds.is_empty()
             && self.file_deletes.is_empty()
             && self.queued_content_type_ops.is_empty()
+            && self.queued_props.is_none()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
-            // `file_deletes`, and `queued_content_type_ops` so a no-op
-            // save remains byte-identical even after these primitives
-            // land. RFC-020's `queued_props` will extend this guard
-            // further.
+            // `file_deletes`, `queued_content_type_ops`, and RFC-020's
+            // `queued_props` so a no-op save remains byte-identical
+            // even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -798,6 +846,44 @@ impl XlsxPatcher {
             file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
         }
 
+        // --- Phase 2.5d: Document properties (RFC-020) ---
+        //
+        // Full rewrite of `docProps/core.xml` + `docProps/app.xml` when
+        // `queued_props` is set. Routing depends on whether each part
+        // already exists in the source ZIP:
+        //   - present → file_patches replaces it in place
+        //   - absent  → file_adds appends a brand-new entry (RFC-013)
+        //
+        // `docProps/core.xml` is OPTIONAL in OOXML (some minimal xlsx
+        // readers omit it), which is why the file_adds path matters
+        // here. See RFC-020 §8 risk #3.
+        //
+        // If the caller didn't supply `sheet_names`, we thread the
+        // patcher's `sheet_order` in so app.xml's `<TitlesOfParts>`
+        // matches the workbook's tab order.
+        if let Some(ref payload) = self.queued_props {
+            let mut effective = payload.clone();
+            if effective.sheet_names.is_empty() {
+                effective.sheet_names = self.sheet_order.clone();
+            }
+            let core_bytes = properties::rewrite_core_props(&effective);
+            let app_bytes = properties::rewrite_app_props(&effective);
+
+            let core_in_source = source_zip_has_entry(&mut zip, "docProps/core.xml");
+            let app_in_source = source_zip_has_entry(&mut zip, "docProps/app.xml");
+
+            if core_in_source {
+                file_patches.insert("docProps/core.xml".into(), core_bytes);
+            } else {
+                self.file_adds.insert("docProps/core.xml".into(), core_bytes);
+            }
+            if app_in_source {
+                file_patches.insert("docProps/app.xml".into(), app_bytes);
+            } else {
+                self.file_adds.insert("docProps/app.xml".into(), app_bytes);
+            }
+        }
+
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
@@ -902,6 +988,16 @@ impl XlsxPatcher {
 // RFC-013 helpers — deterministic-when-test-epoch-is-set datetime stamping
 // for `file_adds` ZIP entries.
 // ---------------------------------------------------------------------------
+
+/// True if the source ZIP contains an entry with the exact given name.
+/// Used by RFC-020's Phase-2.5d to decide between `file_patches`
+/// (replace existing) and `file_adds` (append new).
+fn source_zip_has_entry<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> bool {
+    zip.by_name(name).is_ok()
+}
 
 /// Return a `zip::DateTime` honoring `WOLFXL_TEST_EPOCH` when set.
 ///
