@@ -1526,7 +1526,25 @@ impl XlsxPatcher {
                 };
                 let rels_path = sheet_rels_path_for(&sheet_path);
                 if !self.rels_patches.contains_key(&rels_path) {
-                    let g = load_or_empty_rels(&mut zip, &rels_path)?;
+                    // RFC-035 Pod-δ fix (KNOWN_GAPS bug #3): a Phase
+                    // 2.7-cloned sheet's rels live in file_adds, not
+                    // in the source ZIP. Prefer file_adds/file_patches
+                    // before falling back to the ZIP probe.
+                    let g = if let Some(bytes) = self.file_adds.get(&rels_path) {
+                        RelsGraph::parse(bytes).map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!(
+                                "rels parse for cloned '{rels_path}': {e}"
+                            ))
+                        })?
+                    } else if let Some(bytes) = file_patches.get(&rels_path) {
+                        RelsGraph::parse(bytes).map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!(
+                                "rels parse for patched '{rels_path}': {e}"
+                            ))
+                        })?
+                    } else {
+                        load_or_empty_rels(&mut zip, &rels_path)?
+                    };
                     self.rels_patches.insert(rels_path.clone(), g);
                 }
                 let rels = self
@@ -1783,7 +1801,20 @@ impl XlsxPatcher {
         all_sheet_paths.extend(local_blocks.keys().cloned());
 
         for sheet_path in &all_sheet_paths {
-            let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
+            // RFC-035 composition (Pod-δ fix for KNOWN_GAPS bugs #1/#3):
+            // a Phase 2.7-cloned sheet's bytes live in `file_adds`,
+            // not in the source ZIP. If a user mutates the clone in
+            // the same save (cell value, format, table, DV, CF, etc.)
+            // we must read the clone's source XML from
+            // `file_adds`/`file_patches` first, falling back to the
+            // ZIP for genuine source-side sheets.
+            let xml = if let Some(bytes) = file_patches.get(sheet_path) {
+                String::from_utf8_lossy(bytes).into_owned()
+            } else if let Some(bytes) = self.file_adds.get(sheet_path) {
+                String::from_utf8_lossy(bytes).into_owned()
+            } else {
+                ooxml_util::zip_read_to_string(&mut zip, sheet_path)?
+            };
 
             // Pass 1: cell-level patches.
             let after_cells: Vec<u8> = if let Some(patches) = sheet_cell_patches.get(sheet_path) {
@@ -1806,7 +1837,17 @@ impl XlsxPatcher {
                 after_cells
             };
 
-            file_patches.insert(sheet_path.clone(), after_blocks);
+            // Route the rewrite back to the right primitive: if this
+            // path is a Phase 2.7 cloned sheet (lives in file_adds),
+            // write the patched bytes back to file_adds so they're
+            // emitted by the new-entry pass in Phase 4 (Pod-δ fix
+            // for KNOWN_GAPS bugs #1/#3). For source-side sheets,
+            // file_patches replaces the source-entry bytes as before.
+            if self.file_adds.contains_key(sheet_path) {
+                self.file_adds.insert(sheet_path.clone(), after_blocks);
+            } else {
+                file_patches.insert(sheet_path.clone(), after_blocks);
+            }
         }
 
         // Add styles.xml patch if modified

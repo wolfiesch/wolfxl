@@ -439,24 +439,6 @@ def test_h_copy_with_sheet_scoped_defined_name(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG SURFACED BY POD-γ HARNESS — escalate to Pod-δ. "
-        "Workbook.save() at python/wolfxl/_workbook.py:451 runs "
-        "`for ws in self._sheets.values(): ws._flush()` BEFORE "
-        "`_flush_pending_sheet_copies_to_patcher` (line 459), so "
-        "user edits on the copy are queued against a sheet path "
-        "(xl/worksheets/sheetN.xml) that Phase 2.7 has not yet "
-        "created — the patcher errors with `OSError: Missing zip "
-        "entry xl/worksheets/sheetN.xml`. Fix: invoke the sheet-copy "
-        "flush BEFORE the per-sheet ws._flush() loop, OR materialize "
-        "the cloned sheet path in the patcher's name → path map at "
-        "queue time. RFC-035 §4.2 phase-ordering note covers this "
-        "but was not implemented in Phase 7.3."
-    ),
-    raises=OSError,
-    strict=True,
-)
 def test_i_copy_and_edit_copy_in_same_save(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     out = tmp_path / "out.xlsx"
@@ -520,22 +502,6 @@ def test_j_copy_then_move_sheet_in_same_save(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG SURFACED BY POD-γ HARNESS — escalate to Pod-δ. "
-        "Same root cause as test_i: Workbook.save() flushes "
-        "per-sheet writers (cells, tables, comments, hyperlinks, "
-        "DV, CF) BEFORE Phase 2.7's sheet-copy flush, so a table "
-        "added to the clone references a sheet path the patcher "
-        "has not yet created. OSError: Missing zip entry "
-        "xl/worksheets/sheetN.xml. Fix: route Phase 2.7 BEFORE "
-        "the per-sheet flush loop, OR seed the clone's sheet path "
-        "into patcher.sheet_paths at queue time so downstream "
-        "flushes see it as an existing sheet."
-    ),
-    raises=OSError,
-    strict=True,
-)
 def test_k_copy_then_add_table_to_copy(tmp_path: Path) -> None:
     """A table added to the clone in the same save round-trips.
 
