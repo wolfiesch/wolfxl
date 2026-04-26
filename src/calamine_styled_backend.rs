@@ -713,13 +713,47 @@ pub struct CalamineStyledBook {
 #[pymethods]
 impl CalamineStyledBook {
     #[staticmethod]
-    pub fn open(path: &str) -> PyResult<Self> {
+    #[pyo3(signature = (path, permissive = false))]
+    pub fn open(path: &str, permissive: bool) -> PyResult<Self> {
         let file = File::open(path)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}")))?;
         let reader = BufReader::new(file);
         let wb: XlsxReader = Xlsx::new(reader)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to parse xlsx: {e}")))?;
-        let names = wb.sheet_names().to_vec();
+        let mut names = wb.sheet_names().to_vec();
+
+        // Sprint Θ Pod-A: when permissive=true and calamine returned
+        // zero sheets (typical for a self-closing `<sheets/>` block),
+        // synthesize "Sheet1", "Sheet2", ... by counting worksheet
+        // relationships in `xl/_rels/workbook.xml.rels`. The
+        // synthesized names are placeholders; the patcher is the
+        // actual mutation surface and uses the same fallback to
+        // resolve XML paths.
+        if permissive && names.is_empty() {
+            const WORKSHEET_REL_TYPE: &str =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+            let f = File::open(path).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!("Failed to reopen file for rels scan: {e}"))
+            })?;
+            let mut zip = ZipArchive::new(f).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!("Failed to open zip for rels scan: {e}"))
+            })?;
+            if let Some(rels_xml) = ooxml_util::zip_read_to_string_opt(
+                &mut zip,
+                "xl/_rels/workbook.xml.rels",
+            )? {
+                let graph = wolfxl_rels::RelsGraph::parse(rels_xml.as_bytes())
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Bad rels: {e}")))?;
+                let mut idx = 1usize;
+                for r in graph.iter() {
+                    if r.rel_type == WORKSHEET_REL_TYPE {
+                        names.push(format!("Sheet{idx}"));
+                        idx += 1;
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             workbook: wb,
             sheet_names: names,

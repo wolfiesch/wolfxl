@@ -619,61 +619,44 @@ def test_p_self_closing_sheets_block(tmp_path: Path) -> None:
     """Phase 2.7 must rewrite a self-closing ``<sheets/>`` to open/close
     when appending the new ``<sheet>`` child.
 
-    Pod-β called out this branch as untested. The fixture is borderline
-    (real Excel never emits <sheets/> for a non-empty workbook), so this
-    test guards a wolfxl-internal contract: don't crash, don't lose the
-    new sheet entry, and the rewritten block should be parseable.
+    Pod-β originally called out this branch as untested because
+    wolfxl's loader rejected the synthesized fixture (returned an
+    empty sheet list) before the splice could run. Sprint Θ Pod-A
+    closes that gap via the new ``permissive=True`` flag on
+    ``load_workbook``: when set, the loader falls back to the workbook
+    rels graph and synthesizes ``Sheet1``, ``Sheet2``, ... titles for
+    every worksheet relationship target, then rewrites the empty
+    ``<sheets/>`` block in-memory so downstream phases (Phase 2.7
+    splice, defined-names merger, ...) see a well-formed workbook.
 
-    NOTE: synthesizing a workbook with a self-closing ``<sheets/>``
-    AND retaining the original sheet's data + rels is non-trivial —
-    Excel's workbook.xml without <sheet> children is technically invalid
-    because the workbook rels still references xl/worksheets/sheet1.xml.
-    For this test we synthesize the malformed workbook AND skip the
-    actual save, instead asserting that the splice happens at the
-    workbook.xml byte level via direct invocation. If wolfxl's loader
-    rejects the synthesized fixture before reaching the patcher, that's
-    a separate bug — mark this test as ``xfail`` until Phase 2.7's
-    self-closing branch is exercisable through a public path.
+    With ``permissive=True`` the test now exercises the full public
+    path end-to-end: load → copy_worksheet → save → reload via
+    openpyxl. The asserts at the bottom guard the original splice
+    contract (no self-closing form survives, the new sheet is
+    appended, the block is parseable). KNOWN_GAPS.md tracks this as
+    bug #4 ("self-closing <sheets/>") under "Fixed in 1.2 (Sprint Θ
+    Pod-A)".
     """
     src = tmp_path / "src.xlsx"
     out = tmp_path / "out.xlsx"
     _make_grid_fixture(src)
     _rewrite_sheets_block_self_closing(src)
 
-    # Load may or may not succeed — wolfxl's reader might reject the
-    # malformed workbook (no sheet children but rels reference one).
-    # If it loads, attempt the copy + save; if not, the limitation is
-    # documented and the test is deliberately permissive.
-    try:
-        wb = load_workbook(src, modify=True)
-    except Exception as exc:  # pragma: no cover — environment-dependent
-        pytest.xfail(
-            f"wolfxl rejects synthesized self-closing <sheets/> fixture "
-            f"({type(exc).__name__}: {exc}); Phase 2.7 self-closing "
-            "branch remains untested through the public API. "
-            "Tracked at KNOWN_GAPS.md."
-        )
+    # `permissive=True` tells wolfxl to scan the workbook rels graph
+    # when xl/workbook.xml's <sheets> block is empty/self-closing.
+    # Default is False so well-formed inputs are unaffected.
+    wb = load_workbook(src, modify=True, permissive=True)
 
-    # Sheet list won't include the original anymore; just attempt to
-    # exercise the path.
-    if not wb.sheetnames:  # pragma: no cover
-        pytest.xfail(
-            "no sheets to copy after self-closing <sheets/> rewrite; "
-            "branch coverage requires a different fixture-construction strategy."
-        )
+    # The synthesized title is "Sheet1" (rels-iteration order), which
+    # may differ from the original fixture's "Grid". This is by design
+    # — we don't have the real title without the <sheet> entry.
+    assert wb.sheetnames, "permissive mode must surface at least one sheet"
     src_ws = wb[wb.sheetnames[0]]
     wb.copy_worksheet(src_ws)
-    try:
-        wb.save(out)
-    except Exception as exc:  # pragma: no cover
-        pytest.xfail(
-            f"Phase 2.7 errored on self-closing <sheets/> fixture: "
-            f"{type(exc).__name__}: {exc}; tracked as a wolfxl-internal "
-            "KNOWN_GAP for the splice's self-closing branch."
-        )
+    wb.save(out)
 
-    # If we got here, assert the new workbook.xml has an open/close
-    # <sheets>...</sheets> with at least one <sheet> child.
+    # Verify the new workbook.xml has an open/close <sheets>...</sheets>
+    # with at least one <sheet> child.
     new_wb_xml = _read_zip_text(out, "xl/workbook.xml")
     assert "<sheets/>" not in new_wb_xml, (
         "Phase 2.7 must rewrite self-closing <sheets/> to open/close form"
