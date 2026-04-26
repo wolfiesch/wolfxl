@@ -718,23 +718,29 @@ def _inject_comment_with_sheets_token(path: Path, marker: str) -> None:
     ``</sheets>`` token. A naive splice that searches for ``</sheets>``
     by string match would splice into the comment instead of the real
     closing tag.
+
+    The comment lands BEFORE the real ``<sheets>`` block (right after
+    the opening ``<workbook ...>``). openpyxl's writer omits the XML
+    declaration, so we anchor on the closing ``>`` of the workbook
+    element rather than ``?>``.
     """
     import io
+    import re
 
     with zipfile.ZipFile(path) as zin:
         wb_xml = zin.read("xl/workbook.xml").decode("utf-8")
         names = zin.namelist()
         contents = {n: zin.read(n) for n in names}
 
-    # Inject the comment immediately after the opening <workbook ...>
-    # tag, before the rest of the document.
-    needle = "?>"  # XML decl close
-    # Choose a location that precedes the real <sheets> block.
-    new_wb_xml = wb_xml.replace(
-        needle,
-        f"{needle}<!-- {marker} </sheets> -->",
-        1,
-    )
+    # Find the end of the opening `<workbook ...>` tag and inject the
+    # fakeout comment immediately after it. The regex tolerates either
+    # a self-anchored XML declaration or its absence.
+    m = re.search(r"<workbook\b[^>]*>", wb_xml)
+    if m is None:
+        raise RuntimeError("test fixture: no <workbook> opening tag found")
+    insert_at = m.end()
+    fakeout = f"<!-- {marker} </sheets> -->"
+    new_wb_xml = wb_xml[:insert_at] + fakeout + wb_xml[insert_at:]
     contents["xl/workbook.xml"] = new_wb_xml.encode("utf-8")
 
     buf = io.BytesIO()
@@ -748,52 +754,34 @@ def test_r_cdata_pi_fuzz_fakeout(tmp_path: Path) -> None:
     """A workbook.xml comment containing the literal ``</sheets>``
     string must not fool Phase 2.7's splice.
 
-    Pod-β admits the splice is naive. This test asserts the result
-    is well-formed (the new <sheet> appears) OR documents the
-    limitation as a known gap (the splice may insert into the wrong
-    location, in which case workbook.xml may be malformed).
+    Sprint Θ Pod-B replaced the naive byte-substring locator with a
+    SAX/quick-xml-driven scan that respects element nesting, so
+    comments / CDATA / PIs containing the literal token no longer
+    perturb the insertion point. KNOWN_GAPS bug #6 is closed.
     """
     src = tmp_path / "src.xlsx"
     out = tmp_path / "out.xlsx"
     _make_grid_fixture(src)
     _inject_comment_with_sheets_token(src, "FUZZTOKEN")
 
-    try:
-        wb = load_workbook(src, modify=True)
-    except Exception as exc:  # pragma: no cover
-        pytest.xfail(
-            f"wolfxl rejected the comment-injected fixture "
-            f"({type(exc).__name__}: {exc}). Documented limitation; "
-            "tracked at KNOWN_GAPS.md."
-        )
-
-    if not wb.sheetnames:  # pragma: no cover
-        pytest.xfail("no sheets discovered in fuzz fixture")
+    wb = load_workbook(src, modify=True)
+    assert wb.sheetnames, "fuzz fixture should still expose its sheet"
 
     new_ws = wb.copy_worksheet(wb[wb.sheetnames[0]])
-    try:
-        wb.save(out)
-    except Exception as exc:  # pragma: no cover
-        pytest.xfail(
-            f"Phase 2.7 errored on comment-injected workbook.xml: "
-            f"{type(exc).__name__}: {exc}. The splice is naive; "
-            "tracked at KNOWN_GAPS.md."
-        )
+    wb.save(out)
 
     new_wb_xml = _read_zip_text(out, "xl/workbook.xml")
     # The synthesized comment must survive the rewrite.
-    if "FUZZTOKEN" not in new_wb_xml:
-        pytest.xfail(
-            "Phase 2.7's naive splice clobbered the FUZZTOKEN comment; "
-            "documented limitation tracked at KNOWN_GAPS.md."
-        )
+    assert "FUZZTOKEN" in new_wb_xml, (
+        "SAX-driven splice must preserve the workbook.xml comment "
+        "containing the </sheets> fakeout token (KNOWN_GAPS bug #6)."
+    )
 
     # And the new sheet must appear.
     rt = openpyxl.load_workbook(out)
     assert new_ws.title in rt.sheetnames, (
         "Phase 2.7 splice failed to add the new <sheet> entry on a "
-        "fixture with a CDATA-style fakeout comment; "
-        "tracked as a known limitation at KNOWN_GAPS.md."
+        "fixture with a CDATA-style fakeout comment."
     )
 
 
