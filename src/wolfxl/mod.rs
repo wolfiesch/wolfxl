@@ -15,6 +15,8 @@ pub mod sheet_patcher;
 pub mod styles;
 pub mod conditional_formatting;
 pub mod validations;
+#[allow(dead_code)] // RFC-013: ContentTypesGraph wired into do_save in commit 4
+pub mod content_types;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
