@@ -1317,27 +1317,45 @@ class Worksheet:
     def insert_rows(self, idx: int, amount: int = 1) -> None:
         """Shift rows down to insert *amount* empty rows starting at *idx*.
 
-        Tracked by RFC-030 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/030-insert-delete-rows.md`` for the implementation plan.
+        Implements RFC-030. Validates ``idx >= 1`` and ``amount >= 1``;
+        raises ``ValueError`` otherwise. Queues a row-shift op on the
+        owning workbook's ``_pending_axis_shifts`` list. The op is
+        drained at ``Workbook.save()`` time and applied by the patcher
+        (Phase 2.5i in ``src/wolfxl/mod.rs``).
+
+        See ``Plans/rfcs/030-insert-delete-rows.md`` for full semantics
+        (formula shift, hyperlink/table/DV/CF anchor shift, defined-name
+        shift, comment/VML drawing anchor shift).
         """
-        raise NotImplementedError(
-            "Worksheet.insert_rows is scheduled for WolfXL 1.1 (RFC-030). "
-            "See Plans/rfcs/030-insert-delete-rows.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
+        if not isinstance(idx, int) or idx < 1:
+            raise ValueError(
+                f"insert_rows: idx must be a positive integer (>=1), got {idx!r}"
+            )
+        if not isinstance(amount, int) or amount < 1:
+            raise ValueError(
+                f"insert_rows: amount must be a positive integer (>=1), got {amount!r}"
+            )
+        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
+            (self.title, "row", idx, amount)
         )
 
     def delete_rows(self, idx: int, amount: int = 1) -> None:
         """Delete *amount* rows starting at *idx*, shifting subsequent rows up.
 
-        Tracked by RFC-030 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/030-insert-delete-rows.md`` for the implementation plan.
+        Implements RFC-030. Validates ``idx >= 1`` and ``amount >= 1``;
+        raises ``ValueError`` otherwise. Refs that point INTO the
+        deleted band become ``#REF!`` per OOXML semantics.
         """
-        raise NotImplementedError(
-            "Worksheet.delete_rows is scheduled for WolfXL 1.1 (RFC-030). "
-            "See Plans/rfcs/030-insert-delete-rows.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
+        if not isinstance(idx, int) or idx < 1:
+            raise ValueError(
+                f"delete_rows: idx must be a positive integer (>=1), got {idx!r}"
+            )
+        if not isinstance(amount, int) or amount < 1:
+            raise ValueError(
+                f"delete_rows: amount must be a positive integer (>=1), got {amount!r}"
+            )
+        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
+            (self.title, "row", idx, -amount)
         )
 
     def insert_cols(self, idx: int, amount: int = 1) -> None:

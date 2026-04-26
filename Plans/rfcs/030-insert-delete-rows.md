@@ -1,6 +1,6 @@
 # RFC-030: Structural — `Worksheet.insert_rows` / `delete_rows`
 
-Status: In-Progress
+Status: Shipped
 Owner: pod-030
 Phase: 4
 Estimate: L
