@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — Sprint Δ Phase 4a (Structural ops)
+
+### Added
+
+- **RFC-036** — `Workbook.move_sheet(sheet, offset)` (modify mode).
+  Reorders sheets in-place; updates `<sheets>` order in workbook.xml
+  and any internal references that depend on tab index.
+- **RFC-030** — `Worksheet.insert_rows(idx, amount=1)` /
+  `delete_rows(idx, amount=1)` (modify mode). Pure-Rust XML rewrite
+  via the new `crates/wolfxl-structural` workspace crate. Shifts
+  every cell-coord, dimension, merge, hyperlink, table, DV, CF
+  anchor, defined-name, and formula reference touched by the row
+  band. Delete tombstones (`#REF!`) are emitted per OOXML semantics.
+- **RFC-031** — `Worksheet.insert_cols(idx, amount=1)` /
+  `delete_cols(idx, amount=1)` (modify mode). Symmetric to RFC-030
+  on the column axis; shares the `wolfxl-structural` crate. Adds the
+  col-only `<col>` span splitter (`crates/wolfxl-structural/src/cols.rs`)
+  so per-column width / style metadata is preserved across inserts
+  and deletes. `idx` accepts either a 1-based int or an Excel
+  column letter.
+
+### Notes
+
+- Phase-4a (RFC-030, RFC-031, RFC-036) was dispatched as three
+  parallel pods. RFC-031 reconciliation required hand-porting the
+  `<col>` splitter onto RFC-030's crate layout — sprint retro now
+  documents the rule "if two pods touch a shared crate, sequence
+  them, don't parallelize."
+
 ## wolfxl 0.5.0 (2026-04-20) - PyPI cdylib parity release
 
 ### Added

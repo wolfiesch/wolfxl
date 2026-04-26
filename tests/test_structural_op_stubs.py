@@ -18,10 +18,9 @@ import pytest
 import wolfxl
 
 WORKSHEET_STUBS = [
-    # RFC-030 ships in this branch — insert_rows / delete_rows now work
-    # in modify mode. Remaining stubs are tracked by their RFCs.
-    ("insert_cols", (2,), "RFC-031"),
-    ("delete_cols", (2,), "RFC-031"),
+    # RFC-030 / RFC-031 ship in this branch — insert_rows / delete_rows /
+    # insert_cols / delete_cols now work in modify mode. Remaining stubs
+    # are tracked by their RFCs.
     ("move_range", ("A1:B2",), "RFC-034"),
 ]
 

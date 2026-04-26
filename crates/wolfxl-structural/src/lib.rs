@@ -32,6 +32,7 @@
 #![deny(rust_2018_idioms)]
 
 pub mod axis;
+pub mod cols;
 pub mod shift_anchors;
 pub mod shift_cells;
 pub mod shift_formulas;
@@ -41,6 +42,7 @@ pub mod shift_workbook;
 mod tests;
 
 pub use axis::{Axis, ShiftPlan};
+pub use cols::{shift_sheet_cols_block, split_col_spans, ColSpan};
 pub use shift_anchors::{shift_anchor, shift_sqref};
 pub use shift_cells::shift_sheet_cells;
 pub use shift_formulas::{shift_formula, shift_formula_with_meta};

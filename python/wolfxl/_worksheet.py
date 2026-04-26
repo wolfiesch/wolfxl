@@ -11,6 +11,27 @@ from wolfxl._utils import a1_to_rowcol, column_index, rowcol_to_a1
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
 
+def _coerce_col_idx(idx: int | str, op: str) -> int:
+    """Accept either a 1-based int or an Excel column letter for col ops.
+
+    Used by RFC-031 ``insert_cols`` / ``delete_cols``.
+    """
+    if isinstance(idx, str):
+        try:
+            i = column_index_from_string(idx)
+        except Exception as exc:
+            raise ValueError(
+                f"{op}: idx {idx!r} is not a valid column letter"
+            ) from exc
+    elif isinstance(idx, int) and not isinstance(idx, bool):
+        i = idx
+    else:
+        raise ValueError(f"{op}: idx must be int or str, got {idx!r}")
+    if i < 1:
+        raise ValueError(f"{op}: idx must be >= 1, got {idx!r}")
+    return i
+
+
 def _canonical_data_type(value: Any) -> str:
     """Map a Python value to the same canonical label the Rust reader emits.
 
@@ -1358,30 +1379,44 @@ class Worksheet:
             (self.title, "row", idx, -amount)
         )
 
-    def insert_cols(self, idx: int, amount: int = 1) -> None:
+    def insert_cols(self, idx: int | str, amount: int = 1) -> None:
         """Shift columns right to insert *amount* empty columns at *idx*.
 
-        Tracked by RFC-031 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/031-insert-delete-cols.md`` for the implementation plan.
+        Implements RFC-031. ``idx`` may be a 1-based int or an Excel
+        column letter (``"A"``, ``"AB"``, ...). Validates ``idx >= 1``
+        and ``amount >= 0``; ``amount == 0`` is a noop. Queues a
+        col-shift op on the owning workbook's ``_pending_axis_shifts``.
+
+        See ``Plans/rfcs/031-insert-delete-cols.md`` for full semantics
+        (formula shift, anchor shift, ``<col>`` span split).
         """
-        raise NotImplementedError(
-            "Worksheet.insert_cols is scheduled for WolfXL 1.1 (RFC-031). "
-            "See Plans/rfcs/031-insert-delete-cols.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
+        idx_i = _coerce_col_idx(idx, "insert_cols")
+        if not isinstance(amount, int) or amount < 0:
+            raise ValueError(
+                f"insert_cols: amount must be an integer >= 0, got {amount!r}"
+            )
+        if amount == 0:
+            return
+        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
+            (self.title, "col", idx_i, amount)
         )
 
-    def delete_cols(self, idx: int, amount: int = 1) -> None:
+    def delete_cols(self, idx: int | str, amount: int = 1) -> None:
         """Delete *amount* columns starting at *idx*, shifting subsequent columns left.
 
-        Tracked by RFC-031 (Phase 4 / WolfXL 1.1). See
-        ``Plans/rfcs/031-insert-delete-cols.md`` for the implementation plan.
+        Implements RFC-031. ``idx`` may be a 1-based int or an Excel
+        column letter. Refs that point INTO the deleted band become
+        ``#REF!`` per OOXML semantics. ``amount == 0`` is a noop.
         """
-        raise NotImplementedError(
-            "Worksheet.delete_cols is scheduled for WolfXL 1.1 (RFC-031). "
-            "See Plans/rfcs/031-insert-delete-cols.md for the implementation plan. "
-            "Workaround: use openpyxl for structural ops, then load the result "
-            "with wolfxl.load_workbook() to do the heavy reads."
+        idx_i = _coerce_col_idx(idx, "delete_cols")
+        if not isinstance(amount, int) or amount < 0:
+            raise ValueError(
+                f"delete_cols: amount must be an integer >= 0, got {amount!r}"
+            )
+        if amount == 0:
+            return
+        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
+            (self.title, "col", idx_i, -amount)
         )
 
     def move_range(

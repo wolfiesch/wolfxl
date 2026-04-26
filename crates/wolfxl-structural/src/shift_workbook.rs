@@ -139,6 +139,8 @@ pub fn apply_workbook_shift(
         // 1. Sheet XML.
         if let Some(bytes) = sheet_bytes.get(&op.sheet) {
             let new_bytes = shift_sheet_cells(bytes, &plan);
+            // 1b. RFC-031: rewrite the `<cols>` block on Col-axis shifts.
+            let new_bytes = crate::cols::shift_sheet_cols_block(&new_bytes, plan);
             sheet_bytes.insert(op.sheet.clone(), new_bytes);
         }
 
