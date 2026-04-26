@@ -6,12 +6,54 @@ Exposes :class:`DefinedNameDict` — the openpyxl-shape container for
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from wolfxl.workbook.defined_name import DefinedName
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
+
+
+# A1-style cell reference: at least one letter (col) followed by digits (row).
+_CELL_REF_RE = re.compile(r"^[A-Za-z]{1,3}[0-9]+$")
+
+
+def _validate_defined_name(name: str) -> None:
+    """Validate an Excel defined-name token.
+
+    Mirrors Excel's name rules (subset enforced here):
+        * Must be a non-empty string.
+        * First character must be a letter or underscore (no digits, no
+          leading whitespace).
+        * Must not contain spaces or other whitespace.
+        * Must not look like an A1-style cell reference (e.g. ``A1``,
+          ``XFD1048576``).
+        * Must not be the single letters ``R`` or ``C`` (reserved for
+          R1C1 addressing).
+
+    Raises ``ValueError`` on any violation. The message names the rule
+    that was violated so users can fix the input.
+    """
+    if not isinstance(name, str) or not name:
+        raise ValueError("DefinedName name must be a non-empty string")
+    first = name[0]
+    if not (first.isalpha() or first == "_"):
+        raise ValueError(
+            f"DefinedName name {name!r} must start with a letter or underscore"
+        )
+    if any(ch.isspace() for ch in name):
+        raise ValueError(
+            f"DefinedName name {name!r} must not contain whitespace"
+        )
+    if name in ("R", "C", "r", "c"):
+        raise ValueError(
+            f"DefinedName name {name!r} is reserved (R/C used in R1C1 addressing)"
+        )
+    if _CELL_REF_RE.match(name):
+        raise ValueError(
+            f"DefinedName name {name!r} looks like an A1-style cell reference"
+        )
 
 
 class DefinedNameDict(dict):
@@ -40,6 +82,7 @@ class DefinedNameDict(dict):
             raise ValueError(
                 f"key '{key}' does not match DefinedName.name '{value.name}'"
             )
+        _validate_defined_name(key)
         super().__setitem__(key, value)
         # Queue a flush in both write and modify mode. Write mode ships
         # via ``_rust_writer.add_named_range`` during ``Workbook.save()``;

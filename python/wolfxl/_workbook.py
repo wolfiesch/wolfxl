@@ -1031,14 +1031,26 @@ class Workbook:
             self._properties_dirty = False
 
         if self._pending_defined_names:
-            # The native writer's add_named_range expects a sheet hint —
-            # for workbook-scoped names we pick the first sheet; the Rust
-            # side reads ``localSheetId`` from the dict to override.
+            # The native writer's add_named_range expects a sheet hint
+            # plus an explicit ``scope`` token — workbook-scoped names
+            # use the first sheet (the value is ignored when scope ==
+            # "workbook"), sheet-scoped names resolve to the sheet at
+            # ``localSheetId``.
             primary_sheet = self._sheet_names[0] if self._sheet_names else "Sheet"
             for _, dn in self._pending_defined_names.items():
-                writer.add_named_range(primary_sheet, {
+                if dn.localSheetId is not None:
+                    if 0 <= dn.localSheetId < len(self._sheet_names):
+                        sheet_hint = self._sheet_names[dn.localSheetId]
+                    else:
+                        sheet_hint = primary_sheet
+                    scope = "sheet"
+                else:
+                    sheet_hint = primary_sheet
+                    scope = "workbook"
+                writer.add_named_range(sheet_hint, {
                     "name": dn.name,
                     "refers_to": dn.value,
+                    "scope": scope,
                     "comment": dn.comment,
                     "local_sheet_id": dn.localSheetId,
                     "hidden": dn.hidden,
