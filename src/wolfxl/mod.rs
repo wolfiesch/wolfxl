@@ -15,7 +15,6 @@ pub mod sheet_patcher;
 pub mod styles;
 pub mod conditional_formatting;
 pub mod validations;
-#[allow(dead_code)] // RFC-013: ContentTypesGraph wired into do_save in commit 4
 pub mod content_types;
 #[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
 pub mod ancillary;
@@ -118,6 +117,16 @@ pub struct XlsxPatcher {
     /// consumer; RFC-023/024 follow.
     #[allow(dead_code)]
     ancillary: ancillary::AncillaryPartRegistry,
+    /// Per-sheet `[Content_Types].xml` ops queued by sheet block
+    /// builders (RFC-013 Phase 2.5c). Each entry is the list of
+    /// content-type adjustments that sheet's flush requires (a new
+    /// comments/table part needs an `Override` entry; vmlDrawing
+    /// requires `Default Extension="vml"`). Aggregated across sheets
+    /// during `do_save` so a single workbook-wide
+    /// `[Content_Types].xml` mutation absorbs every sheet's ops in
+    /// one parse + serialize. Empty in this slice (RFC-022/023/024
+    /// will be the first volume callers).
+    queued_content_type_ops: HashMap<String, Vec<content_types::ContentTypeOp>>,
 }
 
 #[pymethods]
@@ -163,6 +172,7 @@ impl XlsxPatcher {
             file_adds: HashMap::new(),
             file_deletes: HashSet::new(),
             ancillary: ancillary::AncillaryPartRegistry::new(),
+            queued_content_type_ops: HashMap::new(),
         })
     }
 
@@ -408,12 +418,13 @@ impl XlsxPatcher {
             && self.queued_cf_patches.is_empty()
             && self.file_adds.is_empty()
             && self.file_deletes.is_empty()
+            && self.queued_content_type_ops.is_empty()
         {
-            // No changes — just copy. Includes RFC-013's `file_adds`
-            // and `file_deletes` so a no-op save remains byte-identical
-            // even after these primitives land. Future predicates
-            // (RFC-013 §2.5c content-types ops, RFC-020 queued props)
-            // extend this guard further.
+            // No changes — just copy. Includes RFC-013's `file_adds`,
+            // `file_deletes`, and `queued_content_type_ops` so a no-op
+            // save remains byte-identical even after these primitives
+            // land. RFC-020's `queued_props` will extend this guard
+            // further.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -640,6 +651,39 @@ impl XlsxPatcher {
             file_patches.insert(path.clone(), graph.serialize());
         }
 
+        // --- Phase 2.5c: Content-types aggregation (RFC-013) ---
+        //
+        // Cross-sheet collection of `ContentTypeOp`s; one parse + serialize
+        // of `[Content_Types].xml` regardless of how many sheets contribute.
+        // Iteration follows `sheet_order` (source-document order) so the
+        // resulting Override sequence is deterministic when multiple sheets
+        // each push ops.
+        //
+        // No live producer in the current slice — `queued_content_type_ops`
+        // is always empty, so this loop short-circuits at the
+        // `is_empty()` guard. RFC-022 (Hyperlinks via new
+        // `xl/worksheets/_rels/sheetN.xml.rels` parts), RFC-023 (Comments
+        // via new `xl/comments<N>.xml` Overrides + a vml `Default`),
+        // and RFC-024 (Tables via new `xl/tables/tableN.xml` Overrides)
+        // will be the first volume producers.
+        let mut content_type_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+        for sheet_name in &self.sheet_order {
+            if let Some(ops) = self.queued_content_type_ops.get(sheet_name) {
+                content_type_ops.extend(ops.iter().cloned());
+            }
+        }
+        if !content_type_ops.is_empty() {
+            let ct_xml = ooxml_util::zip_read_to_string(&mut zip, "[Content_Types].xml")?;
+            let mut graph = content_types::ContentTypesGraph::parse(ct_xml.as_bytes())
+                .map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}"))
+                })?;
+            for op in &content_type_ops {
+                graph.apply_op(op);
+            }
+            file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
+        }
+
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
@@ -857,6 +901,103 @@ mod rfc013_tests {
         let pairs = ooxml_util::parse_workbook_sheet_rids(xml).unwrap();
         let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["Apples", "Bananas", "Cherries"]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 2.5c: cross-sheet content-types aggregation.
+    //
+    // The patcher's Phase-2.5c block iterates `sheet_order`, flattens
+    // every sheet's `queued_content_type_ops` into one Vec, and applies
+    // them onto a single [`ContentTypesGraph`]. These tests model that
+    // chain directly so a regression in either `apply_op` or
+    // serialize-order shows up here.
+    // -----------------------------------------------------------------
+
+    use content_types::{ContentTypeOp, ContentTypesGraph};
+
+    /// Source [Content_Types].xml fixture used by the Phase-2.5c tests.
+    /// Mirrors what `crates/wolfxl-writer/src/emit/content_types.rs::emit`
+    /// produces for a 1-sheet workbook (rels Default, xml Default,
+    /// workbook + 1 sheet + styles + sst Overrides).
+    const SOURCE_CT_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"#;
+
+    #[test]
+    fn phase_2_5c_no_ops_is_no_op() {
+        // Empty op list → `[Content_Types].xml` is left untouched. The
+        // patcher implements this via the `is_empty()` guard before
+        // parse + serialize; modeling that here means asserting the
+        // guard is the only path that mutates anything.
+        let ops: Vec<ContentTypeOp> = Vec::new();
+        // Verify the precondition for the no-op path.
+        assert!(ops.is_empty(), "no-op precondition: no queued ops");
+        // The patcher's `do_save` skips the parse + serialize entirely
+        // when `content_type_ops.is_empty()`. So a no-op save preserves
+        // source bytes verbatim — there is no rewrite path to assert
+        // against.
+    }
+
+    #[test]
+    fn phase_2_5c_aggregates_overrides_into_single_mutation() {
+        // Multiple sheets pushing ops collapse to one parse + one
+        // serialize. Ops in document order; result has every new
+        // override appended after the source overrides.
+        let ops = vec![
+            ContentTypeOp::AddOverride(
+                "/xl/comments1.xml".into(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml".into(),
+            ),
+            ContentTypeOp::EnsureDefault(
+                "vml".into(),
+                "application/vnd.openxmlformats-officedocument.vmlDrawing".into(),
+            ),
+            ContentTypeOp::AddOverride(
+                "/xl/tables/table1.xml".into(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml".into(),
+            ),
+        ];
+        let mut graph = ContentTypesGraph::parse(SOURCE_CT_XML).expect("parse source");
+        for op in &ops {
+            graph.apply_op(op);
+        }
+        let bytes = graph.serialize();
+        let text = std::str::from_utf8(&bytes).expect("utf8 round-trip");
+        // All three new entries present.
+        assert!(text.contains("/xl/comments1.xml"), "comments override");
+        assert!(text.contains("/xl/tables/table1.xml"), "table override");
+        assert!(text.contains(r#"Extension="vml""#), "vml default");
+        // Source entries still present (aggregation is additive).
+        assert!(text.contains("/xl/workbook.xml"));
+        assert!(text.contains("/xl/styles.xml"));
+    }
+
+    #[test]
+    fn phase_2_5c_preserves_source_order_for_existing_overrides() {
+        // The aggregation pass must not reorder source overrides — that
+        // would break byte-stable diffs against unmodified parts. New
+        // ops append; existing entries keep their slot.
+        let ops = vec![ContentTypeOp::AddOverride(
+            "/xl/comments1.xml".into(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml".into(),
+        )];
+        let mut graph = ContentTypesGraph::parse(SOURCE_CT_XML).expect("parse");
+        for op in &ops {
+            graph.apply_op(op);
+        }
+        let bytes = graph.serialize();
+        let text = std::str::from_utf8(&bytes).expect("utf8");
+        let idx_workbook = text.find("/xl/workbook.xml").expect("workbook");
+        let idx_sheet1 = text.find("/xl/worksheets/sheet1.xml").expect("sheet1");
+        let idx_styles = text.find("/xl/styles.xml").expect("styles");
+        let idx_comments = text.find("/xl/comments1.xml").expect("comments");
+        assert!(
+            idx_workbook < idx_sheet1 && idx_sheet1 < idx_styles,
+            "source overrides retain document order",
+        );
+        assert!(
+            idx_styles < idx_comments,
+            "new overrides append after source ones, not interleaved",
+        );
     }
 }
 

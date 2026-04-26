@@ -205,6 +205,16 @@ impl ContentTypesGraph {
         &self.overrides
     }
 
+    /// Dispatch a single [`ContentTypeOp`] onto the matching mutator. Used by
+    /// the patcher's Phase-2.5c aggregation loop so cross-sheet ops can be
+    /// applied with one match instead of N.
+    pub fn apply_op(&mut self, op: &ContentTypeOp) {
+        match op {
+            ContentTypeOp::AddOverride(part, ct) => self.add_override(part, ct),
+            ContentTypeOp::EnsureDefault(ext, ct) => self.ensure_default(ext, ct),
+        }
+    }
+
     /// Serialize back to canonical bytes.
     ///
     /// Layout: XML declaration + `<Types>` open + every `<Default>` in
