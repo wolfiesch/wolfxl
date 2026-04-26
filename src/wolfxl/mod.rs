@@ -13,6 +13,8 @@ pub mod shared_strings;
 pub mod sheet_patcher;
 #[allow(dead_code)] // Styles parser/appender used in Phase 3 (format patching)
 pub mod styles;
+#[allow(dead_code)] // wired to do_save in commit 2 of RFC-026 ship slice
+pub mod conditional_formatting;
 pub mod validations;
 
 use std::collections::HashMap;
