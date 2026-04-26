@@ -51,6 +51,7 @@ def load_workbook(
     keep_links: bool = True,
     modify: bool = False,
     permissive: bool = False,
+    password: str | bytes | None = None,
 ) -> Workbook:
     """Open an .xlsx file for reading or modification.
 
@@ -72,16 +73,35 @@ def load_workbook(
         inputs round-trip unchanged. Added in Sprint Θ Pod-A; tracked in
         tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
         #4).
+    password : str | bytes | None
+        Decryption password for OOXML-encrypted workbooks. When provided,
+        wolfxl lazy-imports ``msoffcrypto-tool`` (install via
+        ``pip install wolfxl[encrypted]``), decrypts the file into an
+        in-memory buffer, then dispatches through the standard reader
+        (or patcher, when ``modify=True``). On a non-encrypted file the
+        password is silently ignored, matching openpyxl's behaviour.
+        Wrong / missing passwords surface as ``ValueError``. Write-side
+        encryption is **not** supported; saving a workbook opened with
+        ``password=`` produces a plaintext output.
 
     Extra keyword arguments (``read_only``, ``data_only``, ``keep_links``) are
     accepted for openpyxl compatibility. ``data_only=True`` returns cached
     formula results when they exist; ``read_only`` and ``keep_links`` remain
     no-op compatibility shims.
     """
+    path_str = str(filename)
+    if password is not None:
+        return Workbook._from_encrypted(  # noqa: SLF001
+            path_str,
+            password=password,
+            data_only=data_only,
+            permissive=permissive,
+            modify=modify,
+        )
     if modify:
         return Workbook._from_patcher(  # noqa: SLF001
-            str(filename), data_only=data_only, permissive=permissive
+            path_str, data_only=data_only, permissive=permissive
         )
     return Workbook._from_reader(  # noqa: SLF001
-        str(filename), data_only=data_only, permissive=permissive
+        path_str, data_only=data_only, permissive=permissive
     )
