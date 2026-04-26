@@ -22,6 +22,7 @@ pub mod properties;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
 pub mod defined_names;
+pub mod sheet_order;
 pub mod tables;
 pub mod comments;
 
@@ -178,6 +179,15 @@ pub struct XlsxPatcher {
     /// happens in `comments::CommentAuthorTable`, shared across all
     /// sheets touched in a single save.
     queued_comments: HashMap<String, BTreeMap<String, comments::CommentOp>>,
+    /// Sheet-reorder operations pending flush (RFC-036). Insertion-
+    /// ordered list of `(sheet_name, offset)` moves. Drained by
+    /// Phase 2.5h, which sequences BEFORE Phase 2.5f (defined-names)
+    /// because both phases mutate `xl/workbook.xml`. The reorder
+    /// merger also produces the post-move `<definedName
+    /// localSheetId>` integers, so the defined-names merger sees a
+    /// workbook.xml whose tab indices already reflect the move.
+    /// Empty queue → no `xl/workbook.xml` touch.
+    queued_sheet_moves: Vec<(String, i32)>,
 }
 
 #[pymethods]
@@ -229,6 +239,7 @@ impl XlsxPatcher {
             queued_defined_names: Vec::new(),
             queued_tables: HashMap::new(),
             queued_comments: HashMap::new(),
+            queued_sheet_moves: Vec::new(),
         })
     }
 
@@ -518,6 +529,21 @@ impl XlsxPatcher {
             hidden,
             comment,
         });
+        Ok(())
+    }
+
+    /// Queue a sheet reorder (RFC-036).
+    ///
+    /// `sheet` is the sheet's `name` attribute (resolved on the Python
+    /// side from a `Worksheet` instance or string). `offset` is added
+    /// to the sheet's current 0-based position; the resulting index is
+    /// clamped to `[0, n-1]`. Drained by Phase 2.5h during `do_save`.
+    /// Multiple queued moves apply in queue order against the running
+    /// tab list, and Phase 2.5h re-points every `<definedName
+    /// localSheetId>` whose integer maps to a moved position before
+    /// the defined-names merger runs.
+    fn queue_sheet_move(&mut self, sheet: &str, offset: i32) -> PyResult<()> {
+        self.queued_sheet_moves.push((sheet.to_string(), offset));
         Ok(())
     }
 
@@ -934,13 +960,14 @@ impl XlsxPatcher {
             && self.queued_defined_names.is_empty()
             && self.queued_tables.is_empty()
             && self.queued_comments.is_empty()
+            && self.queued_sheet_moves.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
             // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
-            // `queued_defined_names`, RFC-024's `queued_tables`, and
-            // RFC-023's `queued_comments` so
-            // a no-op save remains
+            // `queued_defined_names`, RFC-024's `queued_tables`,
+            // RFC-023's `queued_comments`, and RFC-036's
+            // `queued_sheet_moves` so a no-op save remains
             // byte-identical even after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
@@ -1548,6 +1575,29 @@ impl XlsxPatcher {
             file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
         }
 
+        // --- Phase 2.5h: Sheet reorder (RFC-036) ---
+        //
+        // Sequenced BEFORE Phase 2.5f because both phases mutate
+        // `xl/workbook.xml`. When `queued_sheet_moves` is non-empty
+        // we read workbook.xml ONCE here, apply the reorder + the
+        // `<definedName localSheetId>` integer remap, and stash the
+        // resulting bytes for Phase 2.5f to consume (so the defined-
+        // names merger doesn't re-read the source ZIP entry). We also
+        // update `self.sheet_order` so downstream phases (RFC-020
+        // `app.xml` regen, RFC-026 CF aggregation) iterate the
+        // post-move tab list.
+        let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
+        if !self.queued_sheet_moves.is_empty() {
+            let src_wb_xml = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+            let result = sheet_order::merge_sheet_moves(
+                src_wb_xml.as_bytes(),
+                &self.queued_sheet_moves,
+            )
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet-reorder merge: {e}")))?;
+            workbook_xml_in_progress = Some(result.workbook_xml);
+            self.sheet_order = result.new_order;
+        }
+
         // --- Phase 2.5f: Defined names (RFC-021) ---
         //
         // Workbook-level (single XML part), not per-sheet. When the
@@ -1557,14 +1607,29 @@ impl XlsxPatcher {
         // Empty queue is the no-op identity path — workbook.xml is
         // not touched. The merger preserves all unrelated children of
         // `<workbook>` byte-for-byte.
+        //
+        // RFC-036 composition: if Phase 2.5h already produced an
+        // updated workbook.xml, feed the merger those bytes (rather
+        // than re-reading the source) so the move + defined-names
+        // mutations compose without two source-XML parses.
         if !self.queued_defined_names.is_empty() {
-            let wb_xml = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+            let wb_xml_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+                Some(bytes) => bytes,
+                None => {
+                    let s = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+                    s.into_bytes()
+                }
+            };
             let updated = defined_names::merge_defined_names(
-                wb_xml.as_bytes(),
+                &wb_xml_bytes,
                 &self.queued_defined_names,
             )
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("defined-names merge: {e}")))?;
             file_patches.insert("xl/workbook.xml".to_string(), updated);
+        } else if let Some(bytes) = workbook_xml_in_progress.take() {
+            // No defined-names work, but Phase 2.5h produced a workbook
+            // rewrite — route it through file_patches.
+            file_patches.insert("xl/workbook.xml".to_string(), bytes);
         }
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
