@@ -1782,6 +1782,9 @@ impl XlsxPatcher {
             && self.queued_charts.is_empty()
             && self.queued_pivot_caches.is_empty()
             && self.queued_pivot_tables.is_empty()
+            && self.queued_sheet_setup.is_empty()
+            && self.queued_autofilters.is_empty()
+            && self.queued_workbook_security.is_none()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's

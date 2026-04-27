@@ -1624,29 +1624,12 @@ class Workbook:
                 and getattr(ws, "_print_title_cols", None) is None
             ):
                 continue
-            try:
-                d = ws.to_rust_setup_dict()
-            except Exception:
-                continue
-            # Drop the print_titles slot before queuing — the patcher
-            # doesn't act on it (the workbook-level definedNames path
-            # does, in a separate flush). Keep the other 5.
-            payload = {
-                "page_setup": d.get("page_setup"),
-                "page_margins": d.get("page_margins"),
-                "header_footer": d.get("header_footer"),
-                "sheet_view": d.get("sheet_view"),
-                "sheet_protection": d.get("sheet_protection"),
-                "print_titles": d.get("print_titles"),
-            }
+            d = ws.to_rust_setup_dict()
             # Skip queues whose slots are all None — there's nothing
             # to splice and the patcher's parser would just no-op.
-            if all(v is None for v in payload.values()):
+            if all(v is None for v in d.values()):
                 continue
-            try:
-                self._rust_patcher.queue_sheet_setup_update(ws.title, payload)
-            except Exception:
-                continue
+            self._rust_patcher.queue_sheet_setup_update(ws.title, d)
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
