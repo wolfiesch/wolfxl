@@ -946,6 +946,165 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
+    # ------------------------------------------------------------------
+    # Sprint Μ-prime — 3D / Stock / Surface / ProjectedPie families
+    # (RFC-046 §11).  9 new entries.  All start
+    # ``wolfxl_supported=False`` per Sprint Ι Lesson 7 — the
+    # integrator flips them post-merge once Pod-α′ + Pod-β′ + Pod-γ′
+    # land on the integration branch.  Tags carry ``shipped-1.6.1``.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BarChart3D",
+        wolfxl_path="wolfxl.chart.BarChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): BarChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, right_angle_axes=True, "
+            "depth_percent=100).  Inherits the BarChart class surface "
+            "(grouping / bar_dir / gap_width / overlap); adds the "
+            "3D-specific perspective fields and emits "
+            "``<c:bar3DChart>`` instead of ``<c:barChart>``.  "
+            "Verified by tests/test_charts_3d.py (Pod-γ′)."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.LineChart3D",
+        wolfxl_path="wolfxl.chart.LineChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): LineChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, perspective=30, "
+            "right_angle_axes=False, depth_percent=100).  Inherits "
+            "the LineChart class surface (smooth / drop_lines / "
+            "hi_low_lines / per-series marker); emits "
+            "``<c:line3DChart>``."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.PieChart3D",
+        wolfxl_path="wolfxl.chart.PieChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): PieChart3D with "
+            "``view_3d`` (rot_x=30, rot_y=0, perspective=30, "
+            "right_angle_axes=False).  Inherits the PieChart class "
+            "surface (vary_colors / first_slice_ang); emits "
+            "``<c:pie3DChart>``.  Aliased as ``Pie3D`` for openpyxl "
+            "name compatibility."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.Pie3D",
+        wolfxl_path="wolfxl.chart.Pie3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): ``Pie3D`` is the "
+            "openpyxl 3.1.x alias for ``PieChart3D``.  wolfxl exposes "
+            "the same alias under ``wolfxl.chart.Pie3D`` so the "
+            "search-replace from ``openpyxl.chart import Pie3D`` is "
+            "a one-liner.  Defaults match PieChart3D verbatim."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.AreaChart3D",
+        wolfxl_path="wolfxl.chart.AreaChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): AreaChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, perspective=30, "
+            "right_angle_axes=False, depth_percent=100).  Inherits "
+            "the AreaChart class surface (grouping / drop_lines); "
+            "emits ``<c:area3DChart>``."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.SurfaceChart",
+        wolfxl_path="wolfxl.chart.SurfaceChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.3): SurfaceChart (2D) "
+            "wraps the data in ``<c:surfaceChart>`` with a "
+            "``<c:wireframe>`` flag (constructor arg ``wireframe: "
+            "bool = False``).  Series carry the same shape as "
+            "BarChart (cat + val); axes are catAx + valAx + serAx."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.SurfaceChart3D",
+        wolfxl_path="wolfxl.chart.SurfaceChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1, §11.3): "
+            "SurfaceChart3D wraps the data in ``<c:surface3DChart>`` "
+            "with ``view_3d`` defaults (rot_x=15, rot_y=20, "
+            "perspective=30, right_angle_axes=False, "
+            "depth_percent=100) and the ``<c:wireframe>`` flag."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.StockChart",
+        wolfxl_path="wolfxl.chart.StockChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.2): StockChart "
+            "(Open-High-Low-Close).  Constructor validates that the "
+            "series count is exactly 4 in fixed Open / High / Low / "
+            "Close order; raises ``ValueError`` otherwise.  Emits "
+            "``<c:stockChart>`` with ``<c:hiLowLines/>`` and "
+            "``<c:upDownBars/>`` decorators by default."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.ProjectedPieChart",
+        wolfxl_path="wolfxl.chart.ProjectedPieChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.4): ProjectedPieChart "
+            "— pie-of-pie or bar-of-pie.  Constructor exposes "
+            "``of_pie_type: 'bar' | 'pie' = 'pie'``, "
+            "``split_type: 'auto' | 'pos' | 'percent' | 'val' | 'cust'``, "
+            "``split_pos``, ``second_pie_size``.  Emits "
+            "``<c:ofPieChart>`` with ``<c:ofPieType/>``, "
+            "``<c:splitType/>``, ``<c:splitPos/>``, "
+            "``<c:secondPieSize/>``."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
 )
 
 
