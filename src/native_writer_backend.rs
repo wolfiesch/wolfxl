@@ -1782,12 +1782,20 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         }
     };
 
-    // Anchor: prefer explicit dict shape, fall back to A1 → OneCell.
+    // Anchor: accept (a) explicit dict, (b) A1 string (Pod-β shape),
+    // or (c) None / missing — fall back to the call-site `anchor_a1`.
     let anchor = if let Some(v) = d.get_item("anchor")? {
-        let ad = v
-            .downcast::<PyDict>()
-            .map_err(|_| PyValueError::new_err("chart anchor must be a dict"))?;
-        parse_image_anchor(ad)?
+        if v.is_none() {
+            a1_to_one_cell_anchor(anchor_a1)?
+        } else if let Ok(ad) = v.downcast::<PyDict>() {
+            parse_image_anchor(ad)?
+        } else if let Ok(s) = v.extract::<String>() {
+            a1_to_one_cell_anchor(&s)?
+        } else {
+            return Err(PyValueError::new_err(
+                "chart anchor must be a dict, A1 string, or None",
+            ));
+        }
     } else {
         a1_to_one_cell_anchor(anchor_a1)?
     };

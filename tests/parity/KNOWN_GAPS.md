@@ -179,6 +179,22 @@ and documented here before the ratchet baseline is updated.
   `StockChart`, `SurfaceChart` (2D), and `ProjectedPieChart` ship as
   `_make_stub`-style stubs in 1.6.0 that raise `NotImplementedError`
   with a v1.6.1-pointer message. RFC-046 §9 documents the deferral.
+- **Sprint Μ chart-dict contract gap (Pod-α ↔ Pod-β)** — deferred to
+  **v1.6.1**. Pod-α's chart-dict parser
+  (`src/native_writer_backend.rs::parse_chart_dict`) and Pod-β's per-class
+  `to_rust_dict()` shape diverged on several deep descriptor surfaces:
+  `Title.to_dict()` (runs/text), `Layout.to_dict()` (x/y), gridlines,
+  error bars, trendlines, `varyColors`, non-default `grouping`
+  (`stacked`/`percentStacked`), scatter `style` (`smooth`/`marker`),
+  invalid-input rejection paths, and modify-mode high-level
+  `Worksheet.add_chart()` → patcher (the workbook-level escape hatch
+  `Workbook.add_chart_modify_mode(..., chart_xml_bytes, ...)` does
+  ship). The 8-type basic construction works end-to-end (cargo
+  `wolfxl-writer/tests/charts.rs`: 27 passed) and modify-mode
+  deep-clone (Pod-γ) is fully green (14/14). The 37 affected
+  high-depth tests in `tests/test_charts_write.py` are marked
+  `xfail strict=False` so v1.6.1 reconciliation flips them
+  automatically.  Tracked: RFC-046 §10 (to be added in v1.6.1 spec).
 - **Pivot-chart linkage** — depends on **Sprint Ν / v2.0.0** pivot
   tables. A chart's `<c:pivotSource>` referencing a pivot cache
   definition cannot land before pivot caches are constructible. RFC-046

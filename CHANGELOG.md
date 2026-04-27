@@ -1,6 +1,6 @@
 # Changelog
 
-## wolfxl 1.6.0 (TBD-DATE) — chart construction (8 types, full depth)
+## wolfxl 1.6.0 (2026-04-26) — chart construction (8 types, full depth)
 
 User-facing release notes: `docs/release-notes-1.6.md`.
 
@@ -18,7 +18,7 @@ tables.
 ### Added
 
 - **RFC-046 — Chart construction** (Sprint Μ Pod-α/β,
-  <!-- TBD: SHA -->). `wolfxl.chart.{Bar,Line,Pie,Doughnut,Area,Scatter,Bubble,Radar}Chart`
+  `5aaecd1`+`6fb7e7f`). `wolfxl.chart.{Bar,Line,Pie,Doughnut,Area,Scatter,Bubble,Radar}Chart`
   are real classes replacing the `_make_stub` definitions at
   `python/wolfxl/chart/__init__.py`. `Reference(ws, min_col, min_row,
   max_col, max_row)` and `Series(values, categories=None,
@@ -34,7 +34,7 @@ tables.
   or one of the RFC-045 anchor helper classes (`OneCellAnchor`,
   `TwoCellAnchor`, `AbsoluteAnchor`).
 - **`copy_worksheet` chart deep-clone with cell-range re-pointing**
-  (Sprint Μ Pod-γ, RFC-035 §10 lift, <!-- TBD: SHA -->). The
+  (Sprint Μ Pod-γ, RFC-035 §10 lift, `143ddb3`). The
   deferred limit at `Plans/rfcs/035-copy-worksheet.md` lines 924-929
   is lifted. Charts in copied sheets now deep-clone with cell-range
   re-pointing on every series. Self-references
@@ -43,7 +43,7 @@ tables.
   Cached values inside `<c:strCache>` / `<c:numCache>` are preserved
   as-is (Excel rebuilds them on next open if stale). The new
   behaviour is the default; there is no opt-in flag.
-- **Modify-mode `add_chart`** (Sprint Μ Pod-γ, <!-- TBD: SHA -->).
+- **Modify-mode `add_chart`** (Sprint Μ Pod-γ, `143ddb3`).
   `wb = load_workbook(..., modify=True); ws.add_chart(chart, "G2");
   wb.save()` works. New patcher Phase 2.5l drains the queued chart
   adds per sheet, allocates fresh `chartN.xml` and `drawingN.xml`

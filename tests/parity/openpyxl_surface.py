@@ -817,7 +817,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "Verified by tests/test_charts_write.py + "
             "tests/parity/test_charts_parity.py."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -831,7 +831,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "trendline, error bars.  Structural XML compares clean "
             "vs openpyxl modulo zeroed axis IDs."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -845,7 +845,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "labels (showVal / showCatName / position).  No category "
             "axis."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -858,7 +858,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "Sprint Μ Pod-β: DoughnutChart adds ``holeSize`` on top "
             "of the Pie surface."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -871,7 +871,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "Sprint Μ Pod-β: AreaChart, supports ``grouping`` "
             "(standard / stacked / percentStacked)."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -885,7 +885,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "(lineMarker / marker / smooth) + trendline / marker "
             "support per series."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -898,7 +898,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "Sprint Μ Pod-β: BubbleChart — third value series drives "
             "marker size."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -911,7 +911,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "Sprint Μ Pod-β: RadarChart with ``radarStyle`` "
             "(standard / marker / filled)."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -925,7 +925,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "max_col=None, max_row=None)``.  Serialises to the same "
             "Sheet1!$B$2:$B$6 form openpyxl emits."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),
@@ -942,7 +942,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "via the Rust writer (Pod-α).  Modify-mode insertion is "
             "Pod-γ's responsibility (deep-clone-aware)."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts", "shipped-1.6"}),
     ),

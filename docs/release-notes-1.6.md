@@ -1,6 +1,6 @@
-# wolfxl 1.6.0 (TBD-DATE) — chart construction (8 types, full depth)
+# wolfxl 1.6.0 (2026-04-26) — chart construction (8 types, full depth)
 
-_Date: <!-- TBD -->_
+_Date: 2026-04-26_
 
 WolfXL 1.6 lifts the construction-side chart stub that the 1.0–1.5
 arc deferred as out-of-scope. Sprint Μ ("Mu") ships **eight 2D chart
@@ -16,6 +16,18 @@ limit: charts in copied sheets now deep-clone with cell-range
 re-pointing instead of aliasing the source's chart part. Modify-mode
 `add_chart` ships alongside the write-mode path so both flows have
 identical surface and behaviour.
+
+> **Known gap (v1.6.0 → v1.6.1):** The Pod-α (Rust) chart-dict parser
+> and Pod-β (Python) `to_rust_dict()` shape diverged on several deep
+> descriptor surfaces — title rich-text runs, manual layout
+> coordinates, gridlines, error bars, trendlines, `varyColors`,
+> non-default grouping, scatter style, and invalid-input
+> rejection. The basic 8-type chart construction (cargo
+> `wolfxl-writer/tests/charts.rs`: 27 passed) and modify-mode
+> deep-clone (14/14 green) ship in v1.6.0; advanced sub-features
+> are tracked as `xfail` in `tests/test_charts_write.py` and will
+> flip automatically when v1.6.1 reconciles the contract. See
+> `tests/parity/KNOWN_GAPS.md` → "Sprint Μ chart-dict contract gap".
 
 ## TL;DR
 
@@ -412,7 +424,7 @@ RFC-046 §9 with deferral rationales.
 
 ## RFCs
 
-- `Plans/rfcs/046-chart-construction.md` (Sprint Μ Pod-α/β/γ/δ; docs by Pod-ε) — <!-- TBD: SHA -->
+- `Plans/rfcs/046-chart-construction.md` (Sprint Μ Pod-α/β/γ/δ; docs by Pod-ε) — `703264a`
 
 ## Stats (post-1.6)
 
@@ -438,32 +450,37 @@ Sprint Μ ("Mu") pods that landed 1.6:
   `crates/wolfxl-writer/src/emit/drawings.rs` (extended for
   `<xdr:graphicFrame>`),
   `crates/wolfxl-rels/src/lib.rs` (`RT_CHART`),
-  `src/lib.rs` (PyO3 binding `Workbook.add_chart_native`). Commits:
-  <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  `src/lib.rs` (PyO3 binding `Workbook.add_chart_native`).
+  Commits `3513d0e`, `1451f24`, `67016eb`, `ed18996`, `fa0fd4f`,
+  `ac49d2d`, `c774637`. Merged via `5aaecd1`.
 - **Pod-β — RFC-046 Python class hierarchy.** ~17 modules under
   `python/wolfxl/chart/`. Replaces all `_make_stub` chart classes
-  with real ones; mirrors openpyxl's API verbatim. Commits:
-  <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  with real ones; mirrors openpyxl's API verbatim.
+  Commits `2043b3f`, `11a7810`, `8bb6aee`, `1b638f8`, `af50d36`,
+  `ea59f30`, `acfe8e3`. Merged via `6fb7e7f`.
 - **Pod-γ — Modify-mode `add_chart` + RFC-035 chart-deep-clone.**
   XlsxPatcher Phase 2.5l; cell-range re-pointing on the chart-clone
-  pass. Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  pass. Commits `ec9d89a`, `d5cf5f1`, `2c5c2f5`, `482b982`,
+  `7541d8e`. Merged via `143ddb3`.
 - **Pod-δ — Parity tests vs openpyxl.** ~40 write-mode tests +
   ~25 parity tests + 8 LibreOffice smoke + 10 surface entries.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits `7046156`, `5835307`, `be14025`, `df3786c`, `09ea0d2`.
+  Merged via `c9cf9f3`.
 - **Pod-ε (this release scaffold)** — RFC-046, INDEX update,
   KNOWN_GAPS reconciliation, this release notes scaffold, CHANGELOG
   entry, and the RFC-035 §10 chart-aliasing-limit lifted note.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits `703264a`, `e1c427f`, `efb7d14`, `0ea195b`. Merged via
+  `691ed6c`.
 
 ## SHA log
 
 | Pod | Branch | Commits | Merge |
 |---|---|---|---|
-| α | `feat/sprint-mu-pod-alpha`   | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| β | `feat/sprint-mu-pod-beta`    | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| γ | `feat/sprint-mu-pod-gamma`   | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| δ | `feat/sprint-mu-pod-delta`   | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| ε | `feat/sprint-mu-pod-epsilon` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| α | `feat/sprint-mu-pod-alpha`   | `3513d0e`..`c774637` | `5aaecd1` |
+| β | `feat/sprint-mu-pod-beta`    | `2043b3f`..`acfe8e3` | `6fb7e7f` |
+| γ | `feat/sprint-mu-pod-gamma`   | `ec9d89a`..`7541d8e` | `143ddb3` |
+| δ | `feat/sprint-mu-pod-delta`   | `7046156`..`09ea0d2` | `c9cf9f3` |
+| ε | `feat/sprint-mu-pod-epsilon` | `703264a`..`0ea195b` | `691ed6c` |
 
 Integrator finalize commit fills these placeholders, performs the
 post-merge ratchet flip on the 10 chart-related entries in

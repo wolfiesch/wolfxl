@@ -105,13 +105,23 @@ class GraphicalProperties:
         if self.noFill:
             d["noFill"] = True
         if self.solidFill is not None:
-            d["solidFill"] = self.solidFill
+            # Accept either a raw hex/scheme string OR a ColorChoice
+            # (or any object with __str__) — Pod-α's emitter takes a str.
+            d["solidFill"] = (
+                self.solidFill
+                if isinstance(self.solidFill, str)
+                else str(self.solidFill)
+            )
         if self.gradFill is not None:
             d["gradFill"] = self.gradFill
         if self.pattFill is not None:
             d["pattFill"] = self.pattFill
         if self.ln is not None:
-            d["ln"] = self.ln.to_dict()
+            ln_dict = self.ln.to_dict()
+            # Same coercion for nested LineProperties.solidFill.
+            if "solidFill" in ln_dict and not isinstance(ln_dict["solidFill"], str):
+                ln_dict["solidFill"] = str(ln_dict["solidFill"])
+            d["ln"] = ln_dict
         return d
 
 

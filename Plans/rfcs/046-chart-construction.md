@@ -1,6 +1,6 @@
 # RFC-046: Chart construction — `wolfxl.chart.*` (replace `_make_stub`)
 
-Status: Shipped 1.6 (Sprint Μ Pods α/β/γ/δ) <!-- TBD: integrator-fills with SHAs -->
+Status: Shipped 1.6 (Sprint Μ Pods α/β/γ/δ; tag `v1.6.0`)
 Owner: Sprint Μ (Pods α / β / γ / δ / ε)
 Phase: 5 (1.6)
 Estimate: XL
@@ -769,20 +769,18 @@ Other chart features deferred to follow-up RFCs (no v1.6.1 commitment):
 Sprint Μ Pods landed in the following commits on
 `feat/native-writer`:
 
-<!-- TBD: integrator-fills with Pod-α / β / γ / δ SHAs -->
-
 | Pod | Branch | Commits | Merge |
 |---|---|---|---|
-| α | `feat/sprint-mu-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| β | `feat/sprint-mu-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| γ | `feat/sprint-mu-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| δ | `feat/sprint-mu-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| ε | `feat/sprint-mu-pod-epsilon` (this branch) | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| α | `feat/sprint-mu-pod-alpha`   | `3513d0e`..`c774637` | `5aaecd1` |
+| β | `feat/sprint-mu-pod-beta`    | `2043b3f`..`acfe8e3` | `6fb7e7f` |
+| γ | `feat/sprint-mu-pod-gamma`   | `ec9d89a`..`7541d8e` | `143ddb3` |
+| δ | `feat/sprint-mu-pod-delta`   | `7046156`..`09ea0d2` | `c9cf9f3` |
+| ε | `feat/sprint-mu-pod-epsilon` | `703264a`..`0ea195b` | `691ed6c` |
 
 ## Acceptance
 
-- Commit: <!-- TBD: integrator-fills -->
+- Integrator finalize: pending tag `v1.6.0`
 - Verification: `pytest tests/test_charts_write.py
   tests/test_charts_modify.py tests/parity/test_charts_parity.py
   tests/test_copy_worksheet_chart_deep_clone.py` GREEN
-- Date: <!-- TBD -->
+- Date: 2026-04-26

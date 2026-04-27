@@ -235,8 +235,24 @@ class ChartBase:
 
         series_list = [s.to_rust_dict(self._series_type) for s in self.ser]
 
+        # Map openpyxl tagname (e.g. "barChart") to Pod-α's short kind
+        # ("bar"). 3D variants like "bar3DChart" should not reach
+        # to_rust_dict() in v1.6.0 — those are deferred to v1.6.1 and
+        # raise NotImplementedError at the class constructor — but if
+        # they slip through, we let Pod-α surface "unknown chart kind".
+        _TAGNAME_TO_KIND = {
+            "barChart": "bar",
+            "lineChart": "line",
+            "pieChart": "pie",
+            "doughnutChart": "doughnut",
+            "areaChart": "area",
+            "scatterChart": "scatter",
+            "bubbleChart": "bubble",
+            "radarChart": "radar",
+        }
+
         d: dict[str, Any] = {
-            "kind": self.tagname,
+            "kind": _TAGNAME_TO_KIND.get(self.tagname, self.tagname),
             "series_type": self._series_type,
             "style": self._style,
             "display_blanks": self._display_blanks,
