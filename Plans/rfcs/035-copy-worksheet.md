@@ -104,7 +104,7 @@ The OOXML surface RFC-035 must clone or register:
 | §15.2 OPC | `xl/media/image<N>.{png,jpg,…}` | **Aliased**, NOT cloned (§5.3, §8 risk #2). Drawing parts in the copy still point at the original image part. |
 | §18.2.5 CT_DefinedName | `xl/workbook.xml` `<definedName>` | For each source-sheet-scoped defined name (`localSheetId == src_idx`), emit a fresh entry with `localSheetId == new_idx`. Workbook-scope names are left alone. |
 | §18.3.1.20 CT_CalcPr | `xl/calcChain.xml` | NOT touched. After copy, the calc chain entries for the new sheet's cells are missing; Excel transparently rebuilds the chain on next open. (See §10 — out of scope.) |
-| §18.6 PivotCache, §20.5 Chart | `xl/charts/`, `xl/pivotCache*` | Out of scope (§10). Drawings that reference a chart will alias the chart part the same way images alias. |
+| §18.6 PivotCache, §20.5 Chart | `xl/charts/`, `xl/pivotCache*` | **Charts**: deep-cloned with cell-range re-pointing as of 1.6 (Sprint Μ Pod-γ, RFC-046 §7). Self-refs are rewritten to the copy's sheet name; cross-sheet refs preserved. **Pivot caches**: still out of scope; deferred to v2.0.0 / Sprint Ν. |
 
 **Schema-ordering constraint** for `xl/workbook.xml`: `<sheets>` must
 come before `<definedNames>`. The new sheet's `<sheet>` child appends
@@ -921,12 +921,20 @@ side-effect of RFC-035:
   walks the in-memory writer model rather than ZIP bytes. Tracked
   as a follow-up.
 
-- **Copying chart parts** (`xl/charts/chartN.xml` referenced via
+- ~~**Copying chart parts** (`xl/charts/chartN.xml` referenced via
   `RT_CHART` from drawings). Charts contain references to cell
   ranges (chart data series) which would need to be re-pointed to
   the copy's cells (currently they point at the source's). Charts
   are aliased (preserved-on-source) for now; a future RFC owns chart
-  re-pointing.
+  re-pointing.~~
+
+  ✅ **Lifted in 1.6 (Sprint Μ Pod-γ).** RFC-046 §7 documents the
+  deep-clone semantics with cell-range re-pointing. Self-references
+  (`SourceSheet!$B$2:$B$10`) get rewritten to the copy's sheet name;
+  cross-sheet references (`Other!$A$1:$A$5`) are preserved verbatim.
+  Cached values (`<c:strCache>`/`<c:numCache>`) are preserved as-is
+  and Excel rebuilds them on next open if stale. The new behaviour is
+  the default; there is no opt-in flag.
 
 - ~~**Deep-cloning images / media**~~: opt-in via
   `wb.copy_options.deep_copy_images = True` as of Sprint Θ Pod-C2.

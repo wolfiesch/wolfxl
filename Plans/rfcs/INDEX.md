@@ -8,7 +8,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 
 ---
 
-## Status Table (22 RFCs)
+## Status Table (23 RFCs)
 
 | ID | Title | Status | Phase | Estimate | Depends-on | Unblocks |
 |---|---|---|---|---|---|---|
@@ -35,6 +35,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 043 | Read-side parity — `.xlsb` / `.xls` reads (runtime-dispatched calamine backends) | Shipped | 5 (1.4) | L | calamine-styles (xlsx); upstream calamine (xlsb / xls) | (closes Phase 5 — KNOWN_GAPS empty post-1.4) |
 | 044 | Encryption — write-side OOXML encryption (`Workbook.save(password=...)`) | Shipped | 5 (1.5) | M | 042 (msoffcrypto-tool optional dep), 013 | (T3 closure for encrypted xlsx writes) |
 | 045 | Image construction — `wolfxl.drawing.image.Image` (replace stub) | Shipped | 5 (1.5) | L | 010, 013 | (T3 closure for image construction; chart-construction prerequisites) |
+| 046 | Chart construction — `wolfxl.chart.*` (replace `_make_stub`) | Shipped | 5 (1.6) | XL | 010, 013, 035, 045 | (v1.6.1 3D / Stock / Surface / ProjectedPie; v2.0.0 pivot charts) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
@@ -83,6 +84,21 @@ Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (cal
                                           │      (010+012+013+021+022+023   │
                                           │       +024+025+026)             │
                                           │  036 move_sheet  (021 only)     │
+                                          └─────────────────────────────────┘
+                                                          │
+                                          ┌───────────────┴─────────────────┐
+                                          │ Phase 5 — Read + construction   │
+                                          │ parity (1.3 → 1.6)              │
+                                          │                                 │
+                                          │  040 rich-text round-trip       │
+                                          │  041 streaming reads            │
+                                          │  042 password-protected reads   │
+                                          │  043 .xlsb / .xls reads         │
+                                          │  044 encryption writes  (042)   │
+                                          │  045 image construction (010,   │
+                                          │      013)                       │
+                                          │  046 chart construction         │
+                                          │      (010, 013, 035, 045)       │
                                           └─────────────────────────────────┘
 ```
 
@@ -142,6 +158,7 @@ Each is flagged with the RFC that surfaced it. Listed by reverse impact. Decisio
 | **Phase 4a — Row/col structural** | 030, 031 | ~2 weeks | Mechanical once 012 + RFCs 022/024/025/026 land. |
 | **Phase 4b — Range/sheet structural** | 034, 035, 036 | ~2-3 weeks | 035 is critical path (XL); 034/036 land in parallel. |
 | **Phase 4c — Hardening** | (no RFCs) | 1 week | Fuzz, golden expansion, KNOWN_GAPS.md cleanup, doc updates, release notes. |
+| **Phase 5 — Read + construction parity** | 040, 041, 042, 043, 044, 045, 046 | rolling 1.3 → 1.6 | Sprint Ι (1.3) read-side parity, Sprint Κ (1.4) `.xlsb`/`.xls`, Sprint Λ (1.5) encryption + image construction, Sprint Μ (1.6) chart construction. |
 
 ---
 
