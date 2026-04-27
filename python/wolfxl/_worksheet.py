@@ -233,12 +233,27 @@ class _ColumnDimension:
 
 
 class _AutoFilter:
-    """Proxy for ``ws.auto_filter.ref = 'A1:D10'``."""
+    """Proxy for ``ws.auto_filter`` (RFC-056 Sprint Ο Pod 1B).
 
-    __slots__ = ("_ref",)
+    Exposes the openpyxl-shaped surface:
+
+    * ``ref`` — A1 range string (read/write).
+    * ``filter_columns`` — list of :class:`FilterColumn`.
+    * ``sort_state`` — optional :class:`SortState`.
+    * ``add_filter_column(col_id, filter, **kw)`` — fluent builder.
+    * ``add_sort_condition(ref, descending=…, sort_by=…, **kw)``.
+    * ``to_rust_dict()`` — RFC-056 §10 dict shape for the patcher /
+      native-writer PyO3 boundary.
+    """
+
+    __slots__ = ("_ref", "filter_columns", "sort_state")
 
     def __init__(self) -> None:
+        from wolfxl.worksheet.filters import FilterColumn  # noqa: F401 — side-effectful import
+
         self._ref: str | None = None
+        self.filter_columns: list[Any] = []
+        self.sort_state: Any = None
 
     @property
     def ref(self) -> str | None:
@@ -247,6 +262,69 @@ class _AutoFilter:
     @ref.setter
     def ref(self, value: str | None) -> None:
         self._ref = value
+
+    def add_filter_column(
+        self,
+        col_id: int,
+        filter: Any = None,
+        *,
+        hidden_button: bool = False,
+        show_button: bool = True,
+        date_group_items: Any = None,
+    ) -> Any:
+        """Append a ``FilterColumn``. Returns the new entry."""
+        from wolfxl.worksheet.filters import FilterColumn
+
+        fc = FilterColumn(
+            col_id=col_id,
+            hidden_button=hidden_button,
+            show_button=show_button,
+            filter=filter,
+            date_group_items=list(date_group_items) if date_group_items else [],
+        )
+        self.filter_columns.append(fc)
+        return fc
+
+    def add_sort_condition(
+        self,
+        ref: str,
+        descending: bool = False,
+        sort_by: str = "value",
+        *,
+        custom_list: str | None = None,
+        dxf_id: int | None = None,
+        icon_set: str | None = None,
+        icon_id: int | None = None,
+    ) -> Any:
+        """Append a ``SortCondition``. Auto-creates ``sort_state`` if absent."""
+        from wolfxl.worksheet.filters import SortCondition, SortState
+
+        if self.sort_state is None:
+            self.sort_state = SortState(ref=ref)
+        sc = SortCondition(
+            ref=ref,
+            descending=descending,
+            sort_by=sort_by,
+            custom_list=custom_list,
+            dxf_id=dxf_id,
+            icon_set=icon_set,
+            icon_id=icon_id,
+        )
+        self.sort_state.sort_conditions.append(sc)
+        return sc
+
+    def to_rust_dict(self) -> dict[str, Any]:
+        """Serialise to the RFC-056 §10 dict shape."""
+        # Use the AutoFilter dataclass's own marshaller so the §10
+        # contract has a single body of code.
+        from wolfxl.worksheet.filters import AutoFilter as _AF
+
+        af = _AF(
+            ref=self._ref,
+            filter_columns=list(self.filter_columns),
+            sort_state=self.sort_state,
+        )
+        return af.to_rust_dict()
 
 
 class _MergedCellsProxy:
@@ -2130,6 +2208,9 @@ class Worksheet:
             self._flush_to_writer(writer, python_value_to_payload,
                                   font_to_format_dict, fill_to_format_dict,
                                   alignment_to_format_dict, border_to_rust_dict)
+            # Sprint Ο Pod 1B (RFC-056) — autoFilter must be flushed
+            # AFTER cells so the evaluator sees the populated grid.
+            self._flush_autofilter_post_cells(writer)
 
         self._dirty.clear()
 
@@ -2378,6 +2459,30 @@ class Worksheet:
                     if bdict:
                         patcher.queue_border(self._title, coord, bdict)
 
+    def _flush_autofilter_post_cells(self, writer: Any) -> None:
+        """Sprint Ο Pod 1B (RFC-056) — flush the autoFilter to the
+        Rust writer AFTER cells have been populated, so the
+        evaluator sees the real grid and can stamp `row.hidden`
+        flags on filtered-out rows.
+
+        Modify mode goes through
+        `Workbook._flush_pending_autofilters_to_patcher` instead.
+        """
+        sheet = self._title
+        af = self._auto_filter
+        af_has_state = (
+            af.ref is not None
+            or bool(af.filter_columns)
+            or af.sort_state is not None
+        )
+        if af_has_state and hasattr(writer, "set_autofilter_native"):
+            try:
+                writer.set_autofilter_native(sheet, af.to_rust_dict())
+            except Exception:
+                # Defensive: don't poison the save path on a malformed
+                # autofilter spec.
+                pass
+
     def _flush_compat_properties(self, writer: Any) -> None:
         """Flush openpyxl compat properties (freeze_panes, dimensions, etc.)."""
         sheet = self._title
@@ -2401,6 +2506,19 @@ class Worksheet:
         # Print area (flush only if the Rust writer supports it)
         if self._print_area is not None and hasattr(writer, "set_print_area"):
             writer.set_print_area(sheet, self._print_area)
+
+        # Sprint Ο Pod 1B (RFC-056) — autoFilter on write-mode sheets.
+        # Modify mode goes through `Workbook._flush_pending_autofilters_to_patcher`
+        # instead.
+        af = self._auto_filter
+        af_has_state = (
+            af.ref is not None
+            or bool(af.filter_columns)
+            or af.sort_state is not None
+        )
+        # AutoFilter is flushed separately AFTER cells so the
+        # evaluator can see the populated grid; see
+        # `_flush_autofilter_post_cells`.
 
         # T1 PR4: cell-level write features — hyperlinks, comments.
         # Setters populate ``_pending_hyperlinks`` / ``_pending_comments`` and
