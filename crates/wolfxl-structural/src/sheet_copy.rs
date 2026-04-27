@@ -25,6 +25,23 @@
 //!    new_idx` (RFC-035 §5.4 / OQ-c default).
 //! 6. Validate (RFC-035 §5.9): error if `dst_title` already exists or if
 //!    `src_title` is missing from the sheet list.
+//!
+//! # Sprint Ο Pod 1B (RFC-056) — autoFilter deep-clone
+//!
+//! `<autoFilter>` is a sheet-scoped child of `<worksheet>` (slot 11)
+//! with no rels-graph dependencies. The planner clones the source
+//! sheet bytes verbatim into the new `xl/worksheets/sheet{N}.xml`
+//! entry, so `<autoFilter>` and its `<filterColumn>` / `<sortState>`
+//! children survive the clone byte-for-byte without requiring a
+//! dedicated rewrite.
+//!
+//! Excel and openpyxl will see the cloned autoFilter on the new
+//! sheet immediately. The patcher's Phase 2.5o (Pod 1B's drainage
+//! step) re-evaluates the filter on the cloned sheet's data, so if
+//! the user then mutates cells on the destination sheet in the same
+//! save the `<row hidden>` markers refresh automatically. See
+//! `src/wolfxl/mod.rs` Phase 2.5o for the wiring and
+//! RFC-056 §6 for the contract.
 
 use std::collections::{HashMap, HashSet};
 

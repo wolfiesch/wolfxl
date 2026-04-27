@@ -79,6 +79,9 @@ const REL_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/re
 /// malformed output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SheetBlock {
+    /// `<autoFilter ref="…">…</autoFilter>` — slot 11 in §18.3.1.99.
+    /// Sprint Ο Pod 1B (RFC-056). Replaces any existing `<autoFilter>`.
+    AutoFilter(Vec<u8>),
     /// `<mergeCells count="…">…</mergeCells>` — slot 15 in §18.3.1.99.
     MergeCells(Vec<u8>),
     /// `<conditionalFormatting sqref="…">…</conditionalFormatting>` (one per
@@ -107,6 +110,7 @@ impl SheetBlock {
     /// the block when not already present in the source.
     pub fn ecma_position(&self) -> u32 {
         match self {
+            SheetBlock::AutoFilter(_) => 11,
             SheetBlock::MergeCells(_) => 15,
             SheetBlock::ConditionalFormatting(_) => 17,
             SheetBlock::DataValidations(_) => 18,
@@ -120,6 +124,7 @@ impl SheetBlock {
     /// blocks for replacement (matched against `BytesStart::local_name()`).
     pub fn root_local_name(&self) -> &'static [u8] {
         match self {
+            SheetBlock::AutoFilter(_) => b"autoFilter",
             SheetBlock::MergeCells(_) => b"mergeCells",
             SheetBlock::ConditionalFormatting(_) => b"conditionalFormatting",
             SheetBlock::DataValidations(_) => b"dataValidations",
@@ -133,7 +138,8 @@ impl SheetBlock {
     /// chosen insertion point.
     pub fn bytes(&self) -> &[u8] {
         match self {
-            SheetBlock::MergeCells(b)
+            SheetBlock::AutoFilter(b)
+            | SheetBlock::MergeCells(b)
             | SheetBlock::ConditionalFormatting(b)
             | SheetBlock::DataValidations(b)
             | SheetBlock::Hyperlinks(b)
@@ -574,6 +580,7 @@ mod tests {
 
     #[test]
     fn ecma_position_for_each_variant() {
+        assert_eq!(SheetBlock::AutoFilter(vec![]).ecma_position(), 11);
         assert_eq!(SheetBlock::MergeCells(vec![]).ecma_position(), 15);
         assert_eq!(
             SheetBlock::ConditionalFormatting(vec![]).ecma_position(),
@@ -587,6 +594,7 @@ mod tests {
 
     #[test]
     fn root_local_name_for_each_variant() {
+        assert_eq!(SheetBlock::AutoFilter(vec![]).root_local_name(), b"autoFilter");
         assert_eq!(SheetBlock::MergeCells(vec![]).root_local_name(), b"mergeCells");
         assert_eq!(
             SheetBlock::ConditionalFormatting(vec![]).root_local_name(),
@@ -602,6 +610,35 @@ mod tests {
             b"legacyDrawing"
         );
         assert_eq!(SheetBlock::TableParts(vec![]).root_local_name(), b"tableParts");
+    }
+
+    #[test]
+    fn autofilter_replaces_existing_block() {
+        // Source has <autoFilter ref="A1:B5"/> at slot 11.  Supplying a
+        // new block must replace it in place.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><autoFilter ref="A1:B5"/><pageMargins/></worksheet>"#;
+        let block = SheetBlock::AutoFilter(
+            br#"<autoFilter ref="A1:D100"><filterColumn colId="0"/></autoFilter>"#.to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        assert!(s.contains(r#"<autoFilter ref="A1:D100">"#));
+        assert!(!s.contains(r#"<autoFilter ref="A1:B5""#));
+        // Exactly one autoFilter open in output.
+        assert_eq!(s.matches("<autoFilter").count(), 1);
+    }
+
+    #[test]
+    fn autofilter_inserts_before_mergecells() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><mergeCells count="1"><mergeCell ref="A1:B1"/></mergeCells><pageMargins/></worksheet>"#;
+        let block = SheetBlock::AutoFilter(br#"<autoFilter ref="A1:D10"/>"#.to_vec());
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+        let af = s.find("<autoFilter").unwrap();
+        let mc = s.find("<mergeCells").unwrap();
+        assert!(af < mc, "autoFilter (slot 11) must precede mergeCells (slot 15)");
     }
 
     #[test]
