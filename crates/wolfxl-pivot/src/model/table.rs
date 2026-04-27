@@ -298,6 +298,12 @@ pub struct PivotTable {
     pub created_version: u8,
     pub updated_version: u8,
     pub min_refreshable_version: u8,
+    /// RFC-061 §2.3 — calculated items (table-scoped).
+    pub calculated_items: Vec<CalculatedItem>,
+    /// RFC-061 §2.5 — pivot-area Format directives.
+    pub formats: Vec<Format>,
+    /// RFC-061 §2.5 — pivot-scoped CF.
+    pub conditional_formats: Vec<PivotConditionalFormat>,
 }
 
 impl PivotTable {
@@ -335,6 +341,51 @@ impl PivotTable {
         }
         Ok(())
     }
+}
+
+/// RFC-061 §10.4 — calculated item (table-scoped).
+///
+/// Lives inside the pivot table XML, NOT cache XML. Excel evaluates
+/// the formula on open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalculatedItem {
+    pub field_name: String,
+    pub item_name: String,
+    pub formula: String,
+}
+
+/// RFC-061 §10.6 — pivot-area selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PivotArea {
+    pub field: Option<u32>,
+    pub area_type: String,
+    pub data_only: bool,
+    pub label_only: bool,
+    pub grand_row: bool,
+    pub grand_col: bool,
+    pub cache_index: Option<u32>,
+    pub axis: Option<String>,
+    pub field_position: Option<u32>,
+}
+
+/// RFC-061 §10.7 — pivot Format directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Format {
+    pub action: String, // "formatting" | "blank"
+    pub dxf_id: i32,
+    pub pivot_area: PivotArea,
+}
+
+/// RFC-061 §2.5 — pivot-scoped CF rule wrapper.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PivotConditionalFormat {
+    pub priority: i32,
+    pub scope: String, // "selection" | "data" | "field"
+    pub cf_type: String, // "all" | "row" | "column" | "none"
+    pub pivot_areas: Vec<PivotArea>,
+    /// Reference to a workbook-scoped dxf entry id (-1 = unallocated).
+    /// The patcher's RFC-026 dxf allocator stamps this at flush time.
+    pub dxf_id: i32,
 }
 
 /// `<c:pivotSource>` block on a chart. RFC-049 §10.1. Lives here
@@ -398,6 +449,9 @@ mod tests {
             created_version: 6,
             updated_version: 6,
             min_refreshable_version: 3,
+            calculated_items: vec![],
+            formats: vec![],
+            conditional_formats: vec![],
         }
     }
 

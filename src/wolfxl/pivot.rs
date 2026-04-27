@@ -51,8 +51,8 @@ use wolfxl_pivot::model::records::{CacheRecord, RecordCell};
 use wolfxl_pivot::model::slicer::Slicer;
 use wolfxl_pivot::model::slicer_cache::{SlicerCache, SlicerItem, SlicerSortOrder};
 use wolfxl_pivot::model::table::{
-    AxisItem, AxisType, DataField, Location, PageField, PivotField, PivotItem, PivotTable,
-    PivotTableStyleInfo,
+    AxisItem, AxisType, CalculatedItem, DataField, Format, Location, PageField, PivotArea,
+    PivotConditionalFormat, PivotField, PivotItem, PivotTable, PivotTableStyleInfo,
 };
 use wolfxl_pivot::parse as pp;
 
@@ -343,6 +343,12 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
         _ => None,
     };
 
+    // RFC-061 Sub-feature 3.3 — calculated items.
+    let calculated_items = parse_calculated_items_list(d, "calculated_items")?;
+    // RFC-061 Sub-feature 3.5 — formats + conditional formats.
+    let formats = parse_formats_list(d, "formats")?;
+    let conditional_formats = parse_pivot_cfs_list(d, "conditional_formats")?;
+
     let pt = PivotTable {
         name,
         cache_id,
@@ -373,9 +379,129 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
         created_version: extract_u32(d, "created_version", 6)? as u8,
         updated_version: extract_u32(d, "updated_version", 6)? as u8,
         min_refreshable_version: extract_u32(d, "min_refreshable_version", 3)? as u8,
+        calculated_items,
+        formats,
+        conditional_formats,
     };
     pt.validate().map_err(PyValueError::new_err)?;
     Ok(pt)
+}
+
+fn parse_calculated_items_list(
+    d: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Vec<CalculatedItem>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv.downcast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err(format!("{key}[*] must be dict"))
+                })?;
+                out.push(CalculatedItem {
+                    field_name: extract_str(pd, "field_name", "")?,
+                    item_name: extract_str(pd, "item_name", "")?,
+                    formula: extract_str(pd, "formula", "")?,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn parse_pivot_area(d: &Bound<'_, PyDict>) -> PyResult<PivotArea> {
+    Ok(PivotArea {
+        field: extract_opt_u32(d, "field")?,
+        area_type: extract_str(d, "type", "data")?,
+        data_only: extract_bool(d, "data_only", true)?,
+        label_only: extract_bool(d, "label_only", false)?,
+        grand_row: extract_bool(d, "grand_row", false)?,
+        grand_col: extract_bool(d, "grand_col", false)?,
+        cache_index: extract_opt_u32(d, "cache_index")?,
+        axis: extract_opt_str(d, "axis")?,
+        field_position: extract_opt_u32(d, "field_position")?,
+    })
+}
+
+fn parse_formats_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Format>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
+                let pa_d = pd
+                    .get_item("pivot_area")?
+                    .ok_or_else(|| PyValueError::new_err("format missing 'pivot_area'"))?;
+                let pa = parse_pivot_area(
+                    pa_d.downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("pivot_area must be dict"))?,
+                )?;
+                let dxf_id: i32 = match pd.get_item("dxf_id")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => -1,
+                };
+                out.push(Format {
+                    action: extract_str(pd, "action", "formatting")?,
+                    dxf_id,
+                    pivot_area: pa,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn parse_pivot_cfs_list(
+    d: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Vec<PivotConditionalFormat>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
+                let areas_d = pd
+                    .get_item("pivot_areas")?
+                    .ok_or_else(|| {
+                        PyValueError::new_err("conditional_format missing 'pivot_areas'")
+                    })?;
+                let areas_list: Vec<Bound<'_, PyAny>> = areas_d.extract()?;
+                let mut areas = Vec::with_capacity(areas_list.len());
+                for av in &areas_list {
+                    let ad = av
+                        .downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("pivot_areas[*] must be dict"))?;
+                    areas.push(parse_pivot_area(ad)?);
+                }
+                let priority: i32 = match pd.get_item("priority")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => 1,
+                };
+                let dxf_id: i32 = match pd.get_item("dxf_id")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => -1,
+                };
+                out.push(PivotConditionalFormat {
+                    priority,
+                    scope: extract_str(pd, "scope", "data")?,
+                    cf_type: extract_str(pd, "type", "all")?,
+                    pivot_areas: areas,
+                    dxf_id,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 // ---------------------------------------------------------------------------
