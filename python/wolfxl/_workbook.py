@@ -99,6 +99,9 @@ def _build_xlsb_xls_wb(
     wb._properties_dirty = False
     wb._defined_names_cache = None
     wb._pending_defined_names = {}
+    wb._security = None
+    wb._file_sharing = None
+    wb._pending_security_update = False
     wb._pending_axis_shifts = []
     wb._pending_range_moves = []
     wb._pending_sheet_copies = []
@@ -132,6 +135,15 @@ class Workbook:
         self._properties_dirty: bool = False
         self._defined_names_cache: Any | None = None
         self._pending_defined_names: dict[str, Any] = {}
+        # RFC-058 — workbook-level security (workbookProtection + fileSharing).
+        # ``_security`` and ``_file_sharing`` hold user-supplied
+        # WorkbookProtection / FileSharing instances. ``_pending_security_update``
+        # is a sentinel: True once a setter touched either slot, drained at
+        # save() time so the writer / patcher emit the corresponding XML
+        # blocks. None ⇒ no security configured (default).
+        self._security: Any | None = None
+        self._file_sharing: Any | None = None
+        self._pending_security_update: bool = False
         # RFC-030 / RFC-031 — append-order list of structural shift ops.
         # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
         self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
@@ -220,6 +232,9 @@ class Workbook:
         wb._properties_dirty = False
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
+        wb._security = None
+        wb._file_sharing = None
+        wb._pending_security_update = False
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
@@ -427,6 +442,9 @@ class Workbook:
         wb._properties_dirty = False
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
+        wb._security = None
+        wb._file_sharing = None
+        wb._pending_security_update = False
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
@@ -471,6 +489,9 @@ class Workbook:
         wb._properties_dirty = False
         wb._defined_names_cache = None
         wb._pending_defined_names = {}
+        wb._security = None
+        wb._file_sharing = None
+        wb._pending_security_update = False
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
@@ -808,6 +829,57 @@ class Workbook:
         return dnd
 
     # ------------------------------------------------------------------
+    # RFC-058 — workbook-level security
+    # ------------------------------------------------------------------
+
+    @property
+    def security(self) -> Any:
+        """Return the workbook's :class:`WorkbookProtection` block, if any.
+
+        ``None`` when no protection is configured (the default). Assign a
+        :class:`wolfxl.workbook.protection.WorkbookProtection` instance to
+        enable structure / window / revision locks. Mutating an already-
+        attached instance also queues the update — call
+        ``wb.security = wb.security`` after mutating to force the flush
+        if needed (the property write is what flips the dirty flag).
+        """
+        return self._security
+
+    @security.setter
+    def security(self, value: Any) -> None:
+        from wolfxl.workbook.protection import WorkbookProtection
+
+        if value is not None and not isinstance(value, WorkbookProtection):
+            raise TypeError(
+                "wb.security must be a WorkbookProtection or None, "
+                f"got {type(value).__name__}"
+            )
+        self._security = value
+        self._pending_security_update = True
+
+    @property
+    def fileSharing(self) -> Any:  # noqa: N802 — openpyxl-shape camelCase
+        """Return the workbook's :class:`FileSharing` block, if any.
+
+        ``None`` when no file-sharing block is configured (the default).
+        Attribute name matches openpyxl's ``wb.fileSharing`` exactly so
+        existing code continues to work.
+        """
+        return self._file_sharing
+
+    @fileSharing.setter
+    def fileSharing(self, value: Any) -> None:  # noqa: N802
+        from wolfxl.workbook.protection import FileSharing
+
+        if value is not None and not isinstance(value, FileSharing):
+            raise TypeError(
+                "wb.fileSharing must be a FileSharing or None, "
+                f"got {type(value).__name__}"
+            )
+        self._file_sharing = value
+        self._pending_security_update = True
+
+    # ------------------------------------------------------------------
     # Write-mode operations
     # ------------------------------------------------------------------
 
@@ -1090,6 +1162,11 @@ class Workbook:
                 self._flush_properties_to_patcher()
             if self._pending_defined_names:
                 self._flush_defined_names_to_patcher()
+            # RFC-058: workbook-level security (workbookProtection +
+            # fileSharing). Drained BEFORE sheet flushes so the patcher's
+            # Phase 2.5q composes against the source workbook.xml.
+            if self._pending_security_update:
+                self._flush_security_to_patcher()
             for ws in self._sheets.values():
                 ws._flush()  # noqa: SLF001
             # RFC-035: sheet copies must flush BEFORE every per-sheet
@@ -1817,6 +1894,41 @@ class Workbook:
             patcher.queue_defined_name(payload)
         self._pending_defined_names.clear()
 
+    def _flush_security_to_patcher(self) -> None:
+        """Drain ``_security`` / ``_file_sharing`` into the patcher (RFC-058).
+
+        Builds the §10 flat dict and forwards it to
+        ``_rust_patcher.queue_workbook_security``. The Rust side merges
+        the payload into ``xl/workbook.xml`` during Phase 2.5q.
+
+        Empty (no setter ever ran) ⇒ no-op; the patcher leaves
+        workbook.xml byte-identical with the source.
+        """
+        patcher = self._rust_patcher
+        if patcher is None or not self._pending_security_update:
+            return
+        payload = self._build_security_dict()
+        patcher.queue_workbook_security(payload)
+        self._pending_security_update = False
+
+    def _build_security_dict(self) -> dict[str, Any]:
+        """Return the RFC-058 §10 flat dict for the workbook's security blocks.
+
+        Either branch may be ``None`` (the user only set one of the two
+        slots). Always returns a dict — never ``None`` — so callers can
+        unconditionally forward to the Rust side.
+        """
+        return {
+            "workbook_protection": (
+                self._security.to_dict() if self._security is not None else None
+            ),
+            "file_sharing": (
+                self._file_sharing.to_dict()
+                if self._file_sharing is not None
+                else None
+            ),
+        }
+
     def _flush_pending_sheet_moves_to_patcher(self, name: str, offset: int) -> None:
         """Queue a single sheet-reorder on the patcher (RFC-036).
 
@@ -1942,6 +2054,16 @@ class Workbook:
                     "hidden": dn.hidden,
                 })
             self._pending_defined_names.clear()
+
+        # RFC-058 — workbook-level security. The native writer accepts
+        # the §10 dict via ``set_workbook_security`` (PyO3 binding).
+        # Either branch may be ``None``; the writer side handles
+        # absence gracefully (no XML emitted for that block).
+        if self._pending_security_update:
+            payload = self._build_security_dict()
+            if hasattr(writer, "set_workbook_security"):
+                writer.set_workbook_security(payload)
+            self._pending_security_update = False
 
     # ------------------------------------------------------------------
     # Formula evaluation (requires wolfxl.calc)

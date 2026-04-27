@@ -1528,6 +1528,20 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    /// Sprint Ο Pod 1D (RFC-058) — set workbook-level security.
+    ///
+    /// Accepts the §10 flat dict shape (`workbook_protection` and
+    /// `file_sharing` top-level keys, either of which may be `None`).
+    /// Replaces any previously-set security (last writer wins).
+    pub fn set_workbook_security(&mut self, payload: &Bound<'_, PyAny>) -> PyResult<()> {
+        let dict = payload
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("workbook security payload must be a dict"))?;
+        let security = dict_to_workbook_security(dict)?;
+        self.inner.security = security;
+        Ok(())
+    }
+
     /// Sprint Λ Pod-β (RFC-045) — queue an image onto a sheet.
     ///
     /// `image_dict` shape (built by Python's
@@ -1714,6 +1728,103 @@ pub fn serialize_chart_dict(
 ) -> PyResult<Vec<u8>> {
     let chart = parse_chart_dict(chart_dict, anchor_a1)?;
     Ok(wolfxl_writer::emit::charts::emit_chart_xml(&chart))
+}
+
+/// Sprint Ο Pod 1D (RFC-058 §10) — render the workbook security dict to
+/// the two XML fragments (`workbookProtection`, `fileSharing`).
+///
+/// Returns `(workbook_protection_bytes, file_sharing_bytes)`. Either
+/// element may be empty bytes when the corresponding source dict is
+/// `None` or all-default. Callers splice each fragment at the matching
+/// canonical position in `xl/workbook.xml`.
+#[pyfunction]
+pub fn serialize_workbook_security_dict(
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<(Vec<u8>, Vec<u8>)> {
+    use wolfxl_writer::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
+    let security = dict_to_workbook_security(payload)?;
+    let prot_bytes = security
+        .workbook_protection
+        .as_ref()
+        .map(emit_workbook_protection)
+        .unwrap_or_default();
+    let share_bytes = security
+        .file_sharing
+        .as_ref()
+        .map(emit_file_sharing)
+        .unwrap_or_default();
+    Ok((prot_bytes, share_bytes))
+}
+
+fn dict_to_workbook_security(
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<wolfxl_writer::parse::workbook_security::WorkbookSecurity> {
+    use wolfxl_writer::parse::workbook_security::{
+        FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
+    };
+
+    fn extract_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+        match d.get_item(key)? {
+            Some(v) if !v.is_none() => v.extract::<String>().map(Some),
+            _ => Ok(None),
+        }
+    }
+    fn extract_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+        match d.get_item(key)? {
+            Some(v) if !v.is_none() => v.extract::<bool>().map(Some),
+            _ => Ok(None),
+        }
+    }
+    fn extract_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
+        match d.get_item(key)? {
+            Some(v) if !v.is_none() => v.extract::<u32>().map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    let workbook_protection = match payload.get_item("workbook_protection")? {
+        Some(v) if !v.is_none() => {
+            let d = v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err("workbook_protection must be a dict or None")
+            })?;
+            Some(WorkbookProtectionSpec {
+                lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
+                lock_windows: extract_bool(d, "lock_windows")?.unwrap_or(false),
+                lock_revision: extract_bool(d, "lock_revision")?.unwrap_or(false),
+                workbook_algorithm_name: extract_str(d, "workbook_algorithm_name")?,
+                workbook_hash_value: extract_str(d, "workbook_hash_value")?,
+                workbook_salt_value: extract_str(d, "workbook_salt_value")?,
+                workbook_spin_count: extract_u32(d, "workbook_spin_count")?,
+                revisions_algorithm_name: extract_str(d, "revisions_algorithm_name")?,
+                revisions_hash_value: extract_str(d, "revisions_hash_value")?,
+                revisions_salt_value: extract_str(d, "revisions_salt_value")?,
+                revisions_spin_count: extract_u32(d, "revisions_spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    let file_sharing = match payload.get_item("file_sharing")? {
+        Some(v) if !v.is_none() => {
+            let d = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("file_sharing must be a dict or None"))?;
+            Some(FileSharingSpec {
+                read_only_recommended: extract_bool(d, "read_only_recommended")?.unwrap_or(false),
+                user_name: extract_str(d, "user_name")?,
+                algorithm_name: extract_str(d, "algorithm_name")?,
+                hash_value: extract_str(d, "hash_value")?,
+                salt_value: extract_str(d, "salt_value")?,
+                spin_count: extract_u32(d, "spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    Ok(WorkbookSecurity {
+        workbook_protection,
+        file_sharing,
+    })
 }
 
 fn parse_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<ImageAnchor> {

@@ -31,6 +31,9 @@ pub mod sheet_copy;
 pub mod calcchain;
 // Sprint Ν Pod-γ (RFC-047 / RFC-048): Phase 2.5m drains pivot adds.
 pub mod pivot;
+// Sprint Ο Pod 1D (RFC-058): Phase 2.5q splices workbookProtection +
+// fileSharing into xl/workbook.xml.
+pub mod security;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -251,6 +254,13 @@ pub struct XlsxPatcher {
     /// ECMA-376 0-based). Initialised by `XlsxPatcher::open` if
     /// the source already has pivot caches.
     next_pivot_cache_id: u32,
+
+    /// Sprint Ο Pod 1D (RFC-058) — pending workbook-level security
+    /// blocks (workbookProtection + fileSharing). `None` = user
+    /// never set wb.security or wb.fileSharing in this session;
+    /// `Some(_)` = the queue was populated and Phase 2.5q must
+    /// splice into `xl/workbook.xml`.
+    queued_workbook_security: Option<wolfxl_writer::parse::workbook_security::WorkbookSecurity>,
 }
 
 /// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
@@ -520,6 +530,7 @@ impl XlsxPatcher {
             queued_pivot_caches: Vec::new(),
             queued_pivot_tables: HashMap::new(),
             next_pivot_cache_id: 0,
+            queued_workbook_security: None,
         })
     }
 
@@ -837,6 +848,46 @@ impl XlsxPatcher {
             hidden,
             comment,
         });
+        Ok(())
+    }
+
+    /// Queue workbook-level security (RFC-058 Phase 2.5q).
+    ///
+    /// `payload` shape (RFC-058 §10):
+    ///
+    /// ```python
+    /// {
+    ///     "workbook_protection": {
+    ///         "lock_structure": bool,
+    ///         "lock_windows": bool,
+    ///         "lock_revision": bool,
+    ///         "workbook_algorithm_name": str | None,
+    ///         "workbook_hash_value": str | None,
+    ///         "workbook_salt_value": str | None,
+    ///         "workbook_spin_count": int | None,
+    ///         "revisions_algorithm_name": str | None,
+    ///         "revisions_hash_value": str | None,
+    ///         "revisions_salt_value": str | None,
+    ///         "revisions_spin_count": int | None,
+    ///     } | None,
+    ///     "file_sharing": {
+    ///         "read_only_recommended": bool,
+    ///         "user_name": str | None,
+    ///         "algorithm_name": str | None,
+    ///         "hash_value": str | None,
+    ///         "salt_value": str | None,
+    ///         "spin_count": int | None,
+    ///     } | None,
+    /// }
+    /// ```
+    ///
+    /// Either branch may be `None`. Drained by Phase 2.5q during
+    /// `do_save`; the queue is single-slot — calling this again
+    /// REPLACES the previous payload (matches the Python-side
+    /// `wb.security = ...` semantics).
+    fn queue_workbook_security(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let security = parse_workbook_security_payload(payload)?;
+        self.queued_workbook_security = Some(security);
         Ok(())
     }
 
@@ -2336,6 +2387,38 @@ impl XlsxPatcher {
             file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
         }
 
+        // --- Phase 2.5q: Workbook security (Sprint Ο Pod 1D / RFC-058) ---
+        //
+        // Splices `<workbookProtection>` and `<fileSharing>` into
+        // `xl/workbook.xml` at canonical CT_Workbook child positions:
+        //
+        //   fileVersion → fileSharing → workbookPr → workbookProtection
+        //   → bookViews → sheets → ...
+        //
+        // Sequenced AFTER Phase 2.5m (pivots) and BEFORE Phase 2.5h
+        // (sheet reorder) so the reorder phase sees the updated
+        // workbook.xml (the splice + reorder commute, but composing
+        // them through `workbook_xml_in_progress` matches the
+        // RFC-035 / RFC-036 hand-off pattern exactly).
+        //
+        // Empty queue ⇒ identity: workbook.xml flows through
+        // unchanged (no extra parse, no extra serialize).
+        let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
+        if let Some(ref sec) = self.queued_workbook_security {
+            if !sec.is_empty() {
+                let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
+                    Some(b) => b.clone(),
+                    None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
+                        .into_bytes(),
+                };
+                let updated = security::merge_workbook_security(&wb_bytes, sec)
+                    .map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("workbook-security merge: {e}"))
+                    })?;
+                workbook_xml_in_progress = Some(updated);
+            }
+        }
+
         // --- Phase 2.5h: Sheet reorder (RFC-036) ---
         //
         // Sequenced BEFORE Phase 2.5f because both phases mutate
@@ -2347,7 +2430,11 @@ impl XlsxPatcher {
         // update `self.sheet_order` so downstream phases (RFC-020
         // `app.xml` regen, RFC-026 CF aggregation) iterate the
         // post-move tab list.
-        let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
+        //
+        // RFC-058 composition: `workbook_xml_in_progress` may already
+        // hold the post-Phase-2.5q (security splice) bytes; the read
+        // below honours that handoff before falling back to the
+        // file_patches / source-ZIP layers.
         if !self.queued_sheet_moves.is_empty() {
             // RFC-035 + RFC-036 composition (Pod-δ fix for KNOWN_GAPS
             // bug #2): Phase 2.7 writes the cloned <sheet> entry into
@@ -2357,10 +2444,13 @@ impl XlsxPatcher {
             // dropped from the saved workbook.xml. Prefer file_patches
             // so 2.7 → 2.5h compose via the file_patches handoff that
             // RFC-035 §5.4 specifies.
-            let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
-                Some(b) => b.clone(),
-                None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
-                    .into_bytes(),
+            let wb_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+                Some(b) => b,
+                None => match file_patches.get("xl/workbook.xml") {
+                    Some(b) => b.clone(),
+                    None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
+                        .into_bytes(),
+                },
             };
             let result = sheet_order::merge_sheet_moves(
                 &wb_bytes,
@@ -4795,6 +4885,72 @@ fn extract_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
 
 fn extract_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
     d.get_item(key)?.map(|v| v.extract::<f64>()).transpose()
+}
+
+// ---------------------------------------------------------------------------
+// RFC-058: workbook security payload parsing
+// ---------------------------------------------------------------------------
+
+/// Convert a Python dict matching RFC-058 §10 into a
+/// [`wolfxl_writer::parse::workbook_security::WorkbookSecurity`].
+///
+/// Either or both top-level keys (`workbook_protection`,
+/// `file_sharing`) may be `None`; the resulting struct mirrors that
+/// optionality.
+fn parse_workbook_security_payload(
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<wolfxl_writer::parse::workbook_security::WorkbookSecurity> {
+    use wolfxl_writer::parse::workbook_security::{
+        FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
+    };
+
+    let workbook_protection = match payload.get_item("workbook_protection")? {
+        Some(v) if !v.is_none() => {
+            let d = v.downcast::<PyDict>().map_err(|_| {
+                PyErr::new::<PyValueError, _>(
+                    "queue_workbook_security: 'workbook_protection' must be a dict or None",
+                )
+            })?;
+            Some(WorkbookProtectionSpec {
+                lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
+                lock_windows: extract_bool(d, "lock_windows")?.unwrap_or(false),
+                lock_revision: extract_bool(d, "lock_revision")?.unwrap_or(false),
+                workbook_algorithm_name: extract_str(d, "workbook_algorithm_name")?,
+                workbook_hash_value: extract_str(d, "workbook_hash_value")?,
+                workbook_salt_value: extract_str(d, "workbook_salt_value")?,
+                workbook_spin_count: extract_u32(d, "workbook_spin_count")?,
+                revisions_algorithm_name: extract_str(d, "revisions_algorithm_name")?,
+                revisions_hash_value: extract_str(d, "revisions_hash_value")?,
+                revisions_salt_value: extract_str(d, "revisions_salt_value")?,
+                revisions_spin_count: extract_u32(d, "revisions_spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    let file_sharing = match payload.get_item("file_sharing")? {
+        Some(v) if !v.is_none() => {
+            let d = v.downcast::<PyDict>().map_err(|_| {
+                PyErr::new::<PyValueError, _>(
+                    "queue_workbook_security: 'file_sharing' must be a dict or None",
+                )
+            })?;
+            Some(FileSharingSpec {
+                read_only_recommended: extract_bool(d, "read_only_recommended")?.unwrap_or(false),
+                user_name: extract_str(d, "user_name")?,
+                algorithm_name: extract_str(d, "algorithm_name")?,
+                hash_value: extract_str(d, "hash_value")?,
+                salt_value: extract_str(d, "salt_value")?,
+                spin_count: extract_u32(d, "spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    Ok(WorkbookSecurity {
+        workbook_protection,
+        file_sharing,
+    })
 }
 
 /// Normalize "#RRGGBB" or "RRGGBB" to "FFRRGGBB" (OOXML ARGB format).
