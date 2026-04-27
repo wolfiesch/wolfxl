@@ -33,6 +33,8 @@ const CT_COMMENTS: &str =
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const CT_CHART: &str =
+    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_CORE_PROPS: &str = "application/vnd.openxmlformats-package.core-properties+xml";
 const CT_APP_PROPS: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
 const CT_RELATIONSHIPS: &str = "application/vnd.openxmlformats-package.relationships+xml";
@@ -123,16 +125,30 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Λ Pod-β — per-drawing overrides. Drawings are numbered
-    // globally (1..N) across all sheets, one drawing per sheet that
-    // has at least one image.
+    // Sprint Λ Pod-β + Sprint Μ Pod-α — per-drawing overrides.
+    // Drawings are numbered globally (1..N) across all sheets, one
+    // drawing per sheet that has at least one image OR chart.
     let mut drawing_counter: usize = 0;
     for sheet in &wb.sheets {
-        if !sheet.images.is_empty() {
+        if !sheet.images.is_empty() || !sheet.charts.is_empty() {
             drawing_counter += 1;
             out.push_str(&format!(
                 "<Override PartName=\"/xl/drawings/drawing{drawing_counter}.xml\" \
                  ContentType=\"{CT_DRAWING}\"/>"
+            ));
+        }
+    }
+
+    // Sprint Μ Pod-α (RFC-046) — per-chart overrides. Charts are
+    // numbered globally (1..N) across all sheets in sheet+intra-sheet
+    // order. Each chart becomes one xl/charts/chartN.xml part.
+    let mut chart_counter: usize = 0;
+    for sheet in &wb.sheets {
+        for _chart in &sheet.charts {
+            chart_counter += 1;
+            out.push_str(&format!(
+                "<Override PartName=\"/xl/charts/chart{chart_counter}.xml\" \
+                 ContentType=\"{CT_CHART}\"/>"
             ));
         }
     }

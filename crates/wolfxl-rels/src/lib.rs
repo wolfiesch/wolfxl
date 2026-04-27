@@ -82,6 +82,8 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
     pub const IMAGE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+    pub const CHART: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
     pub const TABLE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
     pub const PIVOT_TABLE: &str =

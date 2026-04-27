@@ -891,13 +891,14 @@ fn emit_legacy_drawing(out: &mut String, sheet: &Worksheet) {
     }
 }
 
-/// Sprint Λ Pod-β — emit `<drawing r:id="rIdN"/>` when the sheet has
-/// at least one image. The rId is allocated at the END of the sheet's
-/// rels graph: comments offset (2 if any comments) + table count +
-/// external-hyperlink count + 1. This mirrors the allocation in
-/// `rels::emit_sheet` so the rId numbering stays in lock-step.
+/// Sprint Λ Pod-β + Sprint Μ Pod-α — emit `<drawing r:id="rIdN"/>`
+/// when the sheet has at least one image or chart. The rId is
+/// allocated at the END of the sheet's rels graph: comments offset (2
+/// if any comments) + table count + external-hyperlink count + 1.
+/// This mirrors the allocation in `rels::emit_sheet` so the rId
+/// numbering stays in lock-step.
 fn emit_drawing_ref(out: &mut String, sheet: &Worksheet) {
-    if sheet.images.is_empty() {
+    if sheet.images.is_empty() && sheet.charts.is_empty() {
         return;
     }
     let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };

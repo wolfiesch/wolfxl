@@ -118,8 +118,11 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         .collect();
     let has_tables = !sheet.tables.is_empty();
     let has_images = !sheet.images.is_empty();
+    let has_charts = !sheet.charts.is_empty();
+    // A sheet needs a drawing part if it has at least one image OR chart.
+    let has_drawing = has_images || has_charts;
 
-    if !has_comments && external_hyperlinks.is_empty() && !has_tables && !has_images {
+    if !has_comments && external_hyperlinks.is_empty() && !has_tables && !has_drawing {
         return Vec::new();
     }
 
@@ -172,16 +175,18 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         );
     }
 
-    // Sprint Λ Pod-β (RFC-045) — drawing rel for images. The drawing
-    // part is allocated globally per sheet (one drawing per sheet that
-    // has at least one image). The rId is allocated last so existing
-    // numbering for comments/tables/hyperlinks is preserved.
-    if has_images {
+    // Sprint Λ Pod-β + Sprint Μ Pod-α — drawing rel for images and/or
+    // charts. The drawing part is allocated globally per sheet (one
+    // drawing per sheet that has at least one image or chart). The
+    // rId is allocated last so existing numbering for
+    // comments/tables/hyperlinks is preserved.
+    if has_drawing {
         // drawingN.xml is numbered globally — count how many earlier
-        // sheets had images to compute this sheet's drawing N.
+        // sheets had a drawing (image or chart) to compute this
+        // sheet's drawing N.
         let drawings_before: usize = wb.sheets[..sheet_idx]
             .iter()
-            .filter(|s| !s.images.is_empty())
+            .filter(|s| !s.images.is_empty() || !s.charts.is_empty())
             .count();
         let drawing_n = drawings_before + 1;
         g.add_with_id(
@@ -217,6 +222,43 @@ pub fn emit_drawing_rels(
         rids.push(rid.0);
     }
     (g.serialize(), rids)
+}
+
+/// Sprint Μ Pod-α (RFC-046) — emit `xl/drawings/_rels/drawingN.xml.rels`
+/// for a drawing that may contain both images and charts. Returns the
+/// rels bytes plus two parallel `Vec<String>` of rIds — one for images
+/// (in `sheet.images` order) and one for charts (in `sheet.charts`
+/// order). Image rels come first so existing image-only sheets keep
+/// their rId allocation stable.
+pub fn emit_drawing_rels_with_charts(
+    sheet: &crate::model::worksheet::Worksheet,
+    image_indices: &[u32],
+    chart_indices: &[u32],
+) -> (Vec<u8>, Vec<String>, Vec<String>) {
+    debug_assert_eq!(sheet.images.len(), image_indices.len());
+    debug_assert_eq!(sheet.charts.len(), chart_indices.len());
+
+    let mut g = RelsGraph::new();
+    let mut image_rids: Vec<String> = Vec::with_capacity(sheet.images.len());
+    let mut chart_rids: Vec<String> = Vec::with_capacity(sheet.charts.len());
+
+    for (img, &n) in sheet.images.iter().zip(image_indices.iter()) {
+        let rid = g.add(
+            rt::IMAGE,
+            &format!("../media/image{n}.{}", img.ext),
+            TargetMode::Internal,
+        );
+        image_rids.push(rid.0);
+    }
+    for &n in chart_indices.iter() {
+        let rid = g.add(
+            rt::CHART,
+            &format!("../charts/chart{n}.xml"),
+            TargetMode::Internal,
+        );
+        chart_rids.push(rid.0);
+    }
+    (g.serialize(), image_rids, chart_rids)
 }
 
 #[cfg(test)]

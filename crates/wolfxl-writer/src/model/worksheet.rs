@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use super::cell::{WriteCell, WriteCellValue};
+use super::chart::Chart;
 use super::comment::Comment;
 use super::conditional::ConditionalFormat;
 use super::image::SheetImage;
@@ -66,6 +67,12 @@ pub struct Worksheet {
     /// `ws.add_image(img, anchor)`. Drained at emit time into
     /// `xl/drawings/drawingN.xml` + `xl/media/imageN.<ext>`.
     pub images: Vec<SheetImage>,
+
+    /// Sprint Μ Pod-α (RFC-046) — charts attached to this sheet. Each
+    /// chart becomes one `xl/charts/chartN.xml` part referenced from
+    /// the sheet's drawing via `<xdr:graphicFrame>`. A sheet can mix
+    /// images and charts in a single drawing.
+    pub charts: Vec<Chart>,
 }
 
 impl Worksheet {
@@ -85,6 +92,7 @@ impl Worksheet {
             print_area: None,
             visibility: SheetVisibility::Visible,
             images: Vec::new(),
+            charts: Vec::new(),
         }
     }
 

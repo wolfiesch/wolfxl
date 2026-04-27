@@ -1,9 +1,12 @@
-//! `xl/drawings/drawingN.xml` emitter — Sprint Λ Pod-β (RFC-045).
+//! `xl/drawings/drawingN.xml` emitter — Sprint Λ Pod-β (RFC-045) +
+//! Sprint Μ Pod-α (RFC-046).
 //!
-//! One drawing part per sheet that has at least one image. The part is
-//! a `<xdr:wsDr>` element containing one `<xdr:oneCellAnchor>` /
-//! `<xdr:twoCellAnchor>` / `<xdr:absoluteAnchor>` per image, each
-//! wrapping a `<xdr:pic>` that references its image rel by `r:embed`.
+//! One drawing part per sheet that has at least one image or chart.
+//! The part is a `<xdr:wsDr>` element containing one
+//! `<xdr:oneCellAnchor>` / `<xdr:twoCellAnchor>` / `<xdr:absoluteAnchor>`
+//! per visual, each wrapping a `<xdr:pic>` (for images, referencing the
+//! image rel by `r:embed`) or a `<xdr:graphicFrame>` (for charts,
+//! referencing the chart rel by `r:id`).
 //!
 //! # Coordinate units
 //!
@@ -22,6 +25,29 @@
 use crate::model::image::{ImageAnchor, SheetImage};
 
 const EMU_PER_PIXEL: i64 = 9525;
+
+/// One visual on a sheet's drawing part. Sprint Μ Pod-α adds the
+/// `Chart` variant alongside the existing image-anchor flow so a sheet
+/// can mix images and charts in a single drawing.
+#[derive(Debug, Clone)]
+pub enum DrawingItem {
+    /// Image — emitted as `<xdr:pic>` inside the anchor.
+    Image {
+        image: SheetImage,
+        /// Pre-allocated rId in the drawing's _rels (e.g. `"rId1"`).
+        rid: String,
+    },
+    /// Chart — emitted as `<xdr:graphicFrame>` inside the anchor. The
+    /// `chart_id` is the per-drawing graphicFrame id (1-based, unique
+    /// within this part). The `rid` points at the chart rel in
+    /// `xl/drawings/_rels/drawingN.xml.rels`.
+    Chart {
+        anchor: ImageAnchor,
+        rid: String,
+        chart_id: u32,
+        name: String,
+    },
+}
 
 /// XML namespaces used by `xdr:wsDr`. Excel emits these in this exact
 /// order; openpyxl ignores order on read but downstream byte-equality
@@ -52,6 +78,43 @@ pub fn emit(images: &[SheetImage], image_rel_ids: &[String]) -> Vec<u8> {
         emit_anchor_close(&mut out, &img.anchor);
     }
 
+    out.push_str("</xdr:wsDr>");
+    out.into_bytes()
+}
+
+/// Sprint Μ Pod-α (RFC-046) — emit `xl/drawings/drawingN.xml` for a
+/// mixed list of [`DrawingItem`]s (images + charts). Used by the
+/// writer driver when at least one chart is anchored on the sheet.
+///
+/// The cNvPr `id` is unique within the part; we assign it as 1+index
+/// in the items list so a chart that appears third on a sheet with
+/// two prior images has cNvPr id="3".
+pub fn emit_drawing_xml(items: &[DrawingItem]) -> Vec<u8> {
+    let mut out = String::with_capacity(512 + items.len() * 600);
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+    out.push_str(&format!(
+        "<xdr:wsDr xmlns:xdr=\"{XDR_NS}\" xmlns:a=\"{A_NS}\" xmlns:r=\"{R_NS}\">"
+    ));
+    for (i, item) in items.iter().enumerate() {
+        let cnv_id = (i + 1) as u32;
+        match item {
+            DrawingItem::Image { image, rid } => {
+                emit_anchor_open(&mut out, image);
+                emit_pic(&mut out, cnv_id, rid, image);
+                emit_anchor_close(&mut out, &image.anchor);
+            }
+            DrawingItem::Chart {
+                anchor,
+                rid,
+                chart_id: _,
+                name,
+            } => {
+                emit_chart_anchor_open(&mut out, anchor);
+                emit_graphic_frame(&mut out, cnv_id, rid, name);
+                emit_anchor_close(&mut out, anchor);
+            }
+        }
+    }
     out.push_str("</xdr:wsDr>");
     out.into_bytes()
 }
@@ -122,6 +185,108 @@ fn emit_anchor_close(out: &mut String, anchor: &ImageAnchor) {
         ImageAnchor::TwoCell { .. } => out.push_str("</xdr:twoCellAnchor>"),
         ImageAnchor::Absolute { .. } => out.push_str("</xdr:absoluteAnchor>"),
     }
+}
+
+/// Open an anchor element for a chart. Charts don't carry pixel
+/// dimensions, so a `OneCell` anchor uses a default ext (one cell wide
+/// × ten rows tall ≈ openpyxl's `default_size`). Two-cell anchors use
+/// the explicit `to_*` cells; absolute anchors use the explicit EMU.
+fn emit_chart_anchor_open(out: &mut String, anchor: &ImageAnchor) {
+    match anchor {
+        ImageAnchor::OneCell {
+            from_col,
+            from_row,
+            from_col_off,
+            from_row_off,
+        } => {
+            out.push_str("<xdr:oneCellAnchor>");
+            out.push_str(&format!(
+                "<xdr:from><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff>\
+                 <xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:from>",
+                from_col, from_col_off, from_row, from_row_off
+            ));
+            // Default chart ext: 15 cols × 10 rows ≈ openpyxl default. We
+            // pick 5_400_000 × 3_000_000 EMU which renders close to that.
+            out.push_str("<xdr:ext cx=\"5400000\" cy=\"3000000\"/>");
+        }
+        ImageAnchor::TwoCell {
+            from_col,
+            from_row,
+            from_col_off,
+            from_row_off,
+            to_col,
+            to_row,
+            to_col_off,
+            to_row_off,
+            edit_as,
+        } => {
+            out.push_str(&format!("<xdr:twoCellAnchor editAs=\"{edit_as}\">"));
+            out.push_str(&format!(
+                "<xdr:from><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff>\
+                 <xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:from>",
+                from_col, from_col_off, from_row, from_row_off
+            ));
+            out.push_str(&format!(
+                "<xdr:to><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff>\
+                 <xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:to>",
+                to_col, to_col_off, to_row, to_row_off
+            ));
+        }
+        ImageAnchor::Absolute {
+            x_emu,
+            y_emu,
+            cx_emu,
+            cy_emu,
+        } => {
+            out.push_str("<xdr:absoluteAnchor>");
+            out.push_str(&format!("<xdr:pos x=\"{x_emu}\" y=\"{y_emu}\"/>"));
+            out.push_str(&format!("<xdr:ext cx=\"{cx_emu}\" cy=\"{cy_emu}\"/>"));
+        }
+    }
+}
+
+/// Emit a `<xdr:graphicFrame>` referencing a chart part. The element
+/// shape matches openpyxl's GraphicFrame emit:
+///
+/// ```xml
+/// <xdr:graphicFrame macro="">
+///   <xdr:nvGraphicFramePr>
+///     <xdr:cNvPr id="3" name="Chart 1"/>
+///     <xdr:cNvGraphicFramePr/>
+///   </xdr:nvGraphicFramePr>
+///   <xdr:xfrm>
+///     <a:off x="0" y="0"/>
+///     <a:ext cx="0" cy="0"/>
+///   </xdr:xfrm>
+///   <a:graphic>
+///     <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+///       <c:chart xmlns:c="…/chart" xmlns:r="…/relationships" r:id="rId1"/>
+///     </a:graphicData>
+///   </a:graphic>
+/// </xdr:graphicFrame>
+/// ```
+fn emit_graphic_frame(out: &mut String, cnv_id: u32, rid: &str, name: &str) {
+    out.push_str("<xdr:graphicFrame macro=\"\">");
+    out.push_str("<xdr:nvGraphicFramePr>");
+    out.push_str(&format!(
+        "<xdr:cNvPr id=\"{cnv_id}\" name=\"{name}\"/>"
+    ));
+    out.push_str("<xdr:cNvGraphicFramePr/>");
+    out.push_str("</xdr:nvGraphicFramePr>");
+    out.push_str(
+        "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>",
+    );
+    out.push_str("<a:graphic>");
+    out.push_str(
+        "<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">",
+    );
+    out.push_str(&format!(
+        "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" \
+         xmlns:r=\"{R_NS}\" r:id=\"{rid}\"/>"
+    ));
+    out.push_str("</a:graphicData>");
+    out.push_str("</a:graphic>");
+    out.push_str("</xdr:graphicFrame>");
 }
 
 fn emit_pic(out: &mut String, pic_id: u32, rid: &str, img: &SheetImage) {
@@ -283,5 +448,85 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<xdr:wsDr"));
         assert!(text.contains("</xdr:wsDr>"));
+    }
+
+    // ----- Sprint Μ Pod-α (RFC-046) — chart anchors via graphicFrame --
+
+    #[test]
+    fn drawing_xml_with_chart_only_emits_graphic_frame() {
+        let items = vec![DrawingItem::Chart {
+            anchor: ImageAnchor::one_cell(2, 4),
+            rid: "rId1".to_string(),
+            chart_id: 1,
+            name: "Chart 1".to_string(),
+        }];
+        let bytes = emit_drawing_xml(&items);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("<xdr:graphicFrame macro=\"\">"));
+        assert!(text.contains("<xdr:cNvPr id=\"1\" name=\"Chart 1\"/>"));
+        assert!(text.contains("r:id=\"rId1\""));
+        assert!(text.contains("uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\""));
+        // OneCell anchor with default chart ext.
+        assert!(text.contains("<xdr:oneCellAnchor>"));
+        assert!(text.contains("<xdr:ext cx=\"5400000\" cy=\"3000000\"/>"));
+    }
+
+    #[test]
+    fn drawing_xml_mixes_image_then_chart() {
+        let items = vec![
+            DrawingItem::Image {
+                image: dummy_img(ImageAnchor::one_cell(0, 0)),
+                rid: "rId1".to_string(),
+            },
+            DrawingItem::Chart {
+                anchor: ImageAnchor::TwoCell {
+                    from_col: 1,
+                    from_row: 4,
+                    from_col_off: 0,
+                    from_row_off: 0,
+                    to_col: 5,
+                    to_row: 10,
+                    to_col_off: 0,
+                    to_row_off: 0,
+                    edit_as: "oneCell".into(),
+                },
+                rid: "rId2".to_string(),
+                chart_id: 1,
+                name: "Chart 1".to_string(),
+            },
+        ];
+        let bytes = emit_drawing_xml(&items);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("<xdr:pic>"));
+        assert!(text.contains("<xdr:graphicFrame"));
+        // First item gets cNvPr id=1, second gets id=2.
+        assert!(text.contains("<xdr:cNvPr id=\"2\" name=\"Chart 1\"/>"));
+        // Two-cell anchor for chart.
+        assert!(text.contains("<xdr:twoCellAnchor"));
+    }
+
+    #[test]
+    fn drawing_xml_chart_with_absolute_anchor() {
+        let items = vec![DrawingItem::Chart {
+            anchor: ImageAnchor::Absolute {
+                x_emu: 1_000_000,
+                y_emu: 2_000_000,
+                cx_emu: 5_000_000,
+                cy_emu: 3_000_000,
+            },
+            rid: "rId7".to_string(),
+            chart_id: 1,
+            name: "My Chart".to_string(),
+        }];
+        let bytes = emit_drawing_xml(&items);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("<xdr:absoluteAnchor>"));
+        assert!(text.contains("<xdr:pos x=\"1000000\" y=\"2000000\"/>"));
+        assert!(text.contains("<xdr:ext cx=\"5000000\" cy=\"3000000\"/>"));
+        assert!(text.contains("<xdr:cNvPr id=\"1\" name=\"My Chart\"/>"));
+        assert!(text.contains("r:id=\"rId7\""));
     }
 }

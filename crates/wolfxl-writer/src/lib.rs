@@ -59,9 +59,10 @@ pub use model::worksheet::Worksheet;
 /// the same archive both times.
 pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
     use crate::emit::{
-        calc_chain_xml, comments_xml, content_types, doc_props, drawings, drawings_vml, rels,
-        shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
+        calc_chain_xml, charts, comments_xml, content_types, doc_props, drawings, drawings_vml,
+        rels, shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
     };
+    use crate::emit::drawings::DrawingItem;
     use crate::zip::{package, ZipEntry};
 
     // Sheet emission mutates the SST — must run before the SST emitter.
@@ -134,18 +135,20 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Λ Pod-β (RFC-045) — drawings + media. Drawings are
-    // numbered globally per sheet that has images; media are numbered
-    // globally across all images. Both counters reset to 1 at the
-    // start of save (write mode is always a fresh workbook — no
-    // existing-on-disk allocations to seed around).
+    // Sprint Λ Pod-β + Sprint Μ Pod-α — drawings + media + charts.
+    // Drawings are numbered globally per sheet that has at least one
+    // image or chart; media + charts are numbered globally across all
+    // sheets. All counters reset to 1 at the start of save (write
+    // mode is always a fresh workbook — no existing-on-disk
+    // allocations to seed around).
     let mut global_drawing_idx: usize = 1;
     let mut global_image_idx: u32 = 1;
+    let mut global_chart_idx: u32 = 1;
     for (sheet_idx, sheet) in wb.sheets.iter().enumerate() {
-        if sheet.images.is_empty() {
+        if sheet.images.is_empty() && sheet.charts.is_empty() {
             continue;
         }
-        // Allocate one global image index per image on this sheet.
+        // Allocate global indices for images and charts on this sheet.
         let image_indices: Vec<u32> = sheet
             .images
             .iter()
@@ -155,8 +158,19 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
                 n
             })
             .collect();
-        // Emit the drawing rels (image rIds inside the drawing part).
-        let (drawing_rels_bytes, image_rids) = rels::emit_drawing_rels(sheet, &image_indices);
+        let chart_indices: Vec<u32> = sheet
+            .charts
+            .iter()
+            .map(|_| {
+                let n = global_chart_idx;
+                global_chart_idx += 1;
+                n
+            })
+            .collect();
+
+        // Emit the drawing rels (image + chart rIds inside the drawing part).
+        let (drawing_rels_bytes, image_rids, chart_rids) =
+            rels::emit_drawing_rels_with_charts(sheet, &image_indices, &chart_indices);
         entries.push(ZipEntry {
             path: format!(
                 "xl/drawings/_rels/drawing{}.xml.rels",
@@ -164,19 +178,50 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             ),
             bytes: drawing_rels_bytes,
         });
-        // Emit the drawing part itself.
-        let drawing_bytes = drawings::emit(&sheet.images, &image_rids);
+
+        // Build a unified DrawingItem list (images first, then charts —
+        // matches the drawing-rels rId order).
+        let mut items: Vec<DrawingItem> = Vec::with_capacity(
+            sheet.images.len() + sheet.charts.len(),
+        );
+        for (img, rid) in sheet.images.iter().zip(image_rids.iter()) {
+            items.push(DrawingItem::Image {
+                image: img.clone(),
+                rid: rid.clone(),
+            });
+        }
+        for ((idx, ch), rid) in sheet.charts.iter().enumerate().zip(chart_rids.iter()) {
+            items.push(DrawingItem::Chart {
+                anchor: ch.anchor.clone(),
+                rid: rid.clone(),
+                chart_id: (idx + 1) as u32,
+                name: format!("Chart {}", idx + 1),
+            });
+        }
+        // Emit the drawing part itself (graphicFrame for charts +
+        // pic for images).
+        let drawing_bytes = drawings::emit_drawing_xml(&items);
         entries.push(ZipEntry {
             path: format!("xl/drawings/drawing{}.xml", global_drawing_idx),
             bytes: drawing_bytes,
         });
-        // Emit the media bytes.
+
+        // Emit the media bytes for images.
         for (img, &n) in sheet.images.iter().zip(image_indices.iter()) {
             entries.push(ZipEntry {
                 path: format!("xl/media/image{}.{}", n, img.ext),
                 bytes: img.data.clone(),
             });
         }
+
+        // Emit chart parts (one xl/charts/chartN.xml per chart).
+        for (chart, &n) in sheet.charts.iter().zip(chart_indices.iter()) {
+            entries.push(ZipEntry {
+                path: format!("xl/charts/chart{}.xml", n),
+                bytes: charts::emit_chart_xml(chart),
+            });
+        }
+
         let _ = sheet_idx; // silence unused when not building debug
         global_drawing_idx += 1;
     }
