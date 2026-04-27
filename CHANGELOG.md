@@ -22,7 +22,7 @@ construction-side milestone is pivot tables + pivot charts (Sprint
 ### Added
 
 - **RFC-046 §11 — Chart 3D / Stock / Surface / ProjectedPie
-  families** (Sprint Μ-prime Pod-β′, <!-- TBD: SHA -->). The eight
+  families** (Sprint Μ-prime Pod-β′, `8612189`). The eight
   v1.6.0 stub classes ship as real classes:
   * `BarChart3D` (rot_x=15, rot_y=20, right_angle_axes=True,
     depth_percent=100; emits `<c:bar3DChart>`).
@@ -47,7 +47,7 @@ construction-side milestone is pivot tables + pivot charts (Sprint
     `of_pie_type`, `split_type`, `split_pos`, `second_pie_size`;
     emits `<c:ofPieChart>`).
 - **RFC-046 §10 — Chart-dict contract** (Sprint Μ-prime Pod-α′ +
-  Pod-β′, <!-- TBD: SHA -->). Pod-α's flat-key `parse_chart_dict`
+  Pod-β′, `6c5425c` + `8612189`). Pod-α's flat-key `parse_chart_dict`
   and Pod-β's per-class `to_rust_dict()` now emit/consume the
   canonical §10 shape verbatim. Top-level chart-dict keys are
   flat (`bar_dir`, `grouping`, `gap_width`, …) instead of nested
@@ -61,13 +61,13 @@ construction-side milestone is pivot tables + pivot charts (Sprint
   scatter style, manual layout, marker symbol, fill color, title
   runs, invalid-input rejection) flip from `xfail` → `pass`.
 - **`serialize_chart_dict` PyO3 helper** (Sprint Μ-prime Pod-α′,
-  <!-- TBD: SHA -->). Internal API exposed at
+  `ba16137`). Internal API exposed at
   `wolfxl._backend.serialize_chart_dict(chart_dict) -> bytes`.
   Materialises a §10 chart-dict into the chart XML bytes that
   the patcher's `queue_chart_add` expects. Not public surface;
   callers should keep using `Worksheet.add_chart`.
 - **Modify-mode high-level `Worksheet.add_chart()`** (Sprint
-  Μ-prime Pod-γ′, RFC-046 §10.12, <!-- TBD: SHA -->). The v1.6.0
+  Μ-prime Pod-γ′, RFC-046 §10.12, `ed08aff`). The v1.6.0
   warn-and-drop fallback in
   `Workbook._flush_pending_charts_to_patcher` is replaced with a
   real dict→bytes bridge:
@@ -86,7 +86,7 @@ construction-side milestone is pivot tables + pivot charts (Sprint
   `Workbook.add_chart_modify_mode(sheet_name, chart_xml_bytes,
   anchor)` continues to work unchanged.
 - **Construction-time validation per RFC-046 §10.11** (Sprint
-  Μ-prime Pod-β′, <!-- TBD: SHA -->). Empty `series`, bad anchor,
+  Μ-prime Pod-β′, `8612189`). Empty `series`, bad anchor,
   out-of-range `Reference` bounds, out-of-range `style` (1..48),
   `gap_width` (0..500), `overlap` (-100..100), `hole_size` (1..90),
   `bubble_scale` (0..300), poly trendline `order` (2..6), and
@@ -98,7 +98,7 @@ construction-side milestone is pivot tables + pivot charts (Sprint
 ### Changed
 
 - **`tests/test_charts_write.py` module-level `pytest.mark.xfail`
-  removed** (Sprint Μ-prime Pod-δ′, <!-- TBD: SHA -->). The xfail
+  removed** (Sprint Μ-prime Pod-δ′, `620d606`). The xfail
   was added in the v1.6.0 integrator finalize to mark the 37
   advanced sub-feature tests as known-failing. Pod-α′ + Pod-β′
   fix the underlying contract; the xfail mark is removed and the
@@ -106,7 +106,7 @@ construction-side milestone is pivot tables + pivot charts (Sprint
   `pytest.mark.skipif(not _CHART_API_AVAILABLE, …)` mark is
   retained.
 - **9 new entries in `tests/parity/openpyxl_surface.py`
-  `_GAP_ENTRIES`** (Sprint Μ-prime Pod-δ′, <!-- TBD: SHA -->):
+  `_GAP_ENTRIES`** (Sprint Μ-prime Pod-δ′, `620d606`):
   one per new chart class (`BarChart3D`, `LineChart3D`,
   `PieChart3D`, `Pie3D`, `AreaChart3D`, `SurfaceChart`,
   `SurfaceChart3D`, `StockChart`, `ProjectedPieChart`). All ship
@@ -164,10 +164,11 @@ construction-side milestone is pivot tables + pivot charts (Sprint
 
 | Pod | Branch | Commits | Merge |
 |---|---|---|---|
-| α′ | `feat/sprint-mu-prime-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| β′ | `feat/sprint-mu-prime-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| γ′ | `feat/sprint-mu-prime-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| δ′ | `feat/sprint-mu-prime-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| α′ | `feat/sprint-mu-prime-pod-alpha` | `ba16137`, `37a3a6b` | `6c5425c` |
+| β′ | `feat/sprint-mu-prime-pod-beta`  | `70ebae1`, `a6d7442` | `8612189` |
+| γ′ | `feat/sprint-mu-prime-pod-gamma` | `70ebae1`             | `ed08aff` |
+| δ′ | `feat/sprint-mu-prime-pod-delta` | `330500e`             | `620d606` |
+| —  | (integrator finalize)            | `70492ab`             | n/a       |
 
 ## wolfxl 1.6.0 (2026-04-26) — chart construction (8 types, full depth)
 

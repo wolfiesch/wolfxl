@@ -316,32 +316,41 @@ remove the fallback branch.
 - **Pod-α′** — Rust parser extensions (`parse_chart_dict` covers
   §10 verbatim, 8 new `ChartKind` variants, per-3D-family emit
   fns) + the new `serialize_chart_dict` PyO3 export.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits: `ba16137`, `37a3a6b`. Merged via `6c5425c`.
 - **Pod-β′** — Python flat `to_rust_dict` (matches §10) + 8 new
   chart-family classes (`BarChart3D`, `LineChart3D`, `PieChart3D` /
   `Pie3D`, `AreaChart3D`, `SurfaceChart`, `SurfaceChart3D`,
   `StockChart`, `ProjectedPieChart`) + construction-time validation
   per §10.11.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits: `70ebae1`, `a6d7442`. Merged via `8612189`.
 - **Pod-γ′** — Modify-mode bridge (`_flush_pending_charts_to_patcher`
   uses `serialize_chart_dict`) + 3D-family round-trip tests in
   `tests/test_charts_3d.py`.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits: `70ebae1`. Merged via `ed08aff`.
 - **Pod-δ′** (this release scaffold) — RFC-046 §10/§11 SHA-log
   scaffold, 9 new `tests/parity/openpyxl_surface.py` entries,
   `KNOWN_GAPS.md` close-out, this release notes scaffold,
   `CHANGELOG.md` entry, removal of the module-level xfail on
   `tests/test_charts_write.py`.
-  Commits: <!-- TBD: SHA -->. Merged via <!-- TBD: SHA -->.
+  Commits: `330500e`. Merged via `620d606`.
+- **Integrator finalize** — `parse_graphical_properties` reads both
+  §10.9 and legacy graphical-property keys; chart-level
+  `data_labels` propagates to series; `_DataLabelBase` accepts
+  openpyxl-style `position=`; `Reference(None, …)` rejected;
+  anchor bounds-check against XFD/1048576; 9 ratchet entries
+  flipped to `wolfxl_supported=True`; `Pie3D` surface entry
+  removed (openpyxl 3.1.x doesn't expose the alias).
+  Commit: `70492ab`.
 
 ## SHA log
 
 | Pod | Branch | Commits | Merge |
 |---|---|---|---|
-| α′ | `feat/sprint-mu-prime-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| β′ | `feat/sprint-mu-prime-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| γ′ | `feat/sprint-mu-prime-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| δ′ | `feat/sprint-mu-prime-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| α′ | `feat/sprint-mu-prime-pod-alpha` | `ba16137`, `37a3a6b` | `6c5425c` |
+| β′ | `feat/sprint-mu-prime-pod-beta`  | `70ebae1`, `a6d7442` | `8612189` |
+| γ′ | `feat/sprint-mu-prime-pod-gamma` | `70ebae1`             | `ed08aff` |
+| δ′ | `feat/sprint-mu-prime-pod-delta` | `330500e`             | `620d606` |
+| —  | (integrator finalize)            | `70492ab`             | n/a       |
 
 Integrator finalize commit fills these placeholders, performs the
 post-merge ratchet flip on the 9 new chart-3D entries in

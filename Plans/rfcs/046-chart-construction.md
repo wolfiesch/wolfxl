@@ -1209,10 +1209,11 @@ placeholders below and tags `v1.6.1`.
 
 | Pod | Branch | Commits | Merge |
 |---|---|---|---|
-| α′ | `feat/sprint-mu-prime-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| β′ | `feat/sprint-mu-prime-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| γ′ | `feat/sprint-mu-prime-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
-| δ′ | `feat/sprint-mu-prime-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| α′ | `feat/sprint-mu-prime-pod-alpha` | `ba16137`, `37a3a6b` | `6c5425c` |
+| β′ | `feat/sprint-mu-prime-pod-beta`  | `70ebae1`, `a6d7442` | `8612189` |
+| γ′ | `feat/sprint-mu-prime-pod-gamma` | `70ebae1`             | `ed08aff` |
+| δ′ | `feat/sprint-mu-prime-pod-delta` | `330500e`             | `620d606` |
+| —  | (integrator finalize)            | `70492ab`             | n/a       |
 
 ## Acceptance
 
