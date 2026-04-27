@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl.utils.exceptions import IllegalCharacterError
 from wolfxl.utils.numbers import is_date_format
 
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
+
+
+# RFC-059 (Sprint Ο Pod-1E): OOXML-illegal control characters.
+# The C0 controls 0x00–0x08, 0x0B, 0x0C, 0x0E–0x1F plus 0x7F are
+# rejected by Excel's serializer.  Tab (0x09), newline (0x0A), and
+# carriage return (0x0D) are allowed and pass through unchanged.
+# Mirrors openpyxl's ``ILLEGAL_CHARACTERS_RE``.
+ILLEGAL_CHARACTERS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class Cell:
@@ -286,6 +296,15 @@ class Cell:
         # Accept CellRichText pass-through: if the user assigns a
         # CellRichText, defer rich-text serialization to the writer.
         # Plain strings keep the existing fast path.
+        # RFC-059: reject OOXML-illegal control characters before
+        # they hit the writer.  ``IllegalCharacterError`` subclasses
+        # ``ValueError`` so existing ``except ValueError`` callsites
+        # keep working unchanged.
+        if isinstance(val, str) and ILLEGAL_CHARACTERS_RE.search(val):
+            raise IllegalCharacterError(
+                f"Cell value {val!r} contains characters that are not allowed in "
+                "OOXML strings (control chars 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)"
+            )
         self._value = val
         self._value_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001

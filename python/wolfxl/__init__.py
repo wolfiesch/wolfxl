@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover — Pod-α should always expose this
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._workbook import CopyOptions, Workbook
 from wolfxl._worksheet import Worksheet
+from wolfxl.utils.exceptions import InvalidFileException
 
 __all__ = [
     "__version__",
@@ -178,7 +179,7 @@ def load_workbook(
 
     if fmt == "unknown":
         source_kind = "path" if path else "bytes"
-        raise ValueError(
+        raise InvalidFileException(
             f"could not determine file format from {source_kind}; "
             "expected xlsx/xlsb/xls"
         )
@@ -223,7 +224,7 @@ def load_workbook(
             path=path, data=data, data_only=data_only, permissive=permissive,
         )
     else:  # pragma: no cover — defensive; classify_input only emits the above.
-        raise ValueError(f"unsupported file format: {fmt!r}")
+        raise InvalidFileException(f"unsupported file format: {fmt!r}")
 
     wb._rich_text = rich_text  # noqa: SLF001
     return wb

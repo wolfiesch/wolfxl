@@ -25,6 +25,7 @@ from wolfxl.utils.datetime import (
     CALENDAR_WINDOWS_1900,
     from_excel,
 )
+from wolfxl.utils.exceptions import CellCoordinatesException
 from wolfxl.utils.numbers import is_date_format
 
 __all__ = [
@@ -57,7 +58,7 @@ def absolute_coordinate(coord_string: str) -> str:
         return ":".join(absolute_coordinate(p) for p in parts)
     m = _ABS_COORD_RE.match(coord_string)
     if not m:
-        raise ValueError(f"{coord_string} is not a valid coordinate range")
+        raise CellCoordinatesException(f"{coord_string} is not a valid coordinate range")
     col, row = m.groups()
     return f"${col.upper()}${row}"
 
@@ -81,14 +82,18 @@ def range_to_tuple(range_string: str) -> tuple[str, tuple[int, int, int, int]]:
     Single quotes around the sheet name are stripped if present.
     """
     if "!" not in range_string:
-        raise ValueError(f"Range must have a sheet qualifier: {range_string!r}")
+        raise CellCoordinatesException(
+            f"Range must have a sheet qualifier: {range_string!r}"
+        )
     sheet_part, _, range_part = range_string.rpartition("!")
     sheet = sheet_part
     if sheet.startswith("'") and sheet.endswith("'"):
         sheet = sheet[1:-1].replace("''", "'")
     bounds = range_boundaries(range_part)
     if any(b is None for b in bounds):
-        raise ValueError(f"Range must have explicit bounds: {range_string!r}")
+        raise CellCoordinatesException(
+            f"Range must have explicit bounds: {range_string!r}"
+        )
     # mypy: bounds are all ints after the None check.
     return sheet, (int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3]))  # type: ignore[arg-type]
 
@@ -101,7 +106,9 @@ def rows_from_range(range_string: str) -> Iterator[tuple[str, ...]]:
     """
     min_col, min_row, max_col, max_row = range_boundaries(range_string)
     if min_col is None or min_row is None or max_col is None or max_row is None:
-        raise ValueError(f"Range must have explicit bounds: {range_string!r}")
+        raise CellCoordinatesException(
+            f"Range must have explicit bounds: {range_string!r}"
+        )
     for row in range(min_row, max_row + 1):
         yield tuple(
             f"{get_column_letter(col)}{row}" for col in range(min_col, max_col + 1)
@@ -116,7 +123,9 @@ def cols_from_range(range_string: str) -> Iterator[tuple[str, ...]]:
     """
     min_col, min_row, max_col, max_row = range_boundaries(range_string)
     if min_col is None or min_row is None or max_col is None or max_row is None:
-        raise ValueError(f"Range must have explicit bounds: {range_string!r}")
+        raise CellCoordinatesException(
+            f"Range must have explicit bounds: {range_string!r}"
+        )
     for col in range(min_col, max_col + 1):
         letter = get_column_letter(col)
         yield tuple(f"{letter}{row}" for row in range(min_row, max_row + 1))

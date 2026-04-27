@@ -169,7 +169,13 @@ def test_load_workbook_pathlib_matches_str() -> None:
 
 
 def test_load_unknown_bytes_raises_value_error() -> None:
-    with pytest.raises(ValueError, match="not determine file format"):
+    # RFC-059 (Sprint Ο Pod-1E): unknown-format inputs now raise
+    # ``InvalidFileException`` mirroring openpyxl's typed exception
+    # hierarchy.  ``InvalidFileException`` is a plain ``Exception``
+    # (not a ``ValueError``) to match openpyxl's contract.
+    from wolfxl.utils.exceptions import InvalidFileException
+
+    with pytest.raises(InvalidFileException, match="not determine file format"):
         wolfxl.load_workbook(b"this is definitely not a spreadsheet payload")
 
 
