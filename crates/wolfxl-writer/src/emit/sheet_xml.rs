@@ -479,6 +479,67 @@ fn emit_cell(
             out.push_str(&crate::rich_text::emit_runs(runs));
             out.push_str("</is></c>");
         }
+
+        WriteCellValue::ArrayFormula { ref_range, text } => {
+            // RFC-057: array-formula master cell.
+            //   <c r="A1"><f t="array" ref="A1:A10">B1:B10*2</f></c>
+            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            if let Some(s) = cell.style_id {
+                out.push_str(&format!(" s=\"{}\"", s));
+            }
+            out.push_str(&format!(
+                "><f t=\"array\" ref=\"{}\">{}</f></c>",
+                xml_escape::attr(ref_range),
+                xml_escape::text(text),
+            ));
+        }
+
+        WriteCellValue::DataTableFormula {
+            ref_range,
+            ca,
+            dt2_d,
+            dtr,
+            r1,
+            r2,
+        } => {
+            // RFC-057: data-table formula master cell.  The `<f/>` is
+            // self-closing (no body) — all metadata lives in
+            // attributes.
+            //   <c r="B2"><f t="dataTable" ref="B2:F11" dt2D="1"
+            //              r1="A1" r2="A2"/></c>
+            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            if let Some(s) = cell.style_id {
+                out.push_str(&format!(" s=\"{}\"", s));
+            }
+            out.push_str("><f t=\"dataTable\"");
+            out.push_str(&format!(" ref=\"{}\"", xml_escape::attr(ref_range)));
+            if *ca {
+                out.push_str(" ca=\"1\"");
+            }
+            if *dt2_d {
+                out.push_str(" dt2D=\"1\"");
+            }
+            if *dtr {
+                out.push_str(" dtr=\"1\"");
+            }
+            if let Some(r1v) = r1 {
+                out.push_str(&format!(" r1=\"{}\"", xml_escape::attr(r1v)));
+            }
+            if let Some(r2v) = r2 {
+                out.push_str(&format!(" r2=\"{}\"", xml_escape::attr(r2v)));
+            }
+            out.push_str("/></c>");
+        }
+
+        WriteCellValue::SpillChild => {
+            // RFC-057: bare placeholder cell inside an array-formula's
+            // spill range.  Style is preserved if explicitly set.
+            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            if let Some(s) = cell.style_id {
+                out.push_str(&format!(" s=\"{}\"", s));
+            }
+            out.push_str("/>");
+        }
     }
 }
 

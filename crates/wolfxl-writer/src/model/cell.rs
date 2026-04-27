@@ -48,6 +48,40 @@ pub enum WriteCellValue {
     /// `<c t="inlineStr"><is><r><rPr/><t/></r>…</is></c>` so the SST
     /// stays untouched (matches openpyxl's rich-text emit path).
     InlineRichText(Vec<crate::rich_text::RichTextRun>),
+
+    /// Sprint Ο Pod 1C (RFC-057): array-formula master cell.
+    /// Emitted as `<c r="..."><f t="array" ref="A1:A10">B1:B10*2</f></c>`.
+    /// The cells inside the spill range are emitted as bare
+    /// `<c r="..."/>` placeholders via [`WriteCellValue::SpillChild`].
+    ArrayFormula {
+        /// Spill range, e.g. `"A1:A10"`.
+        ref_range: String,
+        /// Formula body without the leading `=` and without the
+        /// surrounding `{}` braces.
+        text: String,
+    },
+
+    /// Sprint Ο Pod 1C (RFC-057): data-table formula master cell.
+    /// Emitted as `<c r="..."><f t="dataTable" ref="..." dt2D="..."
+    /// r1="..." r2="..."/></c>`.
+    DataTableFormula {
+        ref_range: String,
+        /// Always-calculate flag (`ca`).
+        ca: bool,
+        /// Two-variable data-table flag (`dt2D`).
+        dt2_d: bool,
+        /// Row-input flag (`dtr`).
+        dtr: bool,
+        /// First input cell (`r1`).
+        r1: Option<String>,
+        /// Second input cell (`r2`).
+        r2: Option<String>,
+    },
+
+    /// Sprint Ο Pod 1C (RFC-057): empty placeholder cell that lives
+    /// inside an array-formula's spill range but isn't the master.
+    /// Emitted as a bare `<c r="..."/>` element.
+    SpillChild,
 }
 
 /// The cached result of a formula.

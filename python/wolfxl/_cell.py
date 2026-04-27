@@ -33,6 +33,20 @@ class Cell:
         "_number_format",
         "_value_dirty",
         "_format_dirty",
+        # RFC-057 (Sprint Ο Pod 1C) — array / data-table formula
+        # metadata.  Populated when ``cell.value`` is assigned an
+        # :class:`ArrayFormula` / :class:`DataTableFormula` instance,
+        # or when an existing cell parses back as one of those types.
+        # ``_formula_type`` is one of: ``None`` (plain), ``"array"``,
+        # ``"dataTable"``.
+        "_formula_type",
+        "_array_ref",
+        "_formula_text",
+        "_dt_ca",
+        "_dt_2d",
+        "_dt_r",
+        "_dt_r1",
+        "_dt_r2",
     )
 
     def __init__(self, ws: Worksheet, row: int, col: int) -> None:
@@ -48,6 +62,16 @@ class Cell:
         self._number_format: str | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
+        # RFC-057 metadata — None until the cell is identified as
+        # array / data-table either via setter or on read-back.
+        self._formula_type: str | None = None
+        self._array_ref: str | None = None
+        self._formula_text: str | None = None
+        self._dt_ca: bool = False
+        self._dt_2d: bool = False
+        self._dt_r: bool = False
+        self._dt_r1: str | None = None
+        self._dt_r2: str | None = None
 
     @property
     def coordinate(self) -> str:
@@ -266,8 +290,68 @@ class Cell:
 
     @property
     def value(self) -> Any:
+        # RFC-057: surface array / data-table formulas as the typed
+        # instance regardless of what's been cached in ``_value``.
+        # The metadata is populated either by the setter or by the
+        # read-back path (parse_cell in the calamine backend tags the
+        # cell post-read; pending-array map carries write-side state).
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        ws = self._ws
+        # Pre-save visibility for write-mode / modify-mode setters: any
+        # pending array-formula entry on the worksheet wins over the
+        # cached value.
+        pending = ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
+        if pending is not None:
+            kind, payload = pending
+            if kind == "spill_child":
+                return None
+            if kind == "array":
+                return ArrayFormula(payload["ref"], payload["text"])
+            if kind == "data_table":
+                return DataTableFormula(
+                    ref=payload["ref"],
+                    ca=payload.get("ca", False),
+                    dt2D=payload.get("dt2D", False),
+                    dtr=payload.get("dtr", False),
+                    r1=payload.get("r1"),
+                    r2=payload.get("r2"),
+                )
+        # Read-side: if a previous read populated _formula_type, we
+        # surface the typed instance.
+        if self._formula_type == "array":
+            return ArrayFormula(self._array_ref or "", self._formula_text or "")
+        if self._formula_type == "dataTable":
+            return DataTableFormula(
+                ref=self._array_ref or "",
+                ca=self._dt_ca,
+                dt2D=self._dt_2d,
+                dtr=self._dt_r,
+                r1=self._dt_r1,
+                r2=self._dt_r2,
+            )
+        if self._formula_type == "array_child":
+            # Cell inside a spill range that isn't the master.  openpyxl
+            # also returns None here — Excel computes the spill on open.
+            return None
+
         if self._value is _UNSET:
             self._value = self._read_value()
+            # _read_value may have populated the formula metadata —
+            # re-check after the read.
+            if self._formula_type == "array":
+                return ArrayFormula(self._array_ref or "", self._formula_text or "")
+            if self._formula_type == "dataTable":
+                return DataTableFormula(
+                    ref=self._array_ref or "",
+                    ca=self._dt_ca,
+                    dt2D=self._dt_2d,
+                    dtr=self._dt_r,
+                    r1=self._dt_r1,
+                    r2=self._dt_r2,
+                )
+            if self._formula_type == "array_child":
+                return None
         # Sprint Ι Pod-α: when the workbook was opened with
         # ``rich_text=True``, surface ``CellRichText`` for cells whose
         # backing string carries `<r>` runs.  Default load mode mirrors
@@ -286,20 +370,112 @@ class Cell:
         # Accept CellRichText pass-through: if the user assigns a
         # CellRichText, defer rich-text serialization to the writer.
         # Plain strings keep the existing fast path.
-        self._value = val
-        self._value_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
-        # Pod-α: when a CellRichText is assigned, also stash it on the
-        # worksheet's pending-rich-text map so the flush layer can pick
-        # it up (write-mode and modify-mode both consume the same map).
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
         from wolfxl.cell.rich_text import CellRichText  # local import — avoids cycles
 
         ws = self._ws
+
+        # RFC-057 — array / data-table formula assignment.
+        if isinstance(val, ArrayFormula):
+            self._formula_type = "array"
+            self._array_ref = val.ref
+            self._formula_text = val.text
+            self._value = val
+            self._value_dirty = True
+            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+                "array",
+                {"ref": val.ref, "text": val.text},
+            )
+            # Populate placeholder entries for cells inside the spill
+            # range (excluding the master).  These show up as
+            # ``<c r="..."/>`` placeholders so Excel sees the spill
+            # area pre-populated; without them the spill master would
+            # be the only cell in the range.
+            self._populate_spill_placeholders(val.ref)
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            return
+
+        if isinstance(val, DataTableFormula):
+            self._formula_type = "dataTable"
+            self._array_ref = val.ref
+            self._dt_ca = val.ca
+            self._dt_2d = val.dt2D
+            self._dt_r = val.dtr
+            self._dt_r1 = val.r1
+            self._dt_r2 = val.r2
+            self._value = val
+            self._value_dirty = True
+            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+                "data_table",
+                {
+                    "ref": val.ref,
+                    "ca": val.ca,
+                    "dt2D": val.dt2D,
+                    "dtr": val.dtr,
+                    "r1": val.r1,
+                    "r2": val.r2,
+                },
+            )
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            return
+
+        # Plain assignment — clear any previous array / data-table
+        # state so a former master cell can be replaced cleanly.
+        if self._formula_type in ("array", "dataTable", "array_child"):
+            self._formula_type = None
+            self._array_ref = None
+            self._formula_text = None
+            self._dt_ca = False
+            self._dt_2d = False
+            self._dt_r = False
+            self._dt_r1 = None
+            self._dt_r2 = None
+        ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+
+        self._value = val
+        self._value_dirty = True
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+
+        # Pod-α: when a CellRichText is assigned, also stash it on the
+        # worksheet's pending-rich-text map so the flush layer can pick
+        # it up (write-mode and modify-mode both consume the same map).
         if isinstance(val, CellRichText):
             ws._pending_rich_text[(self._row, self._col)] = val  # noqa: SLF001
         else:
             # Clearing or replacing with plain — drop any prior rich entry.
             ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _populate_spill_placeholders(self, ref: str) -> None:
+        """Mark every non-master cell in ``ref`` as a spill child.
+
+        RFC-057: when the user assigns ``cell.value = ArrayFormula(...)``,
+        every cell inside the spill range becomes a placeholder so the
+        ``cell.value`` getter on those cells returns ``None`` (mirroring
+        openpyxl/Excel).  Only the master cell carries the actual
+        formula text.
+        """
+        from wolfxl._utils import a1_to_rowcol, rowcol_to_a1  # noqa: SLF001
+
+        ws = self._ws
+        # Parse the ref ("A1:A10") into a 2-tuple of cells.
+        if ":" not in ref:
+            return  # single-cell array — nothing else to mark
+        try:
+            top_left, bottom_right = ref.split(":", 1)
+            r1, c1 = a1_to_rowcol(top_left)
+            r2, c2 = a1_to_rowcol(bottom_right)
+        except Exception:  # noqa: BLE001
+            return
+        top, bottom = sorted((r1, r2))
+        left, right = sorted((c1, c2))
+        master_key = (self._row, self._col)
+        for r in range(top, bottom + 1):
+            for c in range(left, right + 1):
+                if (r, c) == master_key:
+                    continue
+                ws._pending_array_formulas[(r, c)] = ("spill_child", {})  # noqa: SLF001
 
     # ------------------------------------------------------------------
     # Rich text
@@ -491,6 +667,32 @@ class Cell:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return None
+        # RFC-057: tag the cell with array / data-table metadata
+        # before falling through to the regular payload read.  The
+        # reader returns ``None`` for plain cells so the cost is one
+        # extra dict-lookup at most.
+        try:
+            af_payload = wb._rust_reader.read_cell_array_formula(  # noqa: SLF001
+                self._ws.title, self.coordinate,
+            )
+        except AttributeError:
+            af_payload = None
+        if af_payload is not None:
+            kind = af_payload.get("kind")
+            if kind == "array":
+                self._formula_type = "array"
+                self._array_ref = af_payload.get("ref")
+                self._formula_text = af_payload.get("text", "")
+            elif kind == "data_table":
+                self._formula_type = "dataTable"
+                self._array_ref = af_payload.get("ref")
+                self._dt_ca = bool(af_payload.get("ca", False))
+                self._dt_2d = bool(af_payload.get("dt2D", False))
+                self._dt_r = bool(af_payload.get("dtr", False))
+                self._dt_r1 = af_payload.get("r1")
+                self._dt_r2 = af_payload.get("r2")
+            elif kind == "spill_child":
+                self._formula_type = "array_child"
         payload = wb._rust_reader.read_cell_value(  # noqa: SLF001
             self._ws.title, self.coordinate, getattr(wb, "_data_only", False),
         )
