@@ -19,6 +19,11 @@ wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
 # writer (commit-time) and merger (modify-time) cannot drift on slot
 # numbers as the spec evolves.
 wolfxl-merger = { path = "../wolfxl-merger", version = "0.1" }
+# Sprint Ν Pod-δ (RFC-049). `wolfxl-pivot` is a leaf crate (no PyO3,
+# no writer back-link) so this dependency is acyclic — verified by
+# `cargo check -p wolfxl-writer`. The chart model re-exports
+# `PivotSource` so Pod-δ's emit only depends on this crate.
+wolfxl-pivot = { path = "../wolfxl-pivot", version = "0.1" }
 
 [dev-dependencies]
 # Integration tests re-parse the emitter output with quick-xml and crack open

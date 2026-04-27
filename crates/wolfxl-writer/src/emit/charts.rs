@@ -43,9 +43,9 @@
 
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, Chart, ChartKind, DataLabels, DateAxis,
-    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, RadarStyle,
-    Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline,
-    TrendlineKind, ValueAxis, View3D, CategoryAxis,
+    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, PivotSource,
+    RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun,
+    Trendline, TrendlineKind, ValueAxis, View3D, CategoryAxis,
 };
 use crate::xml_escape;
 
@@ -69,6 +69,14 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
     ));
 
     out.push_str("<c:chart>");
+
+    // Sprint Ν Pod-δ — RFC-049 §10. ``<c:pivotSource>`` MUST be the
+    // first child of `<c:chart>` per ECMA-376 Part 1 §21.2.2.27 (the
+    // chart sequence is `pivotSource? title? autoTitleDeleted?
+    // view3D? plotArea legend? plotVisOnly? dispBlanksAs? extLst?`).
+    if let Some(ps) = &chart.pivot_source {
+        emit_pivot_source(&mut out, ps);
+    }
 
     // Optional <c:title>
     if let Some(t) = &chart.title {
@@ -208,9 +216,13 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
         _ => {}
     }
 
-    // Series.
+    // Series. Sprint Ν Pod-δ — when the chart has a `pivot_source`,
+    // each `<c:ser>` MUST carry a `<c:fmtId val="0"/>` element matching
+    // the pivot source's fmt_id; Excel rejects pivot charts whose
+    // series lack `<c:fmtId>`. RFC-049 §2.
+    let pivot_fmt_id = chart.pivot_source.as_ref().map(|ps| ps.fmt_id);
     for ser in &chart.series {
-        emit_series(out, ser, chart.kind);
+        emit_series(out, ser, chart.kind, pivot_fmt_id);
     }
 
     // Type-specific trailing properties.
@@ -286,10 +298,22 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
     out.push_str(&format!("</c:{elem}>"));
 }
 
-fn emit_series(out: &mut String, ser: &Series, kind: ChartKind) {
+fn emit_series(
+    out: &mut String,
+    ser: &Series,
+    kind: ChartKind,
+    pivot_fmt_id: Option<u32>,
+) {
     out.push_str("<c:ser>");
     out.push_str(&format!("<c:idx val=\"{}\"/>", ser.idx));
     out.push_str(&format!("<c:order val=\"{}\"/>", ser.order));
+
+    // Sprint Ν Pod-δ — RFC-049 §2. Pivot-chart series carry `fmtId`
+    // immediately after the order block. Excel rejects pivot charts
+    // whose series lack this element.
+    if let Some(fmt_id) = pivot_fmt_id {
+        out.push_str(&format!("<c:fmtId val=\"{fmt_id}\"/>"));
+    }
 
     if let Some(t) = &ser.title {
         emit_series_title(out, t);
@@ -408,6 +432,19 @@ fn emit_num_ref(out: &mut String, r: &Reference) {
         xml_escape::text(&r.to_formula_string())
     ));
     out.push_str("</c:numRef>");
+}
+
+/// Sprint Ν Pod-δ — RFC-049 §10.1. Emits the chart-level
+/// `<c:pivotSource><c:name>…</c:name><c:fmtId val="…"/></c:pivotSource>`
+/// block. `name` is XML-escaped (per the §2 OOXML spec, the inner
+/// element is text-content, not an attribute).
+fn emit_pivot_source(out: &mut String, ps: &PivotSource) {
+    out.push_str("<c:pivotSource>");
+    out.push_str("<c:name>");
+    out.push_str(&xml_escape::text(&ps.name));
+    out.push_str("</c:name>");
+    out.push_str(&format!("<c:fmtId val=\"{}\"/>", ps.fmt_id));
+    out.push_str("</c:pivotSource>");
 }
 
 fn emit_title(out: &mut String, t: &Title) {
@@ -1218,5 +1255,73 @@ mod tests {
         parse_ok(&bytes);
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains("<c:smooth val=\"1\"/>"));
+    }
+
+    // ----------------------------------------------------------------
+    // Sprint Ν Pod-δ — pivot-chart linkage (RFC-049)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn pivot_source_emitted_at_top_of_chart_with_per_series_fmt_id() {
+        let mut c = bar_chart_with_one_series();
+        c.pivot_source = Some(PivotSource {
+            name: "MyPivot".into(),
+            fmt_id: 0,
+        });
+        let bytes = emit_chart_xml(&c);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        // 1) `<c:pivotSource>` block appears immediately after
+        //    `<c:chart>` open and BEFORE `<c:title>`.
+        let chart_open = text.find("<c:chart>").expect("chart open");
+        let pivot_src = text
+            .find("<c:pivotSource>")
+            .expect("pivotSource missing when set");
+        let title_open = text.find("<c:title>").expect("title open");
+        assert!(
+            chart_open < pivot_src && pivot_src < title_open,
+            "ordering wrong: chart={chart_open} pivotSource={pivot_src} title={title_open}\n{text}"
+        );
+        // 2) Block content matches the §10.1 byte-shape exactly.
+        assert!(text.contains(
+            "<c:pivotSource><c:name>MyPivot</c:name><c:fmtId val=\"0\"/></c:pivotSource>"
+        ));
+        // 3) Per-series `<c:fmtId val="0"/>` injected RIGHT AFTER the
+        //    series-order block. RFC-049 §2 — Excel rejects pivot
+        //    charts whose series lack `<c:fmtId>`.
+        assert!(
+            text.contains("<c:order val=\"0\"/><c:fmtId val=\"0\"/>"),
+            "missing per-series fmtId after order: {text}"
+        );
+    }
+
+    #[test]
+    fn pivot_source_omitted_when_none() {
+        let c = bar_chart_with_one_series();
+        let bytes = emit_chart_xml(&c);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(
+            !text.contains("<c:pivotSource"),
+            "should not emit pivotSource when None"
+        );
+        assert!(
+            !text.contains("<c:fmtId"),
+            "should not emit per-series fmtId when no pivot_source"
+        );
+    }
+
+    #[test]
+    fn pivot_source_name_xml_escaped() {
+        let mut c = bar_chart_with_one_series();
+        c.pivot_source = Some(PivotSource {
+            name: "Sheet & Co".into(),
+            fmt_id: 7,
+        });
+        let bytes = emit_chart_xml(&c);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("<c:name>Sheet &amp; Co</c:name>"));
+        assert!(text.contains("<c:fmtId val=\"7\"/>"));
     }
 }
