@@ -5,6 +5,7 @@
 //! [`crate::zip`] assembles their output.
 
 pub mod cell;
+pub mod chart;
 pub mod comment;
 pub mod conditional;
 pub mod date;
@@ -17,6 +18,13 @@ pub mod workbook;
 pub mod worksheet;
 
 pub use cell::{WriteCell, WriteCellValue};
+pub use chart::{
+    Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
+    ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
+    GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
+    RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark, Title,
+    TitleRun, Trendline, TrendlineKind, ValueAxis,
+};
 pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
 pub use image::{ImageAnchor, SheetImage};
 pub use conditional::{
