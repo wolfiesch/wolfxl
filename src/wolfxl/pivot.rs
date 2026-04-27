@@ -44,7 +44,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use wolfxl_pivot::model::cache::{
-    CacheField, CacheValue, PivotCache, SharedItems, WorksheetSource,
+    CacheField, CacheValue, CalculatedField, DateGroup, FieldGroup, FieldGroupKind, PivotCache,
+    RangeGroup, SharedItems, WorksheetSource,
 };
 use wolfxl_pivot::model::records::{CacheRecord, RecordCell};
 use wolfxl_pivot::model::slicer::Slicer;
@@ -130,8 +131,109 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
     pc.min_refreshable_version = extract_u32(d, "min_refreshable_version", 3)? as u8;
     pc.refreshed_by = extract_str(d, "refreshed_by", "wolfxl")?;
     pc.records_part_path = extract_opt_str(d, "records_part_path")?;
+
+    // RFC-061 §10.3 — calculated fields (cache-scoped).
+    if let Some(v) = d.get_item("calculated_fields")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("calculated_fields[*] must be dict"))?;
+                out.push(parse_calculated_field(pd)?);
+            }
+            pc.calculated_fields = out;
+        }
+    }
+
+    // RFC-061 §10.5 — field groups.
+    if let Some(v) = d.get_item("field_groups")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("field_groups[*] must be dict"))?;
+                out.push(parse_field_group(pd)?);
+            }
+            pc.field_groups = out;
+        }
+    }
+
     pc.validate().map_err(PyValueError::new_err)?;
     Ok(pc)
+}
+
+fn parse_calculated_field(d: &Bound<'_, PyDict>) -> PyResult<CalculatedField> {
+    Ok(CalculatedField {
+        name: extract_str(d, "name", "")?,
+        formula: extract_str(d, "formula", "")?,
+        data_type: extract_str(d, "data_type", "number")?,
+    })
+}
+
+fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
+    let kind_str = extract_str(d, "kind", "discrete")?;
+    let kind = match kind_str.as_str() {
+        "date" => FieldGroupKind::Date,
+        "range" => FieldGroupKind::Range,
+        "discrete" => FieldGroupKind::Discrete,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown field_group kind {other:?}"
+            )));
+        }
+    };
+    let date = match d.get_item("date")? {
+        Some(v) if !v.is_none() => {
+            let pd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("date must be dict"))?;
+            Some(DateGroup {
+                group_by: extract_str(pd, "group_by", "")?,
+                start_date: extract_str(pd, "start_date", "")?,
+                end_date: extract_str(pd, "end_date", "")?,
+            })
+        }
+        _ => None,
+    };
+    let range = match d.get_item("range")? {
+        Some(v) if !v.is_none() => {
+            let pd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("range must be dict"))?;
+            Some(RangeGroup {
+                start: extract_opt_f64(pd, "start")?.unwrap_or(0.0),
+                end: extract_opt_f64(pd, "end")?.unwrap_or(0.0),
+                interval: extract_opt_f64(pd, "interval")?.unwrap_or(1.0),
+            })
+        }
+        _ => None,
+    };
+    let items: Vec<String> = match d.get_item("items")? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("items[*] must be dict"))?;
+                out.push(extract_str(pd, "name", "")?);
+            }
+            out
+        }
+        _ => Vec::new(),
+    };
+    Ok(FieldGroup {
+        field_index: extract_u32(d, "field_index", 0)?,
+        parent_index: extract_opt_u32(d, "parent_index")?,
+        kind,
+        date,
+        range,
+        items,
+    })
 }
 
 /// Parse a §10.6 records dict, mutating the supplied `PivotCache`'s
