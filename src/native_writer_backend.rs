@@ -37,9 +37,10 @@ use pyo3::types::PyDict;
 use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
     ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
-    RadarStyle, Reference as ChartReference, ScatterStyle, Series, SeriesAxis, SeriesTitle,
-    TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind, ValueAxis,
+    GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
+    MarkerSymbol, RadarStyle, Reference as ChartReference, ScatterStyle, Series, SeriesAxis,
+    SeriesTitle, TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind, ValueAxis,
+    View3D,
 };
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
@@ -1683,6 +1684,23 @@ impl NativeWorkbook {
     }
 }
 
+/// Sprint Μ-prime — module-level PyO3 helper used by Pod-γ's Python
+/// modify-mode bridge to render a chart dict to OOXML bytes without
+/// going through `NativeWorkbook.add_chart_native`.
+///
+/// `chart_dict` is the v1.6.1 §10 canonical shape; `anchor_a1` is a
+/// fallback A1 reference if the dict's `anchor` key is missing or
+/// `None`. The returned bytes are a complete `xl/charts/chartN.xml`
+/// part, ready for the patcher's `file_adds`.
+#[pyfunction]
+pub fn serialize_chart_dict(
+    chart_dict: &Bound<'_, PyDict>,
+    anchor_a1: &str,
+) -> PyResult<Vec<u8>> {
+    let chart = parse_chart_dict(chart_dict, anchor_a1)?;
+    Ok(wolfxl_writer::emit::charts::emit_chart_xml(&chart))
+}
+
 fn parse_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<ImageAnchor> {
     let kind: String = d
         .get_item("type")?
@@ -1774,10 +1792,20 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         "scatter" => ChartKind::Scatter,
         "bubble" => ChartKind::Bubble,
         "radar" => ChartKind::Radar,
+        // Sprint Μ-prime (RFC-046 §11): new families.
+        "bar3d" => ChartKind::Bar3D,
+        "line3d" => ChartKind::Line3D,
+        "pie3d" => ChartKind::Pie3D,
+        "area3d" => ChartKind::Area3D,
+        "surface" => ChartKind::Surface,
+        "surface3d" => ChartKind::Surface3D,
+        "stock" => ChartKind::Stock,
+        "of_pie" => ChartKind::OfPie,
         other => {
             return Err(PyValueError::new_err(format!(
                 "unknown chart kind {other:?} (expected bar/line/pie/doughnut/\
-                 area/scatter/bubble/radar)"
+                 area/scatter/bubble/radar/bar3d/line3d/pie3d/area3d/surface/\
+                 surface3d/stock/of_pie)"
             )))
         }
     };
@@ -1931,7 +1959,69 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         chart.style = Some(n);
     }
 
+    // Sprint Μ-prime (RFC-046 §10.10): view_3d on 3D chart kinds.
+    if let Some(v) = d.get_item("view_3d")? {
+        if !v.is_none() {
+            let vd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("view_3d must be a dict"))?;
+            chart.view_3d = Some(parse_view_3d(vd)?);
+        }
+    }
+
+    // Surface wireframe toggle (RFC-046 §11.3).
+    if let Some(b) = py_opt_bool(d, "wireframe")? {
+        chart.wireframe = Some(b);
+    }
+
+    // OfPie family fields.
+    if let Some(s) = py_opt_str(d, "of_pie_type")? {
+        chart.of_pie_type = Some(s);
+    }
+    if let Some(s) = py_opt_str(d, "split_type")? {
+        chart.split_type = Some(s);
+    }
+    if let Some(f) = py_opt_f64(d, "split_pos")? {
+        chart.split_pos = Some(f);
+    }
+    if let Some(n) = py_opt_u32(d, "second_pie_size")? {
+        chart.second_pie_size = Some(n);
+    }
+
     Ok(chart)
+}
+
+/// Sprint Μ-prime — parse `<c:view3D>` dict per RFC-046 §10.10.
+fn parse_view_3d(d: &Bound<'_, PyDict>) -> PyResult<View3D> {
+    Ok(View3D {
+        rot_x: py_opt_i16(d, "rot_x")?,
+        rot_y: py_opt_i16(d, "rot_y")?,
+        perspective: py_opt_u8(d, "perspective")?,
+        right_angle_axes: py_opt_bool(d, "right_angle_axes")?,
+        auto_scale: py_opt_bool(d, "auto_scale")?,
+        depth_percent: py_opt_u32(d, "depth_percent")?,
+        h_percent: py_opt_u32(d, "h_percent")?,
+    })
+}
+
+/// Sprint Μ-prime — parse a `gridlines` dict per RFC-046 §10.7.1.
+/// An empty dict is permitted ("draw default gridlines").
+fn parse_gridlines(d: &Bound<'_, PyDict>) -> PyResult<Gridlines> {
+    let graphical_properties = if let Some(v) = d.get_item("graphical_properties")? {
+        if v.is_none() {
+            None
+        } else {
+            let gd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
+            Some(parse_graphical_properties(gd)?)
+        }
+    } else {
+        None
+    };
+    Ok(Gridlines {
+        graphical_properties,
+    })
 }
 
 fn a1_to_one_cell_anchor(a1: &str) -> PyResult<ImageAnchor> {
@@ -1946,7 +2036,14 @@ fn a1_to_one_cell_anchor(a1: &str) -> PyResult<ImageAnchor> {
 }
 
 fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
-    let runs = if let Some(v) = d.get_item("runs")? {
+    // RFC-046 §10.3: `runs` and `text` are mutually exclusive; if both
+    // present, `runs` wins. A `runs` value of `None` falls through to
+    // the `text` plain-text path.
+    let runs_obj = d.get_item("runs")?;
+    let runs_is_useful = runs_obj.as_ref().map(|v| !v.is_none()).unwrap_or(false);
+
+    let runs = if runs_is_useful {
+        let v = runs_obj.unwrap();
         let list: Vec<Bound<'_, PyAny>> = v.extract()?;
         let mut out = Vec::with_capacity(list.len());
         for rv in list.iter() {
@@ -1957,18 +2054,66 @@ fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
                 .get_item("text")?
                 .ok_or_else(|| PyValueError::new_err("title run missing 'text'"))?
                 .extract()?;
+
+            // Two shapes accepted: flat ({"text", "bold", ...}) per the
+            // pre-v1.6.1 internal contract, OR nested {"text",
+            // "font": {"name", "size", "bold", "italic", "color"}} per
+            // RFC-046 §10.3. The nested form is what Pod-β' emits.
+            let mut bold = py_opt_bool(rd, "bold")?;
+            let mut italic = py_opt_bool(rd, "italic")?;
+            let mut underline = py_opt_bool(rd, "underline")?;
+            let mut size_pt = py_opt_u32(rd, "size_pt")?;
+            let mut color = py_opt_str(rd, "color")?;
+            let mut font_name = py_opt_str(rd, "font_name")?;
+
+            if let Some(fv) = rd.get_item("font")? {
+                if !fv.is_none() {
+                    let fd = fv.downcast::<PyDict>().map_err(|_| {
+                        PyValueError::new_err("title run 'font' must be a dict")
+                    })?;
+                    if let Some(b) = py_opt_bool(fd, "bold")? {
+                        bold = Some(b);
+                    }
+                    if let Some(i) = py_opt_bool(fd, "italic")? {
+                        italic = Some(i);
+                    }
+                    if let Some(u) = py_opt_bool(fd, "underline")? {
+                        underline = Some(u);
+                    }
+                    // §10.3 uses "size", we also accept "size_pt".
+                    if let Some(s) = py_opt_u32(fd, "size")? {
+                        size_pt = Some(s);
+                    } else if let Some(s) = py_opt_u32(fd, "size_pt")? {
+                        size_pt = Some(s);
+                    }
+                    if let Some(c) = py_opt_str(fd, "color")? {
+                        color = Some(c);
+                    }
+                    if let Some(n) = py_opt_str(fd, "name")? {
+                        font_name = Some(n);
+                    } else if let Some(n) = py_opt_str(fd, "font_name")? {
+                        font_name = Some(n);
+                    }
+                }
+            }
+
             out.push(TitleRun {
                 text,
-                bold: py_opt_bool(rd, "bold")?,
-                italic: py_opt_bool(rd, "italic")?,
-                underline: py_opt_bool(rd, "underline")?,
-                size_pt: py_opt_u32(rd, "size_pt")?,
-                color: py_opt_str(rd, "color")?,
-                font_name: py_opt_str(rd, "font_name")?,
+                bold,
+                italic,
+                underline,
+                size_pt,
+                color,
+                font_name,
             });
         }
         out
     } else if let Some(v) = d.get_item("text")? {
+        if v.is_none() {
+            return Err(PyValueError::new_err(
+                "chart title must have 'runs' or 'text'",
+            ));
+        }
         // Convenience: {"text": "Sales"} → single plain run.
         let text: String = v.extract()?;
         vec![TitleRun::plain(text)]
@@ -2021,22 +2166,17 @@ fn parse_optional_layout(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<La
 }
 
 fn parse_layout(d: &Bound<'_, PyDict>) -> PyResult<Layout> {
-    let x: f64 = d
-        .get_item("x")?
-        .ok_or_else(|| PyValueError::new_err("layout missing 'x'"))?
-        .extract()?;
-    let y: f64 = d
-        .get_item("y")?
-        .ok_or_else(|| PyValueError::new_err("layout missing 'y'"))?
-        .extract()?;
-    let w: f64 = d
-        .get_item("w")?
-        .ok_or_else(|| PyValueError::new_err("layout missing 'w'"))?
-        .extract()?;
-    let h: f64 = d
-        .get_item("h")?
-        .ok_or_else(|| PyValueError::new_err("layout missing 'h'"))?
-        .extract()?;
+    // RFC-046 §10.5: x/y/w/h are all optional floats. Missing → 0.0
+    // (the Layout struct uses bare f64; an all-zero layout is mostly a
+    // no-op for Excel which interprets this as "place at origin with
+    // zero size", but Pod-β' is responsible for emitting `None` at the
+    // chart level instead of a zero-layout dict). The `*_mode` keys
+    // (x_mode/y_mode/w_mode/h_mode) are currently honored by hardcoding
+    // "edge" in the emitter; future work may plumb them through.
+    let x: f64 = py_opt_f64(d, "x")?.unwrap_or(0.0);
+    let y: f64 = py_opt_f64(d, "y")?.unwrap_or(0.0);
+    let w: f64 = py_opt_f64(d, "w")?.unwrap_or(0.0);
+    let h: f64 = py_opt_f64(d, "h")?.unwrap_or(0.0);
     let layout_target = if let Some(s) = py_opt_str(d, "layout_target")? {
         Some(match s.as_str() {
             "inner" => LayoutTarget::Inner,
@@ -2060,11 +2200,29 @@ fn parse_layout(d: &Bound<'_, PyDict>) -> PyResult<Layout> {
 }
 
 fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
-    let kind: String = d
-        .get_item("kind")?
-        .ok_or_else(|| PyValueError::new_err("axis dict missing 'kind'"))?
-        .extract()?;
+    // Accept both the legacy {"kind": "category"} and the RFC-046 §10.7
+    // {"ax_type": "cat"} shape.
+    let kind: String = if let Some(v) = d.get_item("kind")? {
+        v.extract()?
+    } else if let Some(v) = d.get_item("ax_type")? {
+        match v.extract::<String>()?.as_str() {
+            "cat" => "category".to_string(),
+            "val" => "value".to_string(),
+            "date" => "date".to_string(),
+            "ser" => "series".to_string(),
+            other => return Err(PyValueError::new_err(format!(
+                "unknown ax_type {other:?} (expected cat|val|date|ser)"
+            ))),
+        }
+    } else {
+        return Err(PyValueError::new_err("axis dict missing 'kind' or 'ax_type'"));
+    };
+
     let common = parse_axis_common(d)?;
+
+    // RFC-046 §10.7 nests scaling under "scaling": {"min", "max", ...}.
+    let (scaled_min, scaled_max) = parse_axis_scaling(d)?;
+
     match kind.as_str() {
         "category" => Ok(Axis::Category(CategoryAxis {
             common,
@@ -2073,16 +2231,16 @@ fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
         })),
         "value" => Ok(Axis::Value(ValueAxis {
             common,
-            min: py_opt_f64(d, "min")?,
-            max: py_opt_f64(d, "max")?,
+            min: scaled_min.or(py_opt_f64(d, "min")?),
+            max: scaled_max.or(py_opt_f64(d, "max")?),
             major_unit: py_opt_f64(d, "major_unit")?,
             minor_unit: py_opt_f64(d, "minor_unit")?,
             crosses: py_opt_str(d, "crosses")?,
         })),
         "date" => Ok(Axis::Date(DateAxis {
             common,
-            min: py_opt_f64(d, "min")?,
-            max: py_opt_f64(d, "max")?,
+            min: scaled_min.or(py_opt_f64(d, "min")?),
+            max: scaled_max.or(py_opt_f64(d, "max")?),
             major_unit: py_opt_f64(d, "major_unit")?,
             minor_unit: py_opt_f64(d, "minor_unit")?,
             base_time_unit: py_opt_str(d, "base_time_unit")?,
@@ -2094,6 +2252,20 @@ fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
     }
 }
 
+/// RFC-046 §10.7: optional "scaling" sub-dict on axis. Returns (min, max).
+/// Orientation/log_base are not yet consumed by the emitter.
+fn parse_axis_scaling(d: &Bound<'_, PyDict>) -> PyResult<(Option<f64>, Option<f64>)> {
+    if let Some(v) = d.get_item("scaling")? {
+        if !v.is_none() {
+            let sd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("scaling must be a dict"))?;
+            return Ok((py_opt_f64(sd, "min")?, py_opt_f64(sd, "max")?));
+        }
+    }
+    Ok((None, None))
+}
+
 fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
     let ax_id: u32 = d
         .get_item("ax_id")?
@@ -2103,7 +2275,11 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
         .get_item("cross_ax")?
         .ok_or_else(|| PyValueError::new_err("axis missing 'cross_ax'"))?
         .extract()?;
-    let ax_pos = match py_opt_str(d, "ax_pos")?.as_deref() {
+    // RFC-046 §10.7 calls the field `axis_position`; the legacy shape
+    // used `ax_pos`. Accept both with `axis_position` taking precedence.
+    let ax_pos_raw = py_opt_str(d, "axis_position")?
+        .or(py_opt_str(d, "ax_pos")?);
+    let ax_pos = match ax_pos_raw.as_deref() {
         Some("b") | None => AxisPos::Bottom,
         Some("t") => AxisPos::Top,
         Some("l") => AxisPos::Left,
@@ -2114,7 +2290,18 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
             )))
         }
     };
-    let orientation = match py_opt_str(d, "orientation")?.as_deref() {
+    // Orientation may live on the axis OR (RFC-046) under `scaling`.
+    let mut orientation_raw = py_opt_str(d, "orientation")?;
+    if orientation_raw.is_none() {
+        if let Some(v) = d.get_item("scaling")? {
+            if !v.is_none() {
+                if let Ok(sd) = v.downcast::<PyDict>() {
+                    orientation_raw = py_opt_str(sd, "orientation")?;
+                }
+            }
+        }
+    }
+    let orientation = match orientation_raw.as_deref() {
         Some("minMax") | None => AxisOrientation::MinMax,
         Some("maxMin") => AxisOrientation::MaxMin,
         Some(other) => {
@@ -2145,6 +2332,16 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
     } else {
         None
     };
+
+    // RFC-046 §10.7.1: gridlines are dicts (with optional graphical
+    // properties). Empty `{}` means "draw default gridlines"; `None`
+    // means "no gridlines". Legacy bool form is also accepted —
+    // {"major_gridlines": true} → flag-only emit.
+    let (major_grid_flag, major_grid_obj) = parse_gridlines_field(d, "major_gridlines")?;
+    let (minor_grid_flag, minor_grid_obj) = parse_gridlines_field(d, "minor_gridlines")?;
+
+    let number_format = parse_axis_number_format(d)?;
+
     Ok(AxisCommon {
         ax_id,
         cross_ax,
@@ -2154,10 +2351,56 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
         major_tick_mark,
         minor_tick_mark,
         title,
-        major_gridlines: py_opt_bool(d, "major_gridlines")?.unwrap_or(false),
-        minor_gridlines: py_opt_bool(d, "minor_gridlines")?.unwrap_or(false),
-        number_format: py_opt_str(d, "number_format")?,
+        major_gridlines: major_grid_flag,
+        minor_gridlines: minor_grid_flag,
+        major_gridlines_obj: major_grid_obj,
+        minor_gridlines_obj: minor_grid_obj,
+        number_format,
     })
+}
+
+/// Parse the gridlines slot. Accepts:
+///   - `None` / missing → (false, None) (no gridlines).
+///   - `True` (bool)    → (true, None) (default gridlines, legacy).
+///   - `False` (bool)   → (false, None).
+///   - dict (possibly empty) → (false, Some(Gridlines{...})).
+///
+/// Returns `(flag, obj)` to feed AxisCommon.
+fn parse_gridlines_field(
+    d: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<(bool, Option<Gridlines>)> {
+    let Some(v) = d.get_item(key)? else {
+        return Ok((false, None));
+    };
+    if v.is_none() {
+        return Ok((false, None));
+    }
+    if let Ok(b) = v.extract::<bool>() {
+        return Ok((b, None));
+    }
+    let gd = v
+        .downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err(format!("{key} must be a dict, bool, or None")))?;
+    Ok((false, Some(parse_gridlines(gd)?)))
+}
+
+/// Number format on axis: accept either a string (legacy) or a
+/// dict {"format_code", "source_linked"} per RFC-046 §10.7.
+fn parse_axis_number_format(d: &Bound<'_, PyDict>) -> PyResult<Option<String>> {
+    let Some(v) = d.get_item("number_format")? else {
+        return Ok(None);
+    };
+    if v.is_none() {
+        return Ok(None);
+    }
+    if let Ok(s) = v.extract::<String>() {
+        return Ok(Some(s));
+    }
+    if let Ok(nfd) = v.downcast::<PyDict>() {
+        return Ok(py_opt_str(nfd, "format_code")?);
+    }
+    Ok(None)
 }
 
 fn parse_tick_mark(s: &str) -> PyResult<TickMark> {
@@ -2186,55 +2429,39 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     let mut s = Series::new(idx);
     s.order = order;
 
-    if let Some(v) = d.get_item("title")? {
+    // RFC-046 §10.6: title_ref (A1 string) | title_text (literal). Also
+    // accept the legacy {"strRef": {...}} / {"literal": "..."} shape.
+    if let Some(s_str) = py_opt_str(d, "title_ref")? {
+        s.title = Some(SeriesTitle::StrRef(reference_from_a1(&s_str)?));
+    } else if let Some(s_str) = py_opt_str(d, "title_text")? {
+        s.title = Some(SeriesTitle::Literal(s_str));
+    } else if let Some(v) = d.get_item("title")? {
         if !v.is_none() {
-            let td = v
-                .downcast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("series title must be a dict"))?;
-            if let Some(rv) = td.get_item("strRef")? {
-                let rd = rv
-                    .downcast::<PyDict>()
-                    .map_err(|_| PyValueError::new_err("strRef must be a dict"))?;
-                s.title = Some(SeriesTitle::StrRef(parse_reference(rd)?));
-            } else if let Some(lv) = td.get_item("literal")? {
-                let s_str: String = lv.extract()?;
+            // Legacy: {"strRef": {"sheet", "range"}} or {"literal": "..."}
+            if let Ok(td) = v.downcast::<PyDict>() {
+                if let Some(rv) = td.get_item("strRef")? {
+                    let rd = rv.downcast::<PyDict>().map_err(|_| {
+                        PyValueError::new_err("strRef must be a dict")
+                    })?;
+                    s.title = Some(SeriesTitle::StrRef(parse_reference(rd)?));
+                } else if let Some(lv) = td.get_item("literal")? {
+                    let s_str: String = lv.extract()?;
+                    s.title = Some(SeriesTitle::Literal(s_str));
+                }
+            } else if let Ok(s_str) = v.extract::<String>() {
+                // {"title": "Plain text"} convenience.
                 s.title = Some(SeriesTitle::Literal(s_str));
             }
         }
     }
 
-    if let Some(v) = d.get_item("categories")? {
-        if !v.is_none() {
-            let rd = v
-                .downcast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("categories must be a dict"))?;
-            s.categories = Some(parse_reference(rd)?);
-        }
+    s.categories = parse_series_ref_field(d, "categories", "categories_ref")?;
+    s.values = parse_series_ref_field(d, "values", "values_ref")?;
+    s.x_values = parse_series_ref_field(d, "x_values", "x_values_ref")?;
+    if s.values.is_none() {
+        s.values = parse_series_ref_field(d, "y_values", "y_values_ref")?;
     }
-    if let Some(v) = d.get_item("values")? {
-        if !v.is_none() {
-            let rd = v
-                .downcast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("values must be a dict"))?;
-            s.values = Some(parse_reference(rd)?);
-        }
-    }
-    if let Some(v) = d.get_item("x_values")? {
-        if !v.is_none() {
-            let rd = v
-                .downcast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("x_values must be a dict"))?;
-            s.x_values = Some(parse_reference(rd)?);
-        }
-    }
-    if let Some(v) = d.get_item("bubble_size")? {
-        if !v.is_none() {
-            let rd = v
-                .downcast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("bubble_size must be a dict"))?;
-            s.bubble_size = Some(parse_reference(rd)?);
-        }
-    }
+    s.bubble_size = parse_series_ref_field(d, "bubble_size", "bubble_size_ref")?;
 
     if let Some(v) = d.get_item("graphical_properties")? {
         if !v.is_none() {
@@ -2258,6 +2485,16 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
                 .downcast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
             s.data_labels = Some(parse_data_labels(dd)?);
+        }
+    }
+    // RFC-046 §10.6.3: `err_bars` (singular dict). Legacy: `error_bars`
+    // (list of dicts). Accept both.
+    if let Some(v) = d.get_item("err_bars")? {
+        if !v.is_none() {
+            let ed = v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err("err_bars must be a dict")
+            })?;
+            s.error_bars.push(parse_error_bars(ed)?);
         }
     }
     if let Some(v) = d.get_item("error_bars")? {
@@ -2286,6 +2523,46 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     s.smooth = py_opt_bool(d, "smooth")?;
     s.invert_if_negative = py_opt_bool(d, "invert_if_negative")?;
     Ok(s)
+}
+
+/// Pick up a series reference field. Tries the RFC-046 §10.6 A1-string
+/// form first (`{prefix}_ref`), then the legacy dict form (`prefix`).
+fn parse_series_ref_field(
+    d: &Bound<'_, PyDict>,
+    legacy_key: &str,
+    ref_key: &str,
+) -> PyResult<Option<ChartReference>> {
+    if let Some(s_str) = py_opt_str(d, ref_key)? {
+        return Ok(Some(reference_from_a1(&s_str)?));
+    }
+    if let Some(v) = d.get_item(legacy_key)? {
+        if !v.is_none() {
+            // Could be either the dict form or an A1 string.
+            if let Ok(s_str) = v.extract::<String>() {
+                return Ok(Some(reference_from_a1(&s_str)?));
+            }
+            let rd = v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(format!("{legacy_key} must be a dict or A1 string"))
+            })?;
+            return Ok(Some(parse_reference(rd)?));
+        }
+    }
+    Ok(None)
+}
+
+/// Parse an A1 string of the form `Sheet!A2:B6` or `'Sheet'!A2:B6` (with
+/// optional `$` markers on cells) into a ChartReference. The sheet name
+/// is the LHS of the first `!`. Cell range is preserved verbatim;
+/// downstream `to_formula_string()` will absolutize as needed.
+fn reference_from_a1(s: &str) -> PyResult<ChartReference> {
+    let trimmed = s.trim();
+    let (sheet, range) = trimmed.split_once('!').ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "expected A1 reference 'Sheet!A1:B2', got {s:?}"
+        ))
+    })?;
+    let sheet = sheet.trim_matches('\'').replace("''", "'");
+    Ok(ChartReference::new(sheet, range))
 }
 
 fn parse_reference(d: &Bound<'_, PyDict>) -> PyResult<ChartReference> {
@@ -2364,7 +2641,10 @@ fn parse_data_labels(d: &Bound<'_, PyDict>) -> PyResult<DataLabels> {
 }
 
 fn parse_error_bars(d: &Bound<'_, PyDict>) -> PyResult<ErrorBars> {
-    let bar_type = match py_opt_str(d, "bar_type")?.as_deref() {
+    // RFC-046 §10.6.3 names: err_bar_type, err_val_type. Accept both
+    // legacy bar_type/val_type and the new names.
+    let bar_type_str = py_opt_str(d, "err_bar_type")?.or(py_opt_str(d, "bar_type")?);
+    let bar_type = match bar_type_str.as_deref() {
         Some("plus") => ErrorBarType::Plus,
         Some("minus") => ErrorBarType::Minus,
         Some("both") | None => ErrorBarType::Both,
@@ -2374,28 +2654,41 @@ fn parse_error_bars(d: &Bound<'_, PyDict>) -> PyResult<ErrorBars> {
             )))
         }
     };
-    let val_type = match py_opt_str(d, "val_type")?.as_deref() {
+    let val_type_str = py_opt_str(d, "err_val_type")?.or(py_opt_str(d, "val_type")?);
+    let val_type = match val_type_str.as_deref() {
         Some("cust") => ErrorBarValType::Cust,
-        Some("fixedVal") => ErrorBarValType::FixedVal,
+        Some("fixedVal") | None => ErrorBarValType::FixedVal,
         Some("percentage") => ErrorBarValType::Percentage,
         Some("stdDev") => ErrorBarValType::StdDev,
-        Some("stdErr") | None => ErrorBarValType::StdErr,
+        Some("stdErr") => ErrorBarValType::StdErr,
         Some(other) => {
             return Err(PyValueError::new_err(format!(
                 "unknown error bar val_type {other:?}"
             )))
         }
     };
+    // §10.6.3: `val` (or legacy `value`).
+    let value = py_opt_f64(d, "val")?.or(py_opt_f64(d, "value")?);
+    // direction / plus_ref / minus_ref are not yet plumbed to the Rust
+    // model (the underlying ErrorBars struct doesn't carry them); they
+    // are accepted-and-ignored so dicts conform to the contract without
+    // erroring. Future work: extend ErrorBars with direction & cust refs.
+    let _ = py_opt_str(d, "direction")?;
+    let _ = py_opt_str(d, "plus_ref")?;
+    let _ = py_opt_str(d, "minus_ref")?;
+
     Ok(ErrorBars {
         bar_type,
         val_type,
-        value: py_opt_f64(d, "value")?,
+        value,
         no_end_cap: py_opt_bool(d, "no_end_cap")?,
     })
 }
 
 fn parse_trendline(d: &Bound<'_, PyDict>) -> PyResult<Trendline> {
-    let kind = match py_opt_str(d, "kind")?.as_deref() {
+    // RFC-046 §10.6.4 calls the field `trendline_type`; legacy used `kind`.
+    let kind_raw = py_opt_str(d, "trendline_type")?.or(py_opt_str(d, "kind")?);
+    let kind = match kind_raw.as_deref() {
         Some("linear") | None => TrendlineKind::Linear,
         Some("log") => TrendlineKind::Log,
         Some("power") => TrendlineKind::Power,
@@ -2408,14 +2701,21 @@ fn parse_trendline(d: &Bound<'_, PyDict>) -> PyResult<Trendline> {
             )))
         }
     };
+    // §10.6.4: disp_eq / disp_r_sqr; legacy: display_equation / display_r_squared.
+    let display_equation = py_opt_bool(d, "disp_eq")?.or(py_opt_bool(d, "display_equation")?);
+    let display_r_squared =
+        py_opt_bool(d, "disp_r_sqr")?.or(py_opt_bool(d, "display_r_squared")?);
+    // intercept is in the contract but not in the underlying Trendline struct;
+    // accept-and-ignore for forward-compat.
+    let _ = py_opt_f64(d, "intercept")?;
     Ok(Trendline {
         kind,
         order: py_opt_u32(d, "order")?,
         period: py_opt_u32(d, "period")?,
         forward: py_opt_f64(d, "forward")?,
         backward: py_opt_f64(d, "backward")?,
-        display_equation: py_opt_bool(d, "display_equation")?,
-        display_r_squared: py_opt_bool(d, "display_r_squared")?,
+        display_equation,
+        display_r_squared,
         name: py_opt_str(d, "name")?,
     })
 }
@@ -2490,6 +2790,26 @@ fn py_opt_i32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i32>> {
 }
 
 fn py_opt_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_i16(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i16>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_u8(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u8>> {
     if let Some(v) = d.get_item(key)? {
         if v.is_none() {
             return Ok(None);
