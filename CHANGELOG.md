@@ -1,5 +1,68 @@
 # Changelog
 
+## wolfxl 1.4.0 (2026-04-26) — `.xlsb` / `.xls` reads + bytes / BytesIO / file-like input
+
+User-facing release notes: `docs/release-notes/1.4.md`.
+
+Sprint Κ ("Kappa") closes Phase 5 — the last open row in
+`tests/parity/KNOWN_GAPS.md`. Four parallel pods landed runtime-dispatched
+calamine backends for `.xlsb` and `.xls`, a unified bytes / `io.BytesIO`
+/ file-like input path on `load_workbook` across all formats, and the
+matching parity fixtures vs `pandas.read_excel(engine="calamine")`.
+
+### Added
+
+- **RFC-043 — `.xlsb` / `.xls` reads via runtime-dispatched calamine
+  backends** (Sprint Κ, <!-- TBD: SHA -->). New `CalamineXlsbBook` and
+  `CalamineXlsBook` Rust pyclasses dispatched at `load_workbook` time
+  by the new `_rust.classify_format(path_or_bytes)` magic-byte sniffer.
+  Reads return values + cached formula results; style accessors
+  (`cell.font` / `.fill` / `.border` / `.alignment` / `.number_format`)
+  raise `NotImplementedError` on non-xlsx workbooks. `Workbook._format`
+  attribute (`'xlsx' | 'xlsb' | 'xls'`) for caller-side branching.
+- **Bytes / `BytesIO` / file-like input on `load_workbook`** (Sprint Κ
+  Pod-β, <!-- TBD: SHA -->). Each backend exposes a `Source` enum with
+  `File(BufReader<File>)` and `Bytes(Cursor<Vec<u8>>)` arms that
+  uniformly implement `Read + Seek`. Replaces Sprint Ι Pod-γ's
+  tempfile workaround for password reads — decrypted bytes now route
+  through `open_from_bytes` end-to-end.
+- **`.xlsb` / `.xls` parity fixtures + assertions vs
+  `pandas.read_excel(engine="calamine")`** (Sprint Κ Pod-γ,
+  <!-- TBD: SHA -->). New `tests/parity/test_xlsb_reads.py` +
+  `tests/parity/test_xls_reads.py` element-wise pin shape + values +
+  cached formula results.
+
+### Internal / infra
+
+- **Parity ratchet flipped on Phase 5 entries**. The two open
+  `_GAP_ENTRIES` rows in `tests/parity/openpyxl_surface.py`
+  (`openpyxl.load_workbook('foo.xlsb')` /
+  `openpyxl.load_workbook('foo.xls')`) flip to
+  `wolfxl_supported=True` and are tagged `shipped-1.4` post-merge by
+  the integrator. The xfail strict pins in
+  `tests/parity/test_surface_smoke.py` flag the flip is required.
+- **KNOWN_GAPS Phase 5 section removed**. The openpyxl-parity roadmap
+  is exhausted; only out-of-scope items (write-side encryption,
+  OpenDocument, charts/pivots/images) remain.
+
+### Documentation
+
+- `Plans/rfcs/043-xlsb-xls-reads.md` — RFC for the .xlsb / .xls reads
+  slice (Sprint Κ Pod-δ).
+- `Plans/rfcs/INDEX.md` bumped 19 → 20 RFCs.
+- `tests/parity/KNOWN_GAPS.md` — Phase 5 row replaced with a
+  "✅ SHIPPED in 1.4" note; new "Roadmap status" overview at the top.
+- `docs/release-notes/1.4.md` — user-facing 1.4 release notes
+  (Sprint Κ Pod-δ).
+
+### Test totals (post-1.4)
+
+- `cargo test --workspace --exclude wolfxl`: ~660 + N green (Pod-α
+  adds magic-byte sniffer + bytes-input round-trip tests).
+- `pytest tests/`: **1106 → ~1175+ passed** (Pod-α/β/γ each add
+  cases; final count filled in on integrator merge).
+- `pytest tests/parity`: **102 → ~140+ passed**.
+
 ## wolfxl 1.3.0 (2026-04-26) — Read-side parity (rich text + streaming + password)
 
 User-facing release notes: `docs/release-notes-1.3.md`.

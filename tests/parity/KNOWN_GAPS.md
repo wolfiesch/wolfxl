@@ -7,6 +7,18 @@ tied to a phase in the rollout plan.
 Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 — the parity smoke test keeps the two in sync.
 
+## Roadmap status (overview)
+
+- **Phase 1 — T1 DefinedName WRITE** — closed in 1.3 (Sprint Ι Pod-δ D4).
+- **Phase 2 — T0 Password-protected reads** — closed in 1.3 (Sprint Ι Pod-γ).
+- **Phase 3 — T2 Rich-text reads + writes** — closed in 1.3 (Sprint Ι Pod-α).
+- **Phase 4 — T2 Streaming reads** — closed in 1.3 (Sprint Ι Pod-β).
+- **Phase 5 — T1 `.xls` / `.xlsb`** — closed in 1.4 (Sprint Κ, RFC-043).
+
+The openpyxl-parity roadmap is exhausted. Only out-of-scope items remain
+(write-side encryption, OpenDocument, charts/pivots/images that SynthGL
+never relied on, etc.). See "Out of scope" below.
+
 ## Gate
 
 - Every gap must have a phase owner.
@@ -109,12 +121,18 @@ Documented divergences (out of scope for Pod-β, tracked elsewhere):
 - Rich-text cells flatten to plain strings (matches the existing
   Phase 3 row).
 
-### Phase 5 — T1 .xls / .xlsb
+### Phase 5 — T1 .xls / .xlsb (✅ SHIPPED in 1.4, Sprint Κ)
 
-| openpyxl path | phase | note |
-|---|---|---|
-| `openpyxl.load_workbook('foo.xlsb')` | Phase 5 | openpyxl itself doesn't read xlsb; parity target is pandas-style "same values came out". Migrate WolfXL from `calamine-styles` to upstream `calamine` (xlsb native). |
-| `openpyxl.load_workbook('foo.xls')` | Phase 5 | openpyxl doesn't read xls either. Parity target is xlrd behavior. |
+`load_workbook("foo.xlsb")` and `load_workbook("foo.xls")` ship in 1.4
+via runtime-dispatched calamine backends (`CalamineXlsbBook` /
+`CalamineXlsBook`). Reads return values + cached formula results.
+Style accessors (`cell.font` / `.fill` / `.border` / `.alignment` /
+`.number_format`) raise `NotImplementedError` on non-xlsx workbooks;
+`modify=True`, `read_only=True`, `password=`, and `Workbook.save("out.xlsb")`
+are explicitly xlsx-only. Parity target is
+`pandas.read_excel(engine="calamine")`, pinned by
+`tests/parity/test_xlsb_reads.py` and `tests/parity/test_xls_reads.py`.
+See `Plans/rfcs/043-xlsb-xls-reads.md`.
 
 ## Per-fixture read gaps (surfaced by Phase 0 baseline run)
 

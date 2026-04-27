@@ -8,7 +8,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 
 ---
 
-## Status Table (19 RFCs)
+## Status Table (20 RFCs)
 
 | ID | Title | Status | Phase | Estimate | Depends-on | Unblocks |
 |---|---|---|---|---|---|---|
@@ -32,6 +32,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 040 | Read-side parity — rich text (`Cell.rich_text`) | Shipped | 5 (1.3) | M | — | (T2 rich-text writes, post-1.3) |
 | 041 | Read-side parity — streaming reads (`read_only=True`) | Shipped | 5 (1.3) | L | — | (large-fixture LRBench ingest) |
 | 042 | Read-side parity — password-protected reads (`password=`) | Shipped | 5 (1.3) | M | (msoffcrypto-tool optional dep) | (post-1.3 encrypted writes) |
+| 043 | Read-side parity — `.xlsb` / `.xls` reads (runtime-dispatched calamine backends) | Shipped | 5 (1.4) | L | calamine-styles (xlsx); upstream calamine (xlsb / xls) | (closes Phase 5 — KNOWN_GAPS empty post-1.4) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
