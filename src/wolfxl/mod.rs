@@ -31,6 +31,9 @@ pub mod sheet_copy;
 pub mod calcchain;
 // Sprint Ν Pod-γ (RFC-047 / RFC-048): Phase 2.5m drains pivot adds.
 pub mod pivot;
+// Sprint Ο Pod 3.5 (RFC-061 §3.1): Phase 2.5p drains slicer caches +
+// slicer presentations.
+pub mod pivot_slicer;
 // Sprint Ο Pod 1D (RFC-058): Phase 2.5q splices workbookProtection +
 // fileSharing into xl/workbook.xml.
 pub mod security;
@@ -272,6 +275,12 @@ pub struct XlsxPatcher {
     /// the §10 dict shape so the cdylib can lift it into the typed
     /// model + run filter evaluation at drain time.
     queued_autofilters: HashMap<String, autofilter::QueuedAutoFilter>,
+
+    /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — pending slicer adds,
+    /// in append order. Each entry pairs a slicer-cache + a slicer
+    /// presentation against an owner sheet title. Drained by Phase
+    /// 2.5p (between Phase 2.5m / 2.5n and Phase 2.5o).
+    queued_slicers: Vec<pivot_slicer::QueuedSlicer>,
 }
 
 /// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
@@ -543,6 +552,7 @@ impl XlsxPatcher {
             next_pivot_cache_id: 0,
             queued_workbook_security: None,
             queued_autofilters: HashMap::new(),
+            queued_slicers: Vec::new(),
         })
     }
 
@@ -1252,6 +1262,32 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — queue one slicer + its
+    /// cache for emit on a sheet. Each call adds a single
+    /// `(slicerCache, slicer)` pair; v2.0 emits one slicer per
+    /// presentation file.
+    ///
+    /// `cache_dict` follows the §10.1 contract;
+    /// `slicer_dict` follows §10.2. The Python coordinator's
+    /// `Workbook._flush_pending_slicers_to_patcher` builds these.
+    ///
+    /// Drained by Phase 2.5p in `do_save`.
+    fn queue_slicer_add(
+        &mut self,
+        sheet: &str,
+        cache_dict: &Bound<'_, PyDict>,
+        slicer_dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        if !self.sheet_paths.contains_key(sheet) {
+            return Err(PyValueError::new_err(format!(
+                "queue_slicer_add: no such sheet: {sheet}"
+            )));
+        }
+        let queued = pivot_slicer::parse_queued_slicer(sheet, cache_dict, slicer_dict)?;
+        self.queued_slicers.push(queued);
+        Ok(())
+    }
+
     /// Queue a comment set/update for `sheet[cell]` (RFC-023).
     ///
     /// `payload` keys: `text` (required), `author` (optional — defaults
@@ -1729,6 +1765,7 @@ impl XlsxPatcher {
             && self.queued_charts.is_empty()
             && self.queued_pivot_caches.is_empty()
             && self.queued_pivot_tables.is_empty()
+            && self.queued_slicers.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
@@ -2445,6 +2482,29 @@ impl XlsxPatcher {
         //      * Add a content-type override.
         if !self.queued_pivot_caches.is_empty() || !self.queued_pivot_tables.is_empty() {
             self.apply_pivot_adds_phase(&mut file_patches, &mut zip)?;
+        }
+
+        // --- Phase 2.5p: Slicer caches + presentations (Sprint Ο Pod 3.5 / RFC-061 §3.1) ---
+        //
+        // Sequenced AFTER pivots (2.5m) and (when 1A.5 lands) AFTER
+        // sheet-setup (2.5n), BEFORE autofilter (2.5o) per RFC-061.
+        // For each queued slicer:
+        //
+        //   1. Allocate a slicer-cache part id + slicer-presentation
+        //      part id.
+        //   2. Render `xl/slicerCaches/slicerCache{N}.xml` and
+        //      `xl/slicers/slicer{M}.xml` via wolfxl_pivot::emit.
+        //   3. Build the per-cache rels file pointing at the source
+        //      pivot-cache part.
+        //   4. Add a workbook-rel of type SLICER_CACHE.
+        //   5. Add a sheet-rel of type SLICER.
+        //   6. Splice an `<extLst>` `<x14:slicerCaches>` block into
+        //      `xl/workbook.xml`.
+        //   7. Splice an `<extLst>` `<x14:slicerList>` block into the
+        //      owner sheet.
+        //   8. Add content-type Overrides for both parts.
+        if !self.queued_slicers.is_empty() {
+            self.apply_slicer_adds_phase(&mut file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5o: AutoFilter (Sprint Ο Pod 1B / RFC-056) ---
@@ -3680,6 +3740,219 @@ impl XlsxPatcher {
         if !ct_ops.is_empty() {
             self.queued_content_type_ops
                 .entry("__rfc047_pivots__".to_string())
+                .or_default()
+                .extend(ct_ops);
+        }
+
+        Ok(())
+    }
+
+    /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — Phase 2.5p drain.
+    ///
+    /// For each queued slicer:
+    ///   * Allocate slicer-cache + slicer-presentation part ids.
+    ///   * Render the cache + presentation XML files.
+    ///   * Build per-cache rels (cache → source pivot cache).
+    ///   * Add workbook-rel of type SLICER_CACHE.
+    ///   * Add sheet-rel of type SLICER.
+    ///   * Splice `<x14:slicerCaches>` into workbook.xml `<extLst>`.
+    ///   * Splice `<x14:slicerList>` into the owner sheet's `<extLst>`.
+    ///   * Add content-type Overrides for both parts.
+    fn apply_slicer_adds_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        // Bootstrap counters from source ZIP + pre-existing file_adds
+        // (so RFC-035 deep-clones never collide).
+        let mut counters = pivot_slicer::SlicerPartCounters::new();
+        for i in 0..zip.len() {
+            if let Ok(name) = zip.by_index(i).map(|f| f.name().to_string()) {
+                counters.observe(&name);
+            }
+        }
+        for path in self.file_adds.keys() {
+            counters.observe(path);
+        }
+
+        let drained: Vec<pivot_slicer::QueuedSlicer> = std::mem::take(&mut self.queued_slicers);
+
+        // Group drainage results by sheet for sheet-side rels + extLst splices.
+        let mut workbook_cache_refs: Vec<pivot_slicer::WorkbookSlicerCacheRef> = Vec::new();
+        // sheet_title → list of slicer rids (one per slicer presentation file).
+        let mut sheet_slicer_rids: HashMap<String, Vec<String>> = HashMap::new();
+        let mut ct_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+
+        // Read workbook rels graph once, mutate, persist at the end.
+        let workbook_rels_path = "xl/_rels/workbook.xml.rels";
+        let mut workbook_rels: wolfxl_rels::RelsGraph =
+            if let Some(g) = self.rels_patches.get(workbook_rels_path) {
+                g.clone()
+            } else if let Some(b) = self.file_adds.get(workbook_rels_path) {
+                wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
+                })?
+            } else {
+                let s = ooxml_util::zip_read_to_string(zip, workbook_rels_path)?;
+                wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
+                })?
+            };
+
+        // Per-sheet rels graphs cached so we can mutate-then-persist
+        // each owner sheet exactly once.
+        let mut sheet_rels_cache: HashMap<String, wolfxl_rels::RelsGraph> = HashMap::new();
+
+        for q in &drained {
+            let out = pivot_slicer::drain_one(q, &mut counters);
+
+            // 1. Write cache + slicer parts to file_adds.
+            self.file_adds
+                .insert(out.cache_part_path.clone(), out.cache_xml.clone());
+            self.file_adds
+                .insert(out.slicer_part_path.clone(), out.slicer_xml.clone());
+
+            // 2. Per-cache rels file: cache → source pivot cache.
+            //    Convention used by Phase 2.5m: pivot_cache_id == part_id - 1.
+            //    (queue_pivot_cache_add is monotonic from 0; phase 2.5m
+            //    allocates part ids starting at 1.)
+            let pivot_part_id = out.source_pivot_cache_id + 1;
+            let mut cache_rels = wolfxl_rels::RelsGraph::new();
+            cache_rels.add_with_id(
+                wolfxl_rels::RelId("rId1".into()),
+                wolfxl_rels::rt::PIVOT_CACHE_DEF,
+                &format!("../pivotCache/pivotCacheDefinition{pivot_part_id}.xml"),
+                wolfxl_rels::TargetMode::Internal,
+            );
+            self.rels_patches
+                .insert(out.cache_rels_part_path.clone(), cache_rels);
+
+            // 3. Workbook rel → cache.
+            let cache_rid = workbook_rels.add(
+                wolfxl_pivot::rt::SLICER_CACHE,
+                &format!("slicerCaches/slicerCache{}.xml", out.cache_id),
+                wolfxl_rels::TargetMode::Internal,
+            );
+            workbook_cache_refs.push(pivot_slicer::WorkbookSlicerCacheRef {
+                name: out.cache_name.clone(),
+                rid: cache_rid.0,
+            });
+
+            // 4. Sheet rels → slicer presentation.
+            let sheet_path = match self.sheet_paths.get(&out.sheet_title) {
+                Some(p) => p.clone(),
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "queue_slicer_add: sheet not found: {}",
+                        out.sheet_title
+                    )))
+                }
+            };
+            let sheet_rels_path = format!(
+                "{}/_rels/{}.rels",
+                sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                sheet_path.rsplit('/').next().unwrap_or("")
+            );
+
+            let sheet_rels = sheet_rels_cache.entry(sheet_rels_path.clone()).or_insert_with(|| {
+                if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
+                    g.clone()
+                } else if let Some(b) = self.file_adds.get(&sheet_rels_path) {
+                    wolfxl_rels::RelsGraph::parse(b).unwrap_or_default()
+                } else {
+                    match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path) {
+                        Ok(Some(s)) => {
+                            wolfxl_rels::RelsGraph::parse(s.as_bytes()).unwrap_or_default()
+                        }
+                        _ => wolfxl_rels::RelsGraph::new(),
+                    }
+                }
+            });
+            let slicer_rid = sheet_rels.add(
+                wolfxl_pivot::rt::SLICER,
+                &format!("../slicers/slicer{}.xml", out.slicer_id),
+                wolfxl_rels::TargetMode::Internal,
+            );
+            sheet_slicer_rids
+                .entry(out.sheet_title.clone())
+                .or_default()
+                .push(slicer_rid.0);
+
+            // 5. Content-type overrides.
+            ct_ops.push(content_types::ContentTypeOp::AddOverride(
+                format!("/{}", out.cache_part_path),
+                wolfxl_pivot::ct::SLICER_CACHE.to_string(),
+            ));
+            ct_ops.push(content_types::ContentTypeOp::AddOverride(
+                format!("/{}", out.slicer_part_path),
+                wolfxl_pivot::ct::SLICER.to_string(),
+            ));
+        }
+
+        // Persist workbook rels mutations.
+        self.rels_patches
+            .insert(workbook_rels_path.to_string(), workbook_rels);
+
+        // Persist per-sheet rels mutations.
+        for (path, graph) in sheet_rels_cache {
+            self.rels_patches.insert(path, graph);
+        }
+
+        // Splice <x14:slicerCaches> into xl/workbook.xml.
+        if !workbook_cache_refs.is_empty() {
+            let wb_xml: Vec<u8> = if let Some(b) = file_patches.get("xl/workbook.xml") {
+                b.clone()
+            } else if let Some(b) = self.file_adds.get("xl/workbook.xml") {
+                b.clone()
+            } else {
+                ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes()
+            };
+            let updated =
+                pivot_slicer::splice_workbook_slicer_caches(&wb_xml, &workbook_cache_refs)
+                    .map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!(
+                            "splice workbook <x14:slicerCaches>: {e}"
+                        ))
+                    })?;
+            file_patches.insert("xl/workbook.xml".to_string(), updated);
+        }
+
+        // Splice <x14:slicerList> into each owner sheet.
+        for (sheet_title, rids) in &sheet_slicer_rids {
+            let sheet_path = match self.sheet_paths.get(sheet_title) {
+                Some(p) => p.clone(),
+                None => continue,
+            };
+            let sheet_xml: Vec<u8> = if let Some(b) = file_patches.get(&sheet_path) {
+                b.clone()
+            } else if let Some(b) = self.file_adds.get(&sheet_path) {
+                b.clone()
+            } else {
+                ooxml_util::zip_read_to_string(zip, &sheet_path)?.into_bytes()
+            };
+            // v2.0 emits one <x14:slicerList> per sheet referencing the
+            // first slicer rel; additional slicer rels would aggregate
+            // into the same list element. The slicer file itself can
+            // hold multiple <slicer/> entries, but Pod 3.5 keeps it
+            // 1-presentation-file-per-slicer, so we point at each rid.
+            let mut updated = sheet_xml;
+            for rid in rids {
+                updated =
+                    pivot_slicer::splice_sheet_slicer_list(&updated, rid).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!(
+                            "splice sheet <x14:slicerList>: {e}"
+                        ))
+                    })?;
+            }
+            file_patches.insert(sheet_path, updated);
+        }
+
+        // Queue content-type ops under a synthetic per-workbook key
+        // (slicers are workbook-scope; not tied to one sheet name in
+        // `sheet_order`). Phase 2.5c picks them up via `synth_keys`.
+        if !ct_ops.is_empty() {
+            self.queued_content_type_ops
+                .entry("__rfc061_slicers__".to_string())
                 .or_default()
                 .extend(ct_ops);
         }
