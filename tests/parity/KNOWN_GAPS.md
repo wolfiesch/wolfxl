@@ -15,11 +15,13 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **Phase 4 — T2 Streaming reads** — closed in 1.3 (Sprint Ι Pod-β).
 - **Phase 5 — T1 `.xls` / `.xlsb`** — closed in 1.4 (Sprint Κ, RFC-043).
 - **1.5 — Encryption writes + image construction + streaming-datetime fix** — closed in 1.5 (Sprint Λ Pod-α/β/γ; RFC-044, RFC-045, plus Pod-γ's streaming-datetime correctness fix). Lifts "writing encrypted xlsx" and "image construction" from out-of-scope.
+- **1.6 — Chart construction (8 types, full depth) + RFC-035 chart-deep-clone + modify-mode `add_chart`** — closed in 1.6 (Sprint Μ Pod-α/β/γ/δ; RFC-046). Lifts "chart construction" from out-of-scope for the 2D type families (Bar / Line / Pie / Doughnut / Area / Scatter / Bubble / Radar). 3D / Stock / Surface / ProjectedPie deferred to v1.6.1; pivot-chart linkage deferred to v2.0.0 (Sprint Ν).
 
-The openpyxl-parity roadmap is exhausted. Remaining out-of-scope items
-are now scheduled into post-1.5 sprints — chart construction lands in
-v1.6.0 (Sprint Μ), pivot table construction lands in v2.0.0 (Sprint Ν).
-See "Out of scope" below.
+The openpyxl-parity roadmap is exhausted at the read level (1.0–1.4)
+AND at the construction level for encryption / images / charts (1.5–1.6).
+Remaining out-of-scope items are pivot table construction (v2.0.0 /
+Sprint Ν), chart 3D / Stock / Surface / ProjectedPie (v1.6.1), and
+pivot-chart linkage (depends on Sprint Ν). See "Out of scope" below.
 
 ## Gate
 
@@ -160,12 +162,27 @@ and documented here before the ratchet baseline is updated.
   BMP supported; one-cell, two-cell, and absolute anchors. Both
   write mode (native writer emits drawingN.xml + media + rels) and
   modify mode (patcher routes new images through `file_adds`).
-- **Chart construction** — scheduled for v1.6.0 (Sprint Μ).
-  Modify-mode round-trip already preserves charts verbatim; what's
-  missing is the construction surface (`BarChart`, `LineChart`,
-  series + reference + axis builders). Tracked as the headline
-  v1.6.0 deliverable; full openpyxl `Reference` / `Series` /
-  `XxxChart` parity targeted.
+- ~~Chart construction~~ — ✅ SHIPPED in 1.6 (Sprint Μ Pod-α/β/γ/δ,
+  RFC-046) for the eight 2D chart families:
+  `BarChart`, `LineChart`, `PieChart`, `DoughnutChart`, `AreaChart`,
+  `ScatterChart`, `BubbleChart`, `RadarChart`, plus `Reference` and
+  `Series`. `Worksheet.add_chart(chart, anchor)` accepts both string
+  anchors and the RFC-045 anchor helper classes. Both write mode
+  (native writer emits `xl/charts/chartN.xml` + drawing rels) and
+  modify mode (patcher Phase 2.5l routes new charts through
+  `file_adds`). RFC-035 `copy_worksheet` chart-aliasing limit is
+  lifted — charts in copied sheets now deep-clone with cell-range
+  re-pointing. See "Closed in 1.6 (Sprint Μ)" below.
+- **Chart 3D / Stock / Surface / ProjectedPie variants** —
+  deferred to **v1.6.1**. The five 3D chart classes
+  (`BarChart3D`, `LineChart3D`, `Pie3D`, `Area3D`, `Surface3D`),
+  `StockChart`, `SurfaceChart` (2D), and `ProjectedPieChart` ship as
+  `_make_stub`-style stubs in 1.6.0 that raise `NotImplementedError`
+  with a v1.6.1-pointer message. RFC-046 §9 documents the deferral.
+- **Pivot-chart linkage** — depends on **Sprint Ν / v2.0.0** pivot
+  tables. A chart's `<c:pivotSource>` referencing a pivot cache
+  definition cannot land before pivot caches are constructible. RFC-046
+  §9 documents the dependency.
 - **Pivot table construction** — scheduled for v2.0.0 (Sprint Ν).
   Pivot caches and pivot tables are preserved on modify-mode
   round-trip but cannot be added programmatically. Targeted as part
@@ -173,6 +190,73 @@ and documented here before the ratchet baseline is updated.
 - **OpenDocument (`.ods`)** — out of scope; not on the roadmap.
   Detected and rejected by `_rust.classify_format` with a friendly
   pointer.
+
+## Closed in 1.6 (Sprint Μ)
+
+- ✅ **Chart construction — eight 2D chart families** (Sprint Μ
+  Pod-α/β, RFC-046). The `_make_stub` definitions at
+  `python/wolfxl/chart/__init__.py` for `BarChart`, `LineChart`,
+  `PieChart`, `ScatterChart`, `AreaChart`, `Reference`, and `Series`
+  are replaced by real classes. Two new types ship in 1.6 alongside
+  the original five: `DoughnutChart` (subclasses PieChart) and
+  `BubbleChart` and `RadarChart`. Per-type unique features land at
+  full openpyxl 3.1.x depth: bar `gap_width`/`overlap`/`grouping`/
+  `bar_dir`; line `smooth`/`up_down_bars`/`drop_lines`/`hi_low_lines`/
+  per-series `marker`; pie `vary_colors`/`first_slice_ang`; doughnut
+  `hole_size`; area `grouping`/`drop_lines`; scatter `scatter_style`;
+  bubble `bubble_3d`/`bubble_scale`/`show_neg_bubbles`/`size_represents`;
+  radar `radar_style`. Both write mode (native writer emits
+  `xl/charts/chartN.xml` via `crates/wolfxl-writer/src/emit/charts.rs`)
+  and modify mode (patcher Phase 2.5l routes new charts through
+  `file_adds`). New `RT_CHART` const in `crates/wolfxl-rels/src/lib.rs`.
+  `crates/wolfxl-writer/src/emit/drawings.rs` extended for
+  `<xdr:graphicFrame>` alongside the RFC-045 `<xdr:pic>` block (a
+  worksheet with both an image and a chart shares a single drawing
+  part).
+- ✅ **`Worksheet.add_chart(chart, anchor)`** (Sprint Μ Pod-β).
+  Accepts a `ChartBase` subclass and either a coordinate string
+  (one-cell anchor pinned to the top-left of that cell, sized via
+  `chart.width` / `chart.height`) or one of the RFC-045 anchor
+  helper classes (`OneCellAnchor`, `TwoCellAnchor`, `AbsoluteAnchor`).
+- ✅ **RFC-035 chart-deep-clone with cell-range re-pointing**
+  (Sprint Μ Pod-γ). The deferred limit at
+  `Plans/rfcs/035-copy-worksheet.md` lines 924-929 is lifted.
+  `copy_worksheet` now deep-clones chart parts and re-points the
+  cell-range references on every series. Self-references
+  (`SourceSheet!$B$2:$B$10`) are rewritten to the copy's sheet name;
+  cross-sheet references (`Other!$A$1:$A$5`) are preserved verbatim.
+  Cached values (`<c:strCache>` / `<c:numCache>`) are preserved as-is
+  and Excel rebuilds them on next open if stale. The new behaviour is
+  the default; there is no opt-in flag (the old aliasing was a known
+  limit, not a deliberate contract).
+- ✅ **Modify-mode `add_chart`** (Sprint Μ Pod-γ). XlsxPatcher Phase
+  2.5l drains the queued chart adds per sheet, allocates fresh
+  `chartN.xml` and `drawingN.xml` numbers via `PartIdAllocator`,
+  emits chart bytes through `file_adds`, and splices new
+  `<xdr:graphicFrame>` blocks into the sheet's existing drawing part
+  (or creates one if the sheet had no drawing yet). Composes cleanly
+  with RFC-045 `add_image` and RFC-035 `copy_worksheet`: a single
+  drawing part can contain image `<xdr:pic>` blocks, chart
+  `<xdr:graphicFrame>` blocks, and any mix of the two.
+
+### Deferred to 1.6.1
+
+- **3D chart variants**: `BarChart3D`, `LineChart3D`, `Pie3D`,
+  `Area3D`, `Surface3D`. These use a separate XML element family
+  (`<c:bar3DChart>`, `<c:line3DChart>`, etc.) and additional
+  `<c:view3D>` perspective controls (`rotX`, `rotY`, `depthPercent`,
+  `perspective`, `rAngAx`).
+- **Stock charts** (HLC, OHLC, candlestick). Stock uses a custom
+  `<c:stockChart>` element with `<c:hiLowLines>` and
+  `<c:upDownBars>` always-on.
+- **Surface charts** (2D + 3D). `<c:surfaceChart>` /
+  `<c:surface3DChart>` with `<c:wireframe>` flag.
+- **ProjectedPieChart**. Pie with one slice "exploded" into a
+  secondary chart (`<c:ofPieType val="bar|pie"/>` and
+  `<c:secondPieSize/>`).
+
+In 1.6.0 the seven stub classes above raise `NotImplementedError`
+with a v1.6.1-pointer message on construction.
 
 ## Closed in 1.5 (Sprint Λ)
 
