@@ -1,5 +1,117 @@
 # Changelog
 
+## wolfxl 1.6.0 (TBD-DATE) — chart construction (8 types, full depth)
+
+User-facing release notes: `docs/release-notes-1.6.md`.
+
+Sprint Μ ("Mu") closes the chart-construction gap that the 1.0–1.5
+arc deferred as out-of-scope. Eight 2D chart families ship at full
+openpyxl 3.1.x per-type feature depth: `BarChart`, `LineChart`,
+`PieChart`, `DoughnutChart`, `AreaChart`, `ScatterChart`,
+`BubbleChart`, `RadarChart`, plus `Reference`, `Series`, and
+`Worksheet.add_chart(chart, anchor)`. The 3D / Stock / Surface /
+ProjectedPieChart variants ship as `_make_stub` classes raising
+`NotImplementedError` with a v1.6.1-pointer message and land in
+v1.6.1. Pivot-chart linkage depends on Sprint Ν / v2.0.0 pivot
+tables.
+
+### Added
+
+- **RFC-046 — Chart construction** (Sprint Μ Pod-α/β,
+  <!-- TBD: SHA -->). `wolfxl.chart.{Bar,Line,Pie,Doughnut,Area,Scatter,Bubble,Radar}Chart`
+  are real classes replacing the `_make_stub` definitions at
+  `python/wolfxl/chart/__init__.py`. `Reference(ws, min_col, min_row,
+  max_col, max_row)` and `Series(values, categories=None,
+  title=None, title_from_data=False)` ship together. Per-type unique
+  features land at full openpyxl depth: bar `gap_width`/`overlap`/
+  `grouping`/`bar_dir`; line `smooth`/`up_down_bars`/`drop_lines`/
+  `hi_low_lines`/per-series `marker`; pie `vary_colors`/
+  `first_slice_ang`; doughnut `hole_size`; area `grouping`/
+  `drop_lines`; scatter `scatter_style`; bubble `bubble_3d`/
+  `bubble_scale`/`show_neg_bubbles`/`size_represents`; radar
+  `radar_style`. `Worksheet.add_chart(chart, anchor)` accepts a
+  coordinate string (one-cell anchor at the top-left of that cell)
+  or one of the RFC-045 anchor helper classes (`OneCellAnchor`,
+  `TwoCellAnchor`, `AbsoluteAnchor`).
+- **`copy_worksheet` chart deep-clone with cell-range re-pointing**
+  (Sprint Μ Pod-γ, RFC-035 §10 lift, <!-- TBD: SHA -->). The
+  deferred limit at `Plans/rfcs/035-copy-worksheet.md` lines 924-929
+  is lifted. Charts in copied sheets now deep-clone with cell-range
+  re-pointing on every series. Self-references
+  (`SourceSheet!$B$2:$B$10`) get rewritten to the copy's sheet name;
+  cross-sheet references (`Other!$A$1:$A$5`) are preserved verbatim.
+  Cached values inside `<c:strCache>` / `<c:numCache>` are preserved
+  as-is (Excel rebuilds them on next open if stale). The new
+  behaviour is the default; there is no opt-in flag.
+- **Modify-mode `add_chart`** (Sprint Μ Pod-γ, <!-- TBD: SHA -->).
+  `wb = load_workbook(..., modify=True); ws.add_chart(chart, "G2");
+  wb.save()` works. New patcher Phase 2.5l drains the queued chart
+  adds per sheet, allocates fresh `chartN.xml` and `drawingN.xml`
+  numbers via `PartIdAllocator`, emits chart bytes through
+  `file_adds`, and splices `<xdr:graphicFrame>` blocks into the
+  sheet's existing drawing part (or creates one if the sheet had no
+  drawing yet). Composes cleanly with RFC-045 `add_image` and
+  RFC-035 `copy_worksheet`.
+
+### Internal / infra
+
+- **`RT_CHART` const** added to `crates/wolfxl-rels/src/lib.rs`:
+  `pub const RT_CHART: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";`.
+- **`crates/wolfxl-writer/src/model/chart.rs`** — typed model.
+  `ChartKind` enum (8 variants), `Chart`, `Series`, `Reference`,
+  axis types, marker, layout, legend, title.
+- **`crates/wolfxl-writer/src/emit/charts.rs`** — per-type emit
+  (~1500 LOC). One `emit_chart_xml(&Chart, &mut Writer)` entry
+  point dispatched on `chart.kind` to per-type emit fns
+  (`emit_bar_chart`, `emit_line_chart`, …). Shared helpers for axes
+  and legend live alongside.
+- **`crates/wolfxl-writer/src/emit/drawings.rs`** extended (NOT
+  rewritten) for `<xdr:graphicFrame>` (charts) alongside the
+  existing `<xdr:pic>` (RFC-045 images). A worksheet with both
+  shares a single drawing part with one `<xdr:pic>` block and one
+  `<xdr:graphicFrame>` block.
+- **`PartIdAllocator` extended for charts** (Pod-γ). The centralized
+  allocator at `crates/wolfxl-rels/src/part_id_allocator.rs` (RFC-035
+  §5.2) gains `alloc_chart()` and reuses `alloc_drawing()`, so
+  multiple `add_chart` calls in the same save plus concurrent
+  RFC-045 `add_image` / RFC-035 sheet copies all get collision-free
+  numbers.
+- **`XlsxPatcher` Phase 2.5l** — `chart_adds` drain in modify mode.
+  Sequenced after Phase 2.5j images / 2.5g comments / 2.5f tables
+  and before 2.5c content-types aggregation.
+- **PyO3 binding `Workbook.add_chart_native(sheet_idx, chart_payload,
+  anchor_dict)`** in `src/lib.rs`.
+- **10 new entries in `tests/parity/openpyxl_surface.py`
+  `_GAP_ENTRIES`** (Pod-δ): one per chart class + `Reference` +
+  `Series` + `Worksheet.add_chart`. Integrator flips them to
+  `wolfxl_supported=True` post-merge with the `shipped-1.6` tag.
+
+### Documentation
+
+- `Plans/rfcs/046-chart-construction.md` — Sprint Μ Pod-ε RFC.
+- `Plans/rfcs/INDEX.md` bumped 22 → 23 RFCs (RFC-046 row added; DAG
+  extended with Phase 5 1.6 deliverable).
+- `tests/parity/KNOWN_GAPS.md` — 1.6 roadmap entry added; "Chart
+  construction" lifted from "Out of scope" to "Closed in 1.6 (Sprint
+  Μ)"; 3D / Stock / Surface / ProjectedPie deferral to 1.6.1
+  documented; pivot-chart linkage explicitly deferred to Sprint Ν /
+  v2.0.0.
+- `docs/release-notes-1.6.md` — user-facing 1.6 release notes
+  (Sprint Μ Pod-ε).
+- `Plans/rfcs/035-copy-worksheet.md` — chart-aliasing limit at lines
+  924-929 marked `~~strikethrough~~` with a "✅ Lifted in 1.6 (Sprint
+  Μ Pod-γ)" pointer to RFC-046 §7.
+
+### Test totals (post-1.6)
+
+- `cargo test --workspace --exclude wolfxl`: ~660 + N green
+  (Pod-α adds per-type chart-emit tests, axis-id-allocation tests).
+- `pytest tests/`: **~1235+ → ~1300+ passed** (Pod-β adds ~40
+  write-mode tests, Pod-γ adds ~25 modify-mode + chart-deep-clone
+  tests; final count filled in on integrator merge).
+- `pytest tests/parity`: **~165+ → ~190+ passed** (Pod-δ adds ~25
+  parity tests).
+
 ## wolfxl 1.5.0 (2026-04-26) — encrypted writes + image construction + streaming-datetime fix
 
 User-facing release notes: `docs/release-notes-1.5.md`.
