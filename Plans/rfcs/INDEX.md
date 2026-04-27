@@ -40,6 +40,10 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 051 | docs/migration overhaul for v1.7 (Sprint Ξ) | Shipped | 5 (1.7) | M | 046 | — |
 | 052 | docs/performance refresh for v1.7 (Sprint Ξ) | Shipped | 5 (1.7) | M | — | — |
 | 053 | Public launch posts + materialise `Plans/launch-posts.md` (Sprint Ξ) | Shipped | 5 (1.7) | S | — | — |
+| 047 | Pivot caches — `wolfxl.pivot.PivotCache` + cache definition + records emit (Sprint Ν) | Approved | 5 (2.0) | XL | 010, 013, 035, 046 | 048, 049, 054 |
+| 048 | Pivot tables — `wolfxl.pivot.PivotTable` + layout + RFC-035 deep-clone (Sprint Ν) | Approved | 5 (2.0) | XL | 010, 013, 035, 046, 047 | 049, 054 |
+| 049 | Pivot-chart linkage — `chart.pivot_source = pt` (Sprint Ν) | Approved | 5 (2.0) | M | 046, 048 | 054 |
+| 054 | v2.0.0 launch hardening + docs + README rewrite (Sprint Ν) | Approved | 5 (2.0) | M | 047, 048, 049 | (PyPI publish + launch) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
@@ -240,3 +244,28 @@ no worktree fanout needed):
 
 Sprint Ξ is closed; tag `v1.7.0` cut. Next: **Sprint Ν** (v2.0.0
 pivot tables + pivot charts + public-launch-with-pivots).
+
+### Sprint Ν ("Nu") — pivot tables + pivot charts → v2.0.0 (in progress, 2026-04-27)
+
+User picked **Option A — full pivot construction** (~3-4 wk) on
+2026-04-27 over the 80/20 refresh-on-open variant. Reasoning: the
+"full openpyxl replacement" marketing claim requires pivots that
+work without an Excel-side refresh round-trip — i.e. open the
+wolfxl-emitted workbook in any OOXML-compliant reader and the
+pivot's data is already populated. That requires authoring
+`pivotCacheRecords{N}.xml`.
+
+5 parallel pods + integrator. Pre-dispatch contract specs in
+RFC-047 §10 / RFC-048 §10 / RFC-049 §10 are AUTHORITATIVE
+(lesson #12 from Sprint Μ-prime: write the contract BEFORE pod
+dispatch).
+
+| RFC | Pod | Status | Branch (when dispatched) |
+|---|---|---|---|
+| 047 — pivot caches | α + β + γ | Approved | `feat/sprint-nu-pod-{alpha,beta,gamma}` |
+| 048 — pivot tables | α + β + γ | Approved | `feat/sprint-nu-pod-{alpha,beta,gamma}` |
+| 049 — pivot charts | δ | Approved | `feat/sprint-nu-pod-delta` |
+| 054 — launch hardening | ε | Approved | `feat/sprint-nu-pod-epsilon` |
+
+See `Plans/sprint-nu.md` for the full plan, OOXML pivot anatomy
+diagram, calendar, risk register, and acceptance criteria.

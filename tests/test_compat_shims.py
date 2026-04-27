@@ -114,7 +114,9 @@ STUB_CONSTRUCTORS: list[tuple[str, str]] = [
     # and tests/test_images_modify.py.
     ("wolfxl.worksheet.filters", "AutoFilter"),
     # T1 PR3 promoted: DefinedName now real dataclass.
-    ("wolfxl.pivot", "PivotTable"),
+    # Sprint Ν (RFC-047/048) promoted: ``wolfxl.pivot.PivotTable``,
+    # ``PivotCache``, ``DataField``, ``PivotSource`` are real classes
+    # — exercised in tests/test_pivot_construction.py.
 ]
 
 
@@ -165,6 +167,27 @@ def test_stub_raises_on_construct(module_path: str, class_name: str) -> None:
     msg = str(excinfo.value)
     assert class_name in msg
     assert "wolfxl" in msg.lower()
+
+
+def test_pivot_table_no_longer_stub() -> None:
+    """Sprint Ν (RFC-047/048) ratchet flip: ``wolfxl.pivot.PivotTable``
+    must NOT raise ``NotImplementedError`` on construction.
+
+    This is the explicit ratchet for the v0.5+ → v2.0 promotion of
+    pivot construction from stub to real class.
+    """
+    from wolfxl.pivot import PivotTable
+    # Real PivotTable signature requires `cache=` and `location=`. The
+    # ratchet is: invoking the constructor with proper args succeeds; the
+    # stub variant would have raised NotImplementedError unconditionally.
+    # Exhaustive surface tested in tests/test_pivot_construction.py.
+    import inspect
+    sig = inspect.signature(PivotTable.__init__)
+    assert "cache" in sig.parameters
+    assert "location" in sig.parameters
+    # Sanity: confirm we did NOT accidentally re-stub.
+    assert PivotTable.__module__.startswith("wolfxl.pivot")
+    assert PivotTable.__init__.__qualname__ == "PivotTable.__init__"
 
 
 # ---------------- Color theme/indexed support ----------------

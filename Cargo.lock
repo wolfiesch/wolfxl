@@ -1408,6 +1408,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wolfxl-pivot"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.37.5",
+ "wolfxl-rels",
+]
+
+[[package]]
 name = "wolfxl-rels"
 version = "0.1.0"
 dependencies = [

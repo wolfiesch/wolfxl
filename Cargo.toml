@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer", "crates/wolfxl-rels", "crates/wolfxl-merger", "crates/wolfxl-formula", "crates/wolfxl-structural", "crates/wolfxl-classify"]
+members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer", "crates/wolfxl-rels", "crates/wolfxl-merger", "crates/wolfxl-formula", "crates/wolfxl-structural", "crates/wolfxl-classify", "crates/wolfxl-pivot"]
 
 [workspace.package]
 edition = "2021"

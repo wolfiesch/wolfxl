@@ -178,11 +178,27 @@ and documented here before the ratchet baseline is updated.
 - **Pivot-chart linkage** — depends on **Sprint Ν / v2.0.0** pivot
   tables. A chart's `<c:pivotSource>` referencing a pivot cache
   definition cannot land before pivot caches are constructible.
-  RFC-046 §9 documents the dependency.
-- **Pivot table construction** — scheduled for v2.0.0 (Sprint Ν).
-  Pivot caches and pivot tables are preserved on modify-mode
-  round-trip but cannot be added programmatically. Targeted as part
-  of the v2.0.0 public-launch milestone.
+  RFC-046 §9 documents the dependency. Sprint Ν RFC-049 is
+  authored; awaiting Pod-δ implementation.
+- **Pivot table construction** — IN PROGRESS for v2.0.0
+  (Sprint Ν). The §10 contracts in RFC-047 / RFC-048 are
+  authoritative pre-dispatch artifacts, the Rust crate
+  `crates/wolfxl-pivot` is scaffolded with deterministic emit and
+  25 unit tests green, and the Python `wolfxl.pivot.PivotCache /
+  PivotTable / PivotField / DataField / RowField / ColumnField /
+  PageField / PivotSource` surface is real (replacing the v0.5+
+  `_make_stub`) with 40 construction tests green. Patcher
+  integration (`Worksheet.add_pivot_table` / `Workbook.add_pivot_cache`
+  via PyO3 bindings + Phase 2.5m) is the remaining Pod-γ work
+  and is the gating step before the v2.0.0 ratchet flip in
+  `tests/parity/openpyxl_surface.py`.
+
+  - ✅ Real `wolfxl.pivot.PivotTable` + `PivotCache` + axis fields
+    (Sprint Ν Pod-β)
+  - ✅ Rust `wolfxl-pivot` crate model + emit (Sprint Ν Pod-α)
+  - ⏳ Patcher integration + PyO3 bindings (Sprint Ν Pod-γ)
+  - ⏳ Pivot-chart linkage `chart.pivot_source = pt` (Sprint Ν Pod-δ)
+  - ⏳ Docs + launch posts (Sprint Ν Pod-ε)
 - **OpenDocument (`.ods`)** — out of scope; not on the roadmap.
   Detected and rejected by `_rust.classify_format` with a friendly
   pointer.

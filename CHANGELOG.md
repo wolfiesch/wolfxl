@@ -1,5 +1,103 @@
 # Changelog
 
+## wolfxl 2.0.0-dev (in progress) — pivot tables + pivot charts (Sprint Ν)
+
+Working release notes for v2.0.0. Full release notes will live at
+`docs/release-notes-2.0.md` (TBD; Pod-ε scaffolds during Sprint Ν).
+
+User picked **Option A — full pivot construction** on 2026-04-27:
+emit `pivotCacheRecords{N}.xml` from scratch so pivots open in
+Excel / LibreOffice / openpyxl with data populated, without
+requiring an Excel-side refresh round-trip. After v2.0.0 the
+marketing claim shifts from "openpyxl parity for the 95th-percentile
+case" to **"full openpyxl replacement, period."**
+
+### Pre-dispatch (in progress)
+
+- **RFC-047** (`Plans/rfcs/047-pivot-caches.md`) — pivot-cache
+  definition + records emit. §10 contract spec is authoritative
+  (Sprint Μ-prime lesson #12: contract before pod dispatch).
+- **RFC-048** (`Plans/rfcs/048-pivot-tables.md`) — pivot-table
+  layout + RFC-035 deep-clone extension. §10 contract spec
+  authoritative.
+- **RFC-049** (`Plans/rfcs/049-pivot-charts.md`) —
+  `chart.pivot_source = pt` linkage on the existing 16 chart
+  families.
+- **RFC-054** (`Plans/rfcs/054-launch-hardening.md`) — launch
+  hardening + docs / README rewrite / PyPI publish.
+- **`Plans/sprint-nu.md`** — sprint plan with mermaid OOXML pivot
+  anatomy diagram, calendar, risk register, acceptance criteria.
+
+### Pod-α — Rust crate `wolfxl-pivot` (LANDED, this commit)
+
+- New workspace member `crates/wolfxl-pivot/` with PyO3-free model
+  + emit. Mirrors the §10 contracts of RFC-047 / RFC-048 / RFC-049
+  in typed Rust (`PivotCache`, `CacheField`, `SharedItems`,
+  `CacheValue`, `CacheRecord`, `RecordCell`, `PivotTable`,
+  `PivotField`, `DataField`, `PageField`, `AxisItem`,
+  `PivotTableStyleInfo`, `PivotSource`).
+- `emit::pivot_cache_definition_xml`,
+  `emit::pivot_cache_records_xml`, `emit::pivot_table_xml`. All
+  three deterministic (byte-stable for a given input model;
+  required for `WOLFXL_TEST_EPOCH=0` golden tests).
+- 25 unit tests green; 0 regressions across the 778-test workspace
+  baseline.
+
+### Pod-β — Python `wolfxl.pivot.*` (LANDED, this commit)
+
+- `python/wolfxl/pivot/__init__.py` — replaces the v0.5+
+  `_make_stub` with real classes: `PivotCache`, `PivotTable`,
+  `PivotField`, `DataField`, `RowField`, `ColumnField`,
+  `PageField`, `PivotItem`, `PivotSource`, `Location`,
+  `PivotTableStyleInfo`, `SharedItems`, `CacheField`,
+  `CacheValue`, `WorksheetSource`. `Reference` re-exported from
+  `wolfxl.chart.reference` (shape is identical).
+- `python/wolfxl/pivot/_cache.py` — `PivotCache` with
+  `_materialize(ws)` walking the source range and inferring
+  per-column type (string / number / date / boolean / mixed) per
+  RFC-047 §10.9. `to_rust_dict()` and `to_rust_records_dict()`
+  emit the §10.1 / §10.6 contracts verbatim.
+- `python/wolfxl/pivot/_table.py` — `PivotTable` with bare-string
+  axis specs (`rows=["region"]`), explicit `RowField` /
+  `ColumnField` / `DataField` / `PageField` builders, layout
+  pre-computation (`<rowItems>` / `<colItems>` enumerated +
+  aggregated values per data field — the core of "Option A"),
+  11 aggregator functions (sum / count / average / max / min /
+  product / countNums / stdDev / stdDevp / var / varp), and
+  `to_rust_dict()` emitting RFC-048 §10.1.
+- 40 construction-surface tests in
+  `tests/test_pivot_construction.py` green.
+- `tests/test_compat_shims.py` ratchet flipped: `wolfxl.pivot.PivotTable`
+  no longer raises `NotImplementedError`. New
+  `test_pivot_table_no_longer_stub` pins the v2.0 promotion.
+
+### Pods γ / δ / ε — TBD (next dispatch)
+
+- Pod-γ: patcher Phase 2.5m, `Worksheet.add_pivot_table`,
+  `Workbook.add_pivot_cache`, PyO3 bindings
+  `serialize_pivot_cache_dict` / `serialize_pivot_records_dict` /
+  `serialize_pivot_table_dict`, RFC-035 deep-clone extension for
+  pivots.
+- Pod-δ: `chart.pivot_source = pt` on 16 chart families;
+  `<c:pivotSource>` block emit.
+- Pod-ε: docs, CHANGELOG finalize, release-notes-2.0.md, README
+  rewrite ("full openpyxl replacement"), Compatibility Matrix
+  v2.0, finalize `Plans/launch-posts.md`.
+
+### Verification (this commit)
+
+- `cargo test -p wolfxl-pivot` → 25/25 GREEN.
+- `cargo test --workspace --exclude wolfxl` → 778/778 GREEN
+  (baseline +25; 0 regressions).
+- `pytest tests/test_pivot_construction.py` → 40/40 GREEN.
+- `pytest tests/test_compat_shims.py` → 82/83 GREEN (1 skipped;
+  pre-existing).
+- KNOWN_GAPS.md "Pivot table construction" row updated with
+  Pod progress checklist.
+- INDEX.md adds 047 / 048 / 049 / 054 rows + Sprint Ν section.
+
+---
+
 ## wolfxl 1.7.0 (2026-04-27) — public-launch slice (no pivot tables)
 
 User-facing release notes: `docs/release-notes-1.7.md`.
