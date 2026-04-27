@@ -377,3 +377,242 @@ def test_add_chart_validation_errors(tmp_path: Path) -> None:
         wb.add_chart_modify_mode("Data", "not-bytes", "D2")  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         wb.add_chart_modify_mode("Data", _bar_chart_xml("Data"), "")
+
+
+# ===========================================================================
+# Sprint Μ-prime Pod-γ′ — modify-mode HIGH-LEVEL chart bridge
+# (Worksheet.add_chart(BarChart()) wired through serialize_chart_dict).
+#
+# These tests exercise the dict→bytes bridge added in
+# ``_flush_pending_charts_to_patcher`` (RFC-046 §10.12). They depend on
+# Pod-α′'s ``serialize_chart_dict`` and Pod-β′'s ``to_rust_dict``
+# flat-shape — when Pod-α′/β′ haven't merged yet they will raise
+# NotImplementedError at save time. The integrator validates end-to-end
+# post-merge.
+# ===========================================================================
+
+
+def test_modify_mode_add_bar_chart_high_level(tmp_path: Path) -> None:
+    """Load existing xlsx, ws.add_chart(BarChart()), save, reload,
+    verify chart present."""
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src)
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = BarChart()
+    chart.title = "From-modify"
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
+    assert chart_files, f"high-level chart not emitted; entries={entries}"
+    drawing_files = [
+        e for e in entries
+        if re.match(r"^xl/drawings/drawing\d+\.xml$", e)
+    ]
+    assert drawing_files, f"no drawing part emitted; entries={entries}"
+    # openpyxl must accept the resulting file.
+    op = openpyxl.load_workbook(dst, data_only=False)
+    assert len(op["Data"]._charts) >= 1
+
+
+def test_modify_mode_add_line_chart_high_level(tmp_path: Path) -> None:
+    """Same path, with LineChart instead of BarChart."""
+    from wolfxl.chart import LineChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src)
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = LineChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
+    assert chart_files, f"line chart not emitted; entries={entries}"
+    op = openpyxl.load_workbook(dst, data_only=False)
+    assert len(op["Data"]._charts) >= 1
+
+
+def test_modify_mode_add_chart_with_existing_drawing(tmp_path: Path) -> None:
+    """Sheet has an image, add a high-level chart, both survive
+    (drawing SAX-merge)."""
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_with_image_fixture(src)
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
+    drawing_files = [
+        e for e in entries
+        if re.match(r"^xl/drawings/drawing\d+\.xml$", e)
+    ]
+    assert len(chart_files) == 1, chart_files
+    # Drawing should be SAX-merged (still 1 drawing part).
+    assert len(drawing_files) == 1, drawing_files
+    # Original image media must still be present.
+    assert any(e.startswith("xl/media/image") for e in entries), entries
+    drawing_body = _zip_read(dst, drawing_files[0]).decode()
+    assert "<pic" in drawing_body or "<xdr:pic" in drawing_body, (
+        f"original image must survive; got {drawing_body[:600]}"
+    )
+    assert "graphicFrame" in drawing_body, (
+        f"chart frame must be appended; got {drawing_body[:600]}"
+    )
+
+
+def test_modify_mode_add_chart_then_copy_worksheet_deep_clones(
+    tmp_path: Path,
+) -> None:
+    """RFC-035 §10 composition: add a high-level chart in modify mode
+    AND copy the same sheet in the SAME save. Both the new chart and
+    the copy's deep-cloned chart must land cleanly."""
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src, sheet_title="Data")
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    # And copy the worksheet in the same save.
+    wb.copy_worksheet(ws)
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
+    # Source had no charts but we add 1 high-level then copy → the
+    # high-level chart goes onto the source, and the copy deep-clones
+    # whatever charts are on the source. Depending on flush ordering
+    # we expect at least 1; integrator verifies the exact count
+    # post-merge.
+    assert chart_files, f"no chart emitted; entries={entries}"
+
+
+def test_modify_mode_add_3d_chart_works(tmp_path: Path) -> None:
+    """End-to-end via the bridge with a 3D chart family (Pod-β′
+    BarChart3D). Verifies the bridge is chart-kind-agnostic."""
+    pytest.importorskip("wolfxl.chart")
+    from wolfxl.chart import BarChart3D, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src)
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    try:
+        chart = BarChart3D()
+    except NotImplementedError:
+        pytest.skip("BarChart3D not yet exposed (Pod-β′ not merged)")
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
+    assert chart_files, f"3D chart not emitted; entries={entries}"
+
+
+def test_modify_mode_high_level_no_longer_warns(tmp_path: Path) -> None:
+    """Sprint Μ-prime: the v1.6.0 'warn-and-drop' path is gone — adding
+    a high-level chart in modify mode should NOT emit a RuntimeWarning."""
+    import warnings as _warnings
+
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src)
+    wb = load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "D2")
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        wb.save(dst)
+    relevant = [
+        w for w in caught
+        if issubclass(w.category, RuntimeWarning)
+        and "high-level Worksheet.add_chart" in str(w.message)
+    ]
+    assert not relevant, (
+        f"v1.6.0 warn-and-drop path should be gone; got {[str(w.message) for w in relevant]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sprint Μ-prime Pod-γ′ — bytes-level escape hatch regression.
+#
+# The high-level bridge must NOT break the v1.6.0
+# Workbook.add_chart_modify_mode(sheet, chart_xml: bytes, anchor, ...)
+# escape hatch; both code paths drain in the same flush call.
+# ---------------------------------------------------------------------------
+
+
+def test_bytes_escape_hatch_still_works_after_high_level_bridge(
+    tmp_path: Path,
+) -> None:
+    """Use both pathways in the same save — bytes escape hatch and
+    high-level Worksheet.add_chart — verify both charts land."""
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_data_fixture(src)
+    wb = load_workbook(src, modify=True)
+    # Path A: bytes escape hatch.
+    wb.add_chart_modify_mode("Data", _bar_chart_xml("Data"), "D2")
+    # Path B: high-level bridge.
+    ws = wb["Data"]
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=False,
+    )
+    ws.add_chart(chart, "L2")
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    chart_files = sorted(
+        e for e in entries if e.startswith("xl/charts/chart")
+    )
+    assert len(chart_files) == 2, (
+        f"expected 2 chart parts (escape hatch + bridge); got {chart_files}"
+    )
