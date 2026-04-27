@@ -582,6 +582,45 @@ pub fn plan_sheet_copy(
                 );
                 rid_remap.insert(old_rid, new_rid.0);
             }
+            // ------ Slicer presentations (Sprint Ο Pod 3.5 / RFC-061 §6) ------
+            //
+            // Deep-clone strategy:
+            //   * Allocate a fresh `slicer{N}.xml` suffix (the
+            //     destination sheet must not share the source sheet's
+            //     slicer presentation file, since each presentation
+            //     is anchored to one sheet).
+            //   * Bytes-copy the source slicer XML verbatim. The
+            //     `cache="..."` attribute references the slicer-cache
+            //     by name, NOT by rId, so the cache is automatically
+            //     shared without any rewrite.
+            //   * Add a content-type override.
+            //   * Emit a sheet-rel of type SLICER pointing at the new
+            //     slicer{N}.xml part.
+            //
+            // The slicerCache itself is NOT deep-cloned (workbook-
+            // scope per RFC-061 §6: many slicer presentations can
+            // reference one cache).
+            t if t == wolfxl_pivot::rt::SLICER => {
+                let resolved = resolve_relative(
+                    parent_dir(&inputs.src_sheet_path),
+                    &source_rel.target,
+                );
+                let new_n = inputs.allocator.alloc_slicer();
+                let new_part_path = format!("xl/slicers/slicer{new_n}.xml");
+                let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
+                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
+                content_type_overrides_to_add.push((
+                    format!("/{new_part_path}"),
+                    wolfxl_pivot::ct::SLICER.to_string(),
+                ));
+                let new_target = format!("../slicers/slicer{new_n}.xml");
+                let new_rid = dest_rels.add(
+                    wolfxl_pivot::rt::SLICER,
+                    &new_target,
+                    TargetMode::Internal,
+                );
+                rid_remap.insert(old_rid, new_rid.0);
+            }
             // ------ Hyperlinks (External: alias by URL) ------
             t if t == rt::HYPERLINK => {
                 let new_rid =
