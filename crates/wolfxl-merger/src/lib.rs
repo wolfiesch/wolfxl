@@ -81,6 +81,9 @@ const REL_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/re
 pub enum SheetBlock {
     /// `<sheetViews>…</sheetViews>` — slot 3 (RFC-055 §3.1).
     SheetViews(Vec<u8>),
+    /// `<sheetFormatPr .../>` — slot 4 (RFC-062 §4).
+    /// Sprint Π Pod Π-α. Replaces any existing `<sheetFormatPr>`.
+    SheetFormatPr(Vec<u8>),
     /// `<sheetProtection .../>` — slot 8 (RFC-055 §3.1).
     SheetProtection(Vec<u8>),
     /// `<autoFilter ref="…">…</autoFilter>` — slot 11 in §18.3.1.99.
@@ -109,6 +112,12 @@ pub enum SheetBlock {
     PageSetup(Vec<u8>),
     /// `<headerFooter>…</headerFooter>` — slot 23 (RFC-055 §3.1).
     HeaderFooter(Vec<u8>),
+    /// `<rowBreaks count="…">…</rowBreaks>` — slot 24 (RFC-062 §4).
+    /// Sprint Π Pod Π-α. Replaces any existing `<rowBreaks>`.
+    RowBreaks(Vec<u8>),
+    /// `<colBreaks count="…">…</colBreaks>` — slot 25 (RFC-062 §4).
+    /// Sprint Π Pod Π-α. Replaces any existing `<colBreaks>`.
+    ColBreaks(Vec<u8>),
     /// `<legacyDrawing r:id="…"/>` — slot 31. Empty-element form is canonical.
     LegacyDrawing(Vec<u8>),
     /// `<tableParts count="…">…</tableParts>` — slot 37.
@@ -121,6 +130,7 @@ impl SheetBlock {
     pub fn ecma_position(&self) -> u32 {
         match self {
             SheetBlock::SheetViews(_) => 3,
+            SheetBlock::SheetFormatPr(_) => 4,
             SheetBlock::SheetProtection(_) => 8,
             SheetBlock::AutoFilter(_) => 11,
             SheetBlock::MergeCells(_) => 15,
@@ -130,6 +140,8 @@ impl SheetBlock {
             SheetBlock::PageMargins(_) => 21,
             SheetBlock::PageSetup(_) => 22,
             SheetBlock::HeaderFooter(_) => 23,
+            SheetBlock::RowBreaks(_) => 24,
+            SheetBlock::ColBreaks(_) => 25,
             SheetBlock::LegacyDrawing(_) => 31,
             SheetBlock::TableParts(_) => 37,
         }
@@ -140,6 +152,7 @@ impl SheetBlock {
     pub fn root_local_name(&self) -> &'static [u8] {
         match self {
             SheetBlock::SheetViews(_) => b"sheetViews",
+            SheetBlock::SheetFormatPr(_) => b"sheetFormatPr",
             SheetBlock::SheetProtection(_) => b"sheetProtection",
             SheetBlock::AutoFilter(_) => b"autoFilter",
             SheetBlock::MergeCells(_) => b"mergeCells",
@@ -149,6 +162,8 @@ impl SheetBlock {
             SheetBlock::PageMargins(_) => b"pageMargins",
             SheetBlock::PageSetup(_) => b"pageSetup",
             SheetBlock::HeaderFooter(_) => b"headerFooter",
+            SheetBlock::RowBreaks(_) => b"rowBreaks",
+            SheetBlock::ColBreaks(_) => b"colBreaks",
             SheetBlock::LegacyDrawing(_) => b"legacyDrawing",
             SheetBlock::TableParts(_) => b"tableParts",
         }
@@ -159,6 +174,7 @@ impl SheetBlock {
     pub fn bytes(&self) -> &[u8] {
         match self {
             SheetBlock::SheetViews(b)
+            | SheetBlock::SheetFormatPr(b)
             | SheetBlock::SheetProtection(b)
             | SheetBlock::AutoFilter(b)
             | SheetBlock::MergeCells(b)
@@ -168,6 +184,8 @@ impl SheetBlock {
             | SheetBlock::PageMargins(b)
             | SheetBlock::PageSetup(b)
             | SheetBlock::HeaderFooter(b)
+            | SheetBlock::RowBreaks(b)
+            | SheetBlock::ColBreaks(b)
             | SheetBlock::LegacyDrawing(b)
             | SheetBlock::TableParts(b) => b,
         }

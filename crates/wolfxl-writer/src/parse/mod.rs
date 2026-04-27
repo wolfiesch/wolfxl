@@ -7,6 +7,8 @@
 //! |--------|-------|
 //! | [`workbook_security`] | `<workbookProtection>` + `<fileSharing>` (RFC-058) |
 //! | [`sheet_setup`] | `<sheetView>` / `<sheetProtection>` / `<pageMargins>` / `<pageSetup>` / `<headerFooter>` (RFC-055) |
+//! | [`page_breaks`] | `<rowBreaks>` / `<colBreaks>` / `<sheetFormatPr>` (RFC-062) |
 
+pub mod page_breaks;
 pub mod sheet_setup;
 pub mod workbook_security;

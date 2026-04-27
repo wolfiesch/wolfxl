@@ -105,6 +105,19 @@ pub struct Worksheet {
 
     /// Sprint Ο Pod 1A.5 (RFC-055) — `<headerFooter>` slot 23.
     pub header_footer: Option<crate::parse::sheet_setup::HeaderFooterSpec>,
+
+    /// Sprint Π Pod Π-α (RFC-062) — `<rowBreaks>` slot 24.
+    /// `None` ⇒ no row-breaks element emitted.
+    pub row_breaks: Option<crate::parse::page_breaks::PageBreakList>,
+
+    /// Sprint Π Pod Π-α (RFC-062) — `<colBreaks>` slot 25.
+    /// `None` ⇒ no col-breaks element emitted.
+    pub col_breaks: Option<crate::parse::page_breaks::PageBreakList>,
+
+    /// Sprint Π Pod Π-α (RFC-062) — `<sheetFormatPr>` slot 4.
+    /// `None` ⇒ the writer keeps the legacy hardcoded
+    /// `<sheetFormatPr defaultRowHeight="15"/>` emit path.
+    pub sheet_format: Option<crate::parse::page_breaks::SheetFormatProperties>,
 }
 
 impl Worksheet {
@@ -131,6 +144,9 @@ impl Worksheet {
             page_margins: None,
             page_setup: None,
             header_footer: None,
+            row_breaks: None,
+            col_breaks: None,
+            sheet_format: None,
         }
     }
 

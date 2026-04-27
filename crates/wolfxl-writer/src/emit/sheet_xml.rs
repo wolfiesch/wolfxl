@@ -84,7 +84,20 @@ pub fn emit(
     }
 
     // Slot 4: <sheetFormatPr>
-    out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
+    //
+    // RFC-062: if the user set a typed `sheet_format` spec on the
+    // Worksheet, prefer it; the legacy hardcoded default is still
+    // emitted otherwise so unmodified sheets keep byte-stable.
+    if let Some(spec) = sheet.sheet_format.as_ref() {
+        let bytes = crate::parse::page_breaks::emit_sheet_format_pr(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        } else {
+            out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
+        }
+    } else {
+        out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
+    }
 
     // Slot 5: <cols> (only if non-empty)
     if !sheet.columns.is_empty() {
@@ -145,6 +158,22 @@ pub fn emit(
     // Slot 23: <headerFooter> — RFC-055 (only emitted when set).
     if let Some(spec) = sheet.header_footer.as_ref() {
         let bytes = crate::parse::sheet_setup::emit_header_footer(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        }
+    }
+
+    // Slot 24: <rowBreaks> — RFC-062 (only emitted when set+non-empty).
+    if let Some(spec) = sheet.row_breaks.as_ref() {
+        let bytes = crate::parse::page_breaks::emit_row_breaks(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        }
+    }
+
+    // Slot 25: <colBreaks> — RFC-062 (only emitted when set+non-empty).
+    if let Some(spec) = sheet.col_breaks.as_ref() {
+        let bytes = crate::parse::page_breaks::emit_col_breaks(spec);
         if !bytes.is_empty() {
             out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
         }
