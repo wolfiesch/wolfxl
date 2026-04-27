@@ -61,6 +61,16 @@ from ._table import (
     PivotTableStyleInfo,
     RowField,
 )
+# RFC-061 sub-features.
+from ._slicer import Slicer, SlicerCache, SlicerItem
+from ._calc import CalculatedField, CalculatedItem
+from ._group import FieldGroup, FieldGroupRange, FieldGroupDate
+from ._styling import (
+    ChartFormat,
+    Format,
+    PivotArea,
+    PivotConditionalFormat,
+)
 
 __all__ = [
     # Cache layer (RFC-047)
@@ -84,4 +94,20 @@ __all__ = [
     "PivotSource",
     # Shared with charts
     "Reference",
+    # RFC-061 — Slicers (§2.1)
+    "Slicer",
+    "SlicerCache",
+    "SlicerItem",
+    # RFC-061 — Calculated fields/items (§2.2 / §2.3)
+    "CalculatedField",
+    "CalculatedItem",
+    # RFC-061 — Group items (§2.4)
+    "FieldGroup",
+    "FieldGroupRange",
+    "FieldGroupDate",
+    # RFC-061 — Pivot styling (§2.5)
+    "Format",
+    "PivotArea",
+    "PivotConditionalFormat",
+    "ChartFormat",
 ]

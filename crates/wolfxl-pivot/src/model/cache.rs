@@ -88,6 +88,69 @@ pub enum CacheValue {
     Error(String),
 }
 
+/// RFC-061 §10.3 — calculated cache field.
+///
+/// Lives at the cache level (sister to `CacheField`); emitted as a
+/// `<calculatedItem>` inside the cache definition's `<calculatedItems>`
+/// block. Excel evaluates the formula on open — wolfxl never
+/// pre-computes calc-field values into records (per RFC-061 §8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalculatedField {
+    pub name: String,
+    pub formula: String,
+    /// Data type hint: "string" | "number" | "boolean" | "date".
+    pub data_type: String,
+}
+
+/// RFC-061 §10.5 — typed cache-side field group (date / range /
+/// discrete grouping).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldGroup {
+    /// 0-based cache field index this group applies to.
+    pub field_index: u32,
+    /// Parent field index (for recursive grouping). v2.0 caps depth
+    /// at 4.
+    pub parent_index: Option<u32>,
+    pub kind: FieldGroupKind,
+    pub date: Option<DateGroup>,
+    pub range: Option<RangeGroup>,
+    /// Synthesized item names (the labels Excel shows in the field
+    /// header for each grouped bucket).
+    pub items: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldGroupKind {
+    Date,
+    Range,
+    Discrete,
+}
+
+impl FieldGroupKind {
+    pub fn xml_value(&self) -> &'static str {
+        match self {
+            FieldGroupKind::Date => "date",
+            FieldGroupKind::Range => "range",
+            FieldGroupKind::Discrete => "discrete",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DateGroup {
+    /// One of "years"|"quarters"|"months"|"days"|"hours"|"minutes"|"seconds".
+    pub group_by: String,
+    pub start_date: String,
+    pub end_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RangeGroup {
+    pub start: f64,
+    pub end: f64,
+    pub interval: f64,
+}
+
 /// Top-level pivot cache. Holds both the definition (fields) and the
 /// records snapshot.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +174,10 @@ pub struct PivotCache {
     /// allocates the part-id; emit uses this as the `<r:id>` target
     /// resolution for the cache → records rel.
     pub records_part_path: Option<String>,
+    /// RFC-061 §2.2 — calculated cache fields (cache-scoped).
+    pub calculated_fields: Vec<CalculatedField>,
+    /// RFC-061 §2.4 — cache-side field groups (date / range).
+    pub field_groups: Vec<FieldGroup>,
 }
 
 impl PivotCache {
@@ -127,6 +194,8 @@ impl PivotCache {
             min_refreshable_version: DEFAULT_MIN_REFRESHABLE_VERSION,
             refreshed_by: "wolfxl".to_string(),
             records_part_path: None,
+            calculated_fields: Vec::new(),
+            field_groups: Vec::new(),
         }
     }
 

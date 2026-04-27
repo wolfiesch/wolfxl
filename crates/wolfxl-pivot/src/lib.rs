@@ -27,6 +27,8 @@ pub use model::cache::{
     CacheField, CacheValue, DataType, PivotCache, SharedItems, WorksheetSource,
 };
 pub use model::records::{CacheRecord, RecordCell};
+pub use model::slicer::Slicer;
+pub use model::slicer_cache::{SlicerCache, SlicerItem, SlicerSortOrder};
 pub use model::table::{
     AxisItem, AxisItemType, AxisType, DataField, DataFunction, Location, PageField,
     PivotField, PivotItem, PivotItemType, PivotSource, PivotTable, PivotTableStyleInfo,
@@ -57,6 +59,12 @@ pub mod ct {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml";
     pub const PIVOT_TABLE: &str =
         "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml";
+    /// RFC-061 — slicer cache part content-type.
+    pub const SLICER_CACHE: &str =
+        "application/vnd.ms-excel.slicerCache+xml";
+    /// RFC-061 — slicer presentation part content-type.
+    pub const SLICER: &str =
+        "application/vnd.ms-excel.slicer+xml";
 }
 
 /// Relationship-type URIs that the workbook / cache / sheet rels graphs
@@ -68,4 +76,20 @@ pub mod ct {
 pub mod rt {
     pub const PIVOT_CACHE_RECORDS: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords";
+    /// RFC-061 — slicer cache → pivot cache rel type.
+    pub const SLICER_CACHE: &str =
+        "http://schemas.microsoft.com/office/2007/relationships/slicerCache";
+    /// RFC-061 — sheet → slicer presentation rel type.
+    pub const SLICER: &str =
+        "http://schemas.microsoft.com/office/2007/relationships/slicer";
+}
+
+/// `<extLst>` extension URIs (RFC-061 §3.1).
+pub mod ext_uri {
+    /// Workbook-level `<x14:slicerCaches>` extension URI.
+    pub const WORKBOOK_SLICER_CACHES: &str =
+        "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}";
+    /// Sheet-level `<x14:slicerList>` extension URI.
+    pub const SHEET_SLICER_LIST: &str =
+        "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}";
 }

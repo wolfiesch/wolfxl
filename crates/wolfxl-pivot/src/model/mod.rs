@@ -6,3 +6,6 @@
 pub mod cache;
 pub mod records;
 pub mod table;
+// RFC-061 sub-features.
+pub mod slicer;
+pub mod slicer_cache;

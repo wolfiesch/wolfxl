@@ -44,12 +44,15 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use wolfxl_pivot::model::cache::{
-    CacheField, CacheValue, PivotCache, SharedItems, WorksheetSource,
+    CacheField, CacheValue, CalculatedField, DateGroup, FieldGroup, FieldGroupKind, PivotCache,
+    RangeGroup, SharedItems, WorksheetSource,
 };
 use wolfxl_pivot::model::records::{CacheRecord, RecordCell};
+use wolfxl_pivot::model::slicer::Slicer;
+use wolfxl_pivot::model::slicer_cache::{SlicerCache, SlicerItem, SlicerSortOrder};
 use wolfxl_pivot::model::table::{
-    AxisItem, AxisType, DataField, Location, PageField, PivotField, PivotItem, PivotTable,
-    PivotTableStyleInfo,
+    AxisItem, AxisType, CalculatedItem, DataField, Format, Location, PageField, PivotArea,
+    PivotConditionalFormat, PivotField, PivotItem, PivotTable, PivotTableStyleInfo,
 };
 use wolfxl_pivot::parse as pp;
 
@@ -128,8 +131,109 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
     pc.min_refreshable_version = extract_u32(d, "min_refreshable_version", 3)? as u8;
     pc.refreshed_by = extract_str(d, "refreshed_by", "wolfxl")?;
     pc.records_part_path = extract_opt_str(d, "records_part_path")?;
+
+    // RFC-061 §10.3 — calculated fields (cache-scoped).
+    if let Some(v) = d.get_item("calculated_fields")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("calculated_fields[*] must be dict"))?;
+                out.push(parse_calculated_field(pd)?);
+            }
+            pc.calculated_fields = out;
+        }
+    }
+
+    // RFC-061 §10.5 — field groups.
+    if let Some(v) = d.get_item("field_groups")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("field_groups[*] must be dict"))?;
+                out.push(parse_field_group(pd)?);
+            }
+            pc.field_groups = out;
+        }
+    }
+
     pc.validate().map_err(PyValueError::new_err)?;
     Ok(pc)
+}
+
+fn parse_calculated_field(d: &Bound<'_, PyDict>) -> PyResult<CalculatedField> {
+    Ok(CalculatedField {
+        name: extract_str(d, "name", "")?,
+        formula: extract_str(d, "formula", "")?,
+        data_type: extract_str(d, "data_type", "number")?,
+    })
+}
+
+fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
+    let kind_str = extract_str(d, "kind", "discrete")?;
+    let kind = match kind_str.as_str() {
+        "date" => FieldGroupKind::Date,
+        "range" => FieldGroupKind::Range,
+        "discrete" => FieldGroupKind::Discrete,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown field_group kind {other:?}"
+            )));
+        }
+    };
+    let date = match d.get_item("date")? {
+        Some(v) if !v.is_none() => {
+            let pd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("date must be dict"))?;
+            Some(DateGroup {
+                group_by: extract_str(pd, "group_by", "")?,
+                start_date: extract_str(pd, "start_date", "")?,
+                end_date: extract_str(pd, "end_date", "")?,
+            })
+        }
+        _ => None,
+    };
+    let range = match d.get_item("range")? {
+        Some(v) if !v.is_none() => {
+            let pd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("range must be dict"))?;
+            Some(RangeGroup {
+                start: extract_opt_f64(pd, "start")?.unwrap_or(0.0),
+                end: extract_opt_f64(pd, "end")?.unwrap_or(0.0),
+                interval: extract_opt_f64(pd, "interval")?.unwrap_or(1.0),
+            })
+        }
+        _ => None,
+    };
+    let items: Vec<String> = match d.get_item("items")? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("items[*] must be dict"))?;
+                out.push(extract_str(pd, "name", "")?);
+            }
+            out
+        }
+        _ => Vec::new(),
+    };
+    Ok(FieldGroup {
+        field_index: extract_u32(d, "field_index", 0)?,
+        parent_index: extract_opt_u32(d, "parent_index")?,
+        kind,
+        date,
+        range,
+        items,
+    })
 }
 
 /// Parse a §10.6 records dict, mutating the supplied `PivotCache`'s
@@ -239,6 +343,12 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
         _ => None,
     };
 
+    // RFC-061 Sub-feature 3.3 — calculated items.
+    let calculated_items = parse_calculated_items_list(d, "calculated_items")?;
+    // RFC-061 Sub-feature 3.5 — formats + conditional formats.
+    let formats = parse_formats_list(d, "formats")?;
+    let conditional_formats = parse_pivot_cfs_list(d, "conditional_formats")?;
+
     let pt = PivotTable {
         name,
         cache_id,
@@ -269,9 +379,129 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
         created_version: extract_u32(d, "created_version", 6)? as u8,
         updated_version: extract_u32(d, "updated_version", 6)? as u8,
         min_refreshable_version: extract_u32(d, "min_refreshable_version", 3)? as u8,
+        calculated_items,
+        formats,
+        conditional_formats,
     };
     pt.validate().map_err(PyValueError::new_err)?;
     Ok(pt)
+}
+
+fn parse_calculated_items_list(
+    d: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Vec<CalculatedItem>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv.downcast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err(format!("{key}[*] must be dict"))
+                })?;
+                out.push(CalculatedItem {
+                    field_name: extract_str(pd, "field_name", "")?,
+                    item_name: extract_str(pd, "item_name", "")?,
+                    formula: extract_str(pd, "formula", "")?,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn parse_pivot_area(d: &Bound<'_, PyDict>) -> PyResult<PivotArea> {
+    Ok(PivotArea {
+        field: extract_opt_u32(d, "field")?,
+        area_type: extract_str(d, "type", "data")?,
+        data_only: extract_bool(d, "data_only", true)?,
+        label_only: extract_bool(d, "label_only", false)?,
+        grand_row: extract_bool(d, "grand_row", false)?,
+        grand_col: extract_bool(d, "grand_col", false)?,
+        cache_index: extract_opt_u32(d, "cache_index")?,
+        axis: extract_opt_str(d, "axis")?,
+        field_position: extract_opt_u32(d, "field_position")?,
+    })
+}
+
+fn parse_formats_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Format>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
+                let pa_d = pd
+                    .get_item("pivot_area")?
+                    .ok_or_else(|| PyValueError::new_err("format missing 'pivot_area'"))?;
+                let pa = parse_pivot_area(
+                    pa_d.downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("pivot_area must be dict"))?,
+                )?;
+                let dxf_id: i32 = match pd.get_item("dxf_id")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => -1,
+                };
+                out.push(Format {
+                    action: extract_str(pd, "action", "formatting")?,
+                    dxf_id,
+                    pivot_area: pa,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn parse_pivot_cfs_list(
+    d: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Vec<PivotConditionalFormat>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
+                let areas_d = pd
+                    .get_item("pivot_areas")?
+                    .ok_or_else(|| {
+                        PyValueError::new_err("conditional_format missing 'pivot_areas'")
+                    })?;
+                let areas_list: Vec<Bound<'_, PyAny>> = areas_d.extract()?;
+                let mut areas = Vec::with_capacity(areas_list.len());
+                for av in &areas_list {
+                    let ad = av
+                        .downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("pivot_areas[*] must be dict"))?;
+                    areas.push(parse_pivot_area(ad)?);
+                }
+                let priority: i32 = match pd.get_item("priority")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => 1,
+                };
+                let dxf_id: i32 = match pd.get_item("dxf_id")? {
+                    Some(v) if !v.is_none() => v.extract::<i32>()?,
+                    _ => -1,
+                };
+                out.push(PivotConditionalFormat {
+                    priority,
+                    scope: extract_str(pd, "scope", "data")?,
+                    cf_type: extract_str(pd, "type", "all")?,
+                    pivot_areas: areas,
+                    dxf_id,
+                });
+            }
+            Ok(out)
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +869,145 @@ pub fn serialize_pivot_table_dict(
     let cache = parse_pivot_cache_dict(cache_d)?;
     let table = parse_pivot_table_dict(table_d)?;
     Ok(wolfxl_pivot::emit::pivot_table_xml(&table, &cache))
+}
+
+// ---------------------------------------------------------------------------
+// RFC-061 Sub-feature 3.1 — slicer cache + slicer presentation parsers + serializers
+// ---------------------------------------------------------------------------
+
+fn parse_sort_order(s: &str) -> PyResult<SlicerSortOrder> {
+    match s {
+        "ascending" => Ok(SlicerSortOrder::Ascending),
+        "descending" => Ok(SlicerSortOrder::Descending),
+        "none" => Ok(SlicerSortOrder::None),
+        other => Err(PyValueError::new_err(format!(
+            "unknown slicer sort_order {other:?}"
+        ))),
+    }
+}
+
+fn parse_slicer_item(d: &Bound<'_, PyDict>) -> PyResult<SlicerItem> {
+    Ok(SlicerItem {
+        name: extract_str(d, "name", "")?,
+        hidden: extract_bool(d, "hidden", false)?,
+        no_data: extract_bool(d, "no_data", false)?,
+    })
+}
+
+pub fn parse_slicer_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<SlicerCache> {
+    let name = extract_str(d, "name", "")?;
+    let source_pivot_cache_id = extract_u32(d, "source_pivot_cache_id", 0)?;
+    let source_field_index = extract_u32(d, "source_field_index", 0)?;
+    let sort_str = extract_str(d, "sort_order", "ascending")?;
+    let sort_order = parse_sort_order(&sort_str)?;
+    let custom_list_sort = extract_bool(d, "custom_list_sort", false)?;
+    let hide_items_with_no_data = extract_bool(d, "hide_items_with_no_data", false)?;
+    let show_missing = extract_bool(d, "show_missing", true)?;
+
+    let items: Vec<SlicerItem> = match d.get_item("items")? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv.downcast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err("slicer_cache.items[*] must be dict")
+                })?;
+                out.push(parse_slicer_item(pd)?);
+            }
+            out
+        }
+        _ => Vec::new(),
+    };
+
+    let sc = SlicerCache {
+        name,
+        source_pivot_cache_id,
+        source_field_index,
+        sort_order,
+        custom_list_sort,
+        hide_items_with_no_data,
+        show_missing,
+        items,
+    };
+    sc.validate().map_err(PyValueError::new_err)?;
+    Ok(sc)
+}
+
+pub fn parse_slicer_dict(d: &Bound<'_, PyDict>) -> PyResult<Slicer> {
+    let style = extract_opt_str(d, "style")?;
+    let s = Slicer {
+        name: extract_str(d, "name", "")?,
+        cache_name: extract_str(d, "cache_name", "")?,
+        caption: extract_str(d, "caption", "")?,
+        row_height: extract_u32(d, "row_height", 204)?,
+        column_count: extract_u32(d, "column_count", 1)?,
+        show_caption: extract_bool(d, "show_caption", true)?,
+        style,
+        locked: extract_bool(d, "locked", true)?,
+        anchor: extract_str(d, "anchor", "")?,
+    };
+    s.validate().map_err(PyValueError::new_err)?;
+    Ok(s)
+}
+
+/// RFC-061 §10.7 — serialize a slicer-cache dict to OOXML bytes.
+#[pyfunction]
+pub fn serialize_slicer_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<Vec<u8>> {
+    let sc = parse_slicer_cache_dict(d)?;
+    Ok(wolfxl_pivot::emit::slicer_cache_xml(&sc))
+}
+
+/// RFC-061 §10.7 — serialize a slicer presentation dict to OOXML bytes.
+/// Takes a list of slicer dicts (one sheet's slicers); returns the
+/// merged `xl/slicers/slicer{N}.xml` body.
+#[pyfunction]
+pub fn serialize_slicer_dict(slicers_list: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    let list: Vec<Bound<'_, PyAny>> = slicers_list.extract()?;
+    let mut slicers: Vec<Slicer> = Vec::with_capacity(list.len());
+    for v in &list {
+        let pd = v
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("slicer dict expected"))?;
+        slicers.push(parse_slicer_dict(pd)?);
+    }
+    Ok(wolfxl_pivot::emit::slicer_xml(&slicers))
+}
+
+// ---------------------------------------------------------------------------
+// Queued payloads for the patcher's Phase 2.5p drain.
+// ---------------------------------------------------------------------------
+
+/// One slicer cache queued for emit. Mirrors `QueuedPivotCacheAdd`.
+#[derive(Debug, Clone)]
+pub struct QueuedSlicerCacheAdd {
+    /// `xl/slicerCaches/slicerCache{N}.xml` body.
+    pub cache_xml: Vec<u8>,
+    /// 0-based slicer-cache id allocated when queued.
+    pub slicer_cache_id: u32,
+    /// Slicer-cache name used for both the rel target and the
+    /// workbook-level `<x14:slicerCaches>` extension entries.
+    pub name: String,
+    /// 0-based source pivot-cache id. The patcher uses this to
+    /// resolve the pivot-cache part path for the slicer cache's
+    /// rels file.
+    pub source_pivot_cache_id: u32,
+}
+
+/// One slicer presentation queued for a sheet.
+#[derive(Debug, Clone)]
+pub struct QueuedSlicerAdd {
+    /// Owner sheet title.
+    pub sheet: String,
+    /// `xl/slicers/slicer{N}.xml` body — pre-serialised single-slicer
+    /// presentation. Multiple slicers on one sheet are serialised
+    /// inside ONE presentation file by the Python coordinator
+    /// (which calls `serialize_slicer_dict` with a list).
+    pub slicer_xml: Vec<u8>,
+    /// One slicer-cache_id per slicer in the presentation file.
+    /// Used to wire rels back to the cache.
+    pub slicer_cache_ids: Vec<u32>,
+    /// Slicer-cache names referenced (parallel to `slicer_cache_ids`).
+    pub cache_names: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
