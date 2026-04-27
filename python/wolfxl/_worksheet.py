@@ -399,6 +399,8 @@ class Worksheet:
         "_pending_charts",
         # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue.
         "_pending_pivot_tables",
+        # RFC-061 Sub-feature 3.1 — pending slicer presentations.
+        "_pending_slicers",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -458,6 +460,8 @@ class Worksheet:
         # only — write-mode pivot tables are not yet supported and
         # should fail loud at ``add_pivot_table`` call site).
         self._pending_pivot_tables: list[Any] = []
+        # RFC-061 Sub-feature 3.1 — pending slicer presentations.
+        self._pending_slicers: list[Any] = []
 
     @property
     def title(self) -> str:
@@ -1557,6 +1561,51 @@ class Worksheet:
         if hasattr(pivot_table, "_compute_layout"):
             pivot_table._compute_layout()
         self._pending_pivot_tables.append(pivot_table)
+
+    def add_slicer(self, slicer: Any, anchor: str) -> None:
+        """RFC-061 §2.1 — anchor a slicer presentation on this sheet.
+
+        The slicer's ``cache`` MUST already be registered on the
+        workbook via :meth:`Workbook.add_slicer_cache`. The slicer
+        is queued and drained at ``Workbook.save()`` time via
+        ``_workbook._flush_pending_slicers_to_patcher``.
+
+        Args:
+            slicer: A :class:`wolfxl.pivot.Slicer` instance.
+            anchor: A1-style anchor cell (top-left of the slicer's
+                graphic frame), e.g. ``"H2"``.
+
+        Raises:
+            TypeError: If ``slicer`` is not a Slicer.
+            ValueError: If the slicer's cache has not been registered
+                or ``anchor`` is not a valid A1 string.
+            RuntimeError: If the workbook is not in modify mode.
+        """
+        from wolfxl.pivot import Slicer as _Slicer
+
+        if not isinstance(slicer, _Slicer):
+            raise TypeError(
+                f"add_slicer expected wolfxl.pivot.Slicer, got "
+                f"{type(slicer).__name__}"
+            )
+        if self._workbook._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError(
+                "add_slicer requires modify mode — open the workbook "
+                "with load_workbook(..., modify=True)."
+            )
+        if slicer.cache._slicer_cache_id is None:  # noqa: SLF001
+            raise ValueError(
+                "Slicer.cache has not been registered with the "
+                "workbook yet. Call Workbook.add_slicer_cache(cache) "
+                "before Worksheet.add_slicer(slicer, anchor)."
+            )
+        if not isinstance(anchor, str) or not anchor:
+            raise ValueError(
+                "Worksheet.add_slicer: anchor must be a non-empty A1 string"
+            )
+        self._validate_a1_anchor(anchor)
+        slicer.anchor = anchor
+        self._pending_slicers.append(slicer)
 
     @staticmethod
     def _validate_a1_anchor(anchor: str) -> None:

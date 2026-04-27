@@ -11,9 +11,14 @@
 pub mod cache;
 pub mod records;
 pub mod table;
+// RFC-061 sub-features.
+pub mod slicer;
+pub mod slicer_cache;
 
 pub use cache::pivot_cache_definition_xml;
 pub use records::pivot_cache_records_xml;
+pub use slicer::{drawing_slicer_ext_xml, sheet_slicer_list_inner_xml, slicer_xml};
+pub use slicer_cache::{slicer_cache_xml, workbook_slicer_caches_inner_xml};
 pub use table::pivot_table_xml;
 
 // ---------------------------------------------------------------------------

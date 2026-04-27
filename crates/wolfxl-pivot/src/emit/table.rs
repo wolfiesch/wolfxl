@@ -6,8 +6,8 @@
 use super::{push_attr, push_attr_if, xml_decl};
 use crate::model::cache::PivotCache;
 use crate::model::table::{
-    AxisItem, DataField, Location, PageField, PivotField, PivotItem, PivotTable,
-    PivotTableStyleInfo,
+    AxisItem, CalculatedItem, DataField, Format, Location, PageField, PivotArea, PivotField,
+    PivotItem, PivotConditionalFormat, PivotTable, PivotTableStyleInfo,
 };
 
 /// Emit pivotTable XML. The `cache` is needed to resolve cache-field
@@ -118,12 +118,107 @@ pub fn pivot_table_xml(pt: &PivotTable, cache: &PivotCache) -> Vec<u8> {
     if !pt.data_fields.is_empty() {
         emit_data_fields(&mut out, &pt.data_fields);
     }
+    if !pt.formats.is_empty() {
+        emit_formats(&mut out, &pt.formats);
+    }
+    if !pt.conditional_formats.is_empty() {
+        emit_conditional_formats(&mut out, &pt.conditional_formats);
+    }
     if let Some(si) = &pt.style_info {
         emit_style_info(&mut out, si);
+    }
+    if !pt.calculated_items.is_empty() {
+        emit_calculated_items(&mut out, &pt.calculated_items);
     }
 
     out.push_str("</pivotTableDefinition>");
     out.into_bytes()
+}
+
+fn emit_calculated_items(out: &mut String, items: &[CalculatedItem]) {
+    // Pivot table XML carries calc items as a separate group; the
+    // `<calculatedItems>` block lives at the same level as
+    // `<pivotTableStyleInfo>` etc. Item-side schema mirrors the
+    // calc-fields schema in the cache.
+    out.push_str("<calculatedItems");
+    push_attr(out, "count", &items.len().to_string());
+    out.push('>');
+    for ci in items {
+        out.push_str("<calculatedItem");
+        push_attr(out, "name", &ci.item_name);
+        push_attr(out, "formula", &ci.formula);
+        out.push_str("><pivotArea");
+        push_attr(out, "type", "data");
+        push_attr(out, "outline", "0");
+        push_attr(out, "fieldPosition", "0");
+        out.push_str("/></calculatedItem>");
+    }
+    out.push_str("</calculatedItems>");
+}
+
+fn emit_formats(out: &mut String, formats: &[Format]) {
+    out.push_str("<formats");
+    push_attr(out, "count", &formats.len().to_string());
+    out.push('>');
+    for f in formats {
+        out.push_str("<format");
+        push_attr(out, "dxfId", &f.dxf_id.to_string());
+        push_attr(out, "action", &f.action);
+        out.push('>');
+        emit_pivot_area(out, &f.pivot_area);
+        out.push_str("</format>");
+    }
+    out.push_str("</formats>");
+}
+
+fn emit_pivot_area(out: &mut String, a: &PivotArea) {
+    out.push_str("<pivotArea");
+    if let Some(f) = a.field {
+        push_attr(out, "field", &f.to_string());
+    }
+    push_attr(out, "type", &a.area_type);
+    push_attr_if(out, a.data_only, "dataOnly", "1");
+    push_attr_if(out, a.label_only, "labelOnly", "1");
+    push_attr_if(out, a.grand_row, "grandRow", "1");
+    push_attr_if(out, a.grand_col, "grandCol", "1");
+    if let Some(ci) = a.cache_index {
+        push_attr(out, "cacheIndex", &ci.to_string());
+    }
+    if let Some(ax) = &a.axis {
+        push_attr(out, "axis", ax);
+    }
+    if let Some(fp) = a.field_position {
+        push_attr(out, "fieldPosition", &fp.to_string());
+    }
+    out.push_str("/>");
+}
+
+fn emit_conditional_formats(out: &mut String, cfs: &[PivotConditionalFormat]) {
+    out.push_str("<conditionalFormats");
+    push_attr(out, "count", &cfs.len().to_string());
+    out.push('>');
+    for cf in cfs {
+        out.push_str("<conditionalFormat");
+        push_attr(out, "scope", &cf.scope);
+        push_attr(out, "type", &cf.cf_type);
+        push_attr(out, "priority", &cf.priority.to_string());
+        out.push('>');
+        out.push_str("<pivotAreas");
+        push_attr(out, "count", &cf.pivot_areas.len().to_string());
+        out.push('>');
+        for pa in &cf.pivot_areas {
+            emit_pivot_area(out, pa);
+        }
+        out.push_str("</pivotAreas>");
+        // Reference into workbook-scoped <dxfs> via dxfId (when set).
+        if cf.dxf_id >= 0 {
+            out.push_str("<extLst><ext uri=\"{B025F937-C7B1-47D3-B67F-A62EFF666E3E}\"><x14:dxfId xmlns:x14=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\">");
+            out.push_str(&cf.dxf_id.to_string());
+            out.push_str("</x14:dxfId></ext></extLst>");
+        }
+        out.push_str("</conditionalFormat>");
+    }
+    out.push_str("</conditionalFormats>");
 }
 
 fn emit_location(out: &mut String, loc: &Location) {
@@ -517,6 +612,9 @@ mod tests {
             created_version: 6,
             updated_version: 6,
             min_refreshable_version: 3,
+            calculated_items: vec![],
+            formats: vec![],
+            conditional_formats: vec![],
         }
     }
 

@@ -5,7 +5,8 @@
 
 use super::{esc_attr, fmt_num, push_attr, push_attr_if, xml_decl};
 use crate::model::cache::{
-    CacheField, CacheValue, PivotCache, SharedItems, WorksheetSource,
+    CacheField, CacheValue, CalculatedField, DateGroup, FieldGroup, FieldGroupKind,
+    PivotCache, RangeGroup, SharedItems, WorksheetSource,
 };
 
 /// Emit the pivotCacheDefinition XML. The `r:id` for the records part
@@ -40,7 +41,15 @@ pub fn pivot_cache_definition_xml(pc: &PivotCache, records_rid: Option<&str>) ->
     out.push('>');
 
     emit_cache_source(&mut out, &pc.source);
-    emit_cache_fields(&mut out, &pc.fields);
+    emit_cache_fields(&mut out, &pc.fields, &pc.field_groups);
+
+    // RFC-061 §3.2 — `<calculatedItems>` block carries calc-field
+    // formulas inside the cache definition. The `fld` attribute
+    // points at the index into `<cacheFields>` where the calc field
+    // was inserted (calc fields tail the regular fields).
+    if !pc.calculated_fields.is_empty() {
+        emit_calculated_fields(&mut out, &pc.calculated_fields, pc.fields.len() as u32);
+    }
 
     out.push_str("</pivotCacheDefinition>");
     out.into_bytes()
@@ -62,23 +71,101 @@ fn emit_cache_source(out: &mut String, src: &WorksheetSource) {
     out.push_str("</cacheSource>");
 }
 
-fn emit_cache_fields(out: &mut String, fields: &[CacheField]) {
+fn emit_cache_fields(out: &mut String, fields: &[CacheField], groups: &[FieldGroup]) {
     out.push_str("<cacheFields");
     push_attr(out, "count", &fields.len().to_string());
     out.push('>');
-    for f in fields {
-        emit_cache_field(out, f);
+    for (idx, f) in fields.iter().enumerate() {
+        // Collect ALL groups keyed off this cache field index. For
+        // recursive grouping (year → quarter → month) Excel emits
+        // multiple <fieldGroup> elements nested in the same
+        // cacheField, with `par=` pointing at the previous one.
+        let field_groups: Vec<&FieldGroup> = groups
+            .iter()
+            .filter(|g| g.field_index == idx as u32)
+            .collect();
+        emit_cache_field(out, f, &field_groups);
     }
     out.push_str("</cacheFields>");
 }
 
-fn emit_cache_field(out: &mut String, f: &CacheField) {
+fn emit_cache_field(out: &mut String, f: &CacheField, groups: &[&FieldGroup]) {
     out.push_str("<cacheField");
     push_attr(out, "name", &f.name);
     push_attr(out, "numFmtId", &f.num_fmt_id.to_string());
     out.push('>');
     emit_shared_items(out, &f.shared_items);
+    for g in groups {
+        emit_field_group(out, g);
+    }
     out.push_str("</cacheField>");
+}
+
+fn emit_field_group(out: &mut String, g: &FieldGroup) {
+    out.push_str("<fieldGroup");
+    if let Some(p) = g.parent_index {
+        push_attr(out, "par", &p.to_string());
+    }
+    push_attr(out, "base", &g.field_index.to_string());
+    out.push('>');
+    match g.kind {
+        FieldGroupKind::Date => {
+            if let Some(d) = &g.date {
+                emit_date_range_pr(out, d);
+            }
+        }
+        FieldGroupKind::Range => {
+            if let Some(r) = &g.range {
+                emit_numeric_range_pr(out, r);
+            }
+        }
+        FieldGroupKind::Discrete => { /* no rangePr */ }
+    }
+    if !g.items.is_empty() {
+        out.push_str("<groupItems");
+        push_attr(out, "count", &g.items.len().to_string());
+        out.push('>');
+        for name in &g.items {
+            out.push_str("<s");
+            out.push_str(" v=\"");
+            esc_attr(name, out);
+            out.push_str("\"/>");
+        }
+        out.push_str("</groupItems>");
+    }
+    out.push_str("</fieldGroup>");
+}
+
+fn emit_date_range_pr(out: &mut String, d: &DateGroup) {
+    out.push_str("<rangePr");
+    push_attr(out, "groupBy", &d.group_by);
+    push_attr(out, "startDate", &d.start_date);
+    push_attr(out, "endDate", &d.end_date);
+    out.push_str("/>");
+}
+
+fn emit_numeric_range_pr(out: &mut String, r: &RangeGroup) {
+    out.push_str("<rangePr");
+    push_attr(out, "autoStart", "0");
+    push_attr(out, "autoEnd", "0");
+    push_attr(out, "startNum", &fmt_num(r.start));
+    push_attr(out, "endNum", &fmt_num(r.end));
+    push_attr(out, "groupInterval", &fmt_num(r.interval));
+    out.push_str("/>");
+}
+
+fn emit_calculated_fields(out: &mut String, fields: &[CalculatedField], base_offset: u32) {
+    out.push_str("<calculatedItems");
+    push_attr(out, "count", &fields.len().to_string());
+    out.push('>');
+    for (i, cf) in fields.iter().enumerate() {
+        let fld = base_offset + i as u32;
+        out.push_str("<calculatedItem");
+        push_attr(out, "fld", &fld.to_string());
+        push_attr(out, "formula", &cf.formula);
+        out.push_str("/>");
+    }
+    out.push_str("</calculatedItems>");
 }
 
 fn emit_shared_items(out: &mut String, si: &SharedItems) {

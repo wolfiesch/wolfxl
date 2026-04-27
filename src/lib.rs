@@ -79,6 +79,15 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wolfxl::autofilter::evaluate_autofilter,
         m
     )?)?;
+    // Sprint Ο Pod 3 (RFC-061) — slicer serialisers.
+    m.add_function(wrap_pyfunction!(
+        wolfxl::pivot::serialize_slicer_cache_dict,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::pivot::serialize_slicer_dict,
+        m
+    )?)?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;
