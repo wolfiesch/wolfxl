@@ -8,7 +8,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 
 ---
 
-## Status Table (21 RFCs)
+## Status Table (22 RFCs)
 
 | ID | Title | Status | Phase | Estimate | Depends-on | Unblocks |
 |---|---|---|---|---|---|---|
@@ -34,6 +34,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 042 | Read-side parity — password-protected reads (`password=`) | Shipped | 5 (1.3) | M | (msoffcrypto-tool optional dep) | (post-1.3 encrypted writes) |
 | 043 | Read-side parity — `.xlsb` / `.xls` reads (runtime-dispatched calamine backends) | Shipped | 5 (1.4) | L | calamine-styles (xlsx); upstream calamine (xlsb / xls) | (closes Phase 5 — KNOWN_GAPS empty post-1.4) |
 | 044 | Encryption — write-side OOXML encryption (`Workbook.save(password=...)`) | Shipped | 5 (1.5) | M | 042 (msoffcrypto-tool optional dep), 013 | (T3 closure for encrypted xlsx writes) |
+| 045 | Image construction — `wolfxl.drawing.image.Image` (replace stub) | Shipped | 5 (1.5) | L | 010, 013 | (T3 closure for image construction; chart-construction prerequisites) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
