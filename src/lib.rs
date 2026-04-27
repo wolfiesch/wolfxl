@@ -88,6 +88,11 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wolfxl::pivot::serialize_slicer_dict,
         m
     )?)?;
+    // Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format serialiser.
+    m.add_function(wrap_pyfunction!(
+        wolfxl::page_breaks::serialize_page_breaks_dict,
+        m
+    )?)?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;

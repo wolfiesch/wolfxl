@@ -45,6 +45,9 @@ pub mod autofilter_helpers;
 // blocks (sheetView / sheetProtection / pageMargins / pageSetup /
 // headerFooter) into per-sheet `local_blocks`.
 pub mod sheet_setup;
+// Sprint Π Pod Π-α (RFC-062): Phase 2.5r drains queued
+// rowBreaks / colBreaks / sheetFormatPr mutations.
+pub mod page_breaks;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -290,6 +293,17 @@ pub struct XlsxPatcher {
     /// again for the same sheet REPLACES the previous payload
     /// (matches Python `ws.page_setup = ...` semantics).
     queued_sheet_setup: HashMap<String, sheet_setup::QueuedSheetSetup>,
+
+    /// Sprint Π Pod Π-α (RFC-062) — queued page-breaks +
+    /// sheet-format-pr mutations, keyed by sheet title. Drained by
+    /// Phase 2.5r (sequenced AFTER Phase 2.5n sheet-setup, BEFORE
+    /// Phase 2.5p slicers per RFC-062 §6). Each non-empty slot
+    /// (`row_breaks` / `col_breaks` / `sheet_format`) becomes one
+    /// SheetBlock variant; the merger handles ECMA-376 §18.3.1.99
+    /// ordering (slots 4 / 24 / 25). Calling
+    /// `queue_page_breaks_update` REPLACES the previous payload,
+    /// matching Python `ws.row_breaks = ...` semantics.
+    queued_page_breaks: HashMap<String, page_breaks::QueuedPageBreaks>,
 
     /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — pending slicer adds,
     /// in append order. Each entry pairs a slicer-cache + a slicer
@@ -569,6 +583,7 @@ impl XlsxPatcher {
             queued_workbook_security: None,
             queued_autofilters: HashMap::new(),
             queued_sheet_setup: HashMap::new(),
+            queued_page_breaks: HashMap::new(),
             queued_slicers: Vec::new(),
         })
     }
@@ -1057,6 +1072,39 @@ impl XlsxPatcher {
         } else {
             self.queued_sheet_setup
                 .insert(sheet.to_string(), sheet_setup::QueuedSheetSetup { specs });
+        }
+        Ok(())
+    }
+
+    /// Queue a page-breaks + sheet-format update for `sheet`
+    /// (RFC-062 Phase 2.5r).
+    ///
+    /// `payload` is the merged §10 dict shape produced by
+    /// ``Worksheet.to_rust_page_breaks_dict()`` +
+    /// ``Worksheet.to_rust_sheet_format_dict()``:
+    ///
+    /// ```text
+    /// {
+    ///   "row_breaks":   {...} | None,
+    ///   "col_breaks":   {...} | None,
+    ///   "sheet_format": {...} | None,
+    /// }
+    /// ```
+    ///
+    /// Calling this again for the same `sheet` REPLACES the previous
+    /// payload — matches Python `ws.row_breaks = ...` semantics.
+    /// Drained by Phase 2.5r during `do_save`, sequenced AFTER
+    /// sheet-setup (2.5n) and BEFORE slicers (2.5p).
+    fn queue_page_breaks_update(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let queued = page_breaks::parse_page_breaks_payload(payload)?;
+        if queued.is_empty() {
+            self.queued_page_breaks.remove(sheet);
+        } else {
+            self.queued_page_breaks.insert(sheet.to_string(), queued);
         }
         Ok(())
     }
@@ -1820,6 +1868,7 @@ impl XlsxPatcher {
             && self.queued_pivot_caches.is_empty()
             && self.queued_pivot_tables.is_empty()
             && self.queued_sheet_setup.is_empty()
+            && self.queued_page_breaks.is_empty()
             && self.queued_autofilters.is_empty()
             && self.queued_workbook_security.is_none()
             && self.queued_slicers.is_empty()
@@ -2624,6 +2673,62 @@ impl XlsxPatcher {
                 // print_titles: routed through workbook definedNames
                 // by the Python coordinator. Nothing to do here —
                 // the queue entry is informational only.
+            }
+        }
+
+        // --- Phase 2.5r: Page breaks + sheetFormatPr (Sprint Π Pod Π-α / RFC-062) ---
+        //
+        // Drains queued <rowBreaks> / <colBreaks> / <sheetFormatPr>
+        // mutations into per-sheet `local_blocks` for splice via
+        // merge_blocks in Phase 3. Sequenced AFTER sheet-setup
+        // (2.5n) and BEFORE slicers (2.5p) per RFC-062 §6 — page
+        // breaks must land before slicer extLst entries because
+        // slicer-list refs can anchor to break-bounded cells.
+        //
+        // Each non-empty slot emits one SheetBlock variant; the
+        // merger handles ECMA-376 §18.3.1.99 ordering (slots 4 /
+        // 24 / 25).
+        if !self.queued_page_breaks.is_empty() {
+            let sheet_titles: Vec<String> =
+                self.queued_page_breaks.keys().cloned().collect();
+            for sheet_title in &sheet_titles {
+                let queued = match self.queued_page_breaks.get(sheet_title) {
+                    Some(q) => q.clone(),
+                    None => continue,
+                };
+                let sheet_path = match self.sheet_paths.get(sheet_title) {
+                    Some(p) => p.clone(),
+                    None => continue,
+                };
+
+                if let Some(spec) = &queued.sheet_format {
+                    let bytes =
+                        wolfxl_writer::parse::page_breaks::emit_sheet_format_pr(spec);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::SheetFormatPr(bytes));
+                    }
+                }
+                if let Some(spec) = &queued.row_breaks {
+                    let bytes = wolfxl_writer::parse::page_breaks::emit_row_breaks(spec);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::RowBreaks(bytes));
+                    }
+                }
+                if let Some(spec) = &queued.col_breaks {
+                    let bytes = wolfxl_writer::parse::page_breaks::emit_col_breaks(spec);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::ColBreaks(bytes));
+                    }
+                }
             }
         }
 
