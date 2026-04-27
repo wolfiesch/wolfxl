@@ -28,4 +28,17 @@ class Hyperlink:
     id: str | None = None
 
 
-__all__ = ["Hyperlink"]
+class HyperlinkList(list):
+    """``openpyxl``-shaped list container for :class:`Hyperlink` entries.
+
+    openpyxl exposes ``HyperlinkList`` as the type backing
+    ``ws.hyperlinks``.  Wolfxl tracks hyperlinks on individual cell
+    proxies, so this container is used purely to satisfy
+    ``isinstance(ws.hyperlinks, HyperlinkList)`` migrations — it
+    behaves as a plain :class:`list` of hyperlinks.
+
+    Pod 2 (RFC-060).
+    """
+
+
+__all__ = ["Hyperlink", "HyperlinkList"]

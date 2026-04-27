@@ -125,3 +125,24 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         import wolfxl.utils as _wu
         return getattr(_wu, name)
     raise AttributeError(name)
+
+
+# Pod 2 (RFC-060): re-export the parser module-level constants under
+# their openpyxl names so ``from openpyxl.utils.cell import COORD_RE``
+# swaps cleanly. ``RANGE_EXPR`` is the regex source; ``ABSOLUTE_RE`` is
+# the compiled form openpyxl exposes at module scope.
+RANGE_EXPR = _RANGE_EXPR
+COORD_RE = _COORD_RE
+ABSOLUTE_RE = _ABSOLUTE_RE
+
+
+__all__ = [
+    "ABSOLUTE_RE",
+    "CellCoordinatesException",
+    "COORD_RE",
+    "RANGE_EXPR",
+    "column_index_from_string",
+    "coordinate_to_tuple",
+    "get_column_letter",
+    "range_boundaries",
+]

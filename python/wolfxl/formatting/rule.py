@@ -171,11 +171,97 @@ class IconSetRule(Rule):
         super().__init__(type="iconSet", extra=extra, **kw)
 
 
+# ---------------------------------------------------------------------------
+# Pod 2 (RFC-060 §2.4) — additional openpyxl-shaped names.
+#
+# openpyxl exposes ColorScale / DataBar / IconSet (no "Rule" suffix) as
+# value classes that bundle the start/mid/end stops directly.  The
+# corresponding ``ColorScaleRule`` / ``DataBarRule`` / ``IconSetRule``
+# above already provide the same fields under the openpyxl-Rule alias;
+# the un-suffixed names here are aliases so ``from
+# openpyxl.formatting.rule import ColorScale`` swaps mechanically.
+# ---------------------------------------------------------------------------
+
+ColorScale = ColorScaleRule
+DataBar = DataBarRule
+IconSet = IconSetRule
+
+
+class DifferentialStyle:
+    """``<dxf>``-shaped formatting carried by CF rules' ``dxfId`` reference.
+
+    A :class:`DifferentialStyle` is the per-rule formatting payload —
+    ``font``, ``fill``, ``border``, ``alignment``, ``numFmt``.  Wolfxl
+    stores this metadata inline on the :class:`Rule` ``extra`` blob
+    (see :func:`wolfxl.formatting._dxf_from_rule`); this class is a
+    thin construction shim that mirrors openpyxl's keyword surface so
+    user code that builds a CF rule with explicit dxf state ports
+    mechanically.
+
+    Pod 2 (RFC-060 §2.4).
+    """
+
+    __slots__ = ("font", "fill", "border", "alignment", "number_format", "numFmt")
+
+    def __init__(
+        self,
+        font: Any = None,
+        fill: Any = None,
+        border: Any = None,
+        alignment: Any = None,
+        number_format: Any = None,
+        numFmt: Any = None,  # noqa: N803 — openpyxl alias
+    ) -> None:
+        self.font = font
+        self.fill = fill
+        self.border = border
+        self.alignment = alignment
+        # Accept either ``number_format`` (snake) or ``numFmt`` (camel).
+        self.number_format = number_format if number_format is not None else numFmt
+        self.numFmt = self.number_format
+
+
+class RuleType:
+    """Marker for parametrized CF rule kinds.
+
+    Constants mirror openpyxl's ``RuleType`` enum so user code that
+    references ``RuleType.COLOR_SCALE`` keeps working.
+
+    Pod 2 (RFC-060 §2.4).
+    """
+
+    AVERAGE = "aboveAverage"
+    COLOR_SCALE = "colorScale"
+    DATA_BAR = "dataBar"
+    ICON_SET = "iconSet"
+    FORMULA = "expression"
+    EXPRESSION = "expression"
+    DUPLICATE_VALUES = "duplicateValues"
+    UNIQUE_VALUES = "uniqueValues"
+    CONTAINS_TEXT = "containsText"
+    NOT_CONTAINS_TEXT = "notContainsText"
+    BEGINS_WITH = "beginsWith"
+    ENDS_WITH = "endsWith"
+    CONTAINS_BLANKS = "containsBlanks"
+    CONTAINS_NO_BLANKS = "notContainsBlanks"
+    CONTAINS_ERRORS = "containsErrors"
+    CONTAINS_NO_ERRORS = "notContainsErrors"
+    TIME_PERIOD = "timePeriod"
+    ABOVE_AVERAGE = "aboveAverage"
+    TOP10 = "top10"
+    CELL_IS = "cellIs"
+
+
 __all__ = [
     "CellIsRule",
+    "ColorScale",
     "ColorScaleRule",
+    "DataBar",
     "DataBarRule",
+    "DifferentialStyle",
     "FormulaRule",
+    "IconSet",
     "IconSetRule",
     "Rule",
+    "RuleType",
 ]
