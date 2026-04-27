@@ -73,17 +73,12 @@ class Legend:
         self.legendPos = value
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"legendPos": self.legendPos}
-        if self.legendEntry:
-            d["legendEntry"] = [le.to_dict() for le in self.legendEntry]
-        if self.layout is not None:
-            d["layout"] = self.layout.to_dict()
-        if self.overlay is not None:
-            d["overlay"] = self.overlay
-        if self.spPr is not None:
-            d["spPr"] = self.spPr.to_dict()
-        if self.txPr is not None:
-            d["txPr"] = self.txPr.to_dict()
+        """Emit the §10.4 shape: ``{position, overlay, layout}`` (snake_case)."""
+        d: dict[str, Any] = {
+            "position": self.legendPos,
+            "overlay": self.overlay,
+            "layout": self.layout.to_dict() if self.layout is not None else None,
+        }
         return d
 
 

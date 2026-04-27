@@ -7,11 +7,9 @@ the ``add_data``/``set_categories``/``append`` helpers that drive the
 fluent construction pattern.
 
 The :meth:`to_rust_dict` method is the contract surface Pod-α's PyO3
-binding consumes. It returns a typed-dict-shaped payload describing the
-chart's kind, series, axes, and decorations. Each subclass overrides
-:meth:`_chart_dict_extras` to layer in chart-type-specific fields.
+binding consumes. It returns a flat-shape dict matching RFC-046 §10.
 
-Sprint Μ Pod-β (RFC-046).
+Sprint Μ-prime Pod-β′ (RFC-046 §10) — v1.6.1 contract.
 """
 
 from __future__ import annotations
@@ -32,16 +30,37 @@ from .title import Title, TitleDescriptor
 _VALID_DISPLAY_BLANKS = ("span", "gap", "zero")
 
 
+# Map openpyxl tagname (`barChart`, `bar3DChart`, …) to the §10.2 short
+# kind string. Both 2D and 3D variants — the 8 new families ship in
+# Sprint Μ-prime (v1.6.1).
+_TAGNAME_TO_KIND = {
+    "barChart": "bar",
+    "bar3DChart": "bar3d",
+    "lineChart": "line",
+    "line3DChart": "line3d",
+    "pieChart": "pie",
+    "pie3DChart": "pie3d",
+    "ofPieChart": "of_pie",
+    "doughnutChart": "doughnut",
+    "areaChart": "area",
+    "area3DChart": "area3d",
+    "scatterChart": "scatter",
+    "bubbleChart": "bubble",
+    "radarChart": "radar",
+    "surfaceChart": "surface",
+    "surface3DChart": "surface3d",
+    "stockChart": "stock",
+}
+
+
 class ChartBase:
     """Base class for all chart kinds.
 
     Subclasses provide:
     - ``tagname`` — XML root for this chart's plot block (e.g. ``"barChart"``).
     - ``_series_type`` — key into :data:`series.attribute_mapping`.
-    - Per-type properties (``barDir``, ``grouping``, ``smooth``, …).
-
-    The class is a plain attribute carrier — no descriptor heavy lifting
-    beyond the ``TitleDescriptor`` for ``title``.
+    - ``_chart_type_specific_keys()`` — flat dict of per-type keys merged
+      into the §10.1 top-level shape (replaces v1.6.0 ``_chart_dict_extras``).
     """
 
     title = TitleDescriptor()
@@ -197,67 +216,66 @@ class ChartBase:
         )
 
     # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+    def _validate_at_emit(self) -> None:
+        """Per RFC-046 §10.11: raise at ``to_rust_dict`` time on bad state."""
+        if not self.ser:
+            raise ValueError(
+                f"{type(self).__name__} requires at least one series "
+                f"(call chart.add_data(...) before saving)."
+            )
+
+    # ------------------------------------------------------------------
     # Rust-side serialisation
     # ------------------------------------------------------------------
-    def _chart_dict_extras(self) -> dict[str, Any]:
-        """Hook for subclasses — extra type-specific keys for ``to_rust_dict``."""
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """Return per-type flat keys to merge into the §10.1 top-level dict.
+
+        Replaces the v1.6.0 ``_chart_dict_extras`` envelope. Keys are
+        snake_case, flat at top-level (no nesting). Subclasses override.
+        """
+        return {}
+
+    # v1.6.0 hook kept as a no-op default for any subclass that hasn't
+    # been migrated yet — never called by ``to_rust_dict`` itself.
+    def _chart_dict_extras(self) -> dict[str, Any]:  # pragma: no cover
         return {}
 
     def to_rust_dict(self) -> dict[str, Any]:
         """Produce a typed dict describing this chart for the Rust emitter.
 
-        Schema (top-level keys):
-
-        * ``kind`` — short string matching ``self.tagname`` (``"barChart"``,
-          ``"lineChart"`` …).
-        * ``series_type`` — :data:`series.attribute_mapping` key.
-        * ``style`` — int 1..48 or None.
-        * ``display_blanks`` — ``"span"`` | ``"gap"`` | ``"zero"``.
-        * ``visible_cells_only`` — bool.
-        * ``rounded_corners`` — bool | None.
-        * ``title`` — see :meth:`Title.to_dict` or None.
-        * ``legend`` — see :meth:`Legend.to_dict` or None.
-        * ``layout`` — see :meth:`Layout.to_dict` or None.
-        * ``graphical_properties`` — chart-wide spPr, or None.
-        * ``axes`` — list of ``{kind, axId, crossAx, ...}`` dicts.
-        * ``series`` — list of dicts (slots filtered by ``series_type``).
-        * ``extras`` — chart-type-specific dict (gapWidth, smooth, ...).
-        * ``anchor`` — A1 string the ws.add_chart call resolved (or None).
+        Shape: see RFC-046 §10.1 (flat top-level keys, snake_case
+        throughout; no ``axes`` list, no ``extras`` envelope).
         """
-        axes_list: list[dict[str, Any]] = []
-        for axis in (
-            getattr(self, "x_axis", None),
-            getattr(self, "y_axis", None),
-            getattr(self, "z_axis", None),
-        ):
-            if axis is not None:
-                axes_list.append(axis.to_dict())
+        self._validate_at_emit()
+
+        kind = _TAGNAME_TO_KIND.get(self.tagname)
+        if kind is None:
+            raise ValueError(
+                f"Unknown chart tagname={self.tagname!r}; expected one of "
+                f"{sorted(_TAGNAME_TO_KIND)}"
+            )
+
+        x_axis = getattr(self, "x_axis", None)
+        y_axis = getattr(self, "y_axis", None)
+        z_axis = getattr(self, "z_axis", None)
 
         series_list = [s.to_rust_dict(self._series_type) for s in self.ser]
 
-        # Map openpyxl tagname (e.g. "barChart") to Pod-α's short kind
-        # ("bar"). 3D variants like "bar3DChart" should not reach
-        # to_rust_dict() in v1.6.0 — those are deferred to v1.6.1 and
-        # raise NotImplementedError at the class constructor — but if
-        # they slip through, we let Pod-α surface "unknown chart kind".
-        _TAGNAME_TO_KIND = {
-            "barChart": "bar",
-            "lineChart": "line",
-            "pieChart": "pie",
-            "doughnutChart": "doughnut",
-            "areaChart": "area",
-            "scatterChart": "scatter",
-            "bubbleChart": "bubble",
-            "radarChart": "radar",
-        }
-
         d: dict[str, Any] = {
-            "kind": _TAGNAME_TO_KIND.get(self.tagname, self.tagname),
+            # Required
+            "kind": kind,
             "series_type": self._series_type,
+            "series": series_list,
+
+            # Optional shared
             "style": self._style,
-            "display_blanks": self._display_blanks,
-            "visible_cells_only": self.visible_cells_only,
+            "display_blanks_as": self._display_blanks,
+            "plot_visible_only": self.visible_cells_only,
             "rounded_corners": self.roundedCorners,
+
+            # Decorations
             "title": self.title.to_dict() if self.title is not None else None,
             "legend": self.legend.to_dict() if self.legend is not None else None,
             "layout": self.layout.to_dict() if self.layout is not None else None,
@@ -266,13 +284,25 @@ class ChartBase:
                 if self.graphical_properties is not None
                 else None
             ),
-            "axes": axes_list,
-            "series": series_list,
-            "extras": self._chart_dict_extras(),
+
+            # Axes — flat keys (NOT a list)
+            "x_axis": x_axis.to_dict() if x_axis is not None else None,
+            "y_axis": y_axis.to_dict() if y_axis is not None else None,
+            "z_axis": z_axis.to_dict() if z_axis is not None else None,
+
+            # Anchor + dimensions
             "anchor": self._anchor,
-            "width": self.width,
-            "height": self.height,
+            "width_emu": int(self.width * 360_000) if self.width is not None else None,
+            "height_emu": int(self.height * 360_000) if self.height is not None else None,
         }
+
+        # Default vary_colors (None → omit; subclasses may set)
+        vc = getattr(self, "vary_colors", None)
+        if vc is not None:
+            d["vary_colors"] = vc
+
+        # Merge in per-type flat keys (snake_case at top level).
+        d.update(self._chart_type_specific_keys())
         return d
 
 

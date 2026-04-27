@@ -72,12 +72,25 @@ class ManualLayout:
     def height(self, v: float | None) -> None:
         self.h = v
 
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {}
-        for slot in self.__slots__:
-            v = getattr(self, slot)
-            if v is not None:
-                d[slot] = v
+    def to_dict(self) -> dict[str, Any] | None:
+        """Emit the §10.5 shape (snake_case) — flat ``{x, y, w, h, *_mode, layout_target}``.
+
+        Returns None when every field is None so the parent's
+        ``layout`` key is omitted entirely.
+        """
+        d: dict[str, Any] = {
+            "x": self.x,
+            "y": self.y,
+            "w": self.w,
+            "h": self.h,
+            "layout_target": self.layoutTarget,
+            "x_mode": self.xMode,
+            "y_mode": self.yMode,
+            "w_mode": self.wMode,
+            "h_mode": self.hMode,
+        }
+        if all(v is None for v in d.values()):
+            return None
         return d
 
 
@@ -89,11 +102,15 @@ class Layout:
     def __init__(self, manualLayout: ManualLayout | None = None) -> None:
         self.manualLayout = manualLayout
 
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {}
-        if self.manualLayout is not None:
-            d["manualLayout"] = self.manualLayout.to_dict()
-        return d
+    def to_dict(self) -> dict[str, Any] | None:
+        """Emit the §10.5 shape: pass through ManualLayout's flat fields.
+
+        Returns None when there's no manual layout (so the parent omits
+        the layout key entirely per §10.5).
+        """
+        if self.manualLayout is None:
+            return None
+        return self.manualLayout.to_dict()
 
 
 __all__ = ["Layout", "ManualLayout"]
