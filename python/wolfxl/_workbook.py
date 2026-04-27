@@ -986,6 +986,10 @@ class Workbook:
                 "_header_footer",
                 "_sheet_view",
                 "_protection",
+                # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
+                "_row_breaks",
+                "_col_breaks",
+                "_sheet_format",
             ):
                 src_v = getattr(source, slot, None)
                 if src_v is not None:
@@ -1105,6 +1109,10 @@ class Workbook:
             "_header_footer",
             "_sheet_view",
             "_protection",
+            # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
+            "_row_breaks",
+            "_col_breaks",
+            "_sheet_format",
         ):
             src_v = getattr(source, slot, None)
             if src_v is not None:
@@ -1296,6 +1304,13 @@ class Workbook:
             # Sequenced AFTER pivots and BEFORE slicers/autoFilter so a
             # later protection toggle can lock the autoFilter range.
             self._flush_pending_sheet_setup_to_patcher()
+            # Sprint Π Pod Π-α (RFC-062) — flush page breaks +
+            # sheetFormatPr to the patcher's Phase 2.5r queue.
+            # Sequenced AFTER sheet-setup (2.5n) and BEFORE slicers
+            # (2.5p) per RFC-062 §6 — page breaks must land before
+            # slicer extLst entries because slicer-list refs can
+            # anchor to break-bounded cells.
+            self._flush_pending_page_breaks_to_patcher()
             # Sprint Ο Pod 3.5 (RFC-061 §3.1) — flush slicers to the
             # patcher's Phase 2.5p queue. Sequenced AFTER sheet-setup
             # (whose <extLst> blocks live alongside slicer-list refs)
@@ -1740,6 +1755,57 @@ class Workbook:
             if all(v is None for v in d.values()):
                 continue
             self._rust_patcher.queue_sheet_setup_update(ws.title, d)
+
+    def _flush_pending_page_breaks_to_patcher(self) -> None:
+        """Sprint Π Pod Π-α (RFC-062) — drain each sheet's queued
+        page-breaks + sheet-format-pr mutations into the patcher's
+        Phase 2.5r queue.
+
+        Sheets whose Worksheet has any of ``_row_breaks``,
+        ``_col_breaks``, or ``_sheet_format`` non-default get their
+        merged §10 dict queued. The Rust patcher Phase 2.5r then
+        re-emits the 3 sheet-scope XML blocks
+        (``<rowBreaks>`` / ``<colBreaks>`` / ``<sheetFormatPr>``) and
+        splices them into the sheet via wolfxl_merger::merge_blocks.
+
+        Sheets whose all three slots are at construction defaults
+        (e.g. zero breaks AND default sheet-format) are skipped to
+        keep the no-op save path byte-identical.
+        """
+        if self._rust_patcher is None:
+            return
+        for ws in self._sheets.values():
+            row_breaks = getattr(ws, "_row_breaks", None)
+            col_breaks = getattr(ws, "_col_breaks", None)
+            sheet_format = getattr(ws, "_sheet_format", None)
+            # Cheap probe: skip sheets whose 3 slots are all None /
+            # un-touched. The accessors lazy-init, so reading
+            # ws.row_breaks would defeat the optimisation.
+            if row_breaks is None and col_breaks is None and sheet_format is None:
+                continue
+            try:
+                breaks_dict = ws.to_rust_page_breaks_dict()
+                fmt_dict = ws.to_rust_sheet_format_dict()
+            except Exception:
+                # Defensive: skip malformed wrappers rather than
+                # poison the save path.
+                continue
+            payload = {
+                "row_breaks": breaks_dict.get("row_breaks"),
+                "col_breaks": breaks_dict.get("col_breaks"),
+                "sheet_format": fmt_dict,
+            }
+            # Skip when every slot is None — the patcher's parser
+            # would just no-op anyway, but we match the existing
+            # sheet-setup flush's defensive shape.
+            if all(v is None for v in payload.values()):
+                continue
+            try:
+                self._rust_patcher.queue_page_breaks_update(ws.title, payload)
+            except Exception:
+                # If patcher rejects (e.g. sheet not present in source
+                # because it's a write-mode sheet), silently skip.
+                continue
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's

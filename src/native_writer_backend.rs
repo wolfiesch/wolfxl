@@ -1561,6 +1561,24 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    /// Sprint Π Pod Π-α (RFC-062) — install page-breaks +
+    /// sheetFormatPr blocks on a write-mode sheet. Consumes the
+    /// merged §10 dict shape produced by
+    /// ``Worksheet.to_rust_page_breaks_dict()`` +
+    /// ``Worksheet.to_rust_sheet_format_dict()``.
+    pub fn set_page_breaks_native(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let queued = crate::wolfxl::page_breaks::parse_page_breaks_payload(payload)?;
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.row_breaks = queued.row_breaks;
+        ws.col_breaks = queued.col_breaks;
+        ws.sheet_format = queued.sheet_format;
+        Ok(())
+    }
+
     /// Sprint Ο Pod 1B (RFC-056) — install an autoFilter on a write-
     /// mode sheet. Takes the §10 dict, pre-emits the `<autoFilter>`
     /// block via `wolfxl_autofilter::emit::emit`, and evaluates the

@@ -69,15 +69,30 @@ class DimensionHolder:
         self._proxy()[key] = value
 
     def __iter__(self) -> Iterator[Any]:
-        return iter(self._proxy())
+        proxy = self._proxy()
+        # Wolfxl's row/column-dimension proxies are sparse maps with
+        # no explicit backing-store iterator (dimensions are
+        # auto-materialised on access), so we can't enumerate them
+        # the way openpyxl can. Return an empty iterator when the
+        # proxy doesn't natively support iteration.
+        try:
+            it = proxy.__iter__()  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            return iter(())
+        return it
 
     def __len__(self) -> int:
-        return len(self._proxy())
+        proxy = self._proxy()
+        try:
+            return proxy.__len__()  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
+            return 0
 
     def __contains__(self, key: Any) -> bool:
+        proxy = self._proxy()
         try:
-            return key in self._proxy()
-        except TypeError:
+            return proxy.__contains__(key)  # type: ignore[attr-defined]
+        except (AttributeError, TypeError):
             return False
 
 

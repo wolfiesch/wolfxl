@@ -2983,6 +2983,30 @@ class Worksheet:
                     # validators should already have caught it.
                     pass
 
+        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr on
+        # write mode. Cheap probe first; only call when at least one
+        # slot has been mutated by the user.
+        if hasattr(writer, "set_page_breaks_native"):
+            has_breaks = (
+                self._row_breaks is not None
+                or self._col_breaks is not None
+                or self._sheet_format is not None
+            )
+            if has_breaks:
+                try:
+                    breaks_dict = self.to_rust_page_breaks_dict()
+                    fmt_dict = self.to_rust_sheet_format_dict()
+                    payload = {
+                        "row_breaks": breaks_dict.get("row_breaks"),
+                        "col_breaks": breaks_dict.get("col_breaks"),
+                        "sheet_format": fmt_dict,
+                    }
+                    if any(v is not None for v in payload.values()):
+                        writer.set_page_breaks_native(sheet, payload)
+                except Exception:
+                    # Defensive: don't poison the save path.
+                    pass
+
         # Sprint Ο Pod 1B (RFC-056) — autoFilter on write-mode sheets.
         # Modify mode goes through `Workbook._flush_pending_autofilters_to_patcher`
         # instead.
