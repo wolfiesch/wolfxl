@@ -795,6 +795,157 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         write_api=True,
         tags=frozenset({"shipped-1.5"}),
     ),
+    # ------------------------------------------------------------------
+    # Sprint Μ — chart construction (RFC-046).  10 entries cover the 8
+    # chart types + Reference + Worksheet.add_chart.  All start with
+    # ``wolfxl_supported=False`` per Sprint Ι lesson 7 (the integrator
+    # flips this when Pods α + β land); the smoke test will xfail until
+    # then.  3D / Stock / Surface / Combination charts are explicitly
+    # deferred to v1.6.1+.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BarChart",
+        wolfxl_path="wolfxl.chart.BarChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β (RFC-046): write-side BarChart construction. "
+            "Mirrors openpyxl's API (``add_data``, ``set_categories``, "
+            "``title``, ``legend.position``, ``dataLabels``, ``grouping``, "
+            "``varyColors``, ``y_axis.majorGridlines``, "
+            "``series[i].errBars``).  3D variant deferred to v1.6.1.  "
+            "Verified by tests/test_charts_write.py + "
+            "tests/parity/test_charts_parity.py."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.LineChart",
+        wolfxl_path="wolfxl.chart.LineChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: LineChart with marker, smoothing, "
+            "trendline, error bars.  Structural XML compares clean "
+            "vs openpyxl modulo zeroed axis IDs."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.PieChart",
+        wolfxl_path="wolfxl.chart.PieChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: PieChart with varyColors=True, data "
+            "labels (showVal / showCatName / position).  No category "
+            "axis."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.DoughnutChart",
+        wolfxl_path="wolfxl.chart.DoughnutChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: DoughnutChart adds ``holeSize`` on top "
+            "of the Pie surface."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.AreaChart",
+        wolfxl_path="wolfxl.chart.AreaChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: AreaChart, supports ``grouping`` "
+            "(standard / stacked / percentStacked)."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.ScatterChart",
+        wolfxl_path="wolfxl.chart.ScatterChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ScatterChart with ``scatterStyle`` "
+            "(lineMarker / marker / smooth) + trendline / marker "
+            "support per series."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BubbleChart",
+        wolfxl_path="wolfxl.chart.BubbleChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: BubbleChart — third value series drives "
+            "marker size."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.RadarChart",
+        wolfxl_path="wolfxl.chart.RadarChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: RadarChart with ``radarStyle`` "
+            "(standard / marker / filled)."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.Reference",
+        wolfxl_path="wolfxl.chart.Reference",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ``Reference(ws, min_col, min_row, "
+            "max_col=None, max_row=None)``.  Serialises to the same "
+            "Sheet1!$B$2:$B$6 form openpyxl emits."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_chart",
+        wolfxl_path="wolfxl.Worksheet.add_chart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ``add_chart(chart, anchor)`` queues a "
+            "chart for emit.  Anchor is an A1 cell reference (one-cell "
+            "anchor) or a ``TwoCellAnchor`` instance.  Saves write "
+            "``xl/charts/chartN.xml`` + ``xl/drawings/drawingN.xml`` "
+            "via the Rust writer (Pod-α).  Modify-mode insertion is "
+            "Pod-γ's responsibility (deep-clone-aware)."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
 )
 
 
