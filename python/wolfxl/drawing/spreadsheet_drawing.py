@@ -97,10 +97,24 @@ class AbsoluteAnchor:
             self.ext = XDRPositiveSize2D()
 
 
+# ---------------------------------------------------------------------------
+# Pod 2 (RFC-060) — openpyxl-shaped drawing-container shim.
+# ---------------------------------------------------------------------------
+
+from wolfxl._compat import _make_stub  # noqa: E402
+
+SpreadsheetDrawing = _make_stub(
+    "SpreadsheetDrawing",
+    "Wolfxl manages drawings internally on the Worksheet; user-side "
+    "construction is not exposed.",
+)
+
+
 __all__ = [
     "AbsoluteAnchor",
     "AnchorMarker",
     "OneCellAnchor",
+    "SpreadsheetDrawing",
     "TwoCellAnchor",
     "XDRPoint2D",
     "XDRPositiveSize2D",
