@@ -13,22 +13,22 @@ matching parity fixtures vs `pandas.read_excel(engine="calamine")`.
 ### Added
 
 - **RFC-043 — `.xlsb` / `.xls` reads via runtime-dispatched calamine
-  backends** (Sprint Κ, <!-- TBD: SHA -->). New `CalamineXlsbBook` and
+  backends** (Sprint Κ Pod-α, `b805aac`). New `CalamineXlsbBook` and
   `CalamineXlsBook` Rust pyclasses dispatched at `load_workbook` time
-  by the new `_rust.classify_format(path_or_bytes)` magic-byte sniffer.
+  by the new `_rust.classify_file_format(path_or_bytes)` magic-byte sniffer.
   Reads return values + cached formula results; style accessors
   (`cell.font` / `.fill` / `.border` / `.alignment` / `.number_format`)
   raise `NotImplementedError` on non-xlsx workbooks. `Workbook._format`
   attribute (`'xlsx' | 'xlsb' | 'xls'`) for caller-side branching.
 - **Bytes / `BytesIO` / file-like input on `load_workbook`** (Sprint Κ
-  Pod-β, <!-- TBD: SHA -->). Each backend exposes a `Source` enum with
+  Pod-β, `ddf0dc5`). Each backend exposes a `Source` enum with
   `File(BufReader<File>)` and `Bytes(Cursor<Vec<u8>>)` arms that
   uniformly implement `Read + Seek`. Replaces Sprint Ι Pod-γ's
   tempfile workaround for password reads — decrypted bytes now route
   through `open_from_bytes` end-to-end.
 - **`.xlsb` / `.xls` parity fixtures + assertions vs
   `pandas.read_excel(engine="calamine")`** (Sprint Κ Pod-γ,
-  <!-- TBD: SHA -->). New `tests/parity/test_xlsb_reads.py` +
+  `97585a5` (fixtures) + `49e95d5` (parity tests)). New `tests/parity/test_xlsb_reads.py` +
   `tests/parity/test_xls_reads.py` element-wise pin shape + values +
   cached formula results.
 

@@ -1,6 +1,6 @@
 # RFC-043: `.xlsb` / `.xls` reads via runtime-dispatched calamine backends
 
-Status: Shipped 1.4 (Sprint Κ) <!-- TBD: SHA -->
+Status: Shipped 1.4 (Sprint Κ) — integrator finalize at e2089f9
 Owner: Sprint Κ Pods α / β / γ / δ
 Phase: Read-side parity (1.4)
 Estimate: L
@@ -176,10 +176,11 @@ filled in by the integrator post-merge.
 
 | Pod | Scope | Merge SHA |
 |---|---|---|
-| Pod-α | Rust backends: `CalamineXlsbBook` + `CalamineXlsBook` + `open_from_bytes` on all three pyclasses + `_rust.classify_format` magic-byte sniffer. | <!-- TBD: SHA --> |
-| Pod-β | Python dispatcher: `load_workbook` accepts `bytes` / `BytesIO` / file-like in addition to path; routes through `classify_format`; sets `Workbook._format`; raises on style access for non-xlsx. Drops Sprint Ι Pod-γ's tempfile workaround. | <!-- TBD: SHA --> |
-| Pod-γ | Pre-built `.xlsb` / `.xls` parity fixtures + parity assertions vs `pandas.read_excel(engine="calamine")`. | <!-- TBD: SHA --> |
-| Pod-δ | Docs: this RFC, INDEX update, KNOWN_GAPS reconciliation (Phase 5 removed), 1.4 release notes scaffold, CHANGELOG entry, ratchet-flip prep. | <!-- TBD: SHA --> |
+| Pod-α | Rust backends: `CalamineXlsbBook` + `CalamineXlsBook` + `open_from_bytes` on all three pyclasses + `_rust.classify_file_format` magic-byte sniffer (renamed from the spec's `classify_format` to avoid collision with the existing SynthGL archetype classifier). | `b805aac` |
+| Pod-β | Python dispatcher: `load_workbook` accepts `bytes` / `BytesIO` / file-like in addition to path; routes through `classify_file_format`; sets `Workbook._format`; raises on style access for non-xlsx. Drops Sprint Ι Pod-γ's tempfile workaround for the bytes path. | `ddf0dc5` |
+| Pod-γ | Pre-built `.xlsb` / `.xls` parity fixtures (`97585a5`) + parity assertions vs `pandas.read_excel(engine="calamine")` (`49e95d5`). | `97585a5` + `49e95d5` |
+| Pod-δ | Docs: this RFC (`fe8b677`), 1.4 release notes scaffold (`9aaf918`), KNOWN_GAPS reconciliation Phase 5 closed (`5d22b82`). | `fe8b677` + `9aaf918` + `5d22b82` |
+| Integrator | Drift: encrypted-xlsx CFB disambiguation, `open_from_bytes` permissive-arg fallback, `wolfxl.classify_file_format` re-export, Pod-γ test `data_only=True` + epoch normalization, ratchet flip Phase-5 → shipped-1.4, release-notes-1.4.md path normalization. | `e2089f9` |
 
 ## 9. Verification Matrix
 
@@ -222,9 +223,10 @@ filled in by the integrator post-merge.
 
 (Filled in after Sprint Κ pods merge.)
 
-- Pod-α commit: <!-- TBD: SHA -->
-- Pod-β commit: <!-- TBD: SHA -->
-- Pod-γ commit: <!-- TBD: SHA -->
-- Pod-δ commit: <!-- TBD: SHA -->
-- Verification: `python scripts/verify_rfc.py --rfc 043` GREEN at <!-- TBD -->
-- Date: <!-- TBD -->
+- Pod-α commit: `b805aac`
+- Pod-β commit: `ddf0dc5`
+- Pod-γ commits: `97585a5` (fixtures) + `49e95d5` (parity tests)
+- Pod-δ commits: `fe8b677` (RFC) + `9aaf918` (release notes) + `5d22b82` (KNOWN_GAPS)
+- Integrator drift commit: `e2089f9`
+- Verification: pytest 1190 passed / 14 skipped / 2 xfailed; cargo --workspace --exclude wolfxl ~676 green
+- Date: 2026-04-26

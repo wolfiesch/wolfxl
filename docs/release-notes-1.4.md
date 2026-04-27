@@ -41,7 +41,7 @@ for row in ws.iter_rows(values_only=True):
 `cell.number_format`) raise `NotImplementedError` — see
 "Limitations" below.
 
-Pod-α commit: <!-- Pod-α SHA: TBD -->
+Pod-α commit: `b805aac`
 
 ### `.xls` reads (values + cached formula results)
 
@@ -60,7 +60,7 @@ for row in ws.iter_rows(values_only=True):
 xlsx's separate `xl/styles.xml`; the calamine-styles fork only
 exposes the xlsx style path).
 
-Pod-α commit: <!-- Pod-α SHA: TBD -->
+Pod-α commit: `b805aac`
 
 ### Bytes / `BytesIO` / file-like input
 
@@ -92,7 +92,7 @@ This refactor lands the bytes-direct path that Sprint Ι Pod-γ
 worked around with a tempfile. Password reads now route through
 `open_from_bytes` end-to-end without the tempfile hop.
 
-Pod-β commit: <!-- Pod-β SHA: TBD -->
+Pod-β commit: `ddf0dc5`
 
 ### `_rust.classify_format(path_or_bytes)` magic-byte sniffer
 
@@ -120,7 +120,7 @@ backend pyclass. Magic-byte rules:
 * Anything else → `"unknown"` → raise `ValueError` with the first
   8 bytes hex-dumped.
 
-Pod-α commit: <!-- Pod-α SHA: TBD -->
+Pod-α commit: `b805aac`
 
 ### Pre-built `.xlsb` / `.xls` parity fixtures
 
@@ -132,7 +132,7 @@ openpyxl reads neither format, so pandas+calamine is the de-facto
 parity target for "binary Excel decoded correctly" in the Python
 ecosystem.
 
-Pod-γ commits: <!-- Pod-γ SHAs: TBD -->
+Pod-γ commits: `97585a5` (fixtures) + `49e95d5` (parity tests)
 
 ## Limitations
 
@@ -197,7 +197,7 @@ wb._format  # → 'xlsx' | 'xlsb' | 'xls'
 
 ## RFCs
 
-- `Plans/rfcs/043-xlsb-xls-reads.md` (Sprint Κ) <!-- TBD: SHA -->
+- `Plans/rfcs/043-xlsb-xls-reads.md` (Sprint Κ) (`fe8b677`)
 
 ## Stats (post-1.4)
 
@@ -215,12 +215,12 @@ wb._format  # → 'xlsx' | 'xlsb' | 'xls'
 
 Sprint Κ ("Kappa") pods that landed 1.4:
 
-- **Pod-α — RFC-043 Rust backends + magic-byte sniffer.** <!-- Pod-α SHA: TBD -->
-- **Pod-β — RFC-043 Python dispatcher + bytes/BytesIO/file-like.** <!-- Pod-β SHA: TBD -->
-- **Pod-γ — RFC-043 parity fixtures + pandas+calamine assertions.** <!-- Pod-γ SHAs: TBD -->
+- **Pod-α — RFC-043 Rust backends + magic-byte sniffer.** `b805aac`
+- **Pod-β — RFC-043 Python dispatcher + bytes/BytesIO/file-like.** `ddf0dc5`
+- **Pod-γ — RFC-043 parity fixtures + pandas+calamine assertions.** `97585a5` (fixtures) + `49e95d5` (parity tests)
 - **Pod-δ (this release scaffold)** — RFC-043 spec, INDEX update,
   KNOWN_GAPS Phase 5 reconciliation, this release notes scaffold,
-  and CHANGELOG entry. <!-- Pod-δ SHAs: TBD -->
+  and CHANGELOG entry. `fe8b677` (RFC-043) + `9aaf918` (release notes) + `5d22b82` (KNOWN_GAPS)
 
 Spec: `Plans/rfcs/043-xlsb-xls-reads.md`. Each pod owner (and the
 integrator) should resolve any §10 open questions in the merge PR
