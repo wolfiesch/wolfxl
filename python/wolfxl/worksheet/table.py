@@ -74,4 +74,48 @@ class Table:
             self.displayName = self.name
 
 
-__all__ = ["Table", "TableColumn", "TableStyleInfo"]
+# ---------------------------------------------------------------------------
+# Pod 2 (RFC-060 §2.1) — extended re-exports.
+#
+# openpyxl exposes a handful of supporting types from
+# ``openpyxl.worksheet.table`` that wolfxl preserves on round-trip but
+# does not yet author from Python.  Surface them here so import
+# statements port mechanically.
+# ---------------------------------------------------------------------------
+
+from wolfxl._compat import _make_stub  # noqa: E402
+from wolfxl.worksheet.filters import AutoFilter, SortState  # noqa: E402
+
+TableList = _make_stub(
+    "TableList",
+    "openpyxl's TableList is wolfxl's ``ws.tables`` mapping; iterate or "
+    "index that directly.",
+)
+TablePartList = _make_stub(
+    "TablePartList",
+    "openpyxl's TablePartList is wolfxl's ``ws.tables`` mapping; iterate "
+    "or index that directly.",
+)
+Related = _make_stub(
+    "Related",
+    "Wolfxl tracks table relationships internally; Related is a "
+    "construction shim.",
+)
+XMLColumnProps = _make_stub(
+    "XMLColumnProps",
+    "Wolfxl preserves XML column properties on round-trip; construction "
+    "lands in a future release.",
+)
+
+
+__all__ = [
+    "AutoFilter",
+    "Related",
+    "SortState",
+    "Table",
+    "TableColumn",
+    "TableList",
+    "TablePartList",
+    "TableStyleInfo",
+    "XMLColumnProps",
+]
