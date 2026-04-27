@@ -405,6 +405,8 @@ class Worksheet:
         "_print_title_rows", "_print_title_cols",
         # RFC-061 Sub-feature 3.1 — pending slicer presentations.
         "_pending_slicers",
+        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
+        "_row_breaks", "_col_breaks", "_sheet_format",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -477,6 +479,13 @@ class Worksheet:
         self._print_title_cols: str | None = None
         # RFC-061 Sub-feature 3.1 — pending slicer presentations.
         self._pending_slicers: list[Any] = []
+        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format
+        # defaults. All lazy: instantiate the wrappers only on first
+        # attribute access so a workbook that never touches these
+        # surfaces pays zero overhead.
+        self._row_breaks: Any = None
+        self._col_breaks: Any = None
+        self._sheet_format: Any = None
 
     @property
     def title(self) -> str:
@@ -631,6 +640,92 @@ class Worksheet:
     @protection.setter
     def protection(self, value: Any) -> None:
         self._protection = value
+
+    # ------------------------------------------------------------------
+    # Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format props
+    # ------------------------------------------------------------------
+
+    @property
+    def row_breaks(self) -> Any:
+        """Lazy ``PageBreakList`` of horizontal page breaks (RFC-062 §3)."""
+        if self._row_breaks is None:
+            from wolfxl.worksheet.pagebreak import PageBreakList
+            self._row_breaks = PageBreakList()
+        return self._row_breaks
+
+    @row_breaks.setter
+    def row_breaks(self, value: Any) -> None:
+        self._row_breaks = value
+
+    @property
+    def col_breaks(self) -> Any:
+        """Lazy ``PageBreakList`` of vertical page breaks (RFC-062 §3)."""
+        if self._col_breaks is None:
+            from wolfxl.worksheet.pagebreak import PageBreakList
+            self._col_breaks = PageBreakList()
+        return self._col_breaks
+
+    @col_breaks.setter
+    def col_breaks(self, value: Any) -> None:
+        self._col_breaks = value
+
+    @property
+    def page_breaks(self) -> Any:
+        """openpyxl alias — ``ws.page_breaks`` is a row-breaks alias."""
+        return self.row_breaks
+
+    @page_breaks.setter
+    def page_breaks(self, value: Any) -> None:
+        self._row_breaks = value
+
+    @property
+    def sheet_format(self) -> Any:
+        """Lazy ``SheetFormatProperties`` accessor (RFC-062 §3)."""
+        if self._sheet_format is None:
+            from wolfxl.worksheet.dimensions import SheetFormatProperties
+            self._sheet_format = SheetFormatProperties()
+        return self._sheet_format
+
+    @sheet_format.setter
+    def sheet_format(self, value: Any) -> None:
+        self._sheet_format = value
+
+    @property
+    def dimension_holder(self) -> Any:
+        """Return a fresh ``DimensionHolder`` view bound to this worksheet."""
+        from wolfxl.worksheet.dimensions import DimensionHolder
+        return DimensionHolder(self)
+
+    def to_rust_page_breaks_dict(self) -> dict[str, Any]:
+        """Return the §10 dict shape for ``<rowBreaks>`` / ``<colBreaks>``.
+
+        Each side is ``None`` when the corresponding ``PageBreakList``
+        is un-touched OR carries zero breaks — the patcher / writer
+        then knows to skip emitting the corresponding XML block.
+        """
+        d: dict[str, Any] = {}
+        d["row_breaks"] = (
+            self._row_breaks.to_rust_dict()
+            if self._row_breaks is not None and len(self._row_breaks) > 0
+            else None
+        )
+        d["col_breaks"] = (
+            self._col_breaks.to_rust_dict()
+            if self._col_breaks is not None and len(self._col_breaks) > 0
+            else None
+        )
+        return d
+
+    def to_rust_sheet_format_dict(self) -> dict[str, Any] | None:
+        """Return the §10 dict for ``<sheetFormatPr>`` or ``None``.
+
+        Returns ``None`` when the wrapper is un-touched OR at all-default
+        values — the writer then keeps the legacy hardcoded
+        ``<sheetFormatPr defaultRowHeight="15"/>`` emit path.
+        """
+        if self._sheet_format is None or self._sheet_format.is_default():
+            return None
+        return self._sheet_format.to_rust_dict()
 
     @property
     def print_title_rows(self) -> str | None:
