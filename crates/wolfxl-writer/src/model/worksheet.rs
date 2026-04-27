@@ -73,6 +73,18 @@ pub struct Worksheet {
     /// the sheet's drawing via `<xdr:graphicFrame>`. A sheet can mix
     /// images and charts in a single drawing.
     pub charts: Vec<Chart>,
+
+    /// Sprint Ο Pod 1B (RFC-056) — pre-emitted `<autoFilter>` block
+    /// bytes. The native writer doesn't run filter evaluation (no
+    /// existing-cell read-back path); it just splices the XML at
+    /// slot 11 of the worksheet element. Modify mode runs evaluation
+    /// in Phase 2.5o instead.
+    ///
+    /// `None` (default) → no `<autoFilter>` block emitted. The
+    /// caller (workbook-level coordinator) sets this from the
+    /// Python `ws.auto_filter.to_rust_dict()` and Rust
+    /// `wolfxl_autofilter::emit::emit`.
+    pub auto_filter_xml: Option<Vec<u8>>,
 }
 
 impl Worksheet {
@@ -93,6 +105,7 @@ impl Worksheet {
             visibility: SheetVisibility::Visible,
             images: Vec::new(),
             charts: Vec::new(),
+            auto_filter_xml: None,
         }
     }
 

@@ -112,7 +112,9 @@ STUB_CONSTRUCTORS: list[tuple[str, str]] = [
     # Sprint Λ Pod-β (RFC-045) promoted: ``wolfxl.drawing.image.Image``
     # is now a real class — exercised in tests/test_images_write.py
     # and tests/test_images_modify.py.
-    ("wolfxl.worksheet.filters", "AutoFilter"),
+    # Sprint Ο Pod 1B (RFC-056) promoted:
+    # ``wolfxl.worksheet.filters.AutoFilter`` is now a real class —
+    # exercised in tests/test_autofilter_filters.py.
     # T1 PR3 promoted: DefinedName now real dataclass.
     # Sprint Ν (RFC-047/048) promoted: ``wolfxl.pivot.PivotTable``,
     # ``PivotCache``, ``DataField``, ``PivotSource`` are real classes
@@ -132,6 +134,7 @@ REAL_DATACLASSES: list[tuple[str, str, dict]] = [
     ("wolfxl.formatting.rule", "FormulaRule", {"formula": ["$A1>100"]}),
     ("wolfxl.formatting.rule", "ColorScaleRule", {"start_type": "min", "end_type": "max"}),
     ("wolfxl.workbook.defined_name", "DefinedName", {"name": "Totals", "value": "Sheet1!$A$1"}),
+    ("wolfxl.worksheet.filters", "AutoFilter", {}),
 ]
 
 

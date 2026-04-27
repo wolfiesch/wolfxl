@@ -34,6 +34,10 @@ pub mod pivot;
 // Sprint Ο Pod 1D (RFC-058): Phase 2.5q splices workbookProtection +
 // fileSharing into xl/workbook.xml.
 pub mod security;
+// Sprint Ο Pod 1B (RFC-056): Phase 2.5o drains autoFilter evaluation +
+// `<row hidden="1">` markers.
+pub mod autofilter;
+pub mod autofilter_helpers;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -261,6 +265,13 @@ pub struct XlsxPatcher {
     /// `Some(_)` = the queue was populated and Phase 2.5q must
     /// splice into `xl/workbook.xml`.
     queued_workbook_security: Option<wolfxl_writer::parse::workbook_security::WorkbookSecurity>,
+
+    /// Sprint Ο Pod 1B (RFC-056) — pending autoFilter adds, keyed
+    /// by sheet title. Drained by Phase 2.5o (sequenced AFTER pivot
+    /// Phase 2.5m, BEFORE Phase 3 cell patches). The queue stores
+    /// the §10 dict shape so the cdylib can lift it into the typed
+    /// model + run filter evaluation at drain time.
+    queued_autofilters: HashMap<String, autofilter::QueuedAutoFilter>,
 }
 
 /// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
@@ -531,6 +542,7 @@ impl XlsxPatcher {
             queued_pivot_tables: HashMap::new(),
             next_pivot_cache_id: 0,
             queued_workbook_security: None,
+            queued_autofilters: HashMap::new(),
         })
     }
 
@@ -1211,6 +1223,32 @@ impl XlsxPatcher {
                 table_xml,
                 cache_id,
             });
+        Ok(())
+    }
+
+    /// Sprint Ο Pod 1B (RFC-056) — queue an autoFilter for a sheet.
+    ///
+    /// `dict` is the §10 dict shape produced by
+    /// `Worksheet.auto_filter.to_rust_dict()`. Drained by Phase 2.5o
+    /// during `do_save` (sequenced AFTER pivots, BEFORE cells).
+    fn queue_autofilter(
+        &mut self,
+        sheet: &str,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        if !self.sheet_paths.contains_key(sheet) {
+            return Err(PyValueError::new_err(format!(
+                "queue_autofilter: no such sheet: {sheet}"
+            )));
+        }
+        let dv = autofilter::pyany_to_dictvalue(&dict.as_any().clone())?;
+        self.queued_autofilters.insert(
+            sheet.to_string(),
+            autofilter::QueuedAutoFilter {
+                sheet: sheet.to_string(),
+                dict: dv,
+            },
+        );
         Ok(())
     }
 
@@ -2409,6 +2447,104 @@ impl XlsxPatcher {
             self.apply_pivot_adds_phase(&mut file_patches, &mut zip)?;
         }
 
+        // --- Phase 2.5o: AutoFilter (Sprint Ο Pod 1B / RFC-056) ---
+        //
+        // Sequenced AFTER pivots (2.5m) and BEFORE Phase 3 (cell
+        // patches) per RFC-056 §5. For each sheet with a queued
+        // `auto_filter`:
+        //
+        //   1. Lift the §10 dict into the typed `AutoFilter` model.
+        //   2. Read the sheet's existing cells inside `auto_filter.ref`
+        //      from the source XML (or file_adds for cloned sheets).
+        //   3. Run `wolfxl_autofilter::evaluate` to compute the
+        //      hidden-row offsets + sort permutation.
+        //   4. Push a `SheetBlock::AutoFilter` into `local_blocks`
+        //      (replaces any existing `<autoFilter>` element).
+        //   5. Stash the hidden-row offsets in `autofilter_hidden_rows`
+        //      so Phase 3 can apply `<row hidden="1">` markers AFTER
+        //      sheet_patcher has rewritten the cell payloads.
+        //
+        // Sort permutation is computed but **not applied** in v2.0:
+        // physical row reorder is deferred to v2.1 per RFC-056 §8.
+        let mut autofilter_hidden_rows: HashMap<String, Vec<u32>> = HashMap::new();
+        if !self.queued_autofilters.is_empty() {
+            // Clone the queue keys to avoid borrowing self twice.
+            let sheet_titles: Vec<String> = self.queued_autofilters.keys().cloned().collect();
+            for sheet_title in &sheet_titles {
+                let queued = self.queued_autofilters.get(sheet_title).cloned().unwrap();
+                let sheet_path = match self.sheet_paths.get(sheet_title) {
+                    Some(p) => p.clone(),
+                    None => continue,
+                };
+                // Read current sheet XML (file_adds for clones, file_patches for
+                // already-mutated, otherwise from the source ZIP).
+                let xml_bytes: Vec<u8> = if let Some(b) = file_patches.get(&sheet_path) {
+                    b.clone()
+                } else if let Some(b) = self.file_adds.get(&sheet_path) {
+                    b.clone()
+                } else {
+                    ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?.into_bytes()
+                };
+
+                // Parse the dict to learn the ref + extract the col span.
+                let af_model = wolfxl_autofilter::parse::parse_autofilter(&queued.dict)
+                    .map_err(|e| PyErr::new::<PyValueError, _>(format!("Phase 2.5o: {e}")))?;
+                let (start_row, end_row, start_col, end_col) = match af_model
+                    .ref_
+                    .as_deref()
+                    .and_then(autofilter_helpers::parse_a1_range)
+                {
+                    Some(t) => t,
+                    None => {
+                        // No ref → just splice the (probably empty) block.
+                        // Skip evaluation.
+                        let block = wolfxl_autofilter::emit::emit(&af_model);
+                        if !block.is_empty() {
+                            local_blocks
+                                .entry(sheet_path.clone())
+                                .or_default()
+                                .push(SheetBlock::AutoFilter(block));
+                        }
+                        continue;
+                    }
+                };
+
+                // Read rows of cells in [start_row+1..=end_row][start_col..=end_col].
+                // The header row (start_row) is skipped — autoFilter applies
+                // to the data rows only.
+                let data_start = start_row + 1;
+                let rows_data = autofilter_helpers::extract_cell_grid(
+                    &xml_bytes,
+                    data_start,
+                    end_row,
+                    start_col,
+                    end_col,
+                )?;
+
+                // Drain.
+                let drain = autofilter::drain_autofilter(&queued, &rows_data, None)
+                    .map_err(|e| PyErr::new::<PyValueError, _>(format!("Phase 2.5o: {e}")))?;
+
+                // Convert offsets back to absolute row numbers.
+                let abs_hidden: Vec<u32> = drain
+                    .hidden_offsets
+                    .iter()
+                    .map(|off| data_start + off)
+                    .collect();
+                if !abs_hidden.is_empty() {
+                    autofilter_hidden_rows.insert(sheet_path.clone(), abs_hidden);
+                }
+
+                // Splice the block (replace any existing).
+                if !drain.block_bytes.is_empty() {
+                    local_blocks
+                        .entry(sheet_path.clone())
+                        .or_default()
+                        .push(SheetBlock::AutoFilter(drain.block_bytes));
+                }
+            }
+        }
+
         // --- Phase 3: Patch worksheet XMLs ---
         //
         // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
@@ -2425,6 +2561,9 @@ impl XlsxPatcher {
             std::collections::HashSet::new();
         all_sheet_paths.extend(sheet_cell_patches.keys().cloned());
         all_sheet_paths.extend(local_blocks.keys().cloned());
+        // Sprint Ο Pod 1B: include sheets that only need a row-hidden
+        // marker pass (no other patches).
+        all_sheet_paths.extend(autofilter_hidden_rows.keys().cloned());
 
         for sheet_path in &all_sheet_paths {
             // RFC-035 composition (Pod-δ fix for KNOWN_GAPS bugs #1/#3):
@@ -2461,6 +2600,19 @@ impl XlsxPatcher {
                 }
             } else {
                 after_cells
+            };
+
+            // Pass 3 (Sprint Ο Pod 1B): apply `<row hidden="1">`
+            // markers from Phase 2.5o. Only runs for sheets touched
+            // by an autoFilter evaluation.
+            let after_blocks = if let Some(rows) = autofilter_hidden_rows.get(sheet_path) {
+                if rows.is_empty() {
+                    after_blocks
+                } else {
+                    autofilter_helpers::stamp_row_hidden(&after_blocks, rows)?
+                }
+            } else {
+                after_blocks
             };
 
             // Route the rewrite back to the right primitive: if this

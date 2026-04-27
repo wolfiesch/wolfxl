@@ -70,6 +70,15 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wolfxl::pivot::serialize_pivot_table_dict,
         m
     )?)?;
+    // Sprint Ο Pod 1B (RFC-056) — autoFilter serialiser + evaluator.
+    m.add_function(wrap_pyfunction!(
+        wolfxl::autofilter::serialize_autofilter_dict,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::autofilter::evaluate_autofilter,
+        m
+    )?)?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;

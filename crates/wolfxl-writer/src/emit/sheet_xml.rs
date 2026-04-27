@@ -80,6 +80,14 @@ pub fn emit(
     // Slot 6: <sheetData>
     emit_sheet_data(&mut out, sheet, sst);
 
+    // Slot 11: <autoFilter> — Sprint Ο Pod 1B (RFC-056). The bytes
+    // are pre-emitted by the workbook-level coordinator from the
+    // Python `ws.auto_filter.to_rust_dict()` payload via
+    // `wolfxl_autofilter::emit::emit`.
+    if let Some(bytes) = &sheet.auto_filter_xml {
+        out.push_str(std::str::from_utf8(bytes).unwrap_or(""));
+    }
+
     // Slot 15: <mergeCells> (only if non-empty)
     if !sheet.merges.is_empty() {
         emit_merges(&mut out, sheet);

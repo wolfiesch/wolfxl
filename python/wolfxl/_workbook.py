@@ -1044,6 +1044,20 @@ class Workbook:
             dst._freeze_panes = source._freeze_panes  # noqa: SLF001
         if source._print_area is not None:  # noqa: SLF001
             dst._print_area = source._print_area  # noqa: SLF001
+        # Sprint Ο Pod 1B (RFC-056) — deep-clone the autoFilter state.
+        # Phase 2.5o on the cloned sheet will re-evaluate against the
+        # cloned data (which the user may have mutated post-copy).
+        src_af = source._auto_filter  # noqa: SLF001
+        if (
+            src_af.ref is not None
+            or src_af.filter_columns
+            or src_af.sort_state is not None
+        ):
+            import copy as _copy
+
+            dst._auto_filter._ref = src_af.ref  # noqa: SLF001
+            dst._auto_filter.filter_columns = _copy.deepcopy(src_af.filter_columns)  # noqa: SLF001
+            dst._auto_filter.sort_state = _copy.deepcopy(src_af.sort_state)  # noqa: SLF001
 
         return dst
 
@@ -1219,6 +1233,9 @@ class Workbook:
             # patcher's Phase 2.5m runs against an already-stable
             # rels graph (Phase 2.5l added drawing rels first).
             self._flush_pending_pivots_to_patcher()
+            # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
+            # the patcher's Phase 2.5o queue.
+            self._flush_pending_autofilters_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -1520,6 +1537,40 @@ class Workbook:
             cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
         return cache
+
+    def _flush_pending_autofilters_to_patcher(self) -> None:
+        """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
+        ``ws.auto_filter`` into the patcher's Phase 2.5o queue.
+
+        Only sheets where the user actually configured filter columns
+        OR a sort state OR (legacy) just a ref are queued. The Rust
+        patcher Phase 2.5o then re-emits the ``<autoFilter>`` block
+        and computes the ``<row hidden="1">`` markers.
+        """
+        if self._rust_patcher is None:
+            return
+        for ws in self._sheets.values():
+            af = ws._auto_filter  # noqa: SLF001
+            has_state = (
+                af.ref is not None
+                or bool(af.filter_columns)
+                or af.sort_state is not None
+            )
+            if not has_state:
+                continue
+            try:
+                d = af.to_rust_dict()
+            except Exception:
+                # Defensive: skip malformed autofilter rather than
+                # poison the save path.
+                continue
+            try:
+                self._rust_patcher.queue_autofilter(ws.title, d)
+            except Exception:
+                # If patcher rejects (e.g. sheet not present in source
+                # because it's a write-mode sheet), silently skip — the
+                # native writer path will handle it on its own.
+                continue
 
     def _flush_pending_pivots_to_patcher(self) -> None:
         """Sprint Ν Pod-γ (RFC-047 / RFC-048) — drain pending pivot
