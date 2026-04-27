@@ -1233,6 +1233,12 @@ class Workbook:
             # patcher's Phase 2.5m runs against an already-stable
             # rels graph (Phase 2.5l added drawing rels first).
             self._flush_pending_pivots_to_patcher()
+            # Sprint Ο Pod 1A.5 (RFC-055) — flush sheet-setup blocks
+            # (sheetView / sheetProtection / pageMargins / pageSetup /
+            # headerFooter) to the patcher's Phase 2.5n queue.
+            # Sequenced AFTER pivots and BEFORE autoFilter so a later
+            # protection toggle can lock the autoFilter range.
+            self._flush_pending_sheet_setup_to_patcher()
             # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
             # the patcher's Phase 2.5o queue.
             self._flush_pending_autofilters_to_patcher()
@@ -1537,6 +1543,64 @@ class Workbook:
             cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
         return cache
+
+    def _flush_pending_sheet_setup_to_patcher(self) -> None:
+        """Sprint Ο Pod 1A.5 (RFC-055) — drain each sheet's queued
+        sheet-setup mutations into the patcher's Phase 2.5n queue.
+
+        Sheets whose Worksheet has any of ``_page_setup``,
+        ``_page_margins``, ``_header_footer``, ``_sheet_view``,
+        ``_protection``, ``_print_title_rows``, ``_print_title_cols``
+        non-default get their ``to_rust_setup_dict()`` queued. The
+        Rust patcher Phase 2.5n then re-emits the 5 sheet-scope
+        XML blocks and splices them into the sheet via
+        wolfxl_merger::merge_blocks.
+
+        ``print_titles`` (workbook-scope ``_xlnm.Print_Titles``
+        definedName) does NOT route through Phase 2.5n on the
+        patcher side; it composes through the existing RFC-021
+        defined-names queue. The dict still includes a
+        ``print_titles`` slot for the writer-mode path.
+        """
+        if self._rust_patcher is None:
+            return
+        for ws in self._sheets.values():
+            # Cheap probe: skip sheets whose 6 setup slots are all
+            # None / un-touched. The accessors lazy-init, so reading
+            # ws.page_setup would defeat the optimisation.
+            if (
+                ws._page_setup is None  # noqa: SLF001
+                and ws._page_margins is None  # noqa: SLF001
+                and ws._header_footer is None  # noqa: SLF001
+                and ws._sheet_view is None  # noqa: SLF001
+                and ws._protection is None  # noqa: SLF001
+                and getattr(ws, "_print_title_rows", None) is None
+                and getattr(ws, "_print_title_cols", None) is None
+            ):
+                continue
+            try:
+                d = ws.to_rust_setup_dict()
+            except Exception:
+                continue
+            # Drop the print_titles slot before queuing — the patcher
+            # doesn't act on it (the workbook-level definedNames path
+            # does, in a separate flush). Keep the other 5.
+            payload = {
+                "page_setup": d.get("page_setup"),
+                "page_margins": d.get("page_margins"),
+                "header_footer": d.get("header_footer"),
+                "sheet_view": d.get("sheet_view"),
+                "sheet_protection": d.get("sheet_protection"),
+                "print_titles": d.get("print_titles"),
+            }
+            # Skip queues whose slots are all None — there's nothing
+            # to splice and the patcher's parser would just no-op.
+            if all(v is None for v in payload.values()):
+                continue
+            try:
+                self._rust_patcher.queue_sheet_setup_update(ws.title, payload)
+            except Exception:
+                continue
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
