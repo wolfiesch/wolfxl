@@ -10,6 +10,7 @@ import re
 from typing import TYPE_CHECKING
 
 from wolfxl.workbook.defined_name import DefinedName
+from wolfxl.workbook.protection import FileSharing, WorkbookProtection
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -97,4 +98,4 @@ class DefinedNameDict(dict):
         self[value.name] = value
 
 
-__all__ = ["DefinedNameDict", "DefinedName"]
+__all__ = ["DefinedNameDict", "DefinedName", "FileSharing", "WorkbookProtection"]
