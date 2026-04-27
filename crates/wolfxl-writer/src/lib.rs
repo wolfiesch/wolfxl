@@ -34,6 +34,7 @@
 pub mod emit;
 pub mod intern;
 pub mod model;
+pub mod parse;
 pub mod refs;
 pub mod rich_text;
 pub mod xml_escape;

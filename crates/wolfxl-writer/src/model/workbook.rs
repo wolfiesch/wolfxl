@@ -5,6 +5,7 @@ use super::defined_name::DefinedName;
 use super::format::StylesBuilder;
 use super::worksheet::Worksheet;
 use crate::intern::SstBuilder;
+use crate::parse::workbook_security::WorkbookSecurity;
 
 /// A workbook awaiting serialization.
 ///
@@ -35,6 +36,11 @@ pub struct Workbook {
     /// multi-author workbooks round-trip without the BTreeMap reordering
     /// bug that motivated this rewrite.
     pub comment_authors: CommentAuthorTable,
+
+    /// RFC-058 — workbook-level security blocks (`<workbookProtection>`
+    /// and `<fileSharing>`). Both are optional; when both are `None`
+    /// the emitter writes neither element.
+    pub security: WorkbookSecurity,
 }
 
 impl Workbook {

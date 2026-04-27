@@ -6,6 +6,7 @@
 use crate::model::defined_name::BuiltinName;
 use crate::model::worksheet::SheetVisibility;
 use crate::model::workbook::Workbook;
+use crate::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
 use crate::refs::quote_sheet_name_if_needed;
 use crate::xml_escape;
 
@@ -46,7 +47,29 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
     out.push_str(
         "<fileVersion appName=\"xl\" lastEdited=\"7\" lowestEdited=\"7\" rupBuild=\"10000\"/>",
     );
+
+    // RFC-058: <fileSharing> sits between <fileVersion> and <workbookPr>
+    // per ECMA-376 CT_Workbook child ordering. Empty bytes ⇒ no element.
+    if let Some(spec) = wb.security.file_sharing.as_ref() {
+        let bytes = emit_file_sharing(spec);
+        if !bytes.is_empty() {
+            // Fragment is UTF-8 (xml_escape::attr preserves the encoding
+            // of the input string).
+            out.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+
     out.push_str("<workbookPr date1904=\"false\"/>");
+
+    // RFC-058: <workbookProtection> sits between <workbookPr> and
+    // <bookViews>. Empty bytes ⇒ no element.
+    if let Some(spec) = wb.security.workbook_protection.as_ref() {
+        let bytes = emit_workbook_protection(spec);
+        if !bytes.is_empty() {
+            out.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+
     // windowWidth/windowHeight below are openpyxl-matching defaults.
     out.push_str(
         "<bookViews>\
@@ -429,6 +452,118 @@ mod tests {
         );
         assert!(text.contains("localSheetId=\"0\""), "{text}");
         assert!(text.contains("localSheetId=\"1\""), "{text}");
+    }
+
+    // 14. RFC-058: <workbookProtection> emits between <workbookPr> and
+    // <bookViews>.
+    #[test]
+    fn workbook_protection_emitted_between_pr_and_book_views() {
+        use crate::parse::workbook_security::{WorkbookProtectionSpec, WorkbookSecurity};
+
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("Sheet1"));
+        wb.security = WorkbookSecurity {
+            workbook_protection: Some(WorkbookProtectionSpec {
+                lock_structure: true,
+                lock_windows: true,
+                workbook_algorithm_name: Some("SHA-512".into()),
+                workbook_hash_value: Some("HASH==".into()),
+                workbook_salt_value: Some("SALT==".into()),
+                workbook_spin_count: Some(100_000),
+                ..Default::default()
+            }),
+            file_sharing: None,
+        };
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        let pr = text.find("<workbookPr ").expect("workbookPr present");
+        let prot = text.find("<workbookProtection ").expect("workbookProtection present");
+        let bv = text.find("<bookViews>").expect("bookViews present");
+        assert!(pr < prot, "workbookProtection must come AFTER workbookPr");
+        assert!(prot < bv, "workbookProtection must come BEFORE bookViews");
+        assert!(text.contains("lockStructure=\"1\""));
+        assert!(text.contains("lockWindows=\"1\""));
+    }
+
+    // 15. RFC-058: <fileSharing> emits between <fileVersion> and
+    // <workbookPr>.
+    #[test]
+    fn file_sharing_emitted_between_file_version_and_workbook_pr() {
+        use crate::parse::workbook_security::{FileSharingSpec, WorkbookSecurity};
+
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("Sheet1"));
+        wb.security = WorkbookSecurity {
+            workbook_protection: None,
+            file_sharing: Some(FileSharingSpec {
+                read_only_recommended: true,
+                user_name: Some("alice".into()),
+                ..Default::default()
+            }),
+        };
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        let fv = text.find("<fileVersion ").expect("fileVersion present");
+        let fs = text.find("<fileSharing ").expect("fileSharing present");
+        let pr = text.find("<workbookPr ").expect("workbookPr present");
+        assert!(fv < fs, "fileSharing must come AFTER fileVersion");
+        assert!(fs < pr, "fileSharing must come BEFORE workbookPr");
+        assert!(text.contains("readOnlyRecommended=\"1\""));
+        assert!(text.contains("userName=\"alice\""));
+    }
+
+    // 16. RFC-058: empty security ⇒ no new XML elements emitted.
+    #[test]
+    fn empty_security_emits_nothing() {
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("Sheet1"));
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        assert!(!text.contains("workbookProtection"));
+        assert!(!text.contains("fileSharing"));
+    }
+
+    // 17. RFC-058: both blocks emit at correct positions.
+    #[test]
+    fn both_security_blocks_canonical_positions() {
+        use crate::parse::workbook_security::{
+            FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
+        };
+
+        let mut wb = Workbook::new();
+        wb.add_sheet(Worksheet::new("Sheet1"));
+        wb.security = WorkbookSecurity {
+            workbook_protection: Some(WorkbookProtectionSpec {
+                lock_structure: true,
+                ..Default::default()
+            }),
+            file_sharing: Some(FileSharingSpec {
+                read_only_recommended: true,
+                ..Default::default()
+            }),
+        };
+        let bytes = emit(&wb);
+        parse_ok(&bytes);
+        let text = text_of(&bytes);
+        // Expected order: fileVersion → fileSharing → workbookPr →
+        // workbookProtection → bookViews → sheets
+        let positions: Vec<usize> = [
+            "<fileVersion ",
+            "<fileSharing ",
+            "<workbookPr ",
+            "<workbookProtection ",
+            "<bookViews>",
+            "<sheets>",
+        ]
+        .iter()
+        .map(|tag| text.find(tag).unwrap_or_else(|| panic!("missing {tag}")))
+        .collect();
+        for window in positions.windows(2) {
+            assert!(window[0] < window[1], "ordering violated: {positions:?}");
+        }
     }
 
     // 13. Hidden flag emitted.
