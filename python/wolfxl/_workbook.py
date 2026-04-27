@@ -1278,7 +1278,8 @@ class Workbook:
             pending.clear()
 
     def _flush_pending_charts_to_patcher(self) -> None:
-        """Sprint Μ Pod-γ (RFC-046 §6) — drain pending chart adds in modify mode.
+        """Sprint Μ-prime Pod-γ′ (RFC-046 §6, §10.12) — drain pending
+        chart adds in modify mode.
 
         Two queues are drained here:
 
@@ -1286,18 +1287,19 @@ class Workbook:
            by sheet title with values of ``(chart_xml: bytes, anchor_a1,
            width_emu, height_emu)`` tuples populated via
            :meth:`add_chart_modify_mode`. These are routed straight to
-           ``XlsxPatcher.queue_chart_add``.
+           ``XlsxPatcher.queue_chart_add``. This is the bytes-level
+           escape hatch (v1.6.0) — preserved for callers that want to
+           pass pre-serialised chart XML directly.
         2. Per-sheet ``Worksheet._pending_charts`` (Pod-β): a list of
-           high-level ``ChartBase`` instances queued via
-           :meth:`Worksheet.add_chart`. In **write** mode these are
-           drained inside ``_worksheet._flush_compat_properties`` via
-           ``writer.add_chart_native``. In **modify** mode there is no
-           dict→bytes PyO3 helper yet, so we emit a clear
-           :class:`RuntimeWarning` and drop the queue. Callers needing
-           modify-mode high-level charts in v1.6.0 should use
-           :meth:`add_chart_modify_mode` with pre-serialized XML
-           (e.g. via openpyxl's ``ChartWriter``); a bytes-from-dict
-           bridge is tracked for v1.6.1.
+           high-level :class:`~wolfxl.chart._chart.ChartBase` instances
+           queued via :meth:`Worksheet.add_chart`. In **write** mode
+           these are drained inside
+           ``_worksheet._flush_compat_properties`` via
+           ``writer.add_chart_native``. In **modify** mode (v1.6.1+,
+           Sprint Μ-prime) we now bridge each chart through Pod-α′'s
+           ``serialize_chart_dict`` PyO3 export, producing chart XML
+           bytes that are routed through the same
+           ``patcher.queue_chart_add`` path as the bytes escape hatch.
 
         Sequenced AFTER images / axis shifts but BEFORE the final
         ``patcher.save()`` so chart cell-range formulas can compose
@@ -1307,7 +1309,7 @@ class Workbook:
         patcher = self._rust_patcher
         if patcher is None:
             return
-        # (1) Pod-γ: workbook-level bytes queue.
+        # (1) Pod-γ workbook-level bytes queue (escape hatch / RFC-046 §6).
         pending_bytes = getattr(self, "_pending_chart_adds", None)
         if pending_bytes:
             for sheet_title, items in pending_bytes.items():
@@ -1322,24 +1324,52 @@ class Workbook:
                         int(height_emu),
                     )
             pending_bytes.clear()
-        # (2) Pod-β: per-sheet ChartBase queue (modify-mode warn-and-drop
-        # until v1.6.1 ships the dict→bytes bridge).
-        import warnings
+        # (2) Sprint Μ-prime Pod-γ′ — modify-mode high-level chart
+        # bridge (RFC-046 §10.12). ``ws._pending_charts`` holds
+        # :class:`ChartBase` instances queued via
+        # ``Worksheet.add_chart(chart)``. Each chart is serialised to
+        # XML bytes via Pod-α′'s ``serialize_chart_dict`` and routed
+        # to the patcher exactly like the bytes-level escape hatch.
+        #
+        # If Pod-α′'s helper isn't yet exported on the bound wheel we
+        # raise :class:`NotImplementedError` rather than silently
+        # dropping the queue — surfacing the missing dependency
+        # synchronously so callers see the gap.
+        any_pending = any(ws._pending_charts for ws in self._sheets.values())  # noqa: SLF001
+        if not any_pending:
+            return
+        try:
+            from wolfxl._rust import serialize_chart_dict  # type: ignore[attr-defined]
+        except ImportError as exc:  # pragma: no cover — defensive
+            raise NotImplementedError(
+                "Modify-mode high-level Worksheet.add_chart() requires "
+                "Sprint Μ-prime Pod-α′'s serialize_chart_dict PyO3 "
+                "export. Build the wolfxl wheel from a branch that "
+                "includes the Pod-α′ commits, or fall back to "
+                "Workbook.add_chart_modify_mode(sheet, chart_xml_bytes, "
+                "anchor) with pre-serialised XML."
+            ) from exc
 
+        # 1 cm = 360_000 EMU. ``ChartBase.width`` / ``.height`` are in
+        # cm to match openpyxl semantics.
+        _CM_TO_EMU = 360_000
         for ws in self._sheets.values():
             pending_objs = ws._pending_charts  # noqa: SLF001
             if not pending_objs:
                 continue
-            warnings.warn(
-                "wolfxl.chart: high-level Worksheet.add_chart() in "
-                "modify mode is not wired through to the patcher in "
-                "v1.6.0 (no dict→bytes PyO3 bridge yet — tracked for "
-                "v1.6.1). Use Workbook.add_chart_modify_mode(sheet, "
-                "chart_xml_bytes, anchor) instead. Dropping "
-                f"{len(pending_objs)} chart(s) on sheet {ws.title!r}.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+            for chart in pending_objs:
+                dict_ = chart.to_rust_dict()
+                anchor = chart._anchor or "E15"  # noqa: SLF001
+                chart_xml = serialize_chart_dict(dict_, anchor)
+                width_emu = int(chart.width * _CM_TO_EMU)
+                height_emu = int(chart.height * _CM_TO_EMU)
+                patcher.queue_chart_add(
+                    ws.title,
+                    chart_xml,
+                    anchor,
+                    width_emu,
+                    height_emu,
+                )
             pending_objs.clear()
 
     def add_chart_modify_mode(
