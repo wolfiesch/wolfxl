@@ -1454,6 +1454,98 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    /// Sprint Ο Pod 1B (RFC-056) — install an autoFilter on a write-
+    /// mode sheet. Takes the §10 dict, pre-emits the `<autoFilter>`
+    /// block via `wolfxl_autofilter::emit::emit`, and evaluates the
+    /// filter against the worksheet's in-memory cells to stamp
+    /// `row.hidden = true` on rows excluded by the filter.
+    pub fn set_autofilter_native(
+        &mut self,
+        sheet: &str,
+        d: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        use wolfxl_autofilter::evaluate::{evaluate, Cell as AfCell};
+        use wolfxl_writer::model::cell::WriteCellValue;
+
+        let dv = crate::wolfxl::autofilter::pyany_to_dictvalue(&d.as_any().clone())?;
+        let af = wolfxl_autofilter::parse::parse_autofilter(&dv)
+            .map_err(|e| PyValueError::new_err(format!("set_autofilter_native: {e}")))?;
+        let bytes = wolfxl_autofilter::emit::emit(&af);
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.auto_filter_xml = if bytes.is_empty() { None } else { Some(bytes) };
+
+        // Reset hidden flags from prior filter runs (the user may have
+        // mutated the autofilter and re-flushed). We only clear hidden
+        // flags on rows in the autofilter's data range to avoid
+        // stomping on user-set `row.hidden` outside the filter scope.
+        let Some(ref_str) = af.ref_.as_deref() else {
+            return Ok(()); // no range → nothing to evaluate
+        };
+        let Some((top_row, bot_row, left_col, right_col)) =
+            crate::wolfxl::autofilter_helpers::parse_a1_range(ref_str)
+        else {
+            return Ok(()); // malformed → emit XML only, no evaluation
+        };
+        // Header is the first row; data rows are top_row+1..=bot_row.
+        if top_row >= bot_row {
+            return Ok(());
+        }
+        let data_top = top_row + 1;
+        for r in data_top..=bot_row {
+            if let Some(row) = ws.rows.get_mut(&r) {
+                row.hidden = false;
+            }
+        }
+        // Build the evaluator's cell grid from the writer's in-memory rows.
+        let n_cols = (right_col - left_col + 1) as usize;
+        let mut grid: Vec<Vec<AfCell>> = Vec::with_capacity((bot_row - data_top + 1) as usize);
+        for r in data_top..=bot_row {
+            let mut row_cells: Vec<AfCell> = vec![AfCell::Empty; n_cols];
+            if let Some(row) = ws.rows.get(&r) {
+                for (col_1based, wc) in row.cells.iter() {
+                    if *col_1based < left_col || *col_1based > right_col {
+                        continue;
+                    }
+                    let idx = (*col_1based - left_col) as usize;
+                    row_cells[idx] = match &wc.value {
+                        WriteCellValue::Blank => AfCell::Empty,
+                        WriteCellValue::Number(n) => AfCell::Number(*n),
+                        WriteCellValue::String(s) => AfCell::String(s.clone()),
+                        WriteCellValue::Boolean(b) => AfCell::Bool(*b),
+                        WriteCellValue::DateSerial(n) => AfCell::Date(*n),
+                        WriteCellValue::Formula { result, .. } => match result {
+                            Some(wolfxl_writer::model::cell::FormulaResult::Number(n)) => {
+                                AfCell::Number(*n)
+                            }
+                            Some(wolfxl_writer::model::cell::FormulaResult::String(s)) => {
+                                AfCell::String(s.clone())
+                            }
+                            Some(wolfxl_writer::model::cell::FormulaResult::Boolean(b)) => {
+                                AfCell::Bool(*b)
+                            }
+                            _ => AfCell::Empty,
+                        },
+                        WriteCellValue::InlineRichText(runs) => {
+                            // Concatenate text from rich-text runs.
+                            let s: String = runs.iter().map(|r| r.text.as_str()).collect();
+                            AfCell::String(s)
+                        }
+                    };
+                }
+            }
+            grid.push(row_cells);
+        }
+        // Re-shift filter_columns col_id from autofilter-relative to absolute
+        // is unnecessary — RFC-056 §2.1 colId is already relative to the
+        // autoFilter ref's leftmost column, which matches our grid layout.
+        let result = evaluate(&grid, &af.filter_columns, af.sort_state.as_ref(), None);
+        for hidden_idx in result.hidden_row_indices {
+            let abs_row = data_top + hidden_idx;
+            ws.rows.entry(abs_row).or_default().hidden = true;
+        }
+        Ok(())
+    }
+
     pub fn add_conditional_format(
         &mut self,
         sheet: &str,
