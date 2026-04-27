@@ -315,6 +315,10 @@ class Worksheet:
         "_pending_charts",
         # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue.
         "_pending_pivot_tables",
+        # Sprint Ο Pod 1A (RFC-055) — print/view/protection lazy slots.
+        "_page_setup", "_page_margins", "_header_footer",
+        "_sheet_view", "_protection",
+        "_print_title_rows", "_print_title_cols",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -367,6 +371,17 @@ class Worksheet:
         # only — write-mode pivot tables are not yet supported and
         # should fail loud at ``add_pivot_table`` call site).
         self._pending_pivot_tables: list[Any] = []
+        # Sprint Ο Pod 1A (RFC-055) — print/view/protection. All lazy:
+        # we instantiate the openpyxl-shaped wrappers only on first
+        # attribute access so a workbook that never touches these
+        # surfaces pays zero overhead.
+        self._page_setup: Any = None
+        self._page_margins: Any = None
+        self._header_footer: Any = None
+        self._sheet_view: Any = None
+        self._protection: Any = None
+        self._print_title_rows: str | None = None
+        self._print_title_cols: str | None = None
 
     @property
     def title(self) -> str:
@@ -412,6 +427,184 @@ class Worksheet:
     @freeze_panes.setter
     def freeze_panes(self, value: str | None) -> None:
         self._freeze_panes = value
+        # Mirror the mutation onto sheet_view.pane so callers reading
+        # ``ws.sheet_view.pane`` after a ``ws.freeze_panes = "B2"``
+        # observe a consistent snapshot. RFC-055 §2.5.
+        if self._sheet_view is not None:
+            from wolfxl.worksheet.views import Pane
+            if value is None:
+                self._sheet_view.pane = None
+            else:
+                from wolfxl._utils import a1_to_rowcol
+                try:
+                    r, c = a1_to_rowcol(value)
+                except Exception:
+                    return
+                self._sheet_view.pane = Pane(
+                    xSplit=float(c - 1),
+                    ySplit=float(r - 1),
+                    topLeftCell=value,
+                    activePane="bottomRight",
+                    state="frozen",
+                )
+
+    # ------------------------------------------------------------------
+    # Sprint Ο Pod 1A (RFC-055) — print / view / protection accessors
+    # ------------------------------------------------------------------
+
+    @property
+    def page_setup(self) -> Any:
+        """Lazy ``PageSetup`` accessor (RFC-055 §2.1)."""
+        if self._page_setup is None:
+            from wolfxl.worksheet.page_setup import PageSetup
+            self._page_setup = PageSetup()
+        return self._page_setup
+
+    @page_setup.setter
+    def page_setup(self, value: Any) -> None:
+        self._page_setup = value
+
+    @property
+    def page_margins(self) -> Any:
+        """Lazy ``PageMargins`` accessor (RFC-055 §2.2)."""
+        if self._page_margins is None:
+            from wolfxl.worksheet.page_setup import PageMargins
+            self._page_margins = PageMargins()
+        return self._page_margins
+
+    @page_margins.setter
+    def page_margins(self, value: Any) -> None:
+        self._page_margins = value
+
+    @property
+    def HeaderFooter(self) -> Any:  # noqa: N802 - openpyxl alias
+        return self.header_footer
+
+    @property
+    def header_footer(self) -> Any:
+        """Lazy ``HeaderFooter`` accessor (RFC-055 §2.3)."""
+        if self._header_footer is None:
+            from wolfxl.worksheet.header_footer import HeaderFooter
+            self._header_footer = HeaderFooter()
+        return self._header_footer
+
+    @header_footer.setter
+    def header_footer(self, value: Any) -> None:
+        self._header_footer = value
+
+    @property
+    def sheet_view(self) -> Any:
+        """Lazy ``SheetView`` accessor (RFC-055 §2.5).
+
+        ``ws.freeze_panes`` mutations are mirrored into ``sheet_view.pane``
+        on the setter side; on the getter side, if a sheet view has a
+        non-None pane we surface that as ``freeze_panes`` for parity.
+        """
+        if self._sheet_view is None:
+            from wolfxl.worksheet.views import Pane, SheetView
+            sv = SheetView()
+            # If freeze_panes was set before the lazy view materialized,
+            # carry the state across so the view is consistent.
+            if self._freeze_panes is not None:
+                from wolfxl._utils import a1_to_rowcol
+                try:
+                    r, c = a1_to_rowcol(self._freeze_panes)
+                    sv.pane = Pane(
+                        xSplit=float(c - 1),
+                        ySplit=float(r - 1),
+                        topLeftCell=self._freeze_panes,
+                        activePane="bottomRight",
+                        state="frozen",
+                    )
+                except Exception:
+                    pass
+            self._sheet_view = sv
+        return self._sheet_view
+
+    @sheet_view.setter
+    def sheet_view(self, value: Any) -> None:
+        self._sheet_view = value
+
+    @property
+    def protection(self) -> Any:
+        """Lazy ``SheetProtection`` accessor (RFC-055 §2.6)."""
+        if self._protection is None:
+            from wolfxl.worksheet.protection import SheetProtection
+            self._protection = SheetProtection()
+        return self._protection
+
+    @protection.setter
+    def protection(self, value: Any) -> None:
+        self._protection = value
+
+    @property
+    def print_title_rows(self) -> str | None:
+        """Repeat-rows for printing (RFC-055 §2.4)."""
+        return self._print_title_rows
+
+    @print_title_rows.setter
+    def print_title_rows(self, value: str | None) -> None:
+        if value is not None:
+            from wolfxl.worksheet.print_settings import RowRange
+            # Validate and normalize.
+            self._print_title_rows = str(RowRange.from_string(value))
+        else:
+            self._print_title_rows = None
+
+    @property
+    def print_title_cols(self) -> str | None:
+        """Repeat-cols for printing (RFC-055 §2.4)."""
+        return self._print_title_cols
+
+    @print_title_cols.setter
+    def print_title_cols(self, value: str | None) -> None:
+        if value is not None:
+            from wolfxl.worksheet.print_settings import ColRange
+            self._print_title_cols = str(ColRange.from_string(value))
+        else:
+            self._print_title_cols = None
+
+    def to_rust_setup_dict(self) -> dict[str, Any]:
+        """Return the §10 dict contract for the Rust patcher / writer.
+
+        Returns ``None`` for any sub-block whose Python wrapper is at
+        its construction defaults — the Rust side then knows to skip
+        emitting the corresponding XML.
+        """
+        d: dict[str, Any] = {}
+        d["page_setup"] = (
+            self._page_setup.to_rust_dict()
+            if self._page_setup is not None and not self._page_setup.is_default()
+            else None
+        )
+        d["page_margins"] = (
+            self._page_margins.to_rust_dict()
+            if self._page_margins is not None and not self._page_margins.is_default()
+            else None
+        )
+        d["header_footer"] = (
+            self._header_footer.to_rust_dict()
+            if self._header_footer is not None and not self._header_footer.is_default()
+            else None
+        )
+        d["sheet_view"] = (
+            self._sheet_view.to_rust_dict()
+            if self._sheet_view is not None and not self._sheet_view.is_default()
+            else None
+        )
+        d["sheet_protection"] = (
+            self._protection.to_rust_dict()
+            if self._protection is not None and not self._protection.is_default()
+            else None
+        )
+        if self._print_title_rows is not None or self._print_title_cols is not None:
+            d["print_titles"] = {
+                "rows": self._print_title_rows,
+                "cols": self._print_title_cols,
+            }
+        else:
+            d["print_titles"] = None
+        return d
 
     @property
     def auto_filter(self) -> _AutoFilter:
