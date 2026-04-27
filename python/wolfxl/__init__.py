@@ -24,6 +24,16 @@ from typing import IO
 
 from wolfxl._cell import Cell
 from wolfxl._rust import __version__, classify_format
+
+# Sprint Κ Pod-α: file-format detector (xlsx / xlsb / xls / ods / unknown).
+# Distinct from the long-standing ``classify_format`` SynthGL archetype
+# classifier above. Re-exported here so callers can use a stable
+# ``wolfxl.classify_file_format(...)`` import without needing to drop into
+# the private ``wolfxl._rust`` module.
+try:
+    from wolfxl._rust import classify_file_format  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover — Pod-α should always expose this
+    classify_file_format = None  # type: ignore[assignment]
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._workbook import CopyOptions, Workbook
 from wolfxl._worksheet import Worksheet
@@ -40,6 +50,7 @@ __all__ = [
     "Side",
     "Workbook",
     "Worksheet",
+    "classify_file_format",
     "classify_format",
     "load_workbook",
 ]

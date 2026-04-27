@@ -690,32 +690,42 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         tags=frozenset({"shipped-1.4"}),
     ),
     SurfaceEntry(
-        openpyxl_path="openpyxl.load_workbook('foo.xlsb')",
-        wolfxl_path=None,
+        openpyxl_path="openpyxl.load_workbook (.xlsb dispatch)",
+        wolfxl_path="wolfxl.load_workbook (.xlsb dispatch)",
         category=SurfaceCategory.WORKBOOK_OPEN,
         synthgl_usage=(),
         parity_note=(
-            "Phase 5: openpyxl itself doesn't read xlsb; the parity target "
-            "is pandas-style 'same values come out'. Closing this gap "
-            "requires migrating WolfXL from ``calamine-styles`` to "
-            "upstream ``calamine`` (xlsb native). Stays open into a "
-            "future release."
+            "Sprint Κ Pod-α: .xlsb reads via the new "
+            "``CalamineXlsbBook`` backend (calamine_styles' upstream "
+            "``Xlsb`` reader, already publicly exported by the existing "
+            "workspace dep — no new crate needed). Values + cached "
+            "formula results only; style accessors raise "
+            "NotImplementedError because xlsb encodes styles inline in "
+            "the binary parts and the styles fork only ports the xlsx "
+            "path. Parity target is pandas+calamine — verified by "
+            "``tests/parity/test_xlsb_reads.py``. The "
+            "``(.xlsb dispatch)`` annotation is a parametric marker; "
+            "the smoke test strips it via ``split(' ')[0]`` and "
+            "verifies the bare ``load_workbook`` symbol resolves."
         ),
-        wolfxl_supported=False,
-        tags=frozenset({"hard", "missing", "phase-5"}),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
     ),
     SurfaceEntry(
-        openpyxl_path="openpyxl.load_workbook('foo.xls')",
-        wolfxl_path=None,
+        openpyxl_path="openpyxl.load_workbook (.xls dispatch)",
+        wolfxl_path="wolfxl.load_workbook (.xls dispatch)",
         category=SurfaceCategory.WORKBOOK_OPEN,
         synthgl_usage=(),
         parity_note=(
-            "Phase 5: openpyxl itself doesn't read xls. Parity target is "
-            "xlrd behaviour. Stays open into a future release alongside "
-            "xlsb."
+            "Sprint Κ Pod-α: .xls (legacy BIFF8) reads via the new "
+            "``CalamineXlsBook`` backend. Values + cached formula "
+            "results only; style accessors raise NotImplementedError. "
+            "Parity target is pandas+calamine — verified by "
+            "``tests/parity/test_xls_reads.py``. The "
+            "``(.xls dispatch)`` annotation is a parametric marker."
         ),
-        wolfxl_supported=False,
-        tags=frozenset({"hard", "missing", "phase-5"}),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
     ),
 )
 

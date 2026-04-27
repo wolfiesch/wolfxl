@@ -32,17 +32,27 @@ pytestmark = pytest.mark.skipif(
 
 
 def _coerce(v: object) -> object:
+    import datetime as _dt
+
     if v is None:
         return None
     if isinstance(v, float) and v != v:  # NaN  # noqa: PLR0124
         return None
+    # See test_xlsb_reads._coerce — time-only cells diverge between
+    # wolfxl (datetime with epoch root) and pandas+calamine (datetime.time).
+    if isinstance(v, _dt.datetime) and v.year < 1901:
+        return v.time()
     return v
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda p: p.name)
 def test_xls_values_match_pandas_calamine(fixture: Path) -> None:
-    """wolfxl.load_workbook reads same cell values as pandas+calamine."""
-    wb = wolfxl.load_workbook(str(fixture))
+    """wolfxl.load_workbook reads same cell values as pandas+calamine.
+
+    ``data_only=True`` matches pandas+calamine's behaviour, which
+    returns cached formula results rather than formula strings.
+    """
+    wb = wolfxl.load_workbook(str(fixture), data_only=True)
     df = pd.read_excel(
         str(fixture), engine="calamine", sheet_name=None, header=None,
     )
@@ -124,13 +134,15 @@ def test_xls_from_bytes() -> None:
 
 
 def test_xls_classify_format() -> None:
-    """``wolfxl.classify_format`` (file-format detection) reports 'xls' for
-    this fixture both as a path and as bytes.
+    """``wolfxl.classify_file_format`` reports 'xls' for this fixture
+    both as a path and as bytes.
 
-    Pod-α is responsible for adding the path/bytes-aware format classifier.
+    Note: ``wolfxl.classify_format`` (without ``_file_``) is the
+    SynthGL number-format archetype classifier; the file-format
+    detector is the separate ``classify_file_format`` symbol.
     """
     fixture = _FIXTURES[0]
-    fmt_path = wolfxl.classify_format(str(fixture))
+    fmt_path = wolfxl.classify_file_format(str(fixture))
     assert fmt_path == "xls", f"path -> {fmt_path!r}"
-    fmt_bytes = wolfxl.classify_format(fixture.read_bytes())
+    fmt_bytes = wolfxl.classify_file_format(fixture.read_bytes())
     assert fmt_bytes == "xls", f"bytes -> {fmt_bytes!r}"

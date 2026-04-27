@@ -491,7 +491,11 @@ class Workbook:
                 )
                 _wb._tempfile_path = tmp_path
                 return _wb
-            rust_book = bytes_open(data, permissive)
+            try:
+                rust_book = bytes_open(data, permissive)
+            except TypeError:
+                # xlsb/xls backends don't expose a permissive flag.
+                rust_book = bytes_open(data)
         else:
             opener = getattr(rust_cls, "open", None)
             if opener is None:
@@ -552,7 +556,11 @@ class Workbook:
                 )
                 _wb._tempfile_path = tmp_path
                 return _wb
-            rust_book = bytes_open(data, permissive)
+            try:
+                rust_book = bytes_open(data, permissive)
+            except TypeError:
+                # xlsb/xls backends don't expose a permissive flag.
+                rust_book = bytes_open(data)
         else:
             opener = getattr(rust_cls, "open", None)
             if opener is None:
