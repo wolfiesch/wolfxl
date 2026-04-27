@@ -1146,6 +1146,91 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    /// RFC-057 (Sprint Ο Pod 1C): write an array-formula / data-table
+    /// formula / spill-child cell.
+    ///
+    /// `payload` mirrors the patcher's ``queue_array_formula`` shape:
+    ///   - ``{"kind": "array", "ref": "A1:A10", "text": "B1:B10*2"}``
+    ///   - ``{"kind": "data_table", "ref": "B2:F11", "ca": false,
+    ///        "dt2D": true, "dtr": false, "r1": "A1", "r2": "A2"}``
+    ///   - ``{"kind": "spill_child"}``
+    pub fn write_cell_array_formula(
+        &mut self,
+        sheet: &str,
+        a1: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        use wolfxl_writer::model::cell::WriteCellValue;
+        let (row, col) = parse_a1_to_row_col(a1)?;
+
+        let kind: String = payload
+            .get_item("kind")?
+            .ok_or_else(|| PyValueError::new_err("payload missing 'kind'"))?
+            .extract()?;
+
+        let value = match kind.as_str() {
+            "array" => {
+                let ref_range: String = payload
+                    .get_item("ref")?
+                    .ok_or_else(|| PyValueError::new_err("array kind needs 'ref'"))?
+                    .extract()?;
+                let mut text: String = payload
+                    .get_item("text")?
+                    .ok_or_else(|| PyValueError::new_err("array kind needs 'text'"))?
+                    .extract()?;
+                if let Some(stripped) = text.strip_prefix('=') {
+                    text = stripped.to_string();
+                }
+                WriteCellValue::ArrayFormula { ref_range, text }
+            }
+            "data_table" => {
+                let ref_range: String = payload
+                    .get_item("ref")?
+                    .ok_or_else(|| PyValueError::new_err("data_table kind needs 'ref'"))?
+                    .extract()?;
+                let ca: bool = payload
+                    .get_item("ca")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let dt2_d: bool = payload
+                    .get_item("dt2D")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let dtr: bool = payload
+                    .get_item("dtr")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let r1: Option<String> = payload
+                    .get_item("r1")?
+                    .and_then(|v| v.extract().ok());
+                let r2: Option<String> = payload
+                    .get_item("r2")?
+                    .and_then(|v| v.extract().ok());
+                WriteCellValue::DataTableFormula {
+                    ref_range,
+                    ca,
+                    dt2_d,
+                    dtr,
+                    r1,
+                    r2,
+                }
+            }
+            "spill_child" => WriteCellValue::SpillChild,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown array-formula kind: '{other}'"
+                )))
+            }
+        };
+
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.write_cell(row, col, value, None);
+        Ok(())
+    }
+
     /// Bulk-write a rectangular grid of values starting at `start_a1`.
     pub fn write_sheet_values(
         &mut self,

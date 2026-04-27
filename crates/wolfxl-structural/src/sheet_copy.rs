@@ -591,6 +591,23 @@ pub fn plan_sheet_copy(
     // ---- Apply the rId remap to the cloned sheet XML in one pass ----------
     let new_sheet_xml = rewrite_rids(src_sheet_xml, &rid_remap)?;
 
+    // ---- RFC-035 + RFC-057: translate any explicit-sheet refs inside
+    // the cloned sheet's <f> formula text AND the <f t="array" ref="..."/>
+    // attribute when the source sheet is being renamed during the
+    // copy.  Plain unqualified refs (e.g. `=A1`) are sheet-local and
+    // need no translation.  Qualified refs (e.g. `=Sheet1!A1`) get
+    // re-pointed via the formula translator so the cloned sheet's
+    // cross-sheet references continue to point at the right cells.
+    let new_sheet_xml = if inputs.src_title != inputs.dst_title {
+        rewrite_sheet_formula_refs(
+            &new_sheet_xml,
+            &inputs.src_title,
+            &inputs.dst_title,
+        )
+    } else {
+        new_sheet_xml
+    };
+
     // ---- Sheet-scoped defined-name clones ---------------------------------
     let defined_names_to_add: Vec<DefinedNameClone> = defined_names
         .iter()
@@ -1085,6 +1102,180 @@ fn resolve_relative(base_dir: String, target: &str) -> String {
 // ---------------------------------------------------------------------------
 // Chart deep-clone helpers (Sprint Μ Pod-γ / RFC-046 §7)
 // ---------------------------------------------------------------------------
+
+/// RFC-057 / RFC-035: walk a worksheet XML body, translate every
+/// `<f>` formula body and `<f t="array" ref="..." />` attribute so
+/// any explicit reference to the source sheet name is re-pointed at
+/// the destination sheet.
+///
+/// For RFC-057 specifically, the `ref` attribute on
+/// `<f t="array" ref="...">` and `<f t="dataTable" ref="..."/>` is
+/// sheet-local A1 — it never carries an explicit sheet qualifier, so
+/// in practice the translator is a no-op for that attribute.  We run
+/// it through anyway so future fixtures that DO ship a qualified
+/// `ref` (rare but legal) round-trip cleanly.
+///
+/// Done via SAX (quick-xml) — never regex — so we respect quoting,
+/// 3-D refs, and embedded `<` characters in formula text.
+pub(crate) fn rewrite_sheet_formula_refs(
+    sheet_xml: &[u8],
+    src_title: &str,
+    dst_title: &str,
+) -> Vec<u8> {
+    if src_title == dst_title {
+        return sheet_xml.to_vec();
+    }
+    let mut reader = XmlReader::from_reader(sheet_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(sheet_xml.len()));
+    let mut in_f = false;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                if e.local_name().as_ref() == b"f" {
+                    in_f = true;
+                    let new_e =
+                        rewrite_f_attributes(&e, src_title, dst_title);
+                    writer.write_event(Event::Start(new_e)).expect("write");
+                } else {
+                    writer
+                        .write_event(Event::Start(e.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"f" {
+                    in_f = false;
+                }
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Empty(e)) => {
+                if e.local_name().as_ref() == b"f" {
+                    let new_e =
+                        rewrite_f_attributes(&e, src_title, dst_title);
+                    writer.write_event(Event::Empty(new_e)).expect("write");
+                } else {
+                    writer
+                        .write_event(Event::Empty(e.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if in_f {
+                    let raw = t.unescape().map(|c| c.into_owned()).ok();
+                    if let Some(formula_text) = raw {
+                        // Worksheet `<f>` bodies do not carry the
+                        // leading `=`; the formula translator's
+                        // tokenizer needs it, so we add it before and
+                        // strip after.
+                        let prefixed = format!("={formula_text}");
+                        let translated_eq =
+                            wolfxl_formula::rename_sheet(
+                                &prefixed,
+                                src_title,
+                                dst_title,
+                            );
+                        let translated = translated_eq
+                            .strip_prefix('=')
+                            .unwrap_or(&translated_eq)
+                            .to_string();
+                        writer
+                            .write_event(Event::Text(
+                                quick_xml::events::BytesText::new(
+                                    &translated,
+                                ),
+                            ))
+                            .expect("write");
+                    } else {
+                        writer
+                            .write_event(Event::Text(t.into_owned()))
+                            .expect("write");
+                    }
+                } else {
+                    writer
+                        .write_event(Event::Text(t.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::CData(c)) => {
+                writer
+                    .write_event(Event::CData(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Decl(d)) => {
+                writer
+                    .write_event(Event::Decl(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::PI(p)) => {
+                writer
+                    .write_event(Event::PI(p.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Comment(c)) => {
+                writer
+                    .write_event(Event::Comment(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::DocType(d)) => {
+                writer
+                    .write_event(Event::DocType(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return sheet_xml.to_vec(),
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+/// RFC-057: translate the `ref`, `r1`, `r2` attributes on `<f>` so
+/// any explicit-sheet refs they may carry get re-pointed.  Other
+/// attributes pass through verbatim.
+fn rewrite_f_attributes(
+    e: &BytesStart<'_>,
+    src_title: &str,
+    dst_title: &str,
+) -> BytesStart<'static> {
+    let mut new_e = BytesStart::new(
+        std::str::from_utf8(e.name().as_ref())
+            .map(|s| s.to_owned())
+            .unwrap_or_default(),
+    );
+    for a in e.attributes().with_checks(false).flatten() {
+        let key = a.key.as_ref().to_vec();
+        let value = a
+            .unescape_value()
+            .map(|v| v.into_owned())
+            .unwrap_or_else(|_| {
+                String::from_utf8_lossy(a.value.as_ref()).into_owned()
+            });
+        let new_value = if matches!(key.as_slice(), b"ref" | b"r1" | b"r2") {
+            // Wrap as `=value` to feed the tokenizer, strip back.
+            let prefixed = format!("={value}");
+            let translated_eq = wolfxl_formula::rename_sheet(
+                &prefixed,
+                src_title,
+                dst_title,
+            );
+            translated_eq
+                .strip_prefix('=')
+                .unwrap_or(&translated_eq)
+                .to_string()
+        } else {
+            value
+        };
+        new_e.push_attribute(Attribute {
+            key: QName(&key),
+            value: new_value.into_bytes().into(),
+        });
+    }
+    new_e
+}
 
 /// Walk a chart XML body, find every `<c:f>...</c:f>` formula text
 /// element, and apply

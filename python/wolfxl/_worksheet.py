@@ -309,6 +309,12 @@ class Worksheet:
         # (row, col).  Both write-mode (NativeWorkbook flush) and
         # modify-mode (XlsxPatcher flush) consume this map.
         "_pending_rich_text",
+        # Sprint Ο Pod 1C (RFC-057) — pending array / data-table
+        # formulas keyed by ``(row, col)``.  Each entry is a
+        # ``(kind, payload)`` tuple where ``kind`` is one of
+        # ``"array"``, ``"data_table"``, ``"spill_child"``.  Drained
+        # at save time alongside the regular cell flush.
+        "_pending_array_formulas",
         # Sprint Λ Pod-β (RFC-045) — pending image queue.
         "_pending_images",
         # Sprint Μ Pod-β (RFC-046) — pending chart queue.
@@ -350,6 +356,13 @@ class Worksheet:
         # Sprint Ι Pod-α — keyed by (row, col) so the flush layer can
         # look it up by sparse coordinate without coordinate-string round-trip.
         self._pending_rich_text: dict[tuple[int, int], Any] = {}
+        # Sprint Ο Pod 1C (RFC-057) — pending array / data-table
+        # formulas keyed by ``(row, col)``.  Each entry is a
+        # ``(kind, payload)`` tuple.  Master cells get
+        # ``("array", {"ref": ..., "text": ...})`` or
+        # ``("data_table", {...})``; cells inside the spill range
+        # become ``("spill_child", {})`` placeholders.
+        self._pending_array_formulas: dict[tuple[int, int], tuple[str, dict[str, Any]]] = {}
         self._pending_tables: list[Any] = []
         self._pending_data_validations: list[Any] = []
         self._pending_conditional_formats: list[tuple[str, Any]] = []
@@ -2239,11 +2252,49 @@ class Worksheet:
             writer.write_sheet_values(self._title, start, grid)
 
         # -- Per-cell value writes for non-batchable types --------------------
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
         from wolfxl.cell.rich_text import CellRichText
 
         for _row, _col, cell in indiv_vals:
             coord = rowcol_to_a1(cell._row, cell._col)  # noqa: SLF001
             val = cell._value  # noqa: SLF001
+            if isinstance(val, ArrayFormula):
+                # RFC-057: write-mode array-formula — the native writer
+                # exposes ``write_cell_array_formula`` that emits
+                # ``<f t="array" ref="..."/>`` directly.
+                if hasattr(writer, "write_cell_array_formula"):
+                    writer.write_cell_array_formula(
+                        self._title,
+                        coord,
+                        {
+                            "kind": "array",
+                            "ref": val.ref,
+                            "text": val.text,
+                        },
+                    )
+                else:
+                    # Fallback: emit as a regular formula — Excel will
+                    # treat it as a single-cell formula (still computes
+                    # correctly for spilling 365 functions).
+                    payload = python_value_to_payload(f"={val.text}")
+                    writer.write_cell_value(self._title, coord, payload)
+                continue
+            if isinstance(val, DataTableFormula):
+                if hasattr(writer, "write_cell_array_formula"):
+                    writer.write_cell_array_formula(
+                        self._title,
+                        coord,
+                        {
+                            "kind": "data_table",
+                            "ref": val.ref,
+                            "ca": val.ca,
+                            "dt2D": val.dt2D,
+                            "dtr": val.dtr,
+                            "r1": val.r1,
+                            "r2": val.r2,
+                        },
+                    )
+                continue
             if isinstance(val, CellRichText):
                 # Sprint Ι Pod-α: write-mode rich-text.  The native
                 # writer doesn't expose a structured rich-text API yet,
@@ -2261,6 +2312,26 @@ class Worksheet:
                 continue
             payload = python_value_to_payload(val)
             writer.write_cell_value(self._title, coord, payload)
+
+        # -- Spill-child placeholders ---------------------------------
+        # RFC-057: cells inside an array's spill range that aren't the
+        # master need a placeholder ``<c r="..."/>`` so Excel sees the
+        # spill area pre-populated.  These are not in ``self._dirty``
+        # because no Cell object was ever instantiated.
+        for (sr, sc), (kind, _payload) in self._pending_array_formulas.items():
+            if kind != "spill_child":
+                continue
+            if (sr, sc) in self._dirty:
+                # The user explicitly assigned a value to this child;
+                # skip the placeholder.
+                continue
+            coord = rowcol_to_a1(sr, sc)
+            if hasattr(writer, "write_cell_array_formula"):
+                writer.write_cell_array_formula(
+                    self._title,
+                    coord,
+                    {"kind": "spill_child"},
+                )
 
         # -- Batch format / border writes -----------------------------------------
         if format_cells:
@@ -2343,6 +2414,18 @@ class Worksheet:
         from wolfxl._cell import _UNSET
         from wolfxl.cell.rich_text import CellRichText
 
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        # RFC-057: emit spill-child placeholders too — they are NOT in
+        # ``self._dirty`` because no Cell object was ever instantiated
+        # for them, only the master cell triggered the
+        # ``_populate_spill_placeholders`` map population.
+        spill_children: set[tuple[int, int]] = {
+            key
+            for key, (kind, _payload) in self._pending_array_formulas.items()
+            if kind == "spill_child" and key not in self._dirty
+        }
+
         for row, col in self._dirty:
             cell = self._cells.get((row, col))
             if cell is None:
@@ -2351,12 +2434,44 @@ class Worksheet:
 
             if cell._value_dirty:  # noqa: SLF001
                 val = cell._value  # noqa: SLF001
-                if isinstance(val, CellRichText):
+                if isinstance(val, ArrayFormula):
+                    patcher.queue_array_formula(
+                        self._title,
+                        coord,
+                        {
+                            "kind": "array",
+                            "ref": val.ref,
+                            "text": val.text,
+                        },
+                    )
+                elif isinstance(val, DataTableFormula):
+                    patcher.queue_array_formula(
+                        self._title,
+                        coord,
+                        {
+                            "kind": "data_table",
+                            "ref": val.ref,
+                            "ca": val.ca,
+                            "dt2D": val.dt2D,
+                            "dtr": val.dtr,
+                            "r1": val.r1,
+                            "r2": val.r2,
+                        },
+                    )
+                elif isinstance(val, CellRichText):
                     runs_payload = _cellrichtext_to_runs_payload(val)
                     patcher.queue_rich_text_value(self._title, coord, runs_payload)
                 else:
                     payload = python_value_to_payload(val)
                     patcher.queue_value(self._title, coord, payload)
+
+        for (row, col) in spill_children:
+            coord = rowcol_to_a1(row, col)
+            patcher.queue_array_formula(
+                self._title,
+                coord,
+                {"kind": "spill_child"},
+            )
 
             if cell._format_dirty:  # noqa: SLF001
                 fmt: dict[str, Any] = {}

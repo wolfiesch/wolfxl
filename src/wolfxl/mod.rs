@@ -562,6 +562,100 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue an array-formula / data-table / spill-child cell.
+    ///
+    /// RFC-057 (Sprint Ο Pod 1C).  `payload` is a dict matching the
+    /// shape pinned in §10:
+    ///   - ``{"kind": "array", "ref": "A1:A10", "text": "B1:B10*2"}``
+    ///   - ``{"kind": "data_table", "ref": "B2:F11", "ca": false,
+    ///        "dt2D": true, "dtr": false, "r1": "A1", "r2": "A2"}``
+    ///   - ``{"kind": "spill_child"}``
+    fn queue_array_formula(
+        &mut self,
+        sheet: &str,
+        cell: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let kind: String = payload
+            .get_item("kind")?
+            .ok_or_else(|| PyErr::new::<PyValueError, _>("payload missing 'kind'"))?
+            .extract()?;
+
+        let value = match kind.as_str() {
+            "array" => {
+                let ref_range: String = payload
+                    .get_item("ref")?
+                    .ok_or_else(|| PyErr::new::<PyValueError, _>("array kind needs 'ref'"))?
+                    .extract()?;
+                let mut text: String = payload
+                    .get_item("text")?
+                    .ok_or_else(|| PyErr::new::<PyValueError, _>("array kind needs 'text'"))?
+                    .extract()?;
+                if let Some(stripped) = text.strip_prefix('=') {
+                    text = stripped.to_string();
+                }
+                CellValue::ArrayFormula { ref_range, text }
+            }
+            "data_table" => {
+                let ref_range: String = payload
+                    .get_item("ref")?
+                    .ok_or_else(|| {
+                        PyErr::new::<PyValueError, _>("data_table kind needs 'ref'")
+                    })?
+                    .extract()?;
+                let ca: bool = payload
+                    .get_item("ca")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let dt2_d: bool = payload
+                    .get_item("dt2D")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let dtr: bool = payload
+                    .get_item("dtr")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let r1: Option<String> = payload
+                    .get_item("r1")?
+                    .and_then(|v| v.extract().ok());
+                let r2: Option<String> = payload
+                    .get_item("r2")?
+                    .and_then(|v| v.extract().ok());
+                CellValue::DataTableFormula {
+                    ref_range,
+                    ca,
+                    dt2_d,
+                    dtr,
+                    r1,
+                    r2,
+                }
+            }
+            "spill_child" => CellValue::SpillChild,
+            other => {
+                return Err(PyErr::new::<PyValueError, _>(format!(
+                    "Unknown array-formula kind: '{other}'"
+                )))
+            }
+        };
+
+        let (row, col) =
+            crate::util::a1_to_row_col(cell).map_err(|e| PyErr::new::<PyValueError, _>(e))?;
+
+        let patch = CellPatch {
+            row: row + 1,
+            col: col + 1,
+            value: Some(value),
+            style_index: None,
+        };
+
+        self.value_patches
+            .insert((sheet.to_string(), cell.to_string()), patch);
+        Ok(())
+    }
+
     /// Queue a cell value change.
     ///
     /// `payload` is a dict matching the ExcelBench cell payload format:

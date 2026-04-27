@@ -36,6 +36,28 @@ pub enum CellValue {
     /// Rich-text runs — emitted as `t="inlineStr"` with `<is>...</is>`
     /// containing one `<r><rPr/><t/></r>` per run.  Sprint Ι Pod-α.
     RichText(Vec<wolfxl_writer::rich_text::RichTextRun>),
+    /// RFC-057 (Sprint Ο Pod 1C): array-formula master cell.
+    /// Emitted as `<c r="..."><f t="array" ref="...">text</f></c>`.
+    ArrayFormula {
+        /// Spill / array range, e.g. `"A1:A10"`.
+        ref_range: String,
+        /// Formula body without the leading `=` and without the
+        /// surrounding `{}` braces.
+        text: String,
+    },
+    /// RFC-057: data-table formula master cell.
+    DataTableFormula {
+        ref_range: String,
+        ca: bool,
+        dt2_d: bool,
+        dtr: bool,
+        r1: Option<String>,
+        r2: Option<String>,
+    },
+    /// RFC-057: bare placeholder cell that lives inside an
+    /// array-formula's spill range (everything except the master).
+    /// Emitted as `<c r="..."/>`.
+    SpillChild,
 }
 
 /// A single cell modification.
@@ -424,6 +446,71 @@ fn write_patched_cell<W: Write>(
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
                 .write_event(Event::End(BytesEnd::new("c")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+        }
+        Some(CellValue::ArrayFormula { ref_range, text }) => {
+            // RFC-057: <c r="..."><f t="array" ref="A1:A10">B1:B10*2</f></c>
+            writer
+                .write_event(Event::Start(elem))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            let mut f_start = BytesStart::new("f");
+            f_start.push_attribute(("t", "array"));
+            f_start.push_attribute(("ref", ref_range.as_str()));
+            writer
+                .write_event(Event::Start(f_start))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            writer
+                .write_event(Event::Text(BytesText::new(text)))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("f")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("c")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+        }
+        Some(CellValue::DataTableFormula {
+            ref_range,
+            ca,
+            dt2_d,
+            dtr,
+            r1,
+            r2,
+        }) => {
+            // RFC-057: <c r="..."><f t="dataTable" ref=".." dt2D="1" r1=".." r2=".."/></c>
+            writer
+                .write_event(Event::Start(elem))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            let mut f_empty = BytesStart::new("f");
+            f_empty.push_attribute(("t", "dataTable"));
+            f_empty.push_attribute(("ref", ref_range.as_str()));
+            if *ca {
+                f_empty.push_attribute(("ca", "1"));
+            }
+            if *dt2_d {
+                f_empty.push_attribute(("dt2D", "1"));
+            }
+            if *dtr {
+                f_empty.push_attribute(("dtr", "1"));
+            }
+            if let Some(rv) = r1.as_ref() {
+                f_empty.push_attribute(("r1", rv.as_str()));
+            }
+            if let Some(rv) = r2.as_ref() {
+                f_empty.push_attribute(("r2", rv.as_str()));
+            }
+            writer
+                .write_event(Event::Empty(f_empty))
+                .map_err(|e| format!("XML write error: {e}"))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("c")))
+                .map_err(|e| format!("XML write error: {e}"))?;
+        }
+        Some(CellValue::SpillChild) => {
+            // RFC-057: bare placeholder `<c r="..."/>`.  Style is
+            // already on `elem` (set above when constructing the start tag).
+            writer
+                .write_event(Event::Empty(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::RichText(runs)) => {
