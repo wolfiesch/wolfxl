@@ -1084,6 +1084,8 @@ class Workbook:
             # `move_range("C3:E10", rows=5)` is applied in source order
             # against the post-shift coordinate space.
             self._flush_pending_range_moves_to_patcher()
+            # Sprint Λ Pod-β (RFC-045): drain pending images.
+            self._flush_pending_images_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -1175,6 +1177,32 @@ class Workbook:
                         "show_column_stripes": bool(t.tableStyleInfo.showColumnStripes),
                     }
                 patcher.queue_table(ws.title, payload)
+            pending.clear()
+
+    def _flush_pending_images_to_patcher(self) -> None:
+        """Sprint Λ Pod-β (RFC-045) — drain pending images into the patcher.
+
+        Modify-mode counterpart to the writer-side flush in
+        ``Worksheet._flush_compat_properties``. Each queued
+        :class:`wolfxl.drawing.image.Image` is converted to the flat
+        dict shape and routed to ``XlsxPatcher.queue_image_add``.
+
+        Sheets that already have a drawing rel will surface
+        ``NotImplementedError`` from the patcher at save time —
+        appending to an existing drawing is a v1.5 follow-up.
+        """
+        from wolfxl._images import image_to_writer_payload
+
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_images  # noqa: SLF001
+            if not pending:
+                continue
+            for img in pending:
+                payload = image_to_writer_payload(img)
+                patcher.queue_image_add(ws.title, payload)
             pending.clear()
 
     def _flush_pending_comments_to_patcher(self) -> None:

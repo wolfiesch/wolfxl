@@ -220,6 +220,54 @@ pub struct XlsxPatcher {
     /// (Phase 2.7 splice, defined-names merger, …) sees the
     /// rewritten bytes.
     permissive_seed_file_patches: HashMap<String, Vec<u8>>,
+    /// Sprint Λ Pod-β (RFC-045) — per-sheet pending image adds.
+    /// Drained by Phase 2.5k during `do_save`. Supports the
+    /// "fresh drawing" case only — sheets that already have a
+    /// drawing rel raise NotImplementedError (v1.5 follow-up).
+    queued_images: HashMap<String, Vec<QueuedImageAdd>>,
+}
+
+/// Sprint Λ Pod-β (RFC-045) — one image queued for emit on a sheet.
+#[derive(Debug, Clone)]
+pub struct QueuedImageAdd {
+    /// Raw image bytes — written into `xl/media/imageN.<ext>`.
+    pub data: Vec<u8>,
+    /// Lowercase extension (`"png"`, `"jpeg"`, `"gif"`, `"bmp"`).
+    pub ext: String,
+    /// Pixel width (Excel uses 9525 EMU/px when computing extent).
+    pub width_px: u32,
+    pub height_px: u32,
+    /// Anchor flavour. Mirrors `wolfxl_writer::model::image::ImageAnchor`
+    /// but kept Python-shape so the patcher can stay independent of the
+    /// writer crate's data model.
+    pub anchor: QueuedImageAnchor,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueuedImageAnchor {
+    OneCell {
+        from_col: u32,
+        from_row: u32,
+        from_col_off: i64,
+        from_row_off: i64,
+    },
+    TwoCell {
+        from_col: u32,
+        from_row: u32,
+        from_col_off: i64,
+        from_row_off: i64,
+        to_col: u32,
+        to_row: u32,
+        to_col_off: i64,
+        to_row_off: i64,
+        edit_as: String,
+    },
+    Absolute {
+        x_emu: i64,
+        y_emu: i64,
+        cx_emu: i64,
+        cy_emu: i64,
+    },
 }
 
 /// One queued sheet-copy op (RFC-035).
@@ -420,6 +468,7 @@ impl XlsxPatcher {
             queued_range_moves: Vec::new(),
             queued_sheet_copies: Vec::new(),
             permissive_seed_file_patches: file_patches,
+            queued_images: HashMap::new(),
         })
     }
 
@@ -830,6 +879,58 @@ impl XlsxPatcher {
             .entry(sheet.to_string())
             .or_default()
             .push(patch);
+        Ok(())
+    }
+
+    /// Sprint Λ Pod-β (RFC-045) — queue an image add for `sheet`.
+    ///
+    /// Payload shape mirrors `NativeWorkbook.add_image`:
+    /// ```python
+    /// {
+    ///   "data": <bytes>,
+    ///   "ext": "png" | "jpeg" | "gif" | "bmp",
+    ///   "width": int,
+    ///   "height": int,
+    ///   "anchor": {"type": "one_cell"|"two_cell"|"absolute", ...},
+    /// }
+    /// ```
+    /// Drained by Phase 2.5k during `do_save`. Sheets that already
+    /// have a drawing rel raise `NotImplementedError` at flush time
+    /// (v1.5 follow-up: append to existing drawingN.xml).
+    fn queue_image_add(&mut self, sheet: &str, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let data: Vec<u8> = payload
+            .get_item("data")?
+            .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'data'"))?
+            .extract()?;
+        let ext: String = payload
+            .get_item("ext")?
+            .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'ext'"))?
+            .extract()?;
+        let width: u32 = payload
+            .get_item("width")?
+            .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'width'"))?
+            .extract()?;
+        let height: u32 = payload
+            .get_item("height")?
+            .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'height'"))?
+            .extract()?;
+        let anchor_obj = payload
+            .get_item("anchor")?
+            .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'anchor'"))?;
+        let anchor_dict = anchor_obj
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("queue_image_add: 'anchor' must be a dict"))?;
+        let anchor = parse_queued_image_anchor(anchor_dict)?;
+        self.queued_images
+            .entry(sheet.to_string())
+            .or_default()
+            .push(QueuedImageAdd {
+                data,
+                ext: ext.to_ascii_lowercase(),
+                width_px: width,
+                height_px: height,
+                anchor,
+            });
         Ok(())
     }
 
@@ -1306,6 +1407,7 @@ impl XlsxPatcher {
             && self.queued_axis_shifts.is_empty()
             && self.queued_range_moves.is_empty()
             && self.queued_sheet_copies.is_empty()
+            && self.queued_images.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
@@ -1945,6 +2047,39 @@ impl XlsxPatcher {
                 .extend(comments_ct_ops);
         }
 
+        // --- Phase 2.5k: Image adds (Sprint Λ Pod-β / RFC-045) ---
+        //
+        // Drains `queued_images` per sheet. For each sheet that has
+        // queued images:
+        //   1. Read the existing sheet rels (if any) — error if a
+        //      `drawing` rel is already present (v1.5 limit:
+        //      append-to-existing is a follow-up).
+        //   2. Allocate a fresh `drawingN.xml` part via the shared
+        //      part-id allocator.
+        //   3. Allocate fresh `imageM.<ext>` media parts (one per
+        //      queued image).
+        //   4. Add an image rel for each one to a brand-new
+        //      `xl/drawings/_rels/drawingN.xml.rels`.
+        //   5. Add a drawing rel to the sheet's rels graph (creates
+        //      `rels_patches` entry for that sheet's rels file).
+        //   6. Splice `<drawing r:id="rIdN"/>` into the sheet XML
+        //      (right before `<legacyDrawing>` if present, else
+        //      before `</worksheet>`).
+        //   7. Queue content-type ops: `<Default Extension="png" .../>`
+        //      and `<Override PartName="/xl/drawings/drawingN.xml" .../>`.
+        //
+        // Phase 2.5k runs BEFORE Phase 3 so the cell/block merge
+        // pass picks up any drawing-element splice we put into
+        // `file_patches`. Sheet rels mutations land in
+        // `rels_patches` which is serialized in the final emit pass.
+        if !self.queued_images.is_empty() {
+            self.apply_image_adds_phase(
+                &mut file_patches,
+                &mut zip,
+                &mut part_id_allocator,
+            )?;
+        }
+
         // --- Phase 3: Patch worksheet XMLs ---
         //
         // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
@@ -2119,6 +2254,22 @@ impl XlsxPatcher {
         let mut content_type_ops: Vec<content_types::ContentTypeOp> = Vec::new();
         for sheet_name in &self.sheet_order {
             if let Some(ops) = self.queued_content_type_ops.get(sheet_name) {
+                content_type_ops.extend(ops.iter().cloned());
+            }
+        }
+        // Also pick up synthetic per-workbook keys (e.g. RFC-023
+        // ``__rfc023_comments__`` and RFC-045
+        // ``__rfc045_drawing_N__``) that aren't tied to a single
+        // sheet name in `sheet_order`. Iterate in sorted order so the
+        // emitted Override sequence is deterministic.
+        let mut synth_keys: Vec<&String> = self
+            .queued_content_type_ops
+            .keys()
+            .filter(|k| !self.sheet_order.contains(k))
+            .collect();
+        synth_keys.sort();
+        for k in synth_keys {
+            if let Some(ops) = self.queued_content_type_ops.get(k) {
                 content_type_ops.extend(ops.iter().cloned());
             }
         }
@@ -2341,6 +2492,174 @@ impl XlsxPatcher {
     }
 
     /// Phase 2.5i — drive `wolfxl_structural::apply_workbook_shift`
+    /// Sprint Λ Pod-β (RFC-045) — drain `self.queued_images`.
+    ///
+    /// For each sheet:
+    /// 1. Read the sheet's rels graph (from `rels_patches` if
+    ///    already mutated, else from the source ZIP, else fresh).
+    /// 2. Reject sheets that already have a `drawing` rel — v1.5
+    ///    limit (NotImplementedError to surface the gap).
+    /// 3. Allocate one fresh `drawingN.xml` part + one fresh
+    ///    `imageM.<ext>` per queued image via the shared part-id
+    ///    allocator.
+    /// 4. Synthesize the drawing part XML, the drawing rels XML,
+    ///    and the media bytes — all into `file_adds`.
+    /// 5. Add a `drawing` rel to the sheet's rels graph in
+    ///    `rels_patches`.
+    /// 6. Splice a `<drawing r:id="..."/>` element into the sheet
+    ///    XML in `file_patches` so Phase 3's downstream merger and
+    ///    final emit see it.
+    /// 7. Queue content-type ops: `<Default Extension="<ext>" .../>`
+    ///    once per distinct extension and one
+    ///    `<Override PartName="/xl/drawings/drawingN.xml" .../>`
+    ///    per drawing.
+    fn apply_image_adds_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
+    ) -> PyResult<()> {
+        // Drain queued_images into a stable order — sheet_order so two
+        // saves of the same workbook with the same calls produce the
+        // same output.
+        let drained: Vec<(String, Vec<QueuedImageAdd>)> = self
+            .sheet_order
+            .iter()
+            .filter_map(|s| {
+                self.queued_images
+                    .remove(s)
+                    .map(|v| (s.clone(), v))
+            })
+            .collect();
+        if drained.is_empty() {
+            // Defensive — should be unreachable since the caller checked.
+            self.queued_images.clear();
+            return Ok(());
+        }
+
+        for (sheet_name, queued) in drained {
+            if queued.is_empty() {
+                continue;
+            }
+            let sheet_path = self
+                .sheet_paths
+                .get(&sheet_name)
+                .cloned()
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!("queue_image_add: no such sheet: {sheet_name}"))
+                })?;
+
+            // 1. Get sheet rels graph (from rels_patches → file_adds → ZIP).
+            let sheet_rels_path = format!(
+                "{}/_rels/{}.rels",
+                sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                sheet_path.rsplit('/').next().unwrap_or("")
+            );
+            let mut rels_graph: wolfxl_rels::RelsGraph = if let Some(g) =
+                self.rels_patches.get(&sheet_rels_path)
+            {
+                g.clone()
+            } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
+                wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
+                })?
+            } else {
+                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
+                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
+                    })?,
+                    None => wolfxl_rels::RelsGraph::new(),
+                }
+            };
+
+            // 2. Reject if drawing rel already exists.
+            for r in rels_graph.iter() {
+                if r.rel_type == wolfxl_rels::rt::DRAWING {
+                    return Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
+                        format!(
+                            "queue_image_add on sheet {sheet_name:?}: \
+                             sheet already has a drawing part — appending to an \
+                             existing drawing is a v1.5 follow-up. As a workaround, \
+                             remove the existing drawing first or open the file in \
+                             write mode."
+                        ),
+                    ));
+                }
+            }
+
+            // 3. Allocate part suffixes.
+            let drawing_n = part_id_allocator.alloc_drawing();
+            let image_indices: Vec<u32> =
+                queued.iter().map(|_| part_id_allocator.alloc_image()).collect();
+
+            // 4. Synthesize drawing part XML + rels.
+            let drawing_xml = build_drawing_xml(&queued);
+            let drawing_rels_xml = build_drawing_rels_xml(&queued, &image_indices);
+            let drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
+            let drawing_rels_path =
+                format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
+            self.file_adds
+                .insert(drawing_path.clone(), drawing_xml.into_bytes());
+            self.file_adds
+                .insert(drawing_rels_path, drawing_rels_xml.into_bytes());
+            for (img, &n) in queued.iter().zip(image_indices.iter()) {
+                let media_path = format!("xl/media/image{n}.{}", img.ext);
+                self.file_adds.insert(media_path, img.data.clone());
+            }
+
+            // 5. Add drawing rel to sheet rels graph.
+            let drawing_rid = rels_graph.add(
+                wolfxl_rels::rt::DRAWING,
+                &format!("../drawings/drawing{drawing_n}.xml"),
+                wolfxl_rels::TargetMode::Internal,
+            );
+            self.rels_patches.insert(sheet_rels_path, rels_graph);
+
+            // 6. Splice <drawing r:id> into sheet XML.
+            let sheet_xml = if let Some(b) = file_patches.get(&sheet_path) {
+                String::from_utf8_lossy(b).into_owned()
+            } else if let Some(b) = self.file_adds.get(&sheet_path) {
+                String::from_utf8_lossy(b).into_owned()
+            } else {
+                ooxml_util::zip_read_to_string(zip, &sheet_path)?
+            };
+            let after = splice_drawing_ref(&sheet_xml, &drawing_rid.0)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("splice drawing: {e}")))?;
+            file_patches.insert(sheet_path, after.into_bytes());
+
+            // 7. Queue content-type ops.
+            //    - one Default Extension per distinct extension
+            //    - one Override per drawing part
+            let mut seen_exts: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let mut ops: Vec<content_types::ContentTypeOp> = Vec::new();
+            for img in &queued {
+                if seen_exts.insert(img.ext.clone()) {
+                    let ct = match img.ext.as_str() {
+                        "png" => "image/png",
+                        "jpeg" | "jpg" => "image/jpeg",
+                        "gif" => "image/gif",
+                        "bmp" => "image/bmp",
+                        _ => "application/octet-stream",
+                    };
+                    ops.push(content_types::ContentTypeOp::EnsureDefault(
+                        img.ext.clone(),
+                        ct.to_string(),
+                    ));
+                }
+            }
+            ops.push(content_types::ContentTypeOp::AddOverride(
+                format!("/xl/drawings/drawing{drawing_n}.xml"),
+                "application/vnd.openxmlformats-officedocument.drawing+xml".to_string(),
+            ));
+            self.queued_content_type_ops
+                .entry(format!("__rfc045_drawing_{drawing_n}__"))
+                .or_default()
+                .extend(ops);
+        }
+        Ok(())
+    }
+
     /// across every queued op. Reads from `file_patches` when an
     /// earlier phase already mutated a part; falls back to source ZIP
     /// otherwise. Writes the result back into `file_patches`.
@@ -3808,4 +4127,228 @@ fn minimal_styles_xml() -> String {
 <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs>
 </styleSheet>"#
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Sprint Λ Pod-β (RFC-045) — image-add helpers + Phase 2.5k.
+// ---------------------------------------------------------------------------
+
+fn parse_queued_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<QueuedImageAnchor> {
+    let kind: String = d
+        .get_item("type")?
+        .ok_or_else(|| PyValueError::new_err("anchor dict missing 'type'"))?
+        .extract()?;
+    let q_int = |key: &str, default: u32| -> PyResult<u32> {
+        Ok(d.get_item(key)?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(default))
+    };
+    let q_i64 = |key: &str, default: i64| -> PyResult<i64> {
+        Ok(d.get_item(key)?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(default))
+    };
+    match kind.as_str() {
+        "one_cell" => Ok(QueuedImageAnchor::OneCell {
+            from_col: q_int("from_col", 0)?,
+            from_row: q_int("from_row", 0)?,
+            from_col_off: q_i64("from_col_off", 0)?,
+            from_row_off: q_i64("from_row_off", 0)?,
+        }),
+        "two_cell" => Ok(QueuedImageAnchor::TwoCell {
+            from_col: q_int("from_col", 0)?,
+            from_row: q_int("from_row", 0)?,
+            from_col_off: q_i64("from_col_off", 0)?,
+            from_row_off: q_i64("from_row_off", 0)?,
+            to_col: q_int("to_col", 0)?,
+            to_row: q_int("to_row", 0)?,
+            to_col_off: q_i64("to_col_off", 0)?,
+            to_row_off: q_i64("to_row_off", 0)?,
+            edit_as: d
+                .get_item("edit_as")?
+                .and_then(|v| v.extract().ok())
+                .unwrap_or_else(|| "oneCell".to_string()),
+        }),
+        "absolute" => Ok(QueuedImageAnchor::Absolute {
+            x_emu: q_i64("x_emu", 0)?,
+            y_emu: q_i64("y_emu", 0)?,
+            cx_emu: q_i64("cx_emu", 0)?,
+            cy_emu: q_i64("cy_emu", 0)?,
+        }),
+        other => Err(PyValueError::new_err(format!(
+            "unknown anchor type: {other:?}"
+        ))),
+    }
+}
+
+/// Build the `xl/drawings/drawingN.xml` body for the queued images.
+/// Rels for each image are 1-indexed (`rId1`, `rId2`, ...) since each
+/// drawing has its own rels graph.
+pub(crate) fn build_drawing_xml(images: &[QueuedImageAdd]) -> String {
+    let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let emu_per_px: i64 = 9525;
+    let mut out = String::with_capacity(512 + images.len() * 512);
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+    out.push_str(&format!(
+        "<xdr:wsDr xmlns:xdr=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\">"
+    ));
+    for (i, img) in images.iter().enumerate() {
+        let pic_id = (i + 1) as u32;
+        let rid = format!("rId{}", i + 1);
+        match &img.anchor {
+            QueuedImageAnchor::OneCell {
+                from_col,
+                from_row,
+                from_col_off,
+                from_row_off,
+            } => {
+                out.push_str("<xdr:oneCellAnchor>");
+                out.push_str(&format!(
+                    "<xdr:from><xdr:col>{from_col}</xdr:col><xdr:colOff>{from_col_off}</xdr:colOff>\
+                     <xdr:row>{from_row}</xdr:row><xdr:rowOff>{from_row_off}</xdr:rowOff></xdr:from>"
+                ));
+                let cx = img.width_px as i64 * emu_per_px;
+                let cy = img.height_px as i64 * emu_per_px;
+                out.push_str(&format!("<xdr:ext cx=\"{cx}\" cy=\"{cy}\"/>"));
+            }
+            QueuedImageAnchor::TwoCell {
+                from_col,
+                from_row,
+                from_col_off,
+                from_row_off,
+                to_col,
+                to_row,
+                to_col_off,
+                to_row_off,
+                edit_as,
+            } => {
+                out.push_str(&format!("<xdr:twoCellAnchor editAs=\"{edit_as}\">"));
+                out.push_str(&format!(
+                    "<xdr:from><xdr:col>{from_col}</xdr:col><xdr:colOff>{from_col_off}</xdr:colOff>\
+                     <xdr:row>{from_row}</xdr:row><xdr:rowOff>{from_row_off}</xdr:rowOff></xdr:from>"
+                ));
+                out.push_str(&format!(
+                    "<xdr:to><xdr:col>{to_col}</xdr:col><xdr:colOff>{to_col_off}</xdr:colOff>\
+                     <xdr:row>{to_row}</xdr:row><xdr:rowOff>{to_row_off}</xdr:rowOff></xdr:to>"
+                ));
+            }
+            QueuedImageAnchor::Absolute {
+                x_emu,
+                y_emu,
+                cx_emu,
+                cy_emu,
+            } => {
+                out.push_str("<xdr:absoluteAnchor>");
+                out.push_str(&format!("<xdr:pos x=\"{x_emu}\" y=\"{y_emu}\"/>"));
+                out.push_str(&format!("<xdr:ext cx=\"{cx_emu}\" cy=\"{cy_emu}\"/>"));
+            }
+        }
+        let cx = img.width_px as i64 * emu_per_px;
+        let cy = img.height_px as i64 * emu_per_px;
+        out.push_str(&format!(
+            "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"{pic_id}\" name=\"Picture {pic_id}\" descr=\"Picture {pic_id}\"/>\
+             <xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr>\
+             <xdr:blipFill><a:blip xmlns:r=\"{r_ns}\" r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>\
+             <xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>\
+             <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"
+        ));
+        out.push_str("<xdr:clientData/>");
+        match &img.anchor {
+            QueuedImageAnchor::OneCell { .. } => out.push_str("</xdr:oneCellAnchor>"),
+            QueuedImageAnchor::TwoCell { .. } => out.push_str("</xdr:twoCellAnchor>"),
+            QueuedImageAnchor::Absolute { .. } => out.push_str("</xdr:absoluteAnchor>"),
+        }
+    }
+    out.push_str("</xdr:wsDr>");
+    out
+}
+
+/// Build `xl/drawings/_rels/drawingN.xml.rels` for the given images.
+/// `image_indices` are 1-based global media indices.
+pub(crate) fn build_drawing_rels_xml(images: &[QueuedImageAdd], image_indices: &[u32]) -> String {
+    debug_assert_eq!(images.len(), image_indices.len());
+    let mut g = wolfxl_rels::RelsGraph::new();
+    for (img, &n) in images.iter().zip(image_indices.iter()) {
+        g.add(
+            wolfxl_rels::rt::IMAGE,
+            &format!("../media/image{n}.{}", img.ext),
+            wolfxl_rels::TargetMode::Internal,
+        );
+    }
+    String::from_utf8(g.serialize()).expect("rels serialize is utf8")
+}
+
+/// Splice a `<drawing r:id="rIdN"/>` element into a sheet XML body.
+///
+/// Insertion strategy: locate the position just before
+/// `<legacyDrawing` (slot 31) if present; failing that, just before
+/// `</worksheet>`. This matches the ECMA element-order rule for
+/// slot 30. If a `<drawing` element is already present, returns
+/// `Err` so the caller can raise NotImplementedError (v1.5 limit).
+pub(crate) fn splice_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, &'static str> {
+    if sheet_xml.contains("<drawing ") || sheet_xml.contains("<drawing/>") {
+        return Err("sheet already has a <drawing> element");
+    }
+    let elem = format!("<drawing r:id=\"{rid}\"/>");
+    if let Some(idx) = sheet_xml.find("<legacyDrawing") {
+        let mut out = String::with_capacity(sheet_xml.len() + elem.len());
+        out.push_str(&sheet_xml[..idx]);
+        out.push_str(&elem);
+        out.push_str(&sheet_xml[idx..]);
+        return Ok(out);
+    }
+    if let Some(idx) = sheet_xml.rfind("</worksheet>") {
+        let mut out = String::with_capacity(sheet_xml.len() + elem.len());
+        out.push_str(&sheet_xml[..idx]);
+        out.push_str(&elem);
+        out.push_str(&sheet_xml[idx..]);
+        return Ok(out);
+    }
+    Err("sheet xml has no </worksheet> closing tag")
+}
+
+#[cfg(test)]
+mod image_helpers_tests {
+    use super::*;
+
+    #[test]
+    fn splice_drawing_before_legacy_drawing() {
+        let xml = r#"<?xml version="1.0"?><worksheet><sheetData/><legacyDrawing r:id="rId2"/></worksheet>"#;
+        let out = splice_drawing_ref(xml, "rId5").unwrap();
+        assert!(out.contains("<drawing r:id=\"rId5\"/><legacyDrawing"));
+    }
+
+    #[test]
+    fn splice_drawing_before_close_when_no_legacy() {
+        let xml = r#"<?xml version="1.0"?><worksheet><sheetData/></worksheet>"#;
+        let out = splice_drawing_ref(xml, "rId1").unwrap();
+        assert!(out.contains("<drawing r:id=\"rId1\"/></worksheet>"));
+    }
+
+    #[test]
+    fn splice_drawing_errors_when_already_present() {
+        let xml = r#"<?xml version="1.0"?><worksheet><sheetData/><drawing r:id="rId7"/></worksheet>"#;
+        assert!(splice_drawing_ref(xml, "rId1").is_err());
+    }
+
+    #[test]
+    fn build_drawing_xml_roundtrip() {
+        let imgs = vec![QueuedImageAdd {
+            data: vec![],
+            ext: "png".into(),
+            width_px: 10,
+            height_px: 5,
+            anchor: QueuedImageAnchor::OneCell {
+                from_col: 1,
+                from_row: 4,
+                from_col_off: 0,
+                from_row_off: 0,
+            },
+        }];
+        let xml = build_drawing_xml(&imgs);
+        assert!(xml.contains("<xdr:oneCellAnchor>"));
+        assert!(xml.contains("r:embed=\"rId1\""));
+    }
 }
