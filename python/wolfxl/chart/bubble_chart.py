@@ -87,20 +87,20 @@ class BubbleChart(ChartBase):
             raise ValueError(f"size_represents={v!r} not in {_VALID_SIZE_REPRESENTS}")
         self.sizeRepresents = v
 
-    def _chart_dict_extras(self) -> dict[str, Any]:
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
         d: dict[str, Any] = {}
-        if self.vary_colors is not None:
-            d["varyColors"] = self.vary_colors
         if self.bubble3D is not None:
-            d["bubble3D"] = self.bubble3D
+            d["bubble_3d"] = self.bubble3D
         if self.bubbleScale is not None:
-            d["bubbleScale"] = self.bubbleScale
+            d["bubble_scale"] = self.bubbleScale
         if self.showNegBubbles is not None:
-            d["showNegBubbles"] = self.showNegBubbles
+            d["show_neg_bubbles"] = self.showNegBubbles
         if self.sizeRepresents is not None:
-            d["sizeRepresents"] = self.sizeRepresents
+            d["size_represents"] = self.sizeRepresents
         if self.dLbls is not None:
-            d["dLbls"] = self.dLbls.to_dict()
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
         return d
 
 
