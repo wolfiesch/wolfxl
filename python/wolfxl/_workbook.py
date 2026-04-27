@@ -105,6 +105,8 @@ def _build_xlsb_xls_wb(
     wb._pending_chart_adds = {}
     wb._pending_pivot_caches = []
     wb._next_pivot_cache_id = 0
+    wb._pending_slicer_caches = []
+    wb._next_slicer_cache_id = 0
     wb.copy_options = CopyOptions()
     return wb
 
@@ -168,6 +170,9 @@ class Workbook:
         # called so the first cache is `cache_id=0` (matches OOXML
         # convention of 0-based cacheId in <pivotCache>).
         self._next_pivot_cache_id: int = 0
+        # RFC-061 Sub-feature 3.1 — slicer caches (workbook-scoped).
+        self._pending_slicer_caches: list[Any] = []
+        self._next_slicer_cache_id: int = 0
         # Sprint Θ Pod-C2 — workbook-level copy options.
         self.copy_options: CopyOptions = CopyOptions()
         # Sprint Ι Pod-β — streaming read flag (write mode never streams).
@@ -226,6 +231,8 @@ class Workbook:
         wb._pending_chart_adds = {}
         wb._pending_pivot_caches = []
         wb._next_pivot_cache_id = 0
+        wb._pending_slicer_caches = []
+        wb._next_slicer_cache_id = 0
         wb.copy_options = CopyOptions()
         return wb
 
@@ -433,6 +440,8 @@ class Workbook:
         wb._pending_chart_adds = {}
         wb._pending_pivot_caches = []
         wb._next_pivot_cache_id = 0
+        wb._pending_slicer_caches = []
+        wb._next_slicer_cache_id = 0
         wb.copy_options = CopyOptions()
         return wb
 
@@ -477,6 +486,8 @@ class Workbook:
         wb._pending_chart_adds = {}
         wb._pending_pivot_caches = []
         wb._next_pivot_cache_id = 0
+        wb._pending_slicer_caches = []
+        wb._next_slicer_cache_id = 0
         wb.copy_options = CopyOptions()
         return wb
 
@@ -1442,6 +1453,55 @@ class Workbook:
                 )
             cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
+        return cache
+
+    def add_slicer_cache(self, cache: Any) -> Any:
+        """RFC-061 §2.1 — register a slicer cache against this workbook.
+
+        Slicer caches are workbook-scoped: one cache can be referenced
+        by multiple slicer presentations on different sheets.
+
+        The source pivot cache must already be registered via
+        :meth:`add_pivot_cache` BEFORE the slicer cache is added.
+
+        Args:
+            cache: A :class:`wolfxl.pivot.SlicerCache` instance.
+
+        Returns:
+            The same cache (with ``_slicer_cache_id`` populated).
+
+        Raises:
+            RuntimeError: If the workbook is not open in modify mode.
+            ValueError: If the cache has already been registered or
+                the source pivot cache is not registered.
+        """
+        if self._rust_patcher is None:
+            raise RuntimeError(
+                "add_slicer_cache requires modify mode — open the "
+                "workbook with load_workbook(..., modify=True)"
+            )
+        if getattr(cache, "_slicer_cache_id", None) is not None:
+            raise ValueError(
+                f"Slicer cache already registered with id="
+                f"{cache._slicer_cache_id}"
+            )
+        if cache.source_pivot_cache._cache_id is None:
+            raise ValueError(
+                "SlicerCache.source_pivot_cache must be registered "
+                "via Workbook.add_pivot_cache(...) before "
+                "add_slicer_cache(...)"
+            )
+        cache._slicer_cache_id = self._next_slicer_cache_id
+        self._next_slicer_cache_id += 1
+        # If the caller didn't seed items explicitly, populate from the
+        # source cache's <sharedItems> per RFC-061 §3.1 default.
+        if not cache.items:
+            try:
+                cache.populate_items_from_cache()
+            except Exception:
+                # Source cache field has no enumeration; leave empty.
+                pass
+        self._pending_slicer_caches.append(cache)
         return cache
 
     def _flush_pending_pivots_to_patcher(self) -> None:

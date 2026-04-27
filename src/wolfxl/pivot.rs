@@ -47,6 +47,8 @@ use wolfxl_pivot::model::cache::{
     CacheField, CacheValue, PivotCache, SharedItems, WorksheetSource,
 };
 use wolfxl_pivot::model::records::{CacheRecord, RecordCell};
+use wolfxl_pivot::model::slicer::Slicer;
+use wolfxl_pivot::model::slicer_cache::{SlicerCache, SlicerItem, SlicerSortOrder};
 use wolfxl_pivot::model::table::{
     AxisItem, AxisType, DataField, Location, PageField, PivotField, PivotItem, PivotTable,
     PivotTableStyleInfo,
@@ -639,6 +641,145 @@ pub fn serialize_pivot_table_dict(
     let cache = parse_pivot_cache_dict(cache_d)?;
     let table = parse_pivot_table_dict(table_d)?;
     Ok(wolfxl_pivot::emit::pivot_table_xml(&table, &cache))
+}
+
+// ---------------------------------------------------------------------------
+// RFC-061 Sub-feature 3.1 — slicer cache + slicer presentation parsers + serializers
+// ---------------------------------------------------------------------------
+
+fn parse_sort_order(s: &str) -> PyResult<SlicerSortOrder> {
+    match s {
+        "ascending" => Ok(SlicerSortOrder::Ascending),
+        "descending" => Ok(SlicerSortOrder::Descending),
+        "none" => Ok(SlicerSortOrder::None),
+        other => Err(PyValueError::new_err(format!(
+            "unknown slicer sort_order {other:?}"
+        ))),
+    }
+}
+
+fn parse_slicer_item(d: &Bound<'_, PyDict>) -> PyResult<SlicerItem> {
+    Ok(SlicerItem {
+        name: extract_str(d, "name", "")?,
+        hidden: extract_bool(d, "hidden", false)?,
+        no_data: extract_bool(d, "no_data", false)?,
+    })
+}
+
+pub fn parse_slicer_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<SlicerCache> {
+    let name = extract_str(d, "name", "")?;
+    let source_pivot_cache_id = extract_u32(d, "source_pivot_cache_id", 0)?;
+    let source_field_index = extract_u32(d, "source_field_index", 0)?;
+    let sort_str = extract_str(d, "sort_order", "ascending")?;
+    let sort_order = parse_sort_order(&sort_str)?;
+    let custom_list_sort = extract_bool(d, "custom_list_sort", false)?;
+    let hide_items_with_no_data = extract_bool(d, "hide_items_with_no_data", false)?;
+    let show_missing = extract_bool(d, "show_missing", true)?;
+
+    let items: Vec<SlicerItem> = match d.get_item("items")? {
+        Some(v) if !v.is_none() => {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            let mut out = Vec::with_capacity(list.len());
+            for vv in &list {
+                let pd = vv.downcast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err("slicer_cache.items[*] must be dict")
+                })?;
+                out.push(parse_slicer_item(pd)?);
+            }
+            out
+        }
+        _ => Vec::new(),
+    };
+
+    let sc = SlicerCache {
+        name,
+        source_pivot_cache_id,
+        source_field_index,
+        sort_order,
+        custom_list_sort,
+        hide_items_with_no_data,
+        show_missing,
+        items,
+    };
+    sc.validate().map_err(PyValueError::new_err)?;
+    Ok(sc)
+}
+
+pub fn parse_slicer_dict(d: &Bound<'_, PyDict>) -> PyResult<Slicer> {
+    let style = extract_opt_str(d, "style")?;
+    let s = Slicer {
+        name: extract_str(d, "name", "")?,
+        cache_name: extract_str(d, "cache_name", "")?,
+        caption: extract_str(d, "caption", "")?,
+        row_height: extract_u32(d, "row_height", 204)?,
+        column_count: extract_u32(d, "column_count", 1)?,
+        show_caption: extract_bool(d, "show_caption", true)?,
+        style,
+        locked: extract_bool(d, "locked", true)?,
+        anchor: extract_str(d, "anchor", "")?,
+    };
+    s.validate().map_err(PyValueError::new_err)?;
+    Ok(s)
+}
+
+/// RFC-061 §10.7 — serialize a slicer-cache dict to OOXML bytes.
+#[pyfunction]
+pub fn serialize_slicer_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<Vec<u8>> {
+    let sc = parse_slicer_cache_dict(d)?;
+    Ok(wolfxl_pivot::emit::slicer_cache_xml(&sc))
+}
+
+/// RFC-061 §10.7 — serialize a slicer presentation dict to OOXML bytes.
+/// Takes a list of slicer dicts (one sheet's slicers); returns the
+/// merged `xl/slicers/slicer{N}.xml` body.
+#[pyfunction]
+pub fn serialize_slicer_dict(slicers_list: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    let list: Vec<Bound<'_, PyAny>> = slicers_list.extract()?;
+    let mut slicers: Vec<Slicer> = Vec::with_capacity(list.len());
+    for v in &list {
+        let pd = v
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("slicer dict expected"))?;
+        slicers.push(parse_slicer_dict(pd)?);
+    }
+    Ok(wolfxl_pivot::emit::slicer_xml(&slicers))
+}
+
+// ---------------------------------------------------------------------------
+// Queued payloads for the patcher's Phase 2.5p drain.
+// ---------------------------------------------------------------------------
+
+/// One slicer cache queued for emit. Mirrors `QueuedPivotCacheAdd`.
+#[derive(Debug, Clone)]
+pub struct QueuedSlicerCacheAdd {
+    /// `xl/slicerCaches/slicerCache{N}.xml` body.
+    pub cache_xml: Vec<u8>,
+    /// 0-based slicer-cache id allocated when queued.
+    pub slicer_cache_id: u32,
+    /// Slicer-cache name used for both the rel target and the
+    /// workbook-level `<x14:slicerCaches>` extension entries.
+    pub name: String,
+    /// 0-based source pivot-cache id. The patcher uses this to
+    /// resolve the pivot-cache part path for the slicer cache's
+    /// rels file.
+    pub source_pivot_cache_id: u32,
+}
+
+/// One slicer presentation queued for a sheet.
+#[derive(Debug, Clone)]
+pub struct QueuedSlicerAdd {
+    /// Owner sheet title.
+    pub sheet: String,
+    /// `xl/slicers/slicer{N}.xml` body — pre-serialised single-slicer
+    /// presentation. Multiple slicers on one sheet are serialised
+    /// inside ONE presentation file by the Python coordinator
+    /// (which calls `serialize_slicer_dict` with a list).
+    pub slicer_xml: Vec<u8>,
+    /// One slicer-cache_id per slicer in the presentation file.
+    /// Used to wire rels back to the cache.
+    pub slicer_cache_ids: Vec<u32>,
+    /// Slicer-cache names referenced (parallel to `slicer_cache_ids`).
+    pub cache_names: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

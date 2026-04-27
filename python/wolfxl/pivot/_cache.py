@@ -249,6 +249,10 @@ class PivotCache:
         # Set by _materialize() (called by add_pivot_cache).
         self._fields: list[CacheField] | None = None
         self._records: list[list[CacheValue]] | None = None
+        # RFC-061 §2.2 / §2.4 — calculated fields + field groups.
+        # Both are cache-scoped (RFC-035 deep-clone aliases via parent).
+        self.calculated_fields: list[Any] = []
+        self.field_groups: list[Any] = []
 
     @property
     def cache_id(self) -> int:
@@ -564,8 +568,140 @@ class PivotCache:
     # to_rust_dict — RFC-047 §10.1 + §10.6 contracts.
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # RFC-061 §2.2 — calculated fields
+    # ------------------------------------------------------------------
+
+    def add_calculated_field(
+        self,
+        name: str,
+        formula: str,
+        data_type: str = "number",
+    ):
+        """Add a calculated field to this cache.
+
+        Excel evaluates the formula on open — wolfxl does not
+        pre-evaluate values. Per RFC-061 §2.2 the formula uses pivot
+        field names as bare identifiers (``"= revenue - cost"``).
+
+        Returns the registered :class:`CalculatedField` for chaining.
+        """
+        from ._calc import CalculatedField
+
+        cf = CalculatedField(name=name, formula=formula, data_type=data_type)
+        self.calculated_fields.append(cf)
+        return cf
+
+    # ------------------------------------------------------------------
+    # RFC-061 §2.4 — field grouping (date / range)
+    # ------------------------------------------------------------------
+
+    def group_field(
+        self,
+        field: str,
+        *,
+        by: str | None = None,
+        start: float | None = None,
+        end: float | None = None,
+        interval: float | None = None,
+        parent: str | None = None,
+    ):
+        """Group a cache field by date precision or numeric range.
+
+        Date grouping::
+
+            cache.group_field("order_date", by="months")
+            # by ∈ {"years", "quarters", "months", "days",
+            #       "hours", "minutes", "seconds"}
+
+        Range grouping::
+
+            cache.group_field("age", start=0, end=100, interval=10)
+
+        Recursive grouping::
+
+            cache.group_field("order_date", by="years")
+            cache.group_field("order_date", by="quarters",
+                              parent="order_date")  # nested
+
+        Returns the registered :class:`FieldGroup`.
+        """
+        from ._group import (
+            FieldGroup,
+            FieldGroupDate,
+            FieldGroupRange,
+            synthesize_date_group_items,
+            synthesize_range_group_items,
+        )
+
+        # Recursion-depth cap (RFC-061 §3.3).
+        if len(self.field_groups) >= 4:
+            raise ValueError(
+                "PivotCache.group_field: recursion depth exceeds 4"
+            )
+
+        field_index = self.field_index(field)
+        parent_index = self.field_index(parent) if parent else None
+
+        if by is not None:
+            # Date grouping path.
+            if start is None or end is None:
+                # Pull from the source field's min_date/max_date.
+                cf = self.fields[field_index]
+                si = cf.shared_items
+                if si.min_date is None or si.max_date is None:
+                    raise ValueError(
+                        f"PivotCache.group_field({field!r}): cannot infer "
+                        "date range; pass start= and end= explicitly"
+                    )
+                from datetime import datetime as _dt
+
+                start_dt = _dt.fromisoformat(si.min_date)
+                end_dt = _dt.fromisoformat(si.max_date)
+            else:
+                from datetime import datetime as _dt
+
+                start_dt = (
+                    start if isinstance(start, _dt) else _dt.fromisoformat(str(start))
+                )
+                end_dt = (
+                    end if isinstance(end, _dt) else _dt.fromisoformat(str(end))
+                )
+            items, start_iso, end_iso = synthesize_date_group_items(
+                by, start_dt, end_dt
+            )
+            fg = FieldGroup(
+                field_index=field_index,
+                parent_index=parent_index,
+                kind="date",
+                date=FieldGroupDate(
+                    group_by=by, start_date=start_iso, end_date=end_iso
+                ),
+                items=items,
+            )
+        else:
+            # Numeric range grouping path.
+            if start is None or end is None or interval is None:
+                raise ValueError(
+                    "PivotCache.group_field: range grouping requires "
+                    "start=, end=, and interval=  (or by= for date grouping)"
+                )
+            items = synthesize_range_group_items(start, end, interval)
+            fg = FieldGroup(
+                field_index=field_index,
+                parent_index=parent_index,
+                kind="range",
+                range=FieldGroupRange(
+                    start=float(start), end=float(end), interval=float(interval)
+                ),
+                items=items,
+            )
+
+        self.field_groups.append(fg)
+        return fg
+
     def to_rust_dict(self) -> dict:
-        """Cache-definition dict per RFC-047 §10.1."""
+        """Cache-definition dict per RFC-047 §10.1 + RFC-061 extensions."""
         if self._cache_id is None:
             raise RuntimeError(
                 "PivotCache.cache_id not set — call "
@@ -585,6 +721,13 @@ class PivotCache:
             "min_refreshable_version": 3,
             "refreshed_by": self.refreshed_by,
             "records_part_path": None,  # set by patcher
+            # RFC-061 extensions
+            "calculated_fields": [
+                cf.to_rust_dict() for cf in self.calculated_fields
+            ],
+            "field_groups": [
+                fg.to_rust_dict() for fg in self.field_groups
+            ],
         }
 
     def to_rust_records_dict(self) -> dict:

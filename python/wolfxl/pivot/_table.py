@@ -345,6 +345,12 @@ class PivotTable:
         self._aggregated_values: dict[
             tuple[tuple, tuple, int], float | None
         ] = {}
+        # RFC-061 §2.3 — calculated items (table-scoped).
+        self.calculated_items: list[Any] = []
+        # RFC-061 §2.5 — pivot-area Format / CF directives (table-scoped).
+        self.formats: list[Any] = []
+        self.conditional_formats: list[Any] = []
+        self.chart_formats: list[Any] = []
 
     # ------------------------------------------------------------------
     # Public attribute proxies expected by openpyxl-shaped users.
@@ -739,8 +745,102 @@ class PivotTable:
     # to_rust_dict — RFC-048 §10.1
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # RFC-061 §2.3 — calculated items
+    # ------------------------------------------------------------------
+
+    def add_calculated_item(
+        self,
+        field: str,
+        item_name: str,
+        formula: str,
+    ):
+        """Add a calculated item to a specific field of this pivot table.
+
+        Calc items live inside pivot table XML, NOT cache XML.
+        Excel evaluates the formula on open — wolfxl does not
+        pre-evaluate.
+
+        Returns the registered :class:`CalculatedItem`.
+        """
+        from ._calc import CalculatedItem
+
+        ci = CalculatedItem(
+            field_name=field, item_name=item_name, formula=formula
+        )
+        self.calculated_items.append(ci)
+        return ci
+
+    # ------------------------------------------------------------------
+    # RFC-061 §2.5 — pivot-area Format / CF
+    # ------------------------------------------------------------------
+
+    def add_format(
+        self,
+        pivot_area,
+        dxf=None,
+        action: str = "formatting",
+        dxf_id: int | None = None,
+    ):
+        """Add a Format directive (pivot-area + dxf + action).
+
+        Either pass an explicit ``dxf_id`` (resolved to an existing
+        workbook dxf table entry) or pass a ``dxf=`` instance for
+        the patcher to allocate one via the RFC-026 dxf allocator.
+
+        Returns the registered :class:`Format`.
+        """
+        from ._styling import Format, PivotArea
+
+        if not isinstance(pivot_area, PivotArea):
+            raise TypeError(
+                "PivotTable.add_format: pivot_area must be a PivotArea"
+            )
+        if dxf_id is None:
+            # The patcher will assign a workbook-scoped dxf id from
+            # the dxf= payload at flush time. Until then, we tag a
+            # sentinel `dxf_id=-1` and stash the dxf payload.
+            dxf_id = -1
+        f = Format(pivot_area=pivot_area, dxf_id=dxf_id, action=action)
+        f._dxf_payload = dxf  # type: ignore[attr-defined]
+        self.formats.append(f)
+        return f
+
+    def add_conditional_format(
+        self,
+        rule,
+        pivot_area,
+        priority: int = 1,
+    ):
+        """Add a pivot-scoped CF rule.
+
+        ``rule`` is a CF rule object (e.g.
+        :class:`wolfxl.formatting.Rule` /
+        :class:`wolfxl.formatting.ColorScale` / etc.). The rule
+        references a workbook-scoped dxf entry through the existing
+        RFC-026 ``dxfId`` allocator.
+
+        Returns the registered :class:`PivotConditionalFormat`.
+        """
+        from ._styling import PivotArea, PivotConditionalFormat
+
+        if isinstance(pivot_area, PivotArea):
+            areas = [pivot_area]
+        else:
+            areas = list(pivot_area)
+            if not all(isinstance(a, PivotArea) for a in areas):
+                raise TypeError(
+                    "PivotTable.add_conditional_format: pivot_area must "
+                    "be a PivotArea (or list of PivotArea)"
+                )
+        pcf = PivotConditionalFormat(
+            rule=rule, pivot_areas=areas, priority=priority
+        )
+        self.conditional_formats.append(pcf)
+        return pcf
+
     def to_rust_dict(self) -> dict:
-        """Pivot-table dict per RFC-048 §10.1.
+        """Pivot-table dict per RFC-048 §10.1 + RFC-061 extensions.
 
         Calls :meth:`_compute_layout` if not already invoked.
         """
@@ -777,4 +877,15 @@ class PivotTable:
             "created_version": 6,
             "updated_version": 6,
             "min_refreshable_version": 3,
+            # RFC-061 extensions
+            "calculated_items": [
+                ci.to_rust_dict() for ci in self.calculated_items
+            ],
+            "formats": [f.to_rust_dict() for f in self.formats],
+            "conditional_formats": [
+                cf.to_rust_dict() for cf in self.conditional_formats
+            ],
+            "chart_formats": [
+                cf.to_rust_dict() for cf in self.chart_formats
+            ],
         }
