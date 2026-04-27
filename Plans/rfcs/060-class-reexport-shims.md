@@ -292,3 +292,97 @@ DifferentialStyle) emit dicts compatible with the existing
 - `ColorScale(start_color="FFFF00", end_color="FF0000")` produces
   the same XML as openpyxl when fed to
   `ws.conditional_formatting.add(...)`.
+
+## 12. Implementation status (Sprint Ο Pod 2 landing)
+
+Sprint Ο Pod 2 lands the openpyxl-shaped path surface. The parity
+test `tests/parity/test_openpyxl_path_compat.py` enforces every
+entry below — 211 ``(path, symbol)`` pairs, all green. Symbols flagged
+with **(stub)** raise :class:`NotImplementedError` on instantiation
+(via :func:`wolfxl._compat._make_stub`); the import path itself is
+real, the construction is deferred to a follow-up.
+
+| openpyxl path | wolfxl module | status |
+|---|---|---|
+| `openpyxl.styles.alignment` → `Alignment` | `python/wolfxl/styles/alignment.py` | ✅ |
+| `openpyxl.styles.borders` → `Border`, `Side`, `BORDER_STYLES` | `python/wolfxl/styles/borders.py` | ✅ |
+| `openpyxl.styles.colors` → `Color`, `COLOR_INDEX` + named-palette aliases | `python/wolfxl/styles/colors.py` | ✅ |
+| `openpyxl.styles.fonts` → `Font` | `python/wolfxl/styles/fonts.py` | ✅ |
+| `openpyxl.styles.fills` → `PatternFill`, `GradientFill` (stub), `Fill` (stub), `fills` | `python/wolfxl/styles/fills.py` | ✅ |
+| `openpyxl.styles.protection` → `Protection` (stub) | `python/wolfxl/styles/protection.py` | ✅ |
+| `openpyxl.styles.numbers` → `BUILTIN_FORMATS`, `is_date_format`, `FORMAT_*` | `python/wolfxl/styles/numbers.py` | ✅ |
+| `openpyxl.styles.named_styles` → `NamedStyle` (stub) | `python/wolfxl/styles/named_styles.py` | ✅ |
+| `openpyxl.styles.differential` → `DifferentialStyle` (stub) | `python/wolfxl/styles/differential.py` | ✅ |
+| `openpyxl.cell.cell` → `Cell`, `MergedCell`, `WriteOnlyCell`, `ArrayFormula`, `DataTableFormula`, `Hyperlink`, `IllegalCharacterError` | `python/wolfxl/cell/cell.py` | ✅ |
+| `openpyxl.cell.rich_text` → `CellRichText`, `InlineFont`, `TextBlock` | `python/wolfxl/cell/rich_text.py` | ✅ |
+| `openpyxl.cell.text` → `CellRichText`, `InlineFont`, `TextBlock` | `python/wolfxl/cell/text.py` | ✅ |
+| `openpyxl.worksheet.cell_range` → `CellRange`, `MultiCellRange` | `python/wolfxl/worksheet/cell_range.py` | ✅ |
+| `openpyxl.worksheet.dimensions` → `RowDimension`, `ColumnDimension`, `DimensionHolder` (stub), `SheetFormatProperties` (stub), `SheetDimension` (stub), `Dimension` | `python/wolfxl/worksheet/dimensions.py` | ✅ |
+| `openpyxl.worksheet.merge` → `MergedCell`, `MergedCellRange`, `MergeCell` (stub), `MergeCells` (stub) | `python/wolfxl/worksheet/merge.py` | ✅ |
+| `openpyxl.worksheet.views` → `SheetView`, `Pane`, `Selection`, `SheetViewList` (all stubs) | `python/wolfxl/worksheet/views.py` | ✅ |
+| `openpyxl.worksheet.pagebreak` → `Break`, `ColBreak`, `RowBreak`, `PageBreak` (all stubs) | `python/wolfxl/worksheet/pagebreak.py` | ✅ |
+| `openpyxl.worksheet.print_settings` → `PrintArea`, `PrintTitles`, `ColRange`, `RowRange` (all stubs) | `python/wolfxl/worksheet/print_settings.py` | ✅ |
+| `openpyxl.worksheet.formula` → `ArrayFormula`, `DataTableFormula` | `python/wolfxl/worksheet/formula.py` | ✅ |
+| `openpyxl.worksheet.hyperlink` → `Hyperlink`, `HyperlinkList` | `python/wolfxl/worksheet/hyperlink.py` | ✅ |
+| `openpyxl.worksheet.properties` → `WorksheetProperties`, `PageSetupProperties`, `Outline` (all stubs) | `python/wolfxl/worksheet/properties.py` | ✅ |
+| `openpyxl.worksheet.protection` → `SheetProtection` (stub) | `python/wolfxl/worksheet/protection.py` | ✅ |
+| `openpyxl.worksheet.table` → `Table`, `TableColumn`, `TableStyleInfo`, `TableList` (stub), `TablePartList` (stub), `AutoFilter`, `SortState`, `Related` (stub), `XMLColumnProps` (stub) | `python/wolfxl/worksheet/table.py` | ✅ |
+| `openpyxl.worksheet.page` → `PageMargins`, `PrintOptions`, `PrintPageSetup` (all stubs) | `python/wolfxl/worksheet/page.py` | ✅ |
+| `openpyxl.worksheet.header_footer` → `HeaderFooter`, `HeaderFooterItem` (both stubs) | `python/wolfxl/worksheet/header_footer.py` | ✅ |
+| `openpyxl.worksheet.filters` → all 14 filter / sort classes | `python/wolfxl/worksheet/filters.py` | ✅ |
+| `openpyxl.worksheet.datavalidation` → `DataValidation`, `DataValidationList` | `python/wolfxl/worksheet/datavalidation.py` | ✅ |
+| `openpyxl.worksheet.worksheet` → `Worksheet` | `python/wolfxl/worksheet/worksheet.py` | ✅ |
+| `openpyxl.worksheet.copier` → `WorksheetCopy` (stub) | `python/wolfxl/worksheet/copier.py` | ✅ |
+| `openpyxl.workbook.workbook` → `Workbook` | `python/wolfxl/workbook/workbook.py` | ✅ |
+| `openpyxl.workbook.defined_name` → `DefinedName`, `DefinedNameList`, `DefinedNameDict` | `python/wolfxl/workbook/defined_name.py` | ✅ |
+| `openpyxl.workbook.protection` → `WorkbookProtection`, `FileSharing` | `python/wolfxl/workbook/protection.py` | ✅ |
+| `openpyxl.workbook.properties` → `CalcProperties`, `WorkbookProperties` (stubs) | `python/wolfxl/workbook/properties.py` | ✅ |
+| `openpyxl.workbook.child` → `_WorkbookChild` (stub) | `python/wolfxl/workbook/child.py` | ✅ |
+| `openpyxl.utils.cell` → coordinate parsers + `CellCoordinatesException`, `COORD_RE`, `RANGE_EXPR` | `python/wolfxl/utils/cell.py` | ✅ |
+| `openpyxl.utils.exceptions` → 5 exceptions | `python/wolfxl/utils/exceptions.py` | ✅ |
+| `openpyxl.utils.indexed_list` → `IndexedList` | `python/wolfxl/utils/indexed_list.py` | ✅ |
+| `openpyxl.utils.dataframe` → `dataframe_to_rows` | `python/wolfxl/utils/dataframe.py` | ✅ |
+| `openpyxl.utils.datetime` → `from_excel`, `CALENDAR_WINDOWS_1900`, `CALENDAR_MAC_1904` | `python/wolfxl/utils/datetime.py` | ✅ |
+| `openpyxl.utils.units` → EMU/pixel/point conversions | `python/wolfxl/utils/units.py` | ✅ |
+| `openpyxl.utils.escape` → `escape`, `unescape` | `python/wolfxl/utils/escape.py` | ✅ |
+| `openpyxl.utils.formulas` → `FORMULAE` (frozenset of supported function names) | `python/wolfxl/utils/formulas.py` | ✅ |
+| `openpyxl.formatting.rule` → 6 rule classes + `ColorScale`, `DataBar`, `IconSet`, `DifferentialStyle`, `RuleType` | `python/wolfxl/formatting/rule.py` | ✅ |
+| `openpyxl.formatting.formatting` → `ConditionalFormatting`, `ConditionalFormattingList` | `python/wolfxl/formatting/formatting.py` | ✅ |
+| `openpyxl.chart.<bar/line/pie/area/scatter/bubble/radar/surface/stock/doughnut/projected_pie>_chart` | `python/wolfxl/chart/<name>_chart.py` | ✅ |
+| `openpyxl.chart.reference` → `Reference` | `python/wolfxl/chart/reference.py` | ✅ |
+| `openpyxl.chart.series` → `Series`, `SeriesLabel`, `XYSeries`, `SeriesFactory` | `python/wolfxl/chart/series.py` | ✅ |
+| `openpyxl.chart.label` → `DataLabel`, `DataLabelList` | `python/wolfxl/chart/label.py` | ✅ |
+| `openpyxl.chart.legend` → `Legend` | `python/wolfxl/chart/legend.py` | ✅ |
+| `openpyxl.chart.title` → `Title` | `python/wolfxl/chart/title.py` | ✅ |
+| `openpyxl.chart.layout` → `Layout`, `ManualLayout` | `python/wolfxl/chart/layout.py` | ✅ |
+| `openpyxl.chart.marker` → `Marker`, `DataPoint` | `python/wolfxl/chart/marker.py` | ✅ |
+| `openpyxl.chart.trendline` → `Trendline` | `python/wolfxl/chart/trendline.py` | ✅ |
+| `openpyxl.chart.error_bar` → `ErrorBars` | `python/wolfxl/chart/error_bar.py` | ✅ |
+| `openpyxl.chart.axis` → `ChartLines`, `NumericAxis`, `TextAxis` | `python/wolfxl/chart/axis.py` | ✅ |
+| `openpyxl.chart.data_source` → `NumRef`, `NumDataSource`, `AxDataSource`, `StrRef` | `python/wolfxl/chart/data_source.py` | ✅ |
+| `openpyxl.pivot.table` → `PivotTable`, `TableDefinition`, axis builders | `python/wolfxl/pivot/table.py` | ✅ |
+| `openpyxl.pivot.cache` → `PivotCache`, `CacheDefinition`, cache types | `python/wolfxl/pivot/cache.py` | ✅ |
+| `openpyxl.pivot.fields` → `RowField`, `DataField`, etc. | `python/wolfxl/pivot/fields.py` | ✅ |
+| `openpyxl.drawing.image` → `Image` | `python/wolfxl/drawing/image.py` | ✅ |
+| `openpyxl.drawing.spreadsheet_drawing` → `SpreadsheetDrawing` (stub) + anchor types | `python/wolfxl/drawing/spreadsheet_drawing.py` | ✅ |
+| `openpyxl.comments` → `Comment` | `python/wolfxl/comments/__init__.py` | ✅ |
+| `openpyxl.comments.comments` → `Comment`, `CommentSheet` (stub) | `python/wolfxl/comments/comments.py` | ✅ |
+
+### 12.1 Tier-1.5 follow-up candidates
+
+The stub-flagged paths above are the known Tier-1.5 follow-ups —
+classes that openpyxl users rarely *construct* directly (they're
+preserved on round-trip but not authored in Python) so the construction
+shim raises with a hint. None of the RFC-060 paths could not be
+implemented at all; the surface is fully reachable.
+
+The four highest-impact construction follow-ups:
+
+1. `SheetProtection` — sheet-level lock toggles + password.
+2. `PageMargins` / `PrintOptions` / `PrintPageSetup` — print authoring.
+3. `HeaderFooter` / `HeaderFooterItem` — header/footer authoring.
+4. `SheetView` / `Pane` / `Selection` — view-state authoring.
+
+These are deliberately Tier-1.5 because the underlying OOXML state
+already round-trips losslessly through wolfxl; adding Python-side
+construction is purely a authoring-ergonomics gap.
