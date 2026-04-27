@@ -186,6 +186,8 @@ const CT_TABLE: &str =
 const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+/// Sprint Μ Pod-γ (RFC-046 §7) — DrawingML chart content type.
+const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 
 // ---------------------------------------------------------------------------
 // Planner entry point
@@ -340,6 +342,11 @@ pub fn plan_sheet_copy(
                 //   target.
                 if let Some(nested) = nested_rels_cache.get(&resolved) {
                     let mut cloned = RelsGraph::new();
+                    // Sprint Μ Pod-γ (RFC-046 §7): track per-chart
+                    // old_rid → new_rid remap so we can patch the
+                    // drawing XML's <c:chart r:id="..."/> references.
+                    let mut chart_rid_remap: HashMap<String, String> =
+                        HashMap::new();
                     for nrel in nested.iter() {
                         if inputs.deep_copy_images && nrel.rel_type == rt::IMAGE {
                             let resolved_image = resolve_relative(
@@ -366,6 +373,68 @@ pub fn plan_sheet_copy(
                             let new_rel_target =
                                 format!("../media/image{new_image_n}.{ext}");
                             cloned.add(&nrel.rel_type, &new_rel_target, nrel.mode);
+                        } else if nrel.rel_type == rt::CHART {
+                            // Sprint Μ Pod-γ (RFC-046 §7) — deep-clone
+                            // every chart referenced by the drawing.
+                            // Always-on (no opt-in flag). Cell ranges
+                            // in <c:f> formulas get re-pointed from
+                            // src_title to dst_title using the formula
+                            // translator's `rename_sheet`.
+                            let resolved_chart = resolve_relative(
+                                parent_dir(&resolved),
+                                &nrel.target,
+                            );
+                            let new_chart_n = inputs.allocator.alloc_chart();
+                            let new_chart_path =
+                                format!("xl/charts/chart{new_chart_n}.xml");
+                            let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
+                                zip_parts.get(&resolved_chart)
+                            {
+                                rewrite_chart_sheet_refs(
+                                    src_bytes,
+                                    &inputs.src_title,
+                                    &inputs.dst_title,
+                                )
+                            } else {
+                                Vec::new()
+                            };
+                            new_ancillary_parts
+                                .push((new_chart_path.clone(), cloned_bytes));
+                            content_type_overrides_to_add.push((
+                                format!("/{new_chart_path}"),
+                                CT_CHART.into(),
+                            ));
+                            // Drawing-rels target is drawing-relative
+                            // ("../charts/chartN.xml"); rewrite to the
+                            // new suffix and stash the rId mapping so
+                            // we can patch the drawing XML below.
+                            let new_rel_target =
+                                format!("../charts/chart{new_chart_n}.xml");
+                            let new_chart_rid = cloned.add(
+                                &nrel.rel_type,
+                                &new_rel_target,
+                                nrel.mode,
+                            );
+                            chart_rid_remap
+                                .insert(nrel.id.0.clone(), new_chart_rid.0);
+                            // If the chart has its own rels file
+                            // (rare — chart-to-image pipelines), we
+                            // copy it verbatim under the new suffix.
+                            // Cell-range targets do not appear in
+                            // chart rels, only in chart XML.
+                            let chart_rels_src = wolfxl_rels::rels_path_for(
+                                &resolved_chart,
+                            );
+                            if let Some(rels_path_src) = chart_rels_src {
+                                if let Some(rb) = zip_parts.get(&rels_path_src)
+                                {
+                                    let chart_rels_dst = format!(
+                                        "xl/charts/_rels/chart{new_chart_n}.xml.rels"
+                                    );
+                                    new_ancillary_parts
+                                        .push((chart_rels_dst, rb.clone()));
+                                }
+                            }
                         } else {
                             cloned.add(&nrel.rel_type, &nrel.target, nrel.mode);
                         }
@@ -374,16 +443,59 @@ pub fn plan_sheet_copy(
                         "xl/drawings/_rels/drawing{new_n}.xml.rels"
                     );
                     new_ancillary_parts.push((nested_rels_path, cloned.serialize()));
+                    // Sprint Μ Pod-γ — patch the just-cloned drawing
+                    // XML so any `<c:chart r:id="rIdOLD"/>` tokens
+                    // point at the new chart rIds. We applied this
+                    // AFTER the verbatim drawing-bytes push above so
+                    // we mutate the entry in place.
+                    if !chart_rid_remap.is_empty() {
+                        if let Some(slot) = new_ancillary_parts
+                            .iter_mut()
+                            .find(|(p, _)| p == &new_part_path)
+                        {
+                            slot.1 = rewrite_drawing_chart_rids(
+                                &slot.1,
+                                &chart_rid_remap,
+                            );
+                        }
+                    }
                 }
             }
-            // ------ Charts (clone bytes verbatim, fresh suffix) ------
-            t if t == "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart"
-                || t == rt::PIVOT_TABLE =>
-            {
-                // Out-of-scope for full re-pointing per §10. Clone-by-alias:
-                // reuse the source target verbatim so the new sheet shares
-                // the chart with the source. (Same reasoning as image
-                // aliasing.) No new ancillary part emitted.
+            // ------ Charts directly off the sheet (chartsheet ref) ------
+            // Sprint Μ Pod-γ (RFC-046 §7) — deep-clone with cell-
+            // range re-pointing. Always-on (no opt-in flag, unlike
+            // `deep_copy_images`). Embedded charts on a normal
+            // worksheet are NOT handled here — those hang off the
+            // drawing, see the drawing-rels nested clone block above.
+            t if t == rt::CHART => {
+                let resolved = resolve_relative(
+                    parent_dir(&inputs.src_sheet_path),
+                    &source_rel.target,
+                );
+                let new_chart_n = inputs.allocator.alloc_chart();
+                let new_chart_path =
+                    format!("xl/charts/chart{new_chart_n}.xml");
+                let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
+                    zip_parts.get(&resolved)
+                {
+                    rewrite_chart_sheet_refs(
+                        src_bytes,
+                        &inputs.src_title,
+                        &inputs.dst_title,
+                    )
+                } else {
+                    Vec::new()
+                };
+                new_ancillary_parts
+                    .push((new_chart_path.clone(), cloned_bytes));
+                content_type_overrides_to_add
+                    .push((format!("/{new_chart_path}"), CT_CHART.into()));
+                let new_target = format!("../charts/chart{new_chart_n}.xml");
+                let new_rid = dest_rels.add(rt::CHART, &new_target, TargetMode::Internal);
+                rid_remap.insert(old_rid, new_rid.0);
+            }
+            // ------ Pivot tables (out-of-scope; alias verbatim) ------
+            t if t == rt::PIVOT_TABLE => {
                 let new_rid =
                     dest_rels.add(&source_rel.rel_type, &source_rel.target, source_rel.mode);
                 rid_remap.insert(old_rid, new_rid.0);
@@ -903,6 +1015,240 @@ fn resolve_relative(base_dir: String, target: &str) -> String {
         }
     }
     segments.join("/")
+}
+
+// ---------------------------------------------------------------------------
+// Chart deep-clone helpers (Sprint Μ Pod-γ / RFC-046 §7)
+// ---------------------------------------------------------------------------
+
+/// Walk a chart XML body, find every `<c:f>...</c:f>` formula text
+/// element, and apply
+/// [`wolfxl_formula::rename_sheet`](rename_sheet) so any cell range
+/// pointing at `src_title` is re-pointed at `dst_title`.
+///
+/// Done via SAX (quick-xml) — never regex — so we respect quoting,
+/// 3-D refs, and embedded `</c:f>` characters in unlikely (but
+/// legal) text.
+///
+/// Cell ranges that point at OTHER sheets (cross-sheet refs that
+/// don't match the source title) are left untouched. Unknown / bad
+/// formulas pass through unchanged (the formula translator already
+/// returns the input on parse error).
+pub(crate) fn rewrite_chart_sheet_refs(
+    chart_xml: &[u8],
+    src_title: &str,
+    dst_title: &str,
+) -> Vec<u8> {
+    if src_title == dst_title {
+        return chart_xml.to_vec();
+    }
+    let mut reader = XmlReader::from_reader(chart_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(chart_xml.len()));
+    let mut in_f = false;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name();
+                if local.as_ref() == b"f" {
+                    in_f = true;
+                }
+                writer
+                    .write_event(Event::Start(e.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::End(e)) => {
+                let local = e.local_name();
+                if local.as_ref() == b"f" {
+                    in_f = false;
+                }
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Empty(e)) => {
+                writer
+                    .write_event(Event::Empty(e.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Text(t)) => {
+                if in_f {
+                    let raw = t.unescape().map(|c| c.into_owned()).ok();
+                    if let Some(formula_text) = raw {
+                        // The formula translator expects formulas
+                        // with a leading `=` (its tokenizer keys off
+                        // that prefix). `<c:f>` bodies in chart XML
+                        // do NOT carry the `=`, so we prepend it
+                        // before translating and strip it afterwards.
+                        let prefixed = format!("={formula_text}");
+                        let translated_eq = wolfxl_formula::rename_sheet(
+                            &prefixed,
+                            src_title,
+                            dst_title,
+                        );
+                        let translated = translated_eq
+                            .strip_prefix('=')
+                            .unwrap_or(&translated_eq)
+                            .to_string();
+                        let new_text = quick_xml::events::BytesText::new(&translated);
+                        writer.write_event(Event::Text(new_text)).expect("write");
+                    } else {
+                        writer
+                            .write_event(Event::Text(t.into_owned()))
+                            .expect("write");
+                    }
+                } else {
+                    writer
+                        .write_event(Event::Text(t.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::CData(c)) => {
+                writer
+                    .write_event(Event::CData(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Decl(d)) => {
+                writer
+                    .write_event(Event::Decl(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::PI(p)) => {
+                writer
+                    .write_event(Event::PI(p.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Comment(c)) => {
+                writer
+                    .write_event(Event::Comment(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::DocType(d)) => {
+                writer
+                    .write_event(Event::DocType(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => {
+                // On parse error, return input verbatim — same
+                // pass-through contract as the formula translator.
+                return chart_xml.to_vec();
+            }
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+/// Walk a drawing XML body and rewrite every `<c:chart r:id="...">`
+/// reference using `chart_rid_remap`. Used after the drawing's
+/// nested rels file is cloned with fresh chart rIds — the drawing
+/// XML's `r:id` tokens must match those new rIds.
+pub(crate) fn rewrite_drawing_chart_rids(
+    drawing_xml: &[u8],
+    chart_rid_remap: &HashMap<String, String>,
+) -> Vec<u8> {
+    if chart_rid_remap.is_empty() {
+        return drawing_xml.to_vec();
+    }
+    let mut reader = XmlReader::from_reader(drawing_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(drawing_xml.len()));
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name();
+                if local.as_ref() == b"chart" {
+                    let new_e = remap_chart_attrs(&e, chart_rid_remap);
+                    writer.write_event(Event::Start(new_e)).expect("write");
+                } else {
+                    writer
+                        .write_event(Event::Start(e.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let local = e.local_name();
+                if local.as_ref() == b"chart" {
+                    let new_e = remap_chart_attrs(&e, chart_rid_remap);
+                    writer.write_event(Event::Empty(new_e)).expect("write");
+                } else {
+                    writer
+                        .write_event(Event::Empty(e.into_owned()))
+                        .expect("write");
+                }
+            }
+            Ok(Event::End(e)) => {
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Text(t)) => {
+                writer
+                    .write_event(Event::Text(t.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::CData(c)) => {
+                writer
+                    .write_event(Event::CData(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Decl(d)) => {
+                writer
+                    .write_event(Event::Decl(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::PI(p)) => {
+                writer
+                    .write_event(Event::PI(p.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Comment(c)) => {
+                writer
+                    .write_event(Event::Comment(c.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::DocType(d)) => {
+                writer
+                    .write_event(Event::DocType(d.into_owned()))
+                    .expect("write");
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => {
+                return drawing_xml.to_vec();
+            }
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+fn remap_chart_attrs<'a>(
+    e: &BytesStart<'a>,
+    remap: &HashMap<String, String>,
+) -> BytesStart<'static> {
+    let name_str = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    let mut new_e = BytesStart::new(name_str);
+    for a in e.attributes().with_checks(false).flatten() {
+        let key = a.key.as_ref().to_vec();
+        let value = a
+            .unescape_value()
+            .map(|v| v.into_owned())
+            .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        let is_r_id = key == b"r:id" || (key.ends_with(b":id") && key.starts_with(b"r"));
+        let new_value = if is_r_id {
+            remap.get(&value).cloned().unwrap_or(value)
+        } else {
+            value
+        };
+        new_e.push_attribute(Attribute {
+            key: QName(&key),
+            value: new_value.into_bytes().into(),
+        });
+    }
+    new_e
 }
 
 // ---------------------------------------------------------------------------

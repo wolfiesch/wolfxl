@@ -94,6 +94,9 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vbaProject";
     pub const PRINTER_SETTINGS: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings";
+    /// Sprint Μ Pod-γ (RFC-046) — DrawingML chart relationship URI.
+    pub const CHART: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
 }
 
 const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
