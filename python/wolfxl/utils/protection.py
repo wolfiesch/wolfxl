@@ -35,14 +35,17 @@ def hash_password(plaintext_password: str = "") -> str:
     """Compute the legacy ECMA-376 16-bit hash of ``plaintext_password``.
 
     Returns an uppercase hex string with no ``0x`` prefix. Empty input
-    hashes to ``"CE4B"`` (matches openpyxl). Used for the ``password=``
-    attribute that the legacy ``<sheetProtection>`` / ``<workbookProtection>``
-    elements still recognise.
+    returns ``""`` so callers can use the result directly as
+    ``password=...`` attribute value where "no password" is the literal
+    empty string. The algorithm matches openpyxl 3.1.x's
+    ``openpyxl.utils.protection.hash_password`` byte-for-byte for
+    non-empty input (e.g. ``"hunter2"`` → ``"C258"``).
 
-    The algorithm is documented at
-    http://blogs.msdn.com/b/ericwhite/archive/2008/02/23/the-legacy-hashing-algorithm-in-open-xml.aspx
-    and matches openpyxl 3.1.x's implementation byte-for-byte.
+    See http://blogs.msdn.com/b/ericwhite/archive/2008/02/23/the-legacy-hashing-algorithm-in-open-xml.aspx
+    for the algorithm rationale.
     """
+    if not plaintext_password:
+        return ""
     password = 0x0000
     for idx, char in enumerate(plaintext_password, 1):
         value = ord(char) << idx
@@ -52,6 +55,17 @@ def hash_password(plaintext_password: str = "") -> str:
     password ^= len(plaintext_password)
     password ^= 0xCE4B
     return str(hex(password)).upper()[2:]
+
+
+def check_password(plaintext: str, expected_hash: str) -> bool:
+    """Verify ``plaintext`` matches a previously-stored legacy hash.
+
+    Returns False on empty/None input regardless of the stored hash —
+    "no password supplied" never matches a stored protection.
+    """
+    if not plaintext:
+        return False
+    return hash_password(plaintext) == (expected_hash or "").upper()
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +155,7 @@ def verify_password_sha512(
 
 __all__ = [
     "hash_password",
+    "check_password",
     "hash_password_sha512",
     "verify_password_sha512",
 ]
