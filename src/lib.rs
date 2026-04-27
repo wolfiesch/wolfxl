@@ -52,6 +52,11 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         native_writer_backend::serialize_chart_dict,
         m
     )?)?;
+    // Sprint Ο Pod 1D (RFC-058 §10) — workbook security serializer.
+    m.add_function(wrap_pyfunction!(
+        native_writer_backend::serialize_workbook_security_dict,
+        m
+    )?)?;
     // Sprint Ν Pod-γ (RFC-047 / RFC-048) — pivot serialisers.
     m.add_function(wrap_pyfunction!(
         wolfxl::pivot::serialize_pivot_cache_dict,
