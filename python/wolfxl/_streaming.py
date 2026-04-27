@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl.utils.datetime import from_excel
+from wolfxl.utils.numbers import is_date_format
 
 if TYPE_CHECKING:
     from wolfxl._styles import Alignment, Border, Font, PatternFill
@@ -56,6 +58,27 @@ def _streaming_value(payload: Any) -> Any:
         if t == "error":
             return payload.get("value")
     return payload
+
+
+def _maybe_datetime_from_serial(value: Any, num_fmt: str | None) -> Any:
+    """Convert an Excel serial to a ``datetime``/``date``/``time`` when
+    ``num_fmt`` is a date-typed format string (Sprint Λ Pod-γ).
+
+    Mirrors openpyxl's read-only path: numeric cells with a date number
+    format surface as Python datetimes rather than raw serials. Non-date
+    formats and non-numeric values pass through unchanged.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    if not is_date_format(num_fmt):
+        return value
+    try:
+        return from_excel(value)
+    except Exception:
+        # Out-of-range serial / unrepresentable timedelta — fall back to
+        # the raw serial so the row keeps flowing rather than erroring
+        # mid-iteration. Matches openpyxl's behavior on bad serials.
+        return value
 
 
 class StreamingCell:
@@ -97,6 +120,11 @@ class StreamingCell:
 
     @property
     def value(self) -> Any:
+        # Sprint Λ Pod-γ: numeric cells whose number format is date-typed
+        # surface as Python datetime, mirroring openpyxl's read_only path
+        # (and the eager Cell.value path, which converts via calamine).
+        if isinstance(self._value, (int, float)) and not isinstance(self._value, bool):
+            return _maybe_datetime_from_serial(self._value, self.number_format)
         return self._value
 
     @property
@@ -280,20 +308,78 @@ def stream_iter_rows(
         path, ws.title, mn_r, mx_r, mn_c, mx_c
     )
 
+    # Sprint Λ Pod-γ: cache style_id → (number_format, is_date) so we
+    # resolve a date format once per distinct style rather than once per
+    # cell. Sentinel `_NO_STYLE` covers the (style_id is None) case.
+    style_date_cache: dict[int | None, tuple[str | None, bool]] = {}
+    rust_reader = wb._rust_reader  # noqa: SLF001
+
+    def _is_date_style(style_id: int | None, row_idx: int, col: int) -> bool:
+        cached = style_date_cache.get(style_id)
+        if cached is not None:
+            return cached[1]
+        if style_id is None or rust_reader is None:
+            style_date_cache[style_id] = (None, False)
+            return False
+        # The Rust reader exposes number_format only via cell coordinate.
+        # The lookup is keyed off the cell's style_id internally, so any
+        # cell that shares this style_id will resolve to the same format
+        # — caching by style_id keeps this O(unique-styles) rather than
+        # O(cells).
+        try:
+            payload = rust_reader.read_cell_format(
+                ws.title, rowcol_to_a1(row_idx, col)
+            )
+        except Exception:
+            style_date_cache[style_id] = (None, False)
+            return False
+        num_fmt = payload.get("number_format") if isinstance(payload, dict) else None
+        is_date = is_date_format(num_fmt)
+        style_date_cache[style_id] = (num_fmt, is_date)
+        return is_date
+
     try:
         if values_only:
+            # Switch to ``read_next_row`` rather than ``read_next_values``
+            # so we have access to each cell's style_id. The slight extra
+            # work (vs Rust-side tuple padding) is offset by skipping a
+            # second materialization of the tuple in Python.
             while True:
-                tup = reader.read_next_values()
-                if tup is None:
+                row = reader.read_next_row()
+                if row is None:
                     break
-                # Normalize Rust-side payload dicts (formulas, errors)
-                # into the Python types openpyxl returns from
-                # `Cell.value` in read_only=True mode. Plain values pass
-                # through as-is so the loop stays cheap on numeric-heavy
-                # workbooks.
-                yield tuple(
-                    _streaming_value(v) if isinstance(v, dict) else v for v in tup
-                )
+                row_idx, cells = row
+                if mn_c is not None and mx_c is not None:
+                    cmin, cmax = mn_c, mx_c
+                else:
+                    if not cells:
+                        yield ()
+                        continue
+                    cols = [c[0] for c in cells]
+                    cmin = mn_c if mn_c is not None else min(cols)
+                    cmax = mx_c if mx_c is not None else max(cols)
+                if cmax < cmin:
+                    yield ()
+                    continue
+                by_col = {c[0]: c for c in cells}
+                row_out: list[Any] = []
+                for col in range(cmin, cmax + 1):
+                    rec = by_col.get(col)
+                    if rec is None:
+                        row_out.append(None)
+                        continue
+                    _, value, style_id, _cell_type = rec
+                    py_val = _streaming_value(value) if isinstance(value, dict) else value
+                    if (
+                        isinstance(py_val, (int, float))
+                        and not isinstance(py_val, bool)
+                        and _is_date_style(style_id, row_idx, col)
+                    ):
+                        py_val = _maybe_datetime_from_serial(
+                            py_val, style_date_cache[style_id][0]
+                        )
+                    row_out.append(py_val)
+                yield tuple(row_out)
         else:
             while True:
                 row = reader.read_next_row()
