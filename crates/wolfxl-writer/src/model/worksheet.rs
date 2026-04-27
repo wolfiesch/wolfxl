@@ -85,6 +85,26 @@ pub struct Worksheet {
     /// Python `ws.auto_filter.to_rust_dict()` and Rust
     /// `wolfxl_autofilter::emit::emit`.
     pub auto_filter_xml: Option<Vec<u8>>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — optional `<sheetView>` override.
+    /// When set, the native writer's `<sheetViews>` slot uses the
+    /// typed spec instead of the legacy hardcoded freeze-pane path.
+    /// `None` keeps the pre-RFC-055 behaviour (default sheet view +
+    /// `Worksheet.freeze` / `Worksheet.split` pane mapping).
+    pub views: Option<crate::parse::sheet_setup::SheetViewSpec>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — `<sheetProtection>` slot 8.
+    pub protection: Option<crate::parse::sheet_setup::SheetProtectionSpec>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageMargins>` slot 21.
+    /// Overrides the default margins emitted at slot 21.
+    pub page_margins: Option<crate::parse::sheet_setup::PageMarginsSpec>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageSetup>` slot 22.
+    pub page_setup: Option<crate::parse::sheet_setup::PageSetupSpec>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — `<headerFooter>` slot 23.
+    pub header_footer: Option<crate::parse::sheet_setup::HeaderFooterSpec>,
 }
 
 impl Worksheet {
@@ -106,6 +126,11 @@ impl Worksheet {
             images: Vec::new(),
             charts: Vec::new(),
             auto_filter_xml: None,
+            views: None,
+            protection: None,
+            page_margins: None,
+            page_setup: None,
+            header_footer: None,
         }
     }
 

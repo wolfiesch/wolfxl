@@ -67,7 +67,21 @@ pub fn emit(
     emit_dimension(&mut out, sheet);
 
     // Slot 3: <sheetViews>
-    emit_sheet_views(&mut out, sheet, sheet_idx);
+    //
+    // RFC-055 §3 (Sprint Ο Pod 1A.5): if the user set a typed
+    // `views` spec on the Worksheet, prefer it; the legacy path is
+    // still used otherwise so freeze/split panes set via
+    // `set_freeze`/`set_split` continue to work.
+    if let Some(view_spec) = sheet.views.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_sheet_views(view_spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        } else {
+            emit_sheet_views(&mut out, sheet, sheet_idx);
+        }
+    } else {
+        emit_sheet_views(&mut out, sheet, sheet_idx);
+    }
 
     // Slot 4: <sheetFormatPr>
     out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
@@ -79,6 +93,14 @@ pub fn emit(
 
     // Slot 6: <sheetData>
     emit_sheet_data(&mut out, sheet, sst);
+
+    // Slot 8: <sheetProtection> — Sprint Ο Pod 1A.5 (RFC-055).
+    if let Some(spec) = sheet.protection.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_sheet_protection(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        }
+    }
 
     // Slot 11: <autoFilter> — Sprint Ο Pod 1B (RFC-056). The bytes
     // are pre-emitted by the workbook-level coordinator from the
@@ -104,8 +126,29 @@ pub fn emit(
         emit_hyperlinks(&mut out, sheet);
     }
 
-    // Slot 21: <pageMargins>
-    out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
+    // Slot 21: <pageMargins> — RFC-055 typed override or default.
+    if let Some(spec) = sheet.page_margins.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_page_margins(spec);
+        out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+    } else {
+        out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
+    }
+
+    // Slot 22: <pageSetup> — RFC-055 (only emitted when set).
+    if let Some(spec) = sheet.page_setup.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_page_setup(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        }
+    }
+
+    // Slot 23: <headerFooter> — RFC-055 (only emitted when set).
+    if let Some(spec) = sheet.header_footer.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_header_footer(spec);
+        if !bytes.is_empty() {
+            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+        }
+    }
 
     // Slot 30: <drawing r:id="..."/> — Sprint Λ Pod-β (RFC-045);
     // emitted iff !sheet.images.is_empty(). The rId is appended at
