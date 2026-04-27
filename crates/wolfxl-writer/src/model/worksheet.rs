@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use super::cell::{WriteCell, WriteCellValue};
 use super::comment::Comment;
 use super::conditional::ConditionalFormat;
+use super::image::SheetImage;
 use super::table::Table;
 use super::validation::DataValidation;
 use crate::refs;
@@ -60,6 +61,11 @@ pub struct Worksheet {
 
     /// Whether the sheet tab is visible, hidden, or very-hidden.
     pub visibility: SheetVisibility,
+
+    /// Sprint Λ Pod-β (RFC-045) — images attached to this sheet via
+    /// `ws.add_image(img, anchor)`. Drained at emit time into
+    /// `xl/drawings/drawingN.xml` + `xl/media/imageN.<ext>`.
+    pub images: Vec<SheetImage>,
 }
 
 impl Worksheet {
@@ -78,6 +84,7 @@ impl Worksheet {
             tables: Vec::new(),
             print_area: None,
             visibility: SheetVisibility::Visible,
+            images: Vec::new(),
         }
     }
 

@@ -99,6 +99,13 @@ pub fn emit(
     // Slot 21: <pageMargins>
     out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
 
+    // Slot 30: <drawing r:id="..."/> — Sprint Λ Pod-β (RFC-045);
+    // emitted iff !sheet.images.is_empty(). The rId is appended at
+    // the END of the sheet's rels graph (after comments, vml, tables,
+    // and external hyperlinks) so the existing rId conventions for
+    // those entries are preserved.
+    emit_drawing_ref(&mut out, sheet);
+
     // Slot 31: <legacyDrawing> — EXT-W3A; emitted iff !sheet.comments.is_empty(); rId via convention
     emit_legacy_drawing(&mut out, sheet);
 
@@ -882,6 +889,26 @@ fn emit_legacy_drawing(out: &mut String, sheet: &Worksheet) {
     if !sheet.comments.is_empty() {
         out.push_str("<legacyDrawing r:id=\"rId2\"/>");
     }
+}
+
+/// Sprint Λ Pod-β — emit `<drawing r:id="rIdN"/>` when the sheet has
+/// at least one image. The rId is allocated at the END of the sheet's
+/// rels graph: comments offset (2 if any comments) + table count +
+/// external-hyperlink count + 1. This mirrors the allocation in
+/// `rels::emit_sheet` so the rId numbering stays in lock-step.
+fn emit_drawing_ref(out: &mut String, sheet: &Worksheet) {
+    if sheet.images.is_empty() {
+        return;
+    }
+    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
+    let table_count = sheet.tables.len() as u32;
+    let external_hyperlinks = sheet
+        .hyperlinks
+        .values()
+        .filter(|h| !h.is_internal)
+        .count() as u32;
+    let rid = comments_offset + table_count + external_hyperlinks + 1;
+    out.push_str(&format!("<drawing r:id=\"rId{rid}\"/>"));
 }
 
 /// Emit `<tableParts count="N">…<tablePart r:id="rIdX"/>…</tableParts>`.
