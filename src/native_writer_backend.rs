@@ -586,7 +586,22 @@ fn py_runs_to_rust_writer(
                 ($k:literal, $field:ident) => {
                     if let Some(v) = d.get_item($k)? {
                         if !v.is_none() {
-                            props.$field = Some(v.extract::<i32>()?);
+                            // Accept int or float (Pod-β stores via _BoundedNumber).
+                            let val = if let Ok(i) = v.extract::<i32>() {
+                                i
+                            } else if let Ok(f) = v.extract::<f64>() {
+                                if !f.is_finite() {
+                                    return Err(PyValueError::new_err(format!(
+                                        "{}: non-finite number", $k,
+                                    )));
+                                }
+                                f as i32
+                            } else {
+                                return Err(PyValueError::new_err(format!(
+                                    "{}: expected integer", $k,
+                                )));
+                            };
+                            props.$field = Some(val);
                         }
                     }
                 };
@@ -1886,6 +1901,24 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         }
     }
 
+    // RFC-046 §10.6.2: chart-level `data_labels` apply to every series
+    // that doesn't already carry its own dLbls. Pod-β emits the dict at
+    // the top of the chart; Pod-α propagates it to each series here so
+    // the existing per-series emit path handles it uniformly.
+    if let Some(v) = d.get_item("data_labels")? {
+        if !v.is_none() {
+            let dd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
+            let chart_dlbls = parse_data_labels(dd)?;
+            for s in chart.series.iter_mut() {
+                if s.data_labels.is_none() {
+                    s.data_labels = Some(chart_dlbls.clone());
+                }
+            }
+        }
+    }
+
     if let Some(b) = py_opt_bool(d, "plot_visible_only")? {
         chart.plot_visible_only = Some(b);
     }
@@ -2578,13 +2611,48 @@ fn parse_reference(d: &Bound<'_, PyDict>) -> PyResult<ChartReference> {
 }
 
 fn parse_graphical_properties(d: &Bound<'_, PyDict>) -> PyResult<GraphicalProperties> {
+    // Pod-β (RFC-046 §10.9) emits the snake_case names `solid_fill` and
+    // a nested `ln` dict with `solid_fill` / `prst_dash` / `w_emu`.
+    // Earlier callers (legacy) used flat `fill_color` / `line_color` /
+    // `line_dash` / `line_width_emu`. Accept either; §10 form wins.
+    let fill_color = py_opt_str(d, "solid_fill")?
+        .or(py_opt_str(d, "fill_color")?);
+
+    // Nested ln dict per §10.9
+    let mut line_color = py_opt_str(d, "line_color")?;
+    let mut line_width_emu = py_opt_u32(d, "line_width_emu")?;
+    let mut line_dash = py_opt_str(d, "line_dash")?;
+    let mut no_line = py_opt_bool(d, "no_line")?.unwrap_or(false);
+
+    if let Some(v) = d.get_item("ln")? {
+        if !v.is_none() {
+            let ln = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("ln must be a dict"))?;
+            if line_color.is_none() {
+                line_color = py_opt_str(ln, "solid_fill")?;
+            }
+            if line_width_emu.is_none() {
+                line_width_emu = py_opt_u32(ln, "w_emu")?;
+            }
+            if line_dash.is_none() {
+                line_dash = py_opt_str(ln, "prst_dash")?;
+            }
+            if !no_line {
+                if let Some(b) = py_opt_bool(ln, "no_fill")? {
+                    no_line = b;
+                }
+            }
+        }
+    }
+
     Ok(GraphicalProperties {
-        line_color: py_opt_str(d, "line_color")?,
-        line_width_emu: py_opt_u32(d, "line_width_emu")?,
-        line_dash: py_opt_str(d, "line_dash")?,
-        fill_color: py_opt_str(d, "fill_color")?,
+        line_color,
+        line_width_emu,
+        line_dash,
+        fill_color,
         no_fill: py_opt_bool(d, "no_fill")?.unwrap_or(false),
-        no_line: py_opt_bool(d, "no_line")?.unwrap_or(false),
+        no_line,
     })
 }
 
@@ -2774,7 +2842,20 @@ fn py_opt_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
         if v.is_none() {
             return Ok(None);
         }
-        return Ok(Some(v.extract()?));
+        // Accept either Python int or float (Pod-β's _BoundedNumber
+        // stores as float; the contract treats these as integers).
+        if let Ok(n) = v.extract::<u32>() {
+            return Ok(Some(n));
+        }
+        if let Ok(f) = v.extract::<f64>() {
+            if f.is_finite() && f >= 0.0 && f <= u32::MAX as f64 {
+                return Ok(Some(f as u32));
+            }
+        }
+        return Err(PyValueError::new_err(format!(
+            "{key}: expected non-negative integer (got {})",
+            v.repr()?.to_string()
+        )));
     }
     Ok(None)
 }
@@ -2784,7 +2865,18 @@ fn py_opt_i32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i32>> {
         if v.is_none() {
             return Ok(None);
         }
-        return Ok(Some(v.extract()?));
+        if let Ok(n) = v.extract::<i32>() {
+            return Ok(Some(n));
+        }
+        if let Ok(f) = v.extract::<f64>() {
+            if f.is_finite() && f >= i32::MIN as f64 && f <= i32::MAX as f64 {
+                return Ok(Some(f as i32));
+            }
+        }
+        return Err(PyValueError::new_err(format!(
+            "{key}: expected integer (got {})",
+            v.repr()?.to_string()
+        )));
     }
     Ok(None)
 }

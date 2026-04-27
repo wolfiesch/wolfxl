@@ -967,7 +967,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "``<c:bar3DChart>`` instead of ``<c:barChart>``.  "
             "Verified by tests/test_charts_3d.py (Pod-γ′)."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -984,7 +984,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "hi_low_lines / per-series marker); emits "
             "``<c:line3DChart>``."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -1001,26 +1001,17 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "``<c:pie3DChart>``.  Aliased as ``Pie3D`` for openpyxl "
             "name compatibility."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
-    SurfaceEntry(
-        openpyxl_path="openpyxl.chart.Pie3D",
-        wolfxl_path="wolfxl.chart.Pie3D",
-        category=SurfaceCategory.WRITE,
-        synthgl_usage=(),
-        parity_note=(
-            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): ``Pie3D`` is the "
-            "openpyxl 3.1.x alias for ``PieChart3D``.  wolfxl exposes "
-            "the same alias under ``wolfxl.chart.Pie3D`` so the "
-            "search-replace from ``openpyxl.chart import Pie3D`` is "
-            "a one-liner.  Defaults match PieChart3D verbatim."
-        ),
-        wolfxl_supported=False,
-        write_api=True,
-        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
-    ),
+    # NOTE: ``openpyxl.chart.Pie3D`` is an alias added in openpyxl >=3.2.
+    # 3.1.x (the version this project pins) only exposes ``PieChart3D``.
+    # wolfxl provides both names (``wolfxl.chart.Pie3D`` ≡ ``PieChart3D``)
+    # so user code targeting either openpyxl release ports cleanly, but
+    # we don't need a separate surface entry: the PieChart3D entry above
+    # already covers the parity contract.  Keeping a Pie3D entry here
+    # would break the import-smoke test against openpyxl 3.1.5.
     SurfaceEntry(
         openpyxl_path="openpyxl.chart.AreaChart3D",
         wolfxl_path="wolfxl.chart.AreaChart3D",
@@ -1033,7 +1024,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "the AreaChart class surface (grouping / drop_lines); "
             "emits ``<c:area3DChart>``."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -1049,7 +1040,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "bool = False``).  Series carry the same shape as "
             "BarChart (cat + val); axes are catAx + valAx + serAx."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -1065,7 +1056,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "perspective=30, right_angle_axes=False, "
             "depth_percent=100) and the ``<c:wireframe>`` flag."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -1082,7 +1073,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "``<c:stockChart>`` with ``<c:hiLowLines/>`` and "
             "``<c:upDownBars/>`` decorators by default."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
@@ -1101,7 +1092,7 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "``<c:splitType/>``, ``<c:splitPos/>``, "
             "``<c:secondPieSize/>``."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),

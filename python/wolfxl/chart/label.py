@@ -59,7 +59,12 @@ class _DataLabelBase:
         showBubbleSize: bool | None = None,
         showLeaderLines: bool | None = None,
         separator: str | None = None,
+        position: str | None = None,
     ) -> None:
+        # ``position`` is an openpyxl-style alias for ``dLblPos`` —
+        # accept either, prefer the one explicitly passed.
+        if position is not None and dLblPos is None:
+            dLblPos = position
         if dLblPos not in _VALID_POSITIONS:
             raise ValueError(f"dLblPos={dLblPos!r} not in {_VALID_POSITIONS}")
         self.numFmt = numFmt

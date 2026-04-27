@@ -1422,16 +1422,32 @@ class Worksheet:
         Per RFC-046 §10.11.2: ``r"^[A-Z]+[0-9]+$"`` — single cell
         coordinates only (e.g. ``"E15"``, ``"AA200"``). Range refs and
         sheet-qualified refs are rejected; pass an anchor object for
-        more complex placements.
+        more complex placements. Excel's column max is ``XFD`` (16384)
+        and row max is 1048576; refs outside those bounds raise.
         """
         import re
         if not anchor:
             raise ValueError("anchor must not be empty")
-        if not re.match(r"^[A-Z]+[0-9]+$", anchor):
+        m = re.match(r"^([A-Z]+)([0-9]+)$", anchor)
+        if not m:
             raise ValueError(
                 f"anchor={anchor!r} must be a single A1 cell ref like 'E15' "
                 f"(regex ^[A-Z]+[0-9]+$); for ranged or absolute placement "
                 f"pass an OneCellAnchor / TwoCellAnchor / AbsoluteAnchor"
+            )
+        col_letters, row_str = m.group(1), m.group(2)
+        # Column letters → 1-based index.
+        col_idx = 0
+        for ch in col_letters:
+            col_idx = col_idx * 26 + (ord(ch) - ord("A") + 1)
+        if col_idx > 16384:
+            raise ValueError(
+                f"anchor={anchor!r}: column {col_letters!r} exceeds Excel max XFD (16384)"
+            )
+        row_idx = int(row_str)
+        if row_idx < 1 or row_idx > 1_048_576:
+            raise ValueError(
+                f"anchor={anchor!r}: row {row_idx} out of Excel range [1, 1048576]"
             )
 
     @property

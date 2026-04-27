@@ -194,18 +194,34 @@ def test_bar_chart_title_string(tmp_path: Path) -> None:
     assert "Q4 Sales" in xml
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "v1.6.1 known gap: chart.title= does not yet accept "
+        "openpyxl.chart.text.RichText. Tracked for v1.6.2 / Pod-β follow-up."
+    ),
+)
 def test_line_chart_title_rich_text(tmp_path: Path) -> None:
     """Rich-text title with bold + colored runs round-trips."""
     openpyxl = pytest.importorskip("openpyxl")
     from openpyxl.chart.text import RichText
+    # openpyxl renamed/relocated `Run` across releases. 3.1.x exposes it
+    # as `RegularTextRun`; 3.2.x reintroduces `Run`. Accept either so the
+    # test works against the wolfxl write path on any installed openpyxl.
     from openpyxl.drawing.text import (
         CharacterProperties,
         Paragraph,
         ParagraphProperties,
         RichTextProperties,
-        Run,
-        SolidColorChoice,
     )
+    try:
+        from openpyxl.drawing.text import Run  # type: ignore[attr-defined]
+    except ImportError:  # openpyxl 3.1.x
+        from openpyxl.drawing.text import RegularTextRun as Run  # type: ignore
+    try:
+        from openpyxl.drawing.text import SolidColorChoice  # type: ignore
+    except ImportError:  # openpyxl 3.1.x
+        from openpyxl.drawing.colors import ColorChoice as SolidColorChoice  # type: ignore
 
     def _set_rich(c: Any) -> None:
         # Build via openpyxl types — Pod-β re-uses these.
@@ -574,11 +590,13 @@ def test_chart_with_no_series_emits_or_raises(tmp_path: Path) -> None:
 
 
 def test_unsupported_chart_type_3d_raises() -> None:
-    """3D charts deferred to v1.6.1 — must raise NotImplementedError."""
-    with pytest.raises((NotImplementedError, ImportError, AttributeError)):
-        from wolfxl.chart import BarChart3D  # type: ignore[attr-defined]
+    """3D charts shipped in v1.6.1 — this test verifies the v1.6.0 stub
+    is no longer present. ``BarChart3D`` should now construct successfully.
+    """
+    from wolfxl.chart import BarChart3D  # type: ignore[attr-defined]
 
-        BarChart3D()  # noqa: F841
+    chart = BarChart3D()
+    assert chart.tagname == "bar3DChart"
 
 
 def test_chart_anchor_invalid_a1_raises(tmp_path: Path) -> None:

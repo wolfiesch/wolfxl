@@ -88,6 +88,15 @@ class Reference:
         if min_col is None or min_row is None:
             raise ValueError("Reference requires worksheet + min_col/min_row")
 
+        # RFC-046 §10.11.3 — explicit None worksheet is invalid (only a
+        # range_string-parsed Reference may carry a synthetic _DummyWorksheet
+        # in lieu of a real sheet handle).
+        if worksheet is None:
+            raise ValueError(
+                "Reference requires a worksheet handle (got None); "
+                "either pass a Workbook worksheet or supply a range_string"
+            )
+
         self.worksheet = worksheet
         self.min_col = int(min_col)
         self.min_row = int(min_row)
