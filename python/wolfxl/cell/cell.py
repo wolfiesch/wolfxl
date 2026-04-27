@@ -143,4 +143,31 @@ class DataTableFormula:
         return f"DataTableFormula({', '.join(parts)})"
 
 
-__all__ = ["ArrayFormula", "DataTableFormula"]
+# ---------------------------------------------------------------------------
+# openpyxl-shaped re-exports (RFC-060 Pod 2).
+#
+# ``openpyxl.cell.cell`` is a kitchen-sink module — user code routinely does
+# ``from openpyxl.cell.cell import Cell, MergedCell, WriteOnlyCell``.  Wolfxl
+# keeps each class at its own canonical home (``wolfxl._cell.Cell``,
+# ``wolfxl.cell._merged.MergedCell``, ``wolfxl.cell._write_only.WriteOnlyCell``)
+# and surfaces them all here so a one-line import swap works.
+# ---------------------------------------------------------------------------
+
+from wolfxl._cell import Cell  # noqa: E402
+from wolfxl.cell._merged import MergedCell  # noqa: E402
+from wolfxl.cell._write_only import WriteOnlyCell  # noqa: E402
+from wolfxl.cell.rich_text import CellRichText  # noqa: E402
+from wolfxl.utils.exceptions import IllegalCharacterError  # noqa: E402
+from wolfxl.worksheet.hyperlink import Hyperlink  # noqa: E402
+
+
+__all__ = [
+    "ArrayFormula",
+    "Cell",
+    "CellRichText",
+    "DataTableFormula",
+    "Hyperlink",
+    "IllegalCharacterError",
+    "MergedCell",
+    "WriteOnlyCell",
+]
