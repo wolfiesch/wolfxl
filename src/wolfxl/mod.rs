@@ -38,6 +38,10 @@ pub mod security;
 // `<row hidden="1">` markers.
 pub mod autofilter;
 pub mod autofilter_helpers;
+// Sprint Ο Pod 1A.5 (RFC-055): Phase 2.5n drains queued sheet-setup
+// blocks (sheetView / sheetProtection / pageMargins / pageSetup /
+// headerFooter) into per-sheet `local_blocks`.
+pub mod sheet_setup;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -272,6 +276,17 @@ pub struct XlsxPatcher {
     /// the §10 dict shape so the cdylib can lift it into the typed
     /// model + run filter evaluation at drain time.
     queued_autofilters: HashMap<String, autofilter::QueuedAutoFilter>,
+
+    /// Sprint Ο Pod 1A.5 (RFC-055) — pending sheet-setup mutations,
+    /// keyed by sheet title. Each entry is a parsed
+    /// [`sheet_setup::QueuedSheetSetup`] holding typed specs for the
+    /// 5 sheet-setup blocks. Drained by Phase 2.5n (sequenced AFTER
+    /// pivots in Phase 2.5m and BEFORE autoFilter Phase 2.5o so a
+    /// later sheet-protection toggle can lock the autoFilter range).
+    /// Calling `queue_sheet_setup_update` again for the same sheet
+    /// REPLACES the previous payload (matches Python `ws.page_setup
+    /// = ...` semantics).
+    queued_sheet_setup: HashMap<String, sheet_setup::QueuedSheetSetup>,
 }
 
 /// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
@@ -543,6 +558,7 @@ impl XlsxPatcher {
             next_pivot_cache_id: 0,
             queued_workbook_security: None,
             queued_autofilters: HashMap::new(),
+            queued_sheet_setup: HashMap::new(),
         })
     }
 
@@ -994,6 +1010,43 @@ impl XlsxPatcher {
     fn queue_workbook_security(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let security = parse_workbook_security_payload(payload)?;
         self.queued_workbook_security = Some(security);
+        Ok(())
+    }
+
+    /// Queue a sheet-setup update for `sheet` (RFC-055 Phase 2.5n).
+    ///
+    /// `payload` is the §10 dict shape produced by
+    /// `Worksheet.to_rust_setup_dict()`:
+    ///
+    /// ```text
+    /// {
+    ///   "page_setup": {...} | None,
+    ///   "page_margins": {...} | None,
+    ///   "header_footer": {...} | None,
+    ///   "sheet_view": {...} | None,
+    ///   "sheet_protection": {...} | None,
+    ///   "print_titles": {"rows": "1:1" | None, "cols": "A:A" | None} | None,
+    /// }
+    /// ```
+    ///
+    /// Calling this again for the same `sheet` REPLACES the previous
+    /// payload — matches Python `ws.page_setup = ...` semantics.
+    /// Drained by Phase 2.5n during `do_save`, sequenced AFTER pivots
+    /// (2.5m) and BEFORE autoFilter (2.5o).
+    fn queue_sheet_setup_update(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let specs = sheet_setup::parse_sheet_setup_payload(payload)?;
+        if specs.is_empty() {
+            // No-op queue entry — drop any prior entry too, matching
+            // "user reset everything to default" semantics.
+            self.queued_sheet_setup.remove(sheet);
+        } else {
+            self.queued_sheet_setup
+                .insert(sheet.to_string(), sheet_setup::QueuedSheetSetup { specs });
+        }
         Ok(())
     }
 
@@ -2445,6 +2498,92 @@ impl XlsxPatcher {
         //      * Add a content-type override.
         if !self.queued_pivot_caches.is_empty() || !self.queued_pivot_tables.is_empty() {
             self.apply_pivot_adds_phase(&mut file_patches, &mut zip)?;
+        }
+
+        // --- Phase 2.5n: Sheet setup (Sprint Ο Pod 1A.5 / RFC-055) ---
+        //
+        // Drains queued sheet-setup mutations (sheetView /
+        // sheetProtection / pageMargins / pageSetup / headerFooter)
+        // into per-sheet `local_blocks` for splice via merge_blocks
+        // in Phase 3. Sequenced AFTER pivots (2.5m) and BEFORE
+        // autoFilter (2.5o) so a later sheet-protection toggle can
+        // observe the pivot-table block when computing its allowed
+        // operation set.
+        //
+        // Each non-empty block emits one SheetBlock variant; the
+        // merger handles ECMA-376 §18.3.1.99 ordering. The
+        // `print_titles` slot routes through workbook-scope
+        // <definedNames> (RFC-021 path) — handled by the Workbook
+        // coordinator on the Python side; the patcher just stashes
+        // the strings on the queue for now.
+        if !self.queued_sheet_setup.is_empty() {
+            let sheet_titles: Vec<String> =
+                self.queued_sheet_setup.keys().cloned().collect();
+            for sheet_title in &sheet_titles {
+                let queued = match self.queued_sheet_setup.get(sheet_title) {
+                    Some(q) => q.clone(),
+                    None => continue,
+                };
+                let sheet_path = match self.sheet_paths.get(sheet_title) {
+                    Some(p) => p.clone(),
+                    None => continue,
+                };
+                let specs = &queued.specs;
+
+                // Emit each non-empty block into `local_blocks`. The
+                // merger's replace-on-match semantics handle the
+                // "existing element" case — we don't need to scan
+                // the source XML up-front.
+                if let Some(s) = &specs.sheet_view {
+                    let bytes = wolfxl_writer::parse::sheet_setup::emit_sheet_views(s);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::SheetViews(bytes));
+                    }
+                }
+                if let Some(s) = &specs.sheet_protection {
+                    let bytes =
+                        wolfxl_writer::parse::sheet_setup::emit_sheet_protection(s);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::SheetProtection(bytes));
+                    }
+                }
+                if let Some(s) = &specs.page_margins {
+                    let bytes = wolfxl_writer::parse::sheet_setup::emit_page_margins(s);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::PageMargins(bytes));
+                    }
+                }
+                if let Some(s) = &specs.page_setup {
+                    let bytes = wolfxl_writer::parse::sheet_setup::emit_page_setup(s);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::PageSetup(bytes));
+                    }
+                }
+                if let Some(s) = &specs.header_footer {
+                    let bytes = wolfxl_writer::parse::sheet_setup::emit_header_footer(s);
+                    if !bytes.is_empty() {
+                        local_blocks
+                            .entry(sheet_path.clone())
+                            .or_default()
+                            .push(SheetBlock::HeaderFooter(bytes));
+                    }
+                }
+                // print_titles: routed through workbook definedNames
+                // by the Python coordinator. Nothing to do here —
+                // the queue entry is informational only.
+            }
         }
 
         // --- Phase 2.5o: AutoFilter (Sprint Ο Pod 1B / RFC-056) ---
