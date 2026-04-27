@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import os
+from typing import IO
 
 from wolfxl._cell import Cell
 from wolfxl._rust import __version__, classify_format
@@ -45,7 +46,14 @@ __all__ = [
 
 
 def load_workbook(
-    filename: str | os.PathLike[str],
+    filename: (
+        str
+        | os.PathLike[str]
+        | bytes
+        | bytearray
+        | memoryview
+        | IO[bytes]
+    ),
     read_only: bool = False,
     data_only: bool = False,
     keep_links: bool = True,
@@ -103,26 +111,108 @@ def load_workbook(
 
     ``data_only=True`` returns cached formula results when they exist.
     ``keep_links`` remains a no-op compatibility shim.
+
+    Sprint Κ Pod-β: ``filename`` may now also be raw ``bytes`` /
+    ``bytearray`` / ``memoryview`` or any file-like object whose
+    ``.read()`` returns bytes (e.g. :class:`io.BytesIO`). The format is
+    sniffed from the leading magic bytes; .xlsb and .xls inputs route
+    through dedicated calamine backends (read-only — see the
+    :class:`Workbook._format` attribute and the ``modify``/``read_only``
+    guards below).
     """
-    path_str = str(filename)
-    if password is not None:
-        wb = Workbook._from_encrypted(  # noqa: SLF001
-            path_str,
-            password=password,
-            data_only=data_only,
-            permissive=permissive,
-            modify=modify,
+    from wolfxl._loader import classify_input
+
+    fmt, data, path = classify_input(filename)
+
+    # OOXML-encrypted .xlsx files arrive as OLE CFB envelopes that the
+    # sniffer reports as ``"encrypted"``.  Once decrypted via
+    # msoffcrypto they're plain xlsx, so we route them through the
+    # encrypted constructor unconditionally; if the caller forgot to
+    # pass ``password=``, surface a clear error before _from_encrypted
+    # raises something more cryptic.
+    if fmt == "encrypted":
+        if password is None:
+            raise ValueError(
+                "this workbook is OOXML-encrypted; pass password= to "
+                "load_workbook() (install with pip install wolfxl[encrypted])"
+            )
+        # _from_encrypted will produce a plain xlsx workbook.
+        fmt = "xlsx"
+
+    # Format-specific guards — surface clear errors *before* we try to
+    # materialise a backend that doesn't exist for the requested mode.
+    if fmt in ("xlsb", "xls"):
+        if modify:
+            raise NotImplementedError(
+                f".{fmt} files are read-only in wolfxl; load + transcribe to "
+                ".xlsx then save: load via load_workbook(path), reconstruct "
+                "as a fresh Workbook(), wb.save('out.xlsx')"
+            )
+        if read_only:
+            raise NotImplementedError(
+                f"streaming read_only mode is xlsx-only; .{fmt} files load "
+                "whole-sheet"
+            )
+        if password is not None:
+            raise NotImplementedError(
+                f"password reads are xlsx-only (msoffcrypto-tool); .{fmt} "
+                "encryption is out of scope"
+            )
+
+    if fmt == "ods":
+        raise NotImplementedError(
+            ".ods files are not supported by wolfxl; use openpyxl/odfpy "
+            "for OpenDocument reads"
         )
-    elif modify:
-        wb = Workbook._from_patcher(  # noqa: SLF001
-            path_str, data_only=data_only, permissive=permissive
+
+    if fmt == "unknown":
+        source_kind = "path" if path else "bytes"
+        raise ValueError(
+            f"could not determine file format from {source_kind}; "
+            "expected xlsx/xlsb/xls"
         )
-    else:
-        wb = Workbook._from_reader(  # noqa: SLF001
-            path_str,
-            data_only=data_only,
-            permissive=permissive,
-            read_only=read_only,
+
+    # Dispatch.
+    if fmt == "xlsx":
+        if password is not None:
+            wb = Workbook._from_encrypted(  # noqa: SLF001
+                path=path,
+                data=data,
+                password=password,
+                data_only=data_only,
+                permissive=permissive,
+                modify=modify,
+            )
+        elif data is not None:
+            # Bytes / BytesIO input: dispatch through the bytes shim.
+            wb = Workbook._from_bytes(
+                data,
+                data_only=data_only,
+                permissive=permissive,
+                modify=modify,
+                read_only=read_only,
+            )
+        elif modify:
+            wb = Workbook._from_patcher(  # noqa: SLF001
+                path, data_only=data_only, permissive=permissive
+            )
+        else:
+            wb = Workbook._from_reader(  # noqa: SLF001
+                path,
+                data_only=data_only,
+                permissive=permissive,
+                read_only=read_only,
+            )
+    elif fmt == "xlsb":
+        wb = Workbook._from_xlsb(  # noqa: SLF001
+            path=path, data=data, data_only=data_only, permissive=permissive,
         )
+    elif fmt == "xls":
+        wb = Workbook._from_xls(  # noqa: SLF001
+            path=path, data=data, data_only=data_only, permissive=permissive,
+        )
+    else:  # pragma: no cover — defensive; classify_input only emits the above.
+        raise ValueError(f"unsupported file format: {fmt!r}")
+
     wb._rich_text = rich_text  # noqa: SLF001
     return wb

@@ -652,6 +652,44 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         tags=frozenset({"phase-2", "shipped-1.3"}),
     ),
     SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (bytes overload)",
+        wolfxl_path="wolfxl.load_workbook (bytes overload)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-β bundles bytes-input handling into the "
+            "loader. ``str`` / ``Path`` / ``bytes`` / ``bytearray`` / "
+            "``memoryview`` / ``BytesIO`` / file-like all dispatch "
+            "through the same ``classify_input`` sniffer and reach the "
+            "appropriate Rust backend. xlsx-from-bytes uses Pod-α's "
+            "``CalamineStyledBook.open_from_bytes`` when available, "
+            "otherwise falls back to a tracked tempfile that "
+            "``Workbook.close()`` reaps. The ``(bytes overload)`` "
+            "annotation is a parametric marker; the smoke test strips "
+            "it via ``split(' ')[0]`` and verifies the bare "
+            "``load_workbook`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (BytesIO overload)",
+        wolfxl_path="wolfxl.load_workbook (BytesIO overload)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-β: file-like objects whose ``.read()`` "
+            "returns bytes are accepted by ``load_workbook`` and "
+            "round-trip through the same dispatcher as raw bytes. "
+            "Useful for in-memory pipelines (S3 GetObject responses, "
+            "HTTP file uploads, etc.) where materialising to disk is "
+            "wasteful. Non-bytes file-likes (``StringIO``) raise "
+            "``TypeError`` with a clear message."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
         openpyxl_path="openpyxl.load_workbook('foo.xlsb')",
         wolfxl_path=None,
         category=SurfaceCategory.WORKBOOK_OPEN,

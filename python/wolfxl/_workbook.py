@@ -35,6 +35,77 @@ if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
 
 
+def _xlsb_xls_via_tempfile(
+    rust_cls: Any,
+    data: bytes | bytearray | memoryview,
+    *,
+    suffix: str,
+    permissive: bool,
+) -> tuple[Any, str]:
+    """Materialise ``data`` to a tempfile and call ``rust_cls.open(path)``.
+
+    Used as a fallback for ``CalamineXlsbBook`` / ``CalamineXlsBook``
+    when Pod-α's ``open_from_bytes`` overload isn't yet exposed.
+    Returns ``(rust_book, tempfile_path)`` so the caller can stash the
+    path on the workbook for cleanup at ``close()`` time.
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        prefix="wolfxl-", suffix=suffix, delete=False
+    ) as tmp:
+        tmp.write(bytes(data))
+        tmp_path = tmp.name
+
+    opener = rust_cls.open
+    try:
+        rust_book = opener(tmp_path, permissive)
+    except TypeError:
+        rust_book = opener(tmp_path)
+    return rust_book, tmp_path
+
+
+def _build_xlsb_xls_wb(
+    cls: type,
+    *,
+    rust_book: Any,
+    fmt: str,
+    data_only: bool,
+    source_path: str | None,
+) -> Any:
+    """Wire up the read-mode workbook fields shared by xlsb / xls.
+
+    Skips the workbook-property and defined-name caches because the
+    binary backends don't expose them; everything else mirrors
+    :meth:`Workbook._from_reader` so existing call sites
+    (``wb.sheetnames``, ``wb.active``, ``ws['A1'].value``) keep working.
+    """
+    wb = object.__new__(cls)
+    wb._rust_writer = None
+    wb._rust_patcher = None
+    wb._rust_reader = rust_book
+    wb._data_only = data_only
+    wb._rich_text = False
+    wb._evaluator = None
+    wb._read_only = False
+    wb._source_path = source_path
+    wb._format = fmt
+    names = [str(n) for n in rust_book.sheet_names()]
+    wb._sheet_names = names
+    wb._sheets = {name: Worksheet(wb, name) for name in names}
+    # Keep the rest of the boilerplate empty — these caches and queues
+    # are only meaningful for xlsx (modify mode + write mode).
+    wb._properties_cache = None
+    wb._properties_dirty = False
+    wb._defined_names_cache = None
+    wb._pending_defined_names = {}
+    wb._pending_axis_shifts = []
+    wb._pending_range_moves = []
+    wb._pending_sheet_copies = []
+    wb.copy_options = CopyOptions()
+    return wb
+
+
 class Workbook:
     """openpyxl-compatible workbook backed by Rust."""
 
@@ -78,6 +149,10 @@ class Workbook:
         # Sprint Ι Pod-β — streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
+        # Sprint Κ Pod-β — file format the workbook came from.  Write
+        # mode is xlsx by definition; the read/modify constructors set
+        # this to "xlsx" / "xlsb" / "xls" as appropriate.
+        self._format: str = "xlsx"
 
     @classmethod
     def _from_reader(
@@ -111,6 +186,7 @@ class Workbook:
         wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
         wb._read_only = read_only
         wb._source_path = path
+        wb._format = "xlsx"
         names = [str(n) for n in wb._rust_reader.sheet_names()]
         wb._sheet_names = names
         wb._sheets = {}
@@ -129,8 +205,9 @@ class Workbook:
     @classmethod
     def _from_encrypted(
         cls,
-        path: str,
+        path: str | None = None,
         *,
+        data: bytes | bytearray | memoryview | None = None,
         password: str | bytes,
         data_only: bool = False,
         permissive: bool = False,
@@ -138,21 +215,30 @@ class Workbook:
     ) -> Workbook:
         """Open an OOXML-encrypted .xlsx via msoffcrypto-tool (Sprint Ι Pod-γ).
 
-        Decrypts the source file in memory, materialises the plaintext
-        bytes to a temporary path (the calamine reader and the patcher
-        are both path-based — RFC-035 zip reopens use ``self.file_path``),
-        then dispatches through the existing read or modify path. On a
-        non-encrypted file the password is silently ignored and the
-        normal path is used (matches openpyxl).
+        Decrypts the source (path or in-memory blob) into an in-memory
+        buffer, then dispatches through the bytes-aware reader path
+        (Sprint Κ Pod-β unified entry point). On a non-encrypted file
+        the password is silently ignored and the normal path is used
+        (matches openpyxl).
 
         Wrong / missing passwords raise ``ValueError`` with a clear
         message; ``ImportError`` (with install hint) surfaces when
         ``msoffcrypto-tool`` isn't installed.
 
         Modify mode + password works because the decrypted bytes are
-        materialised to disk; on save the result is plaintext (write-
-        side encryption is documented T3 out-of-scope).
+        rematerialised through ``_from_bytes``; on save the result is
+        plaintext (write-side encryption is documented T3
+        out-of-scope).
+
+        Exactly one of ``path`` / ``data`` must be supplied — the
+        ``load_workbook`` dispatcher (Sprint Κ Pod-β) threads whichever
+        the caller passed in.
         """
+        if (path is None) == (data is None):
+            raise TypeError(
+                "_from_encrypted requires exactly one of path / data"
+            )
+
         # Lazy import — users without the optional dep pay no cost.
         try:
             import msoffcrypto  # type: ignore[import-not-found]
@@ -170,7 +256,14 @@ class Workbook:
         else:
             pw_str = password
 
-        with open(path, "rb") as src_fp:
+        # Funnel both inputs into a BytesIO so msoffcrypto sees the same
+        # shape regardless of caller path.
+        if path is not None:
+            src_fp = open(path, "rb")  # noqa: SIM115 — closed in finally
+        else:
+            src_fp = io.BytesIO(bytes(data))  # type: ignore[arg-type]
+
+        try:
             office = msoffcrypto.OfficeFile(src_fp)
             try:
                 is_encrypted = office.is_encrypted()
@@ -181,12 +274,21 @@ class Workbook:
             if not is_encrypted:
                 # openpyxl-style: silently ignore password on a
                 # non-encrypted file.
-                if modify:
-                    return cls._from_patcher(
+                if path is not None:
+                    if modify:
+                        return cls._from_patcher(
+                            path, data_only=data_only, permissive=permissive
+                        )
+                    return cls._from_reader(
                         path, data_only=data_only, permissive=permissive
                     )
-                return cls._from_reader(
-                    path, data_only=data_only, permissive=permissive
+                # Bytes input that isn't encrypted: route through the
+                # bytes shim so we don't lose the data.
+                return cls._from_bytes(
+                    bytes(data),  # type: ignore[arg-type]
+                    data_only=data_only,
+                    permissive=permissive,
+                    modify=modify,
                 )
 
             try:
@@ -201,15 +303,17 @@ class Workbook:
                 office.decrypt(buf)
             except Exception as exc:
                 # msoffcrypto raises InvalidKeyError on wrong password;
-                # normalise to ValueError so callers don't have to import
-                # msoffcrypto just to except.
+                # normalise to ValueError so callers don't have to
+                # import msoffcrypto just to except.
                 raise ValueError(
                     f"failed to decrypt workbook (wrong password?): {exc}"
                 ) from exc
-            buf.seek(0)
+            decrypted_bytes = buf.getvalue()
+        finally:
+            src_fp.close()
 
         return cls._from_bytes(
-            buf.getvalue(),
+            decrypted_bytes,
             data_only=data_only,
             permissive=permissive,
             modify=modify,
@@ -223,37 +327,83 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
         modify: bool = False,
+        read_only: bool = False,
     ) -> Workbook:
-        """Open an .xlsx blob from memory (Sprint Ι Pod-γ).
+        """Open an .xlsx blob from memory (Sprint Ι Pod-γ, Sprint Κ Pod-β).
 
-        Materialises the bytes to a tempfile and dispatches through the
-        path-based reader / patcher. The tempfile is left on disk for
-        the lifetime of the returned ``Workbook`` because the Rust
-        reader's Tier 2 features reopen the source zip via
-        ``self.file_path`` (see ``CalamineStyledBook::open_zip``); the
-        same applies to the patcher. ``Workbook.close()`` removes the
-        tempfile.
+        When the underlying Rust reader exposes ``open_from_bytes``
+        (Pod-α), the blob is handed to the reader directly with no
+        intermediate tempfile.  Otherwise the bytes are materialised to
+        a tempfile and the path-based reader / patcher is used; the
+        tempfile is tracked on the workbook so :meth:`close` can clean
+        it up.  Either way the public surface (``Workbook._format``,
+        ``Workbook._source_path``, etc.) is identical.
+
+        ``read_only`` plumbs through to the streaming SAX path (Sprint
+        Ι Pod-β); ``modify=True`` always uses a tempfile because the
+        XlsxPatcher is path-only by design (it reopens the source zip
+        on save).
         """
-        import tempfile
+        from wolfxl import _rust
 
-        # delete=False so the file persists across the close-on-exit of
-        # the NamedTemporaryFile context manager. We track the path on
-        # the workbook and remove it from ``close()``.
-        with tempfile.NamedTemporaryFile(
-            prefix="wolfxl-", suffix=".xlsx", delete=False
-        ) as tmp:
-            tmp.write(bytes(data))
-            tmp_path = tmp.name
+        data_bytes = bytes(data)
 
-        if modify:
-            wb = cls._from_patcher(
-                tmp_path, data_only=data_only, permissive=permissive
-            )
-        else:
-            wb = cls._from_reader(
-                tmp_path, data_only=data_only, permissive=permissive
-            )
-        wb._tempfile_path = tmp_path
+        # Modify mode requires the patcher, which is path-only.  Same
+        # for the no-bytes-direct fallback when the Rust reader hasn't
+        # been taught about bytes inputs yet (Pod-α dependency).
+        bytes_open = getattr(_rust.CalamineStyledBook, "open_from_bytes", None)
+        needs_tempfile = modify or bytes_open is None
+
+        if needs_tempfile:
+            import tempfile
+
+            # delete=False so the file persists across the
+            # NamedTemporaryFile context manager. We track the path on
+            # the workbook and remove it from ``close()``.
+            with tempfile.NamedTemporaryFile(
+                prefix="wolfxl-", suffix=".xlsx", delete=False
+            ) as tmp:
+                tmp.write(data_bytes)
+                tmp_path = tmp.name
+
+            if modify:
+                wb = cls._from_patcher(
+                    tmp_path, data_only=data_only, permissive=permissive
+                )
+            else:
+                wb = cls._from_reader(
+                    tmp_path,
+                    data_only=data_only,
+                    permissive=permissive,
+                    read_only=read_only,
+                )
+            wb._tempfile_path = tmp_path
+            return wb
+
+        # Bytes-direct reader path (Pod-α onwards): no tempfile needed.
+        wb = object.__new__(cls)
+        wb._rust_writer = None
+        wb._rust_patcher = None
+        wb._data_only = data_only
+        wb._rich_text = False
+        wb._evaluator = None
+        wb._rust_reader = bytes_open(data_bytes, permissive)
+        wb._read_only = read_only
+        wb._source_path = None
+        wb._format = "xlsx"
+        names = [str(n) for n in wb._rust_reader.sheet_names()]
+        wb._sheet_names = names
+        wb._sheets = {}
+        for name in names:
+            wb._sheets[name] = Worksheet(wb, name)
+        wb._properties_cache = None
+        wb._properties_dirty = False
+        wb._defined_names_cache = None
+        wb._pending_defined_names = {}
+        wb._pending_axis_shifts = []
+        wb._pending_range_moves = []
+        wb._pending_sheet_copies = []
+        wb.copy_options = CopyOptions()
         return wb
 
     @classmethod
@@ -281,6 +431,7 @@ class Workbook:
         wb._rust_patcher = _rust.XlsxPatcher.open(path, permissive)
         wb._read_only = False
         wb._source_path = path
+        wb._format = "xlsx"
         names = [str(n) for n in wb._rust_reader.sheet_names()]
         wb._sheet_names = names
         wb._sheets = {}
@@ -295,6 +446,132 @@ class Workbook:
         wb._pending_sheet_copies = []
         wb.copy_options = CopyOptions()
         return wb
+
+    @classmethod
+    def _from_xlsb(
+        cls,
+        *,
+        path: str | None,
+        data: bytes | None,
+        data_only: bool = False,
+        permissive: bool = False,
+    ) -> Workbook:
+        """Open an .xlsb workbook via Pod-α's ``CalamineXlsbBook``.
+
+        xlsb is a binary OOXML container; we surface values + cached
+        formula results only (no per-cell styles, no rich text, no
+        comments — that's the same shape calamine's stock xlsb reader
+        exposes).  Callers that need style metadata should
+        load + transcribe to xlsx first.
+        """
+        from wolfxl import _rust
+
+        rust_cls = getattr(_rust, "CalamineXlsbBook", None)
+        if rust_cls is None:
+            raise NotImplementedError(
+                ".xlsb reads require the CalamineXlsbBook backend "
+                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
+                "Pod-α merges, or use openpyxl/xlrd as an interim."
+            )
+
+        if data is not None:
+            bytes_open = getattr(rust_cls, "open_from_bytes", None)
+            if bytes_open is None:
+                # Fall back to a tempfile so we can still hand the
+                # backend a path while Pod-α plumbs the bytes overload.
+                rust_book, tmp_path = _xlsb_xls_via_tempfile(
+                    rust_cls, data, suffix=".xlsb", permissive=permissive
+                )
+                _wb = _build_xlsb_xls_wb(
+                    cls,
+                    rust_book=rust_book,
+                    fmt="xlsb",
+                    data_only=data_only,
+                    source_path=None,
+                )
+                _wb._tempfile_path = tmp_path
+                return _wb
+            rust_book = bytes_open(data, permissive)
+        else:
+            opener = getattr(rust_cls, "open", None)
+            if opener is None:
+                raise NotImplementedError(
+                    "CalamineXlsbBook.open is not yet exposed by the "
+                    "Rust extension; rebuild after Sprint Κ Pod-α."
+                )
+            try:
+                rust_book = opener(path, permissive)
+            except TypeError:
+                # Pod-α may not yet thread `permissive` through.
+                rust_book = opener(path)
+
+        return _build_xlsb_xls_wb(
+            cls,
+            rust_book=rust_book,
+            fmt="xlsb",
+            data_only=data_only,
+            source_path=path,
+        )
+
+    @classmethod
+    def _from_xls(
+        cls,
+        *,
+        path: str | None,
+        data: bytes | None,
+        data_only: bool = False,
+        permissive: bool = False,
+    ) -> Workbook:
+        """Open a legacy .xls workbook via Pod-α's ``CalamineXlsBook``.
+
+        Same shape as :meth:`_from_xlsb` — values + cached formula
+        results only.
+        """
+        from wolfxl import _rust
+
+        rust_cls = getattr(_rust, "CalamineXlsBook", None)
+        if rust_cls is None:
+            raise NotImplementedError(
+                ".xls reads require the CalamineXlsBook backend "
+                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
+                "Pod-α merges, or use xlrd as an interim."
+            )
+
+        if data is not None:
+            bytes_open = getattr(rust_cls, "open_from_bytes", None)
+            if bytes_open is None:
+                rust_book, tmp_path = _xlsb_xls_via_tempfile(
+                    rust_cls, data, suffix=".xls", permissive=permissive
+                )
+                _wb = _build_xlsb_xls_wb(
+                    cls,
+                    rust_book=rust_book,
+                    fmt="xls",
+                    data_only=data_only,
+                    source_path=None,
+                )
+                _wb._tempfile_path = tmp_path
+                return _wb
+            rust_book = bytes_open(data, permissive)
+        else:
+            opener = getattr(rust_cls, "open", None)
+            if opener is None:
+                raise NotImplementedError(
+                    "CalamineXlsBook.open is not yet exposed by the "
+                    "Rust extension; rebuild after Sprint Κ Pod-α."
+                )
+            try:
+                rust_book = opener(path, permissive)
+            except TypeError:
+                rust_book = opener(path)
+
+        return _build_xlsb_xls_wb(
+            cls,
+            rust_book=rust_book,
+            fmt="xls",
+            data_only=data_only,
+            source_path=path,
+        )
 
     # ------------------------------------------------------------------
     # Sheet access
