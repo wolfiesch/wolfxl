@@ -51,6 +51,11 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 059 | Public exceptions + IndexedList (Sprint Ο Pod 1E) | Approved | 5 (2.0) | S | — | 060 |
 | 060 | openpyxl-shaped class re-export shims (Sprint Ο Pod 2) | Approved | 5 (2.0) | M | 055, 056, 057, 058, 059 | (v2.0 launch) |
 | 061 | Advanced pivot construction — slicers, calc fields, calc items, GroupItems, styling (Sprint Ο Pod 3) | Approved | 5 (2.0) | XL | 047, 048, 049, 026 | (v2.0 launch) |
+| 062 | Page breaks + dimensions (Sprint Π Pod Π-α) | Approved | 5 (2.0) | M | 011, 013, 035 | (v2.0 launch) |
+| 063 | Merge + tables + worksheet copier (Sprint Π Pod Π-β) | Approved | 5 (2.0) | M | 024, 035 | (v2.0 launch) |
+| 064 | Styles — NamedStyle + GradientFill + Protection + DifferentialStyle + Fill (Sprint Π Pod Π-γ) | Approved | 5 (2.0) | XL | 026, 061 | (v2.0 launch) |
+| 065 | Workbook properties + internals (Sprint Π Pod Π-δ) | Approved | 5 (2.0) | M | 058 | (v2.0 launch) |
+| 066 | Re-routes + RFC-060 doc cleanup (Sprint Π Pod Π-ε) | Approved | 5 (2.0) | XS | 055, 060 | (v2.0 launch) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
