@@ -117,8 +117,9 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         .filter(|(_, h)| !h.is_internal)
         .collect();
     let has_tables = !sheet.tables.is_empty();
+    let has_images = !sheet.images.is_empty();
 
-    if !has_comments && external_hyperlinks.is_empty() && !has_tables {
+    if !has_comments && external_hyperlinks.is_empty() && !has_tables && !has_images {
         return Vec::new();
     }
 
@@ -171,7 +172,51 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         );
     }
 
+    // Sprint Λ Pod-β (RFC-045) — drawing rel for images. The drawing
+    // part is allocated globally per sheet (one drawing per sheet that
+    // has at least one image). The rId is allocated last so existing
+    // numbering for comments/tables/hyperlinks is preserved.
+    if has_images {
+        // drawingN.xml is numbered globally — count how many earlier
+        // sheets had images to compute this sheet's drawing N.
+        let drawings_before: usize = wb.sheets[..sheet_idx]
+            .iter()
+            .filter(|s| !s.images.is_empty())
+            .count();
+        let drawing_n = drawings_before + 1;
+        g.add_with_id(
+            next_rid(),
+            rt::DRAWING,
+            &format!("../drawings/drawing{drawing_n}.xml"),
+            TargetMode::Internal,
+        );
+    }
+
     g.serialize()
+}
+
+/// Sprint Λ Pod-β — emit `xl/drawings/_rels/drawingN.xml.rels` for the
+/// drawing part on `sheet_idx`. Each image becomes one `image`
+/// relationship pointing at `../media/imageM.<ext>` where M is the
+/// global image index assigned by the caller (`image_indices` is
+/// parallel to `sheet.images`). Returns the allocated `rId`s in image
+/// order so the drawings emitter can reference them.
+pub fn emit_drawing_rels(
+    sheet: &crate::model::worksheet::Worksheet,
+    image_indices: &[u32],
+) -> (Vec<u8>, Vec<String>) {
+    debug_assert_eq!(sheet.images.len(), image_indices.len());
+    let mut g = RelsGraph::new();
+    let mut rids: Vec<String> = Vec::with_capacity(sheet.images.len());
+    for (img, &n) in sheet.images.iter().zip(image_indices.iter()) {
+        let rid = g.add(
+            rt::IMAGE,
+            &format!("../media/image{n}.{}", img.ext),
+            TargetMode::Internal,
+        );
+        rids.push(rid.0);
+    }
+    (g.serialize(), rids)
 }
 
 #[cfg(test)]

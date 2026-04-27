@@ -760,6 +760,44 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         write_api=True,
         tags=frozenset({"phase-encryption", "shipped-1.5"}),
     ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.drawing.image.Image",
+        wolfxl_path="wolfxl.drawing.image.Image",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-β (RFC-045) shipped in 1.5: real "
+            "``Image`` class accepts a path / ``BytesIO`` / raw "
+            "``bytes``, sniffs PNG/JPEG/GIF/BMP via pure-Python magic "
+            "bytes (no Pillow dependency), exposes ``.format``, "
+            "``.width``, ``.height``, ``.anchor``. Pairs with "
+            "``Worksheet.add_image`` for both write- and modify-mode "
+            "image insertion. Modify-mode appending to a sheet that "
+            "already has a drawing part raises NotImplementedError "
+            "(v1.5 limit; tracked as RFC-045 follow-up)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"shipped-1.5"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_image",
+        wolfxl_path="wolfxl.Worksheet.add_image",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-β (RFC-045) shipped in 1.5: "
+            "``add_image(img, anchor=None)`` queues an image; flush "
+            "happens at ``wb.save()`` time via the writer crate "
+            "(write mode) or the patcher's Phase 2.5k (modify mode). "
+            "Anchor accepts an A1 string for one-cell anchors; "
+            "``OneCellAnchor``/``TwoCellAnchor``/``AbsoluteAnchor`` "
+            "objects from ``wolfxl.drawing`` are also supported."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"shipped-1.5"}),
+    ),
 )
 
 

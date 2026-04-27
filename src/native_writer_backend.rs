@@ -35,6 +35,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
+use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
 use wolfxl_writer::model::{
     AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, Comment, CommentAuthorTable,
     ConditionalFormat, ConditionalKind, ConditionalRule, DataValidation, DefinedName, DocProperties,
@@ -1503,5 +1504,141 @@ impl NativeWorkbook {
         self.inner.set_doc_props(doc_props);
         Ok(())
     }
+
+    /// Sprint Λ Pod-β (RFC-045) — queue an image onto a sheet.
+    ///
+    /// `image_dict` shape (built by Python's
+    /// ``Worksheet.add_image``):
+    ///
+    /// ```python
+    /// {
+    ///     "data": <bytes>,
+    ///     "ext": "png" | "jpeg" | "gif" | "bmp",
+    ///     "width": int,
+    ///     "height": int,
+    ///     "anchor": {
+    ///         "type": "one_cell" | "two_cell" | "absolute",
+    ///         # one_cell: from_col, from_row, from_col_off, from_row_off (0-based + EMU)
+    ///         # two_cell: + to_col, to_row, to_col_off, to_row_off, edit_as
+    ///         # absolute: x_emu, y_emu, cx_emu, cy_emu
+    ///         ...
+    ///     },
+    /// }
+    /// ```
+    pub fn add_image(&mut self, sheet: &str, image_dict: &Bound<'_, PyAny>) -> PyResult<()> {
+        let dict = image_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("image must be a dict"))?;
+
+        let data: Vec<u8> = dict
+            .get_item("data")?
+            .ok_or_else(|| PyValueError::new_err("image dict missing 'data'"))?
+            .extract()?;
+        let ext: String = dict
+            .get_item("ext")?
+            .ok_or_else(|| PyValueError::new_err("image dict missing 'ext'"))?
+            .extract()?;
+        let width: u32 = dict
+            .get_item("width")?
+            .ok_or_else(|| PyValueError::new_err("image dict missing 'width'"))?
+            .extract()?;
+        let height: u32 = dict
+            .get_item("height")?
+            .ok_or_else(|| PyValueError::new_err("image dict missing 'height'"))?
+            .extract()?;
+        let anchor_obj = dict
+            .get_item("anchor")?
+            .ok_or_else(|| PyValueError::new_err("image dict missing 'anchor'"))?;
+        let anchor_dict = anchor_obj
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("anchor must be a dict"))?;
+
+        let anchor = parse_image_anchor(anchor_dict)?;
+
+        let img = SheetImage {
+            data,
+            ext: ext.to_ascii_lowercase(),
+            width_px: width,
+            height_px: height,
+            anchor,
+        };
+
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.images.push(img);
+        Ok(())
+    }
+}
+
+fn parse_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<ImageAnchor> {
+    let kind: String = d
+        .get_item("type")?
+        .ok_or_else(|| PyValueError::new_err("anchor dict missing 'type'"))?
+        .extract()?;
+    match kind.as_str() {
+        "one_cell" => {
+            let from_col: u32 = anchor_int(d, "from_col", 0)?;
+            let from_row: u32 = anchor_int(d, "from_row", 0)?;
+            let from_col_off: i64 = anchor_int_i64(d, "from_col_off", 0)?;
+            let from_row_off: i64 = anchor_int_i64(d, "from_row_off", 0)?;
+            Ok(ImageAnchor::OneCell {
+                from_col,
+                from_row,
+                from_col_off,
+                from_row_off,
+            })
+        }
+        "two_cell" => {
+            let from_col: u32 = anchor_int(d, "from_col", 0)?;
+            let from_row: u32 = anchor_int(d, "from_row", 0)?;
+            let from_col_off: i64 = anchor_int_i64(d, "from_col_off", 0)?;
+            let from_row_off: i64 = anchor_int_i64(d, "from_row_off", 0)?;
+            let to_col: u32 = anchor_int(d, "to_col", 0)?;
+            let to_row: u32 = anchor_int(d, "to_row", 0)?;
+            let to_col_off: i64 = anchor_int_i64(d, "to_col_off", 0)?;
+            let to_row_off: i64 = anchor_int_i64(d, "to_row_off", 0)?;
+            let edit_as: String = d
+                .get_item("edit_as")?
+                .and_then(|v| v.extract().ok())
+                .unwrap_or_else(|| "oneCell".to_string());
+            Ok(ImageAnchor::TwoCell {
+                from_col,
+                from_row,
+                from_col_off,
+                from_row_off,
+                to_col,
+                to_row,
+                to_col_off,
+                to_row_off,
+                edit_as,
+            })
+        }
+        "absolute" => {
+            let x_emu: i64 = anchor_int_i64(d, "x_emu", 0)?;
+            let y_emu: i64 = anchor_int_i64(d, "y_emu", 0)?;
+            let cx_emu: i64 = anchor_int_i64(d, "cx_emu", 0)?;
+            let cy_emu: i64 = anchor_int_i64(d, "cy_emu", 0)?;
+            Ok(ImageAnchor::Absolute {
+                x_emu,
+                y_emu,
+                cx_emu,
+                cy_emu,
+            })
+        }
+        other => Err(PyValueError::new_err(format!(
+            "unknown anchor type: {other:?} (expected one_cell, two_cell, or absolute)"
+        ))),
+    }
+}
+
+fn anchor_int(d: &Bound<'_, PyDict>, key: &str, default: u32) -> PyResult<u32> {
+    Ok(d.get_item(key)?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(default))
+}
+
+fn anchor_int_i64(d: &Bound<'_, PyDict>, key: &str, default: i64) -> PyResult<i64> {
+    Ok(d.get_item(key)?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(default))
 }
 

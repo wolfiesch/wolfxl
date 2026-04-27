@@ -59,7 +59,7 @@ pub use model::worksheet::Worksheet;
 /// the same archive both times.
 pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
     use crate::emit::{
-        calc_chain_xml, comments_xml, content_types, doc_props, drawings_vml, rels,
+        calc_chain_xml, comments_xml, content_types, doc_props, drawings, drawings_vml, rels,
         shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
     };
     use crate::zip::{package, ZipEntry};
@@ -132,6 +132,53 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             });
             global_table_idx += 1;
         }
+    }
+
+    // Sprint Λ Pod-β (RFC-045) — drawings + media. Drawings are
+    // numbered globally per sheet that has images; media are numbered
+    // globally across all images. Both counters reset to 1 at the
+    // start of save (write mode is always a fresh workbook — no
+    // existing-on-disk allocations to seed around).
+    let mut global_drawing_idx: usize = 1;
+    let mut global_image_idx: u32 = 1;
+    for (sheet_idx, sheet) in wb.sheets.iter().enumerate() {
+        if sheet.images.is_empty() {
+            continue;
+        }
+        // Allocate one global image index per image on this sheet.
+        let image_indices: Vec<u32> = sheet
+            .images
+            .iter()
+            .map(|_| {
+                let n = global_image_idx;
+                global_image_idx += 1;
+                n
+            })
+            .collect();
+        // Emit the drawing rels (image rIds inside the drawing part).
+        let (drawing_rels_bytes, image_rids) = rels::emit_drawing_rels(sheet, &image_indices);
+        entries.push(ZipEntry {
+            path: format!(
+                "xl/drawings/_rels/drawing{}.xml.rels",
+                global_drawing_idx
+            ),
+            bytes: drawing_rels_bytes,
+        });
+        // Emit the drawing part itself.
+        let drawing_bytes = drawings::emit(&sheet.images, &image_rids);
+        entries.push(ZipEntry {
+            path: format!("xl/drawings/drawing{}.xml", global_drawing_idx),
+            bytes: drawing_bytes,
+        });
+        // Emit the media bytes.
+        for (img, &n) in sheet.images.iter().zip(image_indices.iter()) {
+            entries.push(ZipEntry {
+                path: format!("xl/media/image{}.{}", n, img.ext),
+                bytes: img.data.clone(),
+            });
+        }
+        let _ = sheet_idx; // silence unused when not building debug
+        global_drawing_idx += 1;
     }
 
     entries.extend([

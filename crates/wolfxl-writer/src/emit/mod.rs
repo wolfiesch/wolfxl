@@ -20,6 +20,7 @@ pub mod calc_chain_xml;
 pub mod comments_xml;
 pub mod content_types;
 pub mod doc_props;
+pub mod drawings;
 pub mod drawings_vml;
 pub mod rels;
 pub mod shared_strings_xml;

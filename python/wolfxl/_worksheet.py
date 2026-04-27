@@ -309,6 +309,8 @@ class Worksheet:
         # (row, col).  Both write-mode (NativeWorkbook flush) and
         # modify-mode (XlsxPatcher flush) consume this map.
         "_pending_rich_text",
+        # Sprint Λ Pod-β (RFC-045) — pending image queue.
+        "_pending_images",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -347,6 +349,10 @@ class Worksheet:
         self._pending_tables: list[Any] = []
         self._pending_data_validations: list[Any] = []
         self._pending_conditional_formats: list[tuple[str, Any]] = []
+        # Sprint Λ Pod-β (RFC-045) — pending images attached to this
+        # sheet via ``add_image``. Drained at save time into the Rust
+        # writer (write mode) or the patcher (modify mode).
+        self._pending_images: list[Any] = []
 
     @property
     def title(self) -> str:
@@ -1364,8 +1370,63 @@ class Worksheet:
 
     @property
     def _images(self) -> list[Any]:
-        """Empty list - same rationale as ``_charts``."""
-        return []
+        """Sprint Λ Pod-β (RFC-045) — list of images queued via ``add_image``.
+
+        Used by openpyxl-compat code that iterates ``ws._images`` (e.g.
+        SynthGL utilities that mirror openpyxl's read-side behaviour).
+        Returns the live list so mutations propagate to the next save.
+        """
+        return self._pending_images
+
+    def add_image(self, img: Any, anchor: Any = None) -> None:
+        """Sprint Λ Pod-β (RFC-045) — attach an image to this worksheet.
+
+        Mirrors :meth:`openpyxl.worksheet.worksheet.Worksheet.add_image`.
+
+        Parameters
+        ----------
+        img : wolfxl.drawing.image.Image
+            The image to embed. Constructed from a path/BytesIO/bytes.
+        anchor : str | TwoCellAnchor | AbsoluteAnchor | None
+            Where to anchor the image. Accepts:
+
+            - ``"B5"`` (A1 cell ref) — one-cell anchor, image extends
+              naturally from its top-left corner. This is what
+              openpyxl users overwhelmingly write.
+            - :class:`wolfxl.drawing.spreadsheet_drawing.TwoCellAnchor`
+              — image stretches between two cells.
+            - :class:`wolfxl.drawing.spreadsheet_drawing.AbsoluteAnchor`
+              — pure EMU coordinates, no cell binding.
+            - ``None`` — defaults to ``"A1"`` (matches openpyxl).
+
+        The image is queued until ``Workbook.save()``, at which point
+        the writer (write mode) or the patcher (modify mode) emits the
+        drawing/media/rels parts.
+        """
+        from wolfxl.drawing.image import Image as _Image
+        from wolfxl.drawing.spreadsheet_drawing import (
+            AbsoluteAnchor,
+            OneCellAnchor,
+            TwoCellAnchor,
+        )
+
+        if not isinstance(img, _Image):
+            raise TypeError(
+                f"add_image expected wolfxl.drawing.image.Image, got {type(img).__name__}"
+            )
+
+        if anchor is None:
+            anchor = "A1"
+
+        # Stash the resolved anchor on the image (openpyxl semantics)
+        # AND on a local copy so this exact call's anchor is captured
+        # even if the user reuses the Image object.
+        img.anchor = anchor
+        self._pending_images.append(img)
+
+    # ------------------------------------------------------------------
+    # End add_image
+    # ------------------------------------------------------------------
 
     @property
     def merged_cells(self) -> _MergedCellsProxy:
@@ -2201,6 +2262,15 @@ class Worksheet:
                     "stop_if_true": rule.stopIfTrue,
                 })
             self._pending_conditional_formats.clear()
+
+        # Sprint Λ Pod-β (RFC-045) — drain pending images.
+        if self._pending_images and hasattr(writer, "add_image"):
+            from wolfxl._images import image_to_writer_payload
+
+            for img in self._pending_images:
+                payload = image_to_writer_payload(img)
+                writer.add_image(sheet, payload)
+            self._pending_images.clear()
 
     # ------------------------------------------------------------------
     # wolfxl-core classifier bridge (delegates to the single Rust

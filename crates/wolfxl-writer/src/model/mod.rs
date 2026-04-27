@@ -10,6 +10,7 @@ pub mod conditional;
 pub mod date;
 pub mod defined_name;
 pub mod format;
+pub mod image;
 pub mod table;
 pub mod validation;
 pub mod workbook;
@@ -17,6 +18,7 @@ pub mod worksheet;
 
 pub use cell::{WriteCell, WriteCellValue};
 pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
+pub use image::{ImageAnchor, SheetImage};
 pub use conditional::{
     CellIsOperator, ColorScaleStop, ConditionalFormat, ConditionalKind, ConditionalRule,
     ConditionalThreshold,

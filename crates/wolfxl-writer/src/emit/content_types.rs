@@ -32,6 +32,7 @@ const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
+const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
 const CT_CORE_PROPS: &str = "application/vnd.openxmlformats-package.core-properties+xml";
 const CT_APP_PROPS: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
 const CT_RELATIONSHIPS: &str = "application/vnd.openxmlformats-package.relationships+xml";
@@ -55,6 +56,24 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
     if any_comments {
         out.push_str(&format!(
             "<Default Extension=\"vml\" ContentType=\"{CT_VML}\"/>"
+        ));
+    }
+
+    // Sprint Λ Pod-β (RFC-045) — Default Extension entries for any
+    // image extensions used across the workbook. Excel only requires
+    // one per distinct extension. We emit them in stable
+    // (sheet-order, intra-sheet image-order, dedup) order so two
+    // saves of the same workbook produce identical bytes.
+    let mut seen_exts: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for sheet in &wb.sheets {
+        for img in &sheet.images {
+            seen_exts.insert(img.ext.to_ascii_lowercase());
+        }
+    }
+    for ext in &seen_exts {
+        let ct = crate::emit::drawings::content_type_for_ext(ext);
+        out.push_str(&format!(
+            "<Default Extension=\"{ext}\" ContentType=\"{ct}\"/>"
         ));
     }
 
@@ -100,6 +119,20 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
             out.push_str(&format!(
                 "<Override PartName=\"/xl/tables/table{table_counter}.xml\" \
                  ContentType=\"{CT_TABLE}\"/>"
+            ));
+        }
+    }
+
+    // Sprint Λ Pod-β — per-drawing overrides. Drawings are numbered
+    // globally (1..N) across all sheets, one drawing per sheet that
+    // has at least one image.
+    let mut drawing_counter: usize = 0;
+    for sheet in &wb.sheets {
+        if !sheet.images.is_empty() {
+            drawing_counter += 1;
+            out.push_str(&format!(
+                "<Override PartName=\"/xl/drawings/drawing{drawing_counter}.xml\" \
+                 ContentType=\"{CT_DRAWING}\"/>"
             ));
         }
     }
