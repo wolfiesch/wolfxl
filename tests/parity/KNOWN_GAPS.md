@@ -113,11 +113,15 @@ test_streaming_parity.py` (5 cases vs openpyxl `read_only=True`),
 
 Documented divergences (out of scope for Pod-β, tracked elsewhere):
 
-- Datetime cells surface as Excel serial floats in `values_only`
-  mode, not as Python `datetime` objects (openpyxl's read_only path
-  returns the converted datetime). Closing this requires the
-  streaming reader to consult the styles table for the cell's
-  number format. Tracked under Phase 3 rich-text follow-ups.
+- ✅ FIXED in 1.5 (Sprint Λ Pod-γ) — Datetime cells previously surfaced as
+  Excel serial floats in `values_only` mode and via `StreamingCell.value`.
+  The streaming reader now consults the cell's style table on the fly
+  (cached per `style_id` so the lookup is O(unique-styles)) and converts
+  date-typed numeric cells via `wolfxl.utils.datetime.from_excel` —
+  matching openpyxl's `read_only=True` semantics. Coverage:
+  `tests/parity/test_streaming_parity.py::test_streaming_values_only_datetime_matches_openpyxl`,
+  `::test_streaming_cell_value_datetime_matches_openpyxl`, and
+  `tests/test_streaming_reads.py::test_streaming_datetime_yields_datetime_*`.
 - Rich-text cells flatten to plain strings (matches the existing
   Phase 3 row).
 
