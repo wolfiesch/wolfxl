@@ -76,22 +76,26 @@ fn emit_cache_fields(out: &mut String, fields: &[CacheField], groups: &[FieldGro
     push_attr(out, "count", &fields.len().to_string());
     out.push('>');
     for (idx, f) in fields.iter().enumerate() {
-        // Find a group keyed off this cache field index, if any.
-        let group = groups
+        // Collect ALL groups keyed off this cache field index. For
+        // recursive grouping (year → quarter → month) Excel emits
+        // multiple <fieldGroup> elements nested in the same
+        // cacheField, with `par=` pointing at the previous one.
+        let field_groups: Vec<&FieldGroup> = groups
             .iter()
-            .find(|g| g.field_index == idx as u32);
-        emit_cache_field(out, f, group);
+            .filter(|g| g.field_index == idx as u32)
+            .collect();
+        emit_cache_field(out, f, &field_groups);
     }
     out.push_str("</cacheFields>");
 }
 
-fn emit_cache_field(out: &mut String, f: &CacheField, group: Option<&FieldGroup>) {
+fn emit_cache_field(out: &mut String, f: &CacheField, groups: &[&FieldGroup]) {
     out.push_str("<cacheField");
     push_attr(out, "name", &f.name);
     push_attr(out, "numFmtId", &f.num_fmt_id.to_string());
     out.push('>');
     emit_shared_items(out, &f.shared_items);
-    if let Some(g) = group {
+    for g in groups {
         emit_field_group(out, g);
     }
     out.push_str("</cacheField>");
