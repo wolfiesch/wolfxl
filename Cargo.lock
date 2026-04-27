@@ -1353,6 +1353,7 @@ dependencies = [
  "wolfxl-classify",
  "wolfxl-core",
  "wolfxl-merger",
+ "wolfxl-pivot",
  "wolfxl-rels",
  "wolfxl-structural",
  "wolfxl-writer",

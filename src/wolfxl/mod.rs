@@ -29,6 +29,8 @@ pub mod comments;
 pub mod sheet_copy;
 // Sprint Θ Pod-C3: Phase 2.8 (do_save) rebuilds xl/calcChain.xml.
 pub mod calcchain;
+// Sprint Ν Pod-γ (RFC-047 / RFC-048): Phase 2.5m drains pivot adds.
+pub mod pivot;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
