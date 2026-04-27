@@ -2788,14 +2788,6 @@ class Worksheet:
                     payload = python_value_to_payload(val)
                     patcher.queue_value(self._title, coord, payload)
 
-        for (row, col) in spill_children:
-            coord = rowcol_to_a1(row, col)
-            patcher.queue_array_formula(
-                self._title,
-                coord,
-                {"kind": "spill_child"},
-            )
-
             if cell._format_dirty:  # noqa: SLF001
                 fmt: dict[str, Any] = {}
 
@@ -2815,6 +2807,14 @@ class Worksheet:
                     bdict = border_to_rust_dict(cell._border)  # noqa: SLF001
                     if bdict:
                         patcher.queue_border(self._title, coord, bdict)
+
+        for (row, col) in spill_children:
+            coord = rowcol_to_a1(row, col)
+            patcher.queue_array_formula(
+                self._title,
+                coord,
+                {"kind": "spill_child"},
+            )
 
     def _flush_autofilter_post_cells(self, writer: Any) -> None:
         """Sprint Ο Pod 1B (RFC-056) — flush the autoFilter to the

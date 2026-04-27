@@ -21,8 +21,10 @@ class TestHashPassword:
         assert hash_password("hunter2") == openpyxl_hash("hunter2")
         assert hash_password("hunter2") == "C258"
 
-    def test_empty_returns_empty(self):
-        assert hash_password("") == ""
+    def test_empty_returns_ce4b(self):
+        # openpyxl-parity: empty input runs through the algorithm and
+        # XORs against the magic 0xCE4B at the end, yielding "CE4B".
+        assert hash_password("") == "CE4B"
 
     def test_distinct_passwords_distinct_hashes(self):
         assert hash_password("a") != hash_password("b")

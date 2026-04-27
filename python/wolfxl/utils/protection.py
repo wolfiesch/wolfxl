@@ -44,8 +44,6 @@ def hash_password(plaintext_password: str = "") -> str:
     See http://blogs.msdn.com/b/ericwhite/archive/2008/02/23/the-legacy-hashing-algorithm-in-open-xml.aspx
     for the algorithm rationale.
     """
-    if not plaintext_password:
-        return ""
     password = 0x0000
     for idx, char in enumerate(plaintext_password, 1):
         value = ord(char) << idx
