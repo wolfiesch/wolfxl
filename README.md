@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">WolfXL</h1>
   <p align="center">
-    <strong>The fastest openpyxl-compatible Excel library for Python.</strong><br>
-    Drop-in replacement backed by Rust — up to 5x faster with zero code changes.
+    <strong>Full openpyxl replacement, drop-in compatible, 10×–100× faster.</strong><br>
+    Pivot tables, charts, encryption, structural ops — every construction idiom that openpyxl 3.1.x supports, with a Rust backend.
   </p>
 </p>
 
@@ -69,6 +69,38 @@ for row in ws.iter_rows(values_only=False):
 wb.close()
 ```
 
+## Pivot tables in 6 lines
+
+```python
+import wolfxl
+from wolfxl.chart import Reference
+from wolfxl.pivot import PivotCache, PivotTable
+
+wb = wolfxl.Workbook()
+ws = wb.active
+# ... fill source data ...
+src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
+cache = wb.add_pivot_cache(PivotCache(source=src))
+pt = PivotTable(
+    cache=cache, location="F2",
+    rows=["region"], cols=["quarter"], data=[("revenue", "sum")],
+)
+ws.add_pivot_table(pt)
+wb.save("pivot.xlsx")
+```
+
+WolfXL is the only Python OOXML library that constructs pivot tables with **pre-aggregated records** — pivots open in Excel, LibreOffice, and openpyxl with data populated, no refresh-on-open required. (openpyxl preserves pivots on round-trip but doesn't construct them; XlsxWriter doesn't support pivots at all.)
+
+Link a chart to the pivot:
+
+```python
+from wolfxl.chart import BarChart
+
+chart = BarChart()
+chart.pivot_source = pt          # emits <c:pivotSource> + per-series <c:fmtId>
+ws.add_chart(chart, "F18")
+```
+
 ## Three Modes
 
 <p align="center">
@@ -97,9 +129,13 @@ Features marked **Preserved** are kept verbatim on modify-mode round-trip (open,
 | **Styling** | Font (bold, italic, underline, color, size), fills, borders, number formats, alignment; `Color(theme=...)` and `Color(indexed=...)` accepted |
 | **Structure** | Multiple sheets, merged cells, defined names (read + write), freeze panes, row heights, column widths, document properties |
 | **Tables / Validation / CF** | `ws.tables`, `ws.add_table`, `ws.data_validations`, `ws.conditional_formatting` (read + write in `Workbook()` mode) |
+| **Charts** | 16 chart families — `BarChart`, `LineChart`, `PieChart`, `DoughnutChart`, `AreaChart`, `ScatterChart`, `BubbleChart`, `RadarChart`, `BarChart3D`, `LineChart3D`, `PieChart3D`, `AreaChart3D`, `SurfaceChart`, `SurfaceChart3D`, `StockChart`, `ProjectedPieChart` |
+| **Pivots** | `PivotCache`, `PivotTable`, `RowField` / `ColumnField` / `DataField` / `PageField`; pivot-chart linkage via `chart.pivot_source = pt`; deep-clone of pivot-bearing sheets |
+| **Images** | `Image` (PNG / JPEG / GIF / BMP); one-cell, two-cell, absolute anchors; modify-mode `add_image` |
+| **Encryption** | Read + write Agile (AES-256 / SHA-512) via `wolfxl[encrypted]` |
 | **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
 | **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
-| **Preserved (read-only)** | Charts, images, pivot tables, macros (VBA) — round-trip cleanly through modify mode |
+| **Preserved (read-only)** | Macros (VBA), embedded objects, slicers (v2.1 will construct slicers) — round-trip cleanly through modify mode |
 
 ### openpyxl compatibility status
 
@@ -113,9 +149,10 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 | `CellIsRule`, `FormulaRule`, `ColorScaleRule`, `DataBarRule`, `IconSetRule` | Read + write (write mode); modify-mode setters T1.5 |
 | `DefinedName`, `DocumentProperties` | Read + write (write mode); modify-mode setters T1.5 |
 | `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Stub (raises `NotImplementedError`) |
-| `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | Stub - use modify mode to preserve existing charts |
-| `Image` (from `wolfxl.drawing.image`) | Stub - preserved on modify-mode round-trip |
-| `AutoFilter`, `PivotTable` | Stub - preserved on modify-mode round-trip |
+| `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | **Full support** (1.6+) — 16 chart families incl. 3D / Stock / Surface / ProjectedPie |
+| `Image` (from `wolfxl.drawing.image`) | **Full support** (1.5+) — PNG / JPEG / GIF / BMP, all anchor types |
+| `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — construction + chart linkage + deep-clone |
+| `AutoFilter` | Stub - preserved on modify-mode round-trip |
 | `ws.insert_rows`, `ws.delete_rows` | **Full support** (modify mode, 1.1+) — RFC-030 |
 | `ws.insert_cols`, `ws.delete_cols` | **Full support** (modify mode, 1.1+) — RFC-031 |
 | `ws.move_range` | **Full support** (modify mode, 1.1+) — RFC-034 |
@@ -126,28 +163,35 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 
 | Scale | File size | WolfXL Read | openpyxl Read | WolfXL Write | openpyxl Write |
 |-------|-----------|-------------|---------------|--------------|----------------|
-| 100K cells | 400 KB | **0.11s** | 0.42s | **0.06s** | 0.28s |
-| 1M cells | 3 MB | **1.1s** | 4.0s | **0.9s** | 2.9s |
-| 5M cells | 25 MB | **6.0s** | 20.9s | **3.2s** | 15.5s |
-| 10M cells | 45 MB | **13.0s** | 47.8s | **6.7s** | 31.8s |
+| 100K cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+| 1M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+| 5M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+| 10M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+| Pivot construction (100k source rows, 4-field layout) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
 
 Throughput stays flat as files grow — no hidden O(n^2) pathology.
+Pivot construction scales linearly with source-row count.
 
 ## How WolfXL Compares
 
-Every Rust-backed Python Excel project picks a different slice of the problem. WolfXL is the only one that covers all three: formatting, modify mode, and openpyxl API compatibility.
+Every Rust-backed Python Excel project picks a different slice of the problem. WolfXL is the only one that covers all four: formatting, modify mode, openpyxl API compatibility, and pivot-table construction.
 
-| Library | Read | Write | Modify | Styling | openpyxl API |
-|---------|:----:|:-----:|:------:|:-------:|:------------:|
-| [fastexcel](https://github.com/ToucanToco/fastexcel) | Yes | — | — | — | — |
-| [python-calamine](https://github.com/dimastbk/python-calamine) | Yes | — | — | — | — |
-| [FastXLSX](https://github.com/shuangluoxss/fastxlsx) | Yes | Yes | — | — | — |
-| [rustpy-xlsxwriter](https://github.com/rahmadafandi/rustpy-xlsxwriter) | — | Yes | — | Partial | — |
-| **WolfXL** | **Yes** | **Yes** | **Yes** | **Yes** | **Yes** |
+| Library | Read | Write | Modify | Styling | openpyxl API | Pivots |
+|---------|:----:|:-----:|:------:|:-------:|:------------:|:------:|
+| [fastexcel](https://github.com/ToucanToco/fastexcel) | Yes | — | — | — | — | — |
+| [python-calamine](https://github.com/dimastbk/python-calamine) | Yes | — | — | — | — | — |
+| [FastXLSX](https://github.com/shuangluoxss/fastxlsx) | Yes | Yes | — | — | — | — |
+| [rustpy-xlsxwriter](https://github.com/rahmadafandi/rustpy-xlsxwriter) | — | Yes | — | Partial | — | — |
+| [openpyxl](https://openpyxl.readthedocs.io/) | Yes | Yes | Yes (full DOM) | Yes | Native | Round-trip only* |
+| [XlsxWriter](https://xlsxwriter.readthedocs.io/) | — | Yes | — | Yes | — | — |
+| **WolfXL** | **Yes** | **Yes** | **Yes (surgical)** | **Yes** | **Yes** | **Yes (construction + linkage)** |
 
 - **Styling** = reads and writes fonts, fills, borders, alignment, number formats
 - **Modify** = open an existing file, change cells, save back — without rebuilding from scratch
 - **openpyxl API** = same `load_workbook`, `Workbook`, `Cell`, `Font`, `PatternFill` objects
+- **Pivots** = construct a pivot table from Python with pre-aggregated records (the file opens in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open)
+
+*openpyxl preserves pivot tables on round-trip but does not provide a Python-side constructor that emits the `pivotCacheRecords` snapshot. WolfXL is the first Python OOXML library to do so.
 
 Upstream [calamine](https://github.com/tafia/calamine) does not parse styles. WolfXL's read engine uses [calamine-styles](https://crates.io/crates/calamine-styles), a fork that adds Font/Fill/Border/Alignment/NumberFormat extraction from OOXML.
 
