@@ -16,12 +16,13 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **Phase 5 — T1 `.xls` / `.xlsb`** — closed in 1.4 (Sprint Κ, RFC-043).
 - **1.5 — Encryption writes + image construction + streaming-datetime fix** — closed in 1.5 (Sprint Λ Pod-α/β/γ; RFC-044, RFC-045, plus Pod-γ's streaming-datetime correctness fix). Lifts "writing encrypted xlsx" and "image construction" from out-of-scope.
 - **1.6 — Chart construction (8 types, full depth) + RFC-035 chart-deep-clone + modify-mode `add_chart`** — closed in 1.6 (Sprint Μ Pod-α/β/γ/δ; RFC-046). Lifts "chart construction" from out-of-scope for the 2D type families (Bar / Line / Pie / Doughnut / Area / Scatter / Bubble / Radar). 3D / Stock / Surface / ProjectedPie deferred to v1.6.1; pivot-chart linkage deferred to v2.0.0 (Sprint Ν).
+- **1.6.1 — Chart-dict contract reconciliation + 3D / Stock / Surface / ProjectedPie families + modify-mode high-level `add_chart`** — closed in 1.6.1 (Sprint Μ-prime Pod-α′/β′/γ′/δ′; RFC-046 §10/§11). Lifts the v1.6.0 chart-dict gap (37 xfailed advanced sub-feature tests in `tests/test_charts_write.py` flip to pass) and ships the eight deferred 3D / Stock / Surface / ProjectedPie chart classes as real implementations. Also replaces the warn-and-drop fallback in `Workbook._flush_pending_charts_to_patcher` with a real dict→bytes bridge via the new `serialize_chart_dict` PyO3 export.
 
 The openpyxl-parity roadmap is exhausted at the read level (1.0–1.4)
-AND at the construction level for encryption / images / charts (1.5–1.6).
-Remaining out-of-scope items are pivot table construction (v2.0.0 /
-Sprint Ν), chart 3D / Stock / Surface / ProjectedPie (v1.6.1), and
-pivot-chart linkage (depends on Sprint Ν). See "Out of scope" below.
+AND at the construction level for encryption / images / charts /
+chart-3D-families (1.5–1.6.1). The only remaining out-of-scope item
+on the roadmap is pivot table + pivot chart construction (v2.0.0 /
+Sprint Ν); see "Out of scope" below.
 
 ## Gate
 
@@ -173,32 +174,10 @@ and documented here before the ratchet baseline is updated.
   `file_adds`). RFC-035 `copy_worksheet` chart-aliasing limit is
   lifted — charts in copied sheets now deep-clone with cell-range
   re-pointing. See "Closed in 1.6 (Sprint Μ)" below.
-- **Chart 3D / Stock / Surface / ProjectedPie variants** —
-  deferred to **v1.6.1**. The five 3D chart classes
-  (`BarChart3D`, `LineChart3D`, `Pie3D`, `Area3D`, `Surface3D`),
-  `StockChart`, `SurfaceChart` (2D), and `ProjectedPieChart` ship as
-  `_make_stub`-style stubs in 1.6.0 that raise `NotImplementedError`
-  with a v1.6.1-pointer message. RFC-046 §9 documents the deferral.
-- **Sprint Μ chart-dict contract gap (Pod-α ↔ Pod-β)** — deferred to
-  **v1.6.1**. Pod-α's chart-dict parser
-  (`src/native_writer_backend.rs::parse_chart_dict`) and Pod-β's per-class
-  `to_rust_dict()` shape diverged on several deep descriptor surfaces:
-  `Title.to_dict()` (runs/text), `Layout.to_dict()` (x/y), gridlines,
-  error bars, trendlines, `varyColors`, non-default `grouping`
-  (`stacked`/`percentStacked`), scatter `style` (`smooth`/`marker`),
-  invalid-input rejection paths, and modify-mode high-level
-  `Worksheet.add_chart()` → patcher (the workbook-level escape hatch
-  `Workbook.add_chart_modify_mode(..., chart_xml_bytes, ...)` does
-  ship). The 8-type basic construction works end-to-end (cargo
-  `wolfxl-writer/tests/charts.rs`: 27 passed) and modify-mode
-  deep-clone (Pod-γ) is fully green (14/14). The 37 affected
-  high-depth tests in `tests/test_charts_write.py` are marked
-  `xfail strict=False` so v1.6.1 reconciliation flips them
-  automatically.  Tracked: RFC-046 §10 (to be added in v1.6.1 spec).
 - **Pivot-chart linkage** — depends on **Sprint Ν / v2.0.0** pivot
   tables. A chart's `<c:pivotSource>` referencing a pivot cache
-  definition cannot land before pivot caches are constructible. RFC-046
-  §9 documents the dependency.
+  definition cannot land before pivot caches are constructible.
+  RFC-046 §9 documents the dependency.
 - **Pivot table construction** — scheduled for v2.0.0 (Sprint Ν).
   Pivot caches and pivot tables are preserved on modify-mode
   round-trip but cannot be added programmatically. Targeted as part
@@ -255,24 +234,41 @@ and documented here before the ratchet baseline is updated.
   drawing part can contain image `<xdr:pic>` blocks, chart
   `<xdr:graphicFrame>` blocks, and any mix of the two.
 
-### Deferred to 1.6.1
+### Deferred to 1.6.1 — ✅ Closed (see "Closed in 1.6.1" below)
 
-- **3D chart variants**: `BarChart3D`, `LineChart3D`, `Pie3D`,
-  `Area3D`, `Surface3D`. These use a separate XML element family
-  (`<c:bar3DChart>`, `<c:line3DChart>`, etc.) and additional
-  `<c:view3D>` perspective controls (`rotX`, `rotY`, `depthPercent`,
-  `perspective`, `rAngAx`).
-- **Stock charts** (HLC, OHLC, candlestick). Stock uses a custom
-  `<c:stockChart>` element with `<c:hiLowLines>` and
-  `<c:upDownBars>` always-on.
-- **Surface charts** (2D + 3D). `<c:surfaceChart>` /
-  `<c:surface3DChart>` with `<c:wireframe>` flag.
-- **ProjectedPieChart**. Pie with one slice "exploded" into a
-  secondary chart (`<c:ofPieType val="bar|pie"/>` and
-  `<c:secondPieSize/>`).
+The four families flagged here in 1.6.0 (3D variants, Stock,
+Surface 2D + 3D, ProjectedPieChart) shipped in 1.6.1 as real
+classes. See "Closed in 1.6.1 (Sprint Μ-prime)" immediately
+below for the receipts.
 
-In 1.6.0 the seven stub classes above raise `NotImplementedError`
-with a v1.6.1-pointer message on construction.
+## Closed in 1.6.1 (Sprint Μ-prime)
+
+- ✅ **Chart 3D / Stock / Surface / ProjectedPie variants** (Sprint
+  Μ-prime Pod-β′, RFC-046 §11). The 8 deferred classes ship as real
+  implementations: `BarChart3D`, `LineChart3D`, `PieChart3D` (alias
+  `Pie3D`), `AreaChart3D`, `SurfaceChart`, `SurfaceChart3D`,
+  `StockChart`, `ProjectedPieChart`. Each carries the appropriate
+  `view_3d` defaults per §11.1; `StockChart` validates its 4-series
+  OHLC ordering at construction; `ProjectedPieChart` exposes
+  `of_pie_type`, `split_type`, `split_pos`, `second_pie_size`.
+  Verified by `tests/test_charts_3d.py` (Pod-β′/Pod-γ′).
+- ✅ **Sprint Μ chart-dict contract gap (Pod-α ↔ Pod-β)** (Sprint
+  Μ-prime Pod-α′ + Pod-β′, RFC-046 §10). Pod-α's flat-key
+  `parse_chart_dict` and Pod-β's `to_rust_dict()` now emit/consume
+  the canonical §10 shape verbatim. The 37 advanced sub-feature
+  tests in `tests/test_charts_write.py` (gridlines, error bars,
+  trendlines, vary_colors, non-default grouping, scatter style,
+  manual layout, marker symbol, fill color, title runs,
+  invalid-input rejection) flip from xfail → pass. Pod-α′ also
+  added 8 new `ChartKind` variants and the `serialize_chart_dict`
+  PyO3 helper that Pod-γ′ uses to bridge modify-mode high-level
+  `Worksheet.add_chart()` to the patcher.
+- ✅ **Modify-mode high-level `Worksheet.add_chart()`** (Sprint
+  Μ-prime Pod-γ′, RFC-046 §10.12). The v1.6.0 warn-and-drop
+  fallback in `Workbook._flush_pending_charts_to_patcher` is
+  replaced with a real dict→bytes bridge via
+  `serialize_chart_dict`. The bytes-level escape hatch
+  `Workbook.add_chart_modify_mode` continues to work unchanged.
 
 ## Closed in 1.5 (Sprint Λ)
 
