@@ -1,5 +1,174 @@
 # Changelog
 
+## wolfxl 1.6.1 (TBD) — chart contract reconciliation + 3D / Stock / Surface / ProjectedPie
+
+User-facing release notes: `docs/release-notes-1.6.1.md`.
+
+Sprint Μ-prime ("Mu-prime") closes the two debts that v1.6.0
+deferred: the Pod-α/Pod-β chart-dict contract gap (37 xfailed
+advanced sub-feature tests in `tests/test_charts_write.py` flip to
+pass) and the eight deferred chart families (`BarChart3D`,
+`LineChart3D`, `PieChart3D` / `Pie3D`, `AreaChart3D`,
+`SurfaceChart`, `SurfaceChart3D`, `StockChart`,
+`ProjectedPieChart`) ship as real classes replacing the v1.6.0
+`NotImplementedError` stubs. Modify-mode high-level
+`Worksheet.add_chart()` is now wired through the new
+`serialize_chart_dict` PyO3 helper, replacing the v1.6.0
+warn-and-drop fallback. After 1.6.1 the openpyxl-parity surface
+for chart construction is exhaustively shipped; the only remaining
+construction-side milestone is pivot tables + pivot charts (Sprint
+Ν / v2.0.0).
+
+### Added
+
+- **RFC-046 §11 — Chart 3D / Stock / Surface / ProjectedPie
+  families** (Sprint Μ-prime Pod-β′, <!-- TBD: SHA -->). The eight
+  v1.6.0 stub classes ship as real classes:
+  * `BarChart3D` (rot_x=15, rot_y=20, right_angle_axes=True,
+    depth_percent=100; emits `<c:bar3DChart>`).
+  * `LineChart3D` (rot_x=15, rot_y=20, perspective=30,
+    right_angle_axes=False, depth_percent=100; emits
+    `<c:line3DChart>`).
+  * `PieChart3D` (rot_x=30, rot_y=0, perspective=30,
+    right_angle_axes=False; emits `<c:pie3DChart>`). `Pie3D` is
+    an alias for openpyxl-name compatibility.
+  * `AreaChart3D` (rot_x=15, rot_y=20, perspective=30,
+    right_angle_axes=False, depth_percent=100; emits
+    `<c:area3DChart>`).
+  * `SurfaceChart` (2D surface chart with `wireframe: bool = False`
+    constructor arg; emits `<c:surfaceChart>`).
+  * `SurfaceChart3D` (3D surface; same `view_3d` defaults as
+    LineChart3D plus `wireframe`; emits `<c:surface3DChart>`).
+  * `StockChart` (Open-High-Low-Close; constructor validates
+    4-series ordering, raises `ValueError` on misordered series;
+    emits `<c:stockChart>` with default `<c:hiLowLines/>` and
+    `<c:upDownBars/>`).
+  * `ProjectedPieChart` (pie-of-pie / bar-of-pie; exposes
+    `of_pie_type`, `split_type`, `split_pos`, `second_pie_size`;
+    emits `<c:ofPieChart>`).
+- **RFC-046 §10 — Chart-dict contract** (Sprint Μ-prime Pod-α′ +
+  Pod-β′, <!-- TBD: SHA -->). Pod-α's flat-key `parse_chart_dict`
+  and Pod-β's per-class `to_rust_dict()` now emit/consume the
+  canonical §10 shape verbatim. Top-level chart-dict keys are
+  flat (`bar_dir`, `grouping`, `gap_width`, …) instead of nested
+  in an `extras` dict; `solid_fill` is snake_case (was
+  `solidFill`); `axes` is no longer a list (`x_axis` / `y_axis` /
+  `z_axis` are flat top-level keys); `view_3d` is a top-level
+  dict on 3D-kind charts; `kind` is a short string ("bar",
+  "line", …) NOT the openpyxl `tagname`. The 37 advanced
+  sub-feature tests in `tests/test_charts_write.py` (gridlines,
+  error bars, trendlines, vary_colors, non-default grouping,
+  scatter style, manual layout, marker symbol, fill color, title
+  runs, invalid-input rejection) flip from `xfail` → `pass`.
+- **`serialize_chart_dict` PyO3 helper** (Sprint Μ-prime Pod-α′,
+  <!-- TBD: SHA -->). Internal API exposed at
+  `wolfxl._backend.serialize_chart_dict(chart_dict) -> bytes`.
+  Materialises a §10 chart-dict into the chart XML bytes that
+  the patcher's `queue_chart_add` expects. Not public surface;
+  callers should keep using `Worksheet.add_chart`.
+- **Modify-mode high-level `Worksheet.add_chart()`** (Sprint
+  Μ-prime Pod-γ′, RFC-046 §10.12, <!-- TBD: SHA -->). The v1.6.0
+  warn-and-drop fallback in
+  `Workbook._flush_pending_charts_to_patcher` is replaced with a
+  real dict→bytes bridge:
+  ```python
+  for ws in self._sheets.values():
+      for chart in ws._pending_charts:
+          dict_ = chart.to_rust_dict()
+          xml_bytes = _backend.serialize_chart_dict(dict_)
+          anchor = chart._anchor or "E15"
+          patcher.queue_chart_add(ws.title, xml_bytes, anchor,
+                                  int(chart.width * 360_000),
+                                  int(chart.height * 360_000))
+      ws._pending_charts.clear()
+  ```
+  The bytes-level escape hatch
+  `Workbook.add_chart_modify_mode(sheet_name, chart_xml_bytes,
+  anchor)` continues to work unchanged.
+- **Construction-time validation per RFC-046 §10.11** (Sprint
+  Μ-prime Pod-β′, <!-- TBD: SHA -->). Empty `series`, bad anchor,
+  out-of-range `Reference` bounds, out-of-range `style` (1..48),
+  `gap_width` (0..500), `overlap` (-100..100), `hole_size` (1..90),
+  `bubble_scale` (0..300), poly trendline `order` (2..6), and
+  `display_blanks_as` outside the closed enum all raise
+  `ValueError` / `TypeError` at construction or `add_chart()`
+  time, not at save. 3D-only fields set on a 2D chart kind warn
+  rather than raise.
+
+### Changed
+
+- **`tests/test_charts_write.py` module-level `pytest.mark.xfail`
+  removed** (Sprint Μ-prime Pod-δ′, <!-- TBD: SHA -->). The xfail
+  was added in the v1.6.0 integrator finalize to mark the 37
+  advanced sub-feature tests as known-failing. Pod-α′ + Pod-β′
+  fix the underlying contract; the xfail mark is removed and the
+  37 tests count as passing on the green path. The single
+  `pytest.mark.skipif(not _CHART_API_AVAILABLE, …)` mark is
+  retained.
+- **9 new entries in `tests/parity/openpyxl_surface.py`
+  `_GAP_ENTRIES`** (Sprint Μ-prime Pod-δ′, <!-- TBD: SHA -->):
+  one per new chart class (`BarChart3D`, `LineChart3D`,
+  `PieChart3D`, `Pie3D`, `AreaChart3D`, `SurfaceChart`,
+  `SurfaceChart3D`, `StockChart`, `ProjectedPieChart`). All ship
+  with `wolfxl_supported=False`; integrator flips them to `True`
+  post-merge with the `shipped-1.6.1` tag.
+
+### Internal / infra
+
+- **`ChartKind` enum extended** in
+  `crates/wolfxl-writer/src/model/chart.rs` (Sprint Μ-prime
+  Pod-α′). 8 new variants:
+  `Bar3D`, `Line3D`, `Pie3D`, `Area3D`, `Surface`, `Surface3D`,
+  `Stock`, `OfPie`.
+- **Per-3D-family emit fns** added to
+  `crates/wolfxl-writer/src/emit/charts.rs` (Pod-α′). Each emits
+  the per-family root element and the `<c:view3D>` block per
+  RFC-046 §11.1.
+- **Construction-time validation** moved into the Pod-β′ class
+  constructors so user-facing errors carry useful messages and
+  point at the offending kwarg. Pod-α′ raises `PyValueError` only
+  for shapes the contract says are illegal at the Rust boundary
+  (unknown kind, malformed dict, type mismatch).
+- **§10.13 test contract**: every test in
+  `tests/test_charts_write.py` (46 tests) MUST pass without
+  `xfail`. Any test that still fails post-merge represents a real
+  bug, not a known gap.
+
+### Documentation
+
+- `Plans/rfcs/046-chart-construction.md` §12 — v1.6.1 SHA-log
+  sub-table added (TBD placeholders filled by integrator
+  finalize). Status line bumped to record the v1.6.1 finalize
+  pending.
+- `tests/parity/KNOWN_GAPS.md` — "Closed in 1.6.1 (Sprint
+  Μ-prime)" section added with three closed gaps. The two
+  "deferred to v1.6.1" pointers in "Out of scope" removed; the
+  pivot-chart linkage entry's v1.6.0-deferral framing dropped
+  (it now reads as a v2.0.0 / Sprint Ν dependency only).
+- `docs/release-notes-1.6.1.md` — user-facing 1.6.1 release notes
+  (Sprint Μ-prime Pod-δ′).
+
+### Test totals (post-1.6.1, projected)
+
+- `cargo test --workspace --exclude wolfxl`: 1.6.0 + per-3D-family
+  emit tests (Pod-α′) + `serialize_chart_dict` roundtrip tests.
+- `pytest tests/`: **~1300+ → ~1340+ passed** (Pod-β′ adds ~30
+  3D-family construction tests; Pod-γ′ adds ~10 modify-mode +
+  bridge tests; Pod-δ′ removes the v1.6.0 xfail mark so the 37
+  previously-xfailed tests count as passing). Final count filled
+  in on integrator merge.
+- `pytest tests/parity`: **~190+ → ~200+ passed** (9 new chart-3D
+  ratchet entries flip to `wolfxl_supported=True` post-merge).
+
+### SHA log
+
+| Pod | Branch | Commits | Merge |
+|---|---|---|---|
+| α′ | `feat/sprint-mu-prime-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| β′ | `feat/sprint-mu-prime-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| γ′ | `feat/sprint-mu-prime-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| δ′ | `feat/sprint-mu-prime-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+
 ## wolfxl 1.6.0 (2026-04-26) — chart construction (8 types, full depth)
 
 User-facing release notes: `docs/release-notes-1.6.md`.
