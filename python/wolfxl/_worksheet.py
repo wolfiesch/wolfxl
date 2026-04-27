@@ -2815,6 +2815,30 @@ class Worksheet:
         if self._print_area is not None and hasattr(writer, "set_print_area"):
             writer.set_print_area(sheet, self._print_area)
 
+        # Sprint Ο Pod 1A.5 (RFC-055) — sheet-setup blocks on write
+        # mode. Cheap probe first; only call set_sheet_setup_native
+        # when at least one slot has been mutated by the user.
+        if hasattr(writer, "set_sheet_setup_native"):
+            has_setup = (
+                self._page_setup is not None
+                or self._page_margins is not None
+                or self._header_footer is not None
+                or self._sheet_view is not None
+                or self._protection is not None
+                or getattr(self, "_print_title_rows", None) is not None
+                or getattr(self, "_print_title_cols", None) is not None
+            )
+            if has_setup:
+                try:
+                    payload = self.to_rust_setup_dict()
+                    if any(v is not None for v in payload.values()):
+                        writer.set_sheet_setup_native(sheet, payload)
+                except Exception:
+                    # Defensive: don't poison the save path on a
+                    # malformed setup spec; the Python class
+                    # validators should already have caught it.
+                    pass
+
         # Sprint Ο Pod 1B (RFC-056) — autoFilter on write-mode sheets.
         # Modify mode goes through `Workbook._flush_pending_autofilters_to_patcher`
         # instead.

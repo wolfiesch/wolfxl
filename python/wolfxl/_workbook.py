@@ -960,6 +960,29 @@ class Workbook:
             self._sheet_names.append(new_title)
             ws = Worksheet(self, new_title)
             self._sheets[new_title] = ws
+            # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
+            # slots into the new proxy so per-sheet divergence after a
+            # copy is preserved. The patcher's Phase 2.7 clones the
+            # source XML (which captures whatever setup is currently
+            # on disk); Phase 2.5n then re-splices our Python-side
+            # mutations onto each sheet independently. Without this
+            # deep-clone, mutating src.page_setup before save() would
+            # silently NOT propagate to dst.
+            import copy as _copy
+            for slot in (
+                "_page_setup",
+                "_page_margins",
+                "_header_footer",
+                "_sheet_view",
+                "_protection",
+            ):
+                src_v = getattr(source, slot, None)
+                if src_v is not None:
+                    setattr(ws, slot, _copy.deepcopy(src_v))
+            if getattr(source, "_print_title_rows", None) is not None:
+                ws._print_title_rows = source._print_title_rows  # noqa: SLF001
+            if getattr(source, "_print_title_cols", None) is not None:
+                ws._print_title_cols = source._print_title_cols  # noqa: SLF001
             return ws
 
         # Write-mode path (Sprint Θ Pod-C1).
@@ -1058,6 +1081,29 @@ class Workbook:
             dst._auto_filter._ref = src_af.ref  # noqa: SLF001
             dst._auto_filter.filter_columns = _copy.deepcopy(src_af.filter_columns)  # noqa: SLF001
             dst._auto_filter.sort_state = _copy.deepcopy(src_af.sort_state)  # noqa: SLF001
+
+        # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
+        # slots so per-sheet divergence after a copy is preserved.
+        # `copy.deepcopy` is safe for the dataclass-shaped Pod 1A
+        # classes; we only deep-copy the underscore-private slots
+        # that have actually been initialised.
+        import copy as _copy
+        for slot in (
+            "_page_setup",
+            "_page_margins",
+            "_header_footer",
+            "_sheet_view",
+            "_protection",
+        ):
+            src_v = getattr(source, slot, None)
+            if src_v is not None:
+                setattr(dst, slot, _copy.deepcopy(src_v))
+        # print_titles are workbook-scope definedNames; clone the
+        # per-sheet selectors so the cloned sheet can retitle them.
+        if getattr(source, "_print_title_rows", None) is not None:
+            dst._print_title_rows = source._print_title_rows  # noqa: SLF001
+        if getattr(source, "_print_title_cols", None) is not None:
+            dst._print_title_cols = source._print_title_cols  # noqa: SLF001
 
         return dst
 
