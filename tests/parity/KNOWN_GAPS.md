@@ -18,12 +18,14 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **1.6 — Chart construction (8 types, full depth) + RFC-035 chart-deep-clone + modify-mode `add_chart`** — closed in 1.6 (Sprint Μ Pod-α/β/γ/δ; RFC-046). Lifts "chart construction" from out-of-scope for the 2D type families (Bar / Line / Pie / Doughnut / Area / Scatter / Bubble / Radar). 3D / Stock / Surface / ProjectedPie deferred to v1.6.1; pivot-chart linkage deferred to v2.0.0 (Sprint Ν).
 - **1.6.1 — Chart-dict contract reconciliation + 3D / Stock / Surface / ProjectedPie families + modify-mode high-level `add_chart`** — closed in 1.6.1 (Sprint Μ-prime Pod-α′/β′/γ′/δ′; RFC-046 §10/§11). Lifts the v1.6.0 chart-dict gap (37 xfailed advanced sub-feature tests in `tests/test_charts_write.py` flip to pass) and ships the eight deferred 3D / Stock / Surface / ProjectedPie chart classes as real implementations. Also replaces the warn-and-drop fallback in `Workbook._flush_pending_charts_to_patcher` with a real dict→bytes bridge via the new `serialize_chart_dict` PyO3 export.
 - **1.7 — Public-launch slice (no pivot tables)** — closed in 1.7 (Sprint Ξ Pod-α/β/γ/δ; RFC-050/051/052/053). Lifts v1.6.1's lone `xfail` (`chart.title = RichText(...)`) and ships `Worksheet.remove_chart` / `replace_chart`. Bumps `pyproject.toml` and `Cargo.toml` to `1.7.0` (was drifted at `0.5.0`); promotes PyPI classifier to `Production/Stable`. Refreshes `docs/migration/` and `docs/performance/` with v1.7 status. Materialises `Plans/launch-posts.md`. Documents RFC-046 §13 legacy chart-dict key sunset (deprecated in 1.7; removed in 2.0).
+- **2.0 — Pivot tables + pivot caches + pivot charts** — closed in 2.0 (Sprint Ν Pods α/β/γ/δ/ε; RFC-047 / RFC-048 / RFC-049 / RFC-054). Lifts the last construction-side row from "Out of scope" — pivot tables, pivot caches, and pivot-chart linkage are all constructible from Python. WolfXL is the first Python OOXML library to emit `pivotCacheRecords{N}.xml` from scratch (Option A); pivots open in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open required. Lifts the RFC-035 §10 limit on `copy_worksheet` of pivot-bearing sheets. Removes the RFC-046 §13 legacy chart-dict key shim (deprecated 1.7, removed 2.0). README rewrite: \"Full openpyxl replacement, drop-in compatible, 10×–100× faster.\"
 
-The openpyxl-parity roadmap is exhausted at the read level (1.0–1.4)
-AND at the construction level for encryption / images / charts /
-chart-3D-families (1.5–1.6.1). The only remaining out-of-scope item
-on the roadmap is pivot table + pivot chart construction (v2.0.0 /
-Sprint Ν); see "Out of scope" below.
+The openpyxl-parity roadmap is now exhausted at the read level
+(1.0–1.4) AND at the full construction level (1.5 encryption +
+images, 1.6–1.6.1 charts, 1.7 chart-stack debt + RichText titles,
+**2.0 pivot tables**). The "Out of scope" section below now lists
+only deferred-to-v2.1+ items (slicers, calc fields, GroupItems,
+OLAP, pivot styling, in-place pivot edits).
 
 ## Gate
 
@@ -175,33 +177,156 @@ and documented here before the ratchet baseline is updated.
   `file_adds`). RFC-035 `copy_worksheet` chart-aliasing limit is
   lifted — charts in copied sheets now deep-clone with cell-range
   re-pointing. See "Closed in 1.6 (Sprint Μ)" below.
-- **Pivot-chart linkage** — depends on **Sprint Ν / v2.0.0** pivot
-  tables. A chart's `<c:pivotSource>` referencing a pivot cache
-  definition cannot land before pivot caches are constructible.
-  RFC-046 §9 documents the dependency. Sprint Ν RFC-049 is
-  authored; awaiting Pod-δ implementation.
-- **Pivot table construction** — IN PROGRESS for v2.0.0
-  (Sprint Ν). The §10 contracts in RFC-047 / RFC-048 are
-  authoritative pre-dispatch artifacts, the Rust crate
-  `crates/wolfxl-pivot` is scaffolded with deterministic emit and
-  25 unit tests green, and the Python `wolfxl.pivot.PivotCache /
-  PivotTable / PivotField / DataField / RowField / ColumnField /
-  PageField / PivotSource` surface is real (replacing the v0.5+
-  `_make_stub`) with 40 construction tests green. Patcher
-  integration (`Worksheet.add_pivot_table` / `Workbook.add_pivot_cache`
-  via PyO3 bindings + Phase 2.5m) is the remaining Pod-γ work
-  and is the gating step before the v2.0.0 ratchet flip in
-  `tests/parity/openpyxl_surface.py`.
-
-  - ✅ Real `wolfxl.pivot.PivotTable` + `PivotCache` + axis fields
-    (Sprint Ν Pod-β)
-  - ✅ Rust `wolfxl-pivot` crate model + emit (Sprint Ν Pod-α)
-  - ⏳ Patcher integration + PyO3 bindings (Sprint Ν Pod-γ)
-  - ⏳ Pivot-chart linkage `chart.pivot_source = pt` (Sprint Ν Pod-δ)
-  - ⏳ Docs + launch posts (Sprint Ν Pod-ε)
+- ~~**Pivot table construction**~~ — ✅ SHIPPED in 2.0 (Sprint Ν).
+  See "Closed in 2.0 (Sprint Ν)" below.
+- ~~**Pivot-chart linkage**~~ — ✅ SHIPPED in 2.0 (Sprint Ν Pod-δ,
+  RFC-049). `chart.pivot_source = pt` on every chart family.
+  See "Closed in 2.0 (Sprint Ν)" below.
+- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`) — deferred
+  to **v2.1**. Separate XML namespace; the slicer-cache-shared-
+  with-pivot-cache wiring is non-trivial. Pivots round-trip
+  without slicers in v2.0; if a source workbook has slicers,
+  modify-mode round-trip preserves them.
+- **Pivot calculated fields** (`<calculatedField>`) — deferred
+  to **v2.1**. Formula expressions in the pivot's field list.
+- **Pivot calculated items** (`<calculatedItem>`) — deferred
+  to **v2.1**. Formula expressions inside row / col fields.
+- **Pivot GroupItems** (date / range grouping —
+  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)
+  — deferred to **v2.1**. Non-trivial recursion.
+- **OLAP / external pivot caches** (`xl/model/`, PowerPivot
+  data-model) — out of scope permanently.
+- **Pivot-table styling beyond named-style picker** (themes,
+  banded formats, pivot-cell conditional formatting) — deferred
+  to **v2.1**.
+- **In-place pivot edits in modify mode** beyond
+  `add_pivot_table` (editing an existing pivot's source range,
+  field re-ordering, subtotal toggling, etc.) — deferred to
+  **v2.2**.
 - **OpenDocument (`.ods`)** — out of scope; not on the roadmap.
   Detected and rejected by `_rust.classify_format` with a friendly
   pointer.
+
+## Closed in 2.0 (Sprint Ν)
+
+The construction-side parity roadmap closes here. Every openpyxl
+3.1.x construction idiom now has a wolfxl equivalent.
+
+- ✅ **Pivot cache construction** (Sprint Ν Pod-α / β / γ,
+  RFC-047). New crate `crates/wolfxl-pivot` ships
+  `PivotCache`, `CacheField`, `SharedItems`, `CacheValue`,
+  `CacheRecord`, `RecordCell`, `WorksheetSource` typed Rust
+  models plus deterministic
+  `emit::pivot_cache_definition_xml` and
+  `emit::pivot_cache_records_xml`. Python
+  `wolfxl.pivot.PivotCache(source=Reference(...))` walks the
+  source range on `wb.add_pivot_cache(cache)`, infers per-column
+  type (string / number / date / boolean / mixed) per RFC-047
+  §10.9, builds `SharedItems`, and emits both the cache
+  definition and the cache records part. **WolfXL is the first
+  Python OOXML library to construct
+  `pivotCacheRecords{N}.xml` from scratch** — pivots open in
+  Excel / LibreOffice / openpyxl with data populated, no
+  refresh-on-open required. (openpyxl preserves records on
+  round-trip but doesn't construct them; XlsxWriter doesn't
+  support pivots at all.)
+
+  - ✅ Rust `wolfxl-pivot` crate model + emit (Pod-α)
+  - ✅ Python `wolfxl.pivot.PivotCache` + `to_rust_dict()` /
+    `to_rust_records_dict()` (Pod-β)
+  - ✅ Patcher Phase 2.5m + `Workbook.add_pivot_cache` public
+    API + PyO3 bindings (Pod-γ)
+  - ✅ Workbook splice (`<pivotCaches>` + rels-of-type
+    `pivotCacheDefinition`) via `PartIdAllocator` (Pod-γ)
+
+- ✅ **Pivot table construction** (Sprint Ν Pod-α / β / γ,
+  RFC-048). Replaces the v0.5+
+  `_make_stub` in `python/wolfxl/pivot/__init__.py` with real
+  classes: `PivotTable`, `PivotField`, `DataField`, `RowField`,
+  `ColumnField`, `PageField`, `PivotItem`, `Location`,
+  `PivotTableStyleInfo`, `PivotSource`. Bare-string axis specs
+  (`rows=["region"]`) and explicit-builder axis specs
+  (`rows=[RowField("region", custom_caption="Region")]`) both
+  work. 11 aggregator functions on `DataField`: sum, count,
+  average, max, min, product, count_nums, std_dev, std_dev_p,
+  var, var_p. The Option A core — pre-computed `<rowItems>` /
+  `<colItems>` aggregation in
+  `python/wolfxl/pivot/_table.py` — is what makes the pivot
+  open with data populated.
+  `Worksheet.add_pivot_table(pt, anchor)` and the patcher's
+  Phase 2.5m wire it all together.
+  `tests/parity/openpyxl_surface.py`:
+  `wolfxl.pivot.PivotTable` flips to
+  `wolfxl_supported=True`. New `tests/test_pivot_construction.py`
+  pins the construction surface (40+ tests). The
+  `test_compat_shims.py` ratchet is updated:
+  `wolfxl.pivot.PivotTable` no longer raises
+  `NotImplementedError`.
+
+- ✅ **Pivot-chart linkage** (Sprint Ν Pod-δ, RFC-049).
+  `chart.pivot_source = pt` on every one of the 16 chart
+  families (the attribute lives on `ChartBase`, so `BarChart`,
+  `LineChart`, `PieChart`, `BarChart3D`, `StockChart`,
+  `ProjectedPieChart`, etc. all gain the same setter).
+  Validates `name` against
+  `^([A-Za-z_][A-Za-z0-9_]*!)?[A-Za-z_][A-Za-z0-9_ ]*$`;
+  validates `fmt_id` in `[0, 65535]`. Rust emit
+  (`crates/wolfxl-writer/src/emit/charts.rs`) inserts
+  `<c:pivotSource>` between `<c:chart>` and `<c:plotArea>` per
+  ECMA-376 §21.2.2.158, plus `<c:fmtId val="0"/>` on every
+  `<c:ser>`. When a pivot-bearing chart is `copy_worksheet`'d,
+  the cloned chart's `pivot_source.name` is rewritten to match
+  the cloned pivot table's `displayName`.
+
+- ✅ **RFC-035 deep-clone of pivot-bearing sheets** (Sprint Ν
+  Pod-γ, RFC-047 §6 + RFC-048 §6). Lifts the v1.6 limit at
+  `Plans/rfcs/035-copy-worksheet.md` §10 ("sheets with pivot
+  tables raise a clear error on copy"). Cloned pivot tables get
+  fresh `pivotTable{N}.xml` IDs via `PartIdAllocator`; the
+  source's pivot cache is **aliased** (one cache serves the
+  source and the clone, mirroring the existing image-media
+  alias pattern); the `Reference`-encoded source-range hint on
+  the cache is re-pointed to the clone's sheet name (mirrors
+  the chart deep-clone pattern from v1.6 / Sprint Μ). Existing
+  RFC-035 cross-RFC composition tests (#1-#6) remain green.
+
+- ✅ **RFC-046 §13 legacy chart-dict key removal** (Sprint Ν
+  Pod-α / Pod-ε). Deprecated in v1.7 (documentation-only); the
+  Rust parser's accept-also for the legacy
+  `fill_color` / `line_color` / `line_dash` / `line_width_emu`
+  keys is **removed in v2.0**. Only the §10.9
+  `solid_fill` + nested `ln: {solid_fill, w_emu, prst_dash}`
+  form is accepted. The Python emitter has used the §10.9 form
+  exclusively since v1.6.1, so only out-of-tree callers that
+  bypassed `Worksheet.add_chart` and built chart dicts by hand
+  are affected (and those callers were warned in the v1.7
+  release notes).
+
+- ✅ **README rewrite** (Sprint Ν Pod-ε, RFC-054). Drops the "for
+  the 95th-percentile case" qualifier; new headline: **"Full
+  openpyxl replacement, drop-in compatible, 10×–100× faster."**
+  Adds "Pivot tables in 6 lines" snippet. Refreshes feature
+  matrix (pivots ✅, charts ✅) and ecosystem comparison.
+
+- ✅ **Compatibility Matrix v2.0** (Sprint Ν Pod-ε, RFC-054).
+  Pivot row flips ❌ → ✅ with full sub-table covering import
+  paths, public APIs, aggregator functions, axis-spec forms,
+  chart linkage, deep-clone, and v2.1+ deferred items.
+  Ecosystem comparison gains a Pivots column showing wolfxl is
+  the only library that constructs pivots with pre-aggregated
+  records (caveat: openpyxl preserves on round-trip).
+
+- ✅ **Migration guide** (Sprint Ν Pod-ε, RFC-054).
+  `docs/migration/openpyxl-migration.md` gains a "Pivot tables
+  (Sprint Ν / v2.0)" section covering the 6-line snippet,
+  chart linkage, openpyxl→wolfxl import-path mapping, two-step
+  cache + table API explanation, 11 aggregator functions, v2.1+
+  limits, and the empty-cache caveat.
+
+- ✅ **Launch posts finalized** (Sprint Ν Pod-ε, RFC-054).
+  `Plans/launch-posts.md` updated for v2.0 with pivot snippets
+  in HN / Twitter / r/Python / dev.to / GH Discussions drafts;
+  pre-launch and post-launch checklists.
 
 ## Closed in 1.6 (Sprint Μ)
 
