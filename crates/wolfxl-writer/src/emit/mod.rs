@@ -17,6 +17,7 @@
 //! | [`tables_xml`] | `xl/tables/tableN.xml` |
 
 pub mod calc_chain_xml;
+pub mod charts;
 pub mod comments_xml;
 pub mod content_types;
 pub mod doc_props;
