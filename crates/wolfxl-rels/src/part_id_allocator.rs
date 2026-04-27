@@ -62,6 +62,9 @@ pub struct PartIdAllocator {
     // Sprint Ν Pod-γ (RFC-035 §10) — pivot deep-clone counters.
     next_pivot_table: u32,
     next_pivot_cache: u32,
+    // Sprint Ο Pod 3.5 (RFC-061 §3.1) — slicer deep-clone counters.
+    next_slicer: u32,
+    next_slicer_cache: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -83,6 +86,8 @@ impl PartIdAllocator {
             next_image: 1,
             next_pivot_table: 1,
             next_pivot_cache: 1,
+            next_slicer: 1,
+            next_slicer_cache: 1,
         }
     }
 
@@ -129,6 +134,10 @@ impl PartIdAllocator {
         } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheRecords", ".xml") {
             // Records share the cache counter (cache N = records N).
             self.bump(Counter::PivotCache, n);
+        } else if let Some(n) = parse_n(path, "xl/slicers/slicer", ".xml") {
+            self.bump(Counter::Slicer, n);
+        } else if let Some(n) = parse_n(path, "xl/slicerCaches/slicerCache", ".xml") {
+            self.bump(Counter::SlicerCache, n);
         } else if path.starts_with("xl/media/image") {
             // Images use heterogeneous extensions (png/jpeg/gif/...) so a
             // generic strip+parse covers all of them.
@@ -152,6 +161,8 @@ impl PartIdAllocator {
             Counter::Image => &mut self.next_image,
             Counter::PivotTable => &mut self.next_pivot_table,
             Counter::PivotCache => &mut self.next_pivot_cache,
+            Counter::Slicer => &mut self.next_slicer,
+            Counter::SlicerCache => &mut self.next_slicer_cache,
         };
         if n + 1 > *slot {
             *slot = n + 1;
@@ -229,6 +240,23 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `slicer{N}` suffix; returns `N` (≥1). Used by
+    /// Sprint Ο Pod 3.5 (RFC-061) deep-clone in sheet copy.
+    pub fn alloc_slicer(&mut self) -> u32 {
+        let n = self.next_slicer;
+        self.next_slicer += 1;
+        n
+    }
+
+    /// Allocate a fresh `slicerCache{N}` suffix; returns `N` (≥1).
+    /// Used only when a slicer cache also needs deep-cloning (rare —
+    /// default is share, see RFC-061 §6).
+    pub fn alloc_slicer_cache(&mut self) -> u32 {
+        let n = self.next_slicer_cache;
+        self.next_slicer_cache += 1;
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
     fn peek(&self) -> [u32; 7] {
@@ -248,6 +276,8 @@ enum Counter {
     Table,
     Comments,
     VmlDrawing,
+    Slicer,
+    SlicerCache,
     Drawing,
     Sheet,
     Chart,

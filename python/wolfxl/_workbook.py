@@ -1244,6 +1244,12 @@ class Workbook:
             # patcher's Phase 2.5m runs against an already-stable
             # rels graph (Phase 2.5l added drawing rels first).
             self._flush_pending_pivots_to_patcher()
+            # Sprint Ο Pod 3.5 (RFC-061 §3.1) — flush slicers to the
+            # patcher's Phase 2.5p queue. Sequenced AFTER pivots
+            # (whose caches the slicer caches reference) and BEFORE
+            # autofilters so the slicer-list <extLst> entries land
+            # before any autoFilter row hides.
+            self._flush_pending_slicers_to_patcher()
             # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
             # the patcher's Phase 2.5o queue.
             self._flush_pending_autofilters_to_patcher()
@@ -1548,6 +1554,50 @@ class Workbook:
             cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
         return cache
+
+    def _flush_pending_slicers_to_patcher(self) -> None:
+        """Sprint Ο Pod 3.5 (RFC-061 §3.1) — drain queued slicers
+        into the patcher's Phase 2.5p queue.
+
+        For each worksheet, iterate over ``ws._pending_slicers`` and
+        bridge the (cache, slicer) pair to the Rust patcher via
+        ``queue_slicer_add(sheet_title, cache_dict, slicer_dict)``.
+        Sequenced AFTER pivots (Phase 2.5m) and BEFORE autofilters
+        (Phase 2.5o).
+        """
+        if self._rust_patcher is None:
+            return
+        for ws in self._sheets.values():
+            pending = getattr(ws, "_pending_slicers", None)
+            if not pending:
+                continue
+            for slicer in pending:
+                cache = slicer.cache
+                try:
+                    cache_dict = cache.to_rust_dict()
+                except Exception:
+                    # Defensive: skip malformed slicer cache rather
+                    # than poison the save path.
+                    continue
+                try:
+                    slicer_dict = slicer.to_rust_dict()
+                except Exception:
+                    continue
+                try:
+                    self._rust_patcher.queue_slicer_add(
+                        ws.title, cache_dict, slicer_dict
+                    )
+                except Exception:
+                    # If the patcher rejects (e.g. sheet not present
+                    # in source ZIP for write-mode), silently skip.
+                    continue
+            # Drain — calling save() twice should not double-emit.
+            ws._pending_slicers = []
+        # Also drain workbook-level pending slicer caches list so a
+        # second save() is idempotent. The cache itself is bridged
+        # via `cache.to_rust_dict()` inside the slicer loop above
+        # since each slicer references its cache directly.
+        self._pending_slicer_caches = []
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
