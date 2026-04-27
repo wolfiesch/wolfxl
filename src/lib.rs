@@ -4,6 +4,7 @@ use pyo3::types::{PyDict, PyList};
 type PyObject = Py<PyAny>;
 
 mod calamine_styled_backend;
+mod calamine_xlsb_xls_backend;
 mod native_writer_backend;
 mod ooxml_util;
 mod streaming;
@@ -40,6 +41,12 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
+    m.add_class::<calamine_xlsb_xls_backend::CalamineXlsbBook>()?;
+    m.add_class::<calamine_xlsb_xls_backend::CalamineXlsBook>()?;
+    m.add_function(wrap_pyfunction!(
+        calamine_xlsb_xls_backend::classify_file_format,
+        m
+    )?)?;
     m.add_class::<native_writer_backend::NativeWorkbook>()?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;

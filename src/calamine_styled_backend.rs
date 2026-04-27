@@ -717,6 +717,55 @@ pub struct CalamineStyledBook {
     /// `parse_shared_strings()` result"; ``Some(runs)`` exposes the
     /// structured runs that Cell.rich_text returns.
     sst_runs_cache: Option<Vec<Option<Vec<crate::rich_text::RichTextRun>>>>,
+    /// Sprint Κ Pod-α: when the workbook was opened from a bytes
+    /// buffer we materialise the contents to a self-cleaning temp
+    /// file so every Tier 2 feature that reopens the zip
+    /// (`File::open(&self.file_path)`) keeps working unchanged.
+    /// `_owned_tempfile` is held purely so its `Drop` impl deletes
+    /// the file when the workbook is dropped.
+    _owned_tempfile: Option<crate::calamine_styled_backend::OwnedTempFile>,
+    /// True when the workbook was opened from bytes; the path
+    /// pointed at by `file_path` is then a temp file rather than a
+    /// caller-supplied path.
+    opened_from_bytes: bool,
+}
+
+/// Self-deleting temp file owner.  Only used by
+/// `CalamineStyledBook::open_from_bytes`.
+pub(crate) struct OwnedTempFile {
+    path: std::path::PathBuf,
+}
+
+impl OwnedTempFile {
+    fn new_with_bytes(data: &[u8]) -> std::io::Result<Self> {
+        use std::io::Write;
+        // Use a counter + nanosecond clock to keep names unique
+        // even under bursts where the clock resolution stalls.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let mut path = std::env::temp_dir();
+        path.push(format!("wolfxl_bytes_{pid}_{nanos}_{n}.xlsx"));
+        let mut f = File::create(&path)?;
+        f.write_all(data)?;
+        f.flush()?;
+        Ok(Self { path })
+    }
+
+    fn path_str(&self) -> String {
+        self.path.to_string_lossy().to_string()
+    }
+}
+
+impl Drop for OwnedTempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 #[pymethods]
@@ -782,7 +831,36 @@ impl CalamineStyledBook {
             record_format_cache: HashMap::new(),
             doc_properties_cache: None,
             sst_runs_cache: None,
+            _owned_tempfile: None,
+            opened_from_bytes: false,
         })
+    }
+
+    /// Sprint Κ Pod-α: load an `.xlsx` workbook from a raw bytes
+    /// buffer.  Materialises the bytes to a self-cleaning temp file
+    /// and forwards to [`Self::open`] so every Tier 2 feature that
+    /// reopens the zip keeps working unchanged.
+    #[staticmethod]
+    #[pyo3(signature = (data, permissive = false))]
+    pub fn open_from_bytes(data: &[u8], permissive: bool) -> PyResult<Self> {
+        let owned = OwnedTempFile::new_with_bytes(data).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!(
+                "Failed to materialise xlsx bytes to temp file: {e}"
+            ))
+        })?;
+        let path = owned.path_str();
+        let mut book = Self::open(&path, permissive)?;
+        book._owned_tempfile = Some(owned);
+        book.opened_from_bytes = true;
+        Ok(book)
+    }
+
+    /// True when the workbook was opened via
+    /// [`Self::open_from_bytes`] rather than [`Self::open`].
+    /// Pod-β surfaces this so the dispatcher knows the in-memory
+    /// origin of the workbook.
+    pub fn opened_from_bytes(&self) -> bool {
+        self.opened_from_bytes
     }
 
     pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
