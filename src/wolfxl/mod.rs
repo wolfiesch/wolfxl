@@ -225,6 +225,36 @@ pub struct XlsxPatcher {
     /// "fresh drawing" case only — sheets that already have a
     /// drawing rel raise NotImplementedError (v1.5 follow-up).
     queued_images: HashMap<String, Vec<QueuedImageAdd>>,
+    /// Sprint Μ Pod-γ (RFC-046) — per-sheet pending chart adds.
+    /// Each entry carries pre-serialized chart XML bytes plus an
+    /// A1-style anchor cell. Drained by Phase 2.5l during
+    /// `do_save`, BEFORE Phase 3 (cell patches) so a chart's data
+    /// range can compose with cell rewrites in the same save.
+    /// Phase 2.5l differs from 2.5k by handling BOTH the
+    /// "fresh-drawing" case AND the "merge-into-existing-drawing"
+    /// case (which Phase 2.5k still rejects).
+    queued_charts: HashMap<String, Vec<QueuedChartAdd>>,
+}
+
+/// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
+///
+/// The chart XML is pre-serialized by the caller (Pod-α's
+/// `emit_chart_xml(&Chart)`); the patcher only routes bytes through
+/// the OOXML rels graph + content-types + drawing layer.
+#[derive(Debug, Clone)]
+pub struct QueuedChartAdd {
+    /// Chart XML body — written into `xl/charts/chartN.xml`. Already
+    /// serialized by the caller (the patcher never builds this).
+    pub chart_xml: Vec<u8>,
+    /// A1-style anchor cell (e.g. `"D2"`). The patcher converts to
+    /// `(col0, row0)` for the `<xdr:from>` block.
+    pub anchor_a1: String,
+    /// Chart pixel size in EMU is fixed for the modify-mode v1: the
+    /// patcher emits a fixed `cx=12cm cy=8cm` extent per chart so we
+    /// don't need a width/height plumb. Pod-β wires width/height
+    /// through Worksheet.add_chart in the future.
+    pub width_emu: i64,
+    pub height_emu: i64,
 }
 
 /// Sprint Λ Pod-β (RFC-045) — one image queued for emit on a sheet.
@@ -469,6 +499,7 @@ impl XlsxPatcher {
             queued_sheet_copies: Vec::new(),
             permissive_seed_file_patches: file_patches,
             queued_images: HashMap::new(),
+            queued_charts: HashMap::new(),
         })
     }
 
@@ -930,6 +961,39 @@ impl XlsxPatcher {
                 width_px: width,
                 height_px: height,
                 anchor,
+            });
+        Ok(())
+    }
+
+    /// Sprint Μ Pod-γ (RFC-046) — queue a chart add for `sheet`.
+    ///
+    /// The caller (Pod-α's `emit_chart_xml(&Chart)` from the writer
+    /// crate, surfaced via `Workbook.add_chart_modify_mode`) supplies
+    /// pre-serialized chart XML bytes plus an A1-style anchor. The
+    /// patcher routes the bytes through `xl/charts/chartN.xml`, the
+    /// drawing layer (fresh OR existing), the rels graphs, and the
+    /// content-types map. Drained by Phase 2.5l during `do_save`.
+    fn queue_chart_add(
+        &mut self,
+        sheet: &str,
+        chart_xml: Vec<u8>,
+        anchor_a1: &str,
+        width_emu: i64,
+        height_emu: i64,
+    ) -> PyResult<()> {
+        if anchor_a1.trim().is_empty() {
+            return Err(PyValueError::new_err(
+                "queue_chart_add: anchor_a1 must be a non-empty A1 cell coord",
+            ));
+        }
+        self.queued_charts
+            .entry(sheet.to_string())
+            .or_default()
+            .push(QueuedChartAdd {
+                chart_xml,
+                anchor_a1: anchor_a1.to_string(),
+                width_emu,
+                height_emu,
             });
         Ok(())
     }
@@ -1408,6 +1472,7 @@ impl XlsxPatcher {
             && self.queued_range_moves.is_empty()
             && self.queued_sheet_copies.is_empty()
             && self.queued_images.is_empty()
+            && self.queued_charts.is_empty()
         {
             // No changes — just copy. Includes RFC-013's `file_adds`,
             // `file_deletes`, `queued_content_type_ops`, RFC-020's
@@ -2080,6 +2145,28 @@ impl XlsxPatcher {
             )?;
         }
 
+        // --- Phase 2.5l: Chart adds (Sprint Μ Pod-γ / RFC-046) ---
+        //
+        // Mirrors Phase 2.5k's image-add flow but with two extra
+        // capabilities:
+        //   * Each queued chart emits its own `xl/charts/chartN.xml`
+        //     part, content-type override, and chart-rel under the
+        //     drawing's nested rels graph.
+        //   * Sheets that already have a `drawing` rel get the new
+        //     `<xdr:graphicFrame>` SAX-merged into the existing
+        //     drawing XML, instead of being rejected like 2.5k does
+        //     for images. (Phase 2.5l also handles the "no existing
+        //     drawing" case by allocating a fresh `drawingN.xml`.)
+        // Phase 2.5l runs BEFORE Phase 3 so cell-range formulas in
+        // chart XML can compose with cell rewrites in the same save.
+        if !self.queued_charts.is_empty() {
+            self.apply_chart_adds_phase(
+                &mut file_patches,
+                &mut zip,
+                &mut part_id_allocator,
+            )?;
+        }
+
         // --- Phase 3: Patch worksheet XMLs ---
         //
         // Two-pass per sheet: cell-level patches via `sheet_patcher`, then
@@ -2656,6 +2743,268 @@ impl XlsxPatcher {
                 .entry(format!("__rfc045_drawing_{drawing_n}__"))
                 .or_default()
                 .extend(ops);
+        }
+        Ok(())
+    }
+
+    /// Sprint Μ Pod-γ (RFC-046) — drain `self.queued_charts`.
+    ///
+    /// For each sheet that has queued charts:
+    /// 1. Read the sheet's rels graph (from `rels_patches` if
+    ///    already mutated, else from `file_adds`/source ZIP).
+    /// 2. Probe for an existing `drawing` rel:
+    ///    * If absent — allocate a fresh `drawingN.xml`,
+    ///      synthesize its body containing one
+    ///      `<xdr:graphicFrame>` per queued chart, plus a fresh
+    ///      `xl/drawings/_rels/drawingN.xml.rels` with one chart
+    ///      rel per chart. Splice `<drawing r:id="...">` into
+    ///      sheet XML.
+    ///    * If present — load the existing drawing XML + rels,
+    ///      append a `<xdr:graphicFrame>` per queued chart via
+    ///      SAX, append a chart rel per chart to the drawing's
+    ///      rels file. The sheet XML's `<drawing>` ref is left
+    ///      alone (already pointing at the drawing).
+    /// 3. Allocate one fresh `xl/charts/chartN.xml` per queued
+    ///    chart and route the caller-supplied bytes through
+    ///    `file_adds`.
+    /// 4. Queue content-type ops: one `<Override>` per chart, plus
+    ///    a `<Override>` for the drawing if we created one fresh.
+    fn apply_chart_adds_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
+    ) -> PyResult<()> {
+        // Drain in sheet_order for stable output across saves.
+        let drained: Vec<(String, Vec<QueuedChartAdd>)> = self
+            .sheet_order
+            .iter()
+            .filter_map(|s| self.queued_charts.remove(s).map(|v| (s.clone(), v)))
+            .collect();
+        if drained.is_empty() {
+            self.queued_charts.clear();
+            return Ok(());
+        }
+
+        for (sheet_name, queued) in drained {
+            if queued.is_empty() {
+                continue;
+            }
+            let sheet_path = self
+                .sheet_paths
+                .get(&sheet_name)
+                .cloned()
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "queue_chart_add: no such sheet: {sheet_name}"
+                    ))
+                })?;
+
+            // 1. Get sheet rels graph (rels_patches → file_adds → ZIP).
+            let sheet_rels_path = format!(
+                "{}/_rels/{}.rels",
+                sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+                sheet_path.rsplit('/').next().unwrap_or("")
+            );
+            let mut sheet_rels: wolfxl_rels::RelsGraph = if let Some(g) =
+                self.rels_patches.get(&sheet_rels_path)
+            {
+                g.clone()
+            } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
+                wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
+                })?
+            } else {
+                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
+                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                        .map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
+                        })?,
+                    None => wolfxl_rels::RelsGraph::new(),
+                }
+            };
+
+            // 2. Probe for existing drawing rel + drawing path.
+            let mut existing_drawing_target: Option<String> = None;
+            for r in sheet_rels.iter() {
+                if r.rel_type == wolfxl_rels::rt::DRAWING {
+                    existing_drawing_target = Some(r.target.clone());
+                    break;
+                }
+            }
+
+            // Allocate one chart part per queued chart.
+            let chart_indices: Vec<u32> =
+                queued.iter().map(|_| part_id_allocator.alloc_chart()).collect();
+
+            // Pre-content-type ops accumulator for this sheet.
+            let mut ct_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+            for &n in &chart_indices {
+                ct_ops.push(content_types::ContentTypeOp::AddOverride(
+                    format!("/xl/charts/chart{n}.xml"),
+                    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+                        .to_string(),
+                ));
+            }
+
+            // Emit the chart XML parts up front.
+            for (chart, &n) in queued.iter().zip(chart_indices.iter()) {
+                let path = format!("xl/charts/chart{n}.xml");
+                self.file_adds.insert(path, chart.chart_xml.clone());
+            }
+
+            // Branch on fresh vs. existing drawing.
+            let drawing_n: u32;
+            let drawing_path: String;
+            let drawing_rels_path: String;
+            let mut drawing_rels: wolfxl_rels::RelsGraph;
+            let mut new_drawing_xml_bytes: Option<Vec<u8>> = None;
+            if let Some(target) = existing_drawing_target {
+                // Existing: resolve the drawing path relative to the
+                // OWNING PART's directory (i.e. the sheet itself, not
+                // the rels file). Rels targets are interpreted
+                // relative to the part the rels graph describes —
+                // here that's `xl/worksheets/sheetN.xml`, so the base
+                // is `xl/worksheets/`.
+                let sheet_dir = sheet_path
+                    .rsplit_once('/')
+                    .map(|(d, _)| d)
+                    .unwrap_or("")
+                    .to_string();
+                let resolved = resolve_relative_path(&sheet_dir, &target);
+                drawing_path = resolved.clone();
+                let n = drawing_n_from_path(&drawing_path).unwrap_or_else(|| {
+                    part_id_allocator.alloc_drawing()
+                });
+                drawing_n = n;
+                drawing_rels_path = format!(
+                    "xl/drawings/_rels/drawing{drawing_n}.xml.rels"
+                );
+                // Load existing drawing rels (if any) — drawing
+                // graphs without rels are legal but rare.
+                drawing_rels = if let Some(g) =
+                    self.rels_patches.get(&drawing_rels_path)
+                {
+                    g.clone()
+                } else if let Some(b) = self.file_adds.get(&drawing_rels_path) {
+                    wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
+                    })?
+                } else {
+                    match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                            .map_err(|e| {
+                                PyErr::new::<PyIOError, _>(format!(
+                                    "drawing rels parse: {e}"
+                                ))
+                            })?,
+                        None => wolfxl_rels::RelsGraph::new(),
+                    }
+                };
+                // Add a chart rel per queued chart.
+                let mut chart_rids: Vec<String> = Vec::with_capacity(queued.len());
+                for &n in &chart_indices {
+                    let rid = drawing_rels.add(
+                        wolfxl_rels::rt::CHART,
+                        &format!("../charts/chart{n}.xml"),
+                        wolfxl_rels::TargetMode::Internal,
+                    );
+                    chart_rids.push(rid.0);
+                }
+                // Read existing drawing XML.
+                let existing_drawing_xml: Vec<u8> = if let Some(b) =
+                    file_patches.get(&drawing_path)
+                {
+                    b.clone()
+                } else if let Some(b) = self.file_adds.get(&drawing_path) {
+                    b.clone()
+                } else {
+                    let s =
+                        ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
+                            .unwrap_or_else(|| String::from(""));
+                    s.into_bytes()
+                };
+                // SAX-merge: append a graphicFrame per queued chart.
+                let merged = append_graphic_frames(
+                    &existing_drawing_xml,
+                    &queued,
+                    &chart_rids,
+                )
+                .map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("merge drawing: {e}"))
+                })?;
+                new_drawing_xml_bytes = Some(merged);
+                // No new <Override> for the drawing — already in
+                // [Content_Types].xml.
+            } else {
+                // Fresh drawing.
+                drawing_n = part_id_allocator.alloc_drawing();
+                drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
+                drawing_rels_path = format!(
+                    "xl/drawings/_rels/drawing{drawing_n}.xml.rels"
+                );
+                drawing_rels = wolfxl_rels::RelsGraph::new();
+                let mut chart_rids: Vec<String> = Vec::with_capacity(queued.len());
+                for &n in &chart_indices {
+                    let rid = drawing_rels.add(
+                        wolfxl_rels::rt::CHART,
+                        &format!("../charts/chart{n}.xml"),
+                        wolfxl_rels::TargetMode::Internal,
+                    );
+                    chart_rids.push(rid.0);
+                }
+                // Build a fresh drawing XML body.
+                let body = build_chart_drawing_xml(&queued, &chart_rids);
+                new_drawing_xml_bytes = Some(body.into_bytes());
+                // Splice <drawing r:id> into sheet XML.
+                let drawing_rid = sheet_rels.add(
+                    wolfxl_rels::rt::DRAWING,
+                    &format!("../drawings/drawing{drawing_n}.xml"),
+                    wolfxl_rels::TargetMode::Internal,
+                );
+                let sheet_xml = if let Some(b) = file_patches.get(&sheet_path) {
+                    String::from_utf8_lossy(b).into_owned()
+                } else if let Some(b) = self.file_adds.get(&sheet_path) {
+                    String::from_utf8_lossy(b).into_owned()
+                } else {
+                    ooxml_util::zip_read_to_string(zip, &sheet_path)?
+                };
+                let after = splice_drawing_ref(&sheet_xml, &drawing_rid.0)
+                    .map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("splice drawing: {e}"))
+                    })?;
+                file_patches.insert(sheet_path.clone(), after.into_bytes());
+                ct_ops.push(content_types::ContentTypeOp::AddOverride(
+                    format!("/xl/drawings/drawing{drawing_n}.xml"),
+                    "application/vnd.openxmlformats-officedocument.drawing+xml".to_string(),
+                ));
+            }
+
+            // Emit drawing XML + drawing rels into file_adds /
+            // file_patches. We use file_patches for in-place updates
+            // of an existing drawing (so the per-emit pass picks the
+            // mutated bytes); file_adds for fresh-drawing emit. The
+            // ZIP probe is the source-of-truth: if the path is
+            // already in the source ZIP we MUST patch (file_adds
+            // panics on collision in the final emit pass).
+            if let Some(bytes) = new_drawing_xml_bytes {
+                if zip.by_name(&drawing_path).is_ok() {
+                    file_patches.insert(drawing_path.clone(), bytes);
+                } else {
+                    self.file_adds.insert(drawing_path.clone(), bytes);
+                }
+            }
+            self.rels_patches
+                .insert(drawing_rels_path, drawing_rels);
+
+            // Persist sheet rels mutation.
+            self.rels_patches.insert(sheet_rels_path, sheet_rels);
+
+            // Queue content-type ops under a synthetic per-sheet key.
+            self.queued_content_type_ops
+                .entry(format!("__rfc046_charts_{sheet_name}__"))
+                .or_default()
+                .extend(ct_ops);
         }
         Ok(())
     }
@@ -4287,26 +4636,69 @@ pub(crate) fn build_drawing_rels_xml(images: &[QueuedImageAdd], image_indices: &
 /// `</worksheet>`. This matches the ECMA element-order rule for
 /// slot 30. If a `<drawing` element is already present, returns
 /// `Err` so the caller can raise NotImplementedError (v1.5 limit).
+///
+/// The splice also ensures the root `<worksheet>` element declares
+/// `xmlns:r="..."` — openpyxl-generated sheets sometimes omit it
+/// when no `r:` reference is currently present, but our `<drawing
+/// r:id="..."/>` requires the prefix to be bound.
 pub(crate) fn splice_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, &'static str> {
     if sheet_xml.contains("<drawing ") || sheet_xml.contains("<drawing/>") {
         return Err("sheet already has a <drawing> element");
     }
     let elem = format!("<drawing r:id=\"{rid}\"/>");
-    if let Some(idx) = sheet_xml.find("<legacyDrawing") {
+    let with_drawing = if let Some(idx) = sheet_xml.find("<legacyDrawing") {
         let mut out = String::with_capacity(sheet_xml.len() + elem.len());
         out.push_str(&sheet_xml[..idx]);
         out.push_str(&elem);
         out.push_str(&sheet_xml[idx..]);
-        return Ok(out);
-    }
-    if let Some(idx) = sheet_xml.rfind("</worksheet>") {
+        out
+    } else if let Some(idx) = sheet_xml.rfind("</worksheet>") {
         let mut out = String::with_capacity(sheet_xml.len() + elem.len());
         out.push_str(&sheet_xml[..idx]);
         out.push_str(&elem);
         out.push_str(&sheet_xml[idx..]);
-        return Ok(out);
+        out
+    } else {
+        return Err("sheet xml has no </worksheet> closing tag");
+    };
+    Ok(ensure_xmlns_r_on_worksheet(&with_drawing))
+}
+
+/// Ensure the `<worksheet>` root element of `sheet_xml` declares the
+/// `r` prefix bound to the OOXML relationships namespace. No-op if
+/// `xmlns:r` is already present anywhere in the open tag.
+pub(crate) fn ensure_xmlns_r_on_worksheet(sheet_xml: &str) -> String {
+    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    // Find the open `<worksheet ...>` tag.
+    let start = match sheet_xml.find("<worksheet") {
+        Some(i) => i,
+        None => return sheet_xml.to_string(),
+    };
+    let end = match sheet_xml[start..].find('>') {
+        Some(e) => start + e,
+        None => return sheet_xml.to_string(),
+    };
+    let open_tag = &sheet_xml[start..=end];
+    if open_tag.contains("xmlns:r=") {
+        return sheet_xml.to_string();
     }
-    Err("sheet xml has no </worksheet> closing tag")
+    // Insert `xmlns:r="..."` just before the closing `>` (or `/>`).
+    let inserted = if open_tag.ends_with("/>") {
+        format!(
+            "{} xmlns:r=\"{r_ns}\"/>",
+            &open_tag[..open_tag.len() - 2]
+        )
+    } else {
+        format!(
+            "{} xmlns:r=\"{r_ns}\">",
+            &open_tag[..open_tag.len() - 1]
+        )
+    };
+    let mut out = String::with_capacity(sheet_xml.len() + 80);
+    out.push_str(&sheet_xml[..start]);
+    out.push_str(&inserted);
+    out.push_str(&sheet_xml[end + 1..]);
+    out
 }
 
 #[cfg(test)]
@@ -4350,5 +4742,317 @@ mod image_helpers_tests {
         let xml = build_drawing_xml(&imgs);
         assert!(xml.contains("<xdr:oneCellAnchor>"));
         assert!(xml.contains("r:embed=\"rId1\""));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint Μ Pod-γ (RFC-046) — chart drawing helpers + A1 + path utils.
+// ---------------------------------------------------------------------------
+
+/// Parse an A1-style coordinate (e.g. `"D2"`) into `(col_zero_based,
+/// row_zero_based)`. Lowercase letters accepted.
+pub(crate) fn parse_a1_coord(s: &str) -> Option<(u32, u32)> {
+    let s = s.trim().trim_start_matches('$');
+    let mut col: u32 = 0;
+    let mut iter = s.chars().peekable();
+    let mut col_chars = 0;
+    while let Some(&c) = iter.peek() {
+        if c.is_ascii_alphabetic() {
+            let v = (c.to_ascii_uppercase() as u32) - ('A' as u32) + 1;
+            col = col * 26 + v;
+            iter.next();
+            col_chars += 1;
+        } else {
+            break;
+        }
+    }
+    if col_chars == 0 || col == 0 {
+        return None;
+    }
+    let rest: String = iter.collect();
+    let rest = rest.trim_start_matches('$');
+    let row: u32 = rest.parse().ok()?;
+    if row == 0 {
+        return None;
+    }
+    Some((col - 1, row - 1))
+}
+
+/// Resolve a relative or absolute OOXML rel target against a base
+/// directory. Examples:
+///
+/// * `("xl/worksheets", "../drawings/drawing1.xml")` → `"xl/drawings/drawing1.xml"`
+/// * `("xl/worksheets", "/xl/drawings/drawing1.xml")` → `"xl/drawings/drawing1.xml"`
+///   (openpyxl uses leading-slash internal absolutes)
+/// * `("xl", "drawings/drawing1.xml")` → `"xl/drawings/drawing1.xml"`
+pub(crate) fn resolve_relative_path(base_dir: &str, target: &str) -> String {
+    // Leading `/` means "internal absolute" — drop the prefix and
+    // start from a fresh root.
+    let (mut parts, target_iter): (Vec<&str>, _) =
+        if let Some(stripped) = target.strip_prefix('/') {
+            (Vec::new(), stripped.split('/'))
+        } else {
+            (
+                base_dir
+                    .split('/')
+                    .filter(|p| !p.is_empty())
+                    .collect(),
+                target.split('/'),
+            )
+        };
+    for seg in target_iter {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
+/// Best-effort extract `N` from `xl/drawings/drawingN.xml`.
+pub(crate) fn drawing_n_from_path(path: &str) -> Option<u32> {
+    let fname = path.rsplit('/').next()?;
+    let core = fname.strip_suffix(".xml")?;
+    let n_str = core.strip_prefix("drawing")?;
+    n_str.parse::<u32>().ok()
+}
+
+/// Build a fresh `xl/drawings/drawingN.xml` body containing one
+/// `<xdr:oneCellAnchor>` wrapping a `<xdr:graphicFrame>` per queued
+/// chart. The chart rids are 1-indexed within the drawing's own
+/// rels file, exactly matching the order of `queued`/`chart_rids`.
+pub(crate) fn build_chart_drawing_xml(
+    queued: &[QueuedChartAdd],
+    chart_rids: &[String],
+) -> String {
+    debug_assert_eq!(queued.len(), chart_rids.len());
+    let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let c_ns = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+    let mut out = String::with_capacity(512 + queued.len() * 768);
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+    out.push_str(&format!(
+        "<xdr:wsDr xmlns:xdr=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" xmlns:c=\"{c_ns}\">"
+    ));
+    for (i, (chart, rid)) in queued.iter().zip(chart_rids.iter()).enumerate() {
+        out.push_str(&render_graphic_frame_anchor(chart, rid, (i + 1) as u32));
+    }
+    out.push_str("</xdr:wsDr>");
+    out
+}
+
+/// Append one anchor per queued chart to an existing drawing XML
+/// body. Inserts before the closing `</xdr:wsDr>` (or `</wsDr>`)
+/// tag. Detects whether the existing wrapper uses an `xdr:` prefix
+/// or a default-namespace `<wsDr>` and emits the appended fragment
+/// in the matching style so the merged body stays well-formed XML
+/// without requiring the caller to pre-declare prefixes.
+pub(crate) fn append_graphic_frames(
+    drawing_xml: &[u8],
+    queued: &[QueuedChartAdd],
+    chart_rids: &[String],
+) -> Result<Vec<u8>, String> {
+    debug_assert_eq!(queued.len(), chart_rids.len());
+    let body = std::str::from_utf8(drawing_xml).map_err(|e| e.to_string())?;
+    // Choose the namespace style so the inserted fragment matches
+    // the existing wrapper. If we see an `xdr:` prefix anywhere in
+    // the wrapper we emit prefixed tags; otherwise we use default-
+    // namespace tags + an explicit `xmlns:xdr="…"` on the inserted
+    // root element so any attributes remain valid.
+    let use_xdr_prefix = body.contains("<xdr:wsDr") || body.contains("xmlns:xdr=");
+    // Count existing anchors / picture frames to keep cNvPr ids
+    // monotonic.
+    let existing_count: u32 = (body.matches("<graphicFrame").count()
+        + body.matches("<pic").count()) as u32;
+    let mut new_anchors = String::with_capacity(queued.len() * 512);
+    for (i, (chart, rid)) in queued.iter().zip(chart_rids.iter()).enumerate() {
+        new_anchors.push_str(&render_graphic_frame_anchor_styled(
+            chart,
+            rid,
+            existing_count + (i + 1) as u32,
+            use_xdr_prefix,
+        ));
+    }
+    // Drawing XML may use either `<xdr:wsDr>` (prefixed) or
+    // `<wsDr>` (default-namespaced — what openpyxl emits). Find
+    // whichever close tag is present.
+    let pos_opt = body
+        .rfind("</xdr:wsDr>")
+        .or_else(|| body.rfind("</wsDr>"));
+    if let Some(pos) = pos_opt {
+        let mut out = String::with_capacity(body.len() + new_anchors.len());
+        out.push_str(&body[..pos]);
+        out.push_str(&new_anchors);
+        out.push_str(&body[pos..]);
+        Ok(out.into_bytes())
+    } else {
+        // Drawing body has no </xdr:wsDr> — wrap a minimal envelope.
+        let xdr_ns =
+            "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+        let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        let r_ns =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let c_ns = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+        let mut out = String::with_capacity(new_anchors.len() + 256);
+        out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+        out.push_str(&format!(
+            "<xdr:wsDr xmlns:xdr=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" xmlns:c=\"{c_ns}\">"
+        ));
+        out.push_str(&new_anchors);
+        out.push_str("</xdr:wsDr>");
+        Ok(out.into_bytes())
+    }
+}
+
+/// Render one `<xdr:oneCellAnchor>` containing a `<xdr:graphicFrame>`
+/// for an embedded chart referenced by `chart_rid`, using `xdr:`
+/// prefixes (the historical default; matches our fresh-drawing
+/// envelope which declares `xmlns:xdr="..."`).
+fn render_graphic_frame_anchor(
+    chart: &QueuedChartAdd,
+    chart_rid: &str,
+    unique_id: u32,
+) -> String {
+    render_graphic_frame_anchor_styled(chart, chart_rid, unique_id, true)
+}
+
+/// As [`render_graphic_frame_anchor`] but emits either prefixed
+/// (`<xdr:oneCellAnchor>`) or default-namespace
+/// (`<oneCellAnchor xmlns="...">`) tags. The default-namespace
+/// variant carries an explicit `xmlns:xdr=""` declaration so the
+/// merged drawing body remains valid even when the existing wrapper
+/// is `<wsDr xmlns="..."/>` (openpyxl's emit style).
+fn render_graphic_frame_anchor_styled(
+    chart: &QueuedChartAdd,
+    chart_rid: &str,
+    unique_id: u32,
+    use_xdr_prefix: bool,
+) -> String {
+    let (col0, row0) = parse_a1_coord(&chart.anchor_a1)
+        .unwrap_or((3, 1)); // fallback: D2
+    let cx = chart.width_emu;
+    let cy = chart.height_emu;
+    let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let c_ns = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+    let p = if use_xdr_prefix { "xdr:" } else { "" };
+    // For the default-namespace style we declare xmlns on the
+    // anchor's root so the unqualified tags resolve correctly.
+    let root_xmlns = if use_xdr_prefix {
+        String::new()
+    } else {
+        format!(
+            " xmlns=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" xmlns:c=\"{c_ns}\""
+        )
+    };
+
+    let mut out = String::with_capacity(640);
+    out.push_str(&format!("<{p}oneCellAnchor{root_xmlns}>"));
+    out.push_str(&format!(
+        "<{p}from><{p}col>{col0}</{p}col><{p}colOff>0</{p}colOff>\
+         <{p}row>{row0}</{p}row><{p}rowOff>0</{p}rowOff></{p}from>"
+    ));
+    out.push_str(&format!("<{p}ext cx=\"{cx}\" cy=\"{cy}\"/>"));
+    // graphicFrame interior: a:* and c:* prefixes are always used
+    // (drawingML uses its own namespace anchors regardless of the
+    // wsDr-prefix style).
+    out.push_str(&format!(
+        "<{p}graphicFrame macro=\"\">\
+           <{p}nvGraphicFramePr>\
+             <{p}cNvPr id=\"{unique_id}\" name=\"Chart {unique_id}\"/>\
+             <{p}cNvGraphicFramePr/>\
+           </{p}nvGraphicFramePr>\
+           <{p}xfrm>\
+             <a:off x=\"0\" y=\"0\" xmlns:a=\"{a_ns}\"/>\
+             <a:ext cx=\"{cx}\" cy=\"{cy}\" xmlns:a=\"{a_ns}\"/>\
+           </{p}xfrm>\
+           <a:graphic xmlns:a=\"{a_ns}\">\
+             <a:graphicData uri=\"{c_ns}\">\
+               <c:chart xmlns:c=\"{c_ns}\" \
+                        xmlns:r=\"{r_ns}\" \
+                        r:id=\"{chart_rid}\"/>\
+             </a:graphicData>\
+           </a:graphic>\
+         </{p}graphicFrame>"
+    ));
+    out.push_str(&format!("<{p}clientData/>"));
+    out.push_str(&format!("</{p}oneCellAnchor>"));
+    out
+}
+
+#[cfg(test)]
+mod chart_helpers_tests {
+    use super::*;
+
+    #[test]
+    fn parse_a1_basic_cells() {
+        assert_eq!(parse_a1_coord("A1"), Some((0, 0)));
+        assert_eq!(parse_a1_coord("D2"), Some((3, 1)));
+        assert_eq!(parse_a1_coord("Z1"), Some((25, 0)));
+        assert_eq!(parse_a1_coord("AA1"), Some((26, 0)));
+        assert_eq!(parse_a1_coord("$D$2"), Some((3, 1)));
+        assert!(parse_a1_coord("").is_none());
+        assert!(parse_a1_coord("1A").is_none());
+    }
+
+    #[test]
+    fn resolve_relative_basic() {
+        assert_eq!(
+            resolve_relative_path("xl/worksheets/_rels", "../drawings/drawing1.xml"),
+            "xl/drawings/drawing1.xml"
+        );
+        assert_eq!(
+            resolve_relative_path("xl/drawings/_rels", "../charts/chart1.xml"),
+            "xl/charts/chart1.xml"
+        );
+    }
+
+    #[test]
+    fn drawing_n_extract() {
+        assert_eq!(drawing_n_from_path("xl/drawings/drawing7.xml"), Some(7));
+        assert_eq!(drawing_n_from_path("xl/drawings/drawing.xml"), None);
+        assert_eq!(drawing_n_from_path("nope.xml"), None);
+    }
+
+    #[test]
+    fn build_drawing_xml_for_one_chart() {
+        let q = vec![QueuedChartAdd {
+            chart_xml: b"<chartSpace/>".to_vec(),
+            anchor_a1: "D2".into(),
+            width_emu: 4_572_000,
+            height_emu: 2_743_200,
+        }];
+        let rids = vec!["rId1".to_string()];
+        let body = build_chart_drawing_xml(&q, &rids);
+        assert!(body.contains("<xdr:graphicFrame"));
+        assert!(body.contains("r:id=\"rId1\""));
+        assert!(body.contains("<xdr:col>3</xdr:col>"));
+        assert!(body.contains("<xdr:row>1</xdr:row>"));
+    }
+
+    #[test]
+    fn append_graphic_frame_inserts_before_close() {
+        let original = b"<?xml version=\"1.0\"?><xdr:wsDr xmlns:xdr=\"x\" xmlns:r=\"r\" xmlns:c=\"c\"><xdr:oneCellAnchor/></xdr:wsDr>";
+        let q = vec![QueuedChartAdd {
+            chart_xml: vec![],
+            anchor_a1: "B5".into(),
+            width_emu: 100,
+            height_emu: 200,
+        }];
+        let rids = vec!["rId7".to_string()];
+        let merged = append_graphic_frames(original, &q, &rids).unwrap();
+        let s = std::str::from_utf8(&merged).unwrap();
+        // Original anchor preserved.
+        assert!(s.contains("<xdr:oneCellAnchor/>"));
+        // New graphicFrame appended before the close.
+        assert!(s.contains("<xdr:graphicFrame"));
+        assert!(s.contains("r:id=\"rId7\""));
+        assert!(s.ends_with("</xdr:wsDr>"));
     }
 }
