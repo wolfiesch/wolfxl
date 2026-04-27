@@ -69,14 +69,14 @@ class ScatterChart(ChartBase):
     def varyColors(self, v: bool | None) -> None:
         self.vary_colors = v
 
-    def _chart_dict_extras(self) -> dict[str, Any]:
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
         d: dict[str, Any] = {}
         if self.scatterStyle is not None:
-            d["scatterStyle"] = self.scatterStyle
-        if self.vary_colors is not None:
-            d["varyColors"] = self.vary_colors
+            d["scatter_style"] = self.scatterStyle
         if self.dLbls is not None:
-            d["dLbls"] = self.dLbls.to_dict()
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
         return d
 
 

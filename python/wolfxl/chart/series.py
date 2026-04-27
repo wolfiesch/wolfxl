@@ -206,31 +206,217 @@ class Series:
     def to_rust_dict(self, series_type: str = "bar") -> dict[str, Any]:
         """Serialise this series for a chart of the given ``series_type``.
 
-        Only the slots in ``attribute_mapping[series_type]`` are emitted —
-        matches the per-type ``__elements__`` filtering openpyxl applies
-        on ``to_tree``.
+        Emits the RFC-046 §10.6 shape (snake_case, flat fields):
+        ``{idx, order, title_ref|title_text, values_ref, categories_ref,
+        x_values_ref, y_values_ref, bubble_size_ref, graphical_properties,
+        marker, smooth, invert_if_negative, data_labels, err_bars,
+        trendlines}``.
+
+        References that are :class:`Reference` / ``NumRef`` / ``StrRef``
+        instances surface as A1-formula strings (``"Sheet1!$A$1:$A$10"``).
         """
-        keys = attribute_mapping.get(series_type, attribute_mapping["bar"])
-        d: dict[str, Any] = {}
-        for key in keys:
-            v = getattr(self, key, None)
-            if v is None:
-                continue
-            if isinstance(v, (list, tuple)):
-                if not v:
-                    continue
-                d[key] = [
-                    item.to_dict() if hasattr(item, "to_dict") else item for item in v
-                ]
-            elif hasattr(v, "to_dict"):
-                d[key] = v.to_dict()
-            else:
-                d[key] = v
-        # idx + order are always emitted even if zero — they're identifiers,
-        # not optional metadata.
-        d.setdefault("idx", self.idx)
-        d.setdefault("order", self.order)
+        d: dict[str, Any] = {
+            "idx": self.idx,
+            "order": self.order,
+        }
+
+        # Title — strRef → title_ref; literal value → title_text
+        if self.tx is not None:
+            if self.tx.strRef is not None and self.tx.strRef.f is not None:
+                d["title_ref"] = self.tx.strRef.f
+            elif self.tx.v is not None:
+                d["title_text"] = str(self.tx.v)
+
+        # Data references — surface as A1 strings
+        d["values_ref"] = _ref_string(self.val)
+        d["categories_ref"] = _ref_string(self.cat)
+        d["x_values_ref"] = _ref_string(self.xVal)
+        d["y_values_ref"] = _ref_string(self.yVal)
+        d["bubble_size_ref"] = _ref_string(self.bubbleSize)
+
+        # spPr — graphical_properties (snake_case)
+        if self.spPr is not None:
+            gp_dict = self.spPr.to_dict()
+            if gp_dict:
+                d["graphical_properties"] = _gp_to_snake(gp_dict)
+
+        # Marker — emit per §10.6.1 even if defaults
+        if self.marker is not None:
+            md = self.marker.to_dict()
+            if md:
+                d["marker"] = _marker_to_snake(md)
+
+        if self.smooth is not None:
+            d["smooth"] = self.smooth
+
+        if self.invertIfNegative is not None:
+            d["invert_if_negative"] = self.invertIfNegative
+
+        # Data labels per §10.6.2
+        if self.dLbls is not None:
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
+
+        # Error bars per §10.6.3
+        if self.errBars is not None:
+            d["err_bars"] = _errbars_to_snake(self.errBars.to_dict())
+
+        # Trendlines per §10.6.4 (list — Series carries 0 or 1 in our model,
+        # surface as singleton list when present so consumers always iterate)
+        if self.trendline is not None:
+            d["trendlines"] = [_trendline_to_snake(self.trendline.to_dict())]
+
+        # Bubble3D flag pass-through (per-series, separate from chart-level)
+        if self.bubble3D is not None:
+            d["bubble_3d"] = self.bubble3D
+
+        if self.explosion is not None:
+            d["explosion"] = self.explosion
+
+        # Shape (bar variant box style)
+        if self.shape is not None:
+            d["shape"] = self.shape
+
+        # Drop None-valued ref keys to keep the dict tight
+        for k in (
+            "values_ref",
+            "categories_ref",
+            "x_values_ref",
+            "y_values_ref",
+            "bubble_size_ref",
+        ):
+            if d.get(k) is None:
+                d.pop(k, None)
+
         return d
+
+
+def _ref_string(src: Any) -> str | None:
+    """Pull an A1 formula string out of a NumDataSource/AxDataSource."""
+    if src is None:
+        return None
+    # NumDataSource carries numRef, AxDataSource carries numRef|strRef
+    inner = (
+        getattr(src, "numRef", None)
+        or getattr(src, "strRef", None)
+        or None
+    )
+    if inner is not None and getattr(inner, "f", None) is not None:
+        return inner.f
+    return None
+
+
+def _gp_to_snake(gp: dict[str, Any]) -> dict[str, Any]:
+    """Translate :class:`GraphicalProperties.to_dict` camelCase → §10.9 snake_case."""
+    out: dict[str, Any] = {}
+    if "noFill" in gp:
+        out["no_fill"] = gp["noFill"]
+    if "solidFill" in gp:
+        out["solid_fill"] = gp["solidFill"]
+    if "ln" in gp:
+        ln = dict(gp["ln"])
+        ln_out: dict[str, Any] = {}
+        if "w" in ln:
+            ln_out["w_emu"] = ln["w"]
+        if "cap" in ln:
+            ln_out["cap"] = ln["cap"]
+        if "cmpd" in ln:
+            ln_out["cmpd"] = ln["cmpd"]
+        if "solidFill" in ln:
+            ln_out["solid_fill"] = ln["solidFill"]
+        if "prstDash" in ln:
+            ln_out["prst_dash"] = ln["prstDash"]
+        if "noFill" in ln:
+            ln_out["no_fill"] = ln["noFill"]
+        out["ln"] = ln_out
+    return out
+
+
+def _marker_to_snake(md: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if "symbol" in md:
+        out["symbol"] = md["symbol"]
+    if "size" in md:
+        out["size"] = md["size"]
+    if "spPr" in md:
+        out["graphical_properties"] = _gp_to_snake(md["spPr"])
+    return out
+
+
+def _dlbls_to_snake(dl: dict[str, Any]) -> dict[str, Any]:
+    """Translate :class:`DataLabelList.to_dict` camelCase → §10.6.2 snake_case."""
+    out: dict[str, Any] = {}
+    mapping = {
+        "showVal": "show_val",
+        "showCatName": "show_cat_name",
+        "showSerName": "show_ser_name",
+        "showLegendKey": "show_legend_key",
+        "showPercent": "show_percent",
+        "showBubbleSize": "show_bubble_size",
+        "dLblPos": "position",
+        "numFmt": "number_format",
+        "separator": "separator",
+    }
+    for ck, sk in mapping.items():
+        if ck in dl and dl[ck] is not None:
+            out[sk] = dl[ck]
+    return out
+
+
+def _errbars_to_snake(eb: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if "errDir" in eb:
+        out["direction"] = eb["errDir"]
+    if "errBarType" in eb:
+        out["err_bar_type"] = eb["errBarType"]
+    if "errValType" in eb:
+        out["err_val_type"] = eb["errValType"]
+    if "noEndCap" in eb:
+        out["no_end_cap"] = eb["noEndCap"]
+    if "val" in eb:
+        out["val"] = eb["val"]
+    plus = eb.get("plus")
+    if plus is not None:
+        # plus may be a NumDataSource-shaped dict {numRef:{f, ...}} or a string
+        if isinstance(plus, dict):
+            inner = plus.get("numRef") or plus.get("strRef")
+            if isinstance(inner, dict) and inner.get("f"):
+                out["plus_ref"] = inner["f"]
+        elif isinstance(plus, str):
+            out["plus_ref"] = plus
+    minus = eb.get("minus")
+    if minus is not None:
+        if isinstance(minus, dict):
+            inner = minus.get("numRef") or minus.get("strRef")
+            if isinstance(inner, dict) and inner.get("f"):
+                out["minus_ref"] = inner["f"]
+        elif isinstance(minus, str):
+            out["minus_ref"] = minus
+    return out
+
+
+def _trendline_to_snake(t: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if "trendlineType" in t:
+        out["trendline_type"] = t["trendlineType"]
+    if "name" in t:
+        out["name"] = t["name"]
+    if "order" in t:
+        out["order"] = t["order"]
+    if "period" in t:
+        out["period"] = t["period"]
+    if "forward" in t:
+        out["forward"] = t["forward"]
+    if "backward" in t:
+        out["backward"] = t["backward"]
+    if "intercept" in t:
+        out["intercept"] = t["intercept"]
+    if "dispEq" in t:
+        out["disp_eq"] = t["dispEq"]
+    if "dispRSqr" in t:
+        out["disp_r_sqr"] = t["dispRSqr"]
+    if "spPr" in t:
+        out["graphical_properties"] = _gp_to_snake(t["spPr"])
+    return out
 
 
 class XYSeries(Series):

@@ -82,17 +82,60 @@ class Title:
         self.spPr = value
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {}
-        if self.tx is not None:
-            d["tx"] = self.tx.to_dict()
-        if self.layout is not None:
-            d["layout"] = self.layout.to_dict()
-        if self.overlay is not None:
-            d["overlay"] = self.overlay
-        if self.spPr is not None:
-            d["spPr"] = self.spPr.to_dict()
-        if self.txPr is not None:
-            d["txPr"] = self.txPr.to_dict()
+        """Emit the §10.3 shape: ``{text, runs, overlay, layout}``.
+
+        The rich-text body (``self.tx.rich``) is flattened into a list
+        of runs ``[{text, font: {name, size, bold, italic, color}}, ...]``.
+        If every run carries the same plain text and no formatting,
+        ``text`` is also surfaced as a fast-path string.
+        """
+        runs: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        all_plain = True
+
+        if self.tx is not None and self.tx.rich is not None:
+            for para in self.tx.rich.p:
+                for r in para.r:
+                    text_parts.append(r.t or "")
+                    font: dict[str, Any] = {}
+                    if r.rPr is not None:
+                        if r.rPr.latin is not None:
+                            font["name"] = r.rPr.latin
+                        if r.rPr.sz is not None:
+                            # CharacterProperties stores size as 1/100 pt;
+                            # surface as integer points.
+                            try:
+                                font["size"] = int(r.rPr.sz) // 100
+                            except (TypeError, ValueError):
+                                font["size"] = r.rPr.sz
+                        if r.rPr.b is not None:
+                            font["bold"] = r.rPr.b
+                        if r.rPr.i is not None:
+                            font["italic"] = r.rPr.i
+                        if r.rPr.solidFill is not None:
+                            font["color"] = r.rPr.solidFill
+                        if font:
+                            all_plain = False
+                    runs.append({"text": r.t or "", "font": font or None})
+
+        text_str: str | None = None
+        if all_plain and text_parts:
+            text_str = "\n".join(text_parts)
+
+        d: dict[str, Any] = {
+            "text": text_str,
+            "runs": runs if runs else None,
+            "overlay": self.overlay,
+            "layout": self.layout.to_dict() if self.layout is not None else None,
+        }
+        # Drop wholly-empty title (no text, no runs, no overlay, no layout)
+        if (
+            d["text"] is None
+            and d["runs"] is None
+            and d["overlay"] is None
+            and d["layout"] is None
+        ):
+            return {}
         return d
 
 

@@ -63,12 +63,12 @@ class PieChart(_PieChartBase):
             raise ValueError(f"first_slice_ang={v} must be in [0, 360]")
         self.firstSliceAng = v
 
-    def _chart_dict_extras(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"firstSliceAng": self.firstSliceAng}
-        if self.vary_colors is not None:
-            d["varyColors"] = self.vary_colors
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        d: dict[str, Any] = {"first_slice_ang": self.firstSliceAng}
         if self.dLbls is not None:
-            d["dLbls"] = self.dLbls.to_dict()
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
         return d
 
 
@@ -101,40 +101,67 @@ class DoughnutChart(_PieChartBase):
             raise ValueError(f"hole_size={v} must be in [1, 90]")
         self.holeSize = v
 
-    def _chart_dict_extras(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"firstSliceAng": self.firstSliceAng}
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        d: dict[str, Any] = {"first_slice_ang": self.firstSliceAng}
         if self.holeSize is not None:
-            d["holeSize"] = self.holeSize
-        if self.vary_colors is not None:
-            d["varyColors"] = self.vary_colors
+            d["hole_size"] = self.holeSize
         if self.dLbls is not None:
-            d["dLbls"] = self.dLbls.to_dict()
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
         return d
 
 
-class PieChart3D(PieChart):
-    """3D pie chart — stub; full support deferred to v1.6.1."""
+class PieChart3D(_PieChartBase):
+    """3D pie chart — RFC-046 §11.1.
+
+    Defaults: rot_x=30, rot_y=0, perspective=30.
+    """
 
     tagname = "pie3DChart"
 
-    def __init__(self, *args: Any, **kw: Any) -> None:
-        raise NotImplementedError(
-            "PieChart3D is not yet implemented in wolfxl (deferred to v1.6.1). "
-            "Use PieChart for 2D pie plots, or fall back to openpyxl for "
-            "3D variants."
-        )
+    def __init__(
+        self,
+        firstSliceAng: int = 0,
+        view_3d: dict[str, Any] | None = None,
+        **kw: Any,
+    ) -> None:
+        if not (0 <= firstSliceAng <= 360):
+            raise ValueError(f"firstSliceAng={firstSliceAng} must be in [0, 360]")
+        super().__init__(**kw)
+        self.firstSliceAng = firstSliceAng
+        self.view_3d = {
+            "rot_x": 30,
+            "rot_y": 0,
+            "perspective": 30,
+            "right_angle_axes": False,
+        }
+        if view_3d is not None:
+            self.view_3d.update(view_3d)
+
+    @property
+    def first_slice_ang(self) -> int:
+        return self.firstSliceAng
+
+    @first_slice_ang.setter
+    def first_slice_ang(self, v: int) -> None:
+        if not (0 <= v <= 360):
+            raise ValueError(f"first_slice_ang={v} must be in [0, 360]")
+        self.firstSliceAng = v
+
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"first_slice_ang": self.firstSliceAng}
+        v3d = {k: v for k, v in self.view_3d.items() if v is not None}
+        if v3d:
+            d["view_3d"] = v3d
+        if self.dLbls is not None:
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
+        return d
 
 
-class ProjectedPieChart(PieChart):
-    """`ofPieChart` (pie-of-pie / bar-of-pie) — deferred to v1.6.1."""
-
-    tagname = "ofPieChart"
-
-    def __init__(self, *args: Any, **kw: Any) -> None:
-        raise NotImplementedError(
-            "ProjectedPieChart is not yet implemented in wolfxl (deferred "
-            "to v1.6.1). Fall back to openpyxl for pie-of-pie / bar-of-pie."
-        )
+# openpyxl-style alias matching the openpyxl class name
+Pie3D = PieChart3D
 
 
-__all__ = ["DoughnutChart", "PieChart", "PieChart3D", "ProjectedPieChart"]
+__all__ = ["DoughnutChart", "Pie3D", "PieChart", "PieChart3D"]

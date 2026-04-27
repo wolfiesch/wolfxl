@@ -1405,8 +1405,34 @@ class Worksheet:
         if anchor is None:
             anchor = chart.anchor if chart.anchor is not None else "E15"
 
+        # RFC-046 §10.11.2 — anchor must be a valid A1 cell ref or a
+        # recognized anchor object (RFC-045 OneCellAnchor / TwoCellAnchor /
+        # AbsoluteAnchor). Strings are validated via the A1 regex; non-str
+        # values are accepted opaquely (the writer validates further).
+        if isinstance(anchor, str):
+            self._validate_a1_anchor(anchor)
+
         chart._anchor = anchor  # noqa: SLF001
         self._pending_charts.append(chart)
+
+    @staticmethod
+    def _validate_a1_anchor(anchor: str) -> None:
+        """Raise :class:`ValueError` if *anchor* is not a valid A1 cell ref.
+
+        Per RFC-046 §10.11.2: ``r"^[A-Z]+[0-9]+$"`` — single cell
+        coordinates only (e.g. ``"E15"``, ``"AA200"``). Range refs and
+        sheet-qualified refs are rejected; pass an anchor object for
+        more complex placements.
+        """
+        import re
+        if not anchor:
+            raise ValueError("anchor must not be empty")
+        if not re.match(r"^[A-Z]+[0-9]+$", anchor):
+            raise ValueError(
+                f"anchor={anchor!r} must be a single A1 cell ref like 'E15' "
+                f"(regex ^[A-Z]+[0-9]+$); for ranged or absolute placement "
+                f"pass an OneCellAnchor / TwoCellAnchor / AbsoluteAnchor"
+            )
 
     @property
     def _images(self) -> list[Any]:

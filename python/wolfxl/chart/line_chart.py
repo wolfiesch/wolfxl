@@ -71,16 +71,15 @@ class LineChart(_LineChartBase):
         self.x_axis = TextAxis()
         self.y_axis = NumericAxis()
 
-    def _chart_dict_extras(self) -> dict[str, Any]:
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
         d: dict[str, Any] = {"grouping": self.grouping}
-        if self.vary_colors is not None:
-            d["varyColors"] = self.vary_colors
         if self.dropLines is not None:
-            d["dropLines"] = self.dropLines.to_dict()
+            d["drop_lines"] = self.dropLines.to_dict()
         if self.hiLowLines is not None:
-            d["hiLowLines"] = self.hiLowLines.to_dict()
+            d["hi_low_lines"] = self.hiLowLines.to_dict()
         if self.upDownBars is not None:
-            d["upDownBars"] = (
+            d["up_down_bars"] = (
                 self.upDownBars.to_dict()
                 if hasattr(self.upDownBars, "to_dict")
                 else self.upDownBars
@@ -90,21 +89,54 @@ class LineChart(_LineChartBase):
         if self.smooth is not None:
             d["smooth"] = self.smooth
         if self.dLbls is not None:
-            d["dLbls"] = self.dLbls.to_dict()
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
         return d
 
 
-class LineChart3D(LineChart):
-    """3D line chart — stub; full support deferred to v1.6.1."""
+class LineChart3D(_LineChartBase):
+    """3D line chart — RFC-046 §11.1.
+
+    Defaults: rot_x=15, rot_y=20, perspective=30, depth_percent=100.
+    """
 
     tagname = "line3DChart"
 
-    def __init__(self, *args: Any, **kw: Any) -> None:
-        raise NotImplementedError(
-            "LineChart3D is not yet implemented in wolfxl (deferred to v1.6.1). "
-            "Use LineChart for 2D line plots, or fall back to openpyxl for "
-            "3D variants."
-        )
+    def __init__(
+        self,
+        gapDepth: int | None = 150,
+        view_3d: dict[str, Any] | None = None,
+        **kw: Any,
+    ) -> None:
+        if gapDepth is not None and not (0 <= gapDepth <= 500):
+            raise ValueError(f"gapDepth={gapDepth} must be in [0, 500]")
+        super().__init__(**kw)
+        self.gapDepth = gapDepth
+        from .axis import NumericAxis, SeriesAxis, TextAxis
+        self.x_axis = TextAxis()
+        self.y_axis = NumericAxis()
+        self.z_axis = SeriesAxis()
+        self.view_3d = {
+            "rot_x": 15,
+            "rot_y": 20,
+            "perspective": 30,
+            "right_angle_axes": False,
+            "depth_percent": 100,
+        }
+        if view_3d is not None:
+            self.view_3d.update(view_3d)
+
+    def _chart_type_specific_keys(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"grouping": self.grouping}
+        if self.gapDepth is not None:
+            d["gap_depth"] = self.gapDepth
+        v3d = {k: v for k, v in self.view_3d.items() if v is not None}
+        if v3d:
+            d["view_3d"] = v3d
+        if self.dLbls is not None:
+            from .series import _dlbls_to_snake
+            d["data_labels"] = _dlbls_to_snake(self.dLbls.to_dict())
+        return d
 
 
 __all__ = ["LineChart", "LineChart3D"]

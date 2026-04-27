@@ -95,6 +95,24 @@ class Reference:
         self.max_row = int(max_row) if max_row is not None else self.min_row
         self.range_string = range_string
 
+        # RFC-046 §10.11.3 — validate at construction time.
+        if self.min_col < 1:
+            raise ValueError(
+                f"Reference.min_col={self.min_col} must be >= 1 (1-based)"
+            )
+        if self.min_row < 1:
+            raise ValueError(
+                f"Reference.min_row={self.min_row} must be >= 1 (1-based)"
+            )
+        if self.min_col > self.max_col:
+            raise ValueError(
+                f"Reference.min_col={self.min_col} > max_col={self.max_col}"
+            )
+        if self.min_row > self.max_row:
+            raise ValueError(
+                f"Reference.min_row={self.min_row} > max_row={self.max_row}"
+            )
+
     @staticmethod
     def _parse_range_string(s: str) -> tuple[str, tuple[int, int, int, int]]:
         m = _RANGE_RE.match(s)

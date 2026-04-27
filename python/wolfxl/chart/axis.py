@@ -29,7 +29,12 @@ _VALID_TIME_UNIT = (None, "days", "months", "years")
 
 
 class ChartLines:
-    """`<c:majorGridlines>` / `<c:minorGridlines>` — optional spPr-only block."""
+    """`<c:majorGridlines>` / `<c:minorGridlines>` — optional spPr-only block.
+
+    Per RFC-046 §10.7.1: emits ``{graphical_properties}`` snake-case.
+    Empty ``{}`` means "default gridlines"; ``None`` at the parent
+    means "no gridlines".
+    """
 
     __slots__ = ("spPr",)
 
@@ -47,8 +52,12 @@ class ChartLines:
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {}
         if self.spPr is not None:
-            d["spPr"] = self.spPr.to_dict()
+            d["graphical_properties"] = self.spPr.to_dict()
         return d
+
+
+# Public alias matching RFC-046 §10.7.1 naming.
+Gridlines = ChartLines
 
 
 class Scaling:
@@ -253,36 +262,48 @@ class _BaseAxis:
         self.txPr = v
 
     def _base_to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "axId": self.axId,
-            "scaling": self.scaling.to_dict(),
-            "axPos": self.axPos,
-            "crossAx": self.crossAx,
-        }
-        if self.delete is not None:
-            d["delete"] = self.delete
-        if self.majorGridlines is not None:
-            d["majorGridlines"] = self.majorGridlines.to_dict()
-        if self.minorGridlines is not None:
-            d["minorGridlines"] = self.minorGridlines.to_dict()
-        if self.title is not None:
-            d["title"] = self.title.to_dict()
+        """Emit the snake_case shared keys per RFC-046 §10.7."""
+        scaling_d = self.scaling.to_dict() if self.scaling is not None else None
+        if scaling_d is not None:
+            # Map nested keys to snake_case per §10.7
+            scaling_d = {
+                "min": scaling_d.get("min"),
+                "max": scaling_d.get("max"),
+                "orientation": scaling_d.get("orientation"),
+                "log_base": scaling_d.get("logBase"),
+            }
+            if all(v is None for v in scaling_d.values()):
+                scaling_d = None
+
+        num_fmt_d: dict[str, Any] | None = None
         if self._numFmt is not None:
-            d["numFmt"] = self._numFmt.to_dict()
-        if self.majorTickMark is not None:
-            d["majorTickMark"] = self.majorTickMark
-        if self.minorTickMark is not None:
-            d["minorTickMark"] = self.minorTickMark
-        if self.tickLblPos is not None:
-            d["tickLblPos"] = self.tickLblPos
-        if self.spPr is not None:
-            d["spPr"] = self.spPr.to_dict()
-        if self.txPr is not None:
-            d["txPr"] = self.txPr.to_dict()
-        if self.crosses is not None:
-            d["crosses"] = self.crosses
-        if self.crossesAt is not None:
-            d["crossesAt"] = self.crossesAt
+            nf = self._numFmt.to_dict()
+            num_fmt_d = {
+                "format_code": nf.get("formatCode"),
+                "source_linked": nf.get("sourceLinked", False),
+            }
+
+        d: dict[str, Any] = {
+            "ax_id": self.axId,
+            "cross_ax": self.crossAx,
+            "scaling": scaling_d,
+            "delete": self.delete,
+            "axis_position": self.axPos,
+            "title": self.title.to_dict() if self.title is not None else None,
+            "number_format": num_fmt_d,
+            "major_tick_mark": self.majorTickMark,
+            "minor_tick_mark": self.minorTickMark,
+            "major_gridlines": (
+                self.majorGridlines.to_dict() if self.majorGridlines is not None else None
+            ),
+            "minor_gridlines": (
+                self.minorGridlines.to_dict() if self.minorGridlines is not None else None
+            ),
+            "graphical_properties": self.spPr.to_dict() if self.spPr is not None else None,
+            "tick_lbl_pos": self.tickLblPos,
+            "crosses": self.crosses,
+            "crosses_at": self.crossesAt,
+        }
         return d
 
 
@@ -312,15 +333,15 @@ class NumericAxis(_BaseAxis):
 
     def to_dict(self) -> dict[str, Any]:
         d = self._base_to_dict()
-        d["_kind"] = "valAx"
-        if self.crossBetween is not None:
-            d["crossBetween"] = self.crossBetween
+        d["ax_type"] = "val"
         if self.majorUnit is not None:
-            d["majorUnit"] = self.majorUnit
+            d["major_unit"] = self.majorUnit
         if self.minorUnit is not None:
-            d["minorUnit"] = self.minorUnit
+            d["minor_unit"] = self.minorUnit
+        if self.crossBetween is not None:
+            d["cross_between"] = self.crossBetween
         if self.dispUnits is not None:
-            d["dispUnits"] = self.dispUnits.to_dict()
+            d["disp_units"] = self.dispUnits.to_dict()
         return d
 
 
@@ -360,12 +381,18 @@ class TextAxis(_BaseAxis):
 
     def to_dict(self) -> dict[str, Any]:
         d = self._base_to_dict()
-        d["_kind"] = "catAx"
-        d["lblOffset"] = self.lblOffset
-        for slot in ("auto", "lblAlgn", "tickLblSkip", "tickMarkSkip", "noMultiLvlLbl"):
-            v = getattr(self, slot)
-            if v is not None:
-                d[slot] = v
+        d["ax_type"] = "cat"
+        d["lbl_offset"] = self.lblOffset
+        if self.lblAlgn is not None:
+            d["lbl_align"] = self.lblAlgn
+        if self.auto is not None:
+            d["auto"] = self.auto
+        if self.tickLblSkip is not None:
+            d["tick_lbl_skip"] = self.tickLblSkip
+        if self.tickMarkSkip is not None:
+            d["tick_mark_skip"] = self.tickMarkSkip
+        if self.noMultiLvlLbl is not None:
+            d["no_multi_lvl_lbl"] = self.noMultiLvlLbl
         return d
 
 
@@ -412,15 +439,21 @@ class DateAxis(TextAxis):
 
     def to_dict(self) -> dict[str, Any]:
         d = self._base_to_dict()
-        d["_kind"] = "dateAx"
+        d["ax_type"] = "date"
         if self.auto is not None:
             d["auto"] = self.auto
         if self.lblOffset is not None:
-            d["lblOffset"] = self.lblOffset
-        for slot in ("baseTimeUnit", "majorUnit", "majorTimeUnit", "minorUnit", "minorTimeUnit"):
-            v = getattr(self, slot)
-            if v is not None:
-                d[slot] = v
+            d["lbl_offset"] = self.lblOffset
+        if self.baseTimeUnit is not None:
+            d["base_time_unit"] = self.baseTimeUnit
+        if self.majorUnit is not None:
+            d["major_unit"] = self.majorUnit
+        if self.majorTimeUnit is not None:
+            d["major_time_unit"] = self.majorTimeUnit
+        if self.minorUnit is not None:
+            d["minor_unit"] = self.minorUnit
+        if self.minorTimeUnit is not None:
+            d["minor_time_unit"] = self.minorTimeUnit
         return d
 
 
@@ -446,11 +479,11 @@ class SeriesAxis(_BaseAxis):
 
     def to_dict(self) -> dict[str, Any]:
         d = self._base_to_dict()
-        d["_kind"] = "serAx"
+        d["ax_type"] = "ser"
         if self.tickLblSkip is not None:
-            d["tickLblSkip"] = self.tickLblSkip
+            d["tick_lbl_skip"] = self.tickLblSkip
         if self.tickMarkSkip is not None:
-            d["tickMarkSkip"] = self.tickMarkSkip
+            d["tick_mark_skip"] = self.tickMarkSkip
         return d
 
 
@@ -466,6 +499,7 @@ __all__ = [
     "DateAx",
     "DisplayUnitsLabel",
     "DisplayUnitsLabelList",
+    "Gridlines",
     "NumericAxis",
     "Scaling",
     "SeriesAxis",
