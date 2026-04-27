@@ -1,5 +1,94 @@
 # Changelog
 
+## wolfxl 1.5.0 (TBD) — encrypted writes + image construction + streaming-datetime fix
+
+User-facing release notes: `docs/release-notes-1.5.md`.
+
+Sprint Λ ("Lambda") closes the last two "construction" gaps that the
+1.0–1.4 arc deferred as out-of-scope: write-side OOXML encryption
+(Pod-α, RFC-044) and image construction (Pod-β, RFC-045). Pod-γ
+closes the streaming-reads datetime divergence Pod-β surfaced in 1.3.
+After 1.5 the openpyxl-parity surface is exhausted at the
+construction level too — only chart construction (v1.6.0 / Sprint Μ)
+and pivot table construction (v2.0.0 / Sprint Ν) remain.
+
+### Added
+
+- **RFC-044 — Write-side OOXML encryption** (Sprint Λ Pod-α,
+  <!-- TBD: SHA -->). `Workbook.save(path, password="...")` now
+  emits an Agile (AES-256 / SHA-512) encrypted file via
+  `msoffcrypto-tool`'s high-level `OOXMLFile.encrypt()`. Lifts the
+  `NotImplementedError` at `python/wolfxl/_workbook.py:1032`. Empty
+  string is a literal empty-key password (NOT equivalent to
+  `password=None`). Encryption pass is mode-agnostic — works for
+  both write-mode and modify-mode workbooks. The
+  `wolfxl[encrypted]` extra now covers writes too (was already on
+  reads from Sprint Ι Pod-γ).
+- **RFC-045 — Image construction** (Sprint Λ Pod-β,
+  <!-- TBD: SHA -->). `wolfxl.drawing.image.Image(...)` and
+  `Worksheet.add_image(...)` are real, replacing the `_make_stub` at
+  `python/wolfxl/drawing/image.py`. Supports PNG / JPEG / GIF / BMP;
+  one-cell, two-cell, and absolute anchors. Magic-byte format
+  sniffing + auto-detected width/height from format-specific
+  headers (PNG IHDR, JPEG SOF, GIF LSD, BMP DIB). Both write mode
+  (native writer emits drawingN.xml + media + rels through a new
+  images-emit pass) and modify mode (patcher's new Phase 2.5j
+  drains queued images and routes through `file_adds`). New anchor
+  helper classes under `wolfxl.drawing.spreadsheet_drawing` and
+  `wolfxl.drawing.xdr` to mirror openpyxl's module layout. Composes
+  cleanly with RFC-035 `copy_worksheet`.
+- **Streaming-datetime fix** (Sprint Λ Pod-γ, <!-- TBD: SHA -->).
+  `iter_rows(values_only=True)` and `StreamingCell.value` now return
+  `datetime` objects for date-formatted cells under
+  `read_only=True`. Closes the documented Phase 4 divergence in
+  `tests/parity/KNOWN_GAPS.md` lines 116-122. The streaming reader
+  consults the styles table for the cell's number format and
+  converts Excel serial floats inline.
+
+### Internal / infra
+
+- **`PartIdAllocator` extended for images** (Pod-β). The centralized
+  allocator at `crates/wolfxl-rels/src/part_id_allocator.rs`
+  (introduced in RFC-035 §5.2) gains `alloc_image(extension: &str)`
+  with per-extension counters, so multiple `add_image` calls in the
+  same save plus concurrent RFC-035 sheet copies all get
+  collision-free numbers.
+- **Phase 2.5j patcher hook** (Pod-β). New per-sheet phase in
+  `XlsxPatcher::do_save`, sequenced after Phase 2.5g comments /
+  2.5f tables and before 2.5c content-types aggregation. Drains
+  `queued_image_adds` per sheet, builds or extends drawing parts,
+  and emits new image bytes through `file_adds`.
+- **`_save_plaintext` bytes-output seam** (Pod-α). Symmetric with
+  Sprint Κ Pod-β's bytes-input plumbing — the existing writer /
+  patcher pipeline now accepts `Path | str | BinaryIO` for the
+  output target, enabling the encryption pass to buffer plaintext
+  bytes through `BytesIO` before writing the encrypted envelope.
+- **uv.lock updated** for `msoffcrypto-tool >= 5.4` write-side
+  surface (no new transitive deps; the read-side already pulled
+  the package in 1.3 Sprint Ι).
+
+### Documentation
+
+- `Plans/rfcs/044-encryption-writes.md` — Pod-α RFC.
+- `Plans/rfcs/045-image-construction.md` — Pod-β RFC.
+- `Plans/rfcs/INDEX.md` bumped 20 → 22 RFCs.
+- `tests/parity/KNOWN_GAPS.md` — "Writing encrypted xlsx" and
+  "Image construction" lifted from "Out of scope" to "Closed in
+  1.5"; chart construction explicitly scheduled for v1.6.0,
+  pivot table construction for v2.0.0; Pod-γ closes the streaming-
+  datetime divergence note.
+- `docs/release-notes-1.5.md` — user-facing 1.5 release notes
+  (Sprint Λ Pod-δ).
+
+### Test totals (post-1.5)
+
+- `cargo test --workspace --exclude wolfxl`: ~660 + N green
+  (Pod-β adds image-meta sniffer + dim-extraction tests; Pod-γ adds
+  styles-table-aware streaming-datetime tests).
+- `pytest tests/`: **1175+ → ~1235+ passed** (Pod-α/β/γ each add
+  cases; final count filled in on integrator merge).
+- `pytest tests/parity`: **140+ → ~165+ passed**.
+
 ## wolfxl 1.4.0 (2026-04-26) — `.xlsb` / `.xls` reads + bytes / BytesIO / file-like input
 
 User-facing release notes: `docs/release-notes/1.4.md`.

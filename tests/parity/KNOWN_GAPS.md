@@ -14,10 +14,12 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **Phase 3 — T2 Rich-text reads + writes** — closed in 1.3 (Sprint Ι Pod-α).
 - **Phase 4 — T2 Streaming reads** — closed in 1.3 (Sprint Ι Pod-β).
 - **Phase 5 — T1 `.xls` / `.xlsb`** — closed in 1.4 (Sprint Κ, RFC-043).
+- **1.5 — Encryption writes + image construction + streaming-datetime fix** — closed in 1.5 (Sprint Λ Pod-α/β/γ; RFC-044, RFC-045, plus Pod-γ's streaming-datetime correctness fix). Lifts "writing encrypted xlsx" and "image construction" from out-of-scope.
 
-The openpyxl-parity roadmap is exhausted. Only out-of-scope items remain
-(write-side encryption, OpenDocument, charts/pivots/images that SynthGL
-never relied on, etc.). See "Out of scope" below.
+The openpyxl-parity roadmap is exhausted. Remaining out-of-scope items
+are now scheduled into post-1.5 sprints — chart construction lands in
+v1.6.0 (Sprint Μ), pivot table construction lands in v2.0.0 (Sprint Ν).
+See "Out of scope" below.
 
 ## Gate
 
@@ -144,10 +146,61 @@ Phase 0's read-parity xfail list is now empty. Any newly discovered
 fixture-specific drift should be added to `test_read_parity.py::KNOWN_FIXTURE_GAPS`
 and documented here before the ratchet baseline is updated.
 
-## Out of scope (documented, not planned)
+## Out of scope (documented, planned)
 
-- Writing encrypted xlsx. Decision: T3 per plan — document in migration guide.
-- Pivot tables, charts, images, data validation — not in SynthGL's openpyxl surface.
+- ~~Writing encrypted xlsx~~ — ✅ SHIPPED in 1.5 (Sprint Λ Pod-α, RFC-044).
+  `Workbook.save(path, password="...")` now emits an Agile (AES-256)
+  encrypted file via `msoffcrypto-tool`'s high-level
+  `OOXMLFile.encrypt()`. Standard (AES-128) and XOR remain
+  decrypt-only in the upstream library and are deferred (no current
+  customer ask). Install via `pip install wolfxl[encrypted]`.
+- ~~Image construction~~ — ✅ SHIPPED in 1.5 (Sprint Λ Pod-β, RFC-045).
+  `wolfxl.drawing.image.Image(...)` and `Worksheet.add_image(...)`
+  are real, replacing the previous `_make_stub`. PNG / JPEG / GIF /
+  BMP supported; one-cell, two-cell, and absolute anchors. Both
+  write mode (native writer emits drawingN.xml + media + rels) and
+  modify mode (patcher routes new images through `file_adds`).
+- **Chart construction** — scheduled for v1.6.0 (Sprint Μ).
+  Modify-mode round-trip already preserves charts verbatim; what's
+  missing is the construction surface (`BarChart`, `LineChart`,
+  series + reference + axis builders). Tracked as the headline
+  v1.6.0 deliverable; full openpyxl `Reference` / `Series` /
+  `XxxChart` parity targeted.
+- **Pivot table construction** — scheduled for v2.0.0 (Sprint Ν).
+  Pivot caches and pivot tables are preserved on modify-mode
+  round-trip but cannot be added programmatically. Targeted as part
+  of the v2.0.0 public-launch milestone.
+- **OpenDocument (`.ods`)** — out of scope; not on the roadmap.
+  Detected and rejected by `_rust.classify_format` with a friendly
+  pointer.
+
+## Closed in 1.5 (Sprint Λ)
+
+- ✅ **Write-side OOXML encryption** (Sprint Λ Pod-α, RFC-044).
+  `Workbook.save(path, password="...")` now encrypts on the way out
+  via `msoffcrypto-tool`'s high-level `OOXMLFile.encrypt()`. Agile
+  (AES-256 / SHA-512) is the only algorithm shipped; Standard
+  (AES-128) and XOR remain decrypt-only in the upstream library.
+  Lifts the `NotImplementedError` at `python/wolfxl/_workbook.py:1032`.
+  `wolfxl[encrypted]` extra now covers writes too (was already on
+  reads from Sprint Ι Pod-γ). Closes the long-standing T3
+  out-of-scope row.
+- ✅ **Image construction** (Sprint Λ Pod-β, RFC-045).
+  `wolfxl.drawing.image.Image(...)` and `Worksheet.add_image(...)`
+  are real, replacing the `_make_stub` at
+  `python/wolfxl/drawing/image.py`. Supports PNG / JPEG / GIF / BMP;
+  one-cell, two-cell, and absolute anchors. Both write mode (native
+  writer emits drawingN.xml + media + rels) and modify mode
+  (patcher routes new images through `file_adds`). Targets full
+  openpyxl `Image()` parity.
+- ✅ **Streaming-datetime fix** (Sprint Λ Pod-γ). The Phase 4
+  divergence note in the streaming-reads section is closed —
+  `iter_rows(values_only=True)` now returns Python `datetime`
+  objects for date-formatted cells, matching openpyxl's
+  `read_only=True` contract. The streaming reader consults the
+  styles table for the cell's number format and converts Excel
+  serial floats inline. (See the streaming-reads divergence note
+  immediately above for the original behavior.)
 
 ## Closed in 1.3 (Sprint Ι Pod-α)
 
