@@ -102,6 +102,7 @@ def _build_xlsb_xls_wb(
     wb._pending_axis_shifts = []
     wb._pending_range_moves = []
     wb._pending_sheet_copies = []
+    wb._pending_chart_adds = {}
     wb.copy_options = CopyOptions()
     return wb
 
@@ -144,6 +145,15 @@ class Workbook:
         # call time so a later toggle of wb.copy_options doesn't
         # retroactively affect already-queued copies.
         self._pending_sheet_copies: list[tuple[str, str, bool]] = []
+        # Sprint Μ Pod-γ (RFC-046 §6) — pending modify-mode chart adds.
+        # Per-sheet list of ``(chart_xml: bytes, anchor_a1: str,
+        # width_emu: int, height_emu: int)`` tuples. Pod-β's
+        # ``Worksheet.add_chart`` populates this in modify mode (the
+        # writer-mode path stays on Pod-α's NativeWorkbook bindings).
+        # Drained by ``_flush_pending_charts_to_patcher`` in save().
+        self._pending_chart_adds: dict[
+            str, list[tuple[bytes, str, int, int]]
+        ] = {}
         # Sprint Θ Pod-C2 — workbook-level copy options.
         self.copy_options: CopyOptions = CopyOptions()
         # Sprint Ι Pod-β — streaming read flag (write mode never streams).
@@ -199,6 +209,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb._pending_chart_adds = {}
         wb.copy_options = CopyOptions()
         return wb
 
@@ -403,6 +414,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb._pending_chart_adds = {}
         wb.copy_options = CopyOptions()
         return wb
 
@@ -444,6 +456,7 @@ class Workbook:
         wb._pending_axis_shifts = []
         wb._pending_range_moves = []
         wb._pending_sheet_copies = []
+        wb._pending_chart_adds = {}
         wb.copy_options = CopyOptions()
         return wb
 
@@ -1098,6 +1111,12 @@ class Workbook:
             self._flush_pending_range_moves_to_patcher()
             # Sprint Λ Pod-β (RFC-045): drain pending images.
             self._flush_pending_images_to_patcher()
+            # Sprint Μ Pod-γ (RFC-046): drain pending chart adds.
+            # Sequenced AFTER images / axis shifts but BEFORE the
+            # final patcher.save() so chart cell-range formulas can
+            # compose with cell rewrites in the same save (the
+            # patcher's Phase 2.5l runs before Phase 3 cell patches).
+            self._flush_pending_charts_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -1257,6 +1276,90 @@ class Workbook:
                 payload = image_to_writer_payload(img)
                 patcher.queue_image_add(ws.title, payload)
             pending.clear()
+
+    def _flush_pending_charts_to_patcher(self) -> None:
+        """Sprint Μ Pod-γ (RFC-046 §6) — drain ``_pending_chart_adds``.
+
+        The dict is keyed by sheet title; each value is a list of
+        ``(chart_xml: bytes, anchor_a1: str, width_emu: int,
+        height_emu: int)`` tuples. Pod-β's ``Worksheet.add_chart``
+        in modify mode is expected to populate this dict by routing
+        the chart through Pod-α's ``emit_chart_xml`` and appending
+        the resulting bytes here.
+
+        The patcher's ``queue_chart_add`` accepts pre-serialized
+        bytes so this drain stays Pod-α/Pod-β-agnostic — it works
+        with any caller that follows the tuple shape.
+
+        Empty dict is a no-op; the queue dict is cleared after
+        draining so a subsequent ``save()`` doesn't double-emit.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        pending = getattr(self, "_pending_chart_adds", None)
+        if not pending:
+            return
+        for sheet_title, items in pending.items():
+            if not items:
+                continue
+            for chart_xml, anchor_a1, width_emu, height_emu in items:
+                patcher.queue_chart_add(
+                    sheet_title,
+                    chart_xml,
+                    anchor_a1,
+                    int(width_emu),
+                    int(height_emu),
+                )
+        pending.clear()
+
+    def add_chart_modify_mode(
+        self,
+        sheet_title: str,
+        chart_xml: bytes,
+        anchor_a1: str,
+        width_emu: int = 4_572_000,
+        height_emu: int = 2_743_200,
+    ) -> None:
+        """Sprint Μ Pod-γ (RFC-046 §6) — modify-mode chart add public API.
+
+        Stub-friendly entry point that the integrator can plumb
+        through Pod-α's ``emit_chart_xml(&Chart)`` once the writer
+        crate's chart serializer ships. Today the caller passes
+        pre-serialized chart XML bytes (e.g. from openpyxl's
+        ``ChartWriter`` or a hand-rolled minimal ``<chartSpace>``
+        for tests).
+
+        The chart is queued onto ``_pending_chart_adds`` and drained
+        by ``_flush_pending_charts_to_patcher`` at save time.
+
+        Args:
+            sheet_title: Target worksheet by title — must exist.
+            chart_xml: Already-serialized chart XML bytes.
+            anchor_a1: A1-style anchor cell, e.g. ``"D2"``.
+            width_emu: Chart width in EMU (defaults to ~12 cm).
+            height_emu: Chart height in EMU (defaults to ~7.25 cm).
+        """
+        if self._rust_patcher is None:
+            raise NotImplementedError(
+                "add_chart_modify_mode requires modify mode "
+                "(load_workbook(path, modify=True))"
+            )
+        if sheet_title not in self._sheets:
+            raise ValueError(
+                f"add_chart_modify_mode: no such sheet: {sheet_title!r}"
+            )
+        if not isinstance(chart_xml, (bytes, bytearray)):
+            raise TypeError(
+                "add_chart_modify_mode: chart_xml must be bytes "
+                f"(got {type(chart_xml).__name__})"
+            )
+        if not anchor_a1 or not isinstance(anchor_a1, str):
+            raise ValueError(
+                "add_chart_modify_mode: anchor_a1 must be a non-empty A1 string"
+            )
+        bucket = self._pending_chart_adds.setdefault(sheet_title, [])
+        bucket.append((bytes(chart_xml), anchor_a1, int(width_emu), int(height_emu)))
 
     def _flush_pending_comments_to_patcher(self) -> None:
         """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
