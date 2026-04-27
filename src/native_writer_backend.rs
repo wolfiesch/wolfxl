@@ -38,9 +38,9 @@ use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
     ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
     GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
-    MarkerSymbol, RadarStyle, Reference as ChartReference, ScatterStyle, Series, SeriesAxis,
-    SeriesTitle, TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind, ValueAxis,
-    View3D,
+    MarkerSymbol, PivotSource, RadarStyle, Reference as ChartReference, ScatterStyle, Series,
+    SeriesAxis, SeriesTitle, TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind,
+    ValueAxis, View3D,
 };
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
@@ -2021,7 +2021,90 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         chart.second_pie_size = Some(n);
     }
 
+    // Sprint Ν Pod-δ — RFC-049 §10. Optional `pivot_source` dict
+    // {"name": str, "fmt_id": int} or None. Backward-compat: chart
+    // dicts without this key parse identically to v1.7 output.
+    if let Some(v) = d.get_item("pivot_source")? {
+        if !v.is_none() {
+            let psd = v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err("pivot_source must be a dict or None")
+            })?;
+            chart.pivot_source = Some(parse_pivot_source(psd)?);
+        }
+    }
+
     Ok(chart)
+}
+
+/// RFC-049 §10.2 — parse + validate a chart `pivot_source` dict.
+/// Validation matches the Python-side ``ChartBase._validate_pivot_source``
+/// so write-mode (Python validation) and modify-mode (Rust validation)
+/// reject the same inputs.
+fn parse_pivot_source(d: &Bound<'_, PyDict>) -> PyResult<PivotSource> {
+    let name: String = d
+        .get_item("name")?
+        .ok_or_else(|| PyValueError::new_err("pivot_source missing 'name'"))?
+        .extract()
+        .map_err(|_| PyValueError::new_err("pivot_source.name must be a string"))?;
+    if name.is_empty() {
+        return Err(PyValueError::new_err(
+            "pivot_source.name must be a non-empty string",
+        ));
+    }
+    if !is_valid_pivot_source_name(&name) {
+        return Err(PyValueError::new_err(format!(
+            "pivot_source.name={name:?} does not match the OOXML \
+             pivot-source name regex"
+        )));
+    }
+    let fmt_id: u32 = match d.get_item("fmt_id")? {
+        Some(v) if !v.is_none() => v.extract().map_err(|_| {
+            PyValueError::new_err("pivot_source.fmt_id must be an int")
+        })?,
+        _ => 0,
+    };
+    if fmt_id > 65535 {
+        return Err(PyValueError::new_err(format!(
+            "pivot_source.fmt_id={fmt_id} must be in [0, 65535]"
+        )));
+    }
+    Ok(PivotSource { name, fmt_id })
+}
+
+/// RFC-049 §10.2 name regex implemented as a manual matcher (avoids a
+/// `regex` dep). Pattern:
+///     `^([A-Za-z_][A-Za-z0-9_]*!)?[A-Za-z_][A-Za-z0-9_ ]*$`
+fn is_valid_pivot_source_name(s: &str) -> bool {
+    fn is_ident_start(b: u8) -> bool {
+        b.is_ascii_alphabetic() || b == b'_'
+    }
+    fn is_ident_cont(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_'
+    }
+    fn is_table_cont(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_' || b == b' '
+    }
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    // Optional `[ident]!` sheet-name prefix.
+    let mut i = 0;
+    if let Some(bang) = bytes.iter().position(|&b| b == b'!') {
+        let prefix = &bytes[..bang];
+        if prefix.is_empty() || !is_ident_start(prefix[0]) {
+            return false;
+        }
+        if !prefix[1..].iter().copied().all(is_ident_cont) {
+            return false;
+        }
+        i = bang + 1;
+    }
+    let table = &bytes[i..];
+    if table.is_empty() || !is_ident_start(table[0]) {
+        return false;
+    }
+    table[1..].iter().copied().all(is_table_cont)
 }
 
 /// Sprint Μ-prime — parse `<c:view3D>` dict per RFC-046 §10.10.
