@@ -1,6 +1,6 @@
 # RFC-046: Chart construction — `wolfxl.chart.*` (replace `_make_stub`)
 
-Status: Shipped 1.6 (Sprint Μ Pods α/β/γ/δ; tag `v1.6.0`)
+Status: Shipped 1.6 (Sprint Μ Pods α/β/γ/δ; tag `v1.6.0`) + 1.6.1 (Sprint Μ-prime Pods α′/β′/γ′/δ′; tag `v1.6.1` — pending)
 Owner: Sprint Μ (Pods α / β / γ / δ / ε)
 Phase: 5 (1.6)
 Estimate: XL
@@ -1198,6 +1198,21 @@ Sprint Μ Pods landed in the following commits on
 | γ | `feat/sprint-mu-pod-gamma`   | `ec9d89a`..`7541d8e` | `143ddb3` |
 | δ | `feat/sprint-mu-pod-delta`   | `7046156`..`09ea0d2` | `c9cf9f3` |
 | ε | `feat/sprint-mu-pod-epsilon` | `703264a`..`0ea195b` | `691ed6c` |
+
+### Sprint Μ-prime (v1.6.1) Pods
+
+Sprint Μ-prime closes the v1.6.0 chart-dict contract gap (the 37
+xfailed advanced sub-feature tests in `tests/test_charts_write.py`)
+and ships the eight 3D / Stock / Surface / ProjectedPie chart
+families per §11. The integrator finalize commit fills the SHA
+placeholders below and tags `v1.6.1`.
+
+| Pod | Branch | Commits | Merge |
+|---|---|---|---|
+| α′ | `feat/sprint-mu-prime-pod-alpha` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| β′ | `feat/sprint-mu-prime-pod-beta`  | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| γ′ | `feat/sprint-mu-prime-pod-gamma` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
+| δ′ | `feat/sprint-mu-prime-pod-delta` | <!-- TBD: SHA --> | <!-- TBD: SHA --> |
 
 ## Acceptance
 
