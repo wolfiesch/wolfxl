@@ -727,6 +727,39 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         wolfxl_supported=True,
         tags=frozenset({"shipped-1.4"}),
     ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.Workbook.save (password kwarg)",
+        wolfxl_path="wolfxl.Workbook.save (password kwarg)",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-α: ``Workbook.save(path, password=...)`` "
+            "encrypts the freshly written xlsx via "
+            "``msoffcrypto.format.ooxml.OOXMLFile.encrypt`` (Agile / "
+            "AES-256, the modern Excel default). Standard (AES-128) "
+            "and XOR are explicitly out-of-scope on the write side — "
+            "msoffcrypto-tool's library only implements *decrypt* for "
+            "those algorithms; see ``docs/encryption.md``. Both "
+            "write-mode and modify-mode save paths are wrapped; the "
+            "plaintext is materialised to a tempfile then re-encoded "
+            "and atomic-renamed onto the user's target path. Empty "
+            "passwords raise ``ValueError``; the lazy ``msoffcrypto-tool`` "
+            "import surfaces ``ImportError(\"install with "
+            "pip install wolfxl[encrypted]\")``. Round-trip verified "
+            "wolfxl-write → wolfxl-read and wolfxl-write → "
+            "msoffcrypto-decrypt by ``tests/test_encrypted_writes.py`` "
+            "and ``tests/parity/test_encrypted_write_parity.py``. "
+            "The ``(password kwarg)`` annotation is a parametric "
+            "marker; the smoke test strips it via ``split(' ')[0]`` "
+            "and verifies the bare ``Workbook.save`` symbol resolves. "
+            "``wolfxl_supported=False`` initially per Sprint Ι "
+            "lesson 7 — the integrator flips it to ``True`` after the "
+            "ratchet ratifies the post-merge state."
+        ),
+        wolfxl_supported=False,
+        write_api=True,
+        tags=frozenset({"phase-encryption", "shipped-1.5"}),
+    ),
 )
 
 

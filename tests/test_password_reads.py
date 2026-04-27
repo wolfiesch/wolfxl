@@ -214,12 +214,24 @@ def test_password_with_modify_round_trip(
         wb2.close()
 
 
-def test_save_with_password_kwarg_raises_not_implemented() -> None:
-    """``wb.save(path, password=...)`` is reserved; today raises."""
+def test_save_with_password_kwarg_writes_encrypted_file(tmp_path) -> None:
+    """``wb.save(path, password=...)`` encrypts via msoffcrypto-tool.
+
+    Sprint Λ Pod-α (RFC-044) lifted the previous ``NotImplementedError``
+    and wired the kwarg through to ``wolfxl._encryption``. This test is
+    the regression pin — see ``tests/test_encrypted_writes.py`` for
+    full coverage.
+    """
+    pytest.importorskip("msoffcrypto")
+    import msoffcrypto
+
+    out = tmp_path / "encrypted.xlsx"
     wb = wolfxl.Workbook()
     try:
-        with pytest.raises(NotImplementedError) as excinfo:
-            wb.save("ignored.xlsx", password="x")
-        assert "encryption" in str(excinfo.value).lower()
+        wb.active.cell(row=1, column=1, value="encrypted")
+        wb.save(out, password="pw")
     finally:
         wb.close()
+    assert out.exists()
+    with open(out, "rb") as fp:
+        assert msoffcrypto.OfficeFile(fp).is_encrypted()
