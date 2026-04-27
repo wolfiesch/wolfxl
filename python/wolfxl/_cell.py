@@ -140,6 +140,13 @@ class Cell:
         value = self.value
         if hasattr(value, "year") and hasattr(value, "month"):
             return True
+        # Sprint Κ Pod-β: xlsb / xls workbooks don't expose number_format
+        # because the binary backends don't carry per-cell style records.
+        # Fall back to the value-type check above and return False rather
+        # than raise out of an introspection accessor.
+        wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format != "xlsx":
+            return False
         return is_date_format(self.number_format)
 
     @property
@@ -367,17 +374,39 @@ class Cell:
         self.value = val
 
     # ------------------------------------------------------------------
+    # Style guard (Sprint Κ Pod-β)
+    # ------------------------------------------------------------------
+
+    def _require_xlsx_for_style(self, attr: str) -> None:
+        """Raise NotImplementedError if the workbook isn't xlsx.
+
+        xlsb / xls workbooks load via calamine's binary readers which
+        don't expose the per-cell style records that ``cell.font``,
+        ``cell.fill`` etc. need.  Surface a clear error at the Python
+        layer so callers don't get a confusing Rust panic / empty
+        Font object.
+        """
+        wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format != "xlsx":
+            raise NotImplementedError(
+                f"cell.{attr} is xlsx-only; this workbook is .{wb_format}. "
+                "Use .xlsx for style-aware reads."
+            )
+
+    # ------------------------------------------------------------------
     # Font
     # ------------------------------------------------------------------
 
     @property
     def font(self) -> Font:
+        self._require_xlsx_for_style("font")
         if self._font is _UNSET:
             self._font = self._read_font()
         return self._font  # type: ignore[return-value]
 
     @font.setter
     def font(self, val: Font) -> None:
+        self._require_xlsx_for_style("font")
         self._font = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -388,12 +417,14 @@ class Cell:
 
     @property
     def fill(self) -> PatternFill:
+        self._require_xlsx_for_style("fill")
         if self._fill is _UNSET:
             self._fill = self._read_fill()
         return self._fill  # type: ignore[return-value]
 
     @fill.setter
     def fill(self, val: PatternFill) -> None:
+        self._require_xlsx_for_style("fill")
         self._fill = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -404,12 +435,14 @@ class Cell:
 
     @property
     def border(self) -> Border:
+        self._require_xlsx_for_style("border")
         if self._border is _UNSET:
             self._border = self._read_border()
         return self._border  # type: ignore[return-value]
 
     @border.setter
     def border(self, val: Border) -> None:
+        self._require_xlsx_for_style("border")
         self._border = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -420,12 +453,14 @@ class Cell:
 
     @property
     def alignment(self) -> Alignment:
+        self._require_xlsx_for_style("alignment")
         if self._alignment is _UNSET:
             self._alignment = self._read_alignment()
         return self._alignment  # type: ignore[return-value]
 
     @alignment.setter
     def alignment(self, val: Alignment) -> None:
+        self._require_xlsx_for_style("alignment")
         self._alignment = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -436,12 +471,14 @@ class Cell:
 
     @property
     def number_format(self) -> str | None:
+        self._require_xlsx_for_style("number_format")
         if self._number_format is _UNSET:
             self._number_format = self._read_number_format()
         return self._number_format  # type: ignore[return-value]
 
     @number_format.setter
     def number_format(self, val: str | None) -> None:
+        self._require_xlsx_for_style("number_format")
         self._number_format = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
