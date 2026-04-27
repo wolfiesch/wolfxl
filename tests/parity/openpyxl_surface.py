@@ -1096,6 +1096,87 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         write_api=True,
         tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
     ),
+    # ------------------------------------------------------------------
+    # Sprint Ν — pivot tables + pivot-chart linkage (RFC-047/048/049).
+    # All flipped to ``wolfxl_supported=True`` by the integrator after
+    # Pods α / β / γ / δ / ε land.  Tag: ``shipped-2.0``.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.pivot.cache.CacheDefinition",
+        wolfxl_path="wolfxl.pivot.PivotCache",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-β (RFC-047): ``PivotCache(source=Reference)`` "
+            "constructs a pivot cache.  ``_materialize(ws)`` walks the "
+            "source range with per-column type inference and populates "
+            "the typed records.  Registered via "
+            "``Workbook.add_pivot_cache(cache)`` which allocates the "
+            "0-based ``cacheId``.  Emits ``xl/pivotCache/"
+            "pivotCacheDefinition{N}.xml`` + ``pivotCacheRecords{N}"
+            ".xml`` via Phase 2.5m of the patcher."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.pivot.table.TableDefinition",
+        wolfxl_path="wolfxl.pivot.PivotTable",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-β (RFC-048): ``PivotTable(cache, location, "
+            "rows=[...], cols=[...], data=[(field, agg)])`` constructs "
+            "a pivot table with bare-string axis specs and 11 supported "
+            "aggregators (sum / count / average / max / min / product / "
+            "countNums / stdDev / stdDevp / var / varp).  "
+            "``_compute_layout()`` enumerates ``<rowItems>``/"
+            "``<colItems>`` and pre-aggregates values per data field "
+            "— Excel renders without requiring refresh.  Registered "
+            "via ``Worksheet.add_pivot_table(pt)``; emitted as "
+            "``xl/pivotTables/pivotTable{N}.xml`` via Phase 2.5m."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_pivot",
+        wolfxl_path="wolfxl.Worksheet.add_pivot_table",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-γ (RFC-048 §10): ``add_pivot_table(pt)`` "
+            "queues a pivot table for emit.  Validates that "
+            "``pt.cache._cache_id`` is set (requires prior "
+            "``Workbook.add_pivot_cache(cache)`` call).  Drained from "
+            "``Workbook.save()`` AFTER charts (Phase 2.5l) and BEFORE "
+            "cell patches (Phase 3) by Phase 2.5m of the patcher."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.pivot.PivotSource",
+        wolfxl_path="wolfxl.chart._chart.ChartBase.pivot_source",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-δ (RFC-049): ``chart.pivot_source = pt`` "
+            "(or ``= (name, fmt_id)`` or ``= None``) links the chart "
+            "to a pivot table.  Emitter writes ``<c:pivotSource>"
+            "<c:name>...</c:name><c:fmtId val=.../></c:pivotSource>`` "
+            "as the first child of ``<c:chart>`` and injects "
+            "per-series ``<c:fmtId val=.../>`` mandatorily after "
+            "``<c:order>`` — Excel rejects pivot charts whose series "
+            "lack ``<c:fmtId>``."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
 )
 
 

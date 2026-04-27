@@ -1,6 +1,6 @@
 # wolfxl 2.0.0 — full openpyxl replacement, pivot tables included
 
-_Date: <!-- TBD -->_
+_Date: 2026-04-27_
 
 WolfXL 2.0.0 closes the last construction-side gap on the
 openpyxl-parity roadmap: **pivot tables, pivot caches, and
@@ -240,12 +240,11 @@ This RFC has no code; it's the launch-day envelope:
 
 | Pod | Branch | Deliverable | Merge SHA |
 |---|---|---|---|
-| α | `feat/sprint-nu-pod-alpha` | Rust `wolfxl-pivot` crate; `pivot_cache_definition_xml` / `pivot_cache_records_xml` / `pivot_table_xml` deterministic emit; PyO3-free unit tests | <!-- TBD: SHA --> |
-| β | `feat/sprint-nu-pod-beta` | Python `wolfxl.pivot.*` module; `to_rust_dict()` + `to_rust_records_dict()`; layout pre-compute (`<rowItems>` / `<colItems>` aggregation); 11 aggregator functions; construction-time validation | <!-- TBD: SHA --> |
-| γ | `feat/sprint-nu-pod-gamma` | Patcher Phase 2.5m (queued pivot adds, `PartIdAllocator`-backed numbering, workbook + sheet rels splice); PyO3 bindings (`serialize_pivot_cache_dict`, `serialize_pivot_records_dict`, `serialize_pivot_table_dict`); RFC-035 deep-clone extension | <!-- TBD: SHA --> |
-| δ | `feat/sprint-nu-pod-delta` | `chart.pivot_source = pt` on 16 chart families; `<c:pivotSource>` block emit + per-series `<c:fmtId>` | <!-- TBD: SHA --> |
-| ε | `feat/sprint-nu-pod-epsilon` | This release-notes file; README rewrite; migration guide; KNOWN_GAPS close-out; launch posts; CHANGELOG finalize | <!-- TBD: SHA --> |
-| Integrator | `feat/native-writer` | Pre-dispatch §10 contract specs; sequential α → β → γ → δ → ε merge; reconciliation pass; `2.0.0` version bump; `v2.0.0` tag | <!-- TBD: SHA --> |
+| α + β | landed inline on `feat/native-writer` | Rust `wolfxl-pivot` crate; `pivot_cache_definition_xml` / `pivot_cache_records_xml` / `pivot_table_xml` deterministic emit + Python `wolfxl.pivot.*` module with layout pre-compute and 11 aggregator functions | `38234b0` |
+| γ | `feat/sprint-nu-pod-gamma` → merge `407f1b7` | Patcher Phase 2.5m (queued pivot adds, `PartIdAllocator`-backed numbering, workbook + sheet rels splice); PyO3 bindings (`serialize_pivot_cache_dict`, `serialize_pivot_records_dict`, `serialize_pivot_table_dict`); RFC-035 deep-clone extension | `ba9db64`, `658e296`, `7f4081e`, `d21edb5`, `4b5e16f` |
+| δ | `feat/sprint-nu-pod-delta` → merge `ac19b60` | `chart.pivot_source = pt` on every chart family; `<c:pivotSource>` block emit + mandatory per-series `<c:fmtId>` | `2fd0de0`, `501f12b`, `2ade7b5`, `04c93bc` |
+| ε | `feat/sprint-nu-pod-epsilon` → merge `231182d` | This release-notes file; README rewrite; migration guide; KNOWN_GAPS close-out; launch posts; CHANGELOG finalize | `7d3d82a`, `f2df471`, `0f099c7`, `329b9ec`, `14f0d7a`, `e5762be`, `79f5b2e` |
+| Integrator | `feat/native-writer` | Pre-dispatch §10 contract specs; sequential α → β → γ → δ → ε merge; reconciliation pass; `2.0.0` version bump; new openpyxl-surface ratchet entries; `v2.0.0` tag | this commit |
 
 Sprint Ν used the parallel-pod orchestration that landed v1.6 /
 v1.6.1 / v1.7. Pre-dispatch §10 contracts (RFC-047 §10, RFC-048

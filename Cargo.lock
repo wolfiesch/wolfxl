@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "wolfxl"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "calamine-styles",
  "chrono",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "wolfxl-pivot"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "quick-xml 0.37.5",
  "wolfxl-rels",

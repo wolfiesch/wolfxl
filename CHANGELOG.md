@@ -1,6 +1,6 @@
 # Changelog
 
-## wolfxl 2.0.0 (<!-- TBD -->) — full openpyxl replacement, pivot tables included
+## wolfxl 2.0.0 (2026-04-27) — full openpyxl replacement, pivot tables included
 
 User-facing release notes: `docs/release-notes-2.0.md`.
 

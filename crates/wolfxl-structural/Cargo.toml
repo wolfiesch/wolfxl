@@ -10,7 +10,7 @@ description = "Structural worksheet operations (insert/delete rows + cols) — p
 wolfxl-formula = { path = "../wolfxl-formula", version = "0.1" }
 wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
 # Sprint Ν Pod-γ (RFC-035 §10) — pivot deep-clone helpers.
-wolfxl-pivot = { path = "../wolfxl-pivot", version = "0.1" }
+wolfxl-pivot = { path = "../wolfxl-pivot", version = "2.0.0" }
 quick-xml.workspace = true
 
 [dev-dependencies]

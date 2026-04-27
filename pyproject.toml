@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "wolfxl"
-version = "1.7.0"
+version = "2.0.0"
 description = "Fast, openpyxl-compatible Excel I/O with Rust backend and built-in formula engine (67 functions, financial, date, time, text, lookup, conditional stats)"
 readme = "README.md"
 requires-python = ">=3.9"

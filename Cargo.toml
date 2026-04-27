@@ -20,7 +20,7 @@ serde_json = "1"
 
 [package]
 name = "wolfxl"
-version = "1.7.0"
+version = "2.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -44,7 +44,7 @@ wolfxl-rels = { path = "crates/wolfxl-rels", version = "0.1" }
 wolfxl-merger = { path = "crates/wolfxl-merger", version = "0.1" }
 wolfxl-structural = { path = "crates/wolfxl-structural", version = "0.1" }
 wolfxl-classify = { path = "crates/wolfxl-classify", version = "0.1" }
-wolfxl-pivot = { path = "crates/wolfxl-pivot", version = "0.1" }
+wolfxl-pivot = { path = "crates/wolfxl-pivot", version = "2.0.0" }
 
 [build-dependencies]
 pyo3-build-config = "0.28"

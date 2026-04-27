@@ -1,7 +1,7 @@
 # Compatibility Matrix
 
 > **Reference**: WolfXL **v2.0.0** (Sprint Ν).
-> **Status as of**: <!-- TBD --> (v2.0.0 launch date).
+> **Status as of**: 2026-04-27 (v2.0.0 launch date).
 
 Status legend:
 
