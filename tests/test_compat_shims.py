@@ -110,8 +110,9 @@ STUB_CONSTRUCTORS: list[tuple[str, str]] = [
     ("wolfxl.chart", "PieChart"),
     ("wolfxl.chart", "Reference"),
     ("wolfxl.chart", "Series"),
-    ("wolfxl.drawing", "Image"),
-    ("wolfxl.drawing.image", "Image"),
+    # Sprint Λ Pod-β (RFC-045) promoted: ``wolfxl.drawing.image.Image``
+    # is now a real class — exercised in tests/test_images_write.py
+    # and tests/test_images_modify.py.
     ("wolfxl.worksheet.filters", "AutoFilter"),
     # T1 PR3 promoted: DefinedName now real dataclass.
     ("wolfxl.pivot", "PivotTable"),
