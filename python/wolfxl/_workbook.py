@@ -1023,17 +1023,29 @@ class Workbook:
     ) -> None:
         """Flush all pending writes and save to disk.
 
-        ``password=`` is reserved for a future write-side encryption
-        feature; in this release it raises ``NotImplementedError``.
-        Saving a workbook that was opened with ``password=`` produces a
-        plaintext output (T3 out-of-scope per Sprint Ι Pod-γ).
+        When ``password`` is supplied, the freshly written plaintext
+        xlsx is re-encoded as an OOXML-encrypted blob (Agile / AES-256,
+        the modern Excel default) via :mod:`wolfxl._encryption` before
+        being placed at ``filename``. Both the write-mode (``Workbook()``)
+        and modify-mode (``open(..., modify=True)``) save paths are
+        wrapped — encryption is applied to the final byte stream
+        regardless of which Rust backend produced it.
+
+        ``password`` accepts ``str`` or ``bytes`` (UTF-8 decoded). An
+        empty string / empty bytes raises :class:`ValueError`. The
+        ``msoffcrypto-tool`` dep is loaded lazily; install via
+        ``pip install wolfxl[encrypted]``. See ``docs/encryption.md``
+        for the supported-algorithm matrix.
         """
-        if password is not None:
-            raise NotImplementedError(
-                "write-side encryption is not yet supported; "
-                "see docs/encryption.md (tracked as T3 out-of-scope)"
-            )
         filename = str(filename)
+        if password is not None:
+            # Validate password early so we don't write a plaintext
+            # tempfile that we'd then have to throw away.
+            from wolfxl._encryption import _coerce_password
+
+            _coerce_password(password)  # raises ValueError on empty
+            self._save_encrypted(filename, password)
+            return
         if self._rust_patcher is not None:
             # Modify mode — workbook-level metadata writes don't have a
             # patcher path yet (T1.5 follow-up). Surface the limitation
@@ -1093,6 +1105,47 @@ class Workbook:
             self._rust_writer.save(filename)
         else:
             raise RuntimeError("save requires write or modify mode")
+
+    def _save_encrypted(
+        self,
+        filename: str,
+        password: str | bytes,
+    ) -> None:
+        """Save plaintext to a tempfile then re-route through encryption.
+
+        Sprint Λ Pod-α: write-side encryption stays Python-side (same
+        as Sprint Ι Pod-γ's read path); the Rust writer/patcher is
+        unchanged. We materialise the unencrypted xlsx via the normal
+        save path, slurp it back as bytes, hand it to
+        :func:`wolfxl._encryption.encrypt_xlsx_to_path` for the
+        in-place encryption + atomic rename onto ``filename``.
+
+        The plaintext tempfile is always cleaned up — including on
+        error paths — so we never leak unencrypted user data on disk.
+        """
+        import tempfile
+
+        from wolfxl._encryption import encrypt_xlsx_to_path
+
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            prefix=".wolfxl-plain-",
+            suffix=".xlsx",
+        )
+        os.close(tmp_fd)
+        try:
+            # Re-enter save() in plaintext mode by calling the original
+            # path. Doing the call without ``password=`` keeps the
+            # branch logic simple and ensures both writer and patcher
+            # paths are exercised identically.
+            self.save(tmp_name)
+            with open(tmp_name, "rb") as fp:
+                plaintext_bytes = fp.read()
+            encrypt_xlsx_to_path(plaintext_bytes, password, filename)
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
 
     def _flush_pending_hyperlinks_to_patcher(self) -> None:
         """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
