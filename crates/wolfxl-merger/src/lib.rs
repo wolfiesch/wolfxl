@@ -79,6 +79,10 @@ const REL_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/re
 /// malformed output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SheetBlock {
+    /// `<sheetViews>…</sheetViews>` — slot 3 (RFC-055 §3.1).
+    SheetViews(Vec<u8>),
+    /// `<sheetProtection .../>` — slot 8 (RFC-055 §3.1).
+    SheetProtection(Vec<u8>),
     /// `<mergeCells count="…">…</mergeCells>` — slot 15 in §18.3.1.99.
     MergeCells(Vec<u8>),
     /// `<conditionalFormatting sqref="…">…</conditionalFormatting>` (one per
@@ -96,6 +100,12 @@ pub enum SheetBlock {
     DataValidations(Vec<u8>),
     /// `<hyperlinks>…</hyperlinks>` — slot 19.
     Hyperlinks(Vec<u8>),
+    /// `<pageMargins .../>` — slot 21 (RFC-055 §3.1).
+    PageMargins(Vec<u8>),
+    /// `<pageSetup .../>` — slot 22 (RFC-055 §3.1).
+    PageSetup(Vec<u8>),
+    /// `<headerFooter>…</headerFooter>` — slot 23 (RFC-055 §3.1).
+    HeaderFooter(Vec<u8>),
     /// `<legacyDrawing r:id="…"/>` — slot 31. Empty-element form is canonical.
     LegacyDrawing(Vec<u8>),
     /// `<tableParts count="…">…</tableParts>` — slot 37.
@@ -107,10 +117,15 @@ impl SheetBlock {
     /// the block when not already present in the source.
     pub fn ecma_position(&self) -> u32 {
         match self {
+            SheetBlock::SheetViews(_) => 3,
+            SheetBlock::SheetProtection(_) => 8,
             SheetBlock::MergeCells(_) => 15,
             SheetBlock::ConditionalFormatting(_) => 17,
             SheetBlock::DataValidations(_) => 18,
             SheetBlock::Hyperlinks(_) => 19,
+            SheetBlock::PageMargins(_) => 21,
+            SheetBlock::PageSetup(_) => 22,
+            SheetBlock::HeaderFooter(_) => 23,
             SheetBlock::LegacyDrawing(_) => 31,
             SheetBlock::TableParts(_) => 37,
         }
@@ -120,10 +135,15 @@ impl SheetBlock {
     /// blocks for replacement (matched against `BytesStart::local_name()`).
     pub fn root_local_name(&self) -> &'static [u8] {
         match self {
+            SheetBlock::SheetViews(_) => b"sheetViews",
+            SheetBlock::SheetProtection(_) => b"sheetProtection",
             SheetBlock::MergeCells(_) => b"mergeCells",
             SheetBlock::ConditionalFormatting(_) => b"conditionalFormatting",
             SheetBlock::DataValidations(_) => b"dataValidations",
             SheetBlock::Hyperlinks(_) => b"hyperlinks",
+            SheetBlock::PageMargins(_) => b"pageMargins",
+            SheetBlock::PageSetup(_) => b"pageSetup",
+            SheetBlock::HeaderFooter(_) => b"headerFooter",
             SheetBlock::LegacyDrawing(_) => b"legacyDrawing",
             SheetBlock::TableParts(_) => b"tableParts",
         }
@@ -133,10 +153,15 @@ impl SheetBlock {
     /// chosen insertion point.
     pub fn bytes(&self) -> &[u8] {
         match self {
-            SheetBlock::MergeCells(b)
+            SheetBlock::SheetViews(b)
+            | SheetBlock::SheetProtection(b)
+            | SheetBlock::MergeCells(b)
             | SheetBlock::ConditionalFormatting(b)
             | SheetBlock::DataValidations(b)
             | SheetBlock::Hyperlinks(b)
+            | SheetBlock::PageMargins(b)
+            | SheetBlock::PageSetup(b)
+            | SheetBlock::HeaderFooter(b)
             | SheetBlock::LegacyDrawing(b)
             | SheetBlock::TableParts(b) => b,
         }
@@ -574,6 +599,8 @@ mod tests {
 
     #[test]
     fn ecma_position_for_each_variant() {
+        assert_eq!(SheetBlock::SheetViews(vec![]).ecma_position(), 3);
+        assert_eq!(SheetBlock::SheetProtection(vec![]).ecma_position(), 8);
         assert_eq!(SheetBlock::MergeCells(vec![]).ecma_position(), 15);
         assert_eq!(
             SheetBlock::ConditionalFormatting(vec![]).ecma_position(),
@@ -581,12 +608,20 @@ mod tests {
         );
         assert_eq!(SheetBlock::DataValidations(vec![]).ecma_position(), 18);
         assert_eq!(SheetBlock::Hyperlinks(vec![]).ecma_position(), 19);
+        assert_eq!(SheetBlock::PageMargins(vec![]).ecma_position(), 21);
+        assert_eq!(SheetBlock::PageSetup(vec![]).ecma_position(), 22);
+        assert_eq!(SheetBlock::HeaderFooter(vec![]).ecma_position(), 23);
         assert_eq!(SheetBlock::LegacyDrawing(vec![]).ecma_position(), 31);
         assert_eq!(SheetBlock::TableParts(vec![]).ecma_position(), 37);
     }
 
     #[test]
     fn root_local_name_for_each_variant() {
+        assert_eq!(SheetBlock::SheetViews(vec![]).root_local_name(), b"sheetViews");
+        assert_eq!(
+            SheetBlock::SheetProtection(vec![]).root_local_name(),
+            b"sheetProtection"
+        );
         assert_eq!(SheetBlock::MergeCells(vec![]).root_local_name(), b"mergeCells");
         assert_eq!(
             SheetBlock::ConditionalFormatting(vec![]).root_local_name(),
@@ -597,6 +632,9 @@ mod tests {
             b"dataValidations"
         );
         assert_eq!(SheetBlock::Hyperlinks(vec![]).root_local_name(), b"hyperlinks");
+        assert_eq!(SheetBlock::PageMargins(vec![]).root_local_name(), b"pageMargins");
+        assert_eq!(SheetBlock::PageSetup(vec![]).root_local_name(), b"pageSetup");
+        assert_eq!(SheetBlock::HeaderFooter(vec![]).root_local_name(), b"headerFooter");
         assert_eq!(
             SheetBlock::LegacyDrawing(vec![]).root_local_name(),
             b"legacyDrawing"
@@ -626,14 +664,19 @@ mod tests {
 
     #[test]
     fn ecma_order_lookup_finds_each_known_local_name() {
-        // For each of the 6 SheetBlock variants, the lookup returns the
+        // For each SheetBlock variant, the lookup returns the
         // same ordinal as `ecma_position` — i.e. the block helpers and the
         // ordering table cannot drift independently.
         let variants = [
+            SheetBlock::SheetViews(vec![]),
+            SheetBlock::SheetProtection(vec![]),
             SheetBlock::MergeCells(vec![]),
             SheetBlock::ConditionalFormatting(vec![]),
             SheetBlock::DataValidations(vec![]),
             SheetBlock::Hyperlinks(vec![]),
+            SheetBlock::PageMargins(vec![]),
+            SheetBlock::PageSetup(vec![]),
+            SheetBlock::HeaderFooter(vec![]),
             SheetBlock::LegacyDrawing(vec![]),
             SheetBlock::TableParts(vec![]),
         ];
