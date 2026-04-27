@@ -105,11 +105,10 @@ STUB_CONSTRUCTORS: list[tuple[str, str]] = [
     ("wolfxl.styles.differential", "DifferentialStyle"),
     # T1 PR1 promoted: Comment, Hyperlink now real dataclasses.
     # T1 PR2 promoted: DataValidation, Table, TableStyleInfo, *Rule now real.
-    ("wolfxl.chart", "BarChart"),
-    ("wolfxl.chart", "LineChart"),
-    ("wolfxl.chart", "PieChart"),
-    ("wolfxl.chart", "Reference"),
-    ("wolfxl.chart", "Series"),
+    # Sprint Μ Pod-β (RFC-046) promoted: ``BarChart``, ``LineChart``,
+    # ``PieChart``, ``DoughnutChart``, ``AreaChart``, ``ScatterChart``,
+    # ``BubbleChart``, ``RadarChart``, ``Reference``, and ``Series`` are
+    # now real chart classes — exercised in tests/test_charts_*.py.
     # Sprint Λ Pod-β (RFC-045) promoted: ``wolfxl.drawing.image.Image``
     # is now a real class — exercised in tests/test_images_write.py
     # and tests/test_images_modify.py.

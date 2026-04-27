@@ -1098,6 +1098,8 @@ class Workbook:
             self._flush_pending_range_moves_to_patcher()
             # Sprint Λ Pod-β (RFC-045): drain pending images.
             self._flush_pending_images_to_patcher()
+            # Sprint Μ Pod-β (RFC-046): drain pending charts.
+            self._flush_pending_charts_to_patcher()
             self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
@@ -1256,6 +1258,45 @@ class Workbook:
             for img in pending:
                 payload = image_to_writer_payload(img)
                 patcher.queue_image_add(ws.title, payload)
+            pending.clear()
+
+    def _flush_pending_charts_to_patcher(self) -> None:
+        """Sprint Μ Pod-β (RFC-046) — drain pending charts into the patcher.
+
+        Modify-mode counterpart to the writer-side flush in
+        ``Worksheet._flush_compat_properties``. Each queued ``ChartBase``
+        is serialised via :meth:`ChartBase.to_rust_dict` and routed to
+        ``XlsxPatcher.queue_chart_add`` (Pod-γ owns the patcher binding).
+
+        If the patcher doesn't expose ``queue_chart_add`` (because Pod-γ
+        hasn't merged yet), we warn rather than raise so existing chart-free
+        modify-mode flows don't regress.
+        """
+        patcher = self._rust_patcher
+        if patcher is None:
+            return
+        if not hasattr(patcher, "queue_chart_add"):
+            import warnings
+
+            for ws in self._sheets.values():
+                if ws._pending_charts:  # noqa: SLF001
+                    warnings.warn(
+                        "wolfxl.chart: modify-mode chart flush requires "
+                        "Pod-γ's queue_chart_add patcher binding (not yet "
+                        f"available). Dropping {len(ws._pending_charts)} "  # noqa: SLF001
+                        f"chart(s) on sheet {ws.title!r}.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    ws._pending_charts.clear()  # noqa: SLF001
+            return
+        for ws in self._sheets.values():
+            pending = ws._pending_charts  # noqa: SLF001
+            if not pending:
+                continue
+            for chart in pending:
+                payload = chart.to_rust_dict()
+                patcher.queue_chart_add(ws.title, payload, chart._anchor)  # noqa: SLF001
             pending.clear()
 
     def _flush_pending_comments_to_patcher(self) -> None:

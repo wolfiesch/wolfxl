@@ -311,6 +311,8 @@ class Worksheet:
         "_pending_rich_text",
         # Sprint Λ Pod-β (RFC-045) — pending image queue.
         "_pending_images",
+        # Sprint Μ Pod-β (RFC-046) — pending chart queue.
+        "_pending_charts",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -353,6 +355,10 @@ class Worksheet:
         # sheet via ``add_image``. Drained at save time into the Rust
         # writer (write mode) or the patcher (modify mode).
         self._pending_images: list[Any] = []
+        # Sprint Μ Pod-β (RFC-046) — pending charts queued via ``add_chart``.
+        # Drained at save time into ``_rust_writer.add_chart_native`` (write
+        # mode) or the patcher (modify mode, queued by Pod-γ's plumbing).
+        self._pending_charts: list[Any] = []
 
     @property
     def title(self) -> str:
@@ -1361,12 +1367,46 @@ class Worksheet:
 
     @property
     def _charts(self) -> list[Any]:
-        """Empty list - matches openpyxl's default for sheets without charts.
+        """Sprint Μ Pod-β (RFC-046) — list of charts queued via ``add_chart``.
 
-        Some code paths (e.g. ``len(ws._charts)``) read this even on
-        sheets that weren't constructed from a chart-bearing file.
+        Mirrors ``openpyxl.worksheet.worksheet.Worksheet._charts``. Returns
+        the live pending list so mutations propagate to the next save and
+        ``len(ws._charts)`` works in user code that mirrors openpyxl's
+        read-side behaviour.
         """
-        return []
+        return self._pending_charts
+
+    def add_chart(self, chart: Any, anchor: Any = None) -> None:
+        """Sprint Μ Pod-β (RFC-046) — attach a chart to this worksheet.
+
+        Mirrors :meth:`openpyxl.worksheet.worksheet.Worksheet.add_chart`.
+
+        Parameters
+        ----------
+        chart : wolfxl.chart.ChartBase subclass
+            The chart to embed (BarChart / LineChart / PieChart / …).
+        anchor : str | None
+            Where to anchor the chart. Accepts an A1-style cell ref
+            (``"D2"``) or ``None`` (defaults to ``"E15"`` to match
+            openpyxl's :class:`ChartBase` default).
+
+        The chart is queued until ``Workbook.save()``, at which point
+        the writer (write mode) or patcher (modify mode) emits the
+        chart/drawing/rels parts.
+        """
+        from wolfxl.chart._chart import ChartBase as _ChartBase
+
+        if not isinstance(chart, _ChartBase):
+            raise TypeError(
+                f"add_chart expected wolfxl.chart.ChartBase, got "
+                f"{type(chart).__name__}"
+            )
+
+        if anchor is None:
+            anchor = chart.anchor if chart.anchor is not None else "E15"
+
+        chart._anchor = anchor  # noqa: SLF001
+        self._pending_charts.append(chart)
 
     @property
     def _images(self) -> list[Any]:
@@ -2271,6 +2311,28 @@ class Worksheet:
                 payload = image_to_writer_payload(img)
                 writer.add_image(sheet, payload)
             self._pending_images.clear()
+
+        # Sprint Μ Pod-β (RFC-046) — drain pending charts.
+        # Pod-α ships ``add_chart_native`` on the Rust writer; until that
+        # binding lands the queue is silently dropped (with a warning) so
+        # existing tests that don't construct charts don't regress.
+        if self._pending_charts:
+            if hasattr(writer, "add_chart_native"):
+                for chart in self._pending_charts:
+                    payload = chart.to_rust_dict()
+                    writer.add_chart_native(sheet, payload, chart._anchor)  # noqa: SLF001
+            else:
+                import warnings
+
+                warnings.warn(
+                    "wolfxl.chart: native chart write requires Pod-α's "
+                    "add_chart_native binding (not yet available). "
+                    f"Dropping {len(self._pending_charts)} chart(s) on "
+                    f"sheet {sheet!r}.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            self._pending_charts.clear()
 
     # ------------------------------------------------------------------
     # wolfxl-core classifier bridge (delegates to the single Rust
