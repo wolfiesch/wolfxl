@@ -80,9 +80,12 @@ class Format:
                 f"Format.action must be one of {_VALID_FORMAT_ACTIONS}, "
                 f"got {self.action!r}"
             )
-        if self.dxf_id < 0:
+        # ``-1`` is a sentinel meaning "patcher will allocate a
+        # workbook-scoped dxf id from the attached payload at flush
+        # time". Any other negative value is an error.
+        if self.dxf_id < -1:
             raise ValueError(
-                f"Format.dxf_id must be ≥ 0, got {self.dxf_id}"
+                f"Format.dxf_id must be ≥ -1 (sentinel), got {self.dxf_id}"
             )
 
     def to_rust_dict(self) -> dict:
