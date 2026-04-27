@@ -17,6 +17,7 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **1.5 — Encryption writes + image construction + streaming-datetime fix** — closed in 1.5 (Sprint Λ Pod-α/β/γ; RFC-044, RFC-045, plus Pod-γ's streaming-datetime correctness fix). Lifts "writing encrypted xlsx" and "image construction" from out-of-scope.
 - **1.6 — Chart construction (8 types, full depth) + RFC-035 chart-deep-clone + modify-mode `add_chart`** — closed in 1.6 (Sprint Μ Pod-α/β/γ/δ; RFC-046). Lifts "chart construction" from out-of-scope for the 2D type families (Bar / Line / Pie / Doughnut / Area / Scatter / Bubble / Radar). 3D / Stock / Surface / ProjectedPie deferred to v1.6.1; pivot-chart linkage deferred to v2.0.0 (Sprint Ν).
 - **1.6.1 — Chart-dict contract reconciliation + 3D / Stock / Surface / ProjectedPie families + modify-mode high-level `add_chart`** — closed in 1.6.1 (Sprint Μ-prime Pod-α′/β′/γ′/δ′; RFC-046 §10/§11). Lifts the v1.6.0 chart-dict gap (37 xfailed advanced sub-feature tests in `tests/test_charts_write.py` flip to pass) and ships the eight deferred 3D / Stock / Surface / ProjectedPie chart classes as real implementations. Also replaces the warn-and-drop fallback in `Workbook._flush_pending_charts_to_patcher` with a real dict→bytes bridge via the new `serialize_chart_dict` PyO3 export.
+- **1.7 — Public-launch slice (no pivot tables)** — closed in 1.7 (Sprint Ξ Pod-α/β/γ/δ; RFC-050/051/052/053). Lifts v1.6.1's lone `xfail` (`chart.title = RichText(...)`) and ships `Worksheet.remove_chart` / `replace_chart`. Bumps `pyproject.toml` and `Cargo.toml` to `1.7.0` (was drifted at `0.5.0`); promotes PyPI classifier to `Production/Stable`. Refreshes `docs/migration/` and `docs/performance/` with v1.7 status. Materialises `Plans/launch-posts.md`. Documents RFC-046 §13 legacy chart-dict key sunset (deprecated in 1.7; removed in 2.0).
 
 The openpyxl-parity roadmap is exhausted at the read level (1.0–1.4)
 AND at the construction level for encryption / images / charts /
@@ -240,6 +241,35 @@ The four families flagged here in 1.6.0 (3D variants, Stock,
 Surface 2D + 3D, ProjectedPieChart) shipped in 1.6.1 as real
 classes. See "Closed in 1.6.1 (Sprint Μ-prime)" immediately
 below for the receipts.
+
+## Closed in 1.7 (Sprint Ξ)
+
+- ✅ **`Worksheet.remove_chart(chart)` + `Worksheet.replace_chart(old, new)`** (Sprint Ξ Pod-α, RFC-046 §14). New on
+  `Worksheet`; mirror openpyxl's `ws._charts.remove(...)` and the swap-in-place idiom.
+  Pending-list scope only in v1.7; modify-mode removal of charts that
+  survive from the source workbook is a v1.8 follow-up.
+  Verified by `tests/test_charts_remove.py` (7 tests).
+- ✅ **`chart.title = RichText(...)` accepted** (Sprint Ξ Pod-α,
+  RFC-046 §15). `TitleDescriptor.__set__` extended to accept
+  wolfxl-typed and openpyxl-typed `RichText`. Coerces openpyxl's
+  `ColorChoice`-typed `solidFill` to the hex string the Rust
+  emitter expects. Closes the lone v1.6.1 `xfail` in
+  `tests/test_charts_write.py::test_line_chart_title_rich_text`.
+- ✅ **Version drift** (Sprint Ξ Pod-α). `pyproject.toml` and
+  `Cargo.toml` synced from `0.5.0` to `1.7.0`. `wolfxl.__version__`
+  now reports `1.7.0` (re-exported from `CARGO_PKG_VERSION` via
+  `src/lib.rs:41`). PyPI classifier promoted to
+  `Development Status :: 5 - Production/Stable`.
+- ✅ **Docs refresh — `docs/migration/` and `docs/performance/`**
+  (Sprint Ξ Pod-β + Pod-γ, RFC-051 + RFC-052). Compatibility
+  Matrix and openpyxl-migration guide rewritten for v1.7;
+  benchmark-results refreshed with read / write / modify-mode /
+  chart-construction speedup tables on a 1k / 10k / 100k row
+  matrix.
+- ✅ **Public launch posts** (Sprint Ξ Pod-δ, RFC-053).
+  `Plans/launch-posts.md` materialised with HN, Twitter/X,
+  r/Python, dev.to, GitHub Discussions drafts + pre/post-launch
+  checklist.
 
 ## Closed in 1.6.1 (Sprint Μ-prime)
 

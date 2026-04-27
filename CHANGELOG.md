@@ -1,5 +1,125 @@
 # Changelog
 
+## wolfxl 1.7.0 (2026-04-27) — public-launch slice (no pivot tables)
+
+User-facing release notes: `docs/release-notes-1.7.md`.
+
+Sprint Ξ ("Xi") is the openpyxl-replacement launch slice. The
+construction-side surface is now exhaustively shipped EXCEPT pivot
+tables (preserved on round-trip but not yet constructible — that's
+v2.0.0 / Sprint Ν). v1.7 also burns down the small chart-stack
+debt that v1.6.1 left behind, refreshes the migration and
+performance docs to v1.7 status, and materialises the public
+launch posts.
+
+### Added
+
+- **`Worksheet.remove_chart(chart)`** (RFC-046 §14, Sprint Ξ).
+  Removes a previously-added chart from the pending list. Raises
+  `ValueError` for unknown charts. v1.7 scope is the not-yet-flushed
+  case; removal of charts that survive from the source workbook in
+  modify mode is a v1.8 follow-up.
+- **`Worksheet.replace_chart(old, new)`** (RFC-046 §14, Sprint Ξ).
+  Convenience method that swaps `old` for `new` in place,
+  preserving the anchor and the list position. Useful for templates
+  where a new dataset gets a redesigned chart at the same
+  location.
+- **`chart.title = RichText(...)` support** (RFC-046 §15, Sprint Ξ).
+  ``TitleDescriptor`` now accepts openpyxl-style `RichText`
+  objects (was previously str-or-Title only). Closes the lone
+  `xfail` in `tests/test_charts_write.py::test_line_chart_title_rich_text`.
+  Coerces openpyxl `ColorChoice`-typed `solidFill` (e.g.
+  `CharacterProperties(solidFill=ColorChoice(srgbClr="FF0000"))`)
+  to the hex string the Rust emitter expects.
+- **Production / Stable PyPI classifier**
+  (`Development Status :: 5 - Production/Stable`). Was Beta. The
+  v1.7 surface is the v2.0 launch baseline minus pivots.
+- **`docs/migration/openpyxl-migration.md`** — full rewrite for
+  v1.7. Walkthroughs for charts (16 families), images, encryption,
+  streaming reads, structural ops, modify-mode mutations, rich text.
+- **`docs/migration/compatibility-matrix.md`** — full rewrite for
+  v1.7. Exhaustive table of every openpyxl symbol with v1.7 status,
+  plus ecosystem comparison vs openpyxl / XlsxWriter / pandas /
+  fastexcel / python-calamine / FastXLSX / rustpy-xlsxwriter.
+- **`docs/performance/benchmark-results.md`** — refreshed for v1.7
+  with read / write / modify-mode / chart-construction speedup
+  tables (1k / 10k / 100k row matrix).
+- **`docs/performance/methodology.md`** — extended with
+  construction-side benchmark guidance (chart cache rebuild
+  semantics, image media reuse on copy_worksheet).
+- **`docs/performance/run-on-your-files.md`** — extended with
+  chart-construction microbenchmark + copy_worksheet harness.
+- **`Plans/launch-posts.md`** materialised — drafts for HN,
+  Twitter/X (8-tweet thread), r/Python, dev.to long-form, and
+  GitHub Discussions announcement post. Pre/post-launch checklist
+  included.
+- **`Plans/sprint-xi.md`** — Sprint Ξ tracking doc + acceptance
+  criteria + lessons applied.
+
+### Changed
+
+- **`pyproject.toml` version → `1.7.0`** (was `0.5.0` — the
+  package version had drifted from the git tag since v0.5).
+  `Cargo.toml [package].version` also bumped to `1.7.0`; the
+  Rust side is the source of truth via
+  `src/lib.rs:41 m.add("__version__", env!("CARGO_PKG_VERSION"))?`,
+  so `wolfxl.__version__` now reports `1.7.0` correctly.
+- **`tests/test_charts_write.py::test_line_chart_title_rich_text`**
+  — `pytest.mark.xfail(strict=True)` removed; the test now passes
+  on the green path (Sprint Ξ Pod-α).
+- **RFC-046 §13 — legacy chart-dict key sunset**. The Rust
+  parser's accept-also for the legacy
+  `fill_color` / `line_color` / `line_dash` / `line_width_emu`
+  keys is deprecated in v1.7 (documentation-only; no runtime
+  warning) and will be removed in v2.0.0. The Python emitter
+  has used the §10 form (`solid_fill`, nested `ln: {solid_fill,
+  w_emu, prst_dash}`) exclusively since v1.6.1.
+
+### Internal / infra
+
+- `python/wolfxl/_worksheet.py:1452-1538` — new
+  `remove_chart` / `replace_chart` methods, ~85 LOC, no Rust
+  changes.
+- `python/wolfxl/chart/title.py` — `TitleDescriptor.__set__`
+  extended to accept `RichText` (wolfxl) and openpyxl-typed
+  `RichText` via duck typing; new `_coerce_openpyxl_richtext`
+  helper rebuilds wolfxl `RichText` from openpyxl
+  paragraphs/runs/character properties.
+- `python/wolfxl/chart/title.py::Title.to_dict` — coerces
+  openpyxl `ColorChoice`-typed `solidFill` to the hex string the
+  Rust emitter expects.
+- `tests/test_charts_remove.py` — 7 new tests covering the
+  remove/replace happy paths + error cases.
+
+### Tests
+
+- `pytest tests/test_charts_write.py tests/test_charts_remove.py
+  tests/test_charts_3d.py` → 82 passed, 1 skipped (was 75 / 1).
+- `pytest tests/test_charts_write.py` → 45 passed, 1 skipped, 0
+  xfailed (was 44 passed, 1 skipped, 1 xfailed in v1.6.1).
+- The chart-parity ratchet test failures in `tests/parity/
+  test_charts_parity.py` (19 `test_*_xml_matches_openpyxl`)
+  predate v1.7 and are tracked separately as a v1.7.x follow-up
+  (the wolfxl-emitted XML and the openpyxl-emitted XML are both
+  Excel-valid; the structural-diff harness flags non-semantic
+  whitespace / attribute-ordering drift).
+
+### Migration
+
+- `pip install --upgrade wolfxl` → `wolfxl.__version__ == "1.7.0"`.
+- No API breaking changes from v1.6.1.
+- New methods: `Worksheet.remove_chart`, `Worksheet.replace_chart`.
+- New title accept: `chart.title = RichText(...)`.
+
+### Roadmap
+
+- **v1.8** — `Worksheet.delete_chart_persisted` (modify-mode
+  removal of charts that survive from the source workbook), other
+  small follow-ups.
+- **v2.0.0 (Sprint Ν)** — pivot tables + pivot caches + pivot
+  charts + public-launch-with-pivots. Closes the only remaining
+  construction-side row in `KNOWN_GAPS.md`.
+
 ## wolfxl 1.6.1 (TBD) — chart contract reconciliation + 3D / Stock / Surface / ProjectedPie
 
 User-facing release notes: `docs/release-notes-1.6.1.md`.

@@ -35,7 +35,11 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 043 | Read-side parity — `.xlsb` / `.xls` reads (runtime-dispatched calamine backends) | Shipped | 5 (1.4) | L | calamine-styles (xlsx); upstream calamine (xlsb / xls) | (closes Phase 5 — KNOWN_GAPS empty post-1.4) |
 | 044 | Encryption — write-side OOXML encryption (`Workbook.save(password=...)`) | Shipped | 5 (1.5) | M | 042 (msoffcrypto-tool optional dep), 013 | (T3 closure for encrypted xlsx writes) |
 | 045 | Image construction — `wolfxl.drawing.image.Image` (replace stub) | Shipped | 5 (1.5) | L | 010, 013 | (T3 closure for image construction; chart-construction prerequisites) |
-| 046 | Chart construction — `wolfxl.chart.*` (replace `_make_stub`) | Shipped | 5 (1.6) | XL | 010, 013, 035, 045 | (v1.6.1 3D / Stock / Surface / ProjectedPie; v2.0.0 pivot charts) |
+| 046 | Chart construction — `wolfxl.chart.*` (replace `_make_stub`) | Shipped | 5 (1.6 + 1.6.1 + 1.7) | XL | 010, 013, 035, 045 | (v2.0.0 pivot charts) |
+| 050 | `Worksheet.remove_chart` / `replace_chart` + RichText title (Sprint Ξ) | Shipped | 5 (1.7) | M | 046 | — |
+| 051 | docs/migration overhaul for v1.7 (Sprint Ξ) | Shipped | 5 (1.7) | M | 046 | — |
+| 052 | docs/performance refresh for v1.7 (Sprint Ξ) | Shipped | 5 (1.7) | M | — | — |
+| 053 | Public launch posts + materialise `Plans/launch-posts.md` (Sprint Ξ) | Shipped | 5 (1.7) | S | — | — |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
@@ -217,3 +221,22 @@ skips); 5 workspace cargo crates green;
    `KNOWN_GAPS.md` cleanup, release notes.
 
 The dependency DAG above is the source of truth for scheduling.
+
+### Sprint Ξ ("Xi") — v1.7 launch slice (2026-04-27)
+
+Public-launch slice (no pivot tables). Burns down v1.6.1 chart-stack
+debt + refreshes migration / performance docs + materialises launch
+posts. See `Plans/sprint-xi.md`.
+
+Four pods landed inline on `feat/native-writer` (small-LOC slice;
+no worktree fanout needed):
+
+| RFC | Pod | Outcome |
+|---|---|---|
+| 050 — `Worksheet.remove_chart` / `replace_chart` + RichText title | α | Shipped |
+| 051 — docs/migration overhaul | β | Shipped |
+| 052 — docs/performance refresh | γ | Shipped |
+| 053 — `Plans/launch-posts.md` drafts | δ | Shipped |
+
+Sprint Ξ is closed; tag `v1.7.0` cut. Next: **Sprint Ν** (v2.0.0
+pivot tables + pivot charts + public-launch-with-pivots).

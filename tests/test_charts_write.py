@@ -194,13 +194,6 @@ def test_bar_chart_title_string(tmp_path: Path) -> None:
     assert "Q4 Sales" in xml
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "v1.6.1 known gap: chart.title= does not yet accept "
-        "openpyxl.chart.text.RichText. Tracked for v1.6.2 / Pod-β follow-up."
-    ),
-)
 def test_line_chart_title_rich_text(tmp_path: Path) -> None:
     """Rich-text title with bold + colored runs round-trips."""
     openpyxl = pytest.importorskip("openpyxl")

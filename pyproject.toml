@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "wolfxl"
-version = "0.5.0"
+version = "1.7.0"
 description = "Fast, openpyxl-compatible Excel I/O with Rust backend and built-in formula engine (67 functions, financial, date, time, text, lookup, conditional stats)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Wolfgang Schoenberger" }]
 keywords = ["excel", "xlsx", "openpyxl", "rust", "performance", "spreadsheet", "formula", "calc", "financial"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "License :: OSI Approved :: MIT License",

@@ -1450,6 +1450,91 @@ class Worksheet:
                 f"anchor={anchor!r}: row {row_idx} out of Excel range [1, 1048576]"
             )
 
+    def remove_chart(self, chart: Any) -> None:
+        """Sprint Ξ (RFC-050) — remove a previously-added chart.
+
+        Mirrors the openpyxl idiom ``ws._charts.remove(chart)``.
+
+        Parameters
+        ----------
+        chart : wolfxl.chart.ChartBase subclass
+            A chart instance previously passed to :meth:`add_chart`
+            on this worksheet. Identity is matched by Python ``is``,
+            not equality, so the caller must pass the same object.
+
+        Raises
+        ------
+        ValueError
+            If *chart* was never added to this worksheet (or has
+            already been removed).
+
+        Notes
+        -----
+        In **write mode** this removes the chart from the
+        ``_pending_charts`` list; the writer simply does not emit
+        the chart part on save.
+
+        In **modify mode** (where the chart was already persisted on
+        disk) this method currently only handles the
+        not-yet-flushed case (chart is still in
+        ``_pending_charts``); removing a chart that survives from
+        the source workbook is tracked as a v1.8 follow-up
+        (``Worksheet.delete_chart_persisted`` — needs the patcher to
+        emit a chart-removal queue alongside ``queue_chart_add``).
+        """
+        try:
+            self._pending_charts.remove(chart)
+        except ValueError:
+            raise ValueError(
+                "chart was not added to this worksheet via add_chart() "
+                "(or has already been removed). Removal of charts that "
+                "survive from the source workbook is a v1.8 follow-up; "
+                "see RFC-050 §6."
+            ) from None
+
+    def replace_chart(self, old: Any, new: Any) -> None:
+        """Sprint Ξ (RFC-050) — replace one chart with another in place.
+
+        Convenience for ``ws.remove_chart(old); ws.add_chart(new, old._anchor)``
+        that preserves the anchor and the position in the chart list
+        (so deterministic ID allocation matches the pre-replace layout).
+
+        Parameters
+        ----------
+        old : wolfxl.chart.ChartBase subclass
+            The chart to replace. Must have been added via
+            :meth:`add_chart`.
+        new : wolfxl.chart.ChartBase subclass
+            The replacement. Inherits *old*'s anchor unless
+            ``new._anchor`` was already set explicitly.
+
+        Raises
+        ------
+        ValueError
+            If *old* was never added to this worksheet.
+        TypeError
+            If *new* is not a :class:`ChartBase` instance.
+        """
+        from wolfxl.chart._chart import ChartBase as _ChartBase
+        if not isinstance(new, _ChartBase):
+            raise TypeError(
+                f"replace_chart expected wolfxl.chart.ChartBase for new, got "
+                f"{type(new).__name__}"
+            )
+        try:
+            idx = self._pending_charts.index(old)
+        except ValueError:
+            raise ValueError(
+                "old chart was not added to this worksheet via add_chart()"
+            ) from None
+        anchor = new._anchor if new._anchor is not None else old._anchor  # noqa: SLF001
+        if anchor is None:
+            anchor = "E15"
+        if isinstance(anchor, str):
+            self._validate_a1_anchor(anchor)
+        new._anchor = anchor  # noqa: SLF001
+        self._pending_charts[idx] = new
+
     @property
     def _images(self) -> list[Any]:
         """Sprint Λ Pod-β (RFC-045) — list of images queued via ``add_image``.

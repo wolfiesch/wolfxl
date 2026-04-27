@@ -1222,3 +1222,91 @@ placeholders below and tags `v1.6.1`.
   tests/test_charts_modify.py tests/parity/test_charts_parity.py
   tests/test_copy_worksheet_chart_deep_clone.py` GREEN
 - Date: 2026-04-26
+
+## §13 — Legacy chart-dict key sunset (Sprint Ξ / v1.7.0)
+
+Sprint Μ-prime's integrator finalize taught us that the
+`parse_graphical_properties` Rust parser carries a backwards-compat
+shim:
+
+* §10.9 form (canonical, emitted by Pod-β′'s `to_rust_dict`):
+  `solid_fill` (top-level), nested `ln: {solid_fill, w_emu, prst_dash, no_fill}`.
+* Legacy form (no longer emitted by any wolfxl Python code as of
+  v1.6.1): flat `fill_color`, `line_color`, `line_dash`,
+  `line_width_emu`.
+
+The Python emitter is fully migrated; the legacy form survives only
+as a Rust-side accept-also for any out-of-tree caller that builds a
+chart dict by hand and passes it to the (private)
+`wolfxl._rust.serialize_chart_dict` helper.
+
+### Sunset timeline
+
+| Version | Status |
+|---|---|
+| v1.6.1 | Both forms accepted; §10 form wins on conflict (current). |
+| v1.7.0 (Sprint Ξ) | Both forms still accepted. Documentation-only deprecation: this section + a note in `docs/release-notes-1.7.md`. No runtime warning (avoids spurious noise for any caller outside our test suite). |
+| v2.0.0 (Sprint Ν) | **Removal**. Legacy keys ignored; only §10.9 form supported. The `serialize_chart_dict` helper documents §10 as the authoritative shape. |
+
+### Rationale
+
+- Internal-only API. `serialize_chart_dict` is exported under
+  `wolfxl._rust` with the deliberate underscore — it's not
+  documented as a stable surface, and no public release notes
+  reference it.
+- The compat path is small (a few `or(py_opt_str(d, "fill_color")?)`
+  calls in `src/native_writer_backend.rs::parse_graphical_properties`
+  around lines 2614-2654), but every legacy branch is a place where
+  Pod-α′'s and Pod-β′'s contracts could re-diverge.
+- v1.7 announces sunset in the release notes; v2.0 removes the shim
+  in the same commit that adds the pivot-table chart parser path,
+  so there's no separate v1.x churn.
+
+### What "removal" means in v2.0
+
+```rust
+// before (v1.7)
+let fill_color = py_opt_str(d, "solid_fill")?
+    .or(py_opt_str(d, "fill_color")?);  // legacy; remove in v2.0
+// after (v2.0)
+let fill_color = py_opt_str(d, "solid_fill")?;
+```
+
+…repeated for `line_color` / `line_width_emu` / `line_dash` and the
+nested `ln` block.
+
+## §14 — `Worksheet.remove_chart` / `replace_chart` (Sprint Ξ / v1.7.0)
+
+Closing a v1.6.1 release-notes deferral. Two new methods on
+`wolfxl._worksheet.Worksheet`:
+
+```python
+ws.remove_chart(chart)            # mirrors openpyxl ws._charts.remove(chart)
+ws.replace_chart(old, new)        # convenience: keeps anchor + list position
+```
+
+**Scope (v1.7)**: removes / replaces a chart that was added via
+`add_chart` and has not yet been flushed to disk. Removal of charts
+that survive from the source workbook (modify mode, open
+`load_workbook(path, modify=True)`) is a v1.8 follow-up — needs the
+patcher to expose a `queue_chart_remove` alongside the existing
+`queue_chart_add`.
+
+Implementation is small (~50 LOC in `python/wolfxl/_worksheet.py`,
+no Rust changes). Test coverage: see `tests/test_charts_remove.py`
+(Sprint Ξ).
+
+## §15 — `chart.title = RichText(...)` (Sprint Ξ / v1.7.0)
+
+v1.6.1 had a single `xfail` in `tests/test_charts_write.py`:
+``test_line_chart_title_rich_text``. Cause: ``TitleDescriptor``
+accepted only ``str`` and ``Title``; a user assigning a
+``RichText(bodyPr=..., p=[...])`` directly (openpyxl-style) raised
+``TypeError``.
+
+Fix: ``TitleDescriptor.__set__`` now also accepts ``RichText``,
+wrapping it in ``Title(tx=Text(rich=value))`` exactly as openpyxl's
+own descriptor does. ``Title.to_dict()`` additionally coerces
+openpyxl's ``ColorChoice``-typed ``solidFill`` (e.g.
+``CharacterProperties(solidFill=ColorChoice(srgbClr="FF0000"))``)
+into the hex string the Rust emitter expects.

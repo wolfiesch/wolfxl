@@ -113,7 +113,23 @@ class Title:
                         if r.rPr.i is not None:
                             font["italic"] = r.rPr.i
                         if r.rPr.solidFill is not None:
-                            font["color"] = r.rPr.solidFill
+                            # Sprint Ξ: coerce openpyxl ColorChoice
+                            # (e.g. ``ColorChoice(srgbClr="FF0000")``) to
+                            # the hex string the Rust emitter wants.
+                            sf = r.rPr.solidFill
+                            if isinstance(sf, str):
+                                font["color"] = sf
+                            else:
+                                # Try common openpyxl shapes:
+                                # ColorChoice.srgbClr → "FF0000" (string)
+                                # ColorChoice.srgbClr → RGBPercent / RGBHex
+                                #   (object with .val attribute)
+                                rgb = getattr(sf, "srgbClr", None)
+                                if rgb is None and hasattr(sf, "value"):
+                                    rgb = sf.value
+                                if rgb is not None and not isinstance(rgb, str):
+                                    rgb = getattr(rgb, "val", None) or str(rgb)
+                                font["color"] = rgb if rgb is not None else str(sf)
                         if font:
                             all_plain = False
                     runs.append({"text": r.t or "", "font": font or None})
@@ -178,9 +194,79 @@ class TitleDescriptor:
             return
         if isinstance(value, str):
             value = title_maker(value)
+        elif isinstance(value, RichText):
+            # Sprint Ξ (RFC-050): wolfxl-typed RichText.
+            value = Title(tx=Text(rich=value))
+        elif not isinstance(value, Title) and (
+            type(value).__name__ == "RichText"
+            and hasattr(value, "p")
+        ):
+            # Sprint Ξ (RFC-050): openpyxl-typed RichText (or any
+            # duck-typed object with a ``.p`` attribute holding a
+            # paragraph list). Convert to wolfxl's RichText so the
+            # downstream ``to_dict`` path picks up the runs.
+            value = Title(tx=Text(rich=_coerce_openpyxl_richtext(value)))
         if not isinstance(value, Title):
-            raise TypeError(f"Title must be str or Title, got {type(value).__name__}")
+            raise TypeError(
+                f"Title must be str, Title, or RichText, got {type(value).__name__}"
+            )
         setattr(instance, self._attr, value)
+
+
+def _coerce_openpyxl_richtext(value: Any) -> RichText:
+    """Convert an openpyxl ``chart.text.RichText`` into wolfxl's.
+
+    Sprint Ξ helper. Reads ``value.bodyPr`` and ``value.p`` (a list of
+    openpyxl ``Paragraph`` objects) and rebuilds a wolfxl
+    :class:`RichText`. Run-level properties (``Paragraph.r[i].rPr``)
+    are duck-typed; only the attributes wolfxl's ``CharacterProperties``
+    understands are copied (``b``, ``i``, ``u``, ``sz``, ``solidFill``,
+    ``latin``, ``baseline``, ``strike``, ``lang``).
+
+    Falls back to a plain wrapping if ``value`` doesn't expose ``.p``.
+    """
+    from .text import (
+        CharacterProperties,
+        Paragraph as _WPara,
+        ParagraphProperties as _WParaProps,
+        RegularTextRun as _WRun,
+        RichTextProperties as _WBodyPr,
+    )
+
+    paras_in = getattr(value, "p", None) or []
+    paras_out: list[_WPara] = []
+    for p in paras_in:
+        runs_in = getattr(p, "r", None) or []
+        runs_out: list[_WRun] = []
+        for r in runs_in:
+            t_val = getattr(r, "t", "") or ""
+            rpr_in = getattr(r, "rPr", None)
+            rpr_out: CharacterProperties | None = None
+            if rpr_in is not None:
+                rpr_out = CharacterProperties(
+                    lang=getattr(rpr_in, "lang", None),
+                    sz=getattr(rpr_in, "sz", None),
+                    b=getattr(rpr_in, "b", None),
+                    i=getattr(rpr_in, "i", None),
+                    u=getattr(rpr_in, "u", None),
+                    strike=getattr(rpr_in, "strike", None),
+                    solidFill=getattr(rpr_in, "solidFill", None),
+                    latin=getattr(rpr_in, "latin", None),
+                    baseline=getattr(rpr_in, "baseline", None),
+                )
+            runs_out.append(_WRun(rPr=rpr_out, t=t_val))
+        ppr_in = getattr(p, "pPr", None)
+        ppr_out: _WParaProps | None = None
+        if ppr_in is not None:
+            ppr_out = _WParaProps(algn=getattr(ppr_in, "algn", None))
+        paras_out.append(_WPara(pPr=ppr_out, r=runs_out))
+    body = getattr(value, "bodyPr", None)
+    body_out = _WBodyPr() if body is None else _WBodyPr(
+        rot=getattr(body, "rot", None),
+        anchor=getattr(body, "anchor", None),
+        wrap=getattr(body, "wrap", None),
+    )
+    return RichText(bodyPr=body_out, p=paras_out)
 
 
 __all__ = ["Title", "TitleDescriptor", "title_maker"]
