@@ -18,6 +18,14 @@
 
 use super::image::ImageAnchor;
 
+/// Re-export of [`wolfxl_pivot::PivotSource`] so Pod-δ's chart model
+/// owns a stable name for downstream callers without forcing them to
+/// reach into the pivot crate. The chart crate cannot define this type
+/// itself (Pod-α already shipped the canonical struct in
+/// `wolfxl-pivot`); it only borrows it as an `Option<PivotSource>` on
+/// [`Chart`]. RFC-049 §10.
+pub use wolfxl_pivot::PivotSource;
+
 /// Top-level chart kind. Each variant maps to one OOXML plot-area
 /// element name (e.g. `<barChart>`, `<lineChart>`).
 ///
@@ -961,6 +969,12 @@ pub struct Chart {
 
     /// Sprint Μ-prime — `<c:secondPieSize val="…"/>` for OfPie (5..200).
     pub second_pie_size: Option<u32>,
+
+    /// Sprint Ν Pod-δ — RFC-049 §10. When `Some`, the chart is a
+    /// pivot-chart and the emitter writes a `<c:pivotSource>` block
+    /// inside `<c:chart>` (between the `<c:chart>` open and the title)
+    /// **and** injects a `<c:fmtId val="0"/>` element on every series.
+    pub pivot_source: Option<PivotSource>,
 }
 
 impl Chart {
@@ -1040,6 +1054,7 @@ impl Chart {
             },
             split_pos: None,
             second_pie_size: None,
+            pivot_source: None,
         }
     }
 
