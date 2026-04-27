@@ -44,6 +44,13 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 048 | Pivot tables — `wolfxl.pivot.PivotTable` + layout + RFC-035 deep-clone (Sprint Ν) | Approved | 5 (2.0) | XL | 010, 013, 035, 046, 047 | 049, 054 |
 | 049 | Pivot-chart linkage — `chart.pivot_source = pt` (Sprint Ν) | Approved | 5 (2.0) | M | 046, 048 | 054 |
 | 054 | v2.0.0 launch hardening + docs + README rewrite (Sprint Ν) | Approved | 5 (2.0) | M | 047, 048, 049 | (PyPI publish + launch) |
+| 055 | Print / view / sheet protection (Sprint Ο Pod 1A) | Approved | 5 (2.0) | L | 010, 011, 013, 035 | 060 |
+| 056 | AutoFilter conditions + eval engine (Sprint Ο Pod 1B) | Approved | 5 (2.0) | XL | 011, 013, 026 | 060 |
+| 057 | Array / DataTable formulas (Sprint Ο Pod 1C) | Approved | 5 (2.0) | L | 012, 013 | 060 |
+| 058 | Workbook-level security (Sprint Ο Pod 1D) | Approved | 5 (2.0) | M | 044, 011 | 060 |
+| 059 | Public exceptions + IndexedList (Sprint Ο Pod 1E) | Approved | 5 (2.0) | S | — | 060 |
+| 060 | openpyxl-shaped class re-export shims (Sprint Ο Pod 2) | Approved | 5 (2.0) | M | 055, 056, 057, 058, 059 | (v2.0 launch) |
+| 061 | Advanced pivot construction — slicers, calc fields, calc items, GroupItems, styling (Sprint Ο Pod 3) | Approved | 5 (2.0) | XL | 047, 048, 049, 026 | (v2.0 launch) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
