@@ -1430,6 +1430,17 @@ class Workbook:
             )
         cache._cache_id = self._next_pivot_cache_id
         self._next_pivot_cache_id += 1
+        # Materialize fields + records against the source worksheet
+        # (RFC-047 §10.9 inference). Skip if already materialized
+        # (caller can pre-materialize against a stub worksheet).
+        if cache._fields is None:
+            ws_obj = cache.source.worksheet
+            if ws_obj is None:
+                raise ValueError(
+                    "PivotCache.source.worksheet is None — pivot cache "
+                    "must reference a real worksheet"
+                )
+            cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
         return cache
 
@@ -1483,11 +1494,18 @@ class Workbook:
             ) from exc
 
         # ---- Pass 1: caches ----
+        # Map: cache_id → cache.to_rust_dict() so Pass 2 can pass
+        # the cache dict to serialize_pivot_table_dict (the table
+        # serializer needs cache schema for field index resolution).
+        cache_dicts: dict[int, dict[str, Any]] = {}
         for cache in self._pending_pivot_caches:
             def_dict = cache.to_rust_dict()
             rec_dict = cache.to_rust_records_dict()
             def_xml = serialize_pivot_cache_dict(def_dict)
-            rec_xml = serialize_pivot_records_dict(rec_dict)
+            # records serializer takes (cache_dict, records_dict)
+            # so it can resolve field types when emitting <r>/<x>.
+            rec_xml = serialize_pivot_records_dict(def_dict, rec_dict)
+            cache_dicts[int(cache._cache_id)] = def_dict
             allocated = patcher.queue_pivot_cache_add(def_xml, rec_xml)
             # Sanity — patcher allocates monotonically; the python-side
             # cache_id we eagerly stamped earlier MUST match.
@@ -1517,11 +1535,24 @@ class Workbook:
                 if hasattr(pt, "_compute_layout"):
                     pt._compute_layout()
                 table_dict = pt.to_rust_dict()
-                table_xml = serialize_pivot_table_dict(table_dict)
+                cache_id = int(pt.cache._cache_id)
+                # serialize_pivot_table_dict needs the cache schema
+                # for field-index resolution (rows/cols/data field
+                # indices map to cache fields by position).
+                cache_dict = cache_dicts.get(cache_id)
+                if cache_dict is None:
+                    # Pre-existing cache from disk (not in this save).
+                    # Pull schema directly from pt.cache (Pod-β
+                    # always exposes the typed model, even after
+                    # registration).
+                    cache_dict = pt.cache.to_rust_dict()
+                table_xml = serialize_pivot_table_dict(
+                    cache_dict, table_dict
+                )
                 patcher.queue_pivot_table_add(
                     ws.title,
                     table_xml,
-                    int(pt.cache._cache_id),
+                    cache_id,
                 )
             pending.clear()
 
