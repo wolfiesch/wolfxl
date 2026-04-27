@@ -20,8 +20,8 @@ fixtures/
 │   ├── key_value/      # Report metadata blocks
 │   └── stress/         # Archetype-confusion cases
 ├── encrypted/          # Phase 2 — password-protected xlsx (one agile, one standard)
-├── xls/                # Phase 5 — legacy BIFF8
-└── xlsb/               # Phase 5 — binary xlsx
+├── xls/                # Sprint Κ — legacy BIFF8 (5 fixtures via LibreOffice)
+└── xlsb/               # Sprint Κ — binary xlsx (5 fixtures via LibreOffice)
 ```
 
 Large/messy corpora (ExcelBench tier2/3) stay in the ExcelBench repo — the
