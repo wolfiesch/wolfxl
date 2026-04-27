@@ -1,10 +1,11 @@
 # Migrate from openpyxl
 
-> **WolfXL 1.7** is the openpyxl-replacement release: the construction
-> surface ships everything except pivot tables (preserved on round-trip
-> but not yet constructible — Sprint Ν / v2.0.0). This guide walks
-> through the API mapping for the seven idioms that cover ~95 % of
-> openpyxl projects.
+> **WolfXL 2.0** is the full openpyxl-replacement release: every
+> construction idiom that openpyxl 3.1.x supports works with the
+> same Python code, **including pivot tables, pivot caches, and
+> pivot-chart linkage** (Sprint Ν / v2.0.0 closes the last gap).
+> This guide walks through the API mapping for the eight idioms
+> that cover the entire openpyxl construction surface.
 
 ## TL;DR — minimal import change
 
@@ -16,6 +17,8 @@ from openpyxl.utils import get_column_letter, column_index_from_string
 from openpyxl.chart import BarChart, Reference
 from openpyxl.drawing.image import Image
 from openpyxl.comments import Comment
+from openpyxl.pivot.table import TableDefinition
+from openpyxl.pivot.cache import CacheDefinition
 
 # after
 from wolfxl import load_workbook, Workbook
@@ -24,6 +27,7 @@ from wolfxl.utils import get_column_letter, column_index_from_string
 from wolfxl.chart import BarChart, Reference
 from wolfxl.drawing.image import Image
 from wolfxl.comments import Comment
+from wolfxl.pivot import PivotTable, PivotCache
 ```
 
 Almost every openpyxl import has the same name under `wolfxl`. The
@@ -49,11 +53,12 @@ ws.cell(row=3, column=2, value="x")
 wb.save("out.xlsx")
 ```
 
-## Construction-side parity (NEW in v1.7)
+## Construction-side parity (complete in v2.0)
 
-WolfXL 1.7 is the first release where these construction-side idioms
-all work end-to-end with the same code you'd write against openpyxl
-3.1.x.
+WolfXL 1.7 was the first release where the non-pivot construction-side
+idioms all work end-to-end with the same code you'd write against
+openpyxl 3.1.x. **WolfXL 2.0 closes the pivot-table gap** — the full
+construction surface is now drop-in.
 
 ### Charts (v1.6 + v1.6.1)
 
@@ -254,6 +259,136 @@ print(ws["A1"].value)             # CellRichText(...)
 print(ws["A1"].rich_text)         # always returns CellRichText (or None)
 ```
 
+### Pivot tables (Sprint Ν / v2.0)
+
+WolfXL 2.0 closes the last construction-side gap. Pivot caches,
+pivot tables, and pivot-chart linkage all ship; the v0.5+
+`_make_stub` is replaced with real classes.
+
+```python
+import wolfxl
+from wolfxl.chart import Reference, BarChart
+from wolfxl.pivot import PivotCache, PivotTable
+
+wb = wolfxl.Workbook()
+ws = wb.active
+ws.append(["region", "quarter", "product", "revenue"])
+ws.append(["NA",     "Q1",      "Widget",  100])
+ws.append(["NA",     "Q2",      "Widget",  120])
+ws.append(["EU",     "Q1",      "Widget",   80])
+ws.append(["EU",     "Q2",      "Widget",   95])
+# ... fill source data ...
+
+# 1. Build a cache around the source range:
+src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
+cache = wb.add_pivot_cache(PivotCache(source=src))
+
+# 2. Build a pivot table referencing the cache:
+pt = PivotTable(
+    cache=cache,
+    location="F2",
+    rows=["region"],
+    cols=["quarter"],
+    data=[("revenue", "sum")],          # or [DataField("revenue", function="sum")]
+)
+ws.add_pivot_table(pt)
+
+# 3. (Optional) link a chart to the pivot:
+chart = BarChart()
+chart.title = "Revenue by region × quarter"
+chart.pivot_source = pt                  # emits <c:pivotSource>
+ws.add_chart(chart, "F18")
+
+wb.save("pivot.xlsx")
+```
+
+Open `pivot.xlsx` in Excel, LibreOffice, or read it with
+`openpyxl.load_workbook(...)` — the pivot's data is already
+populated; **no refresh-on-open is required**. WolfXL is the only
+Python OOXML library that constructs pivot tables with
+pre-aggregated `pivotCacheRecords` (openpyxl preserves them on
+round-trip but doesn't construct them; XlsxWriter doesn't support
+pivots at all).
+
+#### Import paths
+
+| openpyxl path | WolfXL path |
+|---|---|
+| `from openpyxl.pivot.table import TableDefinition` | `from wolfxl.pivot import PivotTable` |
+| `from openpyxl.pivot.cache import CacheDefinition` | `from wolfxl.pivot import PivotCache` |
+| `from openpyxl.pivot.fields import PivotField, DataField, RowField, ColumnField, PageField` | `from wolfxl.pivot import PivotField, DataField, RowField, ColumnField, PageField` |
+| `from openpyxl.pivot.table import PivotItem, Location, PivotTableStyleInfo` | `from wolfxl.pivot import PivotItem, Location, PivotTableStyleInfo` |
+| `Reference(ws, min_col=..., min_row=..., max_col=..., max_row=...)` | Same — re-uses `wolfxl.chart.Reference` (mirrors openpyxl 3.1.x's shared reference type) |
+
+#### API differences
+
+openpyxl exposes a one-step `ws.add_pivot(table)` (where the
+cache is implied). WolfXL splits cache and table into two steps:
+
+```python
+# wolfxl — explicit two-step
+cache = wb.add_pivot_cache(PivotCache(source=src))
+pt    = PivotTable(cache=cache, location="F2", ...)
+ws.add_pivot_table(pt)
+```
+
+The split exists because OOXML caches are workbook-scoped (one
+cache can serve multiple tables) while tables are sheet-scoped.
+Aliasing a cache to several tables is the same idiom wolfxl uses
+for shared image media on `copy_worksheet`.
+
+#### Aggregator functions
+
+`DataField(function=...)` accepts:
+
+| wolfxl name | OOXML name |
+|---|---|
+| `"sum"` | Sum |
+| `"count"` | Count |
+| `"average"` | Average |
+| `"max"` | Max |
+| `"min"` | Min |
+| `"product"` | Product |
+| `"count_nums"` | CountNums |
+| `"std_dev"` | StdDev |
+| `"std_dev_p"` | StdDevp |
+| `"var"` | Var |
+| `"var_p"` | Varp |
+
+The bare-string axis spec (`rows=["region"]`) is shorthand for
+`rows=[RowField("region")]` and uses the field's column header
+as the caption. Use the explicit builders (`RowField`,
+`ColumnField`, `DataField`, `PageField`) for custom captions,
+custom subtotals, or custom sort orders.
+
+#### Limits (deferred to v2.1+)
+
+- **Slicers** — `xl/slicers/` and `xl/slicerCaches/` are not yet
+  constructible. Pivots round-trip without slicers; if a source
+  workbook has them, modify-mode round-trip preserves them.
+- **Calculated fields** (`<calculatedField>`) and **calculated
+  items** (`<calculatedItem>`) — formula expressions in the
+  pivot's field list / row-or-col items. v2.1.
+- **GroupItems** (date / range grouping —
+  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)
+  — non-trivial recursion. v2.1.
+- **OLAP / external pivot caches** — needs the PowerPivot
+  data-model (`xl/model/`). Out of scope permanently.
+- **Pivot-table styling beyond the named-style picker** —
+  themes, banded formats, pivot-cell conditional formatting.
+  v2.1.
+- **In-place pivot edits in modify mode** beyond
+  `add_pivot_table` — editing an existing pivot's source range,
+  field ordering, subtotals, etc. v2.2.
+
+#### Caveat — empty cache
+
+If the chart's `pivot_source` points at a `PivotTable` whose
+cache walked an empty source range, the chart will render blank
+in Excel. This matches openpyxl's behaviour and is documented in
+RFC-049 §10.4. Validate the source range has at least one data
+row before constructing.
+
 ## What to validate during migration
 
 1. **Style fidelity** in your critical sheets — open the saved
@@ -262,9 +397,10 @@ print(ws["A1"].rich_text)         # always returns CellRichText (or None)
    serialisation.
 2. **Formula behavior** in your downstream consumers — formulas are
    preserved verbatim; cached results are recomputed when Excel opens.
-3. **Pivot tables** — preserved on modify-mode round-trip but not yet
-   constructible. If your pipeline *constructs* pivots, stay on
-   openpyxl until v2.0.0 (Sprint Ν).
+3. **Pivot tables** — fully constructible from Python (v2.0+) with
+   pre-aggregated records, so the saved workbook opens in any
+   OOXML reader (Excel / LibreOffice / openpyxl) without
+   refresh-on-open. See "Pivot tables (Sprint Ν / v2.0)" above.
 4. **Rare openpyxl APIs** — see the [Compatibility Matrix](compatibility-matrix.md)
    for anything that's `Partial` or `Not Yet`.
 
@@ -295,13 +431,16 @@ print(ws["A1"].rich_text)         # always returns CellRichText (or None)
 
 ## When to keep openpyxl alongside
 
-- You construct pivot tables programmatically.
 - You construct OpenDocument (`.ods`) files.
 - You need the deepest features of openpyxl's chart layer
   (combination charts, `<c:displayUnits>` on value axes,
   per-data-point overrides via `dPt`).
+- You construct pivot tables that need slicers, calculated
+  fields / items, GroupItems, or pivot-styling beyond the
+  named-style picker. Those are deferred to v2.1+ (see "Limits"
+  in the Pivot tables section above).
 
-For everything else, v1.7 is a drop-in replacement.
+For everything else, v2.0 is a drop-in replacement.
 
 ## Further reading
 
@@ -310,5 +449,6 @@ For everything else, v1.7 is a drop-in replacement.
 - [Legacy Shim](legacy-shim.md) — `excelbench_rust` → `wolfxl._rust`
   shim notes (only relevant if you're upgrading from a pre-1.0
   ExcelBench install).
-- [Performance](../performance/benchmark-results.md) — v1.7 numbers.
+- [Performance](../performance/benchmark-results.md) — v2.0 numbers (incl. pivot construction).
+- [Release notes](../release-notes-2.0.md) — full v2.0 changelog.
 - [Trust](../trust/) — fidelity, security, supply-chain provenance.

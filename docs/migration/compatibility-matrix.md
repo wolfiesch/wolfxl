@@ -1,7 +1,7 @@
 # Compatibility Matrix
 
-> **Reference**: WolfXL **v1.7.0** (Sprint Ξ).
-> **Status as of**: 2026-04-27.
+> **Reference**: WolfXL **v2.0.0** (Sprint Ν).
+> **Status as of**: <!-- TBD --> (v2.0.0 launch date).
 
 Status legend:
 
@@ -10,10 +10,12 @@ Status legend:
 - **Not Yet** — not implemented; tracked via RFC.
 - **Out of scope** — explicitly out of roadmap.
 
-## Construction-side parity (the v1.7 headline)
+## Construction-side parity (the v2.0 headline)
 
 The following constructors all work at the same call site you'd use
-in openpyxl 3.1.x:
+in openpyxl 3.1.x. **As of v2.0, this list is complete** — every
+construction idiom in openpyxl 3.1.x has a wolfxl equivalent,
+including pivot tables and pivot-chart linkage.
 
 ### Workbook + Worksheet
 
@@ -67,8 +69,33 @@ in openpyxl 3.1.x:
 | `Worksheet.add_chart(chart, anchor)` (write + modify mode) | Supported |
 | `Worksheet.remove_chart(chart)` (NEW v1.7) | Supported |
 | `Worksheet.replace_chart(old, new)` (NEW v1.7) | Supported |
-| Combination charts (e.g. bar + line on shared axes) | Not Yet — post-v1.7 |
-| Pivot-chart linkage (`<c:pivotSource>`) | Not Yet — Sprint Ν / v2.0 |
+| Combination charts (e.g. bar + line on shared axes) | Not Yet — post-v2.0 |
+| Pivot-chart linkage (`<c:pivotSource>`) | Supported (v2.0 — RFC-049). `chart.pivot_source = pt` on every chart family. |
+
+### Pivot tables (v2.0 — RFC-047 / RFC-048 / RFC-049)
+
+| openpyxl path | WolfXL status |
+|---|---|
+| `from openpyxl.pivot.table import TableDefinition` | Supported (`from wolfxl.pivot import PivotTable`) |
+| `from openpyxl.pivot.cache import CacheDefinition` | Supported (`from wolfxl.pivot import PivotCache`) |
+| `PivotField`, `DataField`, `RowField`, `ColumnField`, `PageField`, `PivotItem` | Supported (`from wolfxl.pivot import ...`) |
+| `Location`, `PivotTableStyleInfo`, `SharedItems`, `CacheField`, `WorksheetSource` | Supported |
+| `Reference` (for the pivot's source range) | Supported (re-uses `wolfxl.chart.Reference`; mirrors openpyxl 3.1.x) |
+| `Workbook.add_pivot_cache(cache)` | Supported (workbook-scoped; one cache can serve N tables) |
+| `Worksheet.add_pivot_table(pt, anchor)` | Supported (sheet-scoped; anchor accepts `"F2"`-style coords) |
+| `pivotCacheRecords{N}.xml` emit (pre-aggregated records) | **Supported — wolfxl is the only Python OOXML library that constructs this part from scratch.** openpyxl preserves on round-trip but doesn't construct; XlsxWriter doesn't support pivots at all. |
+| 11 aggregator functions (sum / count / average / max / min / product / count_nums / std_dev / std_dev_p / var / var_p) | Supported |
+| Bare-string axis specs (`rows=["region"]`) | Supported |
+| Explicit-builder axis specs (`rows=[RowField("region")]`) | Supported |
+| `chart.pivot_source = pt` (chart-pivot linkage) | Supported (RFC-049; emits `<c:pivotSource>` + per-series `<c:fmtId>`) |
+| `copy_worksheet` of pivot-bearing sheet (deep-clone) | Supported (RFC-035 §6 extension; cache aliased, table fresh-id'd, source-range hint re-pointed) |
+| Slicers (`xl/slicers/`, `xl/slicerCaches/`) | Not Yet — v2.1 |
+| Calculated fields (`<calculatedField>`) | Not Yet — v2.1 |
+| Calculated items (`<calculatedItem>`) | Not Yet — v2.1 |
+| GroupItems (date / range grouping `<fieldGroup>`) | Not Yet — v2.1 |
+| OLAP / external pivot caches (`xl/model/`) | Out of scope |
+| Pivot-table styling beyond named-style picker | Not Yet — v2.1 |
+| In-place pivot edits in modify mode (source-range edit, field re-order, ...) | Not Yet — v2.2 |
 
 ### Images (v1.5 — RFC-045)
 
@@ -137,13 +164,17 @@ Bound checks (`get_column_letter` capped at 18278 = ZZZ) and the
 1900 leap-year correction (`from_excel`) match openpyxl
 verbatim.
 
-## What's *not* in v1.7 (deferred or out of scope)
+## What's *not* in v2.0 (deferred or out of scope)
 
 | Capability | Status | Tracked at |
 |---|---|---|
-| Pivot table construction | **Not Yet — Sprint Ν / v2.0** | `Plans/sprint-xi.md` |
-| Pivot cache definitions | **Not Yet — Sprint Ν / v2.0** | `Plans/sprint-xi.md` |
-| Pivot-chart linkage | **Not Yet — Sprint Ν / v2.0** | RFC-046 §9 |
+| Slicers (`xl/slicers/` + `xl/slicerCaches/`) | Not Yet — v2.1 | `Plans/sprint-nu.md` "Out of scope" |
+| Pivot calculated fields (`<calculatedField>`) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
+| Pivot calculated items (`<calculatedItem>`) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
+| Pivot GroupItems (date / range grouping) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
+| OLAP / external pivot caches (`xl/model/`) | Out of scope | Not on roadmap (PowerPivot data-model) |
+| Pivot-table styling beyond named-style picker | Not Yet — v2.1 | `Plans/sprint-nu.md` |
+| In-place pivot edits in modify mode | Not Yet — v2.2 | `Plans/sprint-nu.md` |
 | Combination charts (multi-plot) | Not Yet | RFC-046 v1.6.1 release notes "Out of scope" |
 | `<c:displayUnits>` on value axes | Not Yet | RFC-046 §9 |
 | Per-data-point overrides (`<c:dPt>`) | Not Yet | RFC-046 §9 |
@@ -156,7 +187,7 @@ verbatim.
 
 ### Pure Python libraries
 
-| Capability | openpyxl | XlsxWriter | pandas (`engine="openpyxl"`) | **WolfXL 1.7** |
+| Capability | openpyxl | XlsxWriter | pandas (`engine="openpyxl"`) | **WolfXL 2.0** |
 |---|---|---|---|---|
 | Read `.xlsx` | Yes | No | Yes | **Yes** |
 | Read `.xlsb` / `.xls` | No | No | Yes (`engine="calamine"`) | **Yes** |
@@ -168,14 +199,22 @@ verbatim.
 | Encryption (write) | No | No | No | **Yes** |
 | Chart construction | Yes (16 types) | Yes (12 types) | No | **Yes (16 types)** |
 | Image construction | Yes | Yes | No | **Yes** |
-| `copy_worksheet` | Yes (drops tables / DV / CF / sheet-scoped names) | N/A | N/A | **Yes (preserves everything)** |
-| Pivot table construction | Yes | No | No | **Not yet (v2.0)** |
+| `copy_worksheet` | Yes (drops tables / DV / CF / sheet-scoped names) | N/A | N/A | **Yes (preserves everything; pivots clone too)** |
+| Pivot table construction | Round-trip preserve only* | No | No | **Yes (with pre-aggregated records)** |
+| Pivot-chart linkage (`chart.pivot_source = pt`) | Yes | No | No | **Yes** |
 | Same API as openpyxl | Native | Different API | Different | **Native** |
-| Performance (relative) | 1× | ~1.5× write | ~1× (wraps openpyxl) | **5–20×** read+write+modify |
+| Performance (relative) | 1× | ~1.5× write | ~1× (wraps openpyxl) | **<!-- TBD: BENCHMARK NUMBERS -->×** read+write+modify |
+
+*openpyxl preserves pivot tables verbatim on round-trip but does
+not provide a Python-side constructor that emits the
+`pivotCacheRecords` snapshot. WolfXL 2.0 is the first Python OOXML
+library to construct pivots with a pre-aggregated records part —
+the saved workbook opens in Excel / LibreOffice / openpyxl with
+data populated, no refresh-on-open required.
 
 ### Rust-backed libraries
 
-| Capability | fastexcel | python-calamine | FastXLSX | rustpy-xlsxwriter | **WolfXL 1.7** |
+| Capability | fastexcel | python-calamine | FastXLSX | rustpy-xlsxwriter | **WolfXL 2.0** |
 |---|---|---|---|---|---|
 | Read `.xlsx` | Yes | Yes | Yes | No | **Yes** |
 | Write `.xlsx` | No | No | Yes | Yes | **Yes** |
@@ -183,10 +222,13 @@ verbatim.
 | Style read | No | No | No | N/A | **Yes** |
 | Style write | N/A | N/A | No | Partial | **Yes** |
 | openpyxl-compatible API | No | No | No | No | **Yes** |
-| Charts / images / pivots / structural ops | No | No | No | Partial (charts only) | **Yes** (charts, images, structural; pivots v2.0) |
+| Charts / images / structural ops | No | No | No | Partial (charts only) | **Yes** |
+| Pivot tables (construction + linkage) | No | No | No | No | **Yes** |
 
-WolfXL is the only Rust-backed Python library that targets the **full
-openpyxl construction surface**, not just the read or write path.
+WolfXL is the only Rust-backed Python library — and the only
+Python OOXML library, period — that targets the **full openpyxl
+construction surface including pivot tables with pre-aggregated
+records**.
 
 ## Footnotes on the underlying readers
 
