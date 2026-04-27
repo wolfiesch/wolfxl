@@ -764,7 +764,429 @@ Other chart features deferred to follow-up RFCs (no v1.6.1 commitment):
   — `add_chart` adds, but there's no `remove_chart` or
   `replace_chart` API.
 
-## 10. SHA log
+## 10. Chart-dict contract (Sprint Μ-prime, v1.6.1)
+
+> **Status**: Authoritative. Both Pod-α′ (Rust `parse_chart_dict`) and
+> Pod-β′ (Python `ChartBase.to_rust_dict`) MUST produce/consume this
+> exact shape. Drift between the two sides was the root cause of the
+> 37 xfailed tests in v1.6.0; this section is the contract that
+> v1.6.1 reconciles.
+
+### 10.1 Top-level keys
+
+```python
+{
+    # Required
+    "kind": "bar",                      # short kind, see §10.2
+    "series_type": "bar",               # series.attribute_mapping key
+    "series": [<series_dict>, ...],     # see §10.6 — empty list raises
+
+    # Optional — None or missing means "use Excel default"
+    "style": int | None,                # 1..48
+    "display_blanks_as": "gap" | "span" | "zero" | None,
+    "plot_visible_only": bool | None,
+    "vary_colors": bool | None,
+    "rounded_corners": bool | None,
+
+    # Decorations — None or {} → omit
+    "title": <title_dict> | None,       # see §10.3
+    "legend": <legend_dict> | None,     # see §10.4
+    "layout": <layout_dict> | None,     # see §10.5
+    "graphical_properties": <gp_dict> | None,
+
+    # Axes — flat keys, NOT a list. Each is None when not used.
+    "x_axis": <axis_dict> | None,       # see §10.7
+    "y_axis": <axis_dict> | None,
+    "z_axis": <axis_dict> | None,       # 3D variants only
+
+    # Per-type unique fields — flat at top level (NOT nested in "extras")
+    "bar_dir": "col" | "bar" | None,
+    "grouping": "clustered" | "stacked" | "percentStacked" | "standard" | "percentStacked",
+    "gap_width": int | None,            # 0..500 (bar/area)
+    "overlap": int | None,              # -100..100 (bar)
+    "smooth": bool | None,              # line/scatter
+    "scatter_style": "marker" | "lineMarker" | "smooth" | "smoothMarker" | "line" | None,
+    "radar_style": "standard" | "marker" | "filled" | None,
+    "first_slice_ang": int | None,      # pie/doughnut, 0..360
+    "hole_size": int | None,            # doughnut, 1..90
+    "bubble_3d": bool | None,
+    "bubble_scale": int | None,         # 0..300
+    "show_neg_bubbles": bool | None,
+    "size_represents": "area" | "w" | None,
+
+    # 3D-only fields (kind ends in "3D" or kind == "surface")
+    "view_3d": <view3d_dict> | None,    # see §10.10
+
+    # Anchor + dimensions
+    "anchor": str | <anchor_dict> | None,   # A1 string OR §10.8 dict
+    "width_emu": int | None,            # default 4_572_000 (~12 cm)
+    "height_emu": int | None,           # default 2_743_200 (~7.25 cm)
+}
+```
+
+### 10.2 `kind` enum (closed set)
+
+| String | XML root | Pod-β class | Cargo `ChartKind` |
+|---|---|---|---|
+| `"bar"`            | `<c:barChart>`        | `BarChart`            | `Bar`            |
+| `"bar3d"`          | `<c:bar3DChart>`      | `BarChart3D`          | `Bar3D`          |
+| `"line"`           | `<c:lineChart>`       | `LineChart`           | `Line`           |
+| `"line3d"`         | `<c:line3DChart>`     | `LineChart3D`         | `Line3D`         |
+| `"pie"`            | `<c:pieChart>`        | `PieChart`            | `Pie`            |
+| `"pie3d"`          | `<c:pie3DChart>`      | `PieChart3D` / `Pie3D`| `Pie3D`          |
+| `"of_pie"`         | `<c:ofPieChart>`      | `ProjectedPieChart`   | `OfPie`          |
+| `"doughnut"`       | `<c:doughnutChart>`   | `DoughnutChart`       | `Doughnut`       |
+| `"area"`           | `<c:areaChart>`       | `AreaChart`           | `Area`           |
+| `"area3d"`         | `<c:area3DChart>`     | `AreaChart3D`         | `Area3D`         |
+| `"scatter"`        | `<c:scatterChart>`    | `ScatterChart`        | `Scatter`        |
+| `"bubble"`         | `<c:bubbleChart>`     | `BubbleChart`         | `Bubble`         |
+| `"radar"`          | `<c:radarChart>`      | `RadarChart`          | `Radar`          |
+| `"surface"`        | `<c:surfaceChart>`    | `SurfaceChart`        | `Surface`        |
+| `"surface3d"`      | `<c:surface3DChart>`  | `SurfaceChart3D`      | `Surface3D`      |
+| `"stock"`          | `<c:stockChart>`      | `StockChart`          | `Stock`          |
+
+Pod-β'`to_rust_dict()` MUST map `tagname` → short kind via a lookup
+table; **never** pass the openpyxl tagname (`"barChart"`) directly.
+Unknown kinds raise `ValueError` at the Pod-β constructor (NOT at
+the Rust boundary — fail fast).
+
+### 10.3 `title` shape
+
+```python
+{
+    "text": str | None,                # plain-text fast path
+    "runs": [                          # rich-text path (mutually exclusive with text)
+        {
+            "text": str,
+            "font": {"name": str | None, "size": int | None,
+                     "bold": bool | None, "italic": bool | None,
+                     "color": str | None},  # any field None → omit
+        },
+        ...
+    ],
+    "overlay": bool | None,            # default False
+    "layout": <layout_dict> | None,    # manual title position
+}
+```
+
+If both `text` and `runs` are non-None, `runs` wins (matches openpyxl).
+Empty title → `None` at top-level, NOT an empty dict.
+
+### 10.4 `legend` shape
+
+```python
+{
+    "position": "r" | "l" | "t" | "b" | "tr" | None,   # default "r"
+    "overlay": bool | None,                            # default False
+    "layout": <layout_dict> | None,
+}
+```
+
+### 10.5 `layout` shape
+
+```python
+{
+    "x": float | None,                 # 0.0..1.0 fraction (or EMU if absolute)
+    "y": float | None,
+    "w": float | None,
+    "h": float | None,
+    "layout_target": "inner" | "outer" | None,         # default "inner"
+    "x_mode": "edge" | "factor" | None,                # default "factor"
+    "y_mode": "edge" | "factor" | None,
+    "w_mode": "edge" | "factor" | None,
+    "h_mode": "edge" | "factor" | None,
+}
+```
+
+All-None layout → top-level `"layout": None` (not `{}`).
+
+### 10.6 `series` (list element) shape
+
+```python
+{
+    # Required
+    "idx": int,                            # 0-based
+    "order": int,
+
+    # Title — Reference OR static string
+    "title_ref": str | None,               # "Sheet1!$B$1"
+    "title_text": str | None,              # mutually exclusive with title_ref
+
+    # Data references — ALL are A1 strings (Sheet!$A$1:$A$10)
+    "values_ref": str | None,              # required for all kinds except some
+    "categories_ref": str | None,
+    "x_values_ref": str | None,            # scatter/bubble only
+    "y_values_ref": str | None,            # scatter/bubble only
+    "bubble_size_ref": str | None,         # bubble only
+
+    # Per-series visual properties
+    "graphical_properties": <gp_dict> | None,
+    "marker": <marker_dict> | None,        # see §10.6.1
+    "smooth": bool | None,
+    "invert_if_negative": bool | None,
+
+    # Per-series labels
+    "data_labels": <dlbl_list_dict> | None,    # see §10.6.2
+
+    # Error bars (bar/line only)
+    "err_bars": <errbars_dict> | None,         # see §10.6.3
+
+    # Trendline (line/scatter/bar/area only)
+    "trendlines": [<trendline_dict>, ...],     # see §10.6.4
+}
+```
+
+#### 10.6.1 `marker` shape
+
+```python
+{
+    "symbol": "circle" | "dash" | "diamond" | "dot" | "plus" |
+              "square" | "star" | "triangle" | "x" | "auto" |
+              "picture" | "none" | None,
+    "size": int | None,                # 2..72 pt
+    "graphical_properties": <gp_dict> | None,
+}
+```
+
+#### 10.6.2 `data_labels` shape
+
+```python
+{
+    "show_val": bool | None,
+    "show_cat_name": bool | None,
+    "show_ser_name": bool | None,
+    "show_legend_key": bool | None,
+    "show_percent": bool | None,
+    "show_bubble_size": bool | None,
+    "position": "ctr" | "l" | "r" | "t" | "b" |
+                "inEnd" | "outEnd" | "inBase" | "bestFit" | None,
+    "number_format": str | None,
+    "separator": str | None,
+}
+```
+
+#### 10.6.3 `err_bars` shape
+
+```python
+{
+    "direction": "x" | "y" | None,        # default "y"
+    "err_bar_type": "both" | "minus" | "plus" | None,
+    "err_val_type": "fixedVal" | "percentage" | "stdDev" |
+                    "stdErr" | "cust" | None,
+    "no_end_cap": bool | None,
+    "val": float | None,                  # required when err_val_type is fixedVal/percentage/stdDev
+    "plus_ref": str | None,               # cust direction only
+    "minus_ref": str | None,
+}
+```
+
+#### 10.6.4 `trendline` (list element) shape
+
+```python
+{
+    "trendline_type": "linear" | "log" | "poly" | "power" |
+                      "exp" | "movingAvg",
+    "name": str | None,
+    "order": int | None,                  # poly only, 2..6
+    "period": int | None,                 # movingAvg only, 2..N
+    "forward": float | None,
+    "backward": float | None,
+    "intercept": float | None,
+    "disp_eq": bool | None,
+    "disp_r_sqr": bool | None,
+    "graphical_properties": <gp_dict> | None,
+}
+```
+
+### 10.7 `axis` shape (used by `x_axis`/`y_axis`/`z_axis`)
+
+```python
+{
+    # Required
+    "ax_id": int,                         # stable axis ID
+    "cross_ax": int,                      # the OTHER axis's ax_id
+    "ax_type": "cat" | "val" | "date" | "ser",     # category/value/date/series
+
+    # Optional
+    "scaling": {
+        "min": float | None,
+        "max": float | None,
+        "orientation": "minMax" | "maxMin" | None,
+        "log_base": float | None,         # 2..1000
+    } | None,
+    "delete": bool | None,                # hide the axis
+    "axis_position": "b" | "t" | "l" | "r" | None,
+    "title": <title_dict> | None,
+    "number_format": {"format_code": str, "source_linked": bool} | None,
+    "major_tick_mark": "none" | "in" | "out" | "cross" | None,
+    "minor_tick_mark": "none" | "in" | "out" | "cross" | None,
+    "major_unit": float | None,
+    "minor_unit": float | None,
+    "major_gridlines": <gridlines_dict> | None,    # see §10.7.1
+    "minor_gridlines": <gridlines_dict> | None,
+    "graphical_properties": <gp_dict> | None,
+    "tick_lbl_pos": "high" | "low" | "nextTo" | "none" | None,
+    "crosses": "autoZero" | "max" | "min" | None,
+    "crosses_at": float | None,
+    # cat/date axis only
+    "lbl_align": "ctr" | "l" | "r" | None,
+    "lbl_offset": int | None,
+}
+```
+
+#### 10.7.1 `gridlines` shape
+
+```python
+{
+    "graphical_properties": <gp_dict> | None,
+}
+```
+
+(Empty `{}` is permitted and means "draw default gridlines"; `None`
+at the parent means "no gridlines".)
+
+### 10.8 `anchor` — accepted shapes
+
+Pod-α MUST accept all three:
+
+1. **A1 string**: `"D2"` → resolved as `OneCell` anchor at (col=3, row=1).
+2. **Dict** matching RFC-045 image-anchor schema:
+   ```python
+   {"type": "one_cell", "from_col": int, "from_row": int,
+    "from_col_off": int, "from_row_off": int,
+    "ext_cx": int, "ext_cy": int}
+   {"type": "two_cell", "from_col": int, ..., "to_col": int, "to_row": int, ...}
+   {"type": "absolute", "x": int, "y": int, "cx": int, "cy": int}
+   ```
+3. **None / missing**: fall back to `Worksheet.add_chart`'s `anchor=` kwarg, then to `"E15"` (openpyxl default).
+
+### 10.9 `graphical_properties` (`<c:spPr>`) shape
+
+```python
+{
+    "no_fill": bool | None,
+    "solid_fill": str | None,              # always coerced to str by Pod-β
+    "ln": {
+        "w_emu": int | None,
+        "cap": "rnd" | "sq" | "flat" | None,
+        "cmpd": "sng" | "dbl" | "thickThin" | "thinThick" | "tri" | None,
+        "solid_fill": str | None,
+        "prst_dash": "solid" | "dash" | "dashDot" | "lgDash" | ...,
+        "no_fill": bool | None,
+    } | None,
+}
+```
+
+(Note: Pod-β v1.6.0 emitted `solidFill` camelCase — Pod-β′ MUST
+emit `solid_fill` snake_case to match Pod-α. All key names are
+snake_case in the contract.)
+
+### 10.10 `view_3d` shape (3D variants only)
+
+```python
+{
+    "rot_x": int | None,                  # -90..90 degrees (or 0..30 for bar3D)
+    "rot_y": int | None,                  # 0..360
+    "perspective": int | None,            # 0..240
+    "right_angle_axes": bool | None,
+    "auto_scale": bool | None,
+    "depth_percent": int | None,          # 20..2000
+    "h_percent": int | None,              # 5..500 (height %)
+}
+```
+
+### 10.11 Validation rules (raise at construction time, NOT at Rust boundary)
+
+Pod-β′ MUST raise `ValueError` / `TypeError` at construction or
+`add_chart()` time for:
+
+1. Empty `series` list (no data to plot).
+2. Anchor that is neither a valid A1 (regex `^[A-Z]+[0-9]+$`) nor a recognized anchor object.
+3. `Reference` with `min_col > max_col` or `min_row > max_row` or out-of-sheet bounds.
+4. `style` outside 1..48.
+5. `gap_width` outside 0..500, `overlap` outside -100..100.
+6. `hole_size` outside 1..90.
+7. `bubble_scale` outside 0..300.
+8. `style` (poly trendline order) outside 2..6.
+9. `display_blanks_as` not in the closed enum.
+10. 3D-only fields set on a 2D chart kind (warn rather than raise).
+
+Pod-α′ raises `PyValueError` only for shapes the contract says are
+illegal (unknown kind, malformed dict, type mismatch). All
+user-facing validation happens Python-side.
+
+### 10.12 Migration sequence (for both pods)
+
+1. **Pod-β′ first**: rewrite `to_rust_dict` to emit the new flat
+   shape. Pod-β′ tests its own output by walking the dict (no Rust
+   call needed). Once Pod-β′ produces clean dicts, Pod-α′'s parser
+   is a target it can verify against.
+2. **Pod-α′ in parallel**: extend `parse_chart_dict` to consume the
+   new shape. Where Pod-α already consumes a key (e.g. `bar_dir`,
+   `grouping`), no change is needed. Where it doesn't (e.g.
+   `major_gridlines`, series `err_bars`/`trendlines`,
+   `view_3d`), add the parser + emit branch in `charts.rs`.
+3. **Pod-γ′ last**: replaces `_workbook._flush_pending_charts_to_patcher`'s
+   warn-and-drop with the high-level bridge:
+   ```python
+   from wolfxl import _backend
+   for ws in self._sheets.values():
+       for chart in ws._pending_charts:
+           dict_ = chart.to_rust_dict()
+           xml_bytes = _backend.serialize_chart_dict(dict_)
+           anchor = chart._anchor or "E15"
+           patcher.queue_chart_add(ws.title, xml_bytes, anchor,
+                                   int(chart.width * 360_000),
+                                   int(chart.height * 360_000))
+       ws._pending_charts.clear()
+   ```
+
+### 10.13 Test contract surface
+
+After v1.6.1, every test in `tests/test_charts_write.py`
+(46 tests) MUST pass without `xfail`. The module-level
+`pytest.mark.xfail` MUST be removed by Pod-δ′. Any test that still
+fails post-merge represents a real bug, not a known gap.
+
+## 11. 3D / Stock / Surface / ProjectedPie families (Sprint Μ-prime, v1.6.1)
+
+The eight new chart families ship in v1.6.1, lifting the v1.6.0
+deferral. Pod-β′ provides the Python classes; Pod-α′ extends
+`ChartKind` and the XML emitter; Pod-γ′ verifies via round-trip
+tests.
+
+### 11.1 `BarChart3D` / `LineChart3D` / `PieChart3D` / `AreaChart3D` / `SurfaceChart3D`
+
+3D variants share `view_3d` (§10.10). Per-type defaults:
+
+| Class | `rot_x` | `rot_y` | `perspective` | `right_angle_axes` | `depth_percent` |
+|---|---|---|---|---|---|
+| `BarChart3D`     | 15  | 20  | None | True  | 100 |
+| `LineChart3D`    | 15  | 20  | 30   | False | 100 |
+| `PieChart3D`     | 30  | 0   | 30   | False | None |
+| `AreaChart3D`    | 15  | 20  | 30   | False | 100 |
+| `SurfaceChart3D` | 15  | 20  | 30   | False | 100 |
+
+### 11.2 `StockChart`
+
+Open-High-Low-Close (OHLC) chart. 4 required series in fixed order:
+Open, High, Low, Close. Pod-β validates count and order at
+construction. Emits as `<c:stockChart>` with `<c:hiLowLines/>` and
+`<c:upDownBars/>` decorators by default.
+
+### 11.3 `SurfaceChart` (2D)
+
+`<c:surfaceChart>` (NOT 3D — that's `SurfaceChart3D`). Wireframe
+toggle via `wireframe: bool` constructor arg.
+
+### 11.4 `ProjectedPieChart`
+
+`<c:ofPieChart>` — bar-of-pie or pie-of-pie. Constructor arg
+`of_pie_type: "bar" | "pie"` (default `"pie"`). Required:
+`split_type: "auto" | "pos" | "percent" | "val" | "cust"` and
+`split_pos`/`second_pie_size` per OOXML spec.
+
+## 12. SHA log
 
 Sprint Μ Pods landed in the following commits on
 `feat/native-writer`:
