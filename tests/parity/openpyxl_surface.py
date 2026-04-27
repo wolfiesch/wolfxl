@@ -751,12 +751,9 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "and ``tests/parity/test_encrypted_write_parity.py``. "
             "The ``(password kwarg)`` annotation is a parametric "
             "marker; the smoke test strips it via ``split(' ')[0]`` "
-            "and verifies the bare ``Workbook.save`` symbol resolves. "
-            "``wolfxl_supported=False`` initially per Sprint Ι "
-            "lesson 7 — the integrator flips it to ``True`` after the "
-            "ratchet ratifies the post-merge state."
+            "and verifies the bare ``Workbook.save`` symbol resolves."
         ),
-        wolfxl_supported=False,
+        wolfxl_supported=True,
         write_api=True,
         tags=frozenset({"phase-encryption", "shipped-1.5"}),
     ),

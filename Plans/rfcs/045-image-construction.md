@@ -1,6 +1,6 @@
 # RFC-045: Image construction — `wolfxl.drawing.image.Image` (replace stub)
 
-Status: Shipped 1.5 (Sprint Λ Pod-β) <!-- TBD: integrator-fills with Pod-β SHAs -->
+Status: Shipped 1.5 (Sprint Λ Pod-β) — writer `0ace8c5`, Image+add_image `d9cb569`, tests `a73737e`
 Owner: Sprint Λ Pod-β
 Phase: 5 (1.5)
 Estimate: L
@@ -357,12 +357,18 @@ merge.
 
 ## 9. SHA log
 
-<!-- TBD: integrator-fills with Pod-β SHAs -->
+Sprint Λ Pod-β landed in three atomic commits on `feat/sprint-lambda-pod-beta`:
+
+- `0ace8c5` `feat(writer): emit drawing parts + media for ws.add_image (RFC-045)`
+- `d9cb569` `feat(images): real wolfxl.drawing.Image + ws.add_image for write & modify (RFC-045)`
+- `a73737e` `test(images): write/modify/parity coverage + surface entries (RFC-045)`
+
+Merged to `feat/native-writer` as merge commit `7dc00d2` on 2026-04-26.
 
 ## Acceptance
 
 (Filled in after Pod-β merges.)
 
-- Commit: <!-- TBD: Pod-β commit sha when integrated -->
-- Verification: `python scripts/verify_rfc.py --rfc 045` GREEN at <!-- TBD -->
-- Date: <!-- TBD -->
+- Commit: `d9cb569` (Pod-β Image+add_image); merged via `7dc00d2` on `feat/native-writer`
+- Verification: `pytest tests/test_images_write.py tests/test_images_modify.py tests/parity/test_images_parity.py` GREEN — 24 cases passing (requires `pip install pillow` for openpyxl-side parity assertions)
+- Date: 2026-04-26

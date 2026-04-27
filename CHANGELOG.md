@@ -1,6 +1,6 @@
 # Changelog
 
-## wolfxl 1.5.0 (TBD) — encrypted writes + image construction + streaming-datetime fix
+## wolfxl 1.5.0 (2026-04-26) — encrypted writes + image construction + streaming-datetime fix
 
 User-facing release notes: `docs/release-notes-1.5.md`.
 
@@ -15,7 +15,7 @@ and pivot table construction (v2.0.0 / Sprint Ν) remain.
 ### Added
 
 - **RFC-044 — Write-side OOXML encryption** (Sprint Λ Pod-α,
-  <!-- TBD: SHA -->). `Workbook.save(path, password="...")` now
+  feat `4bc806c`). `Workbook.save(path, password="...")` now
   emits an Agile (AES-256 / SHA-512) encrypted file via
   `msoffcrypto-tool`'s high-level `OOXMLFile.encrypt()`. Lifts the
   `NotImplementedError` at `python/wolfxl/_workbook.py:1032`. Empty
@@ -25,7 +25,7 @@ and pivot table construction (v2.0.0 / Sprint Ν) remain.
   `wolfxl[encrypted]` extra now covers writes too (was already on
   reads from Sprint Ι Pod-γ).
 - **RFC-045 — Image construction** (Sprint Λ Pod-β,
-  <!-- TBD: SHA -->). `wolfxl.drawing.image.Image(...)` and
+  writer `0ace8c5` + Image+add_image `d9cb569` + tests `a73737e`). `wolfxl.drawing.image.Image(...)` and
   `Worksheet.add_image(...)` are real, replacing the `_make_stub` at
   `python/wolfxl/drawing/image.py`. Supports PNG / JPEG / GIF / BMP;
   one-cell, two-cell, and absolute anchors. Magic-byte format
@@ -37,7 +37,7 @@ and pivot table construction (v2.0.0 / Sprint Ν) remain.
   helper classes under `wolfxl.drawing.spreadsheet_drawing` and
   `wolfxl.drawing.xdr` to mirror openpyxl's module layout. Composes
   cleanly with RFC-035 `copy_worksheet`.
-- **Streaming-datetime fix** (Sprint Λ Pod-γ, <!-- TBD: SHA -->).
+- **Streaming-datetime fix** (Sprint Λ Pod-γ, fix `98cd147`).
   `iter_rows(values_only=True)` and `StreamingCell.value` now return
   `datetime` objects for date-formatted cells under
   `read_only=True`. Closes the documented Phase 4 divergence in

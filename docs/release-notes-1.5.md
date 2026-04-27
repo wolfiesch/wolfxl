@@ -1,6 +1,6 @@
-# wolfxl 1.5.0 (TBD-DATE) — encrypted writes + image construction + streaming-datetime fix
+# wolfxl 1.5.0 (2026-04-26) — encrypted writes + image construction + streaming-datetime fix
 
-_Date: <!-- TBD: integrator-fills -->_
+_Date: 2026-04-26_
 
 WolfXL 1.5 lifts the last two "construction" gaps that the 1.0–1.4
 arc deferred as out-of-scope: write-side OOXML encryption (Pod-α,
@@ -67,7 +67,7 @@ extra installed raises `RuntimeError` with the install hint
 with a literal empty key (matches the read-side semantics RFC-042
 already documents).
 
-Pod-α commit: <!-- TBD: integrator-fills -->. RFC:
+Pod-α feat commit: `4bc806c` (merged via `738656a`). RFC:
 `Plans/rfcs/044-encryption-writes.md`.
 
 ### Image construction (Sprint Λ Pod-β, RFC-045)
@@ -124,7 +124,7 @@ routes them through `file_adds`). Composes with RFC-035
 `copy_worksheet`: copying a sheet that has an image preserves the
 aliased original; adding a new image to the copy works.
 
-Pod-β commit: <!-- TBD: integrator-fills -->. RFC:
+Pod-β feat commit: `d9cb569` (Image+add_image, merged via `7dc00d2`). RFC:
 `Plans/rfcs/045-image-construction.md`.
 
 ### Streaming-datetime fix (Sprint Λ Pod-γ)
@@ -150,7 +150,7 @@ styles table for the cell's number format and convert serial floats
 inline. Both `values_only=True` and `StreamingCell.value` now match
 openpyxl's `read_only=True` behavior.
 
-Pod-γ commit: <!-- TBD: integrator-fills -->.
+Pod-γ fix commit: `98cd147` (merged via `974b9b5`).
 
 ## Migration notes
 
@@ -230,8 +230,8 @@ rationales.
 
 ## RFCs
 
-- `Plans/rfcs/044-encryption-writes.md` (Sprint Λ Pod-α) <!-- TBD: SHA -->
-- `Plans/rfcs/045-image-construction.md` (Sprint Λ Pod-β) <!-- TBD: SHA -->
+- `Plans/rfcs/044-encryption-writes.md` (Sprint Λ Pod-α) — `4bc806c`
+- `Plans/rfcs/045-image-construction.md` (Sprint Λ Pod-β) — `d9cb569`
 
 ## Stats (post-1.5)
 
@@ -250,19 +250,31 @@ rationales.
 
 Sprint Λ ("Lambda") pods that landed 1.5:
 
-- **Pod-α — RFC-044 write-side OOXML encryption.** <!-- TBD: SHA -->
+- **Pod-α — RFC-044 write-side OOXML encryption.** Feat `4bc806c`,
+  test `55dc4c6`, docs `9e9555a`. Merged via `738656a`.
 - **Pod-β — RFC-045 image construction (`Image`, anchors, write +
-  modify mode emit).** <!-- TBD: SHA -->
+  modify mode emit).** Writer `0ace8c5`, Image+add_image `d9cb569`,
+  tests `a73737e`. Merged via `7dc00d2`.
 - **Pod-γ — Streaming-datetime correctness fix (Pod-β follow-up
-  from 1.3).** <!-- TBD: SHA -->
+  from 1.3).** Failing test `8af260c`, fix `98cd147`, docs `409837e`.
+  Merged via `974b9b5`.
 - **Pod-δ (this release scaffold)** — RFC-044 + RFC-045 specs,
   INDEX update, KNOWN_GAPS reconciliation, this release notes
-  scaffold, and CHANGELOG entry. <!-- TBD: integrator-fills with
-  Pod-δ commit SHAs -->
+  scaffold, and CHANGELOG entry. Commits: `9c10ce0`, `fff2142`,
+  `28caf08`, `deb8155`. Merged via `99079d1`.
 
 ## SHA log
 
-<!-- TBD: integrator-fills -->
+| Pod | Branch | Commits | Merge |
+|---|---|---|---|
+| α | `feat/sprint-lambda-pod-alpha` | `4bc806c`, `55dc4c6`, `9e9555a` | `738656a` |
+| β | `feat/sprint-lambda-pod-beta` | `0ace8c5`, `d9cb569`, `a73737e` | `7dc00d2` |
+| γ | `feat/sprint-lambda-pod-gamma` | `8af260c`, `98cd147`, `409837e` | `974b9b5` |
+| δ | `feat/sprint-lambda-pod-delta` | `9c10ce0`, `fff2142`, `28caf08`, `deb8155` | `99079d1` |
+
+Integrator finalize commit fills these placeholders, performs the
+post-merge ratchet flip on `openpyxl.Workbook.save (password kwarg)`,
+and tags `v1.5.0`.
 
 After Sprint Λ the openpyxl-parity surface is exhausted at both the
 read level (1.0 → 1.4) and the construction level (1.5). The

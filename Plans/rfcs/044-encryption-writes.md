@@ -1,6 +1,6 @@
 # RFC-044: Write-side OOXML encryption (`Workbook.save(path, password=...)`)
 
-Status: Shipped 1.5 (Sprint Λ Pod-α) <!-- TBD: integrator-fills with Pod-α SHAs -->
+Status: Shipped 1.5 (Sprint Λ Pod-α) — feat `4bc806c`, test `55dc4c6`, docs `9e9555a`
 Owner: Sprint Λ Pod-α
 Phase: 5 (1.5)
 Estimate: M
@@ -256,12 +256,18 @@ Verification matrix coverage (six-layer):
 
 ## 9. SHA log
 
-<!-- TBD: integrator-fills with Pod-α SHAs -->
+Sprint Λ Pod-α landed in three atomic commits on `feat/sprint-lambda-pod-alpha`:
+
+- `4bc806c` `feat(encrypt): add Agile/AES-256 write encryption via msoffcrypto OOXMLFile.encrypt`
+- `55dc4c6` `test(encrypt): write-side encryption coverage + parity vs read path`
+- `9e9555a` `docs(encrypt): add docs/encryption.md (Agile-only scope; Standard/XOR rationale)`
+
+Merged to `feat/native-writer` as merge commit `738656a` on 2026-04-26.
 
 ## Acceptance
 
 (Filled in after Pod-α merges.)
 
-- Commit: <!-- TBD: Pod-α commit sha when integrated -->
-- Verification: `python scripts/verify_rfc.py --rfc 044` GREEN at <!-- TBD -->
-- Date: <!-- TBD -->
+- Commit: `4bc806c` (Pod-α feat); merged via `738656a` on `feat/native-writer`
+- Verification: `pytest tests/test_encrypted_writes.py tests/parity/test_encrypted_write_parity.py` GREEN — 13 cases passing
+- Date: 2026-04-26
