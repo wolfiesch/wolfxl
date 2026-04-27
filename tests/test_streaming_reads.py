@@ -419,3 +419,39 @@ def test_streaming_yields_per_row_element(basic_xlsx: Path) -> None:
     for _ in ws.iter_rows(values_only=True):
         count += 1
     assert count == 1000
+
+
+# ---------------------------------------------------------------------------
+# 17. Sprint Λ Pod-γ — datetime cells convert via the styles table.
+# A `<c s="N">` whose number format passes ``is_date_format`` must surface
+# as a ``datetime`` (or ``date``/``time``) — not as the raw Excel serial.
+# ---------------------------------------------------------------------------
+
+
+def test_streaming_datetime_yields_datetime_values_only(mixed_xlsx: Path) -> None:
+    wb = wolfxl.load_workbook(mixed_xlsx, read_only=True)
+    ws = wb["Mixed"]
+    rows = list(
+        ws.iter_rows(min_row=2, max_row=2, min_col=1, max_col=2, values_only=True)
+    )
+    a2, b2 = rows[0]
+    assert isinstance(a2, dt.datetime), f"A2 datetime divergence: {type(a2).__name__} {a2!r}"
+    assert a2 == dt.datetime(2024, 1, 15, 12, 30)
+    # B2 is a date — openpyxl read_only path returns a datetime at midnight.
+    assert isinstance(b2, dt.datetime), f"B2 date divergence: {type(b2).__name__} {b2!r}"
+    assert b2 == dt.datetime(2024, 6, 1, 0, 0)
+
+
+def test_streaming_datetime_yields_datetime_via_streaming_cell(mixed_xlsx: Path) -> None:
+    wb = wolfxl.load_workbook(mixed_xlsx, read_only=True)
+    ws = wb["Mixed"]
+    rows = list(ws.iter_rows(min_row=2, max_row=2, min_col=1, max_col=2))
+    a2_cell, b2_cell = rows[0]
+    assert isinstance(a2_cell.value, dt.datetime), (
+        f"StreamingCell.value (A2) divergence: {type(a2_cell.value).__name__} {a2_cell.value!r}"
+    )
+    assert a2_cell.value == dt.datetime(2024, 1, 15, 12, 30)
+    assert isinstance(b2_cell.value, dt.datetime), (
+        f"StreamingCell.value (B2) divergence: {type(b2_cell.value).__name__} {b2_cell.value!r}"
+    )
+    assert b2_cell.value == dt.datetime(2024, 6, 1, 0, 0)

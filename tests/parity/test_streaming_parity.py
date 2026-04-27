@@ -133,3 +133,55 @@ def test_row_count_matches(parity_xlsx: Path) -> None:
     wx_count = sum(1 for _ in wx_ws.iter_rows(values_only=True))
 
     assert wx_count == op_count
+
+
+# ---------------------------------------------------------------------------
+# Sprint Λ Pod-γ — datetime divergence in streaming reads.
+# Cells whose number format is a date format must surface as Python
+# datetimes via both ``values_only=True`` and ``StreamingCell.value``.
+# ---------------------------------------------------------------------------
+
+
+def test_streaming_values_only_datetime_matches_openpyxl(parity_xlsx: Path) -> None:
+    """Row 3 column A is ``datetime(2024, 6, 1, 12, 0, 0)``. openpyxl's
+    read-only path returns a ``datetime``; wolfxl must too."""
+    op_wb = openpyxl.load_workbook(parity_xlsx, read_only=True)
+    op_ws = op_wb["Parity"]
+    op_a3 = next(
+        iter(op_ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=1, values_only=True))
+    )[0]
+
+    wx_wb = wolfxl.load_workbook(parity_xlsx, read_only=True)
+    wx_ws = wx_wb["Parity"]
+    wx_a3 = next(
+        iter(wx_ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=1, values_only=True))
+    )[0]
+
+    assert isinstance(op_a3, dt.datetime), f"openpyxl baseline changed: {op_a3!r}"
+    assert isinstance(wx_a3, dt.datetime), (
+        f"wolfxl streaming values_only datetime divergence: got {type(wx_a3).__name__} "
+        f"({wx_a3!r}), expected datetime to match openpyxl read_only=True"
+    )
+    assert wx_a3 == op_a3
+
+
+def test_streaming_cell_value_datetime_matches_openpyxl(parity_xlsx: Path) -> None:
+    """Same row via ``StreamingCell.value`` (values_only=False)."""
+    op_wb = openpyxl.load_workbook(parity_xlsx, read_only=True)
+    op_ws = op_wb["Parity"]
+    op_a3 = next(
+        iter(op_ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=1))
+    )[0]
+
+    wx_wb = wolfxl.load_workbook(parity_xlsx, read_only=True)
+    wx_ws = wx_wb["Parity"]
+    wx_a3 = next(
+        iter(wx_ws.iter_rows(min_row=3, max_row=3, min_col=1, max_col=1))
+    )[0]
+
+    assert isinstance(op_a3.value, dt.datetime), f"openpyxl baseline changed: {op_a3.value!r}"
+    assert isinstance(wx_a3.value, dt.datetime), (
+        f"wolfxl streaming StreamingCell.value datetime divergence: got "
+        f"{type(wx_a3.value).__name__} ({wx_a3.value!r})"
+    )
+    assert wx_a3.value == op_a3.value
