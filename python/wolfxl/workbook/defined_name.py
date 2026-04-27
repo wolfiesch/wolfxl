@@ -95,4 +95,25 @@ class DefinedName:
         return hash((self.name, self.value, self.localSheetId, self.hidden))
 
 
-__all__ = ["DefinedName"]
+class DefinedNameList(list):
+    """openpyxl-shaped list-of-:class:`DefinedName`.
+
+    openpyxl 3.0 used a ``DefinedNameList`` — newer releases moved to
+    a dict.  Wolfxl exposes both shapes for import-compat parity:
+    :class:`DefinedNameList` here, :class:`~wolfxl.workbook.DefinedNameDict`
+    in :mod:`wolfxl.workbook` (the real container backing
+    ``wb.defined_names``).
+
+    Pod 2 (RFC-060 §2.6).
+    """
+
+
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    """Lazy re-export to dodge a circular ``wolfxl.workbook`` import."""
+    if name == "DefinedNameDict":
+        from wolfxl.workbook import DefinedNameDict as _D
+        return _D
+    raise AttributeError(name)
+
+
+__all__ = ["DefinedName", "DefinedNameDict", "DefinedNameList"]
