@@ -34,6 +34,13 @@ use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use wolfxl_writer::model::chart::{
+    Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
+    ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
+    GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
+    RadarStyle, Reference as ChartReference, ScatterStyle, Series, SeriesAxis, SeriesTitle,
+    TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind, ValueAxis,
+};
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
 use wolfxl_writer::model::{
@@ -1567,6 +1574,113 @@ impl NativeWorkbook {
         ws.images.push(img);
         Ok(())
     }
+
+    /// Sprint Μ Pod-α (RFC-046) — queue a chart onto a sheet.
+    ///
+    /// `chart_dict` shape (built by Python's
+    /// ``Worksheet.add_chart``):
+    ///
+    /// ```python
+    /// {
+    ///     "kind": "bar" | "line" | "pie" | "doughnut" | "area"
+    ///           | "scatter" | "bubble" | "radar",
+    ///     "anchor": { "type": "one_cell" | "two_cell" | "absolute", ... },
+    ///     "title": { "runs": [{"text": "Sales", "bold": true, ...}],
+    ///                "overlay": false } | None,
+    ///     "legend": { "position": "r"|"l"|"t"|"b"|"tr",
+    ///                 "overlay": false, ... } | None,
+    ///     "x_axis": { "kind": "category"|"value"|"date"|"series",
+    ///                 "ax_id": 10, "cross_ax": 100,
+    ///                 "ax_pos": "b"|"t"|"l"|"r",
+    ///                 "orientation": "minMax"|"maxMin",
+    ///                 "major_gridlines": false, "minor_gridlines": false,
+    ///                 "major_tick_mark": "none"|"in"|"out"|"cross",
+    ///                 "title": {...}, "number_format": "0.00",
+    ///                 # ValueAxis only:
+    ///                 "min": 0.0, "max": 100.0,
+    ///                 "major_unit": 10.0, "minor_unit": 1.0,
+    ///                 "crosses": "autoZero"|"min"|"max",
+    ///                 # CategoryAxis only:
+    ///                 "lbl_offset": 100, "lbl_algn": "ctr",
+    ///                 # DateAxis only:
+    ///                 "base_time_unit": "days"|"months"|"years",
+    ///               } | None,
+    ///     "y_axis": {...} | None,
+    ///     "series": [
+    ///         { "idx": 0, "order": 0,
+    ///           "title": {"strRef": {"sheet": "Sheet1", "range": "B1"}}
+    ///                 | {"literal": "My Series"} | None,
+    ///           "categories": {"sheet": "Sheet1", "range": "A2:A6"} | None,
+    ///           "values": {"sheet": "Sheet1", "range": "B2:B6"} | None,
+    ///           "x_values": {...} | None,
+    ///           "bubble_size": {...} | None,
+    ///           "graphical_properties": {
+    ///               "line_color": "FF000000", "line_width_emu": 12700,
+    ///               "line_dash": "solid", "fill_color": "FF0000FF",
+    ///               "no_fill": false, "no_line": false,
+    ///           } | None,
+    ///           "marker": { "symbol": "circle"|"square"|...,
+    ///                       "size": 7, "graphical_properties": {...} } | None,
+    ///           "data_labels": { "show_val": true, "show_cat_name": true,
+    ///                            "show_ser_name": false, "show_percent": false,
+    ///                            "show_legend_key": false,
+    ///                            "show_bubble_size": false,
+    ///                            "position": "outEnd",
+    ///                            "number_format": "0.00",
+    ///                            "separator": "," } | None,
+    ///           "error_bars": [
+    ///               { "bar_type": "plus"|"minus"|"both",
+    ///                 "val_type": "cust"|"fixedVal"|"percentage"
+    ///                          |"stdDev"|"stdErr",
+    ///                 "value": 1.5, "no_end_cap": false }
+    ///           ],
+    ///           "trendlines": [
+    ///               { "kind": "linear"|"log"|"power"|"exp"
+    ///                       |"poly"|"movingAvg",
+    ///                 "order": 2, "period": 3, "forward": 1.0,
+    ///                 "backward": 1.0, "display_equation": true,
+    ///                 "display_r_squared": true, "name": "fit" }
+    ///           ],
+    ///           "smooth": true, "invert_if_negative": false,
+    ///         },
+    ///     ],
+    ///     "plot_visible_only": true, "display_blanks_as": "gap"|"span"|"zero",
+    ///     "vary_colors": true,
+    ///     # Bar:
+    ///     "bar_dir": "col"|"bar", "grouping": "clustered"|"stacked"
+    ///                                |"percentStacked"|"standard",
+    ///     "gap_width": 150, "overlap": -50,
+    ///     # Doughnut/Pie:
+    ///     "hole_size": 50, "first_slice_ang": 0,
+    ///     # Scatter:
+    ///     "scatter_style": "line"|"lineMarker"|"marker"|"smooth"
+    ///                    |"smoothMarker"|"none",
+    ///     # Radar:
+    ///     "radar_style": "standard"|"marker"|"filled",
+    ///     # Bubble:
+    ///     "bubble3d": false, "bubble_scale": 100,
+    ///     "show_neg_bubbles": false,
+    ///     "smoothing": false, "style": 1,
+    /// }
+    /// ```
+    ///
+    /// `anchor_a1` is the A1 reference of the top-left cell where the
+    /// chart should be anchored (e.g. `"D2"`). Pod-β-style anchor
+    /// dicts inside `chart_dict["anchor"]` override this if present.
+    pub fn add_chart_native(
+        &mut self,
+        sheet: &str,
+        chart_dict: &Bound<'_, PyAny>,
+        anchor_a1: &str,
+    ) -> PyResult<()> {
+        let dict = chart_dict
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("chart must be a dict"))?;
+        let chart = parse_chart_dict(dict, anchor_a1)?;
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.charts.push(chart);
+        Ok(())
+    }
 }
 
 fn parse_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<ImageAnchor> {
@@ -1640,5 +1754,740 @@ fn anchor_int_i64(d: &Bound<'_, PyDict>, key: &str, default: i64) -> PyResult<i6
     Ok(d.get_item(key)?
         .and_then(|v| v.extract().ok())
         .unwrap_or(default))
+}
+
+// ---------------------------------------------------------------------------
+// Sprint Μ Pod-α (RFC-046) — chart dict → typed Chart parsing
+// ---------------------------------------------------------------------------
+
+fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
+    let kind_str: String = d
+        .get_item("kind")?
+        .ok_or_else(|| PyValueError::new_err("chart dict missing 'kind'"))?
+        .extract()?;
+    let kind = match kind_str.as_str() {
+        "bar" => ChartKind::Bar,
+        "line" => ChartKind::Line,
+        "pie" => ChartKind::Pie,
+        "doughnut" => ChartKind::Doughnut,
+        "area" => ChartKind::Area,
+        "scatter" => ChartKind::Scatter,
+        "bubble" => ChartKind::Bubble,
+        "radar" => ChartKind::Radar,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown chart kind {other:?} (expected bar/line/pie/doughnut/\
+                 area/scatter/bubble/radar)"
+            )))
+        }
+    };
+
+    // Anchor: prefer explicit dict shape, fall back to A1 → OneCell.
+    let anchor = if let Some(v) = d.get_item("anchor")? {
+        let ad = v
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("chart anchor must be a dict"))?;
+        parse_image_anchor(ad)?
+    } else {
+        a1_to_one_cell_anchor(anchor_a1)?
+    };
+
+    let mut chart = Chart::new(kind, anchor);
+
+    if let Some(v) = d.get_item("title")? {
+        if !v.is_none() {
+            let td = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("chart title must be a dict"))?;
+            chart.title = Some(parse_chart_title(td)?);
+        }
+    }
+
+    if let Some(v) = d.get_item("legend")? {
+        if v.is_none() {
+            chart.legend = None;
+        } else {
+            let ld = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("chart legend must be a dict"))?;
+            chart.legend = Some(parse_legend(ld)?);
+        }
+    }
+
+    if let Some(v) = d.get_item("layout")? {
+        if !v.is_none() {
+            let ld = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("chart layout must be a dict"))?;
+            chart.layout = Some(parse_layout(ld)?);
+        }
+    }
+
+    if let Some(v) = d.get_item("x_axis")? {
+        if !v.is_none() {
+            let ad = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("x_axis must be a dict"))?;
+            chart.x_axis = Some(parse_axis(ad)?);
+        }
+    }
+    if let Some(v) = d.get_item("y_axis")? {
+        if !v.is_none() {
+            let ad = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("y_axis must be a dict"))?;
+            chart.y_axis = Some(parse_axis(ad)?);
+        }
+    }
+
+    if let Some(v) = d.get_item("series")? {
+        let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+        for sv in list.iter() {
+            let sd = sv
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("each series must be a dict"))?;
+            chart.series.push(parse_series(sd)?);
+        }
+    }
+
+    if let Some(b) = py_opt_bool(d, "plot_visible_only")? {
+        chart.plot_visible_only = Some(b);
+    }
+    if let Some(s) = py_opt_str(d, "display_blanks_as")? {
+        chart.display_blanks_as = Some(match s.as_str() {
+            "gap" => DisplayBlanksAs::Gap,
+            "span" => DisplayBlanksAs::Span,
+            "zero" => DisplayBlanksAs::Zero,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown display_blanks_as {other:?}"
+                )))
+            }
+        });
+    }
+    if let Some(b) = py_opt_bool(d, "vary_colors")? {
+        chart.vary_colors = Some(b);
+    }
+
+    if let Some(s) = py_opt_str(d, "bar_dir")? {
+        chart.bar_dir = Some(match s.as_str() {
+            "col" => BarDir::Col,
+            "bar" => BarDir::Bar,
+            other => return Err(PyValueError::new_err(format!("unknown bar_dir {other:?}"))),
+        });
+    }
+    if let Some(s) = py_opt_str(d, "grouping")? {
+        chart.grouping = Some(match s.as_str() {
+            "clustered" => BarGrouping::Clustered,
+            "stacked" => BarGrouping::Stacked,
+            "percentStacked" => BarGrouping::PercentStacked,
+            "standard" => BarGrouping::Standard,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown grouping {other:?}"
+                )))
+            }
+        });
+    }
+    if let Some(n) = py_opt_u32(d, "gap_width")? {
+        chart.gap_width = Some(n);
+    }
+    if let Some(n) = py_opt_i32(d, "overlap")? {
+        chart.overlap = Some(n);
+    }
+    if let Some(n) = py_opt_u32(d, "hole_size")? {
+        chart.hole_size = Some(n);
+    }
+    if let Some(n) = py_opt_u32(d, "first_slice_ang")? {
+        chart.first_slice_ang = Some(n);
+    }
+    if let Some(s) = py_opt_str(d, "scatter_style")? {
+        chart.scatter_style = Some(parse_scatter_style(&s)?);
+    }
+    if let Some(s) = py_opt_str(d, "radar_style")? {
+        chart.radar_style = Some(parse_radar_style(&s)?);
+    }
+    if let Some(b) = py_opt_bool(d, "bubble3d")? {
+        chart.bubble3d = Some(b);
+    }
+    if let Some(n) = py_opt_u32(d, "bubble_scale")? {
+        chart.bubble_scale = Some(n);
+    }
+    if let Some(b) = py_opt_bool(d, "show_neg_bubbles")? {
+        chart.show_neg_bubbles = Some(b);
+    }
+    if let Some(b) = py_opt_bool(d, "smoothing")? {
+        chart.smoothing = Some(b);
+    }
+    if let Some(n) = py_opt_u32(d, "style")? {
+        chart.style = Some(n);
+    }
+
+    Ok(chart)
+}
+
+fn a1_to_one_cell_anchor(a1: &str) -> PyResult<ImageAnchor> {
+    let ((row, col), _) = wolfxl_writer::refs::parse_range(&format!("{a1}:{a1}"))
+        .ok_or_else(|| PyValueError::new_err(format!("invalid A1 anchor {a1:?}")))?;
+    Ok(ImageAnchor::OneCell {
+        from_col: col.saturating_sub(1),
+        from_row: row.saturating_sub(1),
+        from_col_off: 0,
+        from_row_off: 0,
+    })
+}
+
+fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
+    let runs = if let Some(v) = d.get_item("runs")? {
+        let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+        let mut out = Vec::with_capacity(list.len());
+        for rv in list.iter() {
+            let rd = rv
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("title run must be a dict"))?;
+            let text: String = rd
+                .get_item("text")?
+                .ok_or_else(|| PyValueError::new_err("title run missing 'text'"))?
+                .extract()?;
+            out.push(TitleRun {
+                text,
+                bold: py_opt_bool(rd, "bold")?,
+                italic: py_opt_bool(rd, "italic")?,
+                underline: py_opt_bool(rd, "underline")?,
+                size_pt: py_opt_u32(rd, "size_pt")?,
+                color: py_opt_str(rd, "color")?,
+                font_name: py_opt_str(rd, "font_name")?,
+            });
+        }
+        out
+    } else if let Some(v) = d.get_item("text")? {
+        // Convenience: {"text": "Sales"} → single plain run.
+        let text: String = v.extract()?;
+        vec![TitleRun::plain(text)]
+    } else {
+        return Err(PyValueError::new_err(
+            "chart title must have 'runs' or 'text'",
+        ));
+    };
+    Ok(ChartTitle {
+        runs,
+        overlay: py_opt_bool(d, "overlay")?,
+        layout: parse_optional_layout(d, "layout")?,
+    })
+}
+
+fn parse_legend(d: &Bound<'_, PyDict>) -> PyResult<Legend> {
+    let position = if let Some(s) = py_opt_str(d, "position")? {
+        match s.as_str() {
+            "r" => LegendPosition::Right,
+            "l" => LegendPosition::Left,
+            "t" => LegendPosition::Top,
+            "b" => LegendPosition::Bottom,
+            "tr" => LegendPosition::TopRight,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown legend position {other:?}"
+                )))
+            }
+        }
+    } else {
+        LegendPosition::Right
+    };
+    Ok(Legend {
+        position,
+        overlay: py_opt_bool(d, "overlay")?,
+        layout: parse_optional_layout(d, "layout")?,
+    })
+}
+
+fn parse_optional_layout(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Layout>> {
+    if let Some(v) = d.get_item(key)? {
+        if !v.is_none() {
+            let ld = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err(format!("{key} must be a dict")))?;
+            return Ok(Some(parse_layout(ld)?));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_layout(d: &Bound<'_, PyDict>) -> PyResult<Layout> {
+    let x: f64 = d
+        .get_item("x")?
+        .ok_or_else(|| PyValueError::new_err("layout missing 'x'"))?
+        .extract()?;
+    let y: f64 = d
+        .get_item("y")?
+        .ok_or_else(|| PyValueError::new_err("layout missing 'y'"))?
+        .extract()?;
+    let w: f64 = d
+        .get_item("w")?
+        .ok_or_else(|| PyValueError::new_err("layout missing 'w'"))?
+        .extract()?;
+    let h: f64 = d
+        .get_item("h")?
+        .ok_or_else(|| PyValueError::new_err("layout missing 'h'"))?
+        .extract()?;
+    let layout_target = if let Some(s) = py_opt_str(d, "layout_target")? {
+        Some(match s.as_str() {
+            "inner" => LayoutTarget::Inner,
+            "outer" => LayoutTarget::Outer,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown layout_target {other:?}"
+                )))
+            }
+        })
+    } else {
+        None
+    };
+    Ok(Layout {
+        x,
+        y,
+        w,
+        h,
+        layout_target,
+    })
+}
+
+fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
+    let kind: String = d
+        .get_item("kind")?
+        .ok_or_else(|| PyValueError::new_err("axis dict missing 'kind'"))?
+        .extract()?;
+    let common = parse_axis_common(d)?;
+    match kind.as_str() {
+        "category" => Ok(Axis::Category(CategoryAxis {
+            common,
+            lbl_offset: py_opt_u32(d, "lbl_offset")?,
+            lbl_algn: py_opt_str(d, "lbl_algn")?,
+        })),
+        "value" => Ok(Axis::Value(ValueAxis {
+            common,
+            min: py_opt_f64(d, "min")?,
+            max: py_opt_f64(d, "max")?,
+            major_unit: py_opt_f64(d, "major_unit")?,
+            minor_unit: py_opt_f64(d, "minor_unit")?,
+            crosses: py_opt_str(d, "crosses")?,
+        })),
+        "date" => Ok(Axis::Date(DateAxis {
+            common,
+            min: py_opt_f64(d, "min")?,
+            max: py_opt_f64(d, "max")?,
+            major_unit: py_opt_f64(d, "major_unit")?,
+            minor_unit: py_opt_f64(d, "minor_unit")?,
+            base_time_unit: py_opt_str(d, "base_time_unit")?,
+        })),
+        "series" => Ok(Axis::Series(SeriesAxis { common })),
+        other => Err(PyValueError::new_err(format!(
+            "unknown axis kind {other:?} (expected category|value|date|series)"
+        ))),
+    }
+}
+
+fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
+    let ax_id: u32 = d
+        .get_item("ax_id")?
+        .ok_or_else(|| PyValueError::new_err("axis missing 'ax_id'"))?
+        .extract()?;
+    let cross_ax: u32 = d
+        .get_item("cross_ax")?
+        .ok_or_else(|| PyValueError::new_err("axis missing 'cross_ax'"))?
+        .extract()?;
+    let ax_pos = match py_opt_str(d, "ax_pos")?.as_deref() {
+        Some("b") | None => AxisPos::Bottom,
+        Some("t") => AxisPos::Top,
+        Some("l") => AxisPos::Left,
+        Some("r") => AxisPos::Right,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown ax_pos {other:?}"
+            )))
+        }
+    };
+    let orientation = match py_opt_str(d, "orientation")?.as_deref() {
+        Some("minMax") | None => AxisOrientation::MinMax,
+        Some("maxMin") => AxisOrientation::MaxMin,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown axis orientation {other:?}"
+            )))
+        }
+    };
+    let major_tick_mark = if let Some(s) = py_opt_str(d, "major_tick_mark")? {
+        Some(parse_tick_mark(&s)?)
+    } else {
+        None
+    };
+    let minor_tick_mark = if let Some(s) = py_opt_str(d, "minor_tick_mark")? {
+        Some(parse_tick_mark(&s)?)
+    } else {
+        None
+    };
+    let title = if let Some(v) = d.get_item("title")? {
+        if v.is_none() {
+            None
+        } else {
+            let td = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("axis title must be a dict"))?;
+            Some(parse_chart_title(td)?)
+        }
+    } else {
+        None
+    };
+    Ok(AxisCommon {
+        ax_id,
+        cross_ax,
+        orientation,
+        ax_pos,
+        delete: py_opt_bool(d, "delete")?,
+        major_tick_mark,
+        minor_tick_mark,
+        title,
+        major_gridlines: py_opt_bool(d, "major_gridlines")?.unwrap_or(false),
+        minor_gridlines: py_opt_bool(d, "minor_gridlines")?.unwrap_or(false),
+        number_format: py_opt_str(d, "number_format")?,
+    })
+}
+
+fn parse_tick_mark(s: &str) -> PyResult<TickMark> {
+    Ok(match s {
+        "none" => TickMark::None,
+        "in" => TickMark::In,
+        "out" => TickMark::Out,
+        "cross" => TickMark::Cross,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown tick mark {other:?}"
+            )))
+        }
+    })
+}
+
+fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
+    let idx: u32 = d
+        .get_item("idx")?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(0);
+    let order: u32 = d
+        .get_item("order")?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or(idx);
+    let mut s = Series::new(idx);
+    s.order = order;
+
+    if let Some(v) = d.get_item("title")? {
+        if !v.is_none() {
+            let td = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("series title must be a dict"))?;
+            if let Some(rv) = td.get_item("strRef")? {
+                let rd = rv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("strRef must be a dict"))?;
+                s.title = Some(SeriesTitle::StrRef(parse_reference(rd)?));
+            } else if let Some(lv) = td.get_item("literal")? {
+                let s_str: String = lv.extract()?;
+                s.title = Some(SeriesTitle::Literal(s_str));
+            }
+        }
+    }
+
+    if let Some(v) = d.get_item("categories")? {
+        if !v.is_none() {
+            let rd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("categories must be a dict"))?;
+            s.categories = Some(parse_reference(rd)?);
+        }
+    }
+    if let Some(v) = d.get_item("values")? {
+        if !v.is_none() {
+            let rd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("values must be a dict"))?;
+            s.values = Some(parse_reference(rd)?);
+        }
+    }
+    if let Some(v) = d.get_item("x_values")? {
+        if !v.is_none() {
+            let rd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("x_values must be a dict"))?;
+            s.x_values = Some(parse_reference(rd)?);
+        }
+    }
+    if let Some(v) = d.get_item("bubble_size")? {
+        if !v.is_none() {
+            let rd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("bubble_size must be a dict"))?;
+            s.bubble_size = Some(parse_reference(rd)?);
+        }
+    }
+
+    if let Some(v) = d.get_item("graphical_properties")? {
+        if !v.is_none() {
+            let gd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
+            s.graphical_properties = Some(parse_graphical_properties(gd)?);
+        }
+    }
+    if let Some(v) = d.get_item("marker")? {
+        if !v.is_none() {
+            let md = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("marker must be a dict"))?;
+            s.marker = Some(parse_marker(md)?);
+        }
+    }
+    if let Some(v) = d.get_item("data_labels")? {
+        if !v.is_none() {
+            let dd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
+            s.data_labels = Some(parse_data_labels(dd)?);
+        }
+    }
+    if let Some(v) = d.get_item("error_bars")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            for ev in list.iter() {
+                let ed = ev
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("error bar must be a dict"))?;
+                s.error_bars.push(parse_error_bars(ed)?);
+            }
+        }
+    }
+    if let Some(v) = d.get_item("trendlines")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            for tv in list.iter() {
+                let td = tv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("trendline must be a dict"))?;
+                s.trendlines.push(parse_trendline(td)?);
+            }
+        }
+    }
+
+    s.smooth = py_opt_bool(d, "smooth")?;
+    s.invert_if_negative = py_opt_bool(d, "invert_if_negative")?;
+    Ok(s)
+}
+
+fn parse_reference(d: &Bound<'_, PyDict>) -> PyResult<ChartReference> {
+    let sheet: String = d
+        .get_item("sheet")?
+        .ok_or_else(|| PyValueError::new_err("reference missing 'sheet'"))?
+        .extract()?;
+    let range: String = d
+        .get_item("range")?
+        .ok_or_else(|| PyValueError::new_err("reference missing 'range'"))?
+        .extract()?;
+    Ok(ChartReference::new(sheet, range))
+}
+
+fn parse_graphical_properties(d: &Bound<'_, PyDict>) -> PyResult<GraphicalProperties> {
+    Ok(GraphicalProperties {
+        line_color: py_opt_str(d, "line_color")?,
+        line_width_emu: py_opt_u32(d, "line_width_emu")?,
+        line_dash: py_opt_str(d, "line_dash")?,
+        fill_color: py_opt_str(d, "fill_color")?,
+        no_fill: py_opt_bool(d, "no_fill")?.unwrap_or(false),
+        no_line: py_opt_bool(d, "no_line")?.unwrap_or(false),
+    })
+}
+
+fn parse_marker(d: &Bound<'_, PyDict>) -> PyResult<Marker> {
+    let symbol = match py_opt_str(d, "symbol")?.as_deref() {
+        Some("none") => MarkerSymbol::None,
+        Some("circle") | None => MarkerSymbol::Circle,
+        Some("square") => MarkerSymbol::Square,
+        Some("diamond") => MarkerSymbol::Diamond,
+        Some("triangle") => MarkerSymbol::Triangle,
+        Some("plus") => MarkerSymbol::Plus,
+        Some("x") => MarkerSymbol::X,
+        Some("star") => MarkerSymbol::Star,
+        Some("dash") => MarkerSymbol::Dash,
+        Some("dot") => MarkerSymbol::Dot,
+        Some("auto") => MarkerSymbol::Auto,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown marker symbol {other:?}"
+            )))
+        }
+    };
+    let graphical_properties = if let Some(v) = d.get_item("graphical_properties")? {
+        if v.is_none() {
+            None
+        } else {
+            let gd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
+            Some(parse_graphical_properties(gd)?)
+        }
+    } else {
+        None
+    };
+    Ok(Marker {
+        symbol,
+        size: py_opt_u32(d, "size")?,
+        graphical_properties,
+    })
+}
+
+fn parse_data_labels(d: &Bound<'_, PyDict>) -> PyResult<DataLabels> {
+    Ok(DataLabels {
+        show_val: py_opt_bool(d, "show_val")?,
+        show_cat_name: py_opt_bool(d, "show_cat_name")?,
+        show_ser_name: py_opt_bool(d, "show_ser_name")?,
+        show_percent: py_opt_bool(d, "show_percent")?,
+        show_legend_key: py_opt_bool(d, "show_legend_key")?,
+        show_bubble_size: py_opt_bool(d, "show_bubble_size")?,
+        position: py_opt_str(d, "position")?,
+        number_format: py_opt_str(d, "number_format")?,
+        separator: py_opt_str(d, "separator")?,
+    })
+}
+
+fn parse_error_bars(d: &Bound<'_, PyDict>) -> PyResult<ErrorBars> {
+    let bar_type = match py_opt_str(d, "bar_type")?.as_deref() {
+        Some("plus") => ErrorBarType::Plus,
+        Some("minus") => ErrorBarType::Minus,
+        Some("both") | None => ErrorBarType::Both,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown error bar type {other:?}"
+            )))
+        }
+    };
+    let val_type = match py_opt_str(d, "val_type")?.as_deref() {
+        Some("cust") => ErrorBarValType::Cust,
+        Some("fixedVal") => ErrorBarValType::FixedVal,
+        Some("percentage") => ErrorBarValType::Percentage,
+        Some("stdDev") => ErrorBarValType::StdDev,
+        Some("stdErr") | None => ErrorBarValType::StdErr,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown error bar val_type {other:?}"
+            )))
+        }
+    };
+    Ok(ErrorBars {
+        bar_type,
+        val_type,
+        value: py_opt_f64(d, "value")?,
+        no_end_cap: py_opt_bool(d, "no_end_cap")?,
+    })
+}
+
+fn parse_trendline(d: &Bound<'_, PyDict>) -> PyResult<Trendline> {
+    let kind = match py_opt_str(d, "kind")?.as_deref() {
+        Some("linear") | None => TrendlineKind::Linear,
+        Some("log") => TrendlineKind::Log,
+        Some("power") => TrendlineKind::Power,
+        Some("exp") => TrendlineKind::Exp,
+        Some("poly") => TrendlineKind::Polynomial,
+        Some("movingAvg") => TrendlineKind::MovingAvg,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "unknown trendline kind {other:?}"
+            )))
+        }
+    };
+    Ok(Trendline {
+        kind,
+        order: py_opt_u32(d, "order")?,
+        period: py_opt_u32(d, "period")?,
+        forward: py_opt_f64(d, "forward")?,
+        backward: py_opt_f64(d, "backward")?,
+        display_equation: py_opt_bool(d, "display_equation")?,
+        display_r_squared: py_opt_bool(d, "display_r_squared")?,
+        name: py_opt_str(d, "name")?,
+    })
+}
+
+fn parse_scatter_style(s: &str) -> PyResult<ScatterStyle> {
+    Ok(match s {
+        "line" => ScatterStyle::Line,
+        "lineMarker" => ScatterStyle::LineMarker,
+        "marker" => ScatterStyle::Marker,
+        "smooth" => ScatterStyle::Smooth,
+        "smoothMarker" => ScatterStyle::SmoothMarker,
+        "none" => ScatterStyle::None,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown scatter_style {other:?}"
+            )))
+        }
+    })
+}
+
+fn parse_radar_style(s: &str) -> PyResult<RadarStyle> {
+    Ok(match s {
+        "standard" => RadarStyle::Standard,
+        "marker" => RadarStyle::Marker,
+        "filled" => RadarStyle::Filled,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown radar_style {other:?}"
+            )))
+        }
+    })
+}
+
+fn py_opt_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_i32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i32>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
+}
+
+fn py_opt_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
+    if let Some(v) = d.get_item(key)? {
+        if v.is_none() {
+            return Ok(None);
+        }
+        return Ok(Some(v.extract()?));
+    }
+    Ok(None)
 }
 
