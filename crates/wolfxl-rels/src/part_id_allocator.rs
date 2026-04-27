@@ -59,6 +59,9 @@ pub struct PartIdAllocator {
     next_sheet: u32,
     next_chart: u32,
     next_image: u32,
+    // Sprint Ν Pod-γ (RFC-035 §10) — pivot deep-clone counters.
+    next_pivot_table: u32,
+    next_pivot_cache: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -78,6 +81,8 @@ impl PartIdAllocator {
             next_sheet: 1,
             next_chart: 1,
             next_image: 1,
+            next_pivot_table: 1,
+            next_pivot_cache: 1,
         }
     }
 
@@ -115,6 +120,15 @@ impl PartIdAllocator {
             self.bump(Counter::Sheet, n);
         } else if let Some(n) = parse_n(path, "xl/charts/chart", ".xml") {
             self.bump(Counter::Chart, n);
+        } else if let Some(n) = parse_n(path, "xl/pivotTables/pivotTable", ".xml") {
+            self.bump(Counter::PivotTable, n);
+        } else if let Some(n) =
+            parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml")
+        {
+            self.bump(Counter::PivotCache, n);
+        } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheRecords", ".xml") {
+            // Records share the cache counter (cache N = records N).
+            self.bump(Counter::PivotCache, n);
         } else if path.starts_with("xl/media/image") {
             // Images use heterogeneous extensions (png/jpeg/gif/...) so a
             // generic strip+parse covers all of them.
@@ -136,6 +150,8 @@ impl PartIdAllocator {
             Counter::Sheet => &mut self.next_sheet,
             Counter::Chart => &mut self.next_chart,
             Counter::Image => &mut self.next_image,
+            Counter::PivotTable => &mut self.next_pivot_table,
+            Counter::PivotCache => &mut self.next_pivot_cache,
         };
         if n + 1 > *slot {
             *slot = n + 1;
@@ -194,6 +210,25 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `pivotTableN` suffix; returns `N` (≥1).
+    /// Used by Sprint Ν Pod-γ (RFC-035 §10) deep-clone in sheet copy.
+    pub fn alloc_pivot_table(&mut self) -> u32 {
+        let n = self.next_pivot_table;
+        self.next_pivot_table += 1;
+        n
+    }
+
+    /// Allocate a fresh `pivotCacheN` suffix; returns `N` (≥1). Both
+    /// `pivotCacheDefinitionN.xml` and `pivotCacheRecordsN.xml` share
+    /// the same `N`. Used by Sprint Ν Pod-γ (RFC-035 §10) when
+    /// deep-cloning a self-cache (cache whose source range lives on
+    /// the sheet being copied).
+    pub fn alloc_pivot_cache(&mut self) -> u32 {
+        let n = self.next_pivot_cache;
+        self.next_pivot_cache += 1;
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
     fn peek(&self) -> [u32; 7] {
@@ -217,6 +252,8 @@ enum Counter {
     Sheet,
     Chart,
     Image,
+    PivotTable,
+    PivotCache,
 }
 
 // ---------------------------------------------------------------------------

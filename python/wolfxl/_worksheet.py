@@ -313,6 +313,8 @@ class Worksheet:
         "_pending_images",
         # Sprint Μ Pod-β (RFC-046) — pending chart queue.
         "_pending_charts",
+        # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue.
+        "_pending_pivot_tables",
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
@@ -359,6 +361,12 @@ class Worksheet:
         # Drained at save time into ``_rust_writer.add_chart_native`` (write
         # mode) or the patcher (modify mode, queued by Pod-γ's plumbing).
         self._pending_charts: list[Any] = []
+        # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue. Drained
+        # at save time into the patcher via
+        # ``_workbook._flush_pending_pivots_to_patcher`` (modify mode
+        # only — write-mode pivot tables are not yet supported and
+        # should fail loud at ``add_pivot_table`` call site).
+        self._pending_pivot_tables: list[Any] = []
 
     @property
     def title(self) -> str:
@@ -1414,6 +1422,50 @@ class Worksheet:
 
         chart._anchor = anchor  # noqa: SLF001
         self._pending_charts.append(chart)
+
+    def add_pivot_table(self, pivot_table: Any) -> None:
+        """Sprint Ν Pod-γ (RFC-048) — anchor a pivot table on this sheet.
+
+        The pivot table's ``cache`` MUST already be registered on the
+        owning workbook via :meth:`Workbook.add_pivot_cache` (so the
+        cache has a populated ``_cache_id``). The table is queued and
+        drained at ``Workbook.save()`` time via
+        ``_workbook._flush_pending_pivots_to_patcher``.
+
+        Args:
+            pivot_table: A :class:`wolfxl.pivot.PivotTable` instance.
+
+        Raises:
+            TypeError: If ``pivot_table`` is not a
+                :class:`PivotTable`.
+            ValueError: If the pivot table's cache has not been
+                registered yet (its ``_cache_id`` is ``None``).
+            RuntimeError: If the workbook is not in modify mode.
+        """
+        from wolfxl.pivot import PivotTable as _PivotTable
+
+        if not isinstance(pivot_table, _PivotTable):
+            raise TypeError(
+                f"add_pivot_table expected wolfxl.pivot.PivotTable, "
+                f"got {type(pivot_table).__name__}"
+            )
+        if self._workbook._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError(
+                "add_pivot_table requires modify mode — open the "
+                "workbook with load_workbook(..., modify=True). "
+                "Write-mode pivot table emission is not yet supported."
+            )
+        if pivot_table.cache._cache_id is None:  # noqa: SLF001
+            raise ValueError(
+                "PivotTable.cache has not been registered with the "
+                "workbook yet. Call Workbook.add_pivot_cache(cache) "
+                "before Worksheet.add_pivot_table(pt)."
+            )
+        # Compute the layout up-front so any field-axis errors surface
+        # synchronously here rather than at save() time.
+        if hasattr(pivot_table, "_compute_layout"):
+            pivot_table._compute_layout()
+        self._pending_pivot_tables.append(pivot_table)
 
     @staticmethod
     def _validate_a1_anchor(anchor: str) -> None:

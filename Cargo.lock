@@ -1353,6 +1353,7 @@ dependencies = [
  "wolfxl-classify",
  "wolfxl-core",
  "wolfxl-merger",
+ "wolfxl-pivot",
  "wolfxl-rels",
  "wolfxl-structural",
  "wolfxl-writer",
@@ -1431,6 +1432,7 @@ dependencies = [
  "proptest",
  "quick-xml 0.37.5",
  "wolfxl-formula",
+ "wolfxl-pivot",
  "wolfxl-rels",
 ]
 

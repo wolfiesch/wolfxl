@@ -20,6 +20,8 @@
 
 pub mod model;
 pub mod emit;
+pub mod parse;
+pub mod structural;
 
 pub use model::cache::{
     CacheField, CacheValue, DataType, PivotCache, SharedItems, WorksheetSource,

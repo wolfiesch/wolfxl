@@ -494,10 +494,75 @@ pub fn plan_sheet_copy(
                 let new_rid = dest_rels.add(rt::CHART, &new_target, TargetMode::Internal);
                 rid_remap.insert(old_rid, new_rid.0);
             }
-            // ------ Pivot tables (out-of-scope; alias verbatim) ------
+            // ------ Pivot tables (Sprint Ν Pod-γ / RFC-035 §10) ------
+            //
+            // Deep-clone strategy:
+            //   * Allocate a fresh `pivotTableN` suffix.
+            //   * Bytes-rewrite the table XML (rewrite
+            //     `worksheetSource sheet="<src>"` → `<dst>`; this is
+            //     a no-op for the common case where the cache's
+            //     source range lives on a sheet *other* than the one
+            //     being copied, but it's the right behaviour for the
+            //     edge case where the source range itself is on the
+            //     copied sheet — see §10.4 "self-cache copy").
+            //   * Copy the per-table rels file verbatim (the rels
+            //     point at the cache definition; the cache stays
+            //     aliased).
+            //   * Add a content-type override.
+            //   * Emit a sheet-rel pointing at the new pivotTableN
+            //     part. The cache itself is NOT deep-cloned in this
+            //     pass (workbook-scope; same cache → many tables).
             t if t == rt::PIVOT_TABLE => {
-                let new_rid =
-                    dest_rels.add(&source_rel.rel_type, &source_rel.target, source_rel.mode);
+                let resolved_table = resolve_relative(
+                    parent_dir(&inputs.src_sheet_path),
+                    &source_rel.target,
+                );
+                let new_n = inputs.allocator.alloc_pivot_table();
+                let new_table_path =
+                    format!("xl/pivotTables/pivotTable{new_n}.xml");
+
+                let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
+                    zip_parts.get(&resolved_table)
+                {
+                    wolfxl_pivot::structural::deep_clone_pivot_table(
+                        src_bytes,
+                        &inputs.src_title,
+                        &inputs.dst_title,
+                        None,
+                    )
+                } else {
+                    Vec::new()
+                };
+                new_ancillary_parts
+                    .push((new_table_path.clone(), cloned_bytes));
+                content_type_overrides_to_add.push((
+                    format!("/{new_table_path}"),
+                    wolfxl_pivot::ct::PIVOT_TABLE.to_string(),
+                ));
+
+                // Copy per-table rels file (table → cache) verbatim.
+                // The rels target stays pointed at the original cache
+                // definition since we don't deep-clone caches in
+                // sheet copy (RFC-047 §6: caches are workbook-scope).
+                if let Some(src_table_rels_path) =
+                    wolfxl_rels::rels_path_for(&resolved_table)
+                {
+                    if let Some(rb) = zip_parts.get(&src_table_rels_path) {
+                        let dst_table_rels_path = format!(
+                            "xl/pivotTables/_rels/pivotTable{new_n}.xml.rels"
+                        );
+                        new_ancillary_parts
+                            .push((dst_table_rels_path, rb.clone()));
+                    }
+                }
+
+                let new_target =
+                    format!("../pivotTables/pivotTable{new_n}.xml");
+                let new_rid = dest_rels.add(
+                    rt::PIVOT_TABLE,
+                    &new_target,
+                    TargetMode::Internal,
+                );
                 rid_remap.insert(old_rid, new_rid.0);
             }
             // ------ Hyperlinks (External: alias by URL) ------

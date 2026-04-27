@@ -52,6 +52,19 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         native_writer_backend::serialize_chart_dict,
         m
     )?)?;
+    // Sprint Ν Pod-γ (RFC-047 / RFC-048) — pivot serialisers.
+    m.add_function(wrap_pyfunction!(
+        wolfxl::pivot::serialize_pivot_cache_dict,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::pivot::serialize_pivot_records_dict,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::pivot::serialize_pivot_table_dict,
+        m
+    )?)?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;
