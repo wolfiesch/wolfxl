@@ -41,10 +41,10 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 
 use wolfxl_pivot::model::cache::{
-    CacheField, CacheValue, DataType, PivotCache, SharedItems, WorksheetSource,
+    CacheField, CacheValue, PivotCache, SharedItems, WorksheetSource,
 };
 use wolfxl_pivot::model::records::{CacheRecord, RecordCell};
 use wolfxl_pivot::model::table::{
