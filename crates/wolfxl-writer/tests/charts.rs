@@ -16,9 +16,9 @@ use wolfxl_writer::emit::charts::emit_chart_xml;
 use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarGrouping, CategoryAxis, Chart, ChartKind,
     DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Layout, Legend, LegendPosition, Marker, MarkerSymbol, RadarStyle,
-    Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title, TitleRun, Trendline,
-    TrendlineKind, ValueAxis,
+    GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
+    MarkerSymbol, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title,
+    TitleRun, Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use wolfxl_writer::model::image::ImageAnchor;
 
@@ -807,4 +807,412 @@ fn end_to_end_emits_chart_part_via_emit_xlsx() {
     assert!(names
         .iter()
         .any(|n| n == "xl/drawings/_rels/drawing1.xml.rels"));
+}
+
+// ---------------------------------------------------------------------------
+// Sprint Μ-prime Pod-α' — new family round-trips + new sub-features
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bar3d_chart_round_trips() {
+    let mut c = Chart::new(ChartKind::Bar3D, anchor_at(0, 0));
+    c.title = Some(Title::plain("3D Sales"));
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    // 3D defaults set by Chart::new.
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:bar3DChart>");
+    assert_contains(&bytes, "<c:view3D>");
+    assert_contains(&bytes, "<c:barDir val=\"col\"/>");
+}
+
+#[test]
+fn line3d_chart_round_trips() {
+    let mut c = Chart::new(ChartKind::Line3D, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:line3DChart>");
+    assert_contains(&bytes, "<c:grouping val=\"standard\"/>");
+    assert_contains(&bytes, "<c:view3D>");
+}
+
+#[test]
+fn pie3d_chart_round_trips() {
+    let mut c = Chart::new(ChartKind::Pie3D, anchor_at(0, 0));
+    c.vary_colors = Some(true);
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("Sheet", "B2:B6"));
+    s.categories = Some(Reference::new("Sheet", "A2:A6"));
+    c.add_series(s);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:pie3DChart>");
+    assert_contains(&bytes, "<c:varyColors val=\"1\"/>");
+    assert_contains(&bytes, "<c:view3D>");
+    // Pie3D is axis-free.
+    assert_not_contains(&bytes, "<c:axId");
+}
+
+#[test]
+fn area3d_chart_round_trips() {
+    let mut c = Chart::new(ChartKind::Area3D, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:area3DChart>");
+    assert_contains(&bytes, "<c:grouping val=\"standard\"/>");
+    assert_contains(&bytes, "<c:view3D>");
+}
+
+#[test]
+fn surface_chart_round_trips_with_wireframe() {
+    let mut c = Chart::new(ChartKind::Surface, anchor_at(0, 0));
+    c.wireframe = Some(true);
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:surfaceChart>");
+    assert_contains(&bytes, "<c:wireframe val=\"1\"/>");
+    // Surface is NOT 3D, so no view3D.
+    assert_not_contains(&bytes, "<c:view3D>");
+}
+
+#[test]
+fn surface3d_chart_round_trips() {
+    let mut c = Chart::new(ChartKind::Surface3D, anchor_at(0, 0));
+    c.wireframe = Some(false);
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:surface3DChart>");
+    assert_contains(&bytes, "<c:wireframe val=\"0\"/>");
+    assert_contains(&bytes, "<c:view3D>");
+}
+
+#[test]
+fn stock_chart_emits_hilow_and_updown_bars() {
+    let mut c = Chart::new(ChartKind::Stock, anchor_at(0, 0));
+    // 4 series typical (Open, High, Low, Close), but emit accepts any
+    // count — semantic validation is Pod-β's job.
+    for i in 0..4u32 {
+        let mut s = Series::new(i);
+        s.values = Some(Reference::new("Sheet", &format!("B{}:B{}", 2 + i, 6 + i)));
+        c.add_series(s);
+    }
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:stockChart>");
+    assert_contains(&bytes, "<c:hiLowLines/>");
+    assert_contains(&bytes, "<c:upDownBars>");
+}
+
+#[test]
+fn of_pie_chart_emits_split_type_and_of_pie_type() {
+    let mut c = Chart::new(ChartKind::OfPie, anchor_at(0, 0));
+    c.of_pie_type = Some("bar".to_string());
+    c.split_type = Some("percent".to_string());
+    c.split_pos = Some(15.0);
+    c.second_pie_size = Some(75);
+    c.gap_width = Some(100);
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("Sheet", "B2:B8"));
+    s.categories = Some(Reference::new("Sheet", "A2:A8"));
+    c.add_series(s);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:ofPieChart>");
+    assert_contains(&bytes, "<c:ofPieType val=\"bar\"/>");
+    assert_contains(&bytes, "<c:splitType val=\"percent\"/>");
+    assert_contains(&bytes, "<c:splitPos val=\"15\"/>");
+    assert_contains(&bytes, "<c:secondPieSize val=\"75\"/>");
+    assert_contains(&bytes, "<c:gapWidth val=\"100\"/>");
+    // OfPie is axis-free.
+    assert_not_contains(&bytes, "<c:axId");
+}
+
+#[test]
+fn view_3d_emits_all_fields() {
+    let mut c = Chart::new(ChartKind::Bar3D, anchor_at(0, 0));
+    c.view_3d = Some(View3D {
+        rot_x: Some(15),
+        rot_y: Some(20),
+        perspective: Some(30),
+        right_angle_axes: Some(true),
+        auto_scale: Some(true),
+        depth_percent: Some(100),
+        h_percent: Some(120),
+    });
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:view3D>");
+    assert_contains(&bytes, "<c:rotX val=\"15\"/>");
+    assert_contains(&bytes, "<c:rotY val=\"20\"/>");
+    assert_contains(&bytes, "<c:perspective val=\"30\"/>");
+    assert_contains(&bytes, "<c:rAngAx val=\"1\"/>");
+    assert_contains(&bytes, "<c:autoScale val=\"1\"/>");
+    assert_contains(&bytes, "<c:depthPercent val=\"100\"/>");
+    assert_contains(&bytes, "<c:hPercent val=\"120\"/>");
+}
+
+#[test]
+fn major_gridlines_obj_with_graphical_properties() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    c.x_axis = Some(Axis::Category(CategoryAxis {
+        common: AxisCommon::new(10, 100, AxisPos::Bottom),
+        lbl_offset: None,
+        lbl_algn: None,
+    }));
+    let mut yc = AxisCommon::new(100, 10, AxisPos::Left);
+    yc.major_gridlines_obj = Some(Gridlines {
+        graphical_properties: Some(GraphicalProperties {
+            line_color: Some("FFCCCCCC".to_string()),
+            ..Default::default()
+        }),
+    });
+    c.y_axis = Some(Axis::Value(ValueAxis {
+        common: yc,
+        min: None,
+        max: None,
+        major_unit: None,
+        minor_unit: None,
+        crosses: None,
+    }));
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    // Rich gridlines emit the open/close pair with spPr inside.
+    assert_contains(&bytes, "<c:majorGridlines>");
+    assert_contains(&bytes, "<c:spPr>");
+    assert_contains(&bytes, "<a:srgbClr val=\"CCCCCC\"/>");
+    assert_contains(&bytes, "</c:majorGridlines>");
+}
+
+#[test]
+fn empty_gridlines_obj_emits_self_closing_tag() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    c.x_axis = Some(Axis::Category(CategoryAxis {
+        common: AxisCommon::new(10, 100, AxisPos::Bottom),
+        lbl_offset: None,
+        lbl_algn: None,
+    }));
+    let mut yc = AxisCommon::new(100, 10, AxisPos::Left);
+    yc.major_gridlines_obj = Some(Gridlines::default());
+    c.y_axis = Some(Axis::Value(ValueAxis {
+        common: yc,
+        min: None,
+        max: None,
+        major_unit: None,
+        minor_unit: None,
+        crosses: None,
+    }));
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    // Empty gridlines emit `<c:majorGridlines/>` with no inner spPr.
+    assert_contains(&bytes, "<c:majorGridlines/>");
+}
+
+#[test]
+fn fixedval_error_bars_emit_val_attribute() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    let mut s = series_with_cat_val();
+    s.error_bars.push(ErrorBars {
+        bar_type: ErrorBarType::Both,
+        val_type: ErrorBarValType::FixedVal,
+        value: Some(0.5),
+        no_end_cap: None,
+    });
+    c.add_series(s);
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:errBars>");
+    assert_contains(&bytes, "<c:errBarType val=\"both\"/>");
+    assert_contains(&bytes, "<c:errValType val=\"fixedVal\"/>");
+    assert_contains(&bytes, "<c:val val=\"0.5\"/>");
+}
+
+#[test]
+fn linear_trendline_emits_linear_type() {
+    let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("Sheet", "B2:B6"));
+    s.trendlines.push(Trendline {
+        kind: TrendlineKind::Linear,
+        order: None,
+        period: None,
+        forward: None,
+        backward: None,
+        display_equation: Some(true),
+        display_r_squared: Some(true),
+        name: None,
+    });
+    c.add_series(s);
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:trendline>");
+    assert_contains(&bytes, "<c:trendlineType val=\"linear\"/>");
+    assert_contains(&bytes, "<c:dispEq val=\"1\"/>");
+    assert_contains(&bytes, "<c:dispRSqr val=\"1\"/>");
+}
+
+#[test]
+fn polynomial_trendline_order_3_emits_order() {
+    let mut c = Chart::new(ChartKind::Scatter, anchor_at(0, 0));
+    let mut s = Series::new(0);
+    s.x_values = Some(Reference::new("Sheet", "A2:A8"));
+    s.values = Some(Reference::new("Sheet", "B2:B8"));
+    s.trendlines.push(Trendline {
+        kind: TrendlineKind::Polynomial,
+        order: Some(3),
+        period: None,
+        forward: None,
+        backward: None,
+        display_equation: None,
+        display_r_squared: None,
+        name: Some("Cubic Fit".to_string()),
+    });
+    c.add_series(s);
+    let (x, y) = dual_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:trendlineType val=\"poly\"/>");
+    assert_contains(&bytes, "<c:order val=\"3\"/>");
+    assert_contains(&bytes, "<c:name>Cubic Fit</c:name>");
+}
+
+#[test]
+fn data_labels_position_emitted() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    let mut s = series_with_cat_val();
+    s.data_labels = Some(DataLabels {
+        show_val: Some(true),
+        position: Some("outEnd".to_string()),
+        ..Default::default()
+    });
+    c.add_series(s);
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:dLblPos val=\"outEnd\"/>");
+    assert_contains(&bytes, "<c:showVal val=\"1\"/>");
+}
+
+#[test]
+fn marker_symbol_circle_size_emitted() {
+    let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("Sheet", "B2:B6"));
+    s.marker = Some(Marker {
+        symbol: MarkerSymbol::Circle,
+        size: Some(9),
+        graphical_properties: None,
+    });
+    c.add_series(s);
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:marker>");
+    assert_contains(&bytes, "<c:symbol val=\"circle\"/>");
+    assert_contains(&bytes, "<c:size val=\"9\"/>");
+}
+
+#[test]
+fn manual_layout_with_target_inner_emitted() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    c.layout = Some(Layout {
+        x: 0.1,
+        y: 0.15,
+        w: 0.8,
+        h: 0.7,
+        layout_target: Some(LayoutTarget::Inner),
+    });
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:manualLayout>");
+    assert_contains(&bytes, "<c:layoutTarget val=\"inner\"/>");
+    assert_contains(&bytes, "<c:x val=\"0.1\"/>");
+    assert_contains(&bytes, "<c:y val=\"0.15\"/>");
+    assert_contains(&bytes, "<c:w val=\"0.8\"/>");
+    assert_contains(&bytes, "<c:h val=\"0.7\"/>");
+}
+
+#[test]
+fn title_with_two_runs_emits_both() {
+    let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
+    c.title = Some(Title {
+        runs: vec![
+            TitleRun {
+                text: "Q4 ".to_string(),
+                bold: Some(true),
+                italic: None,
+                underline: None,
+                size_pt: Some(14),
+                color: Some("FF000000".to_string()),
+                font_name: Some("Calibri".to_string()),
+            },
+            TitleRun {
+                text: "Revenue".to_string(),
+                bold: None,
+                italic: Some(true),
+                underline: None,
+                size_pt: Some(12),
+                color: None,
+                font_name: None,
+            },
+        ],
+        overlay: Some(false),
+        layout: None,
+    });
+    c.add_series(series_with_cat_val());
+    let (x, y) = cat_value_pair();
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<a:t>Q4 </a:t>");
+    assert_contains(&bytes, "<a:t>Revenue</a:t>");
+    // First run: bold=1 sz=1400.
+    assert_contains(&bytes, " sz=\"1400\"");
+    assert_contains(&bytes, " b=\"1\"");
+    // Second run: italic=1.
+    assert_contains(&bytes, " i=\"1\"");
 }

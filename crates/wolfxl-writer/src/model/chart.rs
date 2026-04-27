@@ -20,6 +20,9 @@ use super::image::ImageAnchor;
 
 /// Top-level chart kind. Each variant maps to one OOXML plot-area
 /// element name (e.g. `<barChart>`, `<lineChart>`).
+///
+/// Sprint Μ-prime (RFC-046 §11) added 8 new variants for 3D / Stock /
+/// Surface / OfPie families. The 2D originals are unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartKind {
     Bar,
@@ -30,6 +33,15 @@ pub enum ChartKind {
     Scatter,
     Bubble,
     Radar,
+    // Sprint Μ-prime additions (v1.6.1).
+    Bar3D,
+    Line3D,
+    Pie3D,
+    Area3D,
+    Surface,
+    Surface3D,
+    Stock,
+    OfPie,
 }
 
 impl ChartKind {
@@ -45,6 +57,14 @@ impl ChartKind {
             ChartKind::Scatter => "scatterChart",
             ChartKind::Bubble => "bubbleChart",
             ChartKind::Radar => "radarChart",
+            ChartKind::Bar3D => "bar3DChart",
+            ChartKind::Line3D => "line3DChart",
+            ChartKind::Pie3D => "pie3DChart",
+            ChartKind::Area3D => "area3DChart",
+            ChartKind::Surface => "surfaceChart",
+            ChartKind::Surface3D => "surface3DChart",
+            ChartKind::Stock => "stockChart",
+            ChartKind::OfPie => "ofPieChart",
         }
     }
 
@@ -54,7 +74,16 @@ impl ChartKind {
     pub fn has_category_axis(self) -> bool {
         matches!(
             self,
-            ChartKind::Bar | ChartKind::Line | ChartKind::Area | ChartKind::Radar
+            ChartKind::Bar
+                | ChartKind::Line
+                | ChartKind::Area
+                | ChartKind::Radar
+                | ChartKind::Bar3D
+                | ChartKind::Line3D
+                | ChartKind::Area3D
+                | ChartKind::Surface
+                | ChartKind::Surface3D
+                | ChartKind::Stock
         )
     }
 
@@ -63,9 +92,38 @@ impl ChartKind {
         matches!(self, ChartKind::Scatter | ChartKind::Bubble)
     }
 
-    /// True when this kind has no axes at all (Pie/Doughnut).
+    /// True when this kind has no axes at all (Pie/Doughnut/Pie3D/OfPie).
     pub fn is_axis_free(self) -> bool {
-        matches!(self, ChartKind::Pie | ChartKind::Doughnut)
+        matches!(
+            self,
+            ChartKind::Pie | ChartKind::Doughnut | ChartKind::Pie3D | ChartKind::OfPie
+        )
+    }
+
+    /// True for 3D chart variants — they emit a top-level `<c:view3D>`
+    /// element and use the 3D plot-area element name.
+    pub fn is_3d(self) -> bool {
+        matches!(
+            self,
+            ChartKind::Bar3D
+                | ChartKind::Line3D
+                | ChartKind::Pie3D
+                | ChartKind::Area3D
+                | ChartKind::Surface3D
+        )
+    }
+
+    /// True for Surface/Surface3D — emit `<c:wireframe/>` if requested.
+    pub fn is_surface(self) -> bool {
+        matches!(self, ChartKind::Surface | ChartKind::Surface3D)
+    }
+
+    /// True for Pie family (Pie, Doughnut, Pie3D, OfPie).
+    pub fn is_pie_family(self) -> bool {
+        matches!(
+            self,
+            ChartKind::Pie | ChartKind::Doughnut | ChartKind::Pie3D | ChartKind::OfPie
+        )
     }
 }
 
@@ -262,10 +320,18 @@ pub struct AxisCommon {
     pub minor_tick_mark: Option<TickMark>,
     /// Axis title (rich-text label). `None` → no `<title>` block.
     pub title: Option<Title>,
-    /// `<majorGridlines/>` present when true.
+    /// `<majorGridlines/>` present when true (legacy short-form flag).
+    /// Set to `true` to emit a default `<c:majorGridlines/>`. To attach
+    /// graphical properties, use [`Self::major_gridlines_obj`] instead;
+    /// when both are set, `major_gridlines_obj` takes precedence.
     pub major_gridlines: bool,
-    /// `<minorGridlines/>` present when true.
+    /// `<minorGridlines/>` present when true (legacy short-form flag).
     pub minor_gridlines: bool,
+    /// `<majorGridlines>` rich form (with optional graphical properties).
+    /// Sprint Μ-prime — RFC-046 §10.7.1.
+    pub major_gridlines_obj: Option<Gridlines>,
+    /// `<minorGridlines>` rich form.
+    pub minor_gridlines_obj: Option<Gridlines>,
     /// `<numFmt formatCode="…" sourceLinked="0"/>` — explicit number format.
     pub number_format: Option<String>,
 }
@@ -283,6 +349,8 @@ impl AxisCommon {
             title: None,
             major_gridlines: false,
             minor_gridlines: false,
+            major_gridlines_obj: None,
+            minor_gridlines_obj: None,
             number_format: None,
         }
     }
@@ -399,6 +467,37 @@ impl Title {
             layout: None,
         }
     }
+}
+
+/// 3D chart view parameters — emitted as `<c:view3D>` at the chart level
+/// (before plotArea) for 3D variants. RFC-046 §10.10.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct View3D {
+    /// `<c:rotX val="…"/>` — typically -90..90 (or 0..30 for Bar3D).
+    pub rot_x: Option<i16>,
+    /// `<c:rotY val="…"/>` — 0..360.
+    pub rot_y: Option<i16>,
+    /// `<c:perspective val="…"/>` — 0..240.
+    pub perspective: Option<u8>,
+    /// `<c:rAngAx val="1"/>` — orthogonal axes flag.
+    pub right_angle_axes: Option<bool>,
+    /// `<c:autoScale val="1"/>` — auto scaling.
+    pub auto_scale: Option<bool>,
+    /// `<c:depthPercent val="…"/>` — 20..2000.
+    pub depth_percent: Option<u32>,
+    /// `<c:hPercent val="…"/>` — 5..500.
+    pub h_percent: Option<u32>,
+}
+
+/// `<c:majorGridlines>` / `<c:minorGridlines>` content. RFC-046 §10.7.1.
+///
+/// `None` at the parent axis means "no gridlines". Empty `Gridlines`
+/// (default) means "draw default gridlines" (an empty self-closing
+/// element is emitted). Optional `graphical_properties` paints the
+/// gridline shape.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Gridlines {
+    pub graphical_properties: Option<GraphicalProperties>,
 }
 
 /// One run of rich text inside a title (or per-cell rich label).
@@ -841,6 +940,27 @@ pub struct Chart {
     /// `<smooth val="1"/>` on Line at the chart level (rare; usually
     /// per-series).
     pub smoothing: Option<bool>,
+
+    /// Sprint Μ-prime (RFC-046 §10.10) — 3D view parameters; only
+    /// emitted when `kind.is_3d()`.
+    pub view_3d: Option<View3D>,
+
+    /// Sprint Μ-prime (RFC-046 §11.3) — Surface chart wireframe toggle.
+    pub wireframe: Option<bool>,
+
+    /// Sprint Μ-prime — `<c:ofPieType val="bar|pie"/>` for OfPie kind.
+    pub of_pie_type: Option<String>,
+
+    /// Sprint Μ-prime — `<c:splitType val="auto|cust|percent|pos|val"/>`
+    /// for OfPie kind.
+    pub split_type: Option<String>,
+
+    /// Sprint Μ-prime — `<c:splitPos val="…"/>` for OfPie when
+    /// `split_type` requires a numeric split point.
+    pub split_pos: Option<f64>,
+
+    /// Sprint Μ-prime — `<c:secondPieSize val="…"/>` for OfPie (5..200).
+    pub second_pie_size: Option<u32>,
 }
 
 impl Chart {
@@ -895,6 +1015,31 @@ impl Chart {
             show_neg_bubbles: None,
             style: None,
             smoothing: None,
+            view_3d: if matches!(
+                kind,
+                ChartKind::Bar3D
+                    | ChartKind::Line3D
+                    | ChartKind::Pie3D
+                    | ChartKind::Area3D
+                    | ChartKind::Surface3D
+            ) {
+                Some(View3D::default())
+            } else {
+                None
+            },
+            wireframe: None,
+            of_pie_type: if matches!(kind, ChartKind::OfPie) {
+                Some("pie".to_string())
+            } else {
+                None
+            },
+            split_type: if matches!(kind, ChartKind::OfPie) {
+                Some("auto".to_string())
+            } else {
+                None
+            },
+            split_pos: None,
+            second_pie_size: None,
         }
     }
 

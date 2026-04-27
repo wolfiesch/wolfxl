@@ -48,6 +48,10 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_class::<native_writer_backend::NativeWorkbook>()?;
+    m.add_function(wrap_pyfunction!(
+        native_writer_backend::serialize_chart_dict,
+        m
+    )?)?;
     m.add_class::<streaming::StreamingSheetReader>()?;
     m.add_class::<wolfxl::XlsxPatcher>()?;
     wolfxl_core_bridge::register(m)?;

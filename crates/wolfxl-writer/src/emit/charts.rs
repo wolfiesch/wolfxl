@@ -43,9 +43,9 @@
 
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, Chart, ChartKind, DataLabels, DateAxis,
-    DisplayBlanksAs, ErrorBars, GraphicalProperties, Layout, Legend, Marker, RadarStyle,
+    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, RadarStyle,
     Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline,
-    TrendlineKind, ValueAxis, CategoryAxis,
+    TrendlineKind, ValueAxis, View3D, CategoryAxis,
 };
 use crate::xml_escape;
 
@@ -76,6 +76,13 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
     }
 
     // Auto-title deleted is implicit when title is absent + we emit no element.
+
+    // Optional <c:view3D> for 3D variants. Sprint Μ-prime / RFC-046 §10.10.
+    if chart.kind.is_3d() {
+        if let Some(v) = &chart.view_3d {
+            emit_view_3d(&mut out, v);
+        }
+    }
 
     // <c:plotArea>
     out.push_str("<c:plotArea>");
@@ -152,7 +159,7 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
 
     // Type-specific shape header.
     match chart.kind {
-        ChartKind::Bar => {
+        ChartKind::Bar | ChartKind::Bar3D => {
             if let Some(d) = chart.bar_dir {
                 out.push_str(&format!("<c:barDir val=\"{}\"/>", d.as_str()));
             } else {
@@ -167,12 +174,12 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
                 ));
             }
         }
-        ChartKind::Line => {
+        ChartKind::Line | ChartKind::Line3D => {
             // Default grouping for Line is "standard".
             let g = chart.grouping.unwrap_or(BarGrouping::Standard);
             out.push_str(&format!("<c:grouping val=\"{}\"/>", g.as_str()));
         }
-        ChartKind::Area => {
+        ChartKind::Area | ChartKind::Area3D => {
             let g = chart.grouping.unwrap_or(BarGrouping::Standard);
             out.push_str(&format!("<c:grouping val=\"{}\"/>", g.as_str()));
         }
@@ -184,7 +191,20 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
             let s = chart.radar_style.unwrap_or(RadarStyle::Standard);
             out.push_str(&format!("<c:radarStyle val=\"{}\"/>", s.as_str()));
         }
-        // Pie/Doughnut/Bubble have no opening style attr beyond varyColors.
+        ChartKind::OfPie => {
+            // ofPieType comes first inside <ofPieChart>.
+            let t = chart.of_pie_type.as_deref().unwrap_or("pie");
+            out.push_str(&format!(
+                "<c:ofPieType val=\"{}\"/>",
+                xml_escape::attr(t)
+            ));
+        }
+        ChartKind::Surface | ChartKind::Surface3D => {
+            if let Some(w) = chart.wireframe {
+                out.push_str(&format!("<c:wireframe val=\"{}\"/>", bool_str(w)));
+            }
+        }
+        // Pie/Doughnut/Pie3D/Bubble/Stock have no opening style attr beyond varyColors.
         _ => {}
     }
 
@@ -195,7 +215,7 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
 
     // Type-specific trailing properties.
     match chart.kind {
-        ChartKind::Bar => {
+        ChartKind::Bar | ChartKind::Bar3D => {
             if let Some(g) = chart.gap_width {
                 out.push_str(&format!("<c:gapWidth val=\"{g}\"/>"));
             }
@@ -211,9 +231,26 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
                 out.push_str(&format!("<c:holeSize val=\"{h}\"/>"));
             }
         }
-        ChartKind::Pie => {
+        ChartKind::Pie | ChartKind::Pie3D => {
             if let Some(a) = chart.first_slice_ang {
                 out.push_str(&format!("<c:firstSliceAng val=\"{a}\"/>"));
+            }
+        }
+        ChartKind::OfPie => {
+            // gapWidth, splitType, splitPos, secondPieSize.
+            if let Some(g) = chart.gap_width {
+                out.push_str(&format!("<c:gapWidth val=\"{g}\"/>"));
+            }
+            let st = chart.split_type.as_deref().unwrap_or("auto");
+            out.push_str(&format!(
+                "<c:splitType val=\"{}\"/>",
+                xml_escape::attr(st)
+            ));
+            if let Some(p) = chart.split_pos {
+                out.push_str(&format!("<c:splitPos val=\"{}\"/>", fmt_f64(p)));
+            }
+            if let Some(s) = chart.second_pie_size {
+                out.push_str(&format!("<c:secondPieSize val=\"{s}\"/>"));
             }
         }
         ChartKind::Bubble => {
@@ -227,10 +264,15 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
                 out.push_str(&format!("<c:bubble3D val=\"{}\"/>", bool_str(b)));
             }
         }
-        ChartKind::Line => {
+        ChartKind::Line | ChartKind::Line3D => {
             if let Some(s) = chart.smoothing {
                 out.push_str(&format!("<c:smooth val=\"{}\"/>", bool_str(s)));
             }
+        }
+        ChartKind::Stock => {
+            // Stock charts emit hiLowLines + upDownBars decorators.
+            out.push_str("<c:hiLowLines/>");
+            out.push_str("<c:upDownBars><c:gapWidth val=\"150\"/></c:upDownBars>");
         }
         _ => {}
     }
@@ -325,7 +367,10 @@ fn emit_series(out: &mut String, ser: &Series, kind: ChartKind) {
                 emit_num_ref(out, v);
                 out.push_str("</c:val>");
             }
-            if matches!(kind, ChartKind::Line | ChartKind::Radar) {
+            if matches!(
+                kind,
+                ChartKind::Line | ChartKind::Radar | ChartKind::Line3D
+            ) {
                 if let Some(s) = ser.smooth {
                     out.push_str(&format!("<c:smooth val=\"{}\"/>", bool_str(s)));
                 }
@@ -454,6 +499,55 @@ fn emit_layout(out: &mut String, layout: &Layout) {
     out.push_str(&format!("<c:h val=\"{}\"/>", fmt_f64(layout.h)));
     out.push_str("</c:manualLayout>");
     out.push_str("</c:layout>");
+}
+
+/// Emit a `<c:majorGridlines/>` or `<c:minorGridlines/>` element.
+///
+/// `tag` is the bare element name (without prefix). Sprint Μ-prime
+/// (RFC-046 §10.7.1). The bool flag is the legacy short-form flag; the
+/// `obj` (when present) takes precedence and may carry graphical
+/// properties.
+fn emit_gridlines(out: &mut String, tag: &str, flag: bool, obj: Option<&Gridlines>) {
+    if let Some(g) = obj {
+        if let Some(gp) = &g.graphical_properties {
+            out.push_str(&format!("<c:{tag}>"));
+            emit_graphical_props(out, gp);
+            out.push_str(&format!("</c:{tag}>"));
+        } else {
+            out.push_str(&format!("<c:{tag}/>"));
+        }
+        return;
+    }
+    if flag {
+        out.push_str(&format!("<c:{tag}/>"));
+    }
+}
+
+/// Emit `<c:view3D>` (chart-level, before plotArea). RFC-046 §10.10.
+fn emit_view_3d(out: &mut String, v: &View3D) {
+    out.push_str("<c:view3D>");
+    if let Some(rx) = v.rot_x {
+        out.push_str(&format!("<c:rotX val=\"{rx}\"/>"));
+    }
+    if let Some(ry) = v.rot_y {
+        out.push_str(&format!("<c:rotY val=\"{ry}\"/>"));
+    }
+    if let Some(p) = v.perspective {
+        out.push_str(&format!("<c:perspective val=\"{p}\"/>"));
+    }
+    if let Some(b) = v.right_angle_axes {
+        out.push_str(&format!("<c:rAngAx val=\"{}\"/>", bool_str(b)));
+    }
+    if let Some(b) = v.auto_scale {
+        out.push_str(&format!("<c:autoScale val=\"{}\"/>", bool_str(b)));
+    }
+    if let Some(d) = v.depth_percent {
+        out.push_str(&format!("<c:depthPercent val=\"{d}\"/>"));
+    }
+    if let Some(h) = v.h_percent {
+        out.push_str(&format!("<c:hPercent val=\"{h}\"/>"));
+    }
+    out.push_str("</c:view3D>");
 }
 
 fn emit_data_labels(out: &mut String, d: &DataLabels) {
@@ -657,12 +751,8 @@ fn emit_axis_common_pre(out: &mut String, common: &AxisCommon) {
         "<c:axPos val=\"{}\"/>",
         common.ax_pos.as_str()
     ));
-    if common.major_gridlines {
-        out.push_str("<c:majorGridlines/>");
-    }
-    if common.minor_gridlines {
-        out.push_str("<c:minorGridlines/>");
-    }
+    emit_gridlines(out, "majorGridlines", common.major_gridlines, common.major_gridlines_obj.as_ref());
+    emit_gridlines(out, "minorGridlines", common.minor_gridlines, common.minor_gridlines_obj.as_ref());
     if let Some(t) = &common.title {
         emit_title(out, t);
     }
@@ -727,12 +817,8 @@ fn emit_value_axis(out: &mut String, v: &ValueAxis) {
         "<c:axPos val=\"{}\"/>",
         v.common.ax_pos.as_str()
     ));
-    if v.common.major_gridlines {
-        out.push_str("<c:majorGridlines/>");
-    }
-    if v.common.minor_gridlines {
-        out.push_str("<c:minorGridlines/>");
-    }
+    emit_gridlines(out, "majorGridlines", v.common.major_gridlines, v.common.major_gridlines_obj.as_ref());
+    emit_gridlines(out, "minorGridlines", v.common.minor_gridlines, v.common.minor_gridlines_obj.as_ref());
     if let Some(t) = &v.common.title {
         emit_title(out, t);
     }
@@ -792,12 +878,8 @@ fn emit_date_axis(out: &mut String, d: &DateAxis) {
         "<c:axPos val=\"{}\"/>",
         d.common.ax_pos.as_str()
     ));
-    if d.common.major_gridlines {
-        out.push_str("<c:majorGridlines/>");
-    }
-    if d.common.minor_gridlines {
-        out.push_str("<c:minorGridlines/>");
-    }
+    emit_gridlines(out, "majorGridlines", d.common.major_gridlines, d.common.major_gridlines_obj.as_ref());
+    emit_gridlines(out, "minorGridlines", d.common.minor_gridlines, d.common.minor_gridlines_obj.as_ref());
     if let Some(t) = &d.common.title {
         emit_title(out, t);
     }
