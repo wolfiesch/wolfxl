@@ -960,6 +960,29 @@ class Workbook:
             self._sheet_names.append(new_title)
             ws = Worksheet(self, new_title)
             self._sheets[new_title] = ws
+            # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
+            # slots into the new proxy so per-sheet divergence after a
+            # copy is preserved. The patcher's Phase 2.7 clones the
+            # source XML (which captures whatever setup is currently
+            # on disk); Phase 2.5n then re-splices our Python-side
+            # mutations onto each sheet independently. Without this
+            # deep-clone, mutating src.page_setup before save() would
+            # silently NOT propagate to dst.
+            import copy as _copy
+            for slot in (
+                "_page_setup",
+                "_page_margins",
+                "_header_footer",
+                "_sheet_view",
+                "_protection",
+            ):
+                src_v = getattr(source, slot, None)
+                if src_v is not None:
+                    setattr(ws, slot, _copy.deepcopy(src_v))
+            if getattr(source, "_print_title_rows", None) is not None:
+                ws._print_title_rows = source._print_title_rows  # noqa: SLF001
+            if getattr(source, "_print_title_cols", None) is not None:
+                ws._print_title_cols = source._print_title_cols  # noqa: SLF001
             return ws
 
         # Write-mode path (Sprint Θ Pod-C1).
@@ -1058,6 +1081,29 @@ class Workbook:
             dst._auto_filter._ref = src_af.ref  # noqa: SLF001
             dst._auto_filter.filter_columns = _copy.deepcopy(src_af.filter_columns)  # noqa: SLF001
             dst._auto_filter.sort_state = _copy.deepcopy(src_af.sort_state)  # noqa: SLF001
+
+        # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
+        # slots so per-sheet divergence after a copy is preserved.
+        # `copy.deepcopy` is safe for the dataclass-shaped Pod 1A
+        # classes; we only deep-copy the underscore-private slots
+        # that have actually been initialised.
+        import copy as _copy
+        for slot in (
+            "_page_setup",
+            "_page_margins",
+            "_header_footer",
+            "_sheet_view",
+            "_protection",
+        ):
+            src_v = getattr(source, slot, None)
+            if src_v is not None:
+                setattr(dst, slot, _copy.deepcopy(src_v))
+        # print_titles are workbook-scope definedNames; clone the
+        # per-sheet selectors so the cloned sheet can retitle them.
+        if getattr(source, "_print_title_rows", None) is not None:
+            dst._print_title_rows = source._print_title_rows  # noqa: SLF001
+        if getattr(source, "_print_title_cols", None) is not None:
+            dst._print_title_cols = source._print_title_cols  # noqa: SLF001
 
         return dst
 
@@ -1233,6 +1279,12 @@ class Workbook:
             # patcher's Phase 2.5m runs against an already-stable
             # rels graph (Phase 2.5l added drawing rels first).
             self._flush_pending_pivots_to_patcher()
+            # Sprint Ο Pod 1A.5 (RFC-055) — flush sheet-setup blocks
+            # (sheetView / sheetProtection / pageMargins / pageSetup /
+            # headerFooter) to the patcher's Phase 2.5n queue.
+            # Sequenced AFTER pivots and BEFORE autoFilter so a later
+            # protection toggle can lock the autoFilter range.
+            self._flush_pending_sheet_setup_to_patcher()
             # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
             # the patcher's Phase 2.5o queue.
             self._flush_pending_autofilters_to_patcher()
@@ -1537,6 +1589,47 @@ class Workbook:
             cache._materialize(ws_obj)
         self._pending_pivot_caches.append(cache)
         return cache
+
+    def _flush_pending_sheet_setup_to_patcher(self) -> None:
+        """Sprint Ο Pod 1A.5 (RFC-055) — drain each sheet's queued
+        sheet-setup mutations into the patcher's Phase 2.5n queue.
+
+        Sheets whose Worksheet has any of ``_page_setup``,
+        ``_page_margins``, ``_header_footer``, ``_sheet_view``,
+        ``_protection``, ``_print_title_rows``, ``_print_title_cols``
+        non-default get their ``to_rust_setup_dict()`` queued. The
+        Rust patcher Phase 2.5n then re-emits the 5 sheet-scope
+        XML blocks and splices them into the sheet via
+        wolfxl_merger::merge_blocks.
+
+        ``print_titles`` (workbook-scope ``_xlnm.Print_Titles``
+        definedName) does NOT route through Phase 2.5n on the
+        patcher side; it composes through the existing RFC-021
+        defined-names queue. The dict still includes a
+        ``print_titles`` slot for the writer-mode path.
+        """
+        if self._rust_patcher is None:
+            return
+        for ws in self._sheets.values():
+            # Cheap probe: skip sheets whose 6 setup slots are all
+            # None / un-touched. The accessors lazy-init, so reading
+            # ws.page_setup would defeat the optimisation.
+            if (
+                ws._page_setup is None  # noqa: SLF001
+                and ws._page_margins is None  # noqa: SLF001
+                and ws._header_footer is None  # noqa: SLF001
+                and ws._sheet_view is None  # noqa: SLF001
+                and ws._protection is None  # noqa: SLF001
+                and getattr(ws, "_print_title_rows", None) is None
+                and getattr(ws, "_print_title_cols", None) is None
+            ):
+                continue
+            d = ws.to_rust_setup_dict()
+            # Skip queues whose slots are all None — there's nothing
+            # to splice and the patcher's parser would just no-op.
+            if all(v is None for v in d.values()):
+                continue
+            self._rust_patcher.queue_sheet_setup_update(ws.title, d)
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's

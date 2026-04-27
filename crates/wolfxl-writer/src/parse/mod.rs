@@ -6,5 +6,7 @@
 //! | Module | Emits |
 //! |--------|-------|
 //! | [`workbook_security`] | `<workbookProtection>` + `<fileSharing>` (RFC-058) |
+//! | [`sheet_setup`] | `<sheetView>` / `<sheetProtection>` / `<pageMargins>` / `<pageSetup>` / `<headerFooter>` (RFC-055) |
 
+pub mod sheet_setup;
 pub mod workbook_security;

@@ -1539,6 +1539,28 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    /// Sprint Ο Pod 1A.5 (RFC-055) — install sheet-setup blocks on a
+    /// write-mode sheet. Consumes the §10 dict shape produced by
+    /// `Worksheet.to_rust_setup_dict()` and copies the parsed specs
+    /// onto the worksheet model. The native writer's emit pass then
+    /// renders them at the correct CT_Worksheet positions.
+    pub fn set_sheet_setup_native(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let specs = crate::wolfxl::sheet_setup::parse_sheet_setup_payload(payload)?;
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.views = specs.sheet_view;
+        ws.protection = specs.sheet_protection;
+        ws.page_margins = specs.page_margins;
+        ws.page_setup = specs.page_setup;
+        ws.header_footer = specs.header_footer;
+        // print_titles is workbook-scope; routed via definedNames
+        // queue on the Python side, not here.
+        Ok(())
+    }
+
     /// Sprint Ο Pod 1B (RFC-056) — install an autoFilter on a write-
     /// mode sheet. Takes the §10 dict, pre-emits the `<autoFilter>`
     /// block via `wolfxl_autofilter::emit::emit`, and evaluates the
