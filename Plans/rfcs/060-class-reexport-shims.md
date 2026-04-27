@@ -319,16 +319,16 @@ real, the construction is deferred to a follow-up.
 | `openpyxl.worksheet.cell_range` → `CellRange`, `MultiCellRange` | `python/wolfxl/worksheet/cell_range.py` | ✅ |
 | `openpyxl.worksheet.dimensions` → `RowDimension`, `ColumnDimension`, `DimensionHolder` (stub), `SheetFormatProperties` (stub), `SheetDimension` (stub), `Dimension` | `python/wolfxl/worksheet/dimensions.py` | ✅ |
 | `openpyxl.worksheet.merge` → `MergedCell`, `MergedCellRange`, `MergeCell` (stub), `MergeCells` (stub) | `python/wolfxl/worksheet/merge.py` | ✅ |
-| `openpyxl.worksheet.views` → `SheetView`, `Pane`, `Selection`, `SheetViewList` (all stubs) | `python/wolfxl/worksheet/views.py` | ✅ |
+| `openpyxl.worksheet.views` → `SheetView`, `Pane`, `Selection`, `SheetViewList` | `python/wolfxl/worksheet/views.py` | ✅ |
 | `openpyxl.worksheet.pagebreak` → `Break`, `ColBreak`, `RowBreak`, `PageBreak` (all stubs) | `python/wolfxl/worksheet/pagebreak.py` | ✅ |
-| `openpyxl.worksheet.print_settings` → `PrintArea`, `PrintTitles`, `ColRange`, `RowRange` (all stubs) | `python/wolfxl/worksheet/print_settings.py` | ✅ |
+| `openpyxl.worksheet.print_settings` → `PrintArea`, `PrintTitles`, `ColRange`, `RowRange` | `python/wolfxl/worksheet/print_settings.py` | ✅ |
 | `openpyxl.worksheet.formula` → `ArrayFormula`, `DataTableFormula` | `python/wolfxl/worksheet/formula.py` | ✅ |
 | `openpyxl.worksheet.hyperlink` → `Hyperlink`, `HyperlinkList` | `python/wolfxl/worksheet/hyperlink.py` | ✅ |
 | `openpyxl.worksheet.properties` → `WorksheetProperties`, `PageSetupProperties`, `Outline` (all stubs) | `python/wolfxl/worksheet/properties.py` | ✅ |
-| `openpyxl.worksheet.protection` → `SheetProtection` (stub) | `python/wolfxl/worksheet/protection.py` | ✅ |
+| `openpyxl.worksheet.protection` → `SheetProtection` | `python/wolfxl/worksheet/protection.py` | ✅ |
 | `openpyxl.worksheet.table` → `Table`, `TableColumn`, `TableStyleInfo`, `TableList` (stub), `TablePartList` (stub), `AutoFilter`, `SortState`, `Related` (stub), `XMLColumnProps` (stub) | `python/wolfxl/worksheet/table.py` | ✅ |
-| `openpyxl.worksheet.page` → `PageMargins`, `PrintOptions`, `PrintPageSetup` (all stubs) | `python/wolfxl/worksheet/page.py` | ✅ |
-| `openpyxl.worksheet.header_footer` → `HeaderFooter`, `HeaderFooterItem` (both stubs) | `python/wolfxl/worksheet/header_footer.py` | ✅ |
+| `openpyxl.worksheet.page` → `PageMargins`, `PrintOptions`, `PrintPageSetup` | `python/wolfxl/worksheet/page.py` | ✅ |
+| `openpyxl.worksheet.header_footer` → `HeaderFooter`, `HeaderFooterItem` | `python/wolfxl/worksheet/header_footer.py` | ✅ |
 | `openpyxl.worksheet.filters` → all 14 filter / sort classes | `python/wolfxl/worksheet/filters.py` | ✅ |
 | `openpyxl.worksheet.datavalidation` → `DataValidation`, `DataValidationList` | `python/wolfxl/worksheet/datavalidation.py` | ✅ |
 | `openpyxl.worksheet.worksheet` → `Worksheet` | `python/wolfxl/worksheet/worksheet.py` | ✅ |
@@ -368,21 +368,19 @@ real, the construction is deferred to a follow-up.
 | `openpyxl.comments` → `Comment` | `python/wolfxl/comments/__init__.py` | ✅ |
 | `openpyxl.comments.comments` → `Comment`, `CommentSheet` (stub) | `python/wolfxl/comments/comments.py` | ✅ |
 
-### 12.1 Tier-1.5 follow-up candidates
+### 12.1 Closure status
 
-The stub-flagged paths above are the known Tier-1.5 follow-ups —
-classes that openpyxl users rarely *construct* directly (they're
-preserved on round-trip but not authored in Python) so the construction
-shim raises with a hint. None of the RFC-060 paths could not be
-implemented at all; the surface is fully reachable.
+All Tier-1.5 follow-up candidates from the Sprint-Ο audit are closed
+as of Sprint Π (2026-04-27):
 
-The four highest-impact construction follow-ups:
+| Candidate | Closed by | SHA |
+|---|---|---|
+| SheetProtection | Sprint-Ο Pod-1A.5 | edcbb2c |
+| PageMargins / PrintOptions / PrintPageSetup | Sprint-Π Pod-Π-ε | <fill at merge> |
+| HeaderFooter / HeaderFooterItem | Sprint-Ο Pod-1A.5 | edcbb2c |
+| SheetView / Pane / Selection | Sprint-Ο Pod-1A.5 | edcbb2c |
 
-1. `SheetProtection` — sheet-level lock toggles + password.
-2. `PageMargins` / `PrintOptions` / `PrintPageSetup` — print authoring.
-3. `HeaderFooter` / `HeaderFooterItem` — header/footer authoring.
-4. `SheetView` / `Pane` / `Selection` — view-state authoring.
-
-These are deliberately Tier-1.5 because the underlying OOXML state
-already round-trips losslessly through wolfxl; adding Python-side
-construction is purely a authoring-ergonomics gap.
+Sprint Π closes the remaining 23 Tier-1.5 stubs across Pods Π-α
+(page breaks + dimensions), Π-β (merge + tables + copier), Π-γ
+(NamedStyle + GradientFill + Protection + DifferentialStyle + Fill),
+and Π-δ (workbook properties + internals).
