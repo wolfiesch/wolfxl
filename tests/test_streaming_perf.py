@@ -19,7 +19,7 @@ CI runner ship without flakes. The full table is printed via
 
 from __future__ import annotations
 
-import resource
+import sys
 import time
 from pathlib import Path
 
@@ -27,6 +27,11 @@ import openpyxl
 import pytest
 
 import wolfxl
+
+if sys.platform == "win32":
+    pytest.skip("streaming RSS benchmark requires resource module", allow_module_level=True)
+
+import resource
 
 
 FIXTURE_ROWS = 100_000

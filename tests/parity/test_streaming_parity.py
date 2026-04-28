@@ -79,8 +79,9 @@ def test_values_only_tuples_match_openpyxl(parity_xlsx: Path) -> None:
     # streamer's Phase-1 representation. Both are tracked in
     # ``KNOWN_GAPS.md`` Phase-3 (rich-text + datetime conversion in
     # streaming) and are out-of-scope for Pod-β.
-    for op_r, wx_r in zip(op_rows, wx_rows, strict=False):
-        for op_v, wx_v in zip(op_r, wx_r, strict=False):
+    for op_r, wx_r in zip(op_rows, wx_rows):
+        assert len(wx_r) == len(op_r)
+        for op_v, wx_v in zip(op_r, wx_r):
             if isinstance(op_v, float) and isinstance(wx_v, float):
                 assert wx_v == pytest.approx(op_v)
             else:
