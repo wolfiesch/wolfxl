@@ -1,5 +1,6 @@
 //! Workbook-level helpers used by the surgical xlsx patcher.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek};
 
@@ -33,6 +34,44 @@ pub(crate) fn load_or_empty_rels(zip: &mut ZipArchive<File>, path: &str) -> PyRe
 /// Returns true when the source ZIP contains an entry with the exact name.
 pub(crate) fn source_zip_has_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> bool {
     zip.by_name(name).is_ok()
+}
+
+/// Reads the current bytes for a part, preferring pending replacements and adds.
+pub(crate) fn current_part_bytes(
+    file_patches: &HashMap<String, Vec<u8>>,
+    file_adds: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    path: &str,
+) -> Option<Vec<u8>> {
+    if let Some(b) = file_patches.get(path) {
+        return Some(b.clone());
+    }
+    if let Some(b) = file_adds.get(path) {
+        return Some(b.clone());
+    }
+    source_part_bytes(zip, path)
+}
+
+/// Reads source or replacement bytes for a part that cannot come from file_adds.
+pub(crate) fn patched_or_source_part_bytes(
+    file_patches: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    path: &str,
+) -> Option<Vec<u8>> {
+    if let Some(b) = file_patches.get(path) {
+        return Some(b.clone());
+    }
+    source_part_bytes(zip, path)
+}
+
+fn source_part_bytes(zip: &mut ZipArchive<File>, path: &str) -> Option<Vec<u8>> {
+    let mut entry = match zip.by_name(path) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+    let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+    std::io::copy(&mut entry, &mut buf).ok()?;
+    Some(buf)
 }
 
 /// Inserts a `<sheet .../>` element into the workbook `<sheets>` block.

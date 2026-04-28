@@ -76,9 +76,9 @@ use patcher_payload::{
     extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
 };
 use patcher_workbook::{
-    epoch_or_now, load_or_empty_rels, minimal_styles_xml, parse_n_from_part_path,
-    replace_first_occurrence, sheet_rels_path_for, source_zip_has_entry, splice_into_sheets_block,
-    xml_escape_attr,
+    current_part_bytes, epoch_or_now, load_or_empty_rels, minimal_styles_xml,
+    parse_n_from_part_path, patched_or_source_part_bytes, replace_first_occurrence,
+    sheet_rels_path_for, source_zip_has_entry, splice_into_sheets_block, xml_escape_attr,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -4122,28 +4122,6 @@ impl XlsxPatcher {
         part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
         cloned_table_names: &mut HashSet<String>,
     ) -> PyResult<()> {
-        // Helper: get bytes for a path (current rewrite if any, else source).
-        fn get_bytes(
-            file_patches: &HashMap<String, Vec<u8>>,
-            file_adds: &HashMap<String, Vec<u8>>,
-            zip: &mut ZipArchive<File>,
-            path: &str,
-        ) -> Option<Vec<u8>> {
-            if let Some(b) = file_patches.get(path) {
-                return Some(b.clone());
-            }
-            if let Some(b) = file_adds.get(path) {
-                return Some(b.clone());
-            }
-            let mut entry = match zip.by_name(path) {
-                Ok(e) => e,
-                Err(_) => return None,
-            };
-            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
-            std::io::copy(&mut entry, &mut buf).ok()?;
-            Some(buf)
-        }
-
         // RFC-035 §5.5: existing-table-name set at the start of Phase
         // 2.7 includes every name from the source ZIP plus any name
         // already queued by `queue_table` (RFC-024 user adds running
@@ -4212,7 +4190,7 @@ impl XlsxPatcher {
                 &src_sheet_path,
                 |part_path: &str| {
                     let rels_path = wolfxl_rels::rels_path_for(part_path)?;
-                    let bytes = get_bytes(file_patches, &self.file_adds, zip, &rels_path)?;
+                    let bytes = current_part_bytes(file_patches, &self.file_adds, zip, &rels_path)?;
                     RelsGraph::parse(&bytes).ok()
                 },
             );
@@ -4222,14 +4200,17 @@ impl XlsxPatcher {
             // we need (drawing rels for image aliasing).
             let mut source_zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
             for part_path in &subgraph.reachable_parts {
-                if let Some(bytes) = get_bytes(file_patches, &self.file_adds, zip, part_path) {
+                if let Some(bytes) =
+                    current_part_bytes(file_patches, &self.file_adds, zip, part_path)
+                {
                     source_zip_parts.insert(part_path.clone(), bytes);
                 }
                 // Each reachable ancillary may have its own rels file
                 // (drawings → images). The planner's resolver expects
                 // those to be in the parts map keyed by rels path.
                 if let Some(rp) = wolfxl_rels::rels_path_for(part_path) {
-                    if let Some(bytes) = get_bytes(file_patches, &self.file_adds, zip, &rp) {
+                    if let Some(bytes) = current_part_bytes(file_patches, &self.file_adds, zip, &rp)
+                    {
                         source_zip_parts.insert(rp, bytes);
                     }
                 }
@@ -4237,7 +4218,7 @@ impl XlsxPatcher {
 
             // Read workbook.xml.
             let workbook_xml =
-                match get_bytes(file_patches, &self.file_adds, zip, "xl/workbook.xml") {
+                match current_part_bytes(file_patches, &self.file_adds, zip, "xl/workbook.xml") {
                     Some(b) => b,
                     None => {
                         return Err(PyErr::new::<PyIOError, _>(
@@ -4419,30 +4400,13 @@ impl XlsxPatcher {
         file_patches: &mut HashMap<String, Vec<u8>>,
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
-        fn get_bytes(
-            file_patches: &HashMap<String, Vec<u8>>,
-            zip: &mut ZipArchive<File>,
-            path: &str,
-        ) -> Option<Vec<u8>> {
-            if let Some(b) = file_patches.get(path) {
-                return Some(b.clone());
-            }
-            let mut entry = match zip.by_name(path) {
-                Ok(e) => e,
-                Err(_) => return None,
-            };
-            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
-            std::io::copy(&mut entry, &mut buf).ok()?;
-            Some(buf)
-        }
-
         for op in self.queued_range_moves.clone() {
             let sheet_path = match self.sheet_paths.get(&op.sheet) {
                 Some(p) => p.clone(),
                 None => continue, // unknown sheet — silently skip
             };
 
-            let sheet_xml = match get_bytes(file_patches, zip, &sheet_path) {
+            let sheet_xml = match patched_or_source_part_bytes(file_patches, zip, &sheet_path) {
                 Some(b) => b,
                 None => continue,
             };
