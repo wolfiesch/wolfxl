@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 5594 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 5393 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -266,7 +266,11 @@ First no-behavior split target, completed 2026-04-28:
    `src/wolfxl/patcher_drawing.rs` on 2026-04-28. Verification completed:
    `cargo test`, `uv run --no-sync maturin develop`, and focused
    image/chart/external-oracle Python tests.
-4. Next parser-helper candidates: CF/styles, then workbook security.
+4. Format, border, conditional-format, and generic dict payload parsers moved
+   into `src/wolfxl/patcher_payload.rs` on 2026-04-28. Verification completed:
+   `cargo test`, `uv run --no-sync maturin develop`, and focused
+   formatting/CF/security/external-oracle Python tests.
+5. Next parser-helper candidate: workbook security.
 
 ## Verification gates
 
