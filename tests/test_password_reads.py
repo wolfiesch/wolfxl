@@ -159,7 +159,7 @@ def test_password_on_plain_file_preserves_read_only(plaintext_xlsx: Path) -> Non
 
 
 def test_missing_msoffcrypto_raises_friendly_import_error(
-    plaintext_xlsx: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When ``msoffcrypto-tool`` isn't installed, ``ImportError`` points
     at the install hint."""
@@ -173,8 +173,13 @@ def test_missing_msoffcrypto_raises_friendly_import_error(
         return real_import(name, *a, **kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
+    encrypted_like = (
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+        + (b"\0" * 512)
+        + "EncryptedPackage".encode("utf-16le")
+    )
     with pytest.raises(ImportError) as excinfo:
-        wolfxl.load_workbook(plaintext_xlsx, password="anything")
+        wolfxl.load_workbook(encrypted_like, password="anything")
     assert "wolfxl[encrypted]" in str(excinfo.value)
 
 

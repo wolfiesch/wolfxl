@@ -289,6 +289,34 @@ class Workbook:
                 "_from_encrypted requires exactly one of path / data"
             )
 
+        if path is not None:
+            with open(path, "rb") as fp:
+                is_plain_xlsx = fp.read(4).startswith(b"PK")
+        else:
+            is_plain_xlsx = bytes(data).startswith(b"PK")  # type: ignore[arg-type]
+
+        if is_plain_xlsx:
+            # openpyxl-style: silently ignore password on a non-encrypted
+            # xlsx without requiring the optional encryption dependency.
+            if path is not None:
+                if modify:
+                    return cls._from_patcher(
+                        path, data_only=data_only, permissive=permissive
+                    )
+                return cls._from_reader(
+                    path,
+                    data_only=data_only,
+                    permissive=permissive,
+                    read_only=read_only,
+                )
+            return cls._from_bytes(
+                bytes(data),  # type: ignore[arg-type]
+                data_only=data_only,
+                permissive=permissive,
+                modify=modify,
+                read_only=read_only,
+            )
+
         # Lazy import — users without the optional dep pay no cost.
         try:
             import msoffcrypto  # type: ignore[import-not-found]
