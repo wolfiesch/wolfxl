@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
 from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
+from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
 from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
+from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
 
@@ -112,139 +115,6 @@ def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | 
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
-
-
-class _AutoFilter:
-    """Proxy for ``ws.auto_filter`` (RFC-056 Sprint Ο Pod 1B).
-
-    Exposes the openpyxl-shaped surface:
-
-    * ``ref`` — A1 range string (read/write).
-    * ``filter_columns`` — list of :class:`FilterColumn`.
-    * ``sort_state`` — optional :class:`SortState`.
-    * ``add_filter_column(col_id, filter, **kw)`` — fluent builder.
-    * ``add_sort_condition(ref, descending=…, sort_by=…, **kw)``.
-    * ``to_rust_dict()`` — RFC-056 §10 dict shape for the patcher /
-      native-writer PyO3 boundary.
-    """
-
-    __slots__ = ("_ref", "filter_columns", "sort_state")
-
-    def __init__(self) -> None:
-        from wolfxl.worksheet.filters import FilterColumn  # noqa: F401 — side-effectful import
-
-        self._ref: str | None = None
-        self.filter_columns: list[Any] = []
-        self.sort_state: Any = None
-
-    @property
-    def ref(self) -> str | None:
-        return self._ref
-
-    @ref.setter
-    def ref(self, value: str | None) -> None:
-        self._ref = value
-
-    def add_filter_column(
-        self,
-        col_id: int,
-        filter: Any = None,
-        *,
-        hidden_button: bool = False,
-        show_button: bool = True,
-        date_group_items: Any = None,
-    ) -> Any:
-        """Append a ``FilterColumn``. Returns the new entry."""
-        from wolfxl.worksheet.filters import FilterColumn
-
-        fc = FilterColumn(
-            col_id=col_id,
-            hidden_button=hidden_button,
-            show_button=show_button,
-            filter=filter,
-            date_group_items=list(date_group_items) if date_group_items else [],
-        )
-        self.filter_columns.append(fc)
-        return fc
-
-    def add_sort_condition(
-        self,
-        ref: str,
-        descending: bool = False,
-        sort_by: str = "value",
-        *,
-        custom_list: str | None = None,
-        dxf_id: int | None = None,
-        icon_set: str | None = None,
-        icon_id: int | None = None,
-    ) -> Any:
-        """Append a ``SortCondition``. Auto-creates ``sort_state`` if absent."""
-        from wolfxl.worksheet.filters import SortCondition, SortState
-
-        if self.sort_state is None:
-            self.sort_state = SortState(ref=ref)
-        sc = SortCondition(
-            ref=ref,
-            descending=descending,
-            sort_by=sort_by,
-            custom_list=custom_list,
-            dxf_id=dxf_id,
-            icon_set=icon_set,
-            icon_id=icon_id,
-        )
-        self.sort_state.sort_conditions.append(sc)
-        return sc
-
-    def to_rust_dict(self) -> dict[str, Any]:
-        """Serialise to the RFC-056 §10 dict shape."""
-        # Use the AutoFilter dataclass's own marshaller so the §10
-        # contract has a single body of code.
-        from wolfxl.worksheet.filters import AutoFilter as _AF
-
-        af = _AF(
-            ref=self._ref,
-            filter_columns=list(self.filter_columns),
-            sort_state=self.sort_state,
-        )
-        return af.to_rust_dict()
-
-
-class _MergedCellsProxy:
-    """openpyxl-shape proxy for ``Worksheet.merged_cells``.
-
-    openpyxl's ``MultiCellRange`` exposes ``.ranges`` as an iterable of
-    ``CellRange`` objects. SynthGL only iterates ``.ranges`` and stringifies
-    each entry, so we expose a list of range strings — adequate for parity
-    on the read path. Write-mode mutations still go through
-    ``Worksheet.merge_cells`` / ``unmerge_cells``.
-    """
-
-    __slots__ = ("_ws",)
-
-    def __init__(self, ws: Worksheet) -> None:
-        self._ws = ws
-
-    @property
-    def ranges(self) -> list[str]:
-        ws = self._ws
-        # Write mode: trust the in-memory set (kept in sync by
-        # ``merge_cells`` / ``unmerge_cells``).
-        wb = ws._workbook  # noqa: SLF001
-        if wb._rust_reader is None:  # noqa: SLF001
-            return list(ws._merged_ranges)  # noqa: SLF001
-        # Read mode: pull from the Rust calamine backend (already cached
-        # there after first call). Falls back to the in-memory set if the
-        # reader rejects the call (e.g. sheet was added in modify mode).
-        try:
-            return wb._rust_reader.read_merged_ranges(ws._title)  # noqa: SLF001
-        except Exception:
-            return list(ws._merged_ranges)  # noqa: SLF001
-
-    def __iter__(self):  # type: ignore[no-untyped-def]
-        return iter(self.ranges)
-
-    def __len__(self) -> int:
-        return len(self.ranges)
 
 
 class Worksheet:
@@ -1329,22 +1199,7 @@ class Worksheet:
         buffer, and bulk-write grids. Returns an empty dict when nothing is
         pending — the Rust read path stays a hot, allocation-free loop.
         """
-        overlay: dict[tuple[int, int], Any] = {}
-        if self._dirty:
-            for key in self._dirty:
-                cell = self._cells.get(key)
-                if cell is not None:
-                    overlay[key] = cell.value
-        if self._append_buffer:
-            start = self._append_buffer_start
-            for row_offset, row_values in enumerate(self._append_buffer):
-                for col_offset, value in enumerate(row_values):
-                    overlay[(start + row_offset, col_offset + 1)] = value
-        for grid, start_row, start_col in self._bulk_writes:
-            for row_offset, row_values in enumerate(grid):
-                for col_offset, value in enumerate(row_values):
-                    overlay[(start_row + row_offset, start_col + col_offset)] = value
-        return overlay
+        return collect_pending_overlay(self)
 
     def cell_records(
         self,
@@ -1500,66 +1355,7 @@ class Worksheet:
         a far cell would otherwise inflate dimension bounds and trigger
         oversized scans in downstream callers.
         """
-        dirty = self._dirty
-        buf = self._append_buffer
-        bulk = self._bulk_writes
-        if not dirty and not buf and not bulk:
-            return None
-        min_r = min_c = None
-        max_r = max_c = 0
-        for row, col in dirty:
-            if min_r is None or row < min_r:
-                min_r = row
-            if min_c is None or col < min_c:
-                min_c = col
-            if row > max_r:
-                max_r = row
-            if col > max_c:
-                max_c = col
-        if buf:
-            start = self._append_buffer_start
-            buf_max_r = start + len(buf) - 1
-            # An empty appended row (`ws.append([])`) still consumes a row
-            # index but contributes no columns. Without `default=0`, a buf
-            # of all-empty rows would be a max() over an empty generator;
-            # with it but no >0 guard, the column-bounds branch would set
-            # min_c=1 / max_c=0, which `_max_col()` would then emit as the
-            # invalid 1-based column 0 to `rowcol_to_a1`.
-            buf_max_c = max((len(row) for row in buf), default=0)
-            if min_r is None or start < min_r:
-                min_r = start
-            if buf_max_r > max_r:
-                max_r = buf_max_r
-            if buf_max_c > 0:
-                if min_c is None or 1 < min_c:
-                    min_c = 1
-                if buf_max_c > max_c:
-                    max_c = buf_max_c
-        for grid, start_row, start_col in bulk:
-            if not grid:
-                continue
-            grid_max_r = start_row + len(grid) - 1
-            # Same zero-width guard: a grid where every row is empty would
-            # yield grid_max_c = start_col - 1, potentially below 1.
-            grid_width = max((len(row) for row in grid), default=0)
-            if grid_width == 0:
-                if min_r is None or start_row < min_r:
-                    min_r = start_row
-                if grid_max_r > max_r:
-                    max_r = grid_max_r
-                continue
-            grid_max_c = start_col + grid_width - 1
-            if min_r is None or start_row < min_r:
-                min_r = start_row
-            if min_c is None or start_col < min_c:
-                min_c = start_col
-            if grid_max_r > max_r:
-                max_r = grid_max_r
-            if grid_max_c > max_c:
-                max_c = grid_max_c
-        if min_r is None or min_c is None:
-            return None
-        return min_r, min_c, max_r, max_c
+        return pending_writes_bounds(self)
 
     def _read_dimensions(self) -> tuple[int, int]:
         """Discover sheet dimensions from the Rust backend (read mode only)."""
