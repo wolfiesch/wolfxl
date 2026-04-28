@@ -97,6 +97,18 @@ Initial adapters:
 - `poi_external`: Maven/Gradle helper.
 - `closedxml_external`: `dotnet` helper.
 
+Implementation checkpoint, 2026-04-28:
+
+- ExcelBench commit `91097bf` adds the initial Excelize external-oracle helper
+  under `tools/external-oracles/excelize`.
+- ExcelBench commit `e988eed` adds the initial LibreOffice external-oracle
+  helper under `tools/external-oracles/libreoffice`.
+- The first generated Excelize smoke workbook includes table, pivot cache,
+  pivot table, slicer, slicer cache, chart, drawing, and picture parts.
+- Local truth pass: openpyxl opened the workbook with the expected unsupported
+  extension warning for slicer metadata, WolfXL read the expected cell values,
+  and LibreOffice headless exported the workbook to PDF without stderr.
+
 ## Cleanup plan
 
 Refactors should be characterization-test driven. Avoid broad behavior-free
@@ -176,4 +188,3 @@ For every external oracle branch:
   https://libxlsxwriter.github.io/working_with_conditional_formatting.html
 - libxlsxwriter chart docs:
   https://libxlsxwriter.github.io/working_with_charts.html
-
