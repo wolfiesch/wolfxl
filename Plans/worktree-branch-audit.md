@@ -192,6 +192,48 @@ Result: 77 passed for the Pi-alpha page-break/dimension slice, and 355 unit
 tests / 47 chart integration tests / 2 roundtrip tests / 1 doctest passed for
 `wolfxl-writer`.
 
+Release-claim branch audit:
+
+- `feat/sprint-nu-pod-epsilon` was audited as release-claim evidence only.
+  Do not merge it wholesale: its tip sits on an old stacked sprint history, and
+  the branch-wide diff would regress current `main`.
+- The useful v2.0 docs surfaces already exist on current `main`
+  (`README.md`, `CHANGELOG.md`, `docs/release-notes-2.0.md`,
+  `docs/migration/compatibility-matrix.md`,
+  `docs/migration/openpyxl-migration.md`, `Plans/launch-posts.md`, and
+  `tests/parity/KNOWN_GAPS.md`), but they are not publish-ready.
+- Current release/public-launch copy still contains `<!-- TBD: BENCHMARK
+  NUMBERS -->`, `<!-- TBD: SHA -->`, and checklist placeholders. Those must be
+  filled from fresh benchmark and release evidence before any tag, PyPI
+  publish, Twitter/X post, or HN post.
+- Public claims need a final truth pass before launch. In particular, verify
+  or soften "full openpyxl replacement" and "only Python OOXML library that
+  constructs pivotCacheRecords" language; decide whether partial pivot styling,
+  OLAP/external pivot caches, and in-place pivot edits are clearly deferred.
+- `CHANGELOG.md` still has stale v2.1/future-work language around slicers,
+  calculated fields/items, and GroupItems even though the post-PR #23 audit
+  slice has code and focused tests for those capabilities. Fix this before
+  treating the changelog as release collateral.
+- Release readiness still requires GitHub Actions plus clean install/import
+  smoke from the published artifact/wheels. The local full-suite proof is
+  necessary evidence, not sufficient release evidence.
+
+Dependency-modernization branch audit:
+
+- `pyo3-bump` was audited and is superseded by current `main`. No branch port
+  is needed.
+- Current `main` already uses `pyo3 = "0.28"` and
+  `pyo3-build-config = "0.28"` in `Cargo.toml`, with maturin enabling the
+  `extension-module` feature through `pyproject.toml`.
+- The current implementation is better than the old branch tip because
+  `extension-module` is no longer enabled for ordinary Cargo workspace tests;
+  this is why the full `cargo test --workspace` proof now passes on macOS.
+- Remaining PyO3 work should be a fresh modernization PR, not an old-branch
+  merge: replace deprecated `Bound::downcast` / `downcast_into` usage with the
+  PyO3 0.28 `cast` / `cast_into` API, remove warning-only unused imports, then
+  rerun `uv run maturin develop`, `cargo test --workspace`, and a clean
+  Python 3.14 import smoke.
+
 ## Verification checkpoint
 
 After the audit, the Rust tree was normalized with `cargo fmt --all`.
@@ -249,7 +291,9 @@ Highest-priority recovery branches:
   openpyxl-path drop-in import parity test is present and included in the
   341-test focused proof.
 - `feat/sprint-nu-pod-epsilon`: v2.0 final docs and launch claims; use only
-  as evidence, not as publish-ready material.
+  as evidence, not as publish-ready material. Audited on 2026-04-28; current
+  docs still need benchmark/SHA replacement and a final truth pass before
+  publication.
 - `w2a/styles-xml`: audited against current `main`; RGB attribute escaping for
   styles plus regression tests are present in `crates/wolfxl-writer/src/emit/styles_xml.rs`.
 - `w2b/sheet-xml`: audited against current `main`; unstyled blank cells are
@@ -262,8 +306,10 @@ Highest-priority recovery branches:
   relationship-id coverage is present.
 - `w3c/cf-dv`: audited against current `main`; empty `<conditionalFormatting>`
   wrappers are skipped when every rule is a stub variant.
-- `pyo3-bump`: Python 3.14 / PyO3 dependency upgrade candidate; handle as a
-  separate dependency modernization PR after capability audit.
+- `pyo3-bump`: audited on 2026-04-28 and superseded by current `main`; the
+  PyO3 0.28 dependency upgrade and `extension-module` feature split are
+  already present. Remaining work is warning cleanup / Python 3.14 smoke on a
+  fresh branch.
 
 ## Recommended recovery procedure
 
