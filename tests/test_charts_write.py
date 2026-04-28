@@ -196,7 +196,7 @@ def test_bar_chart_title_string(tmp_path: Path) -> None:
 
 def test_line_chart_title_rich_text(tmp_path: Path) -> None:
     """Rich-text title with bold + colored runs round-trips."""
-    openpyxl = pytest.importorskip("openpyxl")
+    pytest.importorskip("openpyxl")
     from openpyxl.chart.text import RichText
     # openpyxl renamed/relocated `Run` across releases. 3.1.x exposes it
     # as `RegularTextRun`; 3.2.x reintroduces `Run`. Accept either so the

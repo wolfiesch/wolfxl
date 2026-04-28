@@ -25,7 +25,6 @@ from wolfxl._streaming import (
     StreamingCell,
     should_auto_stream,
 )
-from wolfxl._utils import rowcol_to_a1
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +219,6 @@ def test_streaming_sparse_rows(sparse_xlsx: Path) -> None:
     )
     # 10 rows total, even though only 3 have content.
     assert len(rows) == 3  # SAX path emits one record per `<row>` actually present.
-    # The rows that ARE present should match.
-    found = {r[0]: r for r in rows if r[0] is not None or any(x is not None for x in r)}
     # We don't assert exact row count above — Excel emits explicit
     # `<row>` entries for non-empty rows only. The sparse rows should
     # appear with the right shape:

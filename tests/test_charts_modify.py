@@ -15,15 +15,13 @@ must keep the same downstream contract.
 from __future__ import annotations
 
 import re
-import shutil
-import tempfile
 import zipfile
 from pathlib import Path
 
 import openpyxl
 import pytest
 
-from wolfxl import Workbook, load_workbook
+from wolfxl import load_workbook
 
 
 pytestmark = pytest.mark.rfc046 if hasattr(pytest.mark, "rfc046") else pytest.mark.usefixtures()

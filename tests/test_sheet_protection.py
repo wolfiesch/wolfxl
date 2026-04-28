@@ -6,7 +6,6 @@ Covers password hash round-trip parity with openpyxl for ``"hunter2"``
 
 from __future__ import annotations
 
-import pytest
 
 from wolfxl import Workbook
 from wolfxl.utils.protection import check_password, hash_password

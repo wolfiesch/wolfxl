@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Iterable
+from typing import Any
 
 from wolfxl.chart.reference import Reference
 

@@ -38,15 +38,13 @@ smoke file should be removed (handled in the same commit).
 from __future__ import annotations
 
 import re
-import shutil
 import zipfile
 from pathlib import Path
 
 import openpyxl
 import pytest
 
-import wolfxl
-from wolfxl import Workbook, load_workbook
+from wolfxl import load_workbook
 
 
 # pytest marker so verify_rfc.py can collect this test.
@@ -96,7 +94,7 @@ def _make_table_fixture(path: Path, table_names: list[str]) -> None:
             ref = "A1:E5"
         else:
             # row offset per-table
-            ref = f"A1:E5"  # they all share the same range — overlap is illegal
+            ref = "A1:E5"  # they all share the same range — overlap is illegal
         # If multiple tables, give them their own column range.
         if len(table_names) > 1:
             col0 = chr(ord("A") + i)

@@ -475,7 +475,7 @@ class Cell:
         openpyxl/Excel).  Only the master cell carries the actual
         formula text.
         """
-        from wolfxl._utils import a1_to_rowcol, rowcol_to_a1  # noqa: SLF001
+        from wolfxl._utils import a1_to_rowcol  # noqa: SLF001
 
         ws = self._ws
         # Parse the ref ("A1:A10") into a 2-tuple of cells.

@@ -19,13 +19,13 @@ from collections import OrderedDict
 from operator import attrgetter
 from typing import Any
 
-from .data_source import AxDataSource, NumRef, StrRef
+from .data_source import AxDataSource, NumRef
 from .layout import Layout
 from .legend import Legend
 from .reference import Reference
-from .series import Series, SeriesFactory, SeriesLabel
+from .series import Series, SeriesFactory
 from .shapes import GraphicalProperties
-from .title import Title, TitleDescriptor
+from .title import TitleDescriptor
 
 
 _VALID_DISPLAY_BLANKS = ("span", "gap", "zero")

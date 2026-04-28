@@ -109,6 +109,26 @@ def test_rfc036_in_memory_tab_list_updates_after_move() -> None:
     assert wb.sheetnames == ["Second", "Third", "Sheet"]
 
 
+def test_rfc036_write_mode_move_sheet_persists_on_save(tmp_path: Path) -> None:
+    """Fresh ``Workbook()`` saves must use the post-move native-writer order."""
+    out = tmp_path / "write_mode_move.xlsx"
+    wb = Workbook()
+    wb.active.title = "A"
+    wb["A"]["A1"] = "alpha"
+    wb.create_sheet("B")["A1"] = "bravo"
+    wb.create_sheet("C")["A1"] = "charlie"
+
+    wb.move_sheet("A", offset=2)
+    assert wb.sheetnames == ["B", "C", "A"]
+    wb.save(out)
+
+    rt = openpyxl.load_workbook(out)
+    assert rt.sheetnames == ["B", "C", "A"]
+    assert rt["A"]["A1"].value == "alpha"
+    assert rt["B"]["A1"].value == "bravo"
+    assert rt["C"]["A1"].value == "charlie"
+
+
 def test_rfc036_move_sheet_accepts_worksheet_instance() -> None:
     wb = Workbook()
     wb.create_sheet("Second")

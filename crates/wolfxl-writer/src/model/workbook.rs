@@ -87,14 +87,47 @@ impl Workbook {
             return Ok(());
         }
         if self.sheets.iter().any(|s| s.name == new) {
-            return Err(format!(
-                "sheet name {new:?} already exists in workbook"
-            ));
+            return Err(format!("sheet name {new:?} already exists in workbook"));
         }
         let sheet = self
             .sheet_mut_by_name(old)
             .ok_or_else(|| format!("no sheet named {old:?}"))?;
         sheet.rename(new)
+    }
+
+    /// Move a sheet by an openpyxl-style offset, clamped to workbook bounds.
+    ///
+    /// Sheet-scoped defined names store their owner as the sheet's numeric
+    /// position, so keep those indexes attached to the same logical sheet.
+    pub fn move_sheet(&mut self, name: &str, offset: isize) -> Result<(), String> {
+        let idx = self
+            .sheet_index_by_name(name)
+            .ok_or_else(|| format!("no sheet named {name:?}"))?;
+        if self.sheets.len() <= 1 || offset == 0 {
+            return Ok(());
+        }
+
+        let max_idx = self.sheets.len() - 1;
+        let shifted = idx as isize + offset;
+        let new_pos = shifted.clamp(0, max_idx as isize) as usize;
+        if new_pos == idx {
+            return Ok(());
+        }
+
+        let sheet = self.sheets.remove(idx);
+        self.sheets.insert(new_pos, sheet);
+
+        for defined_name in &mut self.defined_names {
+            if let Some(scope_idx) = defined_name.scope_sheet_index {
+                defined_name.scope_sheet_index = Some(match scope_idx {
+                    s if s == idx => new_pos,
+                    s if idx < new_pos && s > idx && s <= new_pos => s - 1,
+                    s if new_pos < idx && s >= new_pos && s < idx => s + 1,
+                    s => s,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Replace the workbook-level document properties block.
@@ -156,19 +189,18 @@ mod tests {
     #[test]
     fn rename_sheet_missing_old_errors() {
         let mut wb = wb_with(&["Data"]);
-        let err = wb
-            .rename_sheet("Nope", "Whatever".to_string())
-            .unwrap_err();
-        assert!(err.contains("Nope"), "msg should reference missing name: {err}");
+        let err = wb.rename_sheet("Nope", "Whatever".to_string()).unwrap_err();
+        assert!(
+            err.contains("Nope"),
+            "msg should reference missing name: {err}"
+        );
         assert_eq!(wb.sheets[0].name, "Data", "no sheet may change on Err");
     }
 
     #[test]
     fn rename_sheet_collision_errors() {
         let mut wb = wb_with(&["Data", "Summary"]);
-        let err = wb
-            .rename_sheet("Data", "Summary".to_string())
-            .unwrap_err();
+        let err = wb.rename_sheet("Data", "Summary".to_string()).unwrap_err();
         assert!(err.contains("already exists"), "{err}");
         assert_eq!(wb.sheets[0].name, "Data");
         assert_eq!(wb.sheets[1].name, "Summary");
@@ -188,6 +220,50 @@ mod tests {
         let too_long = "x".repeat(32);
         assert!(wb.rename_sheet("Data", too_long).is_err());
         assert_eq!(wb.sheets[0].name, "Data");
+    }
+
+    #[test]
+    fn move_sheet_positive_offset_reorders_and_remaps_scoped_names() {
+        let mut wb = wb_with(&["A", "B", "C", "D"]);
+        wb.defined_names.push(DefinedName {
+            name: "OnA".to_string(),
+            formula: "A!$A$1".to_string(),
+            scope_sheet_index: Some(0),
+            builtin: None,
+            hidden: false,
+        });
+        wb.defined_names.push(DefinedName {
+            name: "OnC".to_string(),
+            formula: "C!$A$1".to_string(),
+            scope_sheet_index: Some(2),
+            builtin: None,
+            hidden: false,
+        });
+
+        wb.move_sheet("A", 2).unwrap();
+
+        let names: Vec<_> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["B", "C", "A", "D"]);
+        assert_eq!(wb.defined_names[0].scope_sheet_index, Some(2));
+        assert_eq!(wb.defined_names[1].scope_sheet_index, Some(1));
+    }
+
+    #[test]
+    fn move_sheet_negative_offset_reorders_and_clamps() {
+        let mut wb = wb_with(&["A", "B", "C", "D"]);
+        wb.move_sheet("D", -99).unwrap();
+
+        let names: Vec<_> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["D", "A", "B", "C"]);
+    }
+
+    #[test]
+    fn move_sheet_missing_name_errors_without_mutating() {
+        let mut wb = wb_with(&["A", "B"]);
+        let err = wb.move_sheet("Nope", 1).unwrap_err();
+        assert!(err.contains("Nope"), "{err}");
+        let names: Vec<_> = wb.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["A", "B"]);
     }
 
     #[test]

@@ -261,6 +261,7 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
         modify: bool = False,
+        read_only: bool = False,
     ) -> Workbook:
         """Open an OOXML-encrypted .xlsx via msoffcrypto-tool (Sprint Ι Pod-γ).
 
@@ -329,7 +330,10 @@ class Workbook:
                             path, data_only=data_only, permissive=permissive
                         )
                     return cls._from_reader(
-                        path, data_only=data_only, permissive=permissive
+                        path,
+                        data_only=data_only,
+                        permissive=permissive,
+                        read_only=read_only,
                     )
                 # Bytes input that isn't encrypted: route through the
                 # bytes shim so we don't lose the data.
@@ -338,6 +342,7 @@ class Workbook:
                     data_only=data_only,
                     permissive=permissive,
                     modify=modify,
+                    read_only=read_only,
                 )
 
             try:
@@ -366,6 +371,7 @@ class Workbook:
             data_only=data_only,
             permissive=permissive,
             modify=modify,
+            read_only=read_only,
         )
 
     @classmethod
@@ -1198,6 +1204,8 @@ class Workbook:
         # symmetry with the openpyxl signature.
         if self._rust_patcher is not None:
             self._flush_pending_sheet_moves_to_patcher(name, offset)
+        if self._rust_writer is not None:
+            self._rust_writer.move_sheet(name, offset)
 
     def save(
         self,

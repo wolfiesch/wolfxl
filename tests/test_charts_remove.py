@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
 def _build_workbook_with_pending_chart() -> tuple[Any, Any, Any]:
     """Helper — build a write-mode workbook with one pending chart."""
     import wolfxl
-    from wolfxl.chart import BarChart, LineChart, Reference
+    from wolfxl.chart import BarChart, Reference
 
     wb = wolfxl.Workbook()
     ws = wb.active

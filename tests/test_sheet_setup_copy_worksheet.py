@@ -16,8 +16,7 @@ import pytest
 
 import wolfxl
 from wolfxl.worksheet.header_footer import HeaderFooter, HeaderFooterItem
-from wolfxl.worksheet.page_setup import PageMargins, PageSetup
-from wolfxl.worksheet.protection import SheetProtection
+from wolfxl.worksheet.page_setup import PageMargins
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +33,6 @@ def test_page_setup_diverges_after_copy(tmp_path: Path) -> None:
     """src.page_setup.orientation = 'landscape' before copy → both
     initially landscape; mutating src after the copy does NOT affect
     the clone (and vice versa)."""
-    p = tmp_path / "out.xlsx"
     wb = wolfxl.Workbook()
     src = wb.active
     src["A1"] = "x"

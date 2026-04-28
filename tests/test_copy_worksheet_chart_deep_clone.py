@@ -17,7 +17,6 @@ The lift is **always-on** (no opt-in flag, unlike the Sprint Θ
 from __future__ import annotations
 
 import re
-import shutil
 import zipfile
 from pathlib import Path
 

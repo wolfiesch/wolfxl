@@ -14,7 +14,7 @@ Sprint Π Pod Π-α (RFC-062) replaces the construction stubs for
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterator
 
 from wolfxl._worksheet import (

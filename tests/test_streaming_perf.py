@@ -19,7 +19,6 @@ CI runner ship without flakes. The full table is printed via
 
 from __future__ import annotations
 
-import os
 import resource
 import time
 from pathlib import Path

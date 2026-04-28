@@ -14,9 +14,8 @@ emitted into the OOXML so Excel doesn't need to refresh on open.
 
 from __future__ import annotations
 
-import math
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Sequence
 
 if TYPE_CHECKING:
@@ -655,7 +654,6 @@ class PivotTable:
     def _index_for_record_cell(cell: "CacheValue", cache_field) -> int | None:
         """Convert a record cell into the cache field's shared-items
         index, or ``None`` if missing."""
-        from ._cache import CacheValue
 
         if cell.kind == "missing":
             return None

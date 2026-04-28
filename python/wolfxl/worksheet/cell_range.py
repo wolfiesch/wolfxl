@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Iterable, Iterator, Optional, Union
 
 from wolfxl.utils.cell import (
-    column_index_from_string,
     get_column_letter,
     range_boundaries,
 )

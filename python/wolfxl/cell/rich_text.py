@@ -23,9 +23,9 @@ gap and the implicit T3 rich-text-write deferral.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Optional, Union
 
 
 @dataclass(eq=True)

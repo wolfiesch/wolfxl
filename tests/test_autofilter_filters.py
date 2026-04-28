@@ -7,7 +7,6 @@ lives in the Rust crate's own tests.
 """
 from __future__ import annotations
 
-import pytest
 
 from wolfxl.worksheet.filters import (
     AutoFilter,

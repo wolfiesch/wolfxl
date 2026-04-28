@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -111,7 +110,6 @@ def test_slicer_cache_dict_round_trip(tmp_path: Path) -> None:
     patcher; assert the dict shape matches RFC-061 §10.1 keys.
     """
     src = tmp_path / "src.xlsx"
-    dst = tmp_path / "dst.xlsx"
     _make_pivot_source(src)
     wb = load_workbook(src, modify=True)
     sheet = wb["Data"]

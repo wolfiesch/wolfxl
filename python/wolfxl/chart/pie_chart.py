@@ -11,8 +11,6 @@ from __future__ import annotations
 from typing import Any
 
 from ._chart import ChartBase
-from .axis import ChartLines
-from .descriptors import NestedGapAmount
 from .label import DataLabelList
 
 

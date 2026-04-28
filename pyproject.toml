@@ -47,6 +47,18 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    # WolfXL intentionally mirrors openpyxl's camelCase public API.
+    "N",
+    # Keep lint focused on behavioral issues until the openpyxl surface is
+    # migrated to a project-wide formatter/import policy.
+    "I",
+    # The package supports Python 3.9; defer pyupgrade-style rewrites.
+    "UP",
+    # Existing OOXML fixture strings and importorskip patterns are long/by design.
+    "E402",
+    "E501",
+]
 
 [tool.pytest.ini_options]
 markers = [

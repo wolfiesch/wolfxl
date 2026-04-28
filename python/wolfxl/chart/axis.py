@@ -18,7 +18,7 @@ from .data_source import NumFmt
 from .layout import Layout
 from .shapes import GraphicalProperties
 from .text import RichText, Text
-from .title import Title, TitleDescriptor
+from .title import TitleDescriptor
 
 
 _VALID_AX_POS = ("b", "l", "r", "t")

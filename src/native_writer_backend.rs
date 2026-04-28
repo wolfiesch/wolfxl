@@ -1085,6 +1085,12 @@ impl NativeWorkbook {
             .map_err(PyValueError::new_err)
     }
 
+    pub fn move_sheet(&mut self, name: &str, offset: isize) -> PyResult<()> {
+        self.inner
+            .move_sheet(name, offset)
+            .map_err(PyValueError::new_err)
+    }
+
     pub fn write_cell_value(
         &mut self,
         sheet: &str,
@@ -3328,4 +3334,3 @@ fn py_opt_u8(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u8>> {
     }
     Ok(None)
 }
-

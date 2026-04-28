@@ -6,7 +6,6 @@ defaults and ``to_rust_dict()`` contract for the §10 dict shape.
 
 from __future__ import annotations
 
-import pytest
 
 from wolfxl import Workbook
 from wolfxl.worksheet.dimensions import (

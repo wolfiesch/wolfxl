@@ -14,8 +14,8 @@ See RFC-061 §10.1 / §10.2 for the dict shape returned by
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ._cache import PivotCache

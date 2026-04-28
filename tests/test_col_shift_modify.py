@@ -30,8 +30,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-import wolfxl
-from wolfxl import Workbook, load_workbook
+from wolfxl import load_workbook
 
 
 # ---------------------------------------------------------------------------

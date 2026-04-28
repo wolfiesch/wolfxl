@@ -21,7 +21,7 @@ wolfxl = pytest.importorskip("wolfxl")
 openpyxl = pytest.importorskip("openpyxl")
 
 from wolfxl.worksheet.header_footer import HeaderFooter, HeaderFooterItem
-from wolfxl.worksheet.page_setup import PageMargins, PageSetup
+from wolfxl.worksheet.page_setup import PageMargins
 from wolfxl.worksheet.views import Pane, SheetView
 
 

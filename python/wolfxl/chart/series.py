@@ -17,13 +17,9 @@ from typing import Any
 
 from .data_source import (
     AxDataSource,
-    NumData,
     NumDataSource,
     NumRef,
-    NumVal,
-    StrData,
     StrRef,
-    StrVal,
 )
 from .error_bar import ErrorBars
 from .label import DataLabelList

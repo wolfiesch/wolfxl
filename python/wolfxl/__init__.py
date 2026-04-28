@@ -194,6 +194,7 @@ def load_workbook(
                 data_only=data_only,
                 permissive=permissive,
                 modify=modify,
+                read_only=read_only,
             )
         elif data is not None:
             # Bytes / BytesIO input: dispatch through the bytes shim.

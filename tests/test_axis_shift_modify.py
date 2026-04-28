@@ -25,7 +25,6 @@ import openpyxl
 import pytest
 
 import wolfxl
-from wolfxl import Workbook
 
 
 # pytest marker so verify_rfc.py can collect this test.

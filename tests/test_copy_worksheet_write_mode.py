@@ -202,7 +202,7 @@ def test_g_number_format_propagates(tmp_path: Path) -> None:
     src["A1"] = 1234.5
     src["A1"].number_format = "$#,##0.00"
 
-    dst = wb.copy_worksheet(src)
+    wb.copy_worksheet(src)
     wb.save(out)
 
     rwb = openpyxl.load_workbook(out)

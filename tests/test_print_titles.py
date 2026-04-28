@@ -7,7 +7,6 @@ import pytest
 from wolfxl import Workbook
 from wolfxl.worksheet.print_settings import (
     ColRange,
-    PrintArea,
     PrintTitles,
     RowRange,
 )

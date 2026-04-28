@@ -15,7 +15,6 @@ Edge cases:
 """
 from __future__ import annotations
 
-import re
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path

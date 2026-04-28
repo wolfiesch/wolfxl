@@ -11,7 +11,6 @@ Run with ``WOLFXL_TEST_EPOCH=0`` to pin the embedded timestamp.
 
 from __future__ import annotations
 
-import os
 import zipfile
 from pathlib import Path
 

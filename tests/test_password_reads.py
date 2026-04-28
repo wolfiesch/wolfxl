@@ -13,7 +13,6 @@ rotating the password is trivial.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import pytest
@@ -150,6 +149,15 @@ def test_password_on_plain_file_is_ignored(plaintext_xlsx: Path) -> None:
         wb.close()
 
 
+def test_password_on_plain_file_preserves_read_only(plaintext_xlsx: Path) -> None:
+    """Ignoring password on plaintext files must still honor read_only=True."""
+    wb = wolfxl.load_workbook(plaintext_xlsx, password="ignored", read_only=True)
+    try:
+        assert wb.read_only is True
+    finally:
+        wb.close()
+
+
 def test_missing_msoffcrypto_raises_friendly_import_error(
     plaintext_xlsx: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -181,6 +189,19 @@ def test_password_with_data_only(encrypted_xlsx: Path) -> None:
     try:
         assert wb._data_only is True  # noqa: SLF001
         assert len(wb.sheetnames) >= 1
+    finally:
+        wb.close()
+
+
+def test_password_with_read_only(encrypted_xlsx: Path) -> None:
+    """``read_only=True`` must survive encrypted-file dispatch."""
+    wb = wolfxl.load_workbook(
+        encrypted_xlsx,
+        password=TEST_PASSWORD,
+        read_only=True,
+    )
+    try:
+        assert wb.read_only is True
     finally:
         wb.close()
 

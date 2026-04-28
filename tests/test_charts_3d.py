@@ -314,7 +314,6 @@ def test_surface_chart_empty_series_raises() -> None:
 # patcher.queue_chart_add bridge end-to-end.
 # ---------------------------------------------------------------------------
 
-import re
 import openpyxl
 
 

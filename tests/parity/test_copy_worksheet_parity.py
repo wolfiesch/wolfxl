@@ -32,7 +32,6 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-import wolfxl
 from wolfxl import load_workbook
 
 pytestmark = pytest.mark.rfc035
@@ -415,7 +414,6 @@ def test_parity_image_aliasing_wolf_aliases_op_deep_copies(tmp_path: Path) -> No
 
     # Count xl/media/image*.* entries.
     wolf_media = [n for n in _zip_listing(out_wolf) if n.startswith("xl/media/")]
-    op_media = [n for n in _zip_listing(out_op) if n.startswith("xl/media/")]
 
     # WolfXL: aliasing means the clone reuses the same image binary.
     # The output zip has ONE media entry.

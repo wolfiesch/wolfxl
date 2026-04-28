@@ -2051,11 +2051,6 @@ class Worksheet:
         drawing/media/rels parts.
         """
         from wolfxl.drawing.image import Image as _Image
-        from wolfxl.drawing.spreadsheet_drawing import (
-            AbsoluteAnchor,
-            OneCellAnchor,
-            TwoCellAnchor,
-        )
 
         if not isinstance(img, _Image):
             raise TypeError(
@@ -3010,12 +3005,6 @@ class Worksheet:
         # Sprint Ο Pod 1B (RFC-056) — autoFilter on write-mode sheets.
         # Modify mode goes through `Workbook._flush_pending_autofilters_to_patcher`
         # instead.
-        af = self._auto_filter
-        af_has_state = (
-            af.ref is not None
-            or bool(af.filter_columns)
-            or af.sort_state is not None
-        )
         # AutoFilter is flushed separately AFTER cells so the
         # evaluator can see the populated grid; see
         # `_flush_autofilter_post_cells`.

@@ -19,7 +19,6 @@ the ``XlsxPatcher.queue_image_add`` plumbing.
 
 from __future__ import annotations
 
-import io
 import os
 import struct
 from typing import Any

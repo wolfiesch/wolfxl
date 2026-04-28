@@ -7,7 +7,6 @@ import pytest
 from wolfxl.chart.reference import Reference
 from wolfxl.pivot import (
     CalculatedItem,
-    DataField,
     PivotCache,
     PivotTable,
 )
