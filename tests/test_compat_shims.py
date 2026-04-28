@@ -99,10 +99,6 @@ def test_module_imports(module_path: str) -> None:
 
 
 STUB_CONSTRUCTORS: list[tuple[str, str]] = [
-    ("wolfxl.styles", "NamedStyle"),
-    ("wolfxl.styles", "Protection"),
-    ("wolfxl.styles", "GradientFill"),
-    ("wolfxl.styles.differential", "DifferentialStyle"),
     # T1 PR1 promoted: Comment, Hyperlink now real dataclasses.
     # T1 PR2 promoted: DataValidation, Table, TableStyleInfo, *Rule now real.
     # Sprint Μ Pod-β (RFC-046) promoted: ``BarChart``, ``LineChart``,
@@ -135,6 +131,10 @@ REAL_DATACLASSES: list[tuple[str, str, dict]] = [
     ("wolfxl.formatting.rule", "ColorScaleRule", {"start_type": "min", "end_type": "max"}),
     ("wolfxl.workbook.defined_name", "DefinedName", {"name": "Totals", "value": "Sheet1!$A$1"}),
     ("wolfxl.worksheet.filters", "AutoFilter", {}),
+    ("wolfxl.styles", "NamedStyle", {"name": "Metric"}),
+    ("wolfxl.styles", "Protection", {}),
+    ("wolfxl.styles", "GradientFill", {}),
+    ("wolfxl.styles.differential", "DifferentialStyle", {}),
 ]
 
 
@@ -179,12 +179,13 @@ def test_pivot_table_no_longer_stub() -> None:
     This is the explicit ratchet for the v0.5+ → v2.0 promotion of
     pivot construction from stub to real class.
     """
-    from wolfxl.pivot import PivotTable
     # Real PivotTable signature requires `cache=` and `location=`. The
     # ratchet is: invoking the constructor with proper args succeeds; the
     # stub variant would have raised NotImplementedError unconditionally.
     # Exhaustive surface tested in tests/test_pivot_construction.py.
     import inspect
+
+    from wolfxl.pivot import PivotTable
     sig = inspect.signature(PivotTable.__init__)
     assert "cache" in sig.parameters
     assert "location" in sig.parameters
