@@ -44,8 +44,8 @@
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
     DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker,
-    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title,
-    TitleRun, Trendline, TrendlineKind, ValueAxis, View3D,
+    PivotSource, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, Title, TitleRun,
+    Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use crate::xml_escape;
 
@@ -96,9 +96,6 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
     out.push_str("<c:plotArea>");
     if let Some(layout) = &chart.layout {
         emit_layout(&mut out, layout);
-    } else {
-        // openpyxl always emits an empty <layout/> inside plotArea.
-        out.push_str("<c:layout/>");
     }
 
     // Per-type chart element.
@@ -192,8 +189,9 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
             out.push_str(&format!("<c:grouping val=\"{}\"/>", g.as_str()));
         }
         ChartKind::Scatter => {
-            let s = chart.scatter_style.unwrap_or(ScatterStyle::LineMarker);
-            out.push_str(&format!("<c:scatterStyle val=\"{}\"/>", s.as_str()));
+            if let Some(s) = chart.scatter_style {
+                out.push_str(&format!("<c:scatterStyle val=\"{}\"/>", s.as_str()));
+            }
         }
         ChartKind::Radar => {
             let s = chart.radar_style.unwrap_or(RadarStyle::Standard);
@@ -220,6 +218,9 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
     let pivot_fmt_id = chart.pivot_source.as_ref().map(|ps| ps.fmt_id);
     for ser in &chart.series {
         emit_series(out, ser, chart.kind, pivot_fmt_id);
+    }
+    if let Some(d) = &chart.data_labels {
+        emit_data_labels(out, d);
     }
 
     // Type-specific trailing properties.
@@ -399,7 +400,7 @@ fn emit_series_title(out: &mut String, title: &SeriesTitle) {
             out.push_str("<c:strRef>");
             out.push_str(&format!(
                 "<c:f>{}</c:f>",
-                xml_escape::text(&r.to_formula_string())
+                xml_escape::text(&r.to_series_title_formula_string())
             ));
             out.push_str("</c:strRef>");
         }
@@ -439,7 +440,6 @@ fn emit_title(out: &mut String, t: &Title) {
     out.push_str("<c:tx>");
     out.push_str("<c:rich>");
     out.push_str("<a:bodyPr/>");
-    out.push_str("<a:lstStyle/>");
     out.push_str("<a:p>");
     out.push_str("<a:pPr><a:defRPr/></a:pPr>");
     for run in &t.runs {
@@ -459,7 +459,6 @@ fn emit_title(out: &mut String, t: &Title) {
 
 fn emit_run(out: &mut String, run: &TitleRun) {
     out.push_str("<a:r>");
-    // <a:rPr> contains run-level formatting.
     let mut rpr = String::new();
     if let Some(sz) = run.size_pt {
         // Excel encodes pt as 100 * pt.
@@ -474,17 +473,20 @@ fn emit_run(out: &mut String, run: &TitleRun) {
     if let Some(u) = run.underline {
         rpr.push_str(if u { " u=\"sng\"" } else { " u=\"none\"" });
     }
-    out.push_str(&format!("<a:rPr lang=\"en-US\"{rpr}>"));
-    if let Some(c) = &run.color {
-        out.push_str(&format!(
-            "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
-            strip_alpha(c)
-        ));
+    let has_rpr = !rpr.is_empty() || run.color.is_some() || run.font_name.is_some();
+    if has_rpr {
+        out.push_str(&format!("<a:rPr lang=\"en-US\"{rpr}>"));
+        if let Some(c) = &run.color {
+            out.push_str(&format!(
+                "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
+                strip_alpha(c)
+            ));
+        }
+        if let Some(f) = &run.font_name {
+            out.push_str(&format!("<a:latin typeface=\"{}\"/>", xml_escape::attr(f)));
+        }
+        out.push_str("</a:rPr>");
     }
-    if let Some(f) = &run.font_name {
-        out.push_str(&format!("<a:latin typeface=\"{}\"/>", xml_escape::attr(f)));
-    }
-    out.push_str("</a:rPr>");
     out.push_str("<a:t>");
     out.push_str(&xml_escape::text(&run.text));
     out.push_str("</a:t>");
@@ -1089,7 +1091,7 @@ mod tests {
         parse_ok(&bytes);
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains("<c:scatterChart>"));
-        assert!(text.contains("<c:scatterStyle val=\"lineMarker\"/>"));
+        assert!(!text.contains("<c:scatterStyle"));
         assert!(text.contains("<c:xVal>"));
         assert!(text.contains("<c:yVal>"));
         assert!(!text.contains("<c:cat>"));

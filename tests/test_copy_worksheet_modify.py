@@ -419,6 +419,9 @@ def test_h_copy_with_sheet_scoped_defined_name(tmp_path: Path) -> None:
     wb.save(out)
 
     wb_xml = _read_zip_text(out, "xl/workbook.xml")
+    assert f'name="{new_ws.title}"' in wb_xml, (
+        "defined-name merge must preserve the Phase 2.7 cloned <sheet> entry"
+    )
     # The original Print_Area on Template (localSheetId=0) is preserved.
     assert (
         '<definedName name="_xlnm.Print_Area" localSheetId="0">' in wb_xml

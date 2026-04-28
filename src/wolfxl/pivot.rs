@@ -1048,7 +1048,15 @@ pub fn splice_pivot_caches(
         ));
     }
 
-    let s = std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+    let s0 =
+        std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+    let owned;
+    let s = if workbook_root_has_relationship_namespace(s0)? {
+        s0
+    } else {
+        owned = add_workbook_relationship_namespace(s0)?;
+        owned.as_str()
+    };
 
     // Look for an existing `<pivotCaches>` block.
     if let Some(open_pos) = s.find("<pivotCaches>") {
@@ -1091,6 +1099,37 @@ pub fn splice_pivot_caches(
     out.push_str(&block);
     out.push_str(&s[inject_at..]);
     Ok(out.into_bytes())
+}
+
+fn add_workbook_relationship_namespace(s: &str) -> Result<String, String> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| "workbook.xml has no <workbook> root".to_string())?;
+    let rel_end = s[open..]
+        .find('>')
+        .ok_or_else(|| "workbook.xml has unclosed <workbook> root".to_string())?;
+    let insert_at = open + rel_end;
+    let mut out = String::with_capacity(
+        s.len()
+            + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+                .len(),
+    );
+    out.push_str(&s[..insert_at]);
+    out.push_str(
+        " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+    );
+    out.push_str(&s[insert_at..]);
+    Ok(out)
+}
+
+fn workbook_root_has_relationship_namespace(s: &str) -> Result<bool, String> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| "workbook.xml has no <workbook> root".to_string())?;
+    let rel_end = s[open..]
+        .find('>')
+        .ok_or_else(|| "workbook.xml has unclosed <workbook> root".to_string())?;
+    Ok(s[open..open + rel_end].contains("xmlns:r="))
 }
 
 /// Splice a `<pivotTable>` rel reference into a sheet's XML. OOXML
@@ -1191,12 +1230,38 @@ mod tests {
         let out = splice_pivot_caches(xml, &entries).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains(r#"<pivotCache cacheId="0" r:id="rId7"/>"#));
+        assert!(
+            s.contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "{s}"
+        );
         assert!(s.contains("<pivotCaches>"));
         assert!(s.contains("</pivotCaches>"));
         // Inserted right after </sheets>.
         let after_sheets = s.find("</sheets>").unwrap();
         let pivots_at = s.find("<pivotCaches>").unwrap();
         assert!(pivots_at > after_sheets);
+    }
+
+    #[test]
+    fn splice_pivot_caches_adds_root_rel_namespace_when_only_sheet_has_it() {
+        let xml = br#"<workbook xmlns="x"><sheets><sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+        let entries = vec![PivotCacheRef {
+            cache_id: 0,
+            rid: "rId2".into(),
+        }];
+
+        let out = splice_pivot_caches(xml, &entries).unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_end = s.find('>').unwrap();
+        assert!(
+            s[..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "workbook-level pivotCache r:id needs an r namespace on the workbook root"
+        );
+        assert!(s.contains(r#"<pivotCache cacheId="0" r:id="rId2"/>"#));
     }
 
     #[test]

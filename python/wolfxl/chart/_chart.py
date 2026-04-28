@@ -304,6 +304,7 @@ class ChartBase:
         """Sort series by ``order`` and rebase indexes (matches openpyxl)."""
         ds = sorted(self.ser, key=attrgetter("order"))
         for idx, s in enumerate(ds):
+            s.idx = idx
             s.order = idx
         self.ser = ds
 
@@ -350,6 +351,7 @@ class ChartBase:
         throughout; no ``axes`` list, no ``extras`` envelope).
         """
         self._validate_at_emit()
+        self._reindex()
 
         kind = _TAGNAME_TO_KIND.get(self.tagname)
         if kind is None:

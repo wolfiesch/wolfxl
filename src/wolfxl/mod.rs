@@ -2974,10 +2974,13 @@ impl XlsxPatcher {
         if !self.queued_defined_names.is_empty() {
             let wb_xml_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
                 Some(bytes) => bytes,
-                None => {
-                    let s = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
-                    s.into_bytes()
-                }
+                None => match file_patches.get("xl/workbook.xml") {
+                    Some(bytes) => bytes.clone(),
+                    None => {
+                        let s = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
+                        s.into_bytes()
+                    }
+                },
             };
             let updated =
                 defined_names::merge_defined_names(&wb_xml_bytes, &self.queued_defined_names)
@@ -4778,8 +4781,18 @@ fn splice_into_sheets_block(workbook_xml: &[u8], new_sheet_element: &[u8]) -> Py
 
     // quick-xml works on `&str`, so reject non-UTF-8 input up front
     // with a stable error. workbook.xml is always UTF-8 per ECMA-376.
-    let s = std::str::from_utf8(workbook_xml)
+    let s0 = std::str::from_utf8(workbook_xml)
         .map_err(|_| PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml is not valid UTF-8"))?;
+    let owned;
+    let s = if new_sheet_element.windows(4).any(|w| w == b"r:id")
+        && !workbook_root_has_relationship_namespace(s0)?
+    {
+        owned = add_workbook_relationship_namespace(s0)?;
+        owned.as_str()
+    } else {
+        s0
+    };
+    let workbook_xml = s.as_bytes();
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
 
@@ -4864,6 +4877,37 @@ fn splice_into_sheets_block(workbook_xml: &[u8], new_sheet_element: &[u8]) -> Py
     Err(PyErr::new::<PyIOError, _>(
         "Phase 2.7: workbook.xml has no <sheets> block",
     ))
+}
+
+fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
+    let open = s.find("<workbook").ok_or_else(|| {
+        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml has no <workbook> root")
+    })?;
+    let rel_end = s[open..].find('>').ok_or_else(|| {
+        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml has unclosed <workbook> root")
+    })?;
+    Ok(s[open..open + rel_end].contains("xmlns:r="))
+}
+
+fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
+    let open = s.find("<workbook").ok_or_else(|| {
+        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml has no <workbook> root")
+    })?;
+    let rel_end = s[open..].find('>').ok_or_else(|| {
+        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml has unclosed <workbook> root")
+    })?;
+    let insert_at = open + rel_end;
+    let mut out = String::with_capacity(
+        s.len()
+            + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+                .len(),
+    );
+    out.push_str(&s[..insert_at]);
+    out.push_str(
+        " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+    );
+    out.push_str(&s[insert_at..]);
+    Ok(out)
 }
 
 /// Naive byte-substring search (workbook.xml is small enough that the
@@ -5171,6 +5215,25 @@ mod rfc013_tests {
             1,
             "exactly one </sheets> in output",
         );
+    }
+
+    #[test]
+    fn splice_adds_root_rel_namespace_when_only_existing_sheet_has_it() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheets><sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_start = s.find("<workbook").unwrap();
+        let root_end = root_start + s[root_start..].find('>').unwrap();
+        assert!(
+            s[root_start..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "new sheet r:id must be bound by the workbook root namespace"
+        );
+        assert!(s.contains("r:id=\"rId99\""));
     }
 
     #[test]

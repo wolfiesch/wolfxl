@@ -25,7 +25,7 @@ from .error_bar import ErrorBars
 from .label import DataLabelList
 from .marker import DataPoint, Marker
 from .reference import Reference
-from .shapes import GraphicalProperties
+from .shapes import GraphicalProperties, LineProperties
 from .trendline import Trendline
 
 
@@ -132,7 +132,11 @@ class Series:
         self.idx = idx
         self.order = order
         self.tx = tx
-        self.spPr = spPr if spPr is not None else GraphicalProperties()
+        self.spPr = (
+            spPr
+            if spPr is not None
+            else GraphicalProperties(ln=LineProperties(prstDash="solid"))
+        )
         self.pictureOptions = pictureOptions
         self.dPt = list(dPt)
         self.dLbls = dLbls
@@ -224,9 +228,13 @@ class Series:
                 d["title_text"] = str(self.tx.v)
 
         # Data references — surface as A1 strings
-        d["values_ref"] = _ref_string(self.val)
+        values_ref = _ref_string(self.val)
+        x_values_ref = _ref_string(self.xVal)
+        if series_type in ("scatter", "bubble") and x_values_ref is None:
+            values_ref = None
+        d["values_ref"] = values_ref
         d["categories_ref"] = _ref_string(self.cat)
-        d["x_values_ref"] = _ref_string(self.xVal)
+        d["x_values_ref"] = x_values_ref
         d["y_values_ref"] = _ref_string(self.yVal)
         d["bubble_size_ref"] = _ref_string(self.bubbleSize)
 
@@ -236,9 +244,19 @@ class Series:
             if gp_dict:
                 d["graphical_properties"] = _gp_to_snake(gp_dict)
 
-        # Marker — emit per §10.6.1 even if defaults
-        if self.marker is not None:
+        # Marker — openpyxl emits default "none" markers for line/radar
+        # series, even when the public object carries no explicit fields.
+        if self.marker is not None and series_type in ("line", "radar", "scatter"):
             md = self.marker.to_dict()
+            if not md:
+                md = {
+                    "symbol": "none",
+                    "spPr": {
+                        "ln": {
+                            "prstDash": "solid",
+                        },
+                    },
+                }
             if md:
                 d["marker"] = _marker_to_snake(md)
 

@@ -152,6 +152,37 @@ cargo test -p wolfxl-writer --lib emit::charts
 Result: 47 passed / 2 skipped for Python chart tests, 47 passed for the
 writer chart integration tests, and 13 passed for chart emitter unit tests.
 
+Chart parity truth pass after installing `lxml` locally:
+
+- `tests/parity/_chart_helpers.py` now canonicalizes chart XML with namespace
+  prefix rewriting so default-vs-prefixed namespace differences do not mask
+  real structural drift.
+- The chart writer now matches openpyxl more closely for plot-area/title
+  elision, series-title formulas, default scatter style omission, series
+  reindexing, default marker/tick behavior, and chart-level data labels.
+- `uv run --no-sync pytest tests/parity/test_charts_parity.py -q`: 28 passed,
+  8 skipped.
+- `uv run --no-sync pytest tests/test_charts_write.py
+  tests/test_charts_modify.py tests/test_pivot_charts.py
+  tests/test_copy_worksheet_modify.py tests/test_copy_worksheet_libreoffice.py
+  -q`: 101 passed, 3 skipped, 1 warning.
+- `cargo test -p wolfxl-writer --test charts`: 47 passed.
+
+LibreOffice/copy-worksheet truth pass:
+
+- Two namespace/composition bugs were fixed in the patcher:
+  1. pivot-cache and sheet-copy workbook mutations now add `xmlns:r` on the
+     workbook root when later workbook-level `r:id` attributes need it, even
+     if the source workbook only declared `xmlns:r` on a child `<sheet>`.
+  2. defined-name merge now composes against Phase 2.7's in-progress
+     `xl/workbook.xml` patch instead of re-reading the source ZIP and
+     dropping the cloned `<sheet>` entry.
+- `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest
+  tests/diffwriter/soffice_smoke.py tests/test_copy_worksheet_libreoffice.py
+  tests/test_array_formula_libreoffice.py
+  tests/test_pivot_charts.py::test_pivot_chart_libreoffice_renders -q`:
+  47 passed, 28 warnings.
+
 Post-PR #23 branch-mining proof:
 
 ```bash
@@ -265,6 +296,11 @@ After the audit, the Rust tree was normalized with `cargo fmt --all`.
   `cargo test --workspace`, `cargo fmt --all -- --check`,
   `git diff --check`, `uv run maturin develop`, `uv run ruff check .`,
   `uv run pytest`, and a modify-mode pivot construction smoke all passed.
+- Post-chart/LibreOffice truth pass proof:
+  `git diff --check`, `cargo fmt --all -- --check`,
+  `uv run --no-sync ruff check .`, `cargo test --workspace`, and
+  `uv run --no-sync pytest -q` all passed. The full Python suite reported
+  2278 passed, 29 skipped, 10 warnings.
 
 ## Branch audit queue
 

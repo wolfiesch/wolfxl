@@ -2220,21 +2220,15 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         }
     }
 
-    // RFC-046 §10.6.2: chart-level `data_labels` apply to every series
-    // that doesn't already carry its own dLbls. Pod-β emits the dict at
-    // the top of the chart; Pod-α propagates it to each series here so
-    // the existing per-series emit path handles it uniformly.
+    // RFC-046 §10.6.2: chart-level `data_labels` are emitted once inside
+    // the chart-kind block, after series, matching openpyxl's `chart.dataLabels`
+    // serialization. Per-series data labels remain supported via each series.
     if let Some(v) = d.get_item("data_labels")? {
         if !v.is_none() {
             let dd = v
                 .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
-            let chart_dlbls = parse_data_labels(dd)?;
-            for s in chart.series.iter_mut() {
-                if s.data_labels.is_none() {
-                    s.data_labels = Some(chart_dlbls.clone());
-                }
-            }
+            chart.data_labels = Some(parse_data_labels(dd)?);
         }
     }
 

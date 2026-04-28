@@ -216,7 +216,7 @@ fn scatter_chart_round_trips() {
     let bytes = emit_chart_xml(&c);
     parse_ok(&bytes);
     assert_contains(&bytes, "<c:scatterChart>");
-    assert_contains(&bytes, "<c:scatterStyle val=\"lineMarker\"/>");
+    assert_not_contains(&bytes, "<c:scatterStyle");
     assert_contains(&bytes, "<c:xVal>");
     assert_contains(&bytes, "<c:yVal>");
     assert_not_contains(&bytes, "<c:cat>");

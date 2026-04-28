@@ -181,6 +181,18 @@ def test_openpyxl_reads_wolfxl_chart(tmp_path: Path, kind: str) -> None:
     # since the seed block has 2 numeric columns.
     assert len(charts[0].series) == 2
 
+    if kind in {"scatter", "bubble"}:
+        # openpyxl's generic add_data() path for XY chart families only
+        # carries the header refs unless xvalues/zvalues are supplied.
+        title_refs = [
+            str(s.tx.strRef.f)
+            for s in charts[0].series
+            if s.tx and s.tx.strRef and s.tx.strRef.f
+        ]
+        assert any("B1" in r for r in title_refs), title_refs
+        assert any("C1" in r for r in title_refs), title_refs
+        return
+
     # Each series's numRef points at column B or C of the data block.
     refs = [str(s.val.numRef.f) for s in charts[0].series if s.val and s.val.numRef]
     assert any("B" in r for r in refs), f"no series points at column B: {refs}"
@@ -304,7 +316,7 @@ def test_data_labels_position_xml_matches_openpyxl(tmp_path: Path) -> None:
     ows = owb.active
     _seed(ows)
     ochart = build_identical_chart("openpyxl", "bar", ows)
-    ochart.dataLabels = DataLabelList(showVal=True, position="outEnd")
+    ochart.dataLabels = DataLabelList(showVal=True, dLblPos="outEnd")
     ows.add_chart(ochart, "E2")
     opath = tmp_path / "openpyxl.xlsx"
     owb.save(opath)

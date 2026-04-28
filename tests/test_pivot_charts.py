@@ -5,13 +5,6 @@ setter + validation), the chart-dict §10.1 shape, the Rust emitter's
 ``<c:pivotSource>`` block + per-series ``<c:fmtId>`` injection, and the
 ``parse_chart_dict`` PyO3 boundary.
 
-Pod-γ's pivot-table patcher (``Worksheet.add_pivot_table`` /
-``Workbook.add_pivot_cache``) has NOT shipped at the time these tests
-were written — see RFC-049 §6 / sprint-nu plan. Tests that need a
-saved workbook (#8 openpyxl round-trip, #9 LibreOffice fixture, #11
-``copy_worksheet`` round-trip) are accordingly skipped with
-``pytest.skip`` and re-enabled once Pod-γ lands.
-
 Test #10 (cross-mode equivalence) and #12 (backward-compat) operate on
 the bytes returned by ``serialize_chart_dict`` directly — no save
 needed.
@@ -21,10 +14,15 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import zipfile
+from pathlib import Path
 
+import openpyxl
 import pytest
 
 import wolfxl
+from wolfxl import load_workbook
 from wolfxl.chart import BarChart, Reference
 
 # `serialize_chart_dict` is the PyO3 boundary that consumes a chart
@@ -104,6 +102,52 @@ def _build_chart_with_data() -> BarChart:
     )
     chart.set_categories(Reference(ws, min_col=1, min_row=2, max_col=1, max_row=4))
     return chart
+
+
+def _build_saved_pivot_chart_workbook(tmp_path: Path) -> Path:
+    """Materialize a workbook carrying a pivot table and linked chart."""
+    seed = tmp_path / "pivot_chart_seed.xlsx"
+    out = tmp_path / "pivot_chart.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    rows = [
+        ("region", "quarter", "customer", "revenue"),
+        ("North", "Q1", "Acme", 100.0),
+        ("South", "Q1", "Acme", 200.0),
+        ("North", "Q2", "Globex", 150.0),
+        ("South", "Q2", "Globex", 250.0),
+    ]
+    for row in rows:
+        ws.append(row)
+    wb.save(seed)
+
+    wbm = load_workbook(seed, modify=True)
+    wsm = wbm["Data"]
+    ref = Reference(worksheet=wsm, min_col=1, min_row=1, max_col=4, max_row=5)
+    cache = PivotCache(source=ref)
+    pt = PivotTable(
+        cache=cache,
+        location="F2",
+        rows=["region"],
+        cols=["quarter"],
+        data=["revenue"],
+        name="SalesPivot",
+    )
+    wbm.add_pivot_cache(cache)
+    wsm.add_pivot_table(pt)
+
+    chart = BarChart()
+    chart.title = "Revenue"
+    chart.add_data(
+        Reference(wsm, min_col=4, min_row=1, max_col=4, max_row=5),
+        titles_from_data=True,
+    )
+    chart.set_categories(Reference(wsm, min_col=1, min_row=2, max_col=1, max_row=5))
+    chart.pivot_source = pt
+    wsm.add_chart(chart, "F12")
+    wbm.save(out)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -222,12 +266,22 @@ def test_emitter_uses_provided_fmt_id_on_pivot_source_block():
 # ---------------------------------------------------------------------------
 
 
-def test_pivot_source_round_trips_through_openpyxl():
-    pytest.skip(
-        "RFC-049 §7.3 — openpyxl round-trip requires Pod-γ "
-        "Worksheet.add_pivot_table integration to land first; tracked "
-        "in sprint-nu plan."
-    )
+def test_pivot_source_round_trips_through_openpyxl(tmp_path: Path):
+    path = _build_saved_pivot_chart_workbook(tmp_path)
+    with zipfile.ZipFile(path) as zf:
+        assert zf.testzip() is None
+        chart_xml = zf.read("xl/charts/chart1.xml")
+    assert b"<c:pivotSource>" in chart_xml
+    assert b"<c:name>SalesPivot</c:name>" in chart_xml
+
+    wb = openpyxl.load_workbook(path)
+    try:
+        ws = wb["Data"]
+        assert len(ws._charts) == 1
+        assert len(ws._pivots) == 1
+        assert ws._pivots[0].name == "SalesPivot"
+    finally:
+        wb.close()
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +289,7 @@ def test_pivot_source_round_trips_through_openpyxl():
 # ---------------------------------------------------------------------------
 
 
-def test_pivot_chart_libreoffice_renders():
+def test_pivot_chart_libreoffice_renders(tmp_path: Path):
     if shutil.which("soffice") is None:
         pytest.skip("LibreOffice (soffice) not installed in PATH")
     if os.environ.get("WOLFXL_RUN_LIBREOFFICE_SMOKE") != "1":
@@ -243,10 +297,27 @@ def test_pivot_chart_libreoffice_renders():
             "LibreOffice smoke test opt-in via "
             "WOLFXL_RUN_LIBREOFFICE_SMOKE=1; depends on Pod-γ patcher"
         )
-    pytest.skip(
-        "Pod-γ Worksheet.add_pivot_table required to materialize the "
-        "fixture; will re-enable post Pod-γ merge."
+    src = _build_saved_pivot_chart_workbook(tmp_path)
+    proc = subprocess.run(
+        [
+            shutil.which("soffice") or "soffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(tmp_path),
+            str(src),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
+    assert proc.returncode == 0, (
+        f"soffice failed: stdout={proc.stdout} stderr={proc.stderr}"
+    )
+    pdf = tmp_path / "pivot_chart.pdf"
+    assert pdf.exists()
+    assert pdf.stat().st_size > 0
 
 
 # ---------------------------------------------------------------------------
@@ -278,12 +349,32 @@ def test_write_mode_and_modify_mode_produce_equal_bytes_with_pivot_source(
 # ---------------------------------------------------------------------------
 
 
-def test_pivot_source_round_trips_through_copy_worksheet():
-    pytest.skip(
-        "RFC-049 §6 — copy_worksheet of a sheet bearing a pivot chart "
-        "requires Pod-γ's RFC-035 deep-clone extension; tracked in "
-        "sprint-nu plan."
-    )
+def test_pivot_source_round_trips_through_copy_worksheet(tmp_path: Path):
+    src = _build_saved_pivot_chart_workbook(tmp_path)
+    out = tmp_path / "pivot_chart_clone.xlsx"
+    wb = load_workbook(src, modify=True)
+    wb.copy_worksheet(wb["Data"])
+    wb.save(out)
+
+    with zipfile.ZipFile(out) as zf:
+        chart_parts = sorted(n for n in zf.namelist() if n.startswith("xl/charts/chart"))
+        pivot_parts = sorted(
+            n for n in zf.namelist() if n.startswith("xl/pivotTables/pivotTable")
+        )
+        assert len(chart_parts) == 2
+        assert len(pivot_parts) == 2
+        for chart_part in chart_parts:
+            chart_xml = zf.read(chart_part)
+            assert b"<c:pivotSource>" in chart_xml
+            assert b"<c:name>SalesPivot</c:name>" in chart_xml
+
+    wb2 = openpyxl.load_workbook(out)
+    try:
+        assert wb2.sheetnames == ["Data", "Data Copy"]
+        assert [len(ws._charts) for ws in wb2.worksheets] == [1, 1]
+        assert [len(ws._pivots) for ws in wb2.worksheets] == [1, 1]
+    finally:
+        wb2.close()
 
 
 # ---------------------------------------------------------------------------

@@ -168,6 +168,17 @@ impl Reference {
         let abs = absolutize_a1(&self.cell_range);
         format!("'{}'!{}", self.sheet_name.replace('\'', "''"), abs)
     }
+
+    /// Render the reference as openpyxl serializes series title refs:
+    /// single cells stay relative (`'Sheet'!B1`), while ranges use the
+    /// normal absolute formula representation.
+    pub fn to_series_title_formula_string(&self) -> String {
+        if self.cell_range.contains(':') {
+            return self.to_formula_string();
+        }
+        let rel = self.cell_range.replace('$', "");
+        format!("'{}'!{}", self.sheet_name.replace('\'', "''"), rel)
+    }
 }
 
 /// Insert `$` before column letters and row numbers in an A1 fragment if
@@ -930,6 +941,9 @@ pub struct Chart {
     /// One or more series.
     pub series: Vec<Series>,
 
+    /// Chart-level data labels (`<dLbls>` inside the chart-kind block).
+    pub data_labels: Option<DataLabels>,
+
     /// `<plotVisOnly val="1"/>` (default `true` per openpyxl).
     pub plot_visible_only: Option<bool>,
 
@@ -1024,6 +1038,7 @@ impl Chart {
             x_axis: None,
             y_axis: None,
             series: Vec::new(),
+            data_labels: None,
             plot_visible_only: Some(true),
             display_blanks_as: Some(DisplayBlanksAs::Gap),
             vary_colors: None,
@@ -1050,11 +1065,7 @@ impl Chart {
                 None
             },
             first_slice_ang: None,
-            scatter_style: if matches!(kind, ChartKind::Scatter) {
-                Some(ScatterStyle::LineMarker)
-            } else {
-                None
-            },
+            scatter_style: None,
             radar_style: if matches!(kind, ChartKind::Radar) {
                 Some(RadarStyle::Standard)
             } else {
@@ -1117,6 +1128,12 @@ mod tests {
     }
 
     #[test]
+    fn reference_series_title_single_cell_is_relative() {
+        let r = Reference::new("Data", "B1");
+        assert_eq!(r.to_series_title_formula_string(), "'Data'!B1");
+    }
+
+    #[test]
     fn reference_already_absolute_passes_through() {
         let r = Reference::new("Sheet", "$A$2:$A$6");
         assert_eq!(r.to_formula_string(), "'Sheet'!$A$2:$A$6");
@@ -1168,9 +1185,9 @@ mod tests {
     }
 
     #[test]
-    fn new_scatter_has_default_scatter_style() {
+    fn new_scatter_omits_scatter_style_by_default() {
         let c = Chart::new(ChartKind::Scatter, ImageAnchor::one_cell(0, 0));
-        assert_eq!(c.scatter_style, Some(ScatterStyle::LineMarker));
+        assert_eq!(c.scatter_style, None);
     }
 
     #[test]
