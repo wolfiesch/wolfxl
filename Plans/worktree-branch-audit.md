@@ -310,14 +310,20 @@ ExcelBench local benchmark/fidelity smoke, 2026-04-28:
   local run WolfXL was faster than openpyxl on every reported p50 read/write
   fixture cell; publishable numbers still require the standard iteration count,
   hardware/runtime capture, raw artifact retention, and dashboard regeneration.
+- The first fidelity run exposed dashboard-facing gaps in image metadata,
+  hyperlink display text, no-style/totals-row tables, double underline, and
+  dataBar/colorScale conditional formatting. Those were split into a sibling
+  ExcelBench adapter patch (native writer registration, OOXML image-anchor
+  reads, hyperlink display-cell writes) and a WolfXL native-writer patch
+  (double-underline styles, dataBar/colorScale emission, no-style table
+  preservation, and `totalsRowCount` output).
 - `uv run --no-sync excelbench benchmark --tests fixtures/excel --output
-  /tmp/wolfxl-2.0-excelbench-fidelity-smoke --adapter openpyxl --adapter
-  wolfxl` completed. It exposed public-dashboard fidelity gaps that must be
-  triaged before launch: image read/write remains red in the ExcelBench
-  adapter; write diagnostics also cover double underline, dataBar/colorScale
-  conditional formats, hyperlink display text, table totals rows, and no-style
-  table defaults. Treat these as release-gate triage items before refreshing
-  the public ExcelBench dashboard or making broad "full replacement" claims.
+  /tmp/wolfxl-2.0-excelbench-full-fidelity-fix --adapter openpyxl --adapter
+  wolfxl` completed after those fixes. Both openpyxl and WolfXL now report
+  125/125 read tests and 125/125 write tests passed, 18/18 green scored
+  features, and no diagnostics in this local fixture smoke. The public
+  dashboard still needs an intentional artifact refresh, but the earlier
+  fidelity triage list is closed locally.
 
 Dependency-modernization branch audit:
 

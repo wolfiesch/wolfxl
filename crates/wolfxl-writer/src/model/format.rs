@@ -20,7 +20,8 @@ use std::collections::HashMap;
 pub struct FontSpec {
     pub bold: bool,
     pub italic: bool,
-    pub underline: bool,
+    /// Underline style, e.g. `"single"` or `"double"`.
+    pub underline: Option<String>,
     pub strikethrough: bool,
     pub name: Option<String>,
     /// Stored as integer points (e.g. 11). Excel's schema allows a `Decimal`

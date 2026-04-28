@@ -356,7 +356,7 @@ See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 | openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
 | Advanced pivot/slicer smoke | 96 focused tests passed; a generated advanced pivot+slicer workbook converted through LibreOffice headless to XLSX and PDF without repair/error output | advanced pivot/slicer focused pytest slice + `/opt/homebrew/bin/soffice --headless --convert-to ...` |
 | Local release artifact smoke | macOS arm64 CPython 3.14 wheel builds and installs in a fresh venv; import/build_info, write-mode chart save, and modify-mode pivot construction smoke all pass | `uv run --no-sync maturin build --release --out dist` + fresh-venv smoke |
-| Local ExcelBench smoke | adapter registration restored for WolfXL 2.0 `NativeWorkbook`; smoke-scale perf completed across 19 fixtures; fidelity smoke identified dashboard-facing image/hyperlink/table/CF/text-format triage before public refresh | ExcelBench local `perf` + `benchmark` smoke against `openpyxl` and `wolfxl` |
+| Local ExcelBench smoke | adapter registration restored for WolfXL 2.0 `NativeWorkbook`; smoke-scale perf completed across 19 fixtures; full local fidelity smoke now shows WolfXL and openpyxl at 125/125 read + 125/125 write tests, 18/18 green scored features, and no diagnostics | ExcelBench local `perf` + `benchmark` smoke against `openpyxl` and `wolfxl` |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |
 

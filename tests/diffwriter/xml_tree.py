@@ -376,8 +376,6 @@ _METADATA_ELEMENT_PATHS: tuple[str, ...] = (
 #   - <table @id> is locally 1-based on oracle, globally numbered on native;
 #     the file is referenced by name through the relationships and Excel
 #     looks up the file by id-in-its-own-document.
-#   - <tableStyleInfo @name> defaults to "TableStyleMedium9" on native; oracle
-#     omits the attribute when it equals the global default.
 #   - <dataValidation @showDropDown> / @showInputMessage default-flip; both
 #     backends use OOXML-compliant defaults that simply differ in which one
 #     they elect to emit explicitly.
@@ -413,11 +411,10 @@ _METADATA_INFIX_PATTERNS: tuple[str, ...] = (
     # both backends emit the OOXML-mandated reserved fills, but with slightly
     # different sub-element shapes (oracle adds extra child nodes).
     "xl/styles.xml:/styleSheet/fills[1]/fill[",
-    # Table id (oracle local 1-based, native global) + tableStyleInfo @name default.
+    # Table id (oracle local 1-based, native global).
     "xl/tables/table1.xml:/table/@id",
     "xl/tables/table2.xml:/table/@id",
     "xl/tables/table3.xml:/table/@id",
-    "/table/tableStyleInfo[1]/@name",
     # dataValidation @showDropDown / @showInputMessage / @operator default-flip
     # is suppressed via _METADATA_REGEX_PATTERNS so any DV index — not just
     # ``[1]`` — is covered. The W4G ``data_validation_two_per_sheet`` case

@@ -21,11 +21,12 @@ pub fn emit(table: &Table, _sheet_idx: usize, table_idx: usize) -> Vec<u8> {
     out.push_str(&format!(
         "<table xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" \
          id=\"{id}\" name=\"{name}\" displayName=\"{display_name}\" ref=\"{range}\" \
-         totalsRowShown=\"{totals}\">",
+         totalsRowCount=\"{totals_count}\" totalsRowShown=\"{totals}\">",
         id = table_id,
         name = xml_escape::attr(&table.name),
         display_name = xml_escape::attr(display_name),
         range = xml_escape::attr(&table.range),
+        totals_count = if table.totals_row { "1" } else { "0" },
         totals = if table.totals_row { "1" } else { "0" },
     ));
 
@@ -61,13 +62,7 @@ pub fn emit(table: &Table, _sheet_idx: usize, table_idx: usize) -> Vec<u8> {
 
     // <tableStyleInfo>
     match &table.style {
-        None => {
-            out.push_str(
-                "<tableStyleInfo name=\"TableStyleMedium9\" \
-                 showFirstColumn=\"0\" showLastColumn=\"0\" \
-                 showRowStripes=\"1\" showColumnStripes=\"0\"/>",
-            );
-        }
+        None => {}
         Some(style) => {
             out.push_str(&format!(
                 "<tableStyleInfo name=\"{name}\" \
@@ -154,8 +149,8 @@ mod tests {
         assert!(text.contains("<tableColumn id=\"1\""), "col id=1: {text}");
         assert!(text.contains("<tableColumn id=\"2\""), "col id=2: {text}");
         assert!(
-            text.contains("<tableStyleInfo name=\"TableStyleMedium9\""),
-            "default style: {text}"
+            !text.contains("<tableStyleInfo"),
+            "no style element when table.style is None: {text}"
         );
         assert!(
             text.contains("totalsRowShown=\"0\""),
@@ -217,6 +212,10 @@ mod tests {
         assert!(
             text.contains("totalsRowShown=\"1\""),
             "totalsRowShown=1: {text}"
+        );
+        assert!(
+            text.contains("totalsRowCount=\"1\""),
+            "totalsRowCount=1: {text}"
         );
     }
 

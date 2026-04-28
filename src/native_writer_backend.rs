@@ -45,10 +45,11 @@ use wolfxl_writer::model::chart::{
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
 use wolfxl_writer::model::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, Comment, CommentAuthorTable,
-    ConditionalFormat, ConditionalKind, ConditionalRule, DataValidation, DefinedName,
-    DocProperties, DxfRecord, ErrorStyle, FillSpec, FontSpec, FormatSpec, Hyperlink, StylesBuilder,
-    Table, TableColumn, TableStyle, ValidationOperator, ValidationType, Worksheet, WriteCellValue,
+    AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, ColorScaleStop, Comment,
+    CommentAuthorTable, ConditionalFormat, ConditionalKind, ConditionalRule, ConditionalThreshold,
+    DataValidation, DefinedName, DocProperties, DxfRecord, ErrorStyle, FillSpec, FontSpec,
+    FormatSpec, Hyperlink, StylesBuilder, Table, TableColumn, TableStyle, ValidationOperator,
+    ValidationType, Worksheet, WriteCellValue,
 };
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
@@ -308,15 +309,13 @@ fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
         }
     }
     if let Some(v) = dict.get_item("underline")? {
-        // Python sends a string ("single", "double", ...). Coerce to
-        // boolean: if the field is present and non-empty, set underline.
         if let Ok(s) = v.extract::<String>() {
             if !s.is_empty() {
-                font.underline = true;
+                font.underline = Some(s);
                 font_touched = true;
             }
         } else if let Ok(b) = v.extract::<bool>() {
-            font.underline = b;
+            font.underline = if b { Some("single".to_string()) } else { None };
             font_touched |= b;
         }
     }
@@ -831,7 +830,35 @@ fn dict_to_conditional_format(
                 .to_string();
             ConditionalKind::Expression { formula: fstr }
         }
-        // TODO: future wave — color_scale, data_bar, icon_set, duplicates,
+        "dataBar" | "data_bar" => {
+            let color = cfg
+                .get_item("color")?
+                .and_then(|v| v.extract::<String>().ok())
+                .and_then(|s| parse_hex_color(&s))
+                .unwrap_or_else(|| "FF638EC6".to_string());
+            ConditionalKind::DataBar {
+                color_rgb: color,
+                min: ConditionalThreshold::Min,
+                max: ConditionalThreshold::Max,
+            }
+        }
+        "colorScale" | "color_scale" => ConditionalKind::ColorScale {
+            stops: vec![
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Min,
+                    color_rgb: "FFAA0000".to_string(),
+                },
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Percentile(50.0),
+                    color_rgb: "FFFFFF00".to_string(),
+                },
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Max,
+                    color_rgb: "FF00AA00".to_string(),
+                },
+            ],
+        },
+        // TODO: future wave — icon_set, duplicates,
         // unique, top, bottom, above_average, below_average, text_contains variants
         _ => ConditionalKind::Expression {
             formula: "FALSE()".to_string(),

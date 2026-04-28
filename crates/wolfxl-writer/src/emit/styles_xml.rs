@@ -110,8 +110,12 @@ fn font_to_xml(spec: &FontSpec) -> String {
     if spec.italic {
         parts.push_str("<i/>");
     }
-    if spec.underline {
-        parts.push_str("<u/>");
+    if let Some(underline) = &spec.underline {
+        if underline.is_empty() || underline == "single" {
+            parts.push_str("<u/>");
+        } else {
+            parts.push_str(&format!("<u val=\"{}\"/>", xml_escape::attr(underline)));
+        }
     }
     if spec.strikethrough {
         parts.push_str("<strike/>");
