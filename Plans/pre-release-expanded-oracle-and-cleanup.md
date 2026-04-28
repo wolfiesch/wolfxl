@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 4325 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 4185 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -280,9 +280,13 @@ First no-behavior split target, completed 2026-04-28:
    2026-04-28 while keeping the `mod.rs` call site and phase ordering intact.
    Verification completed: `cargo test`, `uv run --no-sync maturin develop`,
    and focused copy-worksheet/external-oracle Python tests.
-7. Next helper candidate: isolate range-move and axis-shift save phases, or
-   pivot to Python public API docstrings if the remaining Rust save phases look
-   too coupled for another safe extraction.
+7. Axis-shift and range-move save phases moved into
+   `src/wolfxl/patcher_structural.rs` on 2026-04-28. Verification completed:
+   `cargo test`, `uv run --no-sync maturin develop`, and focused
+   axis-shift/move-range/external-oracle Python tests.
+8. Next helper candidate: pivot/slicer phase extraction if the state boundary
+   is clean, or switch to Python public API docstrings if the remaining Rust
+   save phases look too coupled for another safe extraction.
 
 ## Verification gates
 

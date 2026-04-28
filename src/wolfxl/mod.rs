@@ -20,6 +20,7 @@ pub mod patcher_drawing;
 pub mod patcher_models;
 pub mod patcher_payload;
 pub mod patcher_sheet_copy;
+pub mod patcher_structural;
 pub mod patcher_workbook;
 pub mod properties;
 #[allow(dead_code)] // SST parser used in Phase 3 (format patching reads existing styles)
@@ -78,8 +79,7 @@ use patcher_payload::{
 };
 use patcher_workbook::{
     epoch_or_now, load_or_empty_rels, minimal_styles_xml, parse_n_from_part_path,
-    patched_or_source_part_bytes, replace_first_occurrence, sheet_rels_path_for,
-    source_zip_has_entry, xml_escape_attr,
+    replace_first_occurrence, sheet_rels_path_for, source_zip_has_entry, xml_escape_attr,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -3966,125 +3966,7 @@ impl XlsxPatcher {
         file_patches: &mut HashMap<String, Vec<u8>>,
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
-        // Helper: get bytes for a path (current rewrite if any, else source).
-        fn get_bytes(
-            file_patches: &HashMap<String, Vec<u8>>,
-            zip: &mut ZipArchive<File>,
-            path: &str,
-        ) -> Option<Vec<u8>> {
-            if let Some(b) = file_patches.get(path) {
-                return Some(b.clone());
-            }
-            let mut entry = match zip.by_name(path) {
-                Ok(e) => e,
-                Err(_) => return None,
-            };
-            let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
-            std::io::copy(&mut entry, &mut buf).ok()?;
-            Some(buf)
-        }
-
-        // Build sheet name → 0-based position map (for definedName scope).
-        let sheet_positions: BTreeMap<String, u32> = self
-            .sheet_order
-            .iter()
-            .enumerate()
-            .map(|(i, name)| (name.clone(), i as u32))
-            .collect();
-
-        // Discover table parts via the rels graph for each sheet.
-        // We need this lazy + per-sheet because each op may operate
-        // on a different sheet.
-        for op in self.queued_axis_shifts.clone() {
-            let sheet_path = match self.sheet_paths.get(&op.sheet) {
-                Some(p) => p.clone(),
-                None => continue, // unknown sheet — silently skip
-            };
-
-            let axis = match op.axis.as_str() {
-                "row" => wolfxl_structural::Axis::Row,
-                "col" => wolfxl_structural::Axis::Col,
-                _ => continue,
-            };
-
-            // Read sheet XML.
-            let sheet_xml = match get_bytes(file_patches, zip, &sheet_path) {
-                Some(b) => b,
-                None => continue,
-            };
-
-            // Read workbook.xml.
-            let wb_xml = get_bytes(file_patches, zip, "xl/workbook.xml");
-
-            // Discover this sheet's rels graph (for table/comments/vml lookups).
-            // Use the ancillary registry to get the part paths.
-            let _ = self
-                .ancillary
-                .populate_for_sheet(zip, &op.sheet, &sheet_path);
-
-            let (comments_part, vml_part, table_paths) = {
-                let anc = self.ancillary.get(&op.sheet).cloned().unwrap_or_default();
-                (
-                    anc.comments_part,
-                    anc.vml_drawing_part,
-                    anc.table_parts.clone(),
-                )
-            };
-
-            // Read each.
-            let comments_bytes: Option<(String, Vec<u8>)> = comments_part
-                .as_ref()
-                .and_then(|p| get_bytes(file_patches, zip, p).map(|b| (p.clone(), b)));
-            let vml_bytes: Option<(String, Vec<u8>)> = vml_part
-                .as_ref()
-                .and_then(|p| get_bytes(file_patches, zip, p).map(|b| (p.clone(), b)));
-            let mut table_bytes: Vec<(String, Vec<u8>)> = Vec::new();
-            for tp in &table_paths {
-                if let Some(b) = get_bytes(file_patches, zip, tp) {
-                    table_bytes.push((tp.clone(), b));
-                }
-            }
-
-            // Build inputs.
-            let mut inputs = wolfxl_structural::SheetXmlInputs::empty();
-            inputs.sheets.insert(op.sheet.clone(), sheet_xml.as_slice());
-            inputs
-                .sheet_paths
-                .insert(op.sheet.clone(), sheet_path.clone());
-            if let Some(ref wb) = wb_xml {
-                inputs.workbook_xml = Some(wb.as_slice());
-            }
-            if !table_bytes.is_empty() {
-                let parts: Vec<(String, &[u8])> = table_bytes
-                    .iter()
-                    .map(|(p, b)| (p.clone(), b.as_slice()))
-                    .collect();
-                inputs.tables.insert(op.sheet.clone(), parts);
-            }
-            if let Some((ref p, ref b)) = comments_bytes {
-                inputs
-                    .comments
-                    .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
-            }
-            if let Some((ref p, ref b)) = vml_bytes {
-                inputs
-                    .vml
-                    .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
-            }
-            inputs.sheet_positions = sheet_positions.clone();
-
-            let ops_one = vec![wolfxl_structural::AxisShiftOp {
-                sheet: op.sheet.clone(),
-                axis,
-                idx: op.idx,
-                n: op.n,
-            }];
-            let mutations = wolfxl_structural::apply_workbook_shift(inputs, &ops_one);
-            for (path, bytes) in mutations.file_patches {
-                file_patches.insert(path, bytes);
-            }
-        }
-        Ok(())
+        patcher_structural::apply_axis_shifts_phase(self, file_patches, zip)
     }
 
     /// Phase 2.7 — drive `wolfxl_structural::sheet_copy::plan_sheet_copy`
@@ -4142,30 +4024,7 @@ impl XlsxPatcher {
         file_patches: &mut HashMap<String, Vec<u8>>,
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
-        for op in self.queued_range_moves.clone() {
-            let sheet_path = match self.sheet_paths.get(&op.sheet) {
-                Some(p) => p.clone(),
-                None => continue, // unknown sheet — silently skip
-            };
-
-            let sheet_xml = match patched_or_source_part_bytes(file_patches, zip, &sheet_path) {
-                Some(b) => b,
-                None => continue,
-            };
-
-            let plan = wolfxl_structural::RangeMovePlan {
-                src_lo: (op.src_min_row, op.src_min_col),
-                src_hi: (op.src_max_row, op.src_max_col),
-                d_row: op.d_row,
-                d_col: op.d_col,
-                translate: op.translate,
-            };
-            let new_bytes = wolfxl_structural::apply_range_move(&sheet_xml, &plan);
-            if new_bytes != sheet_xml {
-                file_patches.insert(sheet_path, new_bytes);
-            }
-        }
-        Ok(())
+        patcher_structural::apply_range_moves_phase(self, file_patches, zip)
     }
 
     /// Phase 2.8 — rebuild `xl/calcChain.xml` (Sprint Θ Pod-C3).
