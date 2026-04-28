@@ -74,64 +74,34 @@ def load_workbook(
     rich_text: bool = False,
     password: str | bytes | None = None,
 ) -> Workbook:
-    """Open an .xlsx file for reading or modification.
+    """Open a workbook for reading, streaming, or modify-mode saves.
 
-    Parameters
-    ----------
-    modify : bool
-        If True, enable read-modify-write mode.  Values and formats can be
-        changed and saved back to disk via ``wb.save(path)``.  Uses the WolfXL
-        engine (surgical ZIP patching) instead of a full DOM rewrite.
-    permissive : bool
-        If True, fall back to the workbook rels graph when
-        ``xl/workbook.xml``'s ``<sheets>`` block is empty or
-        self-closing. Each worksheet relationship target is registered
-        under a synthesized title (``Sheet1``, ``Sheet2``, ...). This
-        unblocks workflows that need to operate on technically-malformed
-        (but Excel-tolerant) workbooks — e.g. a self-closing
-        ``<sheets/>`` whose rels still reference
-        ``xl/worksheets/sheet1.xml``. Default is ``False`` so well-formed
-        inputs round-trip unchanged. Added in Sprint Θ Pod-A; tracked in
-        tests/parity/KNOWN_GAPS.md (RFC-035 cross-RFC composition bug
-        #4).
-    password : str | bytes | None
-        Decryption password for OOXML-encrypted workbooks. When provided,
-        wolfxl lazy-imports ``msoffcrypto-tool`` (install via
-        ``pip install wolfxl[encrypted]``), decrypts the file into an
-        in-memory buffer, then dispatches through the standard reader
-        (or patcher, when ``modify=True``). On a non-encrypted file the
-        password is silently ignored, matching openpyxl's behaviour.
-        Wrong / missing passwords surface as ``ValueError``. Saving without
-        ``password=`` emits plaintext; passing ``password=`` to
-        :meth:`Workbook.save` re-encrypts the output via the optional
-        encryption dependency.
+    Args:
+        filename: Path, bytes-like object, or binary file-like object
+            containing an ``.xlsx``, ``.xlsb``, or ``.xls`` workbook.
+        read_only: Enable the streaming row reader for ``.xlsx`` files.
+            Streaming cells are immutable.
+        data_only: Return cached formula results when present.
+        keep_links: Compatibility shim accepted for openpyxl-shaped call sites.
+        modify: Enable read-modify-write mode for ``.xlsx`` files. Modified
+            cells and supported metadata are saved through WolfXL's surgical
+            ZIP patcher rather than a full workbook rewrite.
+        permissive: Fall back to worksheet relationships when workbook sheet
+            metadata is malformed but recoverable.
+        rich_text: Return structured rich-text values for cells that carry
+            shared-string runs.
+        password: Decrypt OOXML-encrypted ``.xlsx`` inputs with the optional
+            ``wolfxl[encrypted]`` dependency.
 
-    rich_text : bool
-        Sprint Ι Pod-α: if True, ``Cell.value`` returns a
-        :class:`wolfxl.cell.rich_text.CellRichText` for cells whose
-        backing string carries `<r>` runs.  Default is ``False`` so
-        existing call sites keep returning flattened ``str`` values
-        (matches openpyxl 3.x's default).  Use ``Cell.rich_text``
-        directly to read structured runs without flipping this flag.
+    Returns:
+        A :class:`Workbook` in read, streaming, or modify mode.
 
-    ``read_only=True`` (Sprint Ι Pod-β) activates the SAX streaming
-    read path: ``Worksheet.iter_rows`` becomes a true generator that
-    walks ``xl/worksheets/sheetN.xml`` one row at a time without
-    materializing the whole sheet. Cells in this mode are immutable —
-    assignment raises ``RuntimeError`` immediately. The flag also
-    auto-engages transparently for sheets with > 50000 rows so callers
-    don't have to opt in just to scale to large workbooks.
-
-    ``data_only=True`` returns cached formula results when they exist.
-    ``keep_links`` remains a no-op compatibility shim.
-
-    Sprint Κ Pod-β: ``filename`` may now also be raw ``bytes`` /
-    ``bytearray`` / ``memoryview`` or any file-like object whose
-    ``.read()`` returns bytes (e.g. :class:`io.BytesIO`). The format is
-    sniffed from the leading magic bytes; .xlsb and .xls inputs route
-    through dedicated calamine backends (read-only — see the
-    :class:`Workbook._format` attribute and the ``modify``/``read_only``
-    guards below).
+    Raises:
+        InvalidFileException: If the input format cannot be identified.
+        NotImplementedError: If the requested mode is unsupported for the
+            detected format, such as modify mode for ``.xlsb``.
+        ValueError: If an encrypted workbook needs a password or the supplied
+            password cannot decrypt it.
     """
     from wolfxl._loader import classify_input
 

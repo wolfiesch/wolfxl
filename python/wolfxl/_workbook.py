@@ -8,125 +8,33 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from wolfxl._workbook_state import (
+    CopyOptions,
+    build_xlsb_xls_wb,
+    same_existing_path,
+    xlsb_xls_via_tempfile,
+)
 from wolfxl._worksheet import Worksheet
-
-
-@dataclass
-class CopyOptions:
-    """Per-workbook flags controlling :meth:`Workbook.copy_worksheet`.
-
-    Attributes:
-        deep_copy_images: When ``True``, drawings reachable from a
-            cloned sheet have their referenced ``xl/media/imageN.<ext>``
-            targets DEEP-CLONED into freshly numbered media parts.
-            When ``False`` (default), the cloned drawing rels point at
-            the same image bytes as the source — Excel's historical
-            RFC-035 §5.3 alias behaviour. Modify-mode only;
-            write-mode ignores this flag (write-mode clones run via
-            in-memory replay, not the modify-mode planner).
-    """
-
-    deep_copy_images: bool = False
-
-
-def _same_existing_path(left: str, right: str | None) -> bool:
-    """Return whether two paths identify the same existing filesystem entry."""
-    if right is None:
-        return False
-    try:
-        return os.path.samefile(left, right)
-    except OSError:
-        return os.path.abspath(left) == os.path.abspath(right)
 
 
 if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
 
 
-def _xlsb_xls_via_tempfile(
-    rust_cls: Any,
-    data: bytes | bytearray | memoryview,
-    *,
-    suffix: str,
-    permissive: bool,
-) -> tuple[Any, str]:
-    """Materialise ``data`` to a tempfile and call ``rust_cls.open(path)``.
-
-    Used as a fallback for ``CalamineXlsbBook`` / ``CalamineXlsBook``
-    when Pod-α's ``open_from_bytes`` overload isn't yet exposed.
-    Returns ``(rust_book, tempfile_path)`` so the caller can stash the
-    path on the workbook for cleanup at ``close()`` time.
-    """
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(
-        prefix="wolfxl-", suffix=suffix, delete=False
-    ) as tmp:
-        tmp.write(bytes(data))
-        tmp_path = tmp.name
-
-    opener = rust_cls.open
-    try:
-        rust_book = opener(tmp_path, permissive)
-    except TypeError:
-        rust_book = opener(tmp_path)
-    return rust_book, tmp_path
-
-
-def _build_xlsb_xls_wb(
-    cls: type,
-    *,
-    rust_book: Any,
-    fmt: str,
-    data_only: bool,
-    source_path: str | None,
-) -> Any:
-    """Wire up the read-mode workbook fields shared by xlsb / xls.
-
-    Skips the workbook-property and defined-name caches because the
-    binary backends don't expose them; everything else mirrors
-    :meth:`Workbook._from_reader` so existing call sites
-    (``wb.sheetnames``, ``wb.active``, ``ws['A1'].value``) keep working.
-    """
-    wb = object.__new__(cls)
-    wb._rust_writer = None
-    wb._rust_patcher = None
-    wb._rust_reader = rust_book
-    wb._data_only = data_only
-    wb._rich_text = False
-    wb._evaluator = None
-    wb._read_only = False
-    wb._source_path = source_path
-    wb._format = fmt
-    names = [str(n) for n in rust_book.sheet_names()]
-    wb._sheet_names = names
-    wb._sheets = {name: Worksheet(wb, name) for name in names}
-    # Keep the rest of the boilerplate empty — these caches and queues
-    # are only meaningful for xlsx (modify mode + write mode).
-    wb._properties_cache = None
-    wb._properties_dirty = False
-    wb._defined_names_cache = None
-    wb._pending_defined_names = {}
-    wb._security = None
-    wb._file_sharing = None
-    wb._pending_security_update = False
-    wb._pending_axis_shifts = []
-    wb._pending_range_moves = []
-    wb._pending_sheet_copies = []
-    wb._pending_chart_adds = {}
-    wb._pending_pivot_caches = []
-    wb._next_pivot_cache_id = 0
-    wb._pending_slicer_caches = []
-    wb._next_slicer_cache_id = 0
-    wb.copy_options = CopyOptions()
-    return wb
-
-
 class Workbook:
-    """openpyxl-compatible workbook backed by Rust."""
+    """Openpyxl-compatible workbook backed by Rust.
+
+    A workbook operates in one of three modes:
+
+    * write mode, created with ``Workbook()``;
+    * read mode, created with ``load_workbook(path)``;
+    * modify mode, created with ``load_workbook(path, modify=True)``.
+
+    Public methods mirror openpyxl where practical while routing heavy I/O
+    through WolfXL's native reader, writer, and patcher backends.
+    """
 
     def __init__(self) -> None:
         """Create a new workbook in write mode with a default 'Sheet'."""
@@ -589,10 +497,10 @@ class Workbook:
             if bytes_open is None:
                 # Fall back to a tempfile so we can still hand the
                 # backend a path while Pod-α plumbs the bytes overload.
-                rust_book, tmp_path = _xlsb_xls_via_tempfile(
+                rust_book, tmp_path = xlsb_xls_via_tempfile(
                     rust_cls, data, suffix=".xlsb", permissive=permissive
                 )
-                _wb = _build_xlsb_xls_wb(
+                _wb = build_xlsb_xls_wb(
                     cls,
                     rust_book=rust_book,
                     fmt="xlsb",
@@ -619,7 +527,7 @@ class Workbook:
                 # Pod-α may not yet thread `permissive` through.
                 rust_book = opener(path)
 
-        return _build_xlsb_xls_wb(
+        return build_xlsb_xls_wb(
             cls,
             rust_book=rust_book,
             fmt="xlsb",
@@ -654,10 +562,10 @@ class Workbook:
         if data is not None:
             bytes_open = getattr(rust_cls, "open_from_bytes", None)
             if bytes_open is None:
-                rust_book, tmp_path = _xlsb_xls_via_tempfile(
+                rust_book, tmp_path = xlsb_xls_via_tempfile(
                     rust_cls, data, suffix=".xls", permissive=permissive
                 )
-                _wb = _build_xlsb_xls_wb(
+                _wb = build_xlsb_xls_wb(
                     cls,
                     rust_book=rust_book,
                     fmt="xls",
@@ -683,7 +591,7 @@ class Workbook:
             except TypeError:
                 rust_book = opener(path)
 
-        return _build_xlsb_xls_wb(
+        return build_xlsb_xls_wb(
             cls,
             rust_book=rust_book,
             fmt="xls",
@@ -697,6 +605,7 @@ class Workbook:
 
     @property
     def sheetnames(self) -> list[str]:
+        """Return worksheet titles in tab order."""
         return list(self._sheet_names)
 
     @property
@@ -737,14 +646,17 @@ class Workbook:
         return []
 
     def __getitem__(self, name: str) -> Worksheet:
+        """Return a worksheet by title."""
         if name not in self._sheets:
             raise KeyError(f"Worksheet '{name}' does not exist")
         return self._sheets[name]
 
     def __contains__(self, name: str) -> bool:
+        """Return whether the workbook contains a sheet named ``name``."""
         return name in self._sheets
 
     def __iter__(self):  # type: ignore[no-untyped-def]
+        """Iterate worksheet titles in tab order."""
         return iter(self._sheet_names)
 
     def get_sheet_by_name(self, name: str) -> Worksheet:
@@ -940,7 +852,18 @@ class Workbook:
     # ------------------------------------------------------------------
 
     def create_sheet(self, title: str) -> Worksheet:
-        """Add a new sheet (write mode only)."""
+        """Create and append a worksheet.
+
+        Args:
+            title: Unique worksheet title.
+
+        Returns:
+            The newly created :class:`Worksheet`.
+
+        Raises:
+            RuntimeError: If the workbook is not in write mode.
+            ValueError: If ``title`` already exists.
+        """
         if self._rust_writer is None:
             raise RuntimeError("create_sheet requires write mode")
         if title in self._sheets:
@@ -1254,19 +1177,17 @@ class Workbook:
     ) -> None:
         """Flush all pending writes and save to disk.
 
-        When ``password`` is supplied, the freshly written plaintext
-        xlsx is re-encoded as an OOXML-encrypted blob (Agile / AES-256,
-        the modern Excel default) via :mod:`wolfxl._encryption` before
-        being placed at ``filename``. Both the write-mode (``Workbook()``)
-        and modify-mode (``open(..., modify=True)``) save paths are
-        wrapped — encryption is applied to the final byte stream
-        regardless of which Rust backend produced it.
+        Args:
+            filename: Destination path. In modify mode this may be the original
+                source path; WolfXL uses the patcher's atomic in-place save path
+                for that case.
+            password: Optional encryption password for the final ``.xlsx``
+                payload. Install ``wolfxl[encrypted]`` to enable encryption.
 
-        ``password`` accepts ``str`` or ``bytes`` (UTF-8 decoded). An
-        empty string / empty bytes raises :class:`ValueError`. The
-        ``msoffcrypto-tool`` dep is loaded lazily; install via
-        ``pip install wolfxl[encrypted]``. See ``docs/encryption.md``
-        for the supported-algorithm matrix.
+        Raises:
+            ValueError: If ``password`` is empty.
+            RuntimeError: If the workbook mode cannot save the requested
+                pending changes.
         """
         filename = str(filename)
         if password is not None:
@@ -1367,7 +1288,7 @@ class Workbook:
             # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
             # the patcher's Phase 2.5o queue.
             self._flush_pending_autofilters_to_patcher()
-            if _same_existing_path(filename, self._source_path):
+            if same_existing_path(filename, self._source_path):
                 self._rust_patcher.save_in_place()
             else:
                 self._rust_patcher.save(filename)
@@ -2499,7 +2420,7 @@ class Workbook:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Release resources."""
+        """Release native handles and delete any temporary decrypted input."""
         self._rust_reader = None
         self._rust_writer = None
         self._rust_patcher = None
@@ -2515,9 +2436,11 @@ class Workbook:
             self._tempfile_path = None
 
     def __enter__(self) -> Workbook:
+        """Return this workbook for ``with`` statement use."""
         return self
 
     def __exit__(self, *args: object) -> None:
+        """Close this workbook at the end of a ``with`` block."""
         self.close()
 
     def __repr__(self) -> str:

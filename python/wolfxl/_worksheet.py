@@ -7,7 +7,8 @@ from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
-from wolfxl._utils import a1_to_rowcol, column_index, rowcol_to_a1
+from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
 
@@ -111,125 +112,6 @@ def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | 
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
-
-
-class _RowDimensionProxy:
-    """Dict-like proxy: ``ws.row_dimensions[1].height = 30``."""
-
-    __slots__ = ("_ws",)
-
-    def __init__(self, ws: Worksheet) -> None:
-        self._ws = ws
-
-    def __getitem__(self, row: int) -> _RowDimension:
-        return _RowDimension(self._ws, row)
-
-    def get(self, row: int, default: Any = None) -> _RowDimension | Any:
-        if not isinstance(row, int):
-            return default
-        dimension = _RowDimension(self._ws, row)
-        if dimension.height is not None or dimension.hidden or dimension.outline_level:
-            return dimension
-        return default
-
-
-class _RowDimension:
-    """Single row dimension with a readable/writable ``height`` property."""
-
-    __slots__ = ("_ws", "_row")
-
-    def __init__(self, ws: Worksheet, row: int) -> None:
-        self._ws = ws
-        self._row = row
-
-    @property
-    def height(self) -> float | None:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            return wb._rust_reader.read_row_height(self._ws._title, self._row)  # noqa: SLF001
-        return self._ws._row_heights.get(self._row)  # noqa: SLF001
-
-    @height.setter
-    def height(self, value: float | None) -> None:
-        self._ws._row_heights[self._row] = value  # noqa: SLF001
-
-    @property
-    def hidden(self) -> bool:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            return self._row in self._ws.sheet_visibility()["hidden_rows"]
-        return False
-
-    @property
-    def outlineLevel(self) -> int:  # noqa: N802 - openpyxl public API
-        return self.outline_level
-
-    @property
-    def outline_level(self) -> int:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            return int(self._ws.sheet_visibility()["row_outline_levels"].get(self._row, 0))
-        return 0
-
-
-class _ColumnDimensionProxy:
-    """Dict-like proxy: ``ws.column_dimensions['A'].width = 15``."""
-
-    __slots__ = ("_ws",)
-
-    def __init__(self, ws: Worksheet) -> None:
-        self._ws = ws
-
-    def __getitem__(self, col_letter: str) -> _ColumnDimension:
-        return _ColumnDimension(self._ws, col_letter.upper())
-
-    def get(self, col_letter: str, default: Any = None) -> _ColumnDimension | Any:
-        if not isinstance(col_letter, str):
-            return default
-        dimension = _ColumnDimension(self._ws, col_letter.upper())
-        if dimension.width is not None or dimension.hidden or dimension.outline_level:
-            return dimension
-        return default
-
-
-class _ColumnDimension:
-    """Single column dimension with a readable/writable ``width`` property."""
-
-    __slots__ = ("_ws", "_col_letter")
-
-    def __init__(self, ws: Worksheet, col_letter: str) -> None:
-        self._ws = ws
-        self._col_letter = col_letter
-
-    @property
-    def width(self) -> float | None:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            return wb._rust_reader.read_column_width(self._ws._title, self._col_letter)  # noqa: SLF001
-        return self._ws._col_widths.get(self._col_letter)  # noqa: SLF001
-
-    @width.setter
-    def width(self, value: float | None) -> None:
-        self._ws._col_widths[self._col_letter] = value  # noqa: SLF001
-
-    @property
-    def hidden(self) -> bool:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            return column_index(self._col_letter) in self._ws.sheet_visibility()["hidden_columns"]
-        return False
-
-    @property
-    def outlineLevel(self) -> int:  # noqa: N802 - openpyxl public API
-        return self.outline_level
-
-    @property
-    def outline_level(self) -> int:
-        wb = self._ws._workbook  # noqa: SLF001
-        if wb._rust_reader is not None:  # noqa: SLF001
-            col = column_index(self._col_letter)
-            return int(self._ws.sheet_visibility()["column_outline_levels"].get(col, 0))
-        return 0
 
 
 class _AutoFilter:
@@ -366,7 +248,12 @@ class _MergedCellsProxy:
 
 
 class Worksheet:
-    """Proxy for a single worksheet in a Workbook."""
+    """Openpyxl-shaped proxy for a worksheet in a :class:`Workbook`.
+
+    The proxy presents cell access, sheet metadata, and feature collections
+    while deferring reads and writes to the workbook's active backend. In
+    modify mode, mutations are queued and flushed through the patcher on save.
+    """
 
     __slots__ = (
         "_workbook", "_title", "_cells", "_dirty", "_dimensions",
@@ -489,6 +376,7 @@ class Worksheet:
 
     @property
     def title(self) -> str:
+        """Worksheet title shown in the workbook tab list."""
         return self._title
 
     @title.setter
@@ -582,6 +470,7 @@ class Worksheet:
 
     @property
     def HeaderFooter(self) -> Any:  # noqa: N802 - openpyxl alias
+        """Openpyxl camel-case alias for :attr:`header_footer`."""
         return self.header_footer
 
     @property
@@ -798,15 +687,18 @@ class Worksheet:
 
     @property
     def auto_filter(self) -> _AutoFilter:
+        """Worksheet auto-filter proxy."""
         return self._auto_filter
 
     @property
-    def row_dimensions(self) -> _RowDimensionProxy:
-        return _RowDimensionProxy(self)
+    def row_dimensions(self) -> RowDimensionProxy:
+        """Dict-like row-dimension accessor keyed by 1-based row number."""
+        return RowDimensionProxy(self)
 
     @property
-    def column_dimensions(self) -> _ColumnDimensionProxy:
-        return _ColumnDimensionProxy(self)
+    def column_dimensions(self) -> ColumnDimensionProxy:
+        """Dict-like column-dimension accessor keyed by column letter."""
+        return ColumnDimensionProxy(self)
 
     @property
     def print_area(self) -> str | None:
@@ -1720,10 +1612,12 @@ class Worksheet:
     # Pinned by ``tests/parity/test_read_parity.py`` (uses ``op_ws.max_row``).
     @property
     def max_row(self) -> int:
+        """Largest row index visible to openpyxl-style callers."""
         return self._max_row()
 
     @property
     def max_column(self) -> int:
+        """Largest column index visible to openpyxl-style callers."""
         return self._max_col()
 
     @property
