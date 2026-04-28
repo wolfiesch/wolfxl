@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
+from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl.utils.exceptions import IllegalCharacterError
+from wolfxl.utils.numbers import is_date_format
 
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
+
+
+# RFC-059 (Sprint Ο Pod-1E): OOXML-illegal control characters.
+# The C0 controls 0x00–0x08, 0x0B, 0x0C, 0x0E–0x1F plus 0x7F are
+# rejected by Excel's serializer.  Tab (0x09), newline (0x0A), and
+# carriage return (0x0D) are allowed and pass through unchanged.
+# Mirrors openpyxl's ``ILLEGAL_CHARACTERS_RE``.
+ILLEGAL_CHARACTERS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class Cell:
@@ -31,6 +43,20 @@ class Cell:
         "_number_format",
         "_value_dirty",
         "_format_dirty",
+        # RFC-057 (Sprint Ο Pod 1C) — array / data-table formula
+        # metadata.  Populated when ``cell.value`` is assigned an
+        # :class:`ArrayFormula` / :class:`DataTableFormula` instance,
+        # or when an existing cell parses back as one of those types.
+        # ``_formula_type`` is one of: ``None`` (plain), ``"array"``,
+        # ``"dataTable"``.
+        "_formula_type",
+        "_array_ref",
+        "_formula_text",
+        "_dt_ca",
+        "_dt_2d",
+        "_dt_r",
+        "_dt_r1",
+        "_dt_r2",
     )
 
     def __init__(self, ws: Worksheet, row: int, col: int) -> None:
@@ -46,6 +72,16 @@ class Cell:
         self._number_format: str | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
+        # RFC-057 metadata — None until the cell is identified as
+        # array / data-table either via setter or on read-back.
+        self._formula_type: str | None = None
+        self._array_ref: str | None = None
+        self._formula_text: str | None = None
+        self._dt_ca: bool = False
+        self._dt_2d: bool = False
+        self._dt_r: bool = False
+        self._dt_r1: str | None = None
+        self._dt_r2: str | None = None
 
     @property
     def coordinate(self) -> str:
@@ -59,21 +95,498 @@ class Cell:
     def column(self) -> int:
         return self._col
 
+    @property
+    def column_letter(self) -> str:
+        """Column letter (e.g. ``"A"``, ``"AA"``) — openpyxl alias."""
+        return _column_letter(self._col)
+
+    @property
+    def parent(self) -> Worksheet:
+        """The containing Worksheet — openpyxl alias."""
+        return self._ws
+
+    def offset(self, row: int = 0, column: int = 0) -> Cell:
+        """Return the cell ``row`` rows down and ``column`` columns right.
+
+        Matches openpyxl's ``Cell.offset(row=0, column=0)`` signature. Negative
+        offsets are allowed as long as the target row/col stays within Excel's
+        1-based address space.
+        """
+        return self._ws._get_or_create_cell(self._row + row, self._col + column)  # noqa: SLF001
+
+    @property
+    def data_type(self) -> str:
+        """openpyxl-compatible single-char type code.
+
+        Maps to openpyxl's tags:
+        - ``"s"``: string
+        - ``"n"``: number (openpyxl also uses this for blank cells)
+        - ``"b"``: boolean
+        - ``"d"``: date / datetime
+        - ``"f"``: formula
+        - ``"e"``: error
+        """
+        from wolfxl._worksheet import _canonical_data_type
+
+        canon = _canonical_data_type(self.value)
+        mapping = {
+            "string": "s",
+            "number": "n",
+            "boolean": "b",
+            "datetime": "d",
+            "date": "d",
+            "formula": "f",
+            "error": "e",
+            "blank": "n",
+        }
+        return mapping.get(canon, "n")
+
+    @property
+    def has_style(self) -> bool:
+        """True if any style attribute has been explicitly set on this cell.
+
+        In read mode, checks whether the on-disk format carries any non-default
+        style. In write mode, checks the dirty-flag sentinels so an unset cell
+        reads as False and a cell with ``font = Font(bold=True)`` reads as True.
+        """
+        if self._format_dirty:
+            return True
+        font = self._font if self._font is not _UNSET else None
+        fill = self._fill if self._fill is not _UNSET else None
+        border = self._border if self._border is not _UNSET else None
+        align = self._alignment if self._alignment is not _UNSET else None
+        nfmt = self._number_format if self._number_format is not _UNSET else None
+        if font and font != Font():
+            return True
+        if fill and fill != PatternFill():
+            return True
+        if border and border != Border():
+            return True
+        if align and align != Alignment():
+            return True
+        if nfmt and nfmt != "General":
+            return True
+        return False
+
+    @property
+    def is_date(self) -> bool:
+        """True if the value is a date/datetime or the number format is a date."""
+        value = self.value
+        if hasattr(value, "year") and hasattr(value, "month"):
+            return True
+        # Sprint Κ Pod-β: xlsb / xls workbooks don't expose number_format
+        # because the binary backends don't carry per-cell style records.
+        # Fall back to the value-type check above and return False rather
+        # than raise out of an introspection accessor.
+        wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format != "xlsx":
+            return False
+        return is_date_format(self.number_format)
+
+    @property
+    def style(self) -> None:
+        """Named style name. Not yet supported; always returns None.
+
+        openpyxl uses this to look up ``NamedStyle`` objects in
+        ``wb.named_styles``. wolfxl hasn't implemented named styles yet
+        (tracked for T2). Setting it raises ``NotImplementedError``.
+        """
+        return None
+
+    @style.setter
+    def style(self, value: Any) -> None:  # noqa: ARG002
+        raise NotImplementedError(
+            "Named styles are not yet supported by wolfxl. "
+            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
+        )
+
+    # ------------------------------------------------------------------
+    # T1 PR1: hyperlink / comment read access (write-mode setters land in PR4)
+    #
+    # Reads pull from per-worksheet lazy maps populated on first access.
+    # Cells without a hyperlink/comment return None (matches openpyxl).
+    # Setters raise NotImplementedError with a T1.5 pointer when the file
+    # was opened via load_workbook(...) (no rust writer); write-mode
+    # implementations land in PR4.
+    # ------------------------------------------------------------------
+
+    @property
+    def hyperlink(self) -> Any:
+        # Pre-save visibility: a queued hyperlink shows up immediately
+        # without waiting for ``save()`` to flush to the writer.
+        ws = self._ws
+        coord = self.coordinate
+        pending = ws._pending_hyperlinks.get(coord, _UNSET)  # noqa: SLF001
+        if pending is None:
+            return None  # explicit-delete sentinel
+        if pending is not _UNSET:
+            return pending
+        return ws._get_hyperlinks_map().get(coord)  # noqa: SLF001
+
+    @hyperlink.setter
+    def hyperlink(self, value: Any) -> None:
+        from wolfxl.worksheet.hyperlink import Hyperlink
+
+        ws = self._ws
+        wb = ws._workbook  # noqa: SLF001
+        # RFC-022: cell.hyperlink rounds-trips in BOTH write and modify
+        # mode. Both backends consume the same _pending_hyperlinks dict;
+        # the workbook flush dispatches to writer.add_hyperlink (write)
+        # or patcher.queue_hyperlink (modify). None is the explicit-delete
+        # sentinel per INDEX decision #5 — never use pop().
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("cell.hyperlink requires write or modify mode")
+        coord = self.coordinate
+        if value is None:
+            ws._pending_hyperlinks[coord] = None  # noqa: SLF001
+            return
+        if isinstance(value, str):
+            value = Hyperlink(target=value)
+        if not isinstance(value, Hyperlink):
+            raise TypeError(
+                f"hyperlink must be a Hyperlink or str, got {type(value).__name__}"
+            )
+        ws._pending_hyperlinks[coord] = value  # noqa: SLF001
+        # openpyxl parity: if the cell has no value yet, surface the
+        # target/location as the visible cell value so a freshly-set
+        # hyperlink is also visibly clickable text.
+        if self.value is None:
+            display_value = value.display or value.target or value.location
+            if display_value is not None:
+                self.value = display_value
+
+    @property
+    def comment(self) -> Any:
+        ws = self._ws
+        coord = self.coordinate
+        pending = ws._pending_comments.get(coord, _UNSET)  # noqa: SLF001
+        if pending is None:
+            return None
+        if pending is not _UNSET:
+            return pending
+        return ws._get_comments_map().get(coord)  # noqa: SLF001
+
+    @comment.setter
+    def comment(self, value: Any) -> None:
+        from wolfxl.comments import Comment
+
+        ws = self._ws
+        wb = ws._workbook  # noqa: SLF001
+        # RFC-023: cell.comment round-trips in both write and modify
+        # mode. Both backends consume the same _pending_comments dict;
+        # the workbook flush dispatches to writer.add_comment (write)
+        # or patcher.queue_comment (modify). None is the explicit-
+        # delete sentinel.
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("cell.comment requires write or modify mode")
+        coord = self.coordinate
+        if value is None:
+            ws._pending_comments[coord] = None  # noqa: SLF001
+            return
+        if not isinstance(value, Comment):
+            raise TypeError(
+                f"comment must be a Comment, got {type(value).__name__}"
+            )
+        ws._pending_comments[coord] = value  # noqa: SLF001
+
+    @property
+    def protection(self) -> None:
+        """Read-only default (None). Cell protection is not supported."""
+        return None
+
     # ------------------------------------------------------------------
     # Value
     # ------------------------------------------------------------------
 
     @property
     def value(self) -> Any:
+        # RFC-057: surface array / data-table formulas as the typed
+        # instance regardless of what's been cached in ``_value``.
+        # The metadata is populated either by the setter or by the
+        # read-back path (parse_cell in the calamine backend tags the
+        # cell post-read; pending-array map carries write-side state).
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        ws = self._ws
+        # Pre-save visibility for write-mode / modify-mode setters: any
+        # pending array-formula entry on the worksheet wins over the
+        # cached value.
+        pending = ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
+        if pending is not None:
+            kind, payload = pending
+            if kind == "spill_child":
+                return None
+            if kind == "array":
+                return ArrayFormula(payload["ref"], payload["text"])
+            if kind == "data_table":
+                return DataTableFormula(
+                    ref=payload["ref"],
+                    ca=payload.get("ca", False),
+                    dt2D=payload.get("dt2D", False),
+                    dtr=payload.get("dtr", False),
+                    r1=payload.get("r1"),
+                    r2=payload.get("r2"),
+                )
+        # Read-side: if a previous read populated _formula_type, we
+        # surface the typed instance.
+        if self._formula_type == "array":
+            return ArrayFormula(self._array_ref or "", self._formula_text or "")
+        if self._formula_type == "dataTable":
+            return DataTableFormula(
+                ref=self._array_ref or "",
+                ca=self._dt_ca,
+                dt2D=self._dt_2d,
+                dtr=self._dt_r,
+                r1=self._dt_r1,
+                r2=self._dt_r2,
+            )
+        if self._formula_type == "array_child":
+            # Cell inside a spill range that isn't the master.  openpyxl
+            # also returns None here — Excel computes the spill on open.
+            return None
+
         if self._value is _UNSET:
             self._value = self._read_value()
+            # _read_value may have populated the formula metadata —
+            # re-check after the read.
+            if self._formula_type == "array":
+                return ArrayFormula(self._array_ref or "", self._formula_text or "")
+            if self._formula_type == "dataTable":
+                return DataTableFormula(
+                    ref=self._array_ref or "",
+                    ca=self._dt_ca,
+                    dt2D=self._dt_2d,
+                    dtr=self._dt_r,
+                    r1=self._dt_r1,
+                    r2=self._dt_r2,
+                )
+            if self._formula_type == "array_child":
+                return None
+        # Sprint Ι Pod-α: when the workbook was opened with
+        # ``rich_text=True``, surface ``CellRichText`` for cells whose
+        # backing string carries `<r>` runs.  Default load mode mirrors
+        # openpyxl 3.x, which flattens to plain ``str`` unless the user
+        # opts in via the same flag.
+        if isinstance(self._value, str):
+            wb = self._ws._workbook  # noqa: SLF001
+            if getattr(wb, "_rich_text", False):
+                rt = self.rich_text
+                if rt is not None:
+                    return rt
         return self._value
 
     @value.setter
     def value(self, val: Any) -> None:
+        # Accept CellRichText pass-through: if the user assigns a
+        # CellRichText, defer rich-text serialization to the writer.
+        # Plain strings keep the existing fast path.
+        # RFC-059: reject OOXML-illegal control characters before
+        # they hit the writer.  ``IllegalCharacterError`` subclasses
+        # ``ValueError`` so existing ``except ValueError`` callsites
+        # keep working unchanged.
+        if isinstance(val, str) and ILLEGAL_CHARACTERS_RE.search(val):
+            raise IllegalCharacterError(
+                f"Cell value {val!r} contains characters that are not allowed in "
+                "OOXML strings (control chars 0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)"
+            )
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+        from wolfxl.cell.rich_text import CellRichText  # local import — avoids cycles
+
+        ws = self._ws
+
+        # RFC-057 — array / data-table formula assignment.
+        if isinstance(val, ArrayFormula):
+            self._formula_type = "array"
+            self._array_ref = val.ref
+            self._formula_text = val.text
+            self._value = val
+            self._value_dirty = True
+            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+                "array",
+                {"ref": val.ref, "text": val.text},
+            )
+            # Populate placeholder entries for cells inside the spill
+            # range (excluding the master).  These show up as
+            # ``<c r="..."/>`` placeholders so Excel sees the spill
+            # area pre-populated; without them the spill master would
+            # be the only cell in the range.
+            self._populate_spill_placeholders(val.ref)
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            return
+
+        if isinstance(val, DataTableFormula):
+            self._formula_type = "dataTable"
+            self._array_ref = val.ref
+            self._dt_ca = val.ca
+            self._dt_2d = val.dt2D
+            self._dt_r = val.dtr
+            self._dt_r1 = val.r1
+            self._dt_r2 = val.r2
+            self._value = val
+            self._value_dirty = True
+            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+                "data_table",
+                {
+                    "ref": val.ref,
+                    "ca": val.ca,
+                    "dt2D": val.dt2D,
+                    "dtr": val.dtr,
+                    "r1": val.r1,
+                    "r2": val.r2,
+                },
+            )
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            return
+
+        # Plain assignment — clear any previous array / data-table
+        # state so a former master cell can be replaced cleanly.
+        if self._formula_type in ("array", "dataTable", "array_child"):
+            self._formula_type = None
+            self._array_ref = None
+            self._formula_text = None
+            self._dt_ca = False
+            self._dt_2d = False
+            self._dt_r = False
+            self._dt_r1 = None
+            self._dt_r2 = None
+        ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+
         self._value = val
         self._value_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+
+        # Pod-α: when a CellRichText is assigned, also stash it on the
+        # worksheet's pending-rich-text map so the flush layer can pick
+        # it up (write-mode and modify-mode both consume the same map).
+        if isinstance(val, CellRichText):
+            ws._pending_rich_text[(self._row, self._col)] = val  # noqa: SLF001
+        else:
+            # Clearing or replacing with plain — drop any prior rich entry.
+            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _populate_spill_placeholders(self, ref: str) -> None:
+        """Mark every non-master cell in ``ref`` as a spill child.
+
+        RFC-057: when the user assigns ``cell.value = ArrayFormula(...)``,
+        every cell inside the spill range becomes a placeholder so the
+        ``cell.value`` getter on those cells returns ``None`` (mirroring
+        openpyxl/Excel).  Only the master cell carries the actual
+        formula text.
+        """
+        from wolfxl._utils import a1_to_rowcol  # noqa: SLF001
+
+        ws = self._ws
+        # Parse the ref ("A1:A10") into a 2-tuple of cells.
+        if ":" not in ref:
+            return  # single-cell array — nothing else to mark
+        try:
+            top_left, bottom_right = ref.split(":", 1)
+            r1, c1 = a1_to_rowcol(top_left)
+            r2, c2 = a1_to_rowcol(bottom_right)
+        except Exception:  # noqa: BLE001
+            return
+        top, bottom = sorted((r1, r2))
+        left, right = sorted((c1, c2))
+        master_key = (self._row, self._col)
+        for r in range(top, bottom + 1):
+            for c in range(left, right + 1):
+                if (r, c) == master_key:
+                    continue
+                ws._pending_array_formulas[(r, c)] = ("spill_child", {})  # noqa: SLF001
+
+    # ------------------------------------------------------------------
+    # Rich text
+    # ------------------------------------------------------------------
+
+    @property
+    def rich_text(self) -> Any:
+        """Structured rich-text runs for this cell, or ``None``.
+
+        Returns a :class:`wolfxl.cell.rich_text.CellRichText` object
+        when the on-disk cell carries `<r>` runs (either via the SST
+        or as inline-string runs).  Returns ``None`` for plain-text
+        cells, non-string types, and brand-new cells with no on-disk
+        backing.
+
+        Parity with openpyxl: openpyxl exposes the same data via
+        ``Cell.value`` *only* when the workbook is loaded with
+        ``rich_text=True``.  WolfXL goes one step further and always
+        surfaces the structured representation through this side
+        channel — defaulting ``Cell.value`` to flattened ``str`` so
+        existing user code keeps working unchanged.
+        """
+        from wolfxl.cell.rich_text import CellRichText, InlineFont, TextBlock
+
+        ws = self._ws
+        # Pre-save visibility for write/modify-mode setters.
+        pending = ws._pending_rich_text.get((self._row, self._col))  # noqa: SLF001
+        if pending is not None:
+            return pending
+
+        wb = ws._workbook  # noqa: SLF001
+        reader = getattr(wb, "_rust_reader", None)
+        if reader is None:
+            return None
+        payload = reader.read_cell_rich_text(ws.title, self.coordinate)
+        if payload is None:
+            return None
+        out = CellRichText()
+        for entry in payload:
+            text, font_dict = entry[0], entry[1]
+            if font_dict is None:
+                out.append(text)
+            else:
+                out.append(
+                    TextBlock(
+                        InlineFont(
+                            rFont=font_dict.get("rFont"),
+                            charset=font_dict.get("charset"),
+                            family=font_dict.get("family"),
+                            b=font_dict.get("b"),
+                            i=font_dict.get("i"),
+                            strike=font_dict.get("strike"),
+                            color=font_dict.get("color"),
+                            sz=font_dict.get("sz"),
+                            u=font_dict.get("u"),
+                            vertAlign=font_dict.get("vertAlign"),
+                            scheme=font_dict.get("scheme"),
+                        ),
+                        text,
+                    )
+                )
+        return out
+
+    @rich_text.setter
+    def rich_text(self, val: Any) -> None:
+        """Setter alias for ``cell.value = CellRichText(...)``.
+
+        Lets users round-trip via ``cell.rich_text = ...`` even if they
+        never touch ``cell.value`` directly — handy in code that wants
+        to add/edit runs without disturbing other state.
+        """
+        self.value = val
+
+    # ------------------------------------------------------------------
+    # Style guard (Sprint Κ Pod-β)
+    # ------------------------------------------------------------------
+
+    def _require_xlsx_for_style(self, attr: str) -> None:
+        """Raise NotImplementedError if the workbook isn't xlsx.
+
+        xlsb / xls workbooks load via calamine's binary readers which
+        don't expose the per-cell style records that ``cell.font``,
+        ``cell.fill`` etc. need.  Surface a clear error at the Python
+        layer so callers don't get a confusing Rust panic / empty
+        Font object.
+        """
+        wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format != "xlsx":
+            raise NotImplementedError(
+                f"cell.{attr} is xlsx-only; this workbook is .{wb_format}. "
+                "Use .xlsx for style-aware reads."
+            )
 
     # ------------------------------------------------------------------
     # Font
@@ -81,12 +594,14 @@ class Cell:
 
     @property
     def font(self) -> Font:
+        self._require_xlsx_for_style("font")
         if self._font is _UNSET:
             self._font = self._read_font()
         return self._font  # type: ignore[return-value]
 
     @font.setter
     def font(self, val: Font) -> None:
+        self._require_xlsx_for_style("font")
         self._font = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -97,12 +612,14 @@ class Cell:
 
     @property
     def fill(self) -> PatternFill:
+        self._require_xlsx_for_style("fill")
         if self._fill is _UNSET:
             self._fill = self._read_fill()
         return self._fill  # type: ignore[return-value]
 
     @fill.setter
     def fill(self, val: PatternFill) -> None:
+        self._require_xlsx_for_style("fill")
         self._fill = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -113,12 +630,14 @@ class Cell:
 
     @property
     def border(self) -> Border:
+        self._require_xlsx_for_style("border")
         if self._border is _UNSET:
             self._border = self._read_border()
         return self._border  # type: ignore[return-value]
 
     @border.setter
     def border(self, val: Border) -> None:
+        self._require_xlsx_for_style("border")
         self._border = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -129,12 +648,14 @@ class Cell:
 
     @property
     def alignment(self) -> Alignment:
+        self._require_xlsx_for_style("alignment")
         if self._alignment is _UNSET:
             self._alignment = self._read_alignment()
         return self._alignment  # type: ignore[return-value]
 
     @alignment.setter
     def alignment(self, val: Alignment) -> None:
+        self._require_xlsx_for_style("alignment")
         self._alignment = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -145,12 +666,14 @@ class Cell:
 
     @property
     def number_format(self) -> str | None:
+        self._require_xlsx_for_style("number_format")
         if self._number_format is _UNSET:
             self._number_format = self._read_number_format()
         return self._number_format  # type: ignore[return-value]
 
     @number_format.setter
     def number_format(self, val: str | None) -> None:
+        self._require_xlsx_for_style("number_format")
         self._number_format = val
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -163,6 +686,32 @@ class Cell:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return None
+        # RFC-057: tag the cell with array / data-table metadata
+        # before falling through to the regular payload read.  The
+        # reader returns ``None`` for plain cells so the cost is one
+        # extra dict-lookup at most.
+        try:
+            af_payload = wb._rust_reader.read_cell_array_formula(  # noqa: SLF001
+                self._ws.title, self.coordinate,
+            )
+        except AttributeError:
+            af_payload = None
+        if af_payload is not None:
+            kind = af_payload.get("kind")
+            if kind == "array":
+                self._formula_type = "array"
+                self._array_ref = af_payload.get("ref")
+                self._formula_text = af_payload.get("text", "")
+            elif kind == "data_table":
+                self._formula_type = "dataTable"
+                self._array_ref = af_payload.get("ref")
+                self._dt_ca = bool(af_payload.get("ca", False))
+                self._dt_2d = bool(af_payload.get("dt2D", False))
+                self._dt_r = bool(af_payload.get("dtr", False))
+                self._dt_r1 = af_payload.get("r1")
+                self._dt_r2 = af_payload.get("r2")
+            elif kind == "spill_child":
+                self._formula_type = "array_child"
         payload = wb._rust_reader.read_cell_value(  # noqa: SLF001
             self._ws.title, self.coordinate, getattr(wb, "_data_only", False),
         )

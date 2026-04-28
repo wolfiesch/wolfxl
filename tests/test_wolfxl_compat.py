@@ -1077,7 +1077,7 @@ class TestReadMode:
 
 
 class TestWriteMode:
-    """Write a new Excel file via RustXlsxWriterBook."""
+    """Write a new Excel file via NativeWorkbook."""
 
     def setup_method(self) -> None:
         _require_rust()

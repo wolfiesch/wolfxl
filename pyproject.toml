@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "wolfxl"
-version = "0.5.0"
+version = "2.0.0"
 description = "Fast, openpyxl-compatible Excel I/O with Rust backend and built-in formula engine (67 functions, financial, date, time, text, lookup, conditional stats)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Wolfgang Schoenberger" }]
 keywords = ["excel", "xlsx", "openpyxl", "rust", "performance", "spreadsheet", "formula", "calc", "financial"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "License :: OSI Approved :: MIT License",
@@ -25,6 +25,7 @@ classifiers = [
 
 [project.optional-dependencies]
 calc = ["formulas>=1.3.3,<2.0"]
+encrypted = ["msoffcrypto-tool>=5.4,<6.0"]
 
 [project.urls]
 Homepage = "https://github.com/SynthGL/wolfxl"
@@ -46,9 +47,32 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    # WolfXL intentionally mirrors openpyxl's camelCase public API.
+    "N",
+    # Keep lint focused on behavioral issues until the openpyxl surface is
+    # migrated to a project-wide formatter/import policy.
+    "I",
+    # The package supports Python 3.9; defer pyupgrade-style rewrites.
+    "UP",
+    # Existing OOXML fixture strings and importorskip patterns are long/by design.
+    "E402",
+    "E501",
+]
 
 [tool.pytest.ini_options]
-markers = ["slow: marks tests that are sensitive to CI timing"]
+markers = [
+    "slow: marks tests that are sensitive to CI timing",
+    "rich_features: tests that exercise Wave 4B rich-feature pymethods (hyperlinks, comments, named ranges, properties, tables, CF, DV, print area). Skipped under WOLFXL_WRITER=native via -k 'not rich' until 4B lands.",
+    "smoke: hand-rolled Layer 1/3 smoke gates for the native writer (precedes the W4C diff harness).",
+    "libreoffice_smoke: Layer 4 LibreOffice headless round-trip (gold-star, opt-in via WOLFXL_RUN_LIBREOFFICE_SMOKE=1).",
+    "rfc030: RFC-030 — insert_rows / delete_rows in modify mode.",
+    "rfc034: RFC-034 — Worksheet.move_range in modify mode.",
+    "rfc035: RFC-035 — Workbook.copy_worksheet in modify+write mode.",
+    "rfc031: RFC-031 — insert_cols/delete_cols in modify mode.",
+    "rfc036: RFC-036 — Workbook.move_sheet in modify mode.",
+    "manual: tests requiring manual environment setup (e.g. LibreOffice path).",
+]
 
 [tool.mypy]
 strict = true

@@ -22,8 +22,52 @@ use quick_xml::Reader as XmlReader;
 use zip::ZipArchive;
 
 use crate::ooxml_util;
-use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
+use crate::util::{
+    a1_to_row_col, cell_blank, cell_with_value, column_letter_from_zero_based, parse_iso_date,
+    parse_iso_datetime,
+};
 use crate::wolfxl::styles::XfEntry;
+
+/// RFC-057: parse an XML attribute as an Excel-style boolean.
+///
+/// OOXML uses `"1"`/`"0"` and `"true"`/`"false"` interchangeably for
+/// boolean attributes; the openpyxl parser also accepts the latter.
+fn parse_attr_bool(e: &quick_xml::events::BytesStart<'_>, key: &[u8]) -> bool {
+    let v = ooxml_util::attr_value(e, key).unwrap_or_default();
+    matches!(v.as_str(), "1" | "true" | "True")
+}
+
+/// RFC-057: tag every cell inside ``ref_range`` (except the master
+/// position ``master``) as a ``SpillChild`` placeholder.
+fn mark_spill_children(
+    out: &mut HashMap<(u32, u32), ArrayFormulaInfo>,
+    ref_range: &str,
+    master: (u32, u32),
+) {
+    let parts: Vec<&str> = ref_range.split(':').collect();
+    if parts.is_empty() {
+        return;
+    }
+    let top_left = parts[0];
+    let bottom_right = if parts.len() > 1 { parts[1] } else { top_left };
+    let Ok((r1, c1)) = a1_to_row_col(top_left) else {
+        return;
+    };
+    let Ok((r2, c2)) = a1_to_row_col(bottom_right) else {
+        return;
+    };
+    let (top, bottom) = if r1 < r2 { (r1, r2) } else { (r2, r1) };
+    let (left, right) = if c1 < c2 { (c1, c2) } else { (c2, c1) };
+    for r in top..=bottom {
+        for c in left..=right {
+            if (r, c) == master {
+                continue;
+            }
+            // Don't overwrite a previously-set master entry.
+            out.entry((r, c)).or_insert(ArrayFormulaInfo::SpillChild);
+        }
+    }
+}
 
 fn map_error_value(err_str: &str) -> &'static str {
     let e = err_str.to_ascii_uppercase();
@@ -491,6 +535,25 @@ struct DiagonalBorderInfo {
     color: String,
 }
 
+/// RFC-057 (Sprint Ο Pod 1C) — array / data-table formula
+/// metadata for one cell.
+#[derive(Clone, Debug)]
+enum ArrayFormulaInfo {
+    /// Master cell of an array formula (`<f t="array" ref="...">`).
+    Array { ref_range: String, text: String },
+    /// Master cell of a data-table formula (`<f t="dataTable" ref="..."/>`).
+    DataTable {
+        ref_range: String,
+        ca: bool,
+        dt2_d: bool,
+        dtr: bool,
+        r1: Option<String>,
+        r2: Option<String>,
+    },
+    /// Cell inside the spill range of an array formula but not the master.
+    SpillChild,
+}
+
 #[derive(Clone, Debug, Default)]
 struct RawFontInfo {
     bold: bool,
@@ -693,6 +756,10 @@ pub struct CalamineStyledBook {
     /// Fast formula map: (row,col) -> formula string, parsed from worksheet XML
     /// in a single pass (replaces the slower `worksheet_formula()` calamine call).
     formula_map_cache: HashMap<String, HashMap<(u32, u32), String>>,
+    /// RFC-057 (Sprint Ο Pod 1C): array / data-table formula
+    /// metadata, keyed by ``(row, col)`` of the master cell.
+    /// Cells inside the spill range get ``ArrayFormulaInfo::SpillChild``.
+    array_formula_cache: HashMap<String, HashMap<(u32, u32), ArrayFormulaInfo>>,
     /// Cache: raw sheet XML content (avoids re-opening zip for Tier 2 + formula parsing).
     sheet_xml_content_cache: HashMap<String, String>,
     /// Lazy cache: custom number formats from xl/styles.xml with verbatim escapes.
@@ -704,18 +771,110 @@ pub struct CalamineStyledBook {
     /// Compact `cell_records()` format payloads keyed by
     /// (workbook-global cellXfs style id, include extended style-grid fields).
     record_format_cache: HashMap<(u32, bool), RecordFormatInfo>,
+    /// Lazy cache: parsed `docProps/core.xml` + `docProps/app.xml` metadata.
+    /// Stored as a Python dict so repeated `read_doc_properties` calls
+    /// return the same object without re-parsing XML or reopening the zip.
+    doc_properties_cache: Option<PyObject>,
+    /// Sprint Ι Pod-α: lazy cache of parsed SST entries with their
+    /// rich-text run structure.  ``None`` for an entry means "plain
+    /// text — no `<r>` runs, fall back to the flat
+    /// `parse_shared_strings()` result"; ``Some(runs)`` exposes the
+    /// structured runs that Cell.rich_text returns.
+    sst_runs_cache: Option<Vec<Option<Vec<crate::rich_text::RichTextRun>>>>,
+    /// Sprint Κ Pod-α: when the workbook was opened from a bytes
+    /// buffer we materialise the contents to a self-cleaning temp
+    /// file so every Tier 2 feature that reopens the zip
+    /// (`File::open(&self.file_path)`) keeps working unchanged.
+    /// `_owned_tempfile` is held purely so its `Drop` impl deletes
+    /// the file when the workbook is dropped.
+    _owned_tempfile: Option<crate::calamine_styled_backend::OwnedTempFile>,
+    /// True when the workbook was opened from bytes; the path
+    /// pointed at by `file_path` is then a temp file rather than a
+    /// caller-supplied path.
+    opened_from_bytes: bool,
+}
+
+/// Self-deleting temp file owner.  Only used by
+/// `CalamineStyledBook::open_from_bytes`.
+pub(crate) struct OwnedTempFile {
+    path: std::path::PathBuf,
+}
+
+impl OwnedTempFile {
+    fn new_with_bytes(data: &[u8]) -> std::io::Result<Self> {
+        use std::io::Write;
+        // Use a counter + nanosecond clock to keep names unique
+        // even under bursts where the clock resolution stalls.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let mut path = std::env::temp_dir();
+        path.push(format!("wolfxl_bytes_{pid}_{nanos}_{n}.xlsx"));
+        let mut f = File::create(&path)?;
+        f.write_all(data)?;
+        f.flush()?;
+        Ok(Self { path })
+    }
+
+    fn path_str(&self) -> String {
+        self.path.to_string_lossy().to_string()
+    }
+}
+
+impl Drop for OwnedTempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 #[pymethods]
 impl CalamineStyledBook {
     #[staticmethod]
-    pub fn open(path: &str) -> PyResult<Self> {
+    #[pyo3(signature = (path, permissive = false))]
+    pub fn open(path: &str, permissive: bool) -> PyResult<Self> {
         let file = File::open(path)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}")))?;
         let reader = BufReader::new(file);
         let wb: XlsxReader = Xlsx::new(reader)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to parse xlsx: {e}")))?;
-        let names = wb.sheet_names().to_vec();
+        let mut names = wb.sheet_names().to_vec();
+
+        // Sprint Θ Pod-A: when permissive=true and calamine returned
+        // zero sheets (typical for a self-closing `<sheets/>` block),
+        // synthesize "Sheet1", "Sheet2", ... by counting worksheet
+        // relationships in `xl/_rels/workbook.xml.rels`. The
+        // synthesized names are placeholders; the patcher is the
+        // actual mutation surface and uses the same fallback to
+        // resolve XML paths.
+        if permissive && names.is_empty() {
+            const WORKSHEET_REL_TYPE: &str =
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+            let f = File::open(path).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!("Failed to reopen file for rels scan: {e}"))
+            })?;
+            let mut zip = ZipArchive::new(f).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!("Failed to open zip for rels scan: {e}"))
+            })?;
+            if let Some(rels_xml) =
+                ooxml_util::zip_read_to_string_opt(&mut zip, "xl/_rels/workbook.xml.rels")?
+            {
+                let graph = wolfxl_rels::RelsGraph::parse(rels_xml.as_bytes())
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Bad rels: {e}")))?;
+                let mut idx = 1usize;
+                for r in graph.iter() {
+                    if r.rel_type == WORKSHEET_REL_TYPE {
+                        names.push(format!("Sheet{idx}"));
+                        idx += 1;
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             workbook: wb,
             sheet_names: names,
@@ -728,12 +887,44 @@ impl CalamineStyledBook {
             diagonal_borders: None,
             range_cache: HashMap::new(),
             formula_map_cache: HashMap::new(),
+            array_formula_cache: HashMap::new(),
             sheet_xml_content_cache: HashMap::new(),
             raw_number_formats: None,
             cell_xfs: None,
             raw_fonts: None,
             record_format_cache: HashMap::new(),
+            doc_properties_cache: None,
+            sst_runs_cache: None,
+            _owned_tempfile: None,
+            opened_from_bytes: false,
         })
+    }
+
+    /// Sprint Κ Pod-α: load an `.xlsx` workbook from a raw bytes
+    /// buffer.  Materialises the bytes to a self-cleaning temp file
+    /// and forwards to [`Self::open`] so every Tier 2 feature that
+    /// reopens the zip keeps working unchanged.
+    #[staticmethod]
+    #[pyo3(signature = (data, permissive = false))]
+    pub fn open_from_bytes(data: &[u8], permissive: bool) -> PyResult<Self> {
+        let owned = OwnedTempFile::new_with_bytes(data).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!(
+                "Failed to materialise xlsx bytes to temp file: {e}"
+            ))
+        })?;
+        let path = owned.path_str();
+        let mut book = Self::open(&path, permissive)?;
+        book._owned_tempfile = Some(owned);
+        book.opened_from_bytes = true;
+        Ok(book)
+    }
+
+    /// True when the workbook was opened via
+    /// [`Self::open_from_bytes`] rather than [`Self::open`].
+    /// Pod-β surfaces this so the dispatcher knows the in-memory
+    /// origin of the workbook.
+    pub fn opened_from_bytes(&self) -> bool {
+        self.opened_from_bytes
     }
 
     pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
@@ -801,6 +992,66 @@ impl CalamineStyledBook {
 
     pub fn sheet_names(&self) -> Vec<String> {
         self.sheet_names.clone()
+    }
+
+    /// RFC-057 (Sprint Ο Pod 1C): read array-formula / data-table
+    /// formula metadata for a single cell.  Returns ``None`` for
+    /// plain (non-array) cells.
+    ///
+    /// On a hit, returns a dict matching the Python-side cell-patch
+    /// shape pinned in RFC-057 §10:
+    ///   - ``{"kind": "array", "ref": "A1:A10", "text": "B1:B10*2"}``
+    ///   - ``{"kind": "data_table", "ref": "...", "ca": ..., "dt2D": ...,
+    ///        "dtr": ..., "r1": ..., "r2": ...}``
+    ///   - ``{"kind": "spill_child"}``
+    pub fn read_cell_array_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+
+        self.ensure_sheet_exists(sheet)?;
+        self.ensure_value_caches(sheet)?;
+
+        let info = match self
+            .array_formula_cache
+            .get(sheet)
+            .and_then(|m| m.get(&(row, col)))
+        {
+            Some(i) => i.clone(),
+            None => return Ok(py.None()),
+        };
+
+        let d = PyDict::new(py);
+        match info {
+            ArrayFormulaInfo::Array { ref_range, text } => {
+                d.set_item("kind", "array")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("text", text)?;
+            }
+            ArrayFormulaInfo::DataTable {
+                ref_range,
+                ca,
+                dt2_d,
+                dtr,
+                r1,
+                r2,
+            } => {
+                d.set_item("kind", "data_table")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("ca", ca)?;
+                d.set_item("dt2D", dt2_d)?;
+                d.set_item("dtr", dtr)?;
+                d.set_item("r1", r1)?;
+                d.set_item("r2", r2)?;
+            }
+            ArrayFormulaInfo::SpillChild => {
+                d.set_item("kind", "spill_child")?;
+            }
+        }
+        Ok(d.into())
     }
 
     #[pyo3(signature = (sheet, a1, data_only = false))]
@@ -1249,6 +1500,76 @@ impl CalamineStyledBook {
         }
     }
 
+    /// Sprint Ι Pod-α: structured rich-text reader.
+    ///
+    /// Returns a list of ``(text, font_dict_or_none)`` tuples when the
+    /// cell's backing string carries `<r>` runs (either via the SST or
+    /// inline `<is>`).  Returns ``None`` for cells that are plain text
+    /// (single `<t>` or non-string types) — the caller (Python
+    /// ``Cell.rich_text``) propagates that as ``None`` so user code can
+    /// distinguish "no runs" from "one run".
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row, col) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        self.ensure_sheet_exists(sheet)?;
+        // Pull the raw `<c .../>` XML so we can detect t="s" vs t="inlineStr".
+        let runs_opt = self.cell_rich_text_runs(sheet, row, col)?;
+        let Some(runs) = runs_opt else {
+            return Ok(py.None());
+        };
+        let out = PyList::empty(py);
+        for run in &runs {
+            let tup = PyList::empty(py);
+            tup.append(&run.text)?;
+            match &run.font {
+                None => tup.append(py.None())?,
+                Some(font) => {
+                    let d = PyDict::new(py);
+                    if let Some(b) = font.bold {
+                        d.set_item("b", b)?;
+                    }
+                    if let Some(i) = font.italic {
+                        d.set_item("i", i)?;
+                    }
+                    if let Some(s) = font.strike {
+                        d.set_item("strike", s)?;
+                    }
+                    if let Some(u) = &font.underline {
+                        d.set_item("u", u)?;
+                    }
+                    if let Some(sz) = font.size {
+                        d.set_item("sz", sz)?;
+                    }
+                    if let Some(c) = &font.color {
+                        d.set_item("color", c)?;
+                    }
+                    if let Some(name) = &font.name {
+                        d.set_item("rFont", name)?;
+                    }
+                    if let Some(family) = font.family {
+                        d.set_item("family", family)?;
+                    }
+                    if let Some(charset) = font.charset {
+                        d.set_item("charset", charset)?;
+                    }
+                    if let Some(va) = &font.vert_align {
+                        d.set_item("vertAlign", va)?;
+                    }
+                    if let Some(sc) = &font.scheme {
+                        d.set_item("scheme", sc)?;
+                    }
+                    tup.append(d)?;
+                }
+            }
+            out.append(tup)?;
+        }
+        Ok(out.into())
+    }
+
     pub fn read_cached_formula_values(
         &mut self,
         py: Python<'_>,
@@ -1591,10 +1912,265 @@ impl CalamineStyledBook {
             .tables = Some(tables.clone());
         Self::tables_to_py(py, &tables)
     }
+
+    /// Parse `docProps/core.xml` and `docProps/app.xml` into a Python dict.
+    ///
+    /// Returns a dict shaped for ``DocumentProperties`` construction:
+    /// title/subject/creator/keywords/description/lastModifiedBy/
+    /// category/contentStatus/identifier/language/revision/version/
+    /// created (ISO 8601 string)/modified (ISO 8601 string).
+    ///
+    /// Missing files are tolerated — an xlsx without `docProps/core.xml`
+    /// (unusual but legal) returns an empty dict rather than raising.
+    /// Malformed XML also yields an empty dict so a corrupted metadata
+    /// file can't block reading the actual worksheet data.
+    ///
+    /// Cached on the workbook so repeated calls reuse the same PyObject.
+    pub fn read_doc_properties(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        if let Some(cached) = self.doc_properties_cache.as_ref() {
+            return Ok(cached.clone_ref(py));
+        }
+
+        let dict = PyDict::new(py);
+
+        let mut zip = self.open_zip()?;
+        let core_xml =
+            ooxml_util::zip_read_to_string_opt(&mut zip, "docProps/core.xml").unwrap_or(None);
+        let app_xml =
+            ooxml_util::zip_read_to_string_opt(&mut zip, "docProps/app.xml").unwrap_or(None);
+
+        if let Some(xml) = core_xml {
+            // Parse errors are swallowed here by design — a broken
+            // core.xml shouldn't make the workbook unreadable.
+            let _ = Self::parse_core_xml_into_dict(py, &xml, &dict);
+        }
+        if let Some(xml) = app_xml {
+            let _ = Self::parse_app_xml_into_dict(py, &xml, &dict);
+        }
+
+        let obj: PyObject = dict.into();
+        self.doc_properties_cache = Some(obj.clone_ref(py));
+        Ok(obj)
+    }
 }
 
 // Non-Python helper methods.
 impl CalamineStyledBook {
+    /// Sprint Ι Pod-α: parse `xl/sharedStrings.xml` once, structurally,
+    /// into a per-index `Vec<Option<Vec<RichTextRun>>>`.  ``None`` at
+    /// an index means "this SST entry is plain text — no `<r>` runs",
+    /// matching openpyxl's "flatten to str" default.
+    fn ensure_sst_runs_cache(&mut self) -> PyResult<()> {
+        if self.sst_runs_cache.is_some() {
+            return Ok(());
+        }
+        let mut zip = self.open_zip()?;
+        let xml_opt = ooxml_util::zip_read_to_string_opt(&mut zip, "xl/sharedStrings.xml")?;
+        let mut entries: Vec<Option<Vec<crate::rich_text::RichTextRun>>> = Vec::new();
+        if let Some(xml) = xml_opt {
+            // Walk the XML once and feed each `<si>...</si>` substring
+            // through `parse_runs_in_element`.  We rely on the wrapper
+            // tag (`si`) so the rich-text parser self-terminates at
+            // each closing tag.
+            let mut reader = XmlReader::from_str(&xml);
+            reader.config_mut().trim_text(false);
+            let mut buf: Vec<u8> = Vec::new();
+            let bytes = xml.as_bytes();
+            loop {
+                let pos_before = reader.buffer_position() as usize;
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(e)) if e.local_name().as_ref() == b"si" => {
+                        // `pos_before` points just before the `<si>` tag start.
+                        // Find the matching `</si>` by scanning forward
+                        // through the XML tokens.
+                        let start = bytes[..pos_before]
+                            .iter()
+                            .rposition(|&b| b == b'<')
+                            .unwrap_or(pos_before);
+                        // Read until matching </si>.
+                        let mut depth = 1u32;
+                        loop {
+                            match reader.read_event_into(&mut buf) {
+                                Ok(Event::Start(s)) if s.local_name().as_ref() == b"si" => {
+                                    depth += 1;
+                                }
+                                Ok(Event::End(en)) if en.local_name().as_ref() == b"si" => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                Ok(Event::Eof) => break,
+                                Err(err) => {
+                                    return Err(PyErr::new::<PyIOError, _>(format!(
+                                        "Failed to parse sharedStrings.xml: {err}"
+                                    )));
+                                }
+                                _ => {}
+                            }
+                            buf.clear();
+                        }
+                        let end = reader.buffer_position() as usize;
+                        let slice = &xml[start..end];
+                        let runs =
+                            crate::rich_text::parse_runs_in_element(slice, b"si").map_err(|e| {
+                                PyErr::new::<PyIOError, _>(format!(
+                                    "Failed to parse SST entry: {e}"
+                                ))
+                            })?;
+                        entries.push(runs);
+                    }
+                    Ok(Event::Empty(e)) if e.local_name().as_ref() == b"si" => {
+                        // Self-closing <si/> — empty plain text entry.
+                        entries.push(None);
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(err) => {
+                        return Err(PyErr::new::<PyIOError, _>(format!(
+                            "Failed to parse sharedStrings.xml: {err}"
+                        )));
+                    }
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+        self.sst_runs_cache = Some(entries);
+        Ok(())
+    }
+
+    /// Sprint Ι Pod-α: locate cell ``(row, col)`` in the sheet XML and
+    /// return its rich-text runs (if any).
+    ///
+    /// Walks the sheet XML once looking for the matching
+    /// ``<c r="A1" .../>`` element, then dispatches:
+    /// * ``t="inlineStr"`` → parse the `<is>` child directly
+    /// * ``t="s"`` → resolve the `<v>` index against the cached SST
+    /// * other → return ``None`` (plain / typed value)
+    fn cell_rich_text_runs(
+        &mut self,
+        sheet: &str,
+        target_row: u32,
+        target_col: u32,
+    ) -> PyResult<Option<Vec<crate::rich_text::RichTextRun>>> {
+        // Snapshot the sheet XML up-front so we don't re-borrow `self`
+        // mid-walk.
+        let xml_owned = self.sheet_xml_content(sheet)?;
+        // Build the target A1 string once; this matches the `r=`
+        // attribute Excel writes verbatim.
+        let target_a1 = {
+            let col_letter = column_letter_from_zero_based(target_col);
+            format!("{col_letter}{}", target_row + 1)
+        };
+
+        // Two-pass: walk the XML, find the cell start, capture a slice
+        // that ends at the cell's `</c>`.  Then inspect the slice.
+        let bytes = xml_owned.as_bytes();
+        let mut reader = XmlReader::from_str(&xml_owned);
+        reader.config_mut().trim_text(false);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut found: Option<(usize, String, Option<String>)> = None; // (start_byte, t_attr, ref_attr)
+        loop {
+            let pos_before = reader.buffer_position() as usize;
+            match reader
+                .read_event_into(&mut buf)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet xml: {e}")))?
+            {
+                Event::Start(e) | Event::Empty(e) => {
+                    if e.local_name().as_ref() == b"c" {
+                        let r_attr = ooxml_util::attr_value(&e, b"r");
+                        if r_attr.as_deref() == Some(target_a1.as_str()) {
+                            // Capture the byte position of the `<` that started this tag.
+                            let start = bytes[..pos_before]
+                                .iter()
+                                .rposition(|&b| b == b'<')
+                                .unwrap_or(pos_before);
+                            let t_attr = ooxml_util::attr_value(&e, b"t").unwrap_or_default();
+                            // Self-closing `<c .../>` → no children, definitely no rich text.
+                            if matches!(reader.read_event_into(&mut buf), Ok(Event::Empty(_))) {
+                                // (will not happen because we already consumed the start)
+                            }
+                            // Walk until we hit the matching </c>.
+                            let mut depth: u32 = 1;
+                            // For self-closing `<c.../>`, the loop body
+                            // will see Eof or the next sibling — we
+                            // handle that by returning None below.
+                            // Detect via attempting to find </c>.
+                            loop {
+                                match reader.read_event_into(&mut buf).map_err(|e| {
+                                    PyErr::new::<PyIOError, _>(format!("sheet xml: {e}"))
+                                })? {
+                                    Event::Start(s) if s.local_name().as_ref() == b"c" => {
+                                        depth += 1;
+                                    }
+                                    Event::End(en) if en.local_name().as_ref() == b"c" => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            break;
+                                        }
+                                    }
+                                    Event::Eof => return Ok(None),
+                                    _ => {}
+                                }
+                                buf.clear();
+                            }
+                            let end = reader.buffer_position() as usize;
+                            let slice = xml_owned[start..end].to_string();
+                            found = Some((start, t_attr, Some(slice)));
+                            break;
+                        }
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        let Some((_, t_attr, slice)) = found else {
+            return Ok(None);
+        };
+        let Some(slice) = slice else {
+            return Ok(None);
+        };
+
+        if t_attr == "inlineStr" {
+            // Find the inline `<is>` block and parse it.
+            // Locate `<is>` ... `</is>` substring.
+            if let Some(is_start) = slice.find("<is") {
+                if let Some(is_end_rel) = slice[is_start..].find("</is>") {
+                    let body = &slice[is_start..is_start + is_end_rel + "</is>".len()];
+                    let runs = crate::rich_text::parse_runs_in_element(body, b"is")
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("inlineStr: {e}")))?;
+                    return Ok(runs);
+                }
+            }
+            return Ok(None);
+        }
+
+        if t_attr == "s" {
+            // Pull the SST index from `<v>...</v>`.
+            let Some(v_start) = slice.find("<v>") else {
+                return Ok(None);
+            };
+            let Some(v_end) = slice[v_start..].find("</v>") else {
+                return Ok(None);
+            };
+            let idx_str = &slice[v_start + "<v>".len()..v_start + v_end];
+            let Ok(idx) = idx_str.trim().parse::<usize>() else {
+                return Ok(None);
+            };
+            self.ensure_sst_runs_cache()?;
+            let cache = self.sst_runs_cache.as_ref().unwrap();
+            if idx >= cache.len() {
+                return Ok(None);
+            }
+            return Ok(cache[idx].clone());
+        }
+
+        Ok(None)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn append_sheet_record(
         &mut self,
@@ -1787,6 +2363,10 @@ impl CalamineStyledBook {
         let xml = self.sheet_xml_content_cache.get(sheet).unwrap();
         let fmap = Self::parse_formulas_from_sheet_xml(xml)?;
         self.formula_map_cache.insert(sheet.to_string(), fmap);
+        // RFC-057: parse array / data-table formula metadata in the
+        // same pass.  Cheap because we re-use the already-loaded XML.
+        let afmap = Self::parse_array_formulas_from_sheet_xml(xml)?;
+        self.array_formula_cache.insert(sheet.to_string(), afmap);
 
         // 2. Parse cell values via calamine (handles shared strings, dates, etc.)
         //    Calamine opens the zip internally; the OS disk cache will serve
@@ -1814,6 +2394,11 @@ impl CalamineStyledBook {
         let xml = self.sheet_xml_content_cache.get(sheet).unwrap();
         let (formulas, style_ids) = Self::parse_formula_and_style_ids_from_sheet_xml(xml)?;
         self.formula_map_cache.insert(sheet.to_string(), formulas);
+        // RFC-057: parse array / data-table formula metadata so the
+        // Cell.value getter can surface ArrayFormula / DataTableFormula
+        // for the master cell and None for spill children.
+        let afmap = Self::parse_array_formulas_from_sheet_xml(xml)?;
+        self.array_formula_cache.insert(sheet.to_string(), afmap);
         self.tier2_cache
             .entry(sheet.to_string())
             .or_default()
@@ -2595,6 +3180,133 @@ impl CalamineStyledBook {
                 Err(e) => {
                     return Err(PyErr::new::<PyIOError, _>(format!(
                         "Failed to parse worksheet XML for formulas: {e}"
+                    )))
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(out)
+    }
+
+    /// RFC-057: parse array-formula / data-table-formula metadata from
+    /// a worksheet XML.  Walks every ``<c>`` looking for a child ``<f>``
+    /// whose ``t`` attribute is ``"array"`` or ``"dataTable"``.  When
+    /// found, every cell inside the ``ref`` range becomes a
+    /// ``SpillChild`` entry except the master cell itself which gets
+    /// the typed ``Array`` / ``DataTable`` payload.
+    fn parse_array_formulas_from_sheet_xml(
+        xml: &str,
+    ) -> PyResult<HashMap<(u32, u32), ArrayFormulaInfo>> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+        let mut out: HashMap<(u32, u32), ArrayFormulaInfo> = HashMap::new();
+
+        // Track state per-cell so we can correlate the parent <c r="...">
+        // with the child <f t="array" ref="...">…</f> body.
+        let mut current_cell: Option<(u32, u32)> = None;
+        let mut in_array_formula: bool = false;
+        let mut array_text: String = String::new();
+        // (pos, ref, "array"|"dataTable")
+        let mut pending_master: Option<((u32, u32), String, String)> = None;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"c" {
+                        let a1 = ooxml_util::attr_value(e, b"r").unwrap_or_default();
+                        current_cell = if a1.is_empty() {
+                            None
+                        } else {
+                            a1_to_row_col(&a1).ok()
+                        };
+                    } else if name.as_ref() == b"f" {
+                        let t_attr = ooxml_util::attr_value(e, b"t").unwrap_or_default();
+                        if t_attr == "array" {
+                            let ref_range = ooxml_util::attr_value(e, b"ref").unwrap_or_default();
+                            in_array_formula = true;
+                            array_text.clear();
+                            if let Some(pos) = current_cell {
+                                pending_master = Some((pos, ref_range, "array".to_string()));
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"f" {
+                        let t_attr = ooxml_util::attr_value(e, b"t").unwrap_or_default();
+                        if t_attr == "dataTable" {
+                            // Self-closing `<f t="dataTable" ref="..." dt2D="..." r1="..." r2="..."/>`.
+                            let ref_range = ooxml_util::attr_value(e, b"ref").unwrap_or_default();
+                            let ca = parse_attr_bool(e, b"ca");
+                            let dt2_d = parse_attr_bool(e, b"dt2D");
+                            let dtr = parse_attr_bool(e, b"dtr");
+                            let r1 = ooxml_util::attr_value(e, b"r1");
+                            let r2 = ooxml_util::attr_value(e, b"r2");
+                            if let Some(pos) = current_cell {
+                                let info = ArrayFormulaInfo::DataTable {
+                                    ref_range: ref_range.clone(),
+                                    ca,
+                                    dt2_d,
+                                    dtr,
+                                    r1,
+                                    r2,
+                                };
+                                out.insert(pos, info);
+                                // Also tag every other cell in the spill
+                                // range as a SpillChild placeholder.
+                                mark_spill_children(&mut out, &ref_range, pos);
+                            }
+                        } else if t_attr == "array" {
+                            // Self-closing `<f t="array" ref="..."/>` —
+                            // this happens when the formula body is empty.
+                            let ref_range = ooxml_util::attr_value(e, b"ref").unwrap_or_default();
+                            if let Some(pos) = current_cell {
+                                out.insert(
+                                    pos,
+                                    ArrayFormulaInfo::Array {
+                                        ref_range: ref_range.clone(),
+                                        text: String::new(),
+                                    },
+                                );
+                                mark_spill_children(&mut out, &ref_range, pos);
+                            }
+                        }
+                    } else if name.as_ref() == b"c" {
+                        current_cell = None;
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.local_name();
+                    if name.as_ref() == b"f" && in_array_formula {
+                        in_array_formula = false;
+                        if let Some((pos, ref_range, _kind)) = pending_master.take() {
+                            out.insert(
+                                pos,
+                                ArrayFormulaInfo::Array {
+                                    ref_range: ref_range.clone(),
+                                    text: array_text.clone(),
+                                },
+                            );
+                            mark_spill_children(&mut out, &ref_range, pos);
+                        }
+                    } else if name.as_ref() == b"c" {
+                        current_cell = None;
+                    }
+                }
+                Ok(Event::Text(ref t)) if in_array_formula => {
+                    if let Ok(text) = t.unescape() {
+                        array_text.push_str(&text);
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(PyErr::new::<PyIOError, _>(format!(
+                        "Failed to parse worksheet XML for array formulas: {e}"
                     )))
                 }
                 _ => {}
@@ -4111,5 +4823,145 @@ impl CalamineStyledBook {
             result.append(d)?;
         }
         Ok(result.into())
+    }
+
+    /// Parse `docProps/core.xml` (Dublin Core metadata) into `dict`.
+    ///
+    /// The XML looks like:
+    ///   <cp:coreProperties ...>
+    ///     <dc:title>My Report</dc:title>
+    ///     <dc:creator>Alice</dc:creator>
+    ///     <dcterms:created xsi:type="dcterms:W3CDTF">2024-01-15T10:00:00Z</dcterms:created>
+    ///     ...
+    ///   </cp:coreProperties>
+    ///
+    /// We key off the *local* element name (after namespace prefix) so we
+    /// don't need to track namespace bindings. Empty elements produce
+    /// empty-string values, which Python converts to None in
+    /// ``_doc_props_from_dict``.
+    fn parse_core_xml_into_dict(
+        _py: Python<'_>,
+        xml: &str,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut cur_tag: Option<Vec<u8>> = None;
+        let mut cur_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    cur_tag = Some(e.local_name().as_ref().to_vec());
+                    cur_text.clear();
+                }
+                Ok(Event::Text(e)) => {
+                    let t = e.unescape().unwrap_or_default().to_string();
+                    cur_text.push_str(&t);
+                }
+                Ok(Event::End(e)) => {
+                    let name = e.local_name();
+                    let name = name.as_ref();
+                    // Map local element name -> DocumentProperties field name.
+                    let py_key = match name {
+                        b"title" => Some("title"),
+                        b"subject" => Some("subject"),
+                        b"creator" => Some("creator"),
+                        b"keywords" => Some("keywords"),
+                        b"description" => Some("description"),
+                        b"lastModifiedBy" => Some("lastModifiedBy"),
+                        b"category" => Some("category"),
+                        b"contentStatus" => Some("contentStatus"),
+                        b"identifier" => Some("identifier"),
+                        b"language" => Some("language"),
+                        b"revision" => Some("revision"),
+                        b"version" => Some("version"),
+                        b"created" => Some("created"),
+                        b"modified" => Some("modified"),
+                        _ => None,
+                    };
+                    if let Some(key) = py_key {
+                        if cur_tag.as_deref() == Some(name) {
+                            let value = cur_text.trim();
+                            if !value.is_empty() {
+                                dict.set_item(key, value)?;
+                            }
+                        }
+                    }
+                    cur_tag = None;
+                    cur_text.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break, // Swallow parse errors: empty dict is fine.
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(())
+    }
+
+    /// Parse `docProps/app.xml` (extended properties) into `dict`.
+    ///
+    /// app.xml carries Application, Company, AppVersion, Manager, etc.
+    /// Only a subset maps onto openpyxl's DocumentProperties shape; we
+    /// emit the overlapping fields ("company") and ignore the rest.
+    fn parse_app_xml_into_dict(
+        _py: Python<'_>,
+        xml: &str,
+        dict: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let mut reader = XmlReader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf: Vec<u8> = Vec::new();
+
+        let mut cur_tag: Option<Vec<u8>> = None;
+        let mut cur_text = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    cur_tag = Some(e.local_name().as_ref().to_vec());
+                    cur_text.clear();
+                }
+                Ok(Event::Text(e)) => {
+                    let t = e.unescape().unwrap_or_default().to_string();
+                    cur_text.push_str(&t);
+                }
+                Ok(Event::End(e)) => {
+                    let name = e.local_name();
+                    let name = name.as_ref();
+                    // app.xml fields that map 1:1 onto Python-side names.
+                    // Only emit when we haven't already seen the same
+                    // field from core.xml (core takes precedence for
+                    // overlapping fields — there aren't any in practice,
+                    // but the guard is cheap).
+                    let py_key = match name {
+                        b"Company" => Some("company"),
+                        b"Manager" => Some("manager"),
+                        b"Application" => Some("application"),
+                        _ => None,
+                    };
+                    if let Some(key) = py_key {
+                        if cur_tag.as_deref() == Some(name) {
+                            let value = cur_text.trim();
+                            if !value.is_empty() && !dict.contains(key)? {
+                                dict.set_item(key, value)?;
+                            }
+                        }
+                    }
+                    cur_tag = None;
+                    cur_text.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wolfxl-core", "crates/wolfxl-cli"]
+members = ["crates/wolfxl-core", "crates/wolfxl-cli", "crates/wolfxl-writer", "crates/wolfxl-rels", "crates/wolfxl-merger", "crates/wolfxl-formula", "crates/wolfxl-structural", "crates/wolfxl-classify", "crates/wolfxl-pivot", "crates/wolfxl-autofilter"]
 
 [workspace.package]
 edition = "2021"
@@ -10,7 +10,6 @@ authors = ["Wolfgang Schoenberger"]
 
 [workspace.dependencies]
 calamine-styles = { version = "0.1", features = ["dates"] }
-rust_xlsxwriter = { version = "0.79", features = ["chrono"] }
 indexmap = "2.2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
@@ -21,7 +20,7 @@ serde_json = "1"
 
 [package]
 name = "wolfxl"
-version = "0.5.0"
+version = "2.0.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -35,12 +34,18 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
 calamine-styles.workspace = true
-rust_xlsxwriter.workspace = true
 indexmap.workspace = true
 zip.workspace = true
 quick-xml.workspace = true
 chrono.workspace = true
 wolfxl-core = { path = "crates/wolfxl-core", version = "0.8" }
+wolfxl-writer = { path = "crates/wolfxl-writer", version = "0.1" }
+wolfxl-rels = { path = "crates/wolfxl-rels", version = "0.1" }
+wolfxl-merger = { path = "crates/wolfxl-merger", version = "0.1" }
+wolfxl-structural = { path = "crates/wolfxl-structural", version = "0.1" }
+wolfxl-classify = { path = "crates/wolfxl-classify", version = "0.1" }
+wolfxl-pivot = { path = "crates/wolfxl-pivot", version = "2.0.0" }
+wolfxl-autofilter = { path = "crates/wolfxl-autofilter", version = "2.0.0" }
 
 [build-dependencies]
 pyo3-build-config = "0.28"

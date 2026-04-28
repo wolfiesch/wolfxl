@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install maturin pytest openpyxl
+          pip install maturin pytest openpyxl Pillow
 
       - name: Build wheel and install
         run: |
@@ -67,7 +67,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install maturin pytest pytest-xdist openpyxl
+          pip install maturin pytest pytest-xdist openpyxl Pillow
 
       - name: Build wheel and install
         run: |

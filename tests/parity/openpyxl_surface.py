@@ -295,7 +295,12 @@ _RANGE_ENTRIES: tuple[SurfaceEntry, ...] = (
         ),
         parity_note=(
             "Signature: ``iter_rows(min_row, max_row, min_col, max_col, "
-            "values_only)``. ``values_only=True`` yields tuples of raw values."
+            "values_only)``. ``values_only=True`` yields tuples of raw values. "
+            "Sprint Ι Pod-β: when the workbook was opened with "
+            "``read_only=True`` (or the sheet has > 50k rows), the call "
+            "becomes a true SAX-streaming generator backed by the Rust "
+            "``StreamingSheetReader``; cells yielded from the streaming "
+            "path are read-only ``StreamingCell`` proxies."
         ),
         tags=frozenset({"hard"}),
     ),
@@ -577,6 +582,604 @@ _UTILS_ENTRIES: tuple[SurfaceEntry, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# KNOWN GAPS — variants of supported symbols that are NOT yet shipped.
+#
+# These are the still-open KNOWN_GAPS.md rows in fine-grained shape. They
+# carry ``wolfxl_supported=False`` so the parity ratchet
+# (``test_known_gap_still_gaps``) goes RED the moment a Pod lands a
+# closer for them — that's the signal for the integrator to flip the
+# flag and remove the matching KNOWN_GAPS.md row.
+#
+# Sprint Ι: Pods α (rich text), β (streaming), γ (password) closed
+# the first three rows in 1.3 — they're now reflected with
+# ``wolfxl_supported=True`` and a ``shipped-1.3`` tag, kept as
+# regression pins. Phase 5 (.xls / .xlsb) stays open into a future
+# release.
+# ---------------------------------------------------------------------------
+_GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
+    SurfaceEntry(
+        openpyxl_path="openpyxl.cell.rich_text.CellRichText",
+        wolfxl_path="wolfxl.cell.rich_text.CellRichText",
+        category=SurfaceCategory.CELL_READ,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 3 closed in 1.3 by Sprint Ι Pod-α. Reads expose "
+            "``Cell.rich_text`` always; ``Cell.value`` returns "
+            "``CellRichText`` only under ``load_workbook(rich_text=True)`` "
+            "(matches openpyxl's flag-gated behaviour). Round-trip "
+            "verified wolfxl→openpyxl, openpyxl→wolfxl, wolfxl→wolfxl."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-3", "shipped-1.3"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (read_only=True kwarg)",
+        wolfxl_path="wolfxl.load_workbook (read_only=True kwarg)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 4 closed in 1.3 by Sprint Ι Pod-β. SAX-backed "
+            "``Worksheet.iter_rows`` auto-engages on "
+            "``read_only=True`` or sheets > 50k rows. Streaming cells "
+            "carry full style access (font/fill/border/alignment/number_"
+            "format) via lazy lookup; mutation raises. ~5.7× faster "
+            "than openpyxl read_only on a 100k-row × 10-col fixture. "
+            "The ``(read_only=True kwarg)`` annotation is a parametric "
+            "marker; the smoke test strips it via ``split(' ')[0]`` and "
+            "verifies the bare ``load_workbook`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-4", "shipped-1.3"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (password kwarg)",
+        wolfxl_path="wolfxl.load_workbook (password kwarg)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Phase 2 closed in 1.3 by Sprint Ι Pod-γ. ``msoffcrypto-tool`` "
+            "is a lazy optional dep (install via "
+            "``pip install wolfxl[encrypted]``); decrypted bytes route "
+            "through a tempfile to the existing path-based readers. "
+            "Modify mode + password works; saved output is plaintext "
+            "(write-side encryption explicitly raises NotImplementedError). "
+            "The ``(password kwarg)`` annotation is a parametric marker; "
+            "the smoke test strips it via ``split(' ')[0]`` and verifies "
+            "the bare ``load_workbook`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"phase-2", "shipped-1.3"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (bytes overload)",
+        wolfxl_path="wolfxl.load_workbook (bytes overload)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-β bundles bytes-input handling into the "
+            "loader. ``str`` / ``Path`` / ``bytes`` / ``bytearray`` / "
+            "``memoryview`` / ``BytesIO`` / file-like all dispatch "
+            "through the same ``classify_input`` sniffer and reach the "
+            "appropriate Rust backend. xlsx-from-bytes uses Pod-α's "
+            "``CalamineStyledBook.open_from_bytes`` when available, "
+            "otherwise falls back to a tracked tempfile that "
+            "``Workbook.close()`` reaps. The ``(bytes overload)`` "
+            "annotation is a parametric marker; the smoke test strips "
+            "it via ``split(' ')[0]`` and verifies the bare "
+            "``load_workbook`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (BytesIO overload)",
+        wolfxl_path="wolfxl.load_workbook (BytesIO overload)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-β: file-like objects whose ``.read()`` "
+            "returns bytes are accepted by ``load_workbook`` and "
+            "round-trip through the same dispatcher as raw bytes. "
+            "Useful for in-memory pipelines (S3 GetObject responses, "
+            "HTTP file uploads, etc.) where materialising to disk is "
+            "wasteful. Non-bytes file-likes (``StringIO``) raise "
+            "``TypeError`` with a clear message."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (.xlsb dispatch)",
+        wolfxl_path="wolfxl.load_workbook (.xlsb dispatch)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-α: .xlsb reads via the new "
+            "``CalamineXlsbBook`` backend (calamine_styles' upstream "
+            "``Xlsb`` reader, already publicly exported by the existing "
+            "workspace dep — no new crate needed). Values + cached "
+            "formula results only; style accessors raise "
+            "NotImplementedError because xlsb encodes styles inline in "
+            "the binary parts and the styles fork only ports the xlsx "
+            "path. Parity target is pandas+calamine — verified by "
+            "``tests/parity/test_xlsb_reads.py``. The "
+            "``(.xlsb dispatch)`` annotation is a parametric marker; "
+            "the smoke test strips it via ``split(' ')[0]`` and "
+            "verifies the bare ``load_workbook`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.load_workbook (.xls dispatch)",
+        wolfxl_path="wolfxl.load_workbook (.xls dispatch)",
+        category=SurfaceCategory.WORKBOOK_OPEN,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Κ Pod-α: .xls (legacy BIFF8) reads via the new "
+            "``CalamineXlsBook`` backend. Values + cached formula "
+            "results only; style accessors raise NotImplementedError. "
+            "Parity target is pandas+calamine — verified by "
+            "``tests/parity/test_xls_reads.py``. The "
+            "``(.xls dispatch)`` annotation is a parametric marker."
+        ),
+        wolfxl_supported=True,
+        tags=frozenset({"shipped-1.4"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.Workbook.save (password kwarg)",
+        wolfxl_path="wolfxl.Workbook.save (password kwarg)",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-α: ``Workbook.save(path, password=...)`` "
+            "encrypts the freshly written xlsx via "
+            "``msoffcrypto.format.ooxml.OOXMLFile.encrypt`` (Agile / "
+            "AES-256, the modern Excel default). Standard (AES-128) "
+            "and XOR are explicitly out-of-scope on the write side — "
+            "msoffcrypto-tool's library only implements *decrypt* for "
+            "those algorithms; see ``docs/encryption.md``. Both "
+            "write-mode and modify-mode save paths are wrapped; the "
+            "plaintext is materialised to a tempfile then re-encoded "
+            "and atomic-renamed onto the user's target path. Empty "
+            "passwords raise ``ValueError``; the lazy ``msoffcrypto-tool`` "
+            "import surfaces ``ImportError(\"install with "
+            "pip install wolfxl[encrypted]\")``. Round-trip verified "
+            "wolfxl-write → wolfxl-read and wolfxl-write → "
+            "msoffcrypto-decrypt by ``tests/test_encrypted_writes.py`` "
+            "and ``tests/parity/test_encrypted_write_parity.py``. "
+            "The ``(password kwarg)`` annotation is a parametric "
+            "marker; the smoke test strips it via ``split(' ')[0]`` "
+            "and verifies the bare ``Workbook.save`` symbol resolves."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-encryption", "shipped-1.5"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.drawing.image.Image",
+        wolfxl_path="wolfxl.drawing.image.Image",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-β (RFC-045) shipped in 1.5: real "
+            "``Image`` class accepts a path / ``BytesIO`` / raw "
+            "``bytes``, sniffs PNG/JPEG/GIF/BMP via pure-Python magic "
+            "bytes (no Pillow dependency), exposes ``.format``, "
+            "``.width``, ``.height``, ``.anchor``. Pairs with "
+            "``Worksheet.add_image`` for both write- and modify-mode "
+            "image insertion. Modify-mode appending to a sheet that "
+            "already has a drawing part raises NotImplementedError "
+            "(v1.5 limit; tracked as RFC-045 follow-up)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"shipped-1.5"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_image",
+        wolfxl_path="wolfxl.Worksheet.add_image",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Λ Pod-β (RFC-045) shipped in 1.5: "
+            "``add_image(img, anchor=None)`` queues an image; flush "
+            "happens at ``wb.save()`` time via the writer crate "
+            "(write mode) or the patcher's Phase 2.5k (modify mode). "
+            "Anchor accepts an A1 string for one-cell anchors; "
+            "``OneCellAnchor``/``TwoCellAnchor``/``AbsoluteAnchor`` "
+            "objects from ``wolfxl.drawing`` are also supported."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"shipped-1.5"}),
+    ),
+    # ------------------------------------------------------------------
+    # Sprint Μ — chart construction (RFC-046).  10 entries cover the 8
+    # chart types + Reference + Worksheet.add_chart.  All start with
+    # ``wolfxl_supported=False`` per Sprint Ι lesson 7 (the integrator
+    # flips this when Pods α + β land); the smoke test will xfail until
+    # then.  3D / Stock / Surface / Combination charts are explicitly
+    # deferred to v1.6.1+.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BarChart",
+        wolfxl_path="wolfxl.chart.BarChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β (RFC-046): write-side BarChart construction. "
+            "Mirrors openpyxl's API (``add_data``, ``set_categories``, "
+            "``title``, ``legend.position``, ``dataLabels``, ``grouping``, "
+            "``varyColors``, ``y_axis.majorGridlines``, "
+            "``series[i].errBars``).  3D variant deferred to v1.6.1.  "
+            "Verified by tests/test_charts_write.py + "
+            "tests/parity/test_charts_parity.py."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.LineChart",
+        wolfxl_path="wolfxl.chart.LineChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: LineChart with marker, smoothing, "
+            "trendline, error bars.  Structural XML compares clean "
+            "vs openpyxl modulo zeroed axis IDs."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.PieChart",
+        wolfxl_path="wolfxl.chart.PieChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: PieChart with varyColors=True, data "
+            "labels (showVal / showCatName / position).  No category "
+            "axis."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.DoughnutChart",
+        wolfxl_path="wolfxl.chart.DoughnutChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: DoughnutChart adds ``holeSize`` on top "
+            "of the Pie surface."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.AreaChart",
+        wolfxl_path="wolfxl.chart.AreaChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: AreaChart, supports ``grouping`` "
+            "(standard / stacked / percentStacked)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.ScatterChart",
+        wolfxl_path="wolfxl.chart.ScatterChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ScatterChart with ``scatterStyle`` "
+            "(lineMarker / marker / smooth) + trendline / marker "
+            "support per series."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BubbleChart",
+        wolfxl_path="wolfxl.chart.BubbleChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: BubbleChart — third value series drives "
+            "marker size."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.RadarChart",
+        wolfxl_path="wolfxl.chart.RadarChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: RadarChart with ``radarStyle`` "
+            "(standard / marker / filled)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.Reference",
+        wolfxl_path="wolfxl.chart.Reference",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ``Reference(ws, min_col, min_row, "
+            "max_col=None, max_row=None)``.  Serialises to the same "
+            "Sheet1!$B$2:$B$6 form openpyxl emits."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_chart",
+        wolfxl_path="wolfxl.Worksheet.add_chart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ Pod-β: ``add_chart(chart, anchor)`` queues a "
+            "chart for emit.  Anchor is an A1 cell reference (one-cell "
+            "anchor) or a ``TwoCellAnchor`` instance.  Saves write "
+            "``xl/charts/chartN.xml`` + ``xl/drawings/drawingN.xml`` "
+            "via the Rust writer (Pod-α).  Modify-mode insertion is "
+            "Pod-γ's responsibility (deep-clone-aware)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts", "shipped-1.6"}),
+    ),
+    # ------------------------------------------------------------------
+    # Sprint Μ-prime — 3D / Stock / Surface / ProjectedPie families
+    # (RFC-046 §11).  9 new entries.  All start
+    # ``wolfxl_supported=False`` per Sprint Ι Lesson 7 — the
+    # integrator flips them post-merge once Pod-α′ + Pod-β′ + Pod-γ′
+    # land on the integration branch.  Tags carry ``shipped-1.6.1``.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.BarChart3D",
+        wolfxl_path="wolfxl.chart.BarChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): BarChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, right_angle_axes=True, "
+            "depth_percent=100).  Inherits the BarChart class surface "
+            "(grouping / bar_dir / gap_width / overlap); adds the "
+            "3D-specific perspective fields and emits "
+            "``<c:bar3DChart>`` instead of ``<c:barChart>``.  "
+            "Verified by tests/test_charts_3d.py (Pod-γ′)."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.LineChart3D",
+        wolfxl_path="wolfxl.chart.LineChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): LineChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, perspective=30, "
+            "right_angle_axes=False, depth_percent=100).  Inherits "
+            "the LineChart class surface (smooth / drop_lines / "
+            "hi_low_lines / per-series marker); emits "
+            "``<c:line3DChart>``."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.PieChart3D",
+        wolfxl_path="wolfxl.chart.PieChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): PieChart3D with "
+            "``view_3d`` (rot_x=30, rot_y=0, perspective=30, "
+            "right_angle_axes=False).  Inherits the PieChart class "
+            "surface (vary_colors / first_slice_ang); emits "
+            "``<c:pie3DChart>``.  Aliased as ``Pie3D`` for openpyxl "
+            "name compatibility."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    # NOTE: ``openpyxl.chart.Pie3D`` is an alias added in openpyxl >=3.2.
+    # 3.1.x (the version this project pins) only exposes ``PieChart3D``.
+    # wolfxl provides both names (``wolfxl.chart.Pie3D`` ≡ ``PieChart3D``)
+    # so user code targeting either openpyxl release ports cleanly, but
+    # we don't need a separate surface entry: the PieChart3D entry above
+    # already covers the parity contract.  Keeping a Pie3D entry here
+    # would break the import-smoke test against openpyxl 3.1.5.
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.AreaChart3D",
+        wolfxl_path="wolfxl.chart.AreaChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1): AreaChart3D with "
+            "``view_3d`` (rot_x=15, rot_y=20, perspective=30, "
+            "right_angle_axes=False, depth_percent=100).  Inherits "
+            "the AreaChart class surface (grouping / drop_lines); "
+            "emits ``<c:area3DChart>``."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.SurfaceChart",
+        wolfxl_path="wolfxl.chart.SurfaceChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.3): SurfaceChart (2D) "
+            "wraps the data in ``<c:surfaceChart>`` with a "
+            "``<c:wireframe>`` flag (constructor arg ``wireframe: "
+            "bool = False``).  Series carry the same shape as "
+            "BarChart (cat + val); axes are catAx + valAx + serAx."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.SurfaceChart3D",
+        wolfxl_path="wolfxl.chart.SurfaceChart3D",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.1, §11.3): "
+            "SurfaceChart3D wraps the data in ``<c:surface3DChart>`` "
+            "with ``view_3d`` defaults (rot_x=15, rot_y=20, "
+            "perspective=30, right_angle_axes=False, "
+            "depth_percent=100) and the ``<c:wireframe>`` flag."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.StockChart",
+        wolfxl_path="wolfxl.chart.StockChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.2): StockChart "
+            "(Open-High-Low-Close).  Constructor validates that the "
+            "series count is exactly 4 in fixed Open / High / Low / "
+            "Close order; raises ``ValueError`` otherwise.  Emits "
+            "``<c:stockChart>`` with ``<c:hiLowLines/>`` and "
+            "``<c:upDownBars/>`` decorators by default."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.ProjectedPieChart",
+        wolfxl_path="wolfxl.chart.ProjectedPieChart",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Μ-prime Pod-β′ (RFC-046 §11.4): ProjectedPieChart "
+            "— pie-of-pie or bar-of-pie.  Constructor exposes "
+            "``of_pie_type: 'bar' | 'pie' = 'pie'``, "
+            "``split_type: 'auto' | 'pos' | 'percent' | 'val' | 'cust'``, "
+            "``split_pos``, ``second_pie_size``.  Emits "
+            "``<c:ofPieChart>`` with ``<c:ofPieType/>``, "
+            "``<c:splitType/>``, ``<c:splitPos/>``, "
+            "``<c:secondPieSize/>``."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-charts-3d", "shipped-1.6.1"}),
+    ),
+    # ------------------------------------------------------------------
+    # Sprint Ν — pivot tables + pivot-chart linkage (RFC-047/048/049).
+    # All flipped to ``wolfxl_supported=True`` by the integrator after
+    # Pods α / β / γ / δ / ε land.  Tag: ``shipped-2.0``.
+    # ------------------------------------------------------------------
+    SurfaceEntry(
+        openpyxl_path="openpyxl.pivot.cache.CacheDefinition",
+        wolfxl_path="wolfxl.pivot.PivotCache",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-β (RFC-047): ``PivotCache(source=Reference)`` "
+            "constructs a pivot cache.  ``_materialize(ws)`` walks the "
+            "source range with per-column type inference and populates "
+            "the typed records.  Registered via "
+            "``Workbook.add_pivot_cache(cache)`` which allocates the "
+            "0-based ``cacheId``.  Emits ``xl/pivotCache/"
+            "pivotCacheDefinition{N}.xml`` + ``pivotCacheRecords{N}"
+            ".xml`` via Phase 2.5m of the patcher."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.pivot.table.TableDefinition",
+        wolfxl_path="wolfxl.pivot.PivotTable",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-β (RFC-048): ``PivotTable(cache, location, "
+            "rows=[...], cols=[...], data=[(field, agg)])`` constructs "
+            "a pivot table with bare-string axis specs and 11 supported "
+            "aggregators (sum / count / average / max / min / product / "
+            "countNums / stdDev / stdDevp / var / varp).  "
+            "``_compute_layout()`` enumerates ``<rowItems>``/"
+            "``<colItems>`` and pre-aggregates values per data field "
+            "— Excel renders without requiring refresh.  Registered "
+            "via ``Worksheet.add_pivot_table(pt)``; emitted as "
+            "``xl/pivotTables/pivotTable{N}.xml`` via Phase 2.5m."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.worksheet.worksheet.Worksheet.add_pivot",
+        wolfxl_path="wolfxl.Worksheet.add_pivot_table",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-γ (RFC-048 §10): ``add_pivot_table(pt)`` "
+            "queues a pivot table for emit.  Validates that "
+            "``pt.cache._cache_id`` is set (requires prior "
+            "``Workbook.add_pivot_cache(cache)`` call).  Drained from "
+            "``Workbook.save()`` AFTER charts (Phase 2.5l) and BEFORE "
+            "cell patches (Phase 3) by Phase 2.5m of the patcher."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+    SurfaceEntry(
+        openpyxl_path="openpyxl.chart.pivot.PivotSource",
+        wolfxl_path="wolfxl.chart._chart.ChartBase.pivot_source",
+        category=SurfaceCategory.WRITE,
+        synthgl_usage=(),
+        parity_note=(
+            "Sprint Ν Pod-δ (RFC-049): ``chart.pivot_source = pt`` "
+            "(or ``= (name, fmt_id)`` or ``= None``) links the chart "
+            "to a pivot table.  Emitter writes ``<c:pivotSource>"
+            "<c:name>...</c:name><c:fmtId val=.../></c:pivotSource>`` "
+            "as the first child of ``<c:chart>`` and injects "
+            "per-series ``<c:fmtId val=.../>`` mandatorily after "
+            "``<c:order>`` — Excel rejects pivot charts whose series "
+            "lack ``<c:fmtId>``."
+        ),
+        wolfxl_supported=True,
+        write_api=True,
+        tags=frozenset({"phase-pivots", "shipped-2.0"}),
+    ),
+)
+
+
 SURFACE_ENTRIES: tuple[SurfaceEntry, ...] = (
     *_OPEN_ENTRIES,
     *_SHEET_ENTRIES,
@@ -586,6 +1189,7 @@ SURFACE_ENTRIES: tuple[SurfaceEntry, ...] = (
     *_WRITE_ENTRIES,
     *_STYLE_ENTRIES,
     *_UTILS_ENTRIES,
+    *_GAP_ENTRIES,
 )
 
 
