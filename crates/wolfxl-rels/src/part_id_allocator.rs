@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn image_seed_from_xl_media_imageN_ext() {
+    fn image_seed_from_xl_media_image_n_ext() {
         let parts = [
             "xl/media/image1.png",
             "xl/media/image2.jpeg",
@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn comments_seed_from_xl_commentsN_xml() {
+    fn comments_seed_from_xl_comments_n_xml() {
         let parts = ["xl/comments1.xml", "xl/comments3.xml", "xl/comments7.xml"];
         let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
         assert_eq!(a.alloc_comments(), 8);

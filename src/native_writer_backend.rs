@@ -121,7 +121,7 @@ fn parse_hex_color(input: &str) -> Option<String> {
 /// so any pre-W5 Python flush payload still routes correctly.
 fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
     let dict = payload
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("payload must be a dict"))?;
 
     let type_str: String = dict
@@ -440,7 +440,7 @@ fn edge_to_side_spec(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<(BorderSid
     let Some(sub) = dict.get_item(key)? else {
         return Ok((side, false));
     };
-    let Ok(d) = sub.downcast::<PyDict>() else {
+    let Ok(d) = sub.cast::<PyDict>() else {
         return Ok((side, false));
     };
 
@@ -548,7 +548,7 @@ fn py_runs_to_rust_writer(
     use wolfxl_writer::rich_text::{InlineFontProps, RichTextRun};
     let mut out: Vec<RichTextRun> = Vec::with_capacity(runs.len());
     for entry in runs.iter() {
-        let seq: &Bound<'_, pyo3::types::PySequence> = entry.downcast()?;
+        let seq: &Bound<'_, pyo3::types::PySequence> = entry.cast()?;
         if seq.len()? < 2 {
             return Err(PyValueError::new_err(
                 "rich-text run must be a (text, font_or_none) pair",
@@ -559,7 +559,7 @@ fn py_runs_to_rust_writer(
         let font = if font_obj.is_none() {
             None
         } else {
-            let d: &Bound<'_, PyDict> = font_obj.downcast()?;
+            let d: &Bound<'_, PyDict> = font_obj.cast()?;
             let mut props = InlineFontProps::default();
             macro_rules! pull_bool {
                 ($k:literal, $field:ident) => {
@@ -646,7 +646,7 @@ fn unwrap_optional_wrapper<'py>(
     wrapper_key: &str,
 ) -> PyResult<Bound<'py, PyDict>> {
     if let Some(v) = dict.get_item(wrapper_key)? {
-        if let Ok(inner) = v.downcast::<PyDict>() {
+        if let Ok(inner) = v.cast::<PyDict>() {
             return Ok(inner.clone());
         }
     }
@@ -764,7 +764,7 @@ fn dict_to_conditional_format(
     // Optional bg_color → intern a DxfRecord.
     let mut bg_color: Option<String> = None;
     if let Some(v) = cfg.get_item("format")? {
-        if let Ok(fd) = v.downcast::<PyDict>() {
+        if let Ok(fd) = v.cast::<PyDict>() {
             bg_color = fd.get_item("bg_color")?.and_then(|x| x.extract().ok());
         }
     }
@@ -1106,7 +1106,7 @@ impl NativeWorkbook {
         // attached yet, apply the oracle's defaults on the cell's style.
         let default_nf = match (
             payload
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .ok()
                 .and_then(|d| d.get_item("type").ok().flatten())
                 .and_then(|v| v.extract::<String>().ok())
@@ -1271,7 +1271,7 @@ impl NativeWorkbook {
     ) -> PyResult<()> {
         let (row, col) = parse_a1_to_row_col(a1)?;
         let dict = format_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("format_dict must be a dict"))?;
 
         let style_id = intern_format_from_dict(&mut self.inner, dict)?;
@@ -1299,7 +1299,7 @@ impl NativeWorkbook {
     ) -> PyResult<()> {
         let (row, col) = parse_a1_to_row_col(a1)?;
         let dict = border_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("border_dict must be a dict"))?;
 
         let style_id = intern_border_only(&mut self.inner, dict)?;
@@ -1337,7 +1337,7 @@ impl NativeWorkbook {
                     continue;
                 }
                 let dict = val
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("format element must be dict or None"))?;
                 if dict.is_empty() {
                     continue;
@@ -1383,7 +1383,7 @@ impl NativeWorkbook {
                     continue;
                 }
                 let dict = val
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("border element must be dict or None"))?;
                 if dict.is_empty() {
                     continue;
@@ -1439,12 +1439,12 @@ impl NativeWorkbook {
     /// Optional wrapper key `freeze` is also accepted.
     pub fn set_freeze_panes(&mut self, sheet: &str, settings: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = settings
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("settings must be a dict"))?;
 
         let inner: Option<Bound<'_, PyAny>> = dict.get_item("freeze")?;
         let cfg: &Bound<'_, PyDict> = match &inner {
-            Some(v) => v.downcast::<PyDict>().unwrap_or(dict),
+            Some(v) => v.cast::<PyDict>().unwrap_or(dict),
             None => dict,
         };
 
@@ -1503,7 +1503,7 @@ impl NativeWorkbook {
 
     pub fn add_hyperlink(&mut self, sheet: &str, link_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = link_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("link must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "hyperlink")?;
         let Some((a1, hyperlink)) = dict_to_hyperlink(&cfg)? else {
@@ -1516,7 +1516,7 @@ impl NativeWorkbook {
 
     pub fn add_comment(&mut self, sheet: &str, comment_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = comment_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("comment_dict must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "comment")?;
         // Borrow authors first (resolution must happen before re-borrowing inner for sheet).
@@ -1675,7 +1675,7 @@ impl NativeWorkbook {
         rule_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let dict = rule_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("rule must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "cf_rule")?;
         // Resolve CF (may intern a dxf — borrows styles) before borrowing sheet.
@@ -1693,7 +1693,7 @@ impl NativeWorkbook {
         validation_dict: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let dict = validation_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("validation must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "validation")?;
         let Some(dv) = dict_to_data_validation(&cfg)? else {
@@ -1706,7 +1706,7 @@ impl NativeWorkbook {
 
     pub fn add_named_range(&mut self, sheet: &str, named_range: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = named_range
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("named_range must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "named_range")?;
         // sheet_index_by_name borrows &self.inner immutably — do it before any &mut borrow.
@@ -1719,7 +1719,7 @@ impl NativeWorkbook {
 
     pub fn add_table(&mut self, sheet: &str, table: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = table
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("table must be a dict"))?;
         let cfg = unwrap_optional_wrapper(dict, "table")?;
         let Some(tbl) = dict_to_table(&cfg)? else {
@@ -1732,7 +1732,7 @@ impl NativeWorkbook {
 
     pub fn set_properties(&mut self, props: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = props
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("props must be a dict"))?;
         let doc_props = dict_to_doc_properties(dict)?;
         self.inner.set_doc_props(doc_props);
@@ -1746,7 +1746,7 @@ impl NativeWorkbook {
     /// Replaces any previously-set security (last writer wins).
     pub fn set_workbook_security(&mut self, payload: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = payload
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("workbook security payload must be a dict"))?;
         let security = dict_to_workbook_security(dict)?;
         self.inner.security = security;
@@ -1775,7 +1775,7 @@ impl NativeWorkbook {
     /// ```
     pub fn add_image(&mut self, sheet: &str, image_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = image_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("image must be a dict"))?;
 
         let data: Vec<u8> = dict
@@ -1798,7 +1798,7 @@ impl NativeWorkbook {
             .get_item("anchor")?
             .ok_or_else(|| PyValueError::new_err("image dict missing 'anchor'"))?;
         let anchor_dict = anchor_obj
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("anchor must be a dict"))?;
 
         let anchor = parse_image_anchor(anchor_dict)?;
@@ -1915,7 +1915,7 @@ impl NativeWorkbook {
         anchor_a1: &str,
     ) -> PyResult<()> {
         let dict = chart_dict
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("chart must be a dict"))?;
         let chart = parse_chart_dict(dict, anchor_a1)?;
         let ws = require_sheet(&mut self.inner, sheet)?;
@@ -1993,7 +1993,7 @@ fn dict_to_workbook_security(
     let workbook_protection = match payload.get_item("workbook_protection")? {
         Some(v) if !v.is_none() => {
             let d = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("workbook_protection must be a dict or None"))?;
             Some(WorkbookProtectionSpec {
                 lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
@@ -2015,7 +2015,7 @@ fn dict_to_workbook_security(
     let file_sharing = match payload.get_item("file_sharing")? {
         Some(v) if !v.is_none() => {
             let d = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("file_sharing must be a dict or None"))?;
             Some(FileSharingSpec {
                 read_only_recommended: extract_bool(d, "read_only_recommended")?.unwrap_or(false),
@@ -2149,7 +2149,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     let anchor = if let Some(v) = d.get_item("anchor")? {
         if v.is_none() {
             a1_to_one_cell_anchor(anchor_a1)?
-        } else if let Ok(ad) = v.downcast::<PyDict>() {
+        } else if let Ok(ad) = v.cast::<PyDict>() {
             parse_image_anchor(ad)?
         } else if let Ok(s) = v.extract::<String>() {
             a1_to_one_cell_anchor(&s)?
@@ -2167,7 +2167,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("title")? {
         if !v.is_none() {
             let td = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("chart title must be a dict"))?;
             chart.title = Some(parse_chart_title(td)?);
         }
@@ -2178,7 +2178,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
             chart.legend = None;
         } else {
             let ld = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("chart legend must be a dict"))?;
             chart.legend = Some(parse_legend(ld)?);
         }
@@ -2187,7 +2187,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("layout")? {
         if !v.is_none() {
             let ld = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("chart layout must be a dict"))?;
             chart.layout = Some(parse_layout(ld)?);
         }
@@ -2196,7 +2196,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("x_axis")? {
         if !v.is_none() {
             let ad = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("x_axis must be a dict"))?;
             chart.x_axis = Some(parse_axis(ad)?);
         }
@@ -2204,7 +2204,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("y_axis")? {
         if !v.is_none() {
             let ad = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("y_axis must be a dict"))?;
             chart.y_axis = Some(parse_axis(ad)?);
         }
@@ -2214,7 +2214,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
         let list: Vec<Bound<'_, PyAny>> = v.extract()?;
         for sv in list.iter() {
             let sd = sv
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("each series must be a dict"))?;
             chart.series.push(parse_series(sd)?);
         }
@@ -2227,7 +2227,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("data_labels")? {
         if !v.is_none() {
             let dd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
             let chart_dlbls = parse_data_labels(dd)?;
             for s in chart.series.iter_mut() {
@@ -2311,7 +2311,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("view_3d")? {
         if !v.is_none() {
             let vd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("view_3d must be a dict"))?;
             chart.view_3d = Some(parse_view_3d(vd)?);
         }
@@ -2342,7 +2342,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     if let Some(v) = d.get_item("pivot_source")? {
         if !v.is_none() {
             let psd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("pivot_source must be a dict or None"))?;
             chart.pivot_source = Some(parse_pivot_source(psd)?);
         }
@@ -2443,7 +2443,7 @@ fn parse_gridlines(d: &Bound<'_, PyDict>) -> PyResult<Gridlines> {
             None
         } else {
             let gd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
             Some(parse_graphical_properties(gd)?)
         }
@@ -2479,7 +2479,7 @@ fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
         let mut out = Vec::with_capacity(list.len());
         for rv in list.iter() {
             let rd = rv
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("title run must be a dict"))?;
             let text: String = rd
                 .get_item("text")?
@@ -2500,7 +2500,7 @@ fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
             if let Some(fv) = rd.get_item("font")? {
                 if !fv.is_none() {
                     let fd = fv
-                        .downcast::<PyDict>()
+                        .cast::<PyDict>()
                         .map_err(|_| PyValueError::new_err("title run 'font' must be a dict"))?;
                     if let Some(b) = py_opt_bool(fd, "bold")? {
                         bold = Some(b);
@@ -2588,7 +2588,7 @@ fn parse_optional_layout(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<La
     if let Some(v) = d.get_item(key)? {
         if !v.is_none() {
             let ld = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err(format!("{key} must be a dict")))?;
             return Ok(Some(parse_layout(ld)?));
         }
@@ -2694,7 +2694,7 @@ fn parse_axis_scaling(d: &Bound<'_, PyDict>) -> PyResult<(Option<f64>, Option<f6
     if let Some(v) = d.get_item("scaling")? {
         if !v.is_none() {
             let sd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("scaling must be a dict"))?;
             return Ok((py_opt_f64(sd, "min")?, py_opt_f64(sd, "max")?));
         }
@@ -2726,7 +2726,7 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
     if orientation_raw.is_none() {
         if let Some(v) = d.get_item("scaling")? {
             if !v.is_none() {
-                if let Ok(sd) = v.downcast::<PyDict>() {
+                if let Ok(sd) = v.cast::<PyDict>() {
                     orientation_raw = py_opt_str(sd, "orientation")?;
                 }
             }
@@ -2756,7 +2756,7 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
             None
         } else {
             let td = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("axis title must be a dict"))?;
             Some(parse_chart_title(td)?)
         }
@@ -2808,7 +2808,7 @@ fn parse_gridlines_field(d: &Bound<'_, PyDict>, key: &str) -> PyResult<(bool, Op
         return Ok((b, None));
     }
     let gd = v
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err(format!("{key} must be a dict, bool, or None")))?;
     Ok((false, Some(parse_gridlines(gd)?)))
 }
@@ -2825,7 +2825,7 @@ fn parse_axis_number_format(d: &Bound<'_, PyDict>) -> PyResult<Option<String>> {
     if let Ok(s) = v.extract::<String>() {
         return Ok(Some(s));
     }
-    if let Ok(nfd) = v.downcast::<PyDict>() {
+    if let Ok(nfd) = v.cast::<PyDict>() {
         return Ok(py_opt_str(nfd, "format_code")?);
     }
     Ok(None)
@@ -2839,7 +2839,7 @@ fn parse_display_units(d: &Bound<'_, PyDict>) -> PyResult<Option<DisplayUnits>> 
         return Ok(None);
     }
     let dd = v
-        .downcast::<PyDict>()
+        .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("disp_units must be a dict or None"))?;
     Ok(Some(DisplayUnits {
         built_in_unit: py_opt_str(dd, "built_in_unit")?.or(py_opt_str(dd, "builtInUnit")?),
@@ -2884,10 +2884,10 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     } else if let Some(v) = d.get_item("title")? {
         if !v.is_none() {
             // Legacy: {"strRef": {"sheet", "range"}} or {"literal": "..."}
-            if let Ok(td) = v.downcast::<PyDict>() {
+            if let Ok(td) = v.cast::<PyDict>() {
                 if let Some(rv) = td.get_item("strRef")? {
                     let rd = rv
-                        .downcast::<PyDict>()
+                        .cast::<PyDict>()
                         .map_err(|_| PyValueError::new_err("strRef must be a dict"))?;
                     s.title = Some(SeriesTitle::StrRef(parse_reference(rd)?));
                 } else if let Some(lv) = td.get_item("literal")? {
@@ -2912,7 +2912,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     if let Some(v) = d.get_item("graphical_properties")? {
         if !v.is_none() {
             let gd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
             s.graphical_properties = Some(parse_graphical_properties(gd)?);
         }
@@ -2920,7 +2920,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     if let Some(v) = d.get_item("marker")? {
         if !v.is_none() {
             let md = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("marker must be a dict"))?;
             s.marker = Some(parse_marker(md)?);
         }
@@ -2930,7 +2930,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             for dv in list.iter() {
                 let dd = dv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("data point must be a dict"))?;
                 s.data_points.push(parse_data_point(dd)?);
             }
@@ -2939,7 +2939,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     if let Some(v) = d.get_item("data_labels")? {
         if !v.is_none() {
             let dd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("data_labels must be a dict"))?;
             s.data_labels = Some(parse_data_labels(dd)?);
         }
@@ -2949,7 +2949,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     if let Some(v) = d.get_item("err_bars")? {
         if !v.is_none() {
             let ed = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("err_bars must be a dict"))?;
             s.error_bars.push(parse_error_bars(ed)?);
         }
@@ -2959,7 +2959,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             for ev in list.iter() {
                 let ed = ev
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("error bar must be a dict"))?;
                 s.error_bars.push(parse_error_bars(ed)?);
             }
@@ -2970,7 +2970,7 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             for tv in list.iter() {
                 let td = tv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("trendline must be a dict"))?;
                 s.trendlines.push(parse_trendline(td)?);
             }
@@ -2998,7 +2998,7 @@ fn parse_series_ref_field(
             if let Ok(s_str) = v.extract::<String>() {
                 return Ok(Some(reference_from_a1(&s_str)?));
             }
-            let rd = v.downcast::<PyDict>().map_err(|_| {
+            let rd = v.cast::<PyDict>().map_err(|_| {
                 PyValueError::new_err(format!("{legacy_key} must be a dict or A1 string"))
             })?;
             return Ok(Some(parse_reference(rd)?));
@@ -3048,7 +3048,7 @@ fn parse_graphical_properties(d: &Bound<'_, PyDict>) -> PyResult<GraphicalProper
     if let Some(v) = d.get_item("ln")? {
         if !v.is_none() {
             let ln = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("ln must be a dict"))?;
             if line_color.is_none() {
                 line_color = py_opt_str(ln, "solid_fill")?;
@@ -3101,7 +3101,7 @@ fn parse_marker(d: &Bound<'_, PyDict>) -> PyResult<Marker> {
             None
         } else {
             let gd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("graphical_properties must be a dict"))?;
             Some(parse_graphical_properties(gd)?)
         }
@@ -3127,7 +3127,7 @@ fn parse_data_point(d: &Bound<'_, PyDict>) -> PyResult<DataPoint> {
             None
         } else {
             let md = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("data point marker must be a dict"))?;
             Some(parse_marker(md)?)
         }
@@ -3139,7 +3139,7 @@ fn parse_data_point(d: &Bound<'_, PyDict>) -> PyResult<DataPoint> {
             if v.is_none() {
                 None
             } else {
-                let gd = v.downcast::<PyDict>().map_err(|_| {
+                let gd = v.cast::<PyDict>().map_err(|_| {
                     PyValueError::new_err("data point graphical_properties must be a dict")
                 })?;
                 Some(parse_graphical_properties(gd)?)

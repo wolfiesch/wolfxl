@@ -39,6 +39,7 @@ use wolfxl_autofilter::{
 
 /// One AutoFilter queued for emit + evaluation at Phase 2.5o.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QueuedAutoFilter {
     /// Owner sheet title.
     pub sheet: String,
@@ -70,7 +71,7 @@ pub(crate) fn pyany_to_dictvalue(v: &Bound<'_, PyAny>) -> PyResult<DictValue> {
     if let Ok(s) = v.extract::<String>() {
         return Ok(DictValue::Str(s));
     }
-    if let Ok(d) = v.downcast::<PyDict>() {
+    if let Ok(d) = v.cast::<PyDict>() {
         let mut out = BTreeMap::new();
         for (k, val) in d.iter() {
             let key: String = k.extract()?;
@@ -78,7 +79,7 @@ pub(crate) fn pyany_to_dictvalue(v: &Bound<'_, PyAny>) -> PyResult<DictValue> {
         }
         return Ok(DictValue::Dict(out));
     }
-    if let Ok(l) = v.downcast::<PyList>() {
+    if let Ok(l) = v.cast::<PyList>() {
         let mut out = Vec::with_capacity(l.len());
         for item in l.iter() {
             out.push(pyany_to_dictvalue(&item)?);
@@ -137,7 +138,7 @@ pub fn evaluate_autofilter(
     let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(rows_data.len());
     for row in rows_data.iter() {
         let row_list = row
-            .downcast::<PyList>()
+            .cast::<PyList>()
             .map_err(|_| PyValueError::new_err("rows_data: each row must be a list"))?;
         let mut cells: Vec<Cell> = Vec::with_capacity(row_list.len());
         for cell in row_list.iter() {
@@ -166,7 +167,7 @@ fn pyany_to_cell(v: &Bound<'_, PyAny>) -> PyResult<Cell> {
     if v.is_none() {
         return Ok(Cell::Empty);
     }
-    if let Ok(d) = v.downcast::<PyDict>() {
+    if let Ok(d) = v.cast::<PyDict>() {
         if let Ok(Some(date)) = d.get_item("date") {
             let n: f64 = date.extract()?;
             return Ok(Cell::Date(n));
@@ -209,6 +210,7 @@ pub struct AutoFilterDrainResult {
     pub hidden_offsets: Vec<u32>,
     /// Sort permutation (best-effort; v2.0 stores it for inspection
     /// but does not physically reorder rows). RFC-056 §8 deferral.
+    #[allow(dead_code)]
     pub sort_order: Option<Vec<u32>>,
 }
 

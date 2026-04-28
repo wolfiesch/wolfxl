@@ -863,13 +863,13 @@ impl XlsxPatcher {
             PyErr::new::<PyValueError, _>("conditional formatting requires 'rules'")
         })?;
         let rules_list = rules_obj
-            .downcast::<pyo3::types::PyList>()
+            .cast::<pyo3::types::PyList>()
             .map_err(|_| PyErr::new::<PyValueError, _>("'rules' must be a list of dicts"))?;
 
         let mut rules: Vec<CfRulePatch> = Vec::with_capacity(rules_list.len());
         for item in rules_list.iter() {
             let rd = item
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyErr::new::<PyValueError, _>("each rule must be a dict"))?;
             rules.push(extract_cf_rule(rd)?);
         }
@@ -1163,7 +1163,7 @@ impl XlsxPatcher {
         let style = match payload.get_item("style")? {
             Some(v) if !v.is_none() => {
                 let d = v
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyErr::new::<PyValueError, _>("'style' must be a dict or None"))?;
                 let style_name = extract_str(d, "name")?.unwrap_or_default();
                 Some(tables::TableStylePatch {
@@ -1230,7 +1230,7 @@ impl XlsxPatcher {
             .get_item("anchor")?
             .ok_or_else(|| PyValueError::new_err("queue_image_add: missing 'anchor'"))?;
         let anchor_dict = anchor_obj
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("queue_image_add: 'anchor' must be a dict"))?;
         let anchor = parse_queued_image_anchor(anchor_dict)?;
         self.queued_images
@@ -3519,7 +3519,7 @@ impl XlsxPatcher {
             let drawing_path: String;
             let drawing_rels_path: String;
             let mut drawing_rels: wolfxl_rels::RelsGraph;
-            let mut new_drawing_xml_bytes: Option<Vec<u8>> = None;
+            let new_drawing_xml_bytes: Vec<u8>;
             if let Some(target) = existing_drawing_target {
                 // Existing: resolve the drawing path relative to the
                 // OWNING PART's directory (i.e. the sheet itself, not
@@ -3578,7 +3578,7 @@ impl XlsxPatcher {
                 // SAX-merge: append a graphicFrame per queued chart.
                 let merged = append_graphic_frames(&existing_drawing_xml, &queued, &chart_rids)
                     .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge drawing: {e}")))?;
-                new_drawing_xml_bytes = Some(merged);
+                new_drawing_xml_bytes = merged;
                 // No new <Override> for the drawing — already in
                 // [Content_Types].xml.
             } else {
@@ -3598,7 +3598,7 @@ impl XlsxPatcher {
                 }
                 // Build a fresh drawing XML body.
                 let body = build_chart_drawing_xml(&queued, &chart_rids);
-                new_drawing_xml_bytes = Some(body.into_bytes());
+                new_drawing_xml_bytes = body.into_bytes();
                 // Splice <drawing r:id> into sheet XML.
                 let drawing_rid = sheet_rels.add(
                     wolfxl_rels::rt::DRAWING,
@@ -3628,12 +3628,11 @@ impl XlsxPatcher {
             // ZIP probe is the source-of-truth: if the path is
             // already in the source ZIP we MUST patch (file_adds
             // panics on collision in the final emit pass).
-            if let Some(bytes) = new_drawing_xml_bytes {
-                if zip.by_name(&drawing_path).is_ok() {
-                    file_patches.insert(drawing_path.clone(), bytes);
-                } else {
-                    self.file_adds.insert(drawing_path.clone(), bytes);
-                }
+            if zip.by_name(&drawing_path).is_ok() {
+                file_patches.insert(drawing_path.clone(), new_drawing_xml_bytes);
+            } else {
+                self.file_adds
+                    .insert(drawing_path.clone(), new_drawing_xml_bytes);
             }
             self.rels_patches.insert(drawing_rels_path, drawing_rels);
 
@@ -5274,7 +5273,7 @@ fn py_runs_to_rust(
     let mut out: Vec<RichTextRun> = Vec::with_capacity(runs.len());
     for entry in runs.iter() {
         // Each entry is a (text, font_or_none) 2-tuple — accept lists too.
-        let seq: &Bound<'_, pyo3::types::PySequence> = entry.downcast()?;
+        let seq: &Bound<'_, pyo3::types::PySequence> = entry.cast()?;
         if seq.len()? < 2 {
             return Err(PyErr::new::<PyValueError, _>(
                 "rich-text run must be a (text, font_or_none) pair",
@@ -5285,7 +5284,7 @@ fn py_runs_to_rust(
         let font = if font_obj.is_none() {
             None
         } else {
-            let d: &Bound<'_, PyDict> = font_obj.downcast()?;
+            let d: &Bound<'_, PyDict> = font_obj.cast()?;
             let mut props = InlineFontProps::default();
             if let Some(v) = d.get_item("b")? {
                 if !v.is_none() {
@@ -5425,7 +5424,7 @@ fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
 fn dict_to_border_spec(d: &Bound<'_, PyDict>) -> PyResult<styles::BorderSpec> {
     fn extract_side(d: &Bound<'_, PyDict>, key: &str) -> PyResult<styles::BorderSideSpec> {
         if let Some(side) = d.get_item(key)? {
-            if let Ok(sd) = side.downcast::<PyDict>() {
+            if let Ok(sd) = side.cast::<PyDict>() {
                 let style = extract_str(sd, "style")?;
                 let color = extract_str(sd, "color")?.map(|c| normalize_color(&c));
                 return Ok(styles::BorderSideSpec {
@@ -5463,12 +5462,12 @@ fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
                 .get_item("stops")?
                 .ok_or_else(|| PyErr::new::<PyValueError, _>("colorScale rule requires 'stops'"))?;
             let stops_list = stops_obj
-                .downcast::<pyo3::types::PyList>()
+                .cast::<pyo3::types::PyList>()
                 .map_err(|_| PyErr::new::<PyValueError, _>("'stops' must be a list of dicts"))?;
             let mut stops: Vec<ColorScaleStop> = Vec::with_capacity(stops_list.len());
             for s in stops_list.iter() {
                 let sd = s
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyErr::new::<PyValueError, _>("each stop must be a dict"))?;
                 stops.push(ColorScaleStop {
                     cfvo: CfvoPatch {
@@ -5502,7 +5501,7 @@ fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
     let dxf = match d.get_item("dxf")? {
         Some(v) if !v.is_none() => {
             let dd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyErr::new::<PyValueError, _>("'dxf' must be a dict or None"))?;
             Some(extract_dxf_patch(dd)?)
         }
@@ -5565,7 +5564,7 @@ fn parse_workbook_security_payload(
 
     let workbook_protection = match payload.get_item("workbook_protection")? {
         Some(v) if !v.is_none() => {
-            let d = v.downcast::<PyDict>().map_err(|_| {
+            let d = v.cast::<PyDict>().map_err(|_| {
                 PyErr::new::<PyValueError, _>(
                     "queue_workbook_security: 'workbook_protection' must be a dict or None",
                 )
@@ -5589,7 +5588,7 @@ fn parse_workbook_security_payload(
 
     let file_sharing = match payload.get_item("file_sharing")? {
         Some(v) if !v.is_none() => {
-            let d = v.downcast::<PyDict>().map_err(|_| {
+            let d = v.cast::<PyDict>().map_err(|_| {
                 PyErr::new::<PyValueError, _>(
                     "queue_workbook_security: 'file_sharing' must be a dict or None",
                 )

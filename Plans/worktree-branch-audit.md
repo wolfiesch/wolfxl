@@ -228,11 +228,11 @@ Dependency-modernization branch audit:
 - The current implementation is better than the old branch tip because
   `extension-module` is no longer enabled for ordinary Cargo workspace tests;
   this is why the full `cargo test --workspace` proof now passes on macOS.
-- Remaining PyO3 work should be a fresh modernization PR, not an old-branch
-  merge: replace deprecated `Bound::downcast` / `downcast_into` usage with the
-  PyO3 0.28 `cast` / `cast_into` API, remove warning-only unused imports, then
-  rerun `uv run maturin develop`, `cargo test --workspace`, and a clean
-  Python 3.14 import smoke.
+- PyO3 warning cleanup was completed from current `main`, not by merging the
+  old branch: deprecated `Bound::downcast` / `downcast_into` usage was replaced
+  with the PyO3 0.28 `cast` / `cast_into` API, warning-only import/dead-code
+  noise was narrowed, and the remaining `wolfxl-rels` test-name warnings were
+  removed.
 
 ## Verification checkpoint
 
@@ -260,6 +260,11 @@ After the audit, the Rust tree was normalized with `cargo fmt --all`.
   tests/test_autofilter_filters.py
   tests/parity/test_openpyxl_path_compat.py tests/test_compat_shims.py -q`:
   341 passed, 2 skipped.
+- PyO3 modernization proof after the cleanup:
+  `cargo check -p wolfxl`, `cargo test -p wolfxl --lib`,
+  `cargo test --workspace`, `cargo fmt --all -- --check`,
+  `git diff --check`, `uv run maturin develop`, `uv run ruff check .`,
+  `uv run pytest`, and a modify-mode pivot construction smoke all passed.
 
 ## Branch audit queue
 

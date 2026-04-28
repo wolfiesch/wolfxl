@@ -96,6 +96,7 @@ impl CommentAuthorTable {
         id
     }
 
+    #[allow(dead_code)]
     pub fn name_of(&self, id: u32) -> Option<&str> {
         self.inner
             .iter()
@@ -106,10 +107,12 @@ impl CommentAuthorTable {
         self.inner.iter().map(|(k, v)| (k.as_str(), *v))
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -179,7 +182,6 @@ pub fn extract_comments(xml: &[u8]) -> (Vec<String>, BTreeMap<String, ExistingCo
                     authors.push(std::mem::take(&mut current_author));
                     in_author = false;
                 } else if name == b"authors" {
-                    in_authors = false;
                     break;
                 }
             }
@@ -344,6 +346,7 @@ pub struct ColWidthMap {
 }
 
 impl ColWidthMap {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
