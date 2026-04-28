@@ -57,6 +57,9 @@ SPRINT_PI_LANDED_CONSTRUCTORS: tuple[
     ("wolfxl.worksheet.table", "TablePartList", _construct_no_args),
     ("wolfxl.worksheet.table", "Related", _construct_no_args),
     ("wolfxl.worksheet.table", "XMLColumnProps", _construct_no_args),
+    # RFC-065 / Π-delta: workbook calculation + workbook properties.
+    ("wolfxl.workbook.properties", "CalcProperties", _construct_no_args),
+    ("wolfxl.workbook.properties", "WorkbookProperties", _construct_no_args),
 )
 
 
@@ -162,3 +165,16 @@ def test_worksheetcopy_delegates_to_workbook_copy_worksheet() -> None:
     assert copied.title == "Copied"
     assert copied["A1"].value == "copied"
     assert "B2:C3" in copied._merged_ranges  # noqa: SLF001
+
+
+def test_workbook_property_dataclasses_export_rust_contract() -> None:
+    from wolfxl.workbook.properties import CalcProperties, WorkbookProperties
+
+    calc = CalcProperties(calcId=191029, calcMode="manual", forceFullCalc=True)
+    props = WorkbookProperties(date1904=True, codeName="ThisWorkbook")
+
+    assert calc.to_rust_dict()["calc_id"] == 191029
+    assert calc.to_rust_dict()["calc_mode"] == "manual"
+    assert calc.to_rust_dict()["force_full_calc"] is True
+    assert props.to_rust_dict()["date1904"] is True
+    assert props.to_rust_dict()["code_name"] == "ThisWorkbook"
