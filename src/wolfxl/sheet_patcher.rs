@@ -7,7 +7,7 @@
 //! WolfXL uses **inline strings** (`t="str"`) for all new string values.  This
 //! avoids modifying the shared string table for the common case.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -105,8 +105,8 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
     // State tracking
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
-    let mut current_row_cols_seen: Vec<u32> = Vec::new(); // cols we've seen in current row
-    let mut rows_seen: Vec<u32> = Vec::new();
+    let mut current_row_cols_seen: BTreeSet<u32> = BTreeSet::new();
+    let mut rows_seen: BTreeSet<u32> = BTreeSet::new();
     let mut skip_until_cell_end = false; // skip children of a cell being replaced
     let mut worksheet_prefix: Option<String> = None;
 
@@ -133,19 +133,19 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                                 row_patches.get(&pr).unwrap(),
                                 worksheet_prefix.as_deref(),
                             )?;
-                            rows_seen.push(pr);
+                            rows_seen.insert(pr);
                         }
                     }
 
                     current_row = Some(row_num);
                     current_row_cols_seen.clear();
-                    rows_seen.push(row_num);
+                    rows_seen.insert(row_num);
                     write_event(&mut writer, Event::Start(e.to_owned()))?;
                 } else if tag == b"c" && in_sheet_data {
                     let cell_ref = attr_value(e, b"r").unwrap_or_default();
                     let (_, col) = parse_cell_ref(&cell_ref);
 
-                    current_row_cols_seen.push(col);
+                    current_row_cols_seen.insert(col);
 
                     if let Some(row_map) = current_row.and_then(|r| row_patches.get(&r)) {
                         if let Some(patch) = row_map.get(&col) {
@@ -203,10 +203,10 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                                 row_patches.get(&pr).unwrap(),
                                 worksheet_prefix.as_deref(),
                             )?;
-                            rows_seen.push(pr);
+                            rows_seen.insert(pr);
                         }
                     }
-                    rows_seen.push(row_num);
+                    rows_seen.insert(row_num);
 
                     // If this empty row has patches, expand it
                     if let Some(row_map) = row_patches.get(&row_num) {
@@ -219,7 +219,7 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     let cell_ref = attr_value(e, b"r").unwrap_or_default();
                     let (_, col) = parse_cell_ref(&cell_ref);
 
-                    current_row_cols_seen.push(col);
+                    current_row_cols_seen.insert(col);
 
                     if let Some(row_map) = current_row.and_then(|r| row_patches.get(&r)) {
                         if let Some(patch) = row_map.get(&col) {
@@ -243,7 +243,7 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     write_event(&mut writer, Event::Start(start))?;
                     for (&row_num, row_map) in &row_patches {
                         write_new_row(&mut writer, row_num, row_map, worksheet_prefix.as_deref())?;
-                        rows_seen.push(row_num);
+                        rows_seen.insert(row_num);
                     }
                     write_event(
                         &mut writer,
