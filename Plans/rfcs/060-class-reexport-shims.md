@@ -295,12 +295,13 @@ DifferentialStyle) emit dicts compatible with the existing
 
 ## 12. Implementation status (Sprint Ο Pod 2 landing)
 
-Sprint Ο Pod 2 lands the openpyxl-shaped path surface. The parity
+Sprint Ο Pod 2 landed the openpyxl-shaped path surface. The parity
 test `tests/parity/test_openpyxl_path_compat.py` enforces every
-entry below — 211 ``(path, symbol)`` pairs, all green. Symbols flagged
-with **(stub)** raise :class:`NotImplementedError` on instantiation
-(via :func:`wolfxl._compat._make_stub`); the import path itself is
-real, the construction is deferred to a follow-up.
+entry below — 211 ``(path, symbol)`` pairs, all green. Earlier sprint
+docs used **(stub)** annotations for construction gaps; as of the
+post-PR #23 audit, the RFC-060 path table below is importable and
+representative formerly-stubbed constructors are covered by
+`tests/test_compat_shims.py`.
 
 | openpyxl path | wolfxl module | status |
 |---|---|---|
@@ -308,36 +309,36 @@ real, the construction is deferred to a follow-up.
 | `openpyxl.styles.borders` → `Border`, `Side`, `BORDER_STYLES` | `python/wolfxl/styles/borders.py` | ✅ |
 | `openpyxl.styles.colors` → `Color`, `COLOR_INDEX` + named-palette aliases | `python/wolfxl/styles/colors.py` | ✅ |
 | `openpyxl.styles.fonts` → `Font` | `python/wolfxl/styles/fonts.py` | ✅ |
-| `openpyxl.styles.fills` → `PatternFill`, `GradientFill` (stub), `Fill` (stub), `fills` | `python/wolfxl/styles/fills.py` | ✅ |
-| `openpyxl.styles.protection` → `Protection` (stub) | `python/wolfxl/styles/protection.py` | ✅ |
+| `openpyxl.styles.fills` → `PatternFill`, `GradientFill`, `Fill`, `fills` | `python/wolfxl/styles/fills.py` | ✅ |
+| `openpyxl.styles.protection` → `Protection` | `python/wolfxl/styles/protection.py` | ✅ |
 | `openpyxl.styles.numbers` → `BUILTIN_FORMATS`, `is_date_format`, `FORMAT_*` | `python/wolfxl/styles/numbers.py` | ✅ |
-| `openpyxl.styles.named_styles` → `NamedStyle` (stub) | `python/wolfxl/styles/named_styles.py` | ✅ |
-| `openpyxl.styles.differential` → `DifferentialStyle` (stub) | `python/wolfxl/styles/differential.py` | ✅ |
+| `openpyxl.styles.named_styles` → `NamedStyle` | `python/wolfxl/styles/named_styles.py` | ✅ |
+| `openpyxl.styles.differential` → `DifferentialStyle` | `python/wolfxl/styles/differential.py` | ✅ |
 | `openpyxl.cell.cell` → `Cell`, `MergedCell`, `WriteOnlyCell`, `ArrayFormula`, `DataTableFormula`, `Hyperlink`, `IllegalCharacterError` | `python/wolfxl/cell/cell.py` | ✅ |
 | `openpyxl.cell.rich_text` → `CellRichText`, `InlineFont`, `TextBlock` | `python/wolfxl/cell/rich_text.py` | ✅ |
 | `openpyxl.cell.text` → `CellRichText`, `InlineFont`, `TextBlock` | `python/wolfxl/cell/text.py` | ✅ |
 | `openpyxl.worksheet.cell_range` → `CellRange`, `MultiCellRange` | `python/wolfxl/worksheet/cell_range.py` | ✅ |
-| `openpyxl.worksheet.dimensions` → `RowDimension`, `ColumnDimension`, `DimensionHolder` (stub), `SheetFormatProperties` (stub), `SheetDimension` (stub), `Dimension` | `python/wolfxl/worksheet/dimensions.py` | ✅ |
-| `openpyxl.worksheet.merge` → `MergedCell`, `MergedCellRange`, `MergeCell` (stub), `MergeCells` (stub) | `python/wolfxl/worksheet/merge.py` | ✅ |
+| `openpyxl.worksheet.dimensions` → `RowDimension`, `ColumnDimension`, `DimensionHolder`, `SheetFormatProperties`, `SheetDimension`, `Dimension` | `python/wolfxl/worksheet/dimensions.py` | ✅ |
+| `openpyxl.worksheet.merge` → `MergedCell`, `MergedCellRange`, `MergeCell`, `MergeCells` | `python/wolfxl/worksheet/merge.py` | ✅ |
 | `openpyxl.worksheet.views` → `SheetView`, `Pane`, `Selection`, `SheetViewList` | `python/wolfxl/worksheet/views.py` | ✅ |
-| `openpyxl.worksheet.pagebreak` → `Break`, `ColBreak`, `RowBreak`, `PageBreak` (all stubs) | `python/wolfxl/worksheet/pagebreak.py` | ✅ |
+| `openpyxl.worksheet.pagebreak` → `Break`, `ColBreak`, `RowBreak`, `PageBreak` | `python/wolfxl/worksheet/pagebreak.py` | ✅ |
 | `openpyxl.worksheet.print_settings` → `PrintArea`, `PrintTitles`, `ColRange`, `RowRange` | `python/wolfxl/worksheet/print_settings.py` | ✅ |
 | `openpyxl.worksheet.formula` → `ArrayFormula`, `DataTableFormula` | `python/wolfxl/worksheet/formula.py` | ✅ |
 | `openpyxl.worksheet.hyperlink` → `Hyperlink`, `HyperlinkList` | `python/wolfxl/worksheet/hyperlink.py` | ✅ |
-| `openpyxl.worksheet.properties` → `WorksheetProperties`, `PageSetupProperties`, `Outline` (all stubs) | `python/wolfxl/worksheet/properties.py` | ✅ |
+| `openpyxl.worksheet.properties` → `WorksheetProperties`, `PageSetupProperties`, `Outline` | `python/wolfxl/worksheet/properties.py` | ✅ |
 | `openpyxl.worksheet.protection` → `SheetProtection` | `python/wolfxl/worksheet/protection.py` | ✅ |
-| `openpyxl.worksheet.table` → `Table`, `TableColumn`, `TableStyleInfo`, `TableList` (stub), `TablePartList` (stub), `AutoFilter`, `SortState`, `Related` (stub), `XMLColumnProps` (stub) | `python/wolfxl/worksheet/table.py` | ✅ |
+| `openpyxl.worksheet.table` → `Table`, `TableColumn`, `TableStyleInfo`, `TableList`, `TablePartList`, `AutoFilter`, `SortState`, `Related`, `XMLColumnProps` | `python/wolfxl/worksheet/table.py` | ✅ |
 | `openpyxl.worksheet.page` → `PageMargins`, `PrintOptions`, `PrintPageSetup` | `python/wolfxl/worksheet/page.py` | ✅ |
 | `openpyxl.worksheet.header_footer` → `HeaderFooter`, `HeaderFooterItem` | `python/wolfxl/worksheet/header_footer.py` | ✅ |
 | `openpyxl.worksheet.filters` → all 14 filter / sort classes | `python/wolfxl/worksheet/filters.py` | ✅ |
 | `openpyxl.worksheet.datavalidation` → `DataValidation`, `DataValidationList` | `python/wolfxl/worksheet/datavalidation.py` | ✅ |
 | `openpyxl.worksheet.worksheet` → `Worksheet` | `python/wolfxl/worksheet/worksheet.py` | ✅ |
-| `openpyxl.worksheet.copier` → `WorksheetCopy` (stub) | `python/wolfxl/worksheet/copier.py` | ✅ |
+| `openpyxl.worksheet.copier` → `WorksheetCopy` | `python/wolfxl/worksheet/copier.py` | ✅ |
 | `openpyxl.workbook.workbook` → `Workbook` | `python/wolfxl/workbook/workbook.py` | ✅ |
 | `openpyxl.workbook.defined_name` → `DefinedName`, `DefinedNameList`, `DefinedNameDict` | `python/wolfxl/workbook/defined_name.py` | ✅ |
 | `openpyxl.workbook.protection` → `WorkbookProtection`, `FileSharing` | `python/wolfxl/workbook/protection.py` | ✅ |
-| `openpyxl.workbook.properties` → `CalcProperties`, `WorkbookProperties` (stubs) | `python/wolfxl/workbook/properties.py` | ✅ |
-| `openpyxl.workbook.child` → `_WorkbookChild` (stub) | `python/wolfxl/workbook/child.py` | ✅ |
+| `openpyxl.workbook.properties` → `CalcProperties`, `WorkbookProperties` | `python/wolfxl/workbook/properties.py` | ✅ |
+| `openpyxl.workbook.child` → `_WorkbookChild` | `python/wolfxl/workbook/child.py` | ✅ |
 | `openpyxl.utils.cell` → coordinate parsers + `CellCoordinatesException`, `COORD_RE`, `RANGE_EXPR` | `python/wolfxl/utils/cell.py` | ✅ |
 | `openpyxl.utils.exceptions` → 5 exceptions | `python/wolfxl/utils/exceptions.py` | ✅ |
 | `openpyxl.utils.indexed_list` → `IndexedList` | `python/wolfxl/utils/indexed_list.py` | ✅ |
@@ -364,23 +365,23 @@ real, the construction is deferred to a follow-up.
 | `openpyxl.pivot.cache` → `PivotCache`, `CacheDefinition`, cache types | `python/wolfxl/pivot/cache.py` | ✅ |
 | `openpyxl.pivot.fields` → `RowField`, `DataField`, etc. | `python/wolfxl/pivot/fields.py` | ✅ |
 | `openpyxl.drawing.image` → `Image` | `python/wolfxl/drawing/image.py` | ✅ |
-| `openpyxl.drawing.spreadsheet_drawing` → `SpreadsheetDrawing` (stub) + anchor types | `python/wolfxl/drawing/spreadsheet_drawing.py` | ✅ |
+| `openpyxl.drawing.spreadsheet_drawing` → `SpreadsheetDrawing` + anchor types | `python/wolfxl/drawing/spreadsheet_drawing.py` | ✅ |
 | `openpyxl.comments` → `Comment` | `python/wolfxl/comments/__init__.py` | ✅ |
-| `openpyxl.comments.comments` → `Comment`, `CommentSheet` (stub) | `python/wolfxl/comments/comments.py` | ✅ |
+| `openpyxl.comments.comments` → `Comment`, `CommentSheet` | `python/wolfxl/comments/comments.py` | ✅ |
 
 ### 12.1 Closure status
 
-All Tier-1.5 follow-up candidates from the Sprint-Ο audit are closed
-as of Sprint Π (2026-04-27):
+All Sprint-Ο Tier-1.5 follow-up candidates from the RFC-060 table are
+closed on current `main` as of the post-PR #23 audit (2026-04-27):
 
-| Candidate | Closed by | SHA |
+| Candidate | Closed by | Evidence |
 |---|---|---|
-| SheetProtection | Sprint-Ο Pod-1A.5 | edcbb2c |
-| PageMargins / PrintOptions / PrintPageSetup | Sprint-Π Pod-Π-ε | <fill at merge> |
-| HeaderFooter / HeaderFooterItem | Sprint-Ο Pod-1A.5 | edcbb2c |
-| SheetView / Pane / Selection | Sprint-Ο Pod-1A.5 | edcbb2c |
+| SheetProtection | Sprint-Ο Pod-1A.5 | Branch evidence `edcbb2c`; current main covered by shim and sheet-setup tests. |
+| PageMargins / PrintOptions / PrintPageSetup | Sprint-Π Pod-Π-ε | Branch evidence `69e1a14`; current main routes page setup through real worksheet page objects. |
+| HeaderFooter / HeaderFooterItem | Sprint-Ο Pod-1A.5 | Branch evidence `edcbb2c`; current main covered by sheet-setup tests. |
+| SheetView / Pane / Selection | Sprint-Ο Pod-1A.5 | Branch evidence `edcbb2c`; current main covered by sheet-setup tests. |
+| Styles, dimensions, merge, pagebreak, table helpers, workbook props, drawing, comments | Sprint Π pods | Current main imports and constructs representative former stubs via `tests/test_compat_shims.py`. |
 
-Sprint Π closes the remaining 23 Tier-1.5 stubs across Pods Π-α
-(page breaks + dimensions), Π-β (merge + tables + copier), Π-γ
-(NamedStyle + GradientFill + Protection + DifferentialStyle + Fill),
-and Π-δ (workbook properties + internals).
+The stale "(stub)" markers were removed during the post-PR #23 recovery
+audit after confirming the modules no longer contain `_make_stub`
+placeholders for this table slice.

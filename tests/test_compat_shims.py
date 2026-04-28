@@ -3,8 +3,9 @@
 Two goals:
 1. Every openpyxl module path exposed by wolfxl imports cleanly (no
    ``ModuleNotFoundError`` for the common paths).
-2. Every shim class raises ``NotImplementedError`` with a helpful message
-   at the construction site - not at downstream attribute access.
+2. Every formerly-stubbed shim class stays promoted to a real constructor,
+   while any remaining shim placeholders raise ``NotImplementedError`` with a
+   helpful message at construction time.
 
 A drop-in replacement that silently no-ops would be far worse than a
 pointed error. These tests pin the error behavior so we don't regress.
@@ -134,7 +135,25 @@ REAL_DATACLASSES: list[tuple[str, str, dict]] = [
     ("wolfxl.styles", "NamedStyle", {"name": "Metric"}),
     ("wolfxl.styles", "Protection", {}),
     ("wolfxl.styles", "GradientFill", {}),
+    ("wolfxl.styles.fills", "Fill", {}),
     ("wolfxl.styles.differential", "DifferentialStyle", {}),
+    ("wolfxl.worksheet.dimensions", "DimensionHolder", {"worksheet": None}),
+    ("wolfxl.worksheet.dimensions", "SheetFormatProperties", {}),
+    ("wolfxl.worksheet.dimensions", "SheetDimension", {}),
+    ("wolfxl.worksheet.merge", "MergeCell", {"ref": "A1:B2"}),
+    ("wolfxl.worksheet.merge", "MergeCells", {}),
+    ("wolfxl.worksheet.pagebreak", "Break", {}),
+    ("wolfxl.worksheet.pagebreak", "PageBreak", {}),
+    ("wolfxl.worksheet.properties", "WorksheetProperties", {}),
+    ("wolfxl.worksheet.table", "TableList", {}),
+    ("wolfxl.worksheet.table", "TablePartList", {}),
+    ("wolfxl.worksheet.table", "Related", {}),
+    ("wolfxl.worksheet.table", "XMLColumnProps", {}),
+    ("wolfxl.workbook.properties", "CalcProperties", {}),
+    ("wolfxl.workbook.properties", "WorkbookProperties", {}),
+    ("wolfxl.workbook.child", "_WorkbookChild", {}),
+    ("wolfxl.drawing.spreadsheet_drawing", "SpreadsheetDrawing", {}),
+    ("wolfxl.comments.comments", "CommentSheet", {}),
 ]
 
 

@@ -87,12 +87,14 @@ in the docs.
   at the model/patcher/copy level. Evidence:
   `python/wolfxl/pivot/_slicer.py`, `Workbook.add_slicer_cache`,
   `Worksheet.add_slicer`, `tests/test_slicer_copy_worksheet.py`,
+  `tests/test_pivot_slicers.py`, `tests/test_advanced_pivots_save_smoke.py`,
   `tests/diffwriter/test_advanced_pivots_bytes.py`, and
   `tests/parity/test_advanced_pivots_parity.py`.
 - Pivot calculated fields (`<calculatedField>`) and calculated items
   (`<calculatedItem>`): implemented/tested in current `main`. Evidence:
   `python/wolfxl/pivot/_calc.py`, `tests/test_pivot_calculated_fields.py`,
-  and `tests/test_pivot_advanced_styling.py`.
+  `tests/test_pivot_calculated_items.py`, and
+  `tests/test_pivot_advanced_styling.py`.
 - Pivot GroupItems/date-range grouping (`<fieldGroup>`): implemented/tested.
   Evidence: `tests/test_pivot_group_items.py`.
 - Pivot-table styling beyond the named-style picker: partially implemented.
@@ -150,6 +152,32 @@ cargo test -p wolfxl-writer --lib emit::charts
 Result: 47 passed / 2 skipped for Python chart tests, 47 passed for the
 writer chart integration tests, and 13 passed for chart emitter unit tests.
 
+Post-PR #23 branch-mining proof:
+
+```bash
+uv run pytest tests/test_compat_shims.py tests/parity/test_openpyxl_path_compat.py -q
+```
+
+Result: 271 passed, 2 skipped.
+
+```bash
+uv run pytest \
+  tests/test_pivot_calculated_fields.py \
+  tests/test_pivot_calculated_items.py \
+  tests/test_pivot_group_items.py \
+  tests/test_pivot_advanced_styling.py \
+  tests/test_pivot_slicers.py \
+  tests/test_slicer_copy_worksheet.py \
+  tests/test_advanced_pivots_save_smoke.py \
+  tests/diffwriter/test_advanced_pivots_bytes.py \
+  tests/parity/test_advanced_pivots_parity.py \
+  -q
+cargo test -p wolfxl-pivot
+```
+
+Result: 193 passed / 1 warning for the Python advanced-pivot slice, and 55
+passed for `wolfxl-pivot`.
+
 ## Verification checkpoint
 
 After the audit, the Rust tree was normalized with `cargo fmt --all`.
@@ -184,9 +212,16 @@ to merge wholesale.
 Highest-priority recovery branches:
 
 - `feat/sprint-pi-pod-alpha`: page breaks and dimension construction coverage.
-- `feat/sprint-pi-pod-epsilon`: RFC-060 cleanup / stale stub annotations.
-- `feat/sprint-omicron-pod-3-5`: advanced pivot/slicer cross-cutting tests.
-- `feat/sprint-omicron-pod-3`: pivot area formatting / chart formatting.
+- `feat/sprint-pi-pod-epsilon`: audited/mined against current `main`; the
+  useful RFC-060 cleanup was ported by removing stale `(stub)` annotations and
+  adding representative former-stub constructors to `tests/test_compat_shims.py`.
+- `feat/sprint-omicron-pod-3-5`: audited against current `main`; its advanced
+  pivot/slicer cross-cutting tests are already present and included in the
+  193-test focused proof above.
+- `feat/sprint-omicron-pod-3`: audited against current `main`; calculated
+  fields/items, field grouping, PivotArea formatting, pivot CFs, and
+  chart-format coverage are already present and included in the focused proof
+  above.
 - `feat/sprint-omicron-pod-1a5`: audited against current `main`; its
   sheet-setup / page-break / autofilter / workbook-security no-op guard
   queues are present in `XlsxPatcher::do_save`, and the focused Python proof
