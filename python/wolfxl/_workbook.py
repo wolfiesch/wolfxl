@@ -31,6 +31,17 @@ class CopyOptions:
 
     deep_copy_images: bool = False
 
+
+def _same_existing_path(left: str, right: str | None) -> bool:
+    """Return whether two paths identify the same existing filesystem entry."""
+    if right is None:
+        return False
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return os.path.abspath(left) == os.path.abspath(right)
+
+
 if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
 
@@ -1356,7 +1367,10 @@ class Workbook:
             # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
             # the patcher's Phase 2.5o queue.
             self._flush_pending_autofilters_to_patcher()
-            self._rust_patcher.save(filename)
+            if _same_existing_path(filename, self._source_path):
+                self._rust_patcher.save_in_place()
+            else:
+                self._rust_patcher.save(filename)
         elif self._rust_writer is not None:
             # Write mode — flush workbook-level writes, then sheets.
             self._flush_workbook_writes()

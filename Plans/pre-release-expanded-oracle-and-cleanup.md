@@ -108,6 +108,12 @@ Implementation checkpoint, 2026-04-28:
 - Local truth pass: openpyxl opened the workbook with the expected unsupported
   extension warning for slicer metadata, WolfXL read the expected cell values,
   and LibreOffice headless exported the workbook to PDF without stderr.
+- Follow-up mining found a real WolfXL bug: modify-mode saves back to the
+  original source path called the normal patcher `save(path)` path and could
+  trip a ZIP checksum read error. The fix routes same-path modify saves through
+  the patcher's atomic `save_in_place()` path and adds a regression test.
+- ExcelBench commit `2de89d2` adds a repeatable local fixture-pack generator:
+  `uv run python scripts/generate_external_oracle_fixtures.py`.
 
 ## Cleanup plan
 
