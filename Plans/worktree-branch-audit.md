@@ -292,6 +292,33 @@ Advanced pivot/slicer cross-renderer smoke, 2026-04-28:
   slicers. It still does not replace manual Excel GUI inspection of the
   rendered layout and slicer interactivity before public release.
 
+ExcelBench local benchmark/fidelity smoke, 2026-04-28:
+
+- The sibling ExcelBench venv was still importing `wolfxl==0.1.0`, so it was
+  updated locally to install this checkout as `wolfxl==2.0.0` before any
+  benchmark smoke.
+- ExcelBench initially did not register the `wolfxl` adapter because it still
+  expected the old `RustXlsxWriterBook` PyO3 class. WolfXL 2.0 exposes
+  `NativeWorkbook`; the sibling ExcelBench adapter was patched with a
+  backwards-compatible writer-class fallback and committed there as
+  `e0d5431` (`fix: support wolfxl native writer adapter`).
+- `uv run --no-sync excelbench perf --tests fixtures/excel --output
+  /tmp/wolfxl-2.0-excelbench-full-smoke --adapter openpyxl --adapter wolfxl
+  --warmup 1 --iters 5 --memory-mode getrusage` completed across the 19
+  committed fixture features with no adapter notes. This is a smoke-scale
+  performance run only, not the publishable benchmark replacement. In that
+  local run WolfXL was faster than openpyxl on every reported p50 read/write
+  fixture cell; publishable numbers still require the standard iteration count,
+  hardware/runtime capture, raw artifact retention, and dashboard regeneration.
+- `uv run --no-sync excelbench benchmark --tests fixtures/excel --output
+  /tmp/wolfxl-2.0-excelbench-fidelity-smoke --adapter openpyxl --adapter
+  wolfxl` completed. It exposed public-dashboard fidelity gaps that must be
+  triaged before launch: image read/write remains red in the ExcelBench
+  adapter; write diagnostics also cover double underline, dataBar/colorScale
+  conditional formats, hyperlink display text, table totals rows, and no-style
+  table defaults. Treat these as release-gate triage items before refreshing
+  the public ExcelBench dashboard or making broad "full replacement" claims.
+
 Dependency-modernization branch audit:
 
 - `pyo3-bump` was audited and is superseded by current `main`. No branch port
