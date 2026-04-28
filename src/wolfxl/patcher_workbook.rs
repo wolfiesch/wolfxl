@@ -277,8 +277,11 @@ mod tests {
     use super::*;
     use crate::ooxml_util;
 
+    static TEST_EPOCH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn epoch_or_now_honors_test_epoch_zero() {
+        let _guard = TEST_EPOCH_ENV_LOCK.lock().unwrap();
         let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
         std::env::set_var("WOLFXL_TEST_EPOCH", "0");
         let dt = epoch_or_now();
@@ -313,9 +316,14 @@ mod tests {
 
     #[test]
     fn epoch_or_now_clamps_pre_1980_floor() {
+        let _guard = TEST_EPOCH_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
         std::env::set_var("WOLFXL_TEST_EPOCH", "0");
         let dt = epoch_or_now();
-        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        match prev {
+            Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
+            None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
+        }
         assert_eq!(dt.year(), 1980);
         assert_eq!(dt.month(), 1);
         assert_eq!(dt.day(), 1);
@@ -323,9 +331,14 @@ mod tests {
 
     #[test]
     fn epoch_or_now_handles_recent_timestamp() {
+        let _guard = TEST_EPOCH_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
         std::env::set_var("WOLFXL_TEST_EPOCH", "1704067200");
         let dt = epoch_or_now();
-        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        match prev {
+            Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
+            None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
+        }
         assert_eq!(dt.year(), 2024);
         assert_eq!(dt.month(), 1);
         assert_eq!(dt.day(), 1);
