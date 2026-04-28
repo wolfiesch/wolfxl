@@ -7,6 +7,9 @@ use pyo3::types::{PyDict, PyList};
 use super::conditional_formatting::{CfRuleKind, CfRulePatch, CfvoPatch, ColorScaleStop, DxfPatch};
 use super::styles;
 use super::styles::FormatSpec;
+use wolfxl_writer::parse::workbook_security::{
+    FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
+};
 
 pub(crate) fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
     let mut spec = FormatSpec::default();
@@ -162,6 +165,59 @@ pub(crate) fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
         kind,
         dxf,
         stop_if_true: extract_bool(d, "stop_if_true")?.unwrap_or(false),
+    })
+}
+
+/// Converts a Python RFC-058 workbook-security payload into writer state.
+pub(crate) fn parse_workbook_security_payload(
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<WorkbookSecurity> {
+    let workbook_protection = match payload.get_item("workbook_protection")? {
+        Some(v) if !v.is_none() => {
+            let d = v.cast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(
+                    "queue_workbook_security: 'workbook_protection' must be a dict or None",
+                )
+            })?;
+            Some(WorkbookProtectionSpec {
+                lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
+                lock_windows: extract_bool(d, "lock_windows")?.unwrap_or(false),
+                lock_revision: extract_bool(d, "lock_revision")?.unwrap_or(false),
+                workbook_algorithm_name: extract_str(d, "workbook_algorithm_name")?,
+                workbook_hash_value: extract_str(d, "workbook_hash_value")?,
+                workbook_salt_value: extract_str(d, "workbook_salt_value")?,
+                workbook_spin_count: extract_u32(d, "workbook_spin_count")?,
+                revisions_algorithm_name: extract_str(d, "revisions_algorithm_name")?,
+                revisions_hash_value: extract_str(d, "revisions_hash_value")?,
+                revisions_salt_value: extract_str(d, "revisions_salt_value")?,
+                revisions_spin_count: extract_u32(d, "revisions_spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    let file_sharing = match payload.get_item("file_sharing")? {
+        Some(v) if !v.is_none() => {
+            let d = v.cast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(
+                    "queue_workbook_security: 'file_sharing' must be a dict or None",
+                )
+            })?;
+            Some(FileSharingSpec {
+                read_only_recommended: extract_bool(d, "read_only_recommended")?.unwrap_or(false),
+                user_name: extract_str(d, "user_name")?,
+                algorithm_name: extract_str(d, "algorithm_name")?,
+                hash_value: extract_str(d, "hash_value")?,
+                salt_value: extract_str(d, "salt_value")?,
+                spin_count: extract_u32(d, "spin_count")?,
+            })
+        }
+        _ => None,
+    };
+
+    Ok(WorkbookSecurity {
+        workbook_protection,
+        file_sharing,
     })
 }
 
