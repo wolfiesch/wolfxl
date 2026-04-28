@@ -331,10 +331,62 @@ Highest-priority recovery branches:
 - `feat/sprint-omicron-pod-2`: audited against current `main`; the
   openpyxl-path drop-in import parity test is present and included in the
   341-test focused proof.
+- `feat/sprint-omicron-pod-1b`: audited against current `main`; AutoFilter
+  model/emit/evaluate support is present via `crates/wolfxl-autofilter`,
+  `python/wolfxl/worksheet/filters.py`, and the worksheet flush path.
+  Focused proof: `tests/test_autofilter_filters.py` plus the openpyxl-path
+  ratchet passed in the 405-test constructor/import proof; `cargo test -p
+  wolfxl-autofilter` passed 49 tests.
+- `feat/sprint-omicron-pod-1c`: audited against current `main`; RFC-057
+  `ArrayFormula` / `DataTableFormula` plumbing is present in the cell and
+  worksheet layers with diffwriter, parity, and LibreOffice coverage.
+  Focused proof: `tests/test_array_formula.py`,
+  `tests/test_data_table_formula.py`, and related import parity passed in the
+  405-test proof.
+- `feat/sprint-omicron-pod-1d`: audited against current `main`; workbook
+  protection / file sharing classes plus native-writer and patcher security
+  emission are present. Focused proof: `tests/test_workbook_protection.py`,
+  `tests/parity/test_workbook_security_parity.py` in earlier broad runs, and
+  `cargo test -p wolfxl-writer --lib parse::` passed 40 parse tests including
+  workbook-security coverage.
+- `feat/sprint-omicron-pod-1e`: audited against current `main`; public
+  exceptions, `IndexedList`, and cell-class/path shims are present and covered
+  by `tests/test_indexed_list.py`, `tests/parity/test_openpyxl_path_compat.py`,
+  and `tests/test_compat_shims.py`.
 - `feat/sprint-nu-pod-epsilon`: v2.0 final docs and launch claims; use only
   as evidence, not as publish-ready material. Audited on 2026-04-28; current
   docs still need benchmark/SHA replacement and a final truth pass before
   publication.
+- `feat/sprint-pi-pod-beta`, `feat/sprint-pi-pod-gamma`, and
+  `feat/sprint-pi-pod-delta`: inspected after the post-chart truth pass.
+  Their visible unique branch tips are the shared Sprint Π pre-dispatch
+  scaffold on top of old stacked history; no pod-specific beta/gamma/delta
+  implementation commits were found to port wholesale. Current `main` already
+  carries the Sprint Π constructor/import ratchet for merge/table/copier,
+  style constructors, workbook internals, and re-export paths. Focused proof:
+  `uv run --no-sync pytest tests/test_autofilter_filters.py
+  tests/test_array_formula.py tests/test_data_table_formula.py
+  tests/test_workbook_protection.py tests/test_indexed_list.py
+  tests/parity/test_sprint_pi_constructors.py
+  tests/parity/test_openpyxl_path_compat.py tests/test_compat_shims.py -q`
+  reported 405 passed, 2 skipped.
+- Older T1/T1.5 RFC branches `feat/rfc-012-formula-xlator`,
+  `feat/rfc-021-defined-names`, `feat/rfc-023-comments`,
+  `feat/rfc-024-tables`, `feat/rfc-030-insert-delete-rows`,
+  `feat/rfc-031-insert-delete-cols`, `feat/rfc-034-move-range`,
+  `feat/rfc-035-allocator-and-planner`,
+  `feat/rfc-035-patcher-and-coordinator`,
+  `feat/rfc-035-tests-and-parity`, and `feat/rfc-036-move-sheet`:
+  audited as superseded by current `main`. Their core surfaces are present in
+  the patcher and Rust helper crates, and current focused proof is green:
+  `uv run --no-sync pytest tests/test_defined_names_modify.py
+  tests/test_comments_modify.py tests/test_tables_modify.py
+  tests/test_axis_shift_modify.py tests/test_col_shift_modify.py
+  tests/test_move_range_modify.py tests/test_copy_worksheet_modify.py
+  tests/test_copy_worksheet_byte_stable.py tests/test_copy_worksheet_write_mode.py
+  tests/test_move_sheet_modify.py tests/parity/test_copy_worksheet_parity.py -q`
+  reported 127 passed. `cargo test -p wolfxl-structural`,
+  `cargo test -p wolfxl-formula`, and `cargo test -p wolfxl-rels` also passed.
 - `w2a/styles-xml`: audited against current `main`; RGB attribute escaping for
   styles plus regression tests are present in `crates/wolfxl-writer/src/emit/styles_xml.rs`.
 - `w2b/sheet-xml`: audited against current `main`; unstyled blank cells are
