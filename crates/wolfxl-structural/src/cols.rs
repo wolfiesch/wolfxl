@@ -260,7 +260,10 @@ mod tests {
             ],
         };
         let out = s.render();
-        assert_eq!(out, r#"<col min="3" max="5" width="14.5" customWidth="1"/>"#);
+        assert_eq!(
+            out,
+            r#"<col min="3" max="5" width="14.5" customWidth="1"/>"#
+        );
     }
 
     #[test]
@@ -336,7 +339,9 @@ pub fn shift_sheet_cols_block(sheet_xml: &[u8], plan: ShiftPlan) -> Vec<u8> {
 /// Parse `<col min="..." max="..." key="value" .../>` into a ColSpan.
 fn parse_col_element(elt: &str) -> Option<ColSpan> {
     // Strip leading "<col " and trailing "/>".
-    let body = elt.strip_prefix("<col ").or_else(|| elt.strip_prefix("<col"))?;
+    let body = elt
+        .strip_prefix("<col ")
+        .or_else(|| elt.strip_prefix("<col"))?;
     let body = body.strip_suffix("/>").unwrap_or(body).trim();
 
     let mut min: Option<u32> = None;
@@ -350,7 +355,11 @@ fn parse_col_element(elt: &str) -> Option<ColSpan> {
             _ => other.push((key, val)),
         }
     }
-    Some(ColSpan { min: min?, max: max?, other_attrs: other })
+    Some(ColSpan {
+        min: min?,
+        max: max?,
+        other_attrs: other,
+    })
 }
 
 /// Yield `(key, value)` from a string of `key="value"` pairs. Tolerant
@@ -370,7 +379,9 @@ fn iter_attrs(s: &str) -> Vec<(String, String)> {
         while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
             i += 1;
         }
-        let key = std::str::from_utf8(&bytes[key_start..i]).unwrap_or("").to_string();
+        let key = std::str::from_utf8(&bytes[key_start..i])
+            .unwrap_or("")
+            .to_string();
         while i < bytes.len() && (bytes[i] == b'=' || bytes[i].is_ascii_whitespace()) {
             i += 1;
         }
@@ -382,7 +393,9 @@ fn iter_attrs(s: &str) -> Vec<(String, String)> {
         while i < bytes.len() && bytes[i] != b'"' {
             i += 1;
         }
-        let val = std::str::from_utf8(&bytes[val_start..i]).unwrap_or("").to_string();
+        let val = std::str::from_utf8(&bytes[val_start..i])
+            .unwrap_or("")
+            .to_string();
         if i < bytes.len() {
             i += 1; // skip closing quote
         }
@@ -411,7 +424,11 @@ mod xml_tests {
         );
         let out = shift_sheet_cols_block(
             &xml,
-            ShiftPlan { axis: Axis::Col, idx: 5, n: 2 },
+            ShiftPlan {
+                axis: Axis::Col,
+                idx: 5,
+                n: 2,
+            },
         );
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains(r#"min="3" max="3""#), "got: {s}");
@@ -423,7 +440,11 @@ mod xml_tests {
         let xml = sheet_with_cols(r#"<col min="3" max="7" width="14.5" customWidth="1"/>"#);
         let out = shift_sheet_cols_block(
             &xml,
-            ShiftPlan { axis: Axis::Col, idx: 5, n: 2 },
+            ShiftPlan {
+                axis: Axis::Col,
+                idx: 5,
+                n: 2,
+            },
         );
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains(r#"min="3" max="4""#), "got: {s}");
@@ -432,10 +453,16 @@ mod xml_tests {
 
     #[test]
     fn drops_span_inside_delete_band() {
-        let xml = sheet_with_cols(r#"<col min="3" max="3"/><col min="4" max="4"/><col min="7" max="7"/>"#);
+        let xml = sheet_with_cols(
+            r#"<col min="3" max="3"/><col min="4" max="4"/><col min="7" max="7"/>"#,
+        );
         let out = shift_sheet_cols_block(
             &xml,
-            ShiftPlan { axis: Axis::Col, idx: 3, n: -2 },
+            ShiftPlan {
+                axis: Axis::Col,
+                idx: 3,
+                n: -2,
+            },
         );
         let s = String::from_utf8(out).unwrap();
         assert!(!s.contains(r#"min="3""#), "got: {s}");
@@ -448,7 +475,11 @@ mod xml_tests {
         let xml = sheet_with_cols(r#"<col min="3" max="3"/>"#);
         let out = shift_sheet_cols_block(
             &xml,
-            ShiftPlan { axis: Axis::Row, idx: 5, n: 2 },
+            ShiftPlan {
+                axis: Axis::Row,
+                idx: 5,
+                n: 2,
+            },
         );
         assert_eq!(out, xml);
     }

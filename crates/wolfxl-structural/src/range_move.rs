@@ -176,7 +176,7 @@ fn split_sheet_data(xml: &str) -> Option<(&str, &str, &str)> {
     let after_name = open + "<sheetData".len();
     let close_tag = xml[after_name..].find('>')?;
     let open_end = after_name + close_tag + 1; // points past the '>'.
-    // Self-closing case: treat inner as empty.
+                                               // Self-closing case: treat inner as empty.
     if xml[open..open_end].ends_with("/>") {
         return Some((&xml[..open_end], "", &xml[open_end..]));
     }
@@ -184,7 +184,11 @@ fn split_sheet_data(xml: &str) -> Option<(&str, &str, &str)> {
     let inner_start = open_end;
     let inner_end = open_end + close;
     let tail_start = inner_end;
-    Some((&xml[..inner_start], &xml[inner_start..inner_end], &xml[tail_start..]))
+    Some((
+        &xml[..inner_start],
+        &xml[inner_start..inner_end],
+        &xml[tail_start..],
+    ))
 }
 
 /// One captured cell from the source `<sheetData>`.
@@ -404,8 +408,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
 
     // Now relocate.
     let mut relocated: Vec<CapturedCell> = Vec::with_capacity(cells.len());
-    let mut overwritten: std::collections::HashSet<(u32, u32)> =
-        std::collections::HashSet::new();
+    let mut overwritten: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
 
     // First pass: cells inside src get relocated and their formulas
     // paste-translated. Track destination keys so we can drop any
@@ -427,8 +430,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
         let new_row = (cell.row as i64 + plan.d_row as i64) as u32;
         let new_col = (cell.col as i64 + plan.d_col as i64) as u32;
         // Paste-translate formula payload (if any) inside this cell.
-        cell.children =
-            translate_cell_formula(&cell.children, &src_range, &dst_range);
+        cell.children = translate_cell_formula(&cell.children, &src_range, &dst_range);
         // Update the `r=` attribute in raw_attrs.
         let new_r = a1(new_row, new_col);
         for (key, val) in cell.raw_attrs.iter_mut() {
@@ -445,8 +447,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
     for mut cell in external.into_iter() {
         // If translate=true, rewrite refs that point into src.
         if plan.translate {
-            cell.children =
-                translate_cell_formula(&cell.children, &src_range, &dst_range);
+            cell.children = translate_cell_formula(&cell.children, &src_range, &dst_range);
         }
         // Drop external cells that fall on a dst slot we just wrote.
         if overwritten.contains(&(cell.row, cell.col)) {
@@ -583,9 +584,9 @@ fn parse_a1(s: &str) -> Option<(u32, u32)> {
     }
     let mut col_n: u32 = 0;
     for &b in col_str.as_bytes() {
-        col_n = col_n.checked_mul(26)?.checked_add(
-            (b.to_ascii_uppercase() - b'A' + 1) as u32,
-        )?;
+        col_n = col_n
+            .checked_mul(26)?
+            .checked_add((b.to_ascii_uppercase() - b'A' + 1) as u32)?;
     }
     let row_n: u32 = s[row_start..].parse().ok()?;
     if col_n == 0 || row_n == 0 {
@@ -670,11 +671,17 @@ fn translate_cell_formula(children: &[u8], src: &Range, dst: &Range) -> Vec<u8> 
                         Ok(c) => c.into_owned(),
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
-                    let wrapped =
-                        if raw.starts_with('=') { raw.clone() } else { format!("={raw}") };
+                    let wrapped = if raw.starts_with('=') {
+                        raw.clone()
+                    } else {
+                        format!("={raw}")
+                    };
                     let translated = formula_move_range(&wrapped, src, dst, true);
                     let unwrapped = if !raw.starts_with('=') {
-                        translated.strip_prefix('=').unwrap_or(&translated).to_string()
+                        translated
+                            .strip_prefix('=')
+                            .unwrap_or(&translated)
+                            .to_string()
                     } else {
                         translated
                     };
@@ -790,8 +797,11 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
                         Ok(c) => c.into_owned(),
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
-                    let wrapped =
-                        if raw.starts_with('=') { raw.clone() } else { format!("={raw}") };
+                    let wrapped = if raw.starts_with('=') {
+                        raw.clone()
+                    } else {
+                        format!("={raw}")
+                    };
                     let translated = formula_move_range(
                         &wrapped,
                         &plan.formula_src_range(),
@@ -799,7 +809,10 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
                         true,
                     );
                     let unwrapped = if !raw.starts_with('=') {
-                        translated.strip_prefix('=').unwrap_or(&translated).to_string()
+                        translated
+                            .strip_prefix('=')
+                            .unwrap_or(&translated)
+                            .to_string()
                     } else {
                         translated
                     };
@@ -912,7 +925,13 @@ mod tests {
     use super::*;
 
     fn plan(src_lo: (u32, u32), src_hi: (u32, u32), d_row: i32, d_col: i32) -> RangeMovePlan {
-        RangeMovePlan { src_lo, src_hi, d_row, d_col, translate: false }
+        RangeMovePlan {
+            src_lo,
+            src_hi,
+            d_row,
+            d_col,
+            translate: false,
+        }
     }
 
     #[test]

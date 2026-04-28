@@ -218,10 +218,7 @@ impl Worksheet {
     /// [`Worksheet::set_cell`] that the pyclass uses on every Python-side
     /// `write_cell_value` call without having to construct `WriteCell`.
     pub fn write_cell(&mut self, row: u32, col: u32, value: WriteCellValue, style_id: Option<u32>) {
-        let cell = WriteCell {
-            value,
-            style_id,
-        };
+        let cell = WriteCell { value, style_id };
         self.set_cell(row, col, cell);
     }
 
@@ -439,17 +436,17 @@ mod tests {
         s.columns.get_mut(&1).unwrap().hidden = true;
         s.set_column_width(1, 20.0);
         assert_eq!(s.columns[&1].width, Some(20.0));
-        assert!(s.columns[&1].hidden, "hidden flag must survive width update");
+        assert!(
+            s.columns[&1].hidden,
+            "hidden flag must survive width update"
+        );
     }
 
     #[test]
     fn write_cell_upserts_and_overwrites() {
         let mut s = Worksheet::new("S");
         s.write_cell(1, 1, WriteCellValue::Number(1.0), None);
-        assert_eq!(
-            s.rows[&1].cells[&1].value,
-            WriteCellValue::Number(1.0)
-        );
+        assert_eq!(s.rows[&1].cells[&1].value, WriteCellValue::Number(1.0));
         s.write_cell(1, 1, WriteCellValue::String("hi".to_string()), Some(7));
         assert_eq!(
             s.rows[&1].cells[&1].value,
@@ -470,7 +467,10 @@ mod tests {
         let mut s = Worksheet::new("Old");
         let too_long = "x".repeat(32);
         let err = s.rename(too_long).unwrap_err();
-        assert!(err.contains("31"), "msg should mention 31-char limit: {err}");
+        assert!(
+            err.contains("31"),
+            "msg should mention 31-char limit: {err}"
+        );
         assert_eq!(s.name, "Old", "name must not change on Err");
     }
 

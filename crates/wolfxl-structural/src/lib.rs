@@ -52,9 +52,7 @@ pub use sheet_copy::{
 pub use shift_anchors::{shift_anchor, shift_sqref};
 pub use shift_cells::shift_sheet_cells;
 pub use shift_formulas::{shift_formula, shift_formula_with_meta};
-pub use shift_workbook::{
-    apply_workbook_shift, AxisShiftOp, SheetXmlInputs, WorkbookMutations,
-};
+pub use shift_workbook::{apply_workbook_shift, AxisShiftOp, SheetXmlInputs, WorkbookMutations};
 
 /// Convenience re-export so callers don't have to depend on
 /// `wolfxl-formula` directly just to construct a `Range`.

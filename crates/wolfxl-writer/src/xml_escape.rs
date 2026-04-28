@@ -71,8 +71,10 @@ mod tests {
     fn text_escapes_only_three_chars() {
         assert_eq!(text("A & B < C > D"), "A &amp; B &lt; C &gt; D");
         // Quotes are unchanged inside element text.
-        assert_eq!(text(r#"She said "hi" and it's fine"#),
-                   r#"She said "hi" and it's fine"#);
+        assert_eq!(
+            text(r#"She said "hi" and it's fine"#),
+            r#"She said "hi" and it's fine"#
+        );
     }
 
     #[test]

@@ -42,10 +42,10 @@
 //! openpyxl's "leave it off" rule.
 
 use crate::model::chart::{
-    Axis, AxisCommon, BarDir, BarGrouping, Chart, ChartKind, DataLabels, DateAxis,
-    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, PivotSource,
-    RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun,
-    Trendline, TrendlineKind, ValueAxis, View3D, CategoryAxis,
+    Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DateAxis,
+    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, PivotSource, RadarStyle,
+    Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline,
+    TrendlineKind, ValueAxis, View3D,
 };
 use crate::xml_escape;
 
@@ -202,10 +202,7 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
         ChartKind::OfPie => {
             // ofPieType comes first inside <ofPieChart>.
             let t = chart.of_pie_type.as_deref().unwrap_or("pie");
-            out.push_str(&format!(
-                "<c:ofPieType val=\"{}\"/>",
-                xml_escape::attr(t)
-            ));
+            out.push_str(&format!("<c:ofPieType val=\"{}\"/>", xml_escape::attr(t)));
         }
         ChartKind::Surface | ChartKind::Surface3D => {
             if let Some(w) = chart.wireframe {
@@ -254,10 +251,7 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
                 out.push_str(&format!("<c:gapWidth val=\"{g}\"/>"));
             }
             let st = chart.split_type.as_deref().unwrap_or("auto");
-            out.push_str(&format!(
-                "<c:splitType val=\"{}\"/>",
-                xml_escape::attr(st)
-            ));
+            out.push_str(&format!("<c:splitType val=\"{}\"/>", xml_escape::attr(st)));
             if let Some(p) = chart.split_pos {
                 out.push_str(&format!("<c:splitPos val=\"{}\"/>", fmt_f64(p)));
             }
@@ -298,12 +292,7 @@ fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: u32) {
     out.push_str(&format!("</c:{elem}>"));
 }
 
-fn emit_series(
-    out: &mut String,
-    ser: &Series,
-    kind: ChartKind,
-    pivot_fmt_id: Option<u32>,
-) {
+fn emit_series(out: &mut String, ser: &Series, kind: ChartKind, pivot_fmt_id: Option<u32>) {
     out.push_str("<c:ser>");
     out.push_str(&format!("<c:idx val=\"{}\"/>", ser.idx));
     out.push_str(&format!("<c:order val=\"{}\"/>", ser.order));
@@ -328,10 +317,7 @@ fn emit_series(
     }
 
     if let Some(b) = ser.invert_if_negative {
-        out.push_str(&format!(
-            "<c:invertIfNegative val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:invertIfNegative val=\"{}\"/>", bool_str(b)));
     }
 
     if let Some(d) = &ser.data_labels {
@@ -391,10 +377,7 @@ fn emit_series(
                 emit_num_ref(out, v);
                 out.push_str("</c:val>");
             }
-            if matches!(
-                kind,
-                ChartKind::Line | ChartKind::Radar | ChartKind::Line3D
-            ) {
+            if matches!(kind, ChartKind::Line | ChartKind::Radar | ChartKind::Line3D) {
                 if let Some(s) = ser.smooth {
                     out.push_str(&format!("<c:smooth val=\"{}\"/>", bool_str(s)));
                 }
@@ -495,10 +478,7 @@ fn emit_run(out: &mut String, run: &TitleRun) {
         ));
     }
     if let Some(f) = &run.font_name {
-        out.push_str(&format!(
-            "<a:latin typeface=\"{}\"/>",
-            xml_escape::attr(f)
-        ));
+        out.push_str(&format!("<a:latin typeface=\"{}\"/>", xml_escape::attr(f)));
     }
     out.push_str("</a:rPr>");
     out.push_str("<a:t>");
@@ -509,10 +489,7 @@ fn emit_run(out: &mut String, run: &TitleRun) {
 
 fn emit_legend(out: &mut String, l: &Legend) {
     out.push_str("<c:legend>");
-    out.push_str(&format!(
-        "<c:legendPos val=\"{}\"/>",
-        l.position.as_str()
-    ));
+    out.push_str(&format!("<c:legendPos val=\"{}\"/>", l.position.as_str()));
     if let Some(layout) = &l.layout {
         emit_layout(out, layout);
     }
@@ -596,43 +573,25 @@ fn emit_data_labels(out: &mut String, d: &DataLabels) {
         ));
     }
     if let Some(p) = &d.position {
-        out.push_str(&format!(
-            "<c:dLblPos val=\"{}\"/>",
-            xml_escape::attr(p)
-        ));
+        out.push_str(&format!("<c:dLblPos val=\"{}\"/>", xml_escape::attr(p)));
     }
     if let Some(b) = d.show_legend_key {
-        out.push_str(&format!(
-            "<c:showLegendKey val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:showLegendKey val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = d.show_val {
         out.push_str(&format!("<c:showVal val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = d.show_cat_name {
-        out.push_str(&format!(
-            "<c:showCatName val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:showCatName val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = d.show_ser_name {
-        out.push_str(&format!(
-            "<c:showSerName val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:showSerName val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = d.show_percent {
-        out.push_str(&format!(
-            "<c:showPercent val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:showPercent val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = d.show_bubble_size {
-        out.push_str(&format!(
-            "<c:showBubbleSize val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:showBubbleSize val=\"{}\"/>", bool_str(b)));
     }
     if let Some(s) = &d.separator {
         out.push_str(&format!(
@@ -645,19 +604,10 @@ fn emit_data_labels(out: &mut String, d: &DataLabels) {
 
 fn emit_error_bars(out: &mut String, eb: &ErrorBars) {
     out.push_str("<c:errBars>");
-    out.push_str(&format!(
-        "<c:errBarType val=\"{}\"/>",
-        eb.bar_type.as_str()
-    ));
-    out.push_str(&format!(
-        "<c:errValType val=\"{}\"/>",
-        eb.val_type.as_str()
-    ));
+    out.push_str(&format!("<c:errBarType val=\"{}\"/>", eb.bar_type.as_str()));
+    out.push_str(&format!("<c:errValType val=\"{}\"/>", eb.val_type.as_str()));
     if let Some(b) = eb.no_end_cap {
-        out.push_str(&format!(
-            "<c:noEndCap val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:noEndCap val=\"{}\"/>", bool_str(b)));
     }
     if let Some(v) = eb.value {
         out.push_str(&format!("<c:val val=\"{}\"/>", fmt_f64(v)));
@@ -668,15 +618,9 @@ fn emit_error_bars(out: &mut String, eb: &ErrorBars) {
 fn emit_trendline(out: &mut String, tl: &Trendline) {
     out.push_str("<c:trendline>");
     if let Some(name) = &tl.name {
-        out.push_str(&format!(
-            "<c:name>{}</c:name>",
-            xml_escape::text(name)
-        ));
+        out.push_str(&format!("<c:name>{}</c:name>", xml_escape::text(name)));
     }
-    out.push_str(&format!(
-        "<c:trendlineType val=\"{}\"/>",
-        tl.kind.as_str()
-    ));
+    out.push_str(&format!("<c:trendlineType val=\"{}\"/>", tl.kind.as_str()));
     if let Some(o) = tl.order {
         if matches!(tl.kind, TrendlineKind::Polynomial) {
             out.push_str(&format!("<c:order val=\"{o}\"/>"));
@@ -694,26 +638,17 @@ fn emit_trendline(out: &mut String, tl: &Trendline) {
         out.push_str(&format!("<c:backward val=\"{}\"/>", fmt_f64(b)));
     }
     if let Some(b) = tl.display_equation {
-        out.push_str(&format!(
-            "<c:dispEq val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:dispEq val=\"{}\"/>", bool_str(b)));
     }
     if let Some(b) = tl.display_r_squared {
-        out.push_str(&format!(
-            "<c:dispRSqr val=\"{}\"/>",
-            bool_str(b)
-        ));
+        out.push_str(&format!("<c:dispRSqr val=\"{}\"/>", bool_str(b)));
     }
     out.push_str("</c:trendline>");
 }
 
 fn emit_marker(out: &mut String, m: &Marker) {
     out.push_str("<c:marker>");
-    out.push_str(&format!(
-        "<c:symbol val=\"{}\"/>",
-        m.symbol.as_str()
-    ));
+    out.push_str(&format!("<c:symbol val=\"{}\"/>", m.symbol.as_str()));
     if let Some(s) = m.size {
         out.push_str(&format!("<c:size val=\"{s}\"/>"));
     }
@@ -735,10 +670,8 @@ fn emit_graphical_props(out: &mut String, g: &GraphicalProperties) {
         ));
     }
     // Line.
-    let has_line_attrs = g.line_color.is_some()
-        || g.line_width_emu.is_some()
-        || g.line_dash.is_some()
-        || g.no_line;
+    let has_line_attrs =
+        g.line_color.is_some() || g.line_width_emu.is_some() || g.line_dash.is_some() || g.no_line;
     if has_line_attrs {
         if let Some(w) = g.line_width_emu {
             out.push_str(&format!("<a:ln w=\"{w}\">"));
@@ -754,10 +687,7 @@ fn emit_graphical_props(out: &mut String, g: &GraphicalProperties) {
             ));
         }
         if let Some(d) = &g.line_dash {
-            out.push_str(&format!(
-                "<a:prstDash val=\"{}\"/>",
-                xml_escape::attr(d)
-            ));
+            out.push_str(&format!("<a:prstDash val=\"{}\"/>", xml_escape::attr(d)));
         }
         out.push_str("</a:ln>");
     }
@@ -784,12 +714,19 @@ fn emit_axis_common_pre(out: &mut String, common: &AxisCommon) {
     if let Some(d) = common.delete {
         out.push_str(&format!("<c:delete val=\"{}\"/>", bool_str(d)));
     }
-    out.push_str(&format!(
-        "<c:axPos val=\"{}\"/>",
-        common.ax_pos.as_str()
-    ));
-    emit_gridlines(out, "majorGridlines", common.major_gridlines, common.major_gridlines_obj.as_ref());
-    emit_gridlines(out, "minorGridlines", common.minor_gridlines, common.minor_gridlines_obj.as_ref());
+    out.push_str(&format!("<c:axPos val=\"{}\"/>", common.ax_pos.as_str()));
+    emit_gridlines(
+        out,
+        "majorGridlines",
+        common.major_gridlines,
+        common.major_gridlines_obj.as_ref(),
+    );
+    emit_gridlines(
+        out,
+        "minorGridlines",
+        common.minor_gridlines,
+        common.minor_gridlines_obj.as_ref(),
+    );
     if let Some(t) = &common.title {
         emit_title(out, t);
     }
@@ -800,16 +737,10 @@ fn emit_axis_common_pre(out: &mut String, common: &AxisCommon) {
         ));
     }
     if let Some(t) = common.major_tick_mark {
-        out.push_str(&format!(
-            "<c:majorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:majorTickMark val=\"{}\"/>", t.as_str()));
     }
     if let Some(t) = common.minor_tick_mark {
-        out.push_str(&format!(
-            "<c:minorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:minorTickMark val=\"{}\"/>", t.as_str()));
     }
     out.push_str(&format!("<c:crossAx val=\"{}\"/>", common.cross_ax));
 }
@@ -821,10 +752,7 @@ fn emit_category_axis(out: &mut String, c: &CategoryAxis) {
         out.push_str(&format!("<c:lblOffset val=\"{o}\"/>"));
     }
     if let Some(a) = &c.lbl_algn {
-        out.push_str(&format!(
-            "<c:lblAlgn val=\"{}\"/>",
-            xml_escape::attr(a)
-        ));
+        out.push_str(&format!("<c:lblAlgn val=\"{}\"/>", xml_escape::attr(a)));
     }
     out.push_str("</c:catAx>");
 }
@@ -850,12 +778,19 @@ fn emit_value_axis(out: &mut String, v: &ValueAxis) {
     if let Some(d) = v.common.delete {
         out.push_str(&format!("<c:delete val=\"{}\"/>", bool_str(d)));
     }
-    out.push_str(&format!(
-        "<c:axPos val=\"{}\"/>",
-        v.common.ax_pos.as_str()
-    ));
-    emit_gridlines(out, "majorGridlines", v.common.major_gridlines, v.common.major_gridlines_obj.as_ref());
-    emit_gridlines(out, "minorGridlines", v.common.minor_gridlines, v.common.minor_gridlines_obj.as_ref());
+    out.push_str(&format!("<c:axPos val=\"{}\"/>", v.common.ax_pos.as_str()));
+    emit_gridlines(
+        out,
+        "majorGridlines",
+        v.common.major_gridlines,
+        v.common.major_gridlines_obj.as_ref(),
+    );
+    emit_gridlines(
+        out,
+        "minorGridlines",
+        v.common.minor_gridlines,
+        v.common.minor_gridlines_obj.as_ref(),
+    );
     if let Some(t) = &v.common.title {
         emit_title(out, t);
     }
@@ -866,23 +801,14 @@ fn emit_value_axis(out: &mut String, v: &ValueAxis) {
         ));
     }
     if let Some(t) = v.common.major_tick_mark {
-        out.push_str(&format!(
-            "<c:majorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:majorTickMark val=\"{}\"/>", t.as_str()));
     }
     if let Some(t) = v.common.minor_tick_mark {
-        out.push_str(&format!(
-            "<c:minorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:minorTickMark val=\"{}\"/>", t.as_str()));
     }
     out.push_str(&format!("<c:crossAx val=\"{}\"/>", v.common.cross_ax));
     if let Some(c) = &v.crosses {
-        out.push_str(&format!(
-            "<c:crosses val=\"{}\"/>",
-            xml_escape::attr(c)
-        ));
+        out.push_str(&format!("<c:crosses val=\"{}\"/>", xml_escape::attr(c)));
     }
     if let Some(u) = v.major_unit {
         out.push_str(&format!("<c:majorUnit val=\"{}\"/>", fmt_f64(u)));
@@ -911,12 +837,19 @@ fn emit_date_axis(out: &mut String, d: &DateAxis) {
     if let Some(de) = d.common.delete {
         out.push_str(&format!("<c:delete val=\"{}\"/>", bool_str(de)));
     }
-    out.push_str(&format!(
-        "<c:axPos val=\"{}\"/>",
-        d.common.ax_pos.as_str()
-    ));
-    emit_gridlines(out, "majorGridlines", d.common.major_gridlines, d.common.major_gridlines_obj.as_ref());
-    emit_gridlines(out, "minorGridlines", d.common.minor_gridlines, d.common.minor_gridlines_obj.as_ref());
+    out.push_str(&format!("<c:axPos val=\"{}\"/>", d.common.ax_pos.as_str()));
+    emit_gridlines(
+        out,
+        "majorGridlines",
+        d.common.major_gridlines,
+        d.common.major_gridlines_obj.as_ref(),
+    );
+    emit_gridlines(
+        out,
+        "minorGridlines",
+        d.common.minor_gridlines,
+        d.common.minor_gridlines_obj.as_ref(),
+    );
     if let Some(t) = &d.common.title {
         emit_title(out, t);
     }
@@ -927,16 +860,10 @@ fn emit_date_axis(out: &mut String, d: &DateAxis) {
         ));
     }
     if let Some(t) = d.common.major_tick_mark {
-        out.push_str(&format!(
-            "<c:majorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:majorTickMark val=\"{}\"/>", t.as_str()));
     }
     if let Some(t) = d.common.minor_tick_mark {
-        out.push_str(&format!(
-            "<c:minorTickMark val=\"{}\"/>",
-            t.as_str()
-        ));
+        out.push_str(&format!("<c:minorTickMark val=\"{}\"/>", t.as_str()));
     }
     out.push_str(&format!("<c:crossAx val=\"{}\"/>", d.common.cross_ax));
     if let Some(b) = &d.base_time_unit {
@@ -993,10 +920,9 @@ fn fmt_f64(v: f64) -> String {
 mod tests {
     use super::*;
     use crate::model::chart::{
-        Axis, AxisCommon, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind,
-        DataLabels, ErrorBarType, ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker,
-        MarkerSymbol, Reference, ScatterStyle, Series, SeriesTitle, Title, Trendline,
-        TrendlineKind, ValueAxis,
+        Axis, AxisCommon, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels,
+        ErrorBarType, ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker, MarkerSymbol,
+        Reference, ScatterStyle, Series, SeriesTitle, Title, Trendline, TrendlineKind, ValueAxis,
     };
     use crate::model::image::ImageAnchor;
     use quick_xml::events::Event;

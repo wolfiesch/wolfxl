@@ -373,7 +373,10 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
         push_attr(&mut out, "orientation", s);
     }
     if let Some(b) = spec.use_printer_defaults {
-        out.push_str(&format!(" usePrinterDefaults=\"{}\"", if b { "1" } else { "0" }));
+        out.push_str(&format!(
+            " usePrinterDefaults=\"{}\"",
+            if b { "1" } else { "0" }
+        ));
     }
     if let Some(b) = spec.black_and_white {
         out.push_str(&format!(" blackAndWhite=\"{}\"", if b { "1" } else { "0" }));
@@ -385,7 +388,10 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
         push_attr(&mut out, "cellComments", s);
     }
     if let Some(b) = spec.use_first_page_number {
-        out.push_str(&format!(" useFirstPageNumber=\"{}\"", if b { "1" } else { "0" }));
+        out.push_str(&format!(
+            " useFirstPageNumber=\"{}\"",
+            if b { "1" } else { "0" }
+        ));
     }
     if let Some(ref s) = spec.errors {
         push_attr(&mut out, "errors", s);
@@ -403,10 +409,7 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
 /// Emit `<headerFooter>`. Returns empty bytes when the spec is at
 /// construction defaults (no segments + standard flags).
 pub fn emit_header_footer(spec: &HeaderFooterSpec) -> Vec<u8> {
-    let any_text = spec
-        .odd_header
-        .as_ref()
-        .map_or(false, |i| !i.is_empty())
+    let any_text = spec.odd_header.as_ref().map_or(false, |i| !i.is_empty())
         || spec.odd_footer.as_ref().map_or(false, |i| !i.is_empty())
         || spec.even_header.as_ref().map_or(false, |i| !i.is_empty())
         || spec.even_footer.as_ref().map_or(false, |i| !i.is_empty())

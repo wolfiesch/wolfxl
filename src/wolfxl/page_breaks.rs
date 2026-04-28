@@ -13,9 +13,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use wolfxl_writer::parse::page_breaks::{
-    BreakSpec, PageBreakList, SheetFormatProperties,
-};
+use wolfxl_writer::parse::page_breaks::{BreakSpec, PageBreakList, SheetFormatProperties};
 
 // ---------------------------------------------------------------------------
 // QueuedPageBreaks — the patcher's per-sheet queue entry.
@@ -82,16 +80,12 @@ fn parse_page_break_list(d: &Bound<'_, PyDict>) -> PyResult<PageBreakList> {
     let breaks: Vec<BreakSpec> = match d.get_item("breaks")? {
         Some(v) if !v.is_none() => {
             let list = v.downcast::<PyList>().map_err(|_| {
-                PyValueError::new_err(
-                    "queue_page_breaks_update: 'breaks' must be a list or None",
-                )
+                PyValueError::new_err("queue_page_breaks_update: 'breaks' must be a list or None")
             })?;
             let mut out = Vec::with_capacity(list.len());
             for item in list.iter() {
                 let bd = item.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err(
-                        "queue_page_breaks_update: 'breaks' items must be dicts",
-                    )
+                    PyValueError::new_err("queue_page_breaks_update: 'breaks' items must be dicts")
                 })?;
                 out.push(parse_break(bd)?);
             }

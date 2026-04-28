@@ -84,4 +84,3 @@ pub(crate) fn parse_iso_datetime(s: &str) -> Option<NaiveDateTime> {
         .ok()
         .or_else(|| NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f").ok())
 }
-

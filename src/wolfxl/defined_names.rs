@@ -201,8 +201,8 @@ struct WorkbookLayout {
 }
 
 fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
-    let s = std::str::from_utf8(xml)
-        .map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
+    let s =
+        std::str::from_utf8(xml).map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -259,8 +259,8 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         buf.clear();
     }
 
-    let sheets_end = sheets_end
-        .ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
+    let sheets_end =
+        sheets_end.ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
     let outer = match (dn_start, dn_outer_end) {
         (Some(s), Some(e)) => Some((s, e)),
         _ => None,
@@ -408,9 +408,7 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
                     let val = a
                         .unescape_value()
                         .map(|v| v.into_owned())
-                        .unwrap_or_else(|_| {
-                            String::from_utf8_lossy(a.value.as_ref()).into_owned()
-                        });
+                        .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
                     existing_attrs.push((key, val));
                 }
                 break;
@@ -623,7 +621,9 @@ mod tests {
         let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains(r#"<definedName name="Foo">Sheet1!$AA$1</definedName>"#));
-        assert!(text.contains(r#"<definedName name="Foo" localSheetId="0">Sheet1!$B$1</definedName>"#));
+        assert!(
+            text.contains(r#"<definedName name="Foo" localSheetId="0">Sheet1!$B$1</definedName>"#)
+        );
         assert_eq!(text.matches(r#"name="Foo""#).count(), 2);
     }
 
@@ -697,7 +697,8 @@ mod tests {
         }];
         let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
         let text = std::str::from_utf8(&bytes).unwrap();
-        assert!(text.contains(r#"<definedName name="S1Range" localSheetId="1">Sheet2!$A$1</definedName>"#));
+        assert!(text
+            .contains(r#"<definedName name="S1Range" localSheetId="1">Sheet2!$A$1</definedName>"#));
     }
 
     #[test]

@@ -361,7 +361,9 @@ fn insert_hidden_only_rows(xml: &[u8], rows: &[u32]) -> PyResult<Vec<u8>> {
                         .write_event(Event::Start(e.borrow()))
                         .map_err(|e| PyErr::new::<PyIOError, _>(format!("w: {e}")))?;
                 } else if local_owned == b"row" && in_sheet_data {
-                    let r = attr_value(&e, b"r").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    let r = attr_value(&e, b"r")
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
                     // Emit any pending rows BEFORE this one.
                     for &p in &sorted {
                         if p < r && !emitted.contains(&p) {
@@ -381,7 +383,9 @@ fn insert_hidden_only_rows(xml: &[u8], rows: &[u32]) -> PyResult<Vec<u8>> {
             Event::Empty(e) => {
                 let local_owned = e.local_name().as_ref().to_vec();
                 if local_owned == b"row" && in_sheet_data {
-                    let r = attr_value(&e, b"r").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    let r = attr_value(&e, b"r")
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .unwrap_or(0);
                     for &p in &sorted {
                         if p < r && !emitted.contains(&p) {
                             write_hidden_row(&mut writer, p)?;
@@ -439,10 +443,7 @@ fn insert_hidden_only_rows(xml: &[u8], rows: &[u32]) -> PyResult<Vec<u8>> {
     Ok(writer.into_inner())
 }
 
-fn write_hidden_row<W: std::io::Write>(
-    writer: &mut XmlWriter<W>,
-    row_num: u32,
-) -> PyResult<()> {
+fn write_hidden_row<W: std::io::Write>(writer: &mut XmlWriter<W>, row_num: u32) -> PyResult<()> {
     let mut start = quick_xml::events::BytesStart::new("row");
     let r_str = row_num.to_string();
     start.push_attribute(("r", r_str.as_str()));

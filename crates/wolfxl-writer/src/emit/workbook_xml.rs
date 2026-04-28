@@ -4,8 +4,8 @@
 //! and a handful of fixed metadata elements that Excel requires.
 
 use crate::model::defined_name::BuiltinName;
-use crate::model::worksheet::SheetVisibility;
 use crate::model::workbook::Workbook;
+use crate::model::worksheet::SheetVisibility;
 use crate::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
 use crate::refs::quote_sheet_name_if_needed;
 use crate::xml_escape;
@@ -195,7 +195,10 @@ mod tests {
             text.contains("<sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/>"),
             "{text}"
         );
-        assert!(!text.contains("<definedNames>"), "no defined names expected: {text}");
+        assert!(
+            !text.contains("<definedNames>"),
+            "no defined names expected: {text}"
+        );
     }
 
     // 2. Multiple sheets numbered correctly.
@@ -340,7 +343,10 @@ mod tests {
         let text = text_of(&bytes);
         assert!(text.contains("name=\"A &amp; B\""), "{text}");
         // Raw ampersand must not appear inside attributes.
-        assert!(!text.contains("name=\"A & B\""), "raw & in attribute: {text}");
+        assert!(
+            !text.contains("name=\"A & B\""),
+            "raw & in attribute: {text}"
+        );
     }
 
     // 10. Formula text content is text-escaped.
@@ -478,7 +484,9 @@ mod tests {
         parse_ok(&bytes);
         let text = text_of(&bytes);
         let pr = text.find("<workbookPr ").expect("workbookPr present");
-        let prot = text.find("<workbookProtection ").expect("workbookProtection present");
+        let prot = text
+            .find("<workbookProtection ")
+            .expect("workbookProtection present");
         let bv = text.find("<bookViews>").expect("bookViews present");
         assert!(pr < prot, "workbookProtection must come AFTER workbookPr");
         assert!(prot < bv, "workbookProtection must come BEFORE bookViews");

@@ -35,8 +35,7 @@ use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use wolfxl_pivot::emit::{
-    slicer_cache_xml, slicer_xml, sheet_slicer_list_inner_xml,
-    workbook_slicer_caches_inner_xml,
+    sheet_slicer_list_inner_xml, slicer_cache_xml, slicer_xml, workbook_slicer_caches_inner_xml,
 };
 use wolfxl_pivot::model::slicer::Slicer;
 use wolfxl_pivot::model::slicer_cache::SlicerCache;
@@ -92,11 +91,10 @@ pub fn splice_workbook_slicer_caches(
         .map(|e| (e.name.clone(), e.rid.clone()))
         .collect();
     let inner = workbook_slicer_caches_inner_xml(&pairs);
-    let inner_str = std::str::from_utf8(&inner)
-        .map_err(|e| format!("slicer_caches inner not utf8: {e}"))?;
+    let inner_str =
+        std::str::from_utf8(&inner).map_err(|e| format!("slicer_caches inner not utf8: {e}"))?;
 
-    let s = std::str::from_utf8(workbook_xml)
-        .map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+    let s = std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
 
     // Build the wrapped <ext> fragment — the <ext> wrapper carries
     // the URI and x14 namespace declaration so splicing into either
@@ -142,16 +140,12 @@ pub fn splice_workbook_slicer_caches(
 /// pointing at one slicer-presentation rel id.
 ///
 /// Mirrors `splice_workbook_slicer_caches` for placement.
-pub fn splice_sheet_slicer_list(
-    sheet_xml: &[u8],
-    slicer_rid: &str,
-) -> Result<Vec<u8>, String> {
+pub fn splice_sheet_slicer_list(sheet_xml: &[u8], slicer_rid: &str) -> Result<Vec<u8>, String> {
     let inner = sheet_slicer_list_inner_xml(slicer_rid);
-    let inner_str = std::str::from_utf8(&inner)
-        .map_err(|e| format!("slicer_list inner not utf8: {e}"))?;
+    let inner_str =
+        std::str::from_utf8(&inner).map_err(|e| format!("slicer_list inner not utf8: {e}"))?;
 
-    let s = std::str::from_utf8(sheet_xml)
-        .map_err(|e| format!("sheet xml not utf8: {e}"))?;
+    let s = std::str::from_utf8(sheet_xml).map_err(|e| format!("sheet xml not utf8: {e}"))?;
 
     let ext_fragment = format!(
         r#"<ext uri="{uri}" xmlns:x14="{ns}" xmlns:r="{rels}">{inner}</ext>"#,
@@ -339,7 +333,10 @@ mod tests {
         let out = splice_workbook_slicer_caches(xml, &entries).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains("<extLst>"), "output missing <extLst>: {s}");
-        assert!(s.contains("<x14:slicerCaches"), "output missing x14:slicerCaches: {s}");
+        assert!(
+            s.contains("<x14:slicerCaches"),
+            "output missing x14:slicerCaches: {s}"
+        );
         assert!(s.contains("r:id=\"rId7\""));
     }
 
@@ -400,7 +397,10 @@ mod tests {
         let mut c = SlicerPartCounters::new();
         let out = drain_one(&q, &mut c);
         assert_eq!(out.cache_part_path, "xl/slicerCaches/slicerCache1.xml");
-        assert_eq!(out.cache_rels_part_path, "xl/slicerCaches/_rels/slicerCache1.xml.rels");
+        assert_eq!(
+            out.cache_rels_part_path,
+            "xl/slicerCaches/_rels/slicerCache1.xml.rels"
+        );
         assert_eq!(out.slicer_part_path, "xl/slicers/slicer1.xml");
         assert!(!out.cache_xml.is_empty());
         assert!(!out.slicer_xml.is_empty());

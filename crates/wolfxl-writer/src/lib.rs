@@ -59,11 +59,11 @@ pub use model::worksheet::Worksheet;
 /// are added) — calling `emit_xlsx` twice on the same workbook produces
 /// the same archive both times.
 pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
+    use crate::emit::drawings::DrawingItem;
     use crate::emit::{
         calc_chain_xml, charts, comments_xml, content_types, doc_props, drawings, drawings_vml,
         rels, shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
     };
-    use crate::emit::drawings::DrawingItem;
     use crate::zip::{package, ZipEntry};
 
     // Sheet emission mutates the SST — must run before the SST emitter.
@@ -173,18 +173,14 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
         let (drawing_rels_bytes, image_rids, chart_rids) =
             rels::emit_drawing_rels_with_charts(sheet, &image_indices, &chart_indices);
         entries.push(ZipEntry {
-            path: format!(
-                "xl/drawings/_rels/drawing{}.xml.rels",
-                global_drawing_idx
-            ),
+            path: format!("xl/drawings/_rels/drawing{}.xml.rels", global_drawing_idx),
             bytes: drawing_rels_bytes,
         });
 
         // Build a unified DrawingItem list (images first, then charts —
         // matches the drawing-rels rId order).
-        let mut items: Vec<DrawingItem> = Vec::with_capacity(
-            sheet.images.len() + sheet.charts.len(),
-        );
+        let mut items: Vec<DrawingItem> =
+            Vec::with_capacity(sheet.images.len() + sheet.charts.len());
         for (img, rid) in sheet.images.iter().zip(image_rids.iter()) {
             items.push(DrawingItem::Image {
                 image: img.clone(),

@@ -127,9 +127,7 @@ impl PartIdAllocator {
             self.bump(Counter::Chart, n);
         } else if let Some(n) = parse_n(path, "xl/pivotTables/pivotTable", ".xml") {
             self.bump(Counter::PivotTable, n);
-        } else if let Some(n) =
-            parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml")
-        {
+        } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml") {
             self.bump(Counter::PivotCache, n);
         } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheRecords", ".xml") {
             // Records share the cache counter (cache N = records N).

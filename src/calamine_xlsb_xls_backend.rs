@@ -145,10 +145,8 @@ fn resolve_window(
             let parts: Vec<&str> = clean.split(':').collect();
             let a = parts[0];
             let b = if parts.len() > 1 { parts[1] } else { a };
-            let (r0, c0) =
-                a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-            let (r1, c1) =
-                a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+            let (r0, c0) = a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+            let (r1, c1) = a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
             return Ok(Some((r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1))));
         }
     }
@@ -171,7 +169,9 @@ fn resolve_window(
 pub fn classify_file_format(py: Python<'_>, input: &Bound<'_, PyAny>) -> PyResult<String> {
     let _ = py;
     if let Ok(b) = input.cast::<PyBytes>() {
-        return Ok(classify_file_format_bytes(b.as_bytes()).as_str().to_string());
+        return Ok(classify_file_format_bytes(b.as_bytes())
+            .as_str()
+            .to_string());
     }
     if let Ok(s) = input.extract::<String>() {
         return Ok(classify_file_format_path(&s).as_str().to_string());
@@ -239,9 +239,7 @@ macro_rules! define_calamine_book {
                     return Ok(());
                 }
                 let range = self.workbook.worksheet_range(sheet).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!(
-                        "Failed to read sheet {sheet}: {e:?}"
-                    ))
+                    PyErr::new::<PyIOError, _>(format!("Failed to read sheet {sheet}: {e:?}"))
                 })?;
                 self.range_cache.insert(sheet.to_string(), range);
 
@@ -263,9 +261,8 @@ macro_rules! define_calamine_book {
             /// Open a workbook from a filesystem path.
             #[staticmethod]
             pub fn open(path: &str) -> PyResult<Self> {
-                let f = File::open(path).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}"))
-                })?;
+                let f = File::open(path)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}")))?;
                 let source = $SourceTy::File(BufReader::new(f));
                 let wb = $new_fn(source)?;
                 let names = wb.sheet_names().to_vec();
@@ -313,10 +310,7 @@ macro_rules! define_calamine_book {
             /// or `None` for empty sheets.  Mirrors the xlsx
             /// `read_sheet_dimensions` shape (1-based max-row,
             /// max-col).
-            pub fn read_sheet_dimensions(
-                &mut self,
-                sheet: &str,
-            ) -> PyResult<Option<(u32, u32)>> {
+            pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
                 self.ensure_sheet_exists(sheet)?;
                 self.ensure_value_caches(sheet)?;
                 let range = self.range_cache.get(sheet).unwrap();
@@ -411,8 +405,7 @@ macro_rules! define_calamine_book {
                 a1: &str,
                 data_only: bool,
             ) -> PyResult<PyObject> {
-                let (row, col) =
-                    a1_to_row_col(a1).map_err(|m| PyErr::new::<PyValueError, _>(m))?;
+                let (row, col) = a1_to_row_col(a1).map_err(|m| PyErr::new::<PyValueError, _>(m))?;
                 self.ensure_sheet_exists(sheet)?;
                 self.ensure_value_caches(sheet)?;
                 if !data_only {
@@ -463,12 +456,7 @@ macro_rules! define_calamine_book {
             pub fn read_cell_border(&self, _row: u32, _col: u32, _sheet: &str) -> PyResult<()> {
                 styles_unsupported($format_name)
             }
-            pub fn read_cell_alignment(
-                &self,
-                _row: u32,
-                _col: u32,
-                _sheet: &str,
-            ) -> PyResult<()> {
+            pub fn read_cell_alignment(&self, _row: u32, _col: u32, _sheet: &str) -> PyResult<()> {
                 styles_unsupported($format_name)
             }
             pub fn read_cell_number_format(

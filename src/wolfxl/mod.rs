@@ -8,23 +8,23 @@
 //!
 //! This makes modify-and-save O(modified data) instead of O(entire file).
 
+#[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
+pub mod ancillary;
+pub mod comments;
+pub mod conditional_formatting;
+pub mod content_types;
+pub mod defined_names;
+#[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
+pub mod hyperlinks;
+pub mod properties;
 #[allow(dead_code)] // SST parser used in Phase 3 (format patching reads existing styles)
 pub mod shared_strings;
+pub mod sheet_order;
 pub mod sheet_patcher;
 #[allow(dead_code)] // Styles parser/appender used in Phase 3 (format patching)
 pub mod styles;
-pub mod conditional_formatting;
-pub mod validations;
-pub mod content_types;
-#[allow(dead_code)] // RFC-013: registry is scaffolding-only; first caller is RFC-022
-pub mod ancillary;
-pub mod properties;
-#[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
-pub mod hyperlinks;
-pub mod defined_names;
-pub mod sheet_order;
 pub mod tables;
-pub mod comments;
+pub mod validations;
 // RFC-035 Pod-β: Phase 2.7 (do_save) consumes plan_sheet_copy from this re-export.
 pub mod sheet_copy;
 // Sprint Θ Pod-C3: Phase 2.8 (do_save) rebuilds xl/calcChain.xml.
@@ -653,9 +653,7 @@ impl XlsxPatcher {
             "data_table" => {
                 let ref_range: String = payload
                     .get_item("ref")?
-                    .ok_or_else(|| {
-                        PyErr::new::<PyValueError, _>("data_table kind needs 'ref'")
-                    })?
+                    .ok_or_else(|| PyErr::new::<PyValueError, _>("data_table kind needs 'ref'"))?
                     .extract()?;
                 let ca: bool = payload
                     .get_item("ca")?
@@ -672,12 +670,8 @@ impl XlsxPatcher {
                     .map(|v| v.extract::<bool>())
                     .transpose()?
                     .unwrap_or(false);
-                let r1: Option<String> = payload
-                    .get_item("r1")?
-                    .and_then(|v| v.extract().ok());
-                let r2: Option<String> = payload
-                    .get_item("r2")?
-                    .and_then(|v| v.extract().ok());
+                let r1: Option<String> = payload.get_item("r1")?.and_then(|v| v.extract().ok());
+                let r2: Option<String> = payload.get_item("r2")?.and_then(|v| v.extract().ok());
                 CellValue::DataTableFormula {
                     ref_range,
                     ca,
@@ -806,11 +800,7 @@ impl XlsxPatcher {
     /// `payload` is a dict of openpyxl-shaped fields. `sqref` is required;
     /// every other key is optional. Booleans default to `false`. Unknown
     /// keys are ignored to keep the Python side forward-compatible.
-    fn queue_data_validation(
-        &mut self,
-        sheet: &str,
-        payload: &Bound<'_, PyDict>,
-    ) -> PyResult<()> {
+    fn queue_data_validation(&mut self, sheet: &str, payload: &Bound<'_, PyDict>) -> PyResult<()> {
         let sqref = extract_str(payload, "sqref")?
             .ok_or_else(|| PyErr::new::<PyValueError, _>("data validation requires 'sqref'"))?;
 
@@ -865,12 +855,13 @@ impl XlsxPatcher {
         sheet: &str,
         payload: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
-        let sqref = extract_str(payload, "sqref")?
-            .ok_or_else(|| PyErr::new::<PyValueError, _>("conditional formatting requires 'sqref'"))?;
+        let sqref = extract_str(payload, "sqref")?.ok_or_else(|| {
+            PyErr::new::<PyValueError, _>("conditional formatting requires 'sqref'")
+        })?;
 
-        let rules_obj = payload
-            .get_item("rules")?
-            .ok_or_else(|| PyErr::new::<PyValueError, _>("conditional formatting requires 'rules'"))?;
+        let rules_obj = payload.get_item("rules")?.ok_or_else(|| {
+            PyErr::new::<PyValueError, _>("conditional formatting requires 'rules'")
+        })?;
         let rules_list = rules_obj
             .downcast::<pyo3::types::PyList>()
             .map_err(|_| PyErr::new::<PyValueError, _>("'rules' must be a list of dicts"))?;
@@ -974,12 +965,12 @@ impl XlsxPatcher {
     /// `(name, local_sheet_id)` — two entries with the same name but
     /// different scopes coexist independently.
     fn queue_defined_name(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
-        let name = extract_str(payload, "name")?
-            .ok_or_else(|| PyErr::new::<PyValueError, _>("queue_defined_name: 'name' is required"))?;
-        let formula = extract_str(payload, "formula")?
-            .ok_or_else(|| PyErr::new::<PyValueError, _>(
-                "queue_defined_name: 'formula' is required",
-            ))?;
+        let name = extract_str(payload, "name")?.ok_or_else(|| {
+            PyErr::new::<PyValueError, _>("queue_defined_name: 'name' is required")
+        })?;
+        let formula = extract_str(payload, "formula")?.ok_or_else(|| {
+            PyErr::new::<PyValueError, _>("queue_defined_name: 'formula' is required")
+        })?;
         let local_sheet_id = match payload.get_item("local_sheet_id")? {
             Some(v) if !v.is_none() => Some(v.extract::<u32>()?),
             _ => None,
@@ -989,13 +980,14 @@ impl XlsxPatcher {
             _ => None,
         };
         let comment = extract_str(payload, "comment")?;
-        self.queued_defined_names.push(defined_names::DefinedNameMut {
-            name,
-            formula,
-            local_sheet_id,
-            hidden,
-            comment,
-        });
+        self.queued_defined_names
+            .push(defined_names::DefinedNameMut {
+                name,
+                formula,
+                local_sheet_id,
+                hidden,
+                comment,
+            });
         Ok(())
     }
 
@@ -1302,12 +1294,11 @@ impl XlsxPatcher {
     ) -> PyResult<u32> {
         let cache_id = self.next_pivot_cache_id;
         self.next_pivot_cache_id += 1;
-        self.queued_pivot_caches
-            .push(pivot::QueuedPivotCacheAdd {
-                cache_def_xml,
-                cache_records_xml,
-                cache_id,
-            });
+        self.queued_pivot_caches.push(pivot::QueuedPivotCacheAdd {
+            cache_def_xml,
+            cache_records_xml,
+            cache_id,
+        });
         Ok(cache_id)
     }
 
@@ -1343,11 +1334,7 @@ impl XlsxPatcher {
     /// `dict` is the §10 dict shape produced by
     /// `Worksheet.auto_filter.to_rust_dict()`. Drained by Phase 2.5o
     /// during `do_save` (sequenced AFTER pivots, BEFORE cells).
-    fn queue_autofilter(
-        &mut self,
-        sheet: &str,
-        dict: &Bound<'_, PyDict>,
-    ) -> PyResult<()> {
+    fn queue_autofilter(&mut self, sheet: &str, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         if !self.sheet_paths.contains_key(sheet) {
             return Err(PyValueError::new_err(format!(
                 "queue_autofilter: no such sheet: {sheet}"
@@ -1441,13 +1428,7 @@ impl XlsxPatcher {
     /// Drained by Phase 2.5i during `do_save`. Order is append order
     /// — multi-op sequencing matters (each op runs in the coordinate
     /// space produced by the previous op).
-    fn queue_axis_shift(
-        &mut self,
-        sheet: &str,
-        axis: &str,
-        idx: u32,
-        n: i32,
-    ) -> PyResult<()> {
+    fn queue_axis_shift(&mut self, sheet: &str, axis: &str, idx: u32, n: i32) -> PyResult<()> {
         if axis != "row" && axis != "col" {
             return Err(PyErr::new::<PyValueError, _>(format!(
                 "queue_axis_shift: axis must be 'row' or 'col', got '{axis}'"
@@ -1649,14 +1630,12 @@ impl XlsxPatcher {
         value: &str,
     ) -> PyResult<()> {
         let op = match kind {
-            "add_override" => content_types::ContentTypeOp::AddOverride(
-                key.to_string(),
-                value.to_string(),
-            ),
-            "ensure_default" => content_types::ContentTypeOp::EnsureDefault(
-                key.to_string(),
-                value.to_string(),
-            ),
+            "add_override" => {
+                content_types::ContentTypeOp::AddOverride(key.to_string(), value.to_string())
+            }
+            "ensure_default" => {
+                content_types::ContentTypeOp::EnsureDefault(key.to_string(), value.to_string())
+            }
             other => {
                 return Err(PyErr::new::<PyValueError, _>(format!(
                     "unknown ContentTypeOp kind '{other}' (expected 'add_override' or 'ensure_default')"
@@ -1768,10 +1747,7 @@ impl XlsxPatcher {
     /// Run `extract_hyperlinks` on the source ZIP's current sheet XML
     /// and return `(coord, target_or_location)` pairs in BTreeMap order
     /// for assertion in pytest.
-    fn _test_get_extracted_hyperlinks(
-        &mut self,
-        sheet: &str,
-    ) -> PyResult<Vec<(String, String)>> {
+    fn _test_get_extracted_hyperlinks(&mut self, sheet: &str) -> PyResult<Vec<(String, String)>> {
         let sheet_path = self
             .sheet_paths
             .get(sheet)
@@ -1789,10 +1765,7 @@ impl XlsxPatcher {
         Ok(extracted
             .into_iter()
             .map(|(coord, h)| {
-                let val = h
-                    .target
-                    .or(h.location)
-                    .unwrap_or_default();
+                let val = h.target.or(h.location).unwrap_or_default();
                 (coord, val)
             })
             .collect())
@@ -1810,8 +1783,7 @@ impl XlsxPatcher {
 /// `wolfxl_rels::rels_path_for`; falls back to a synthesized path on
 /// the (impossible-in-OOXML) input that has no `/`.
 fn sheet_rels_path_for(sheet_path: &str) -> String {
-    wolfxl_rels::rels_path_for(sheet_path)
-        .unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
+    wolfxl_rels::rels_path_for(sheet_path).unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
 }
 
 /// Parse the trailing integer N out of an OOXML part path like
@@ -1828,10 +1800,7 @@ fn parse_n_from_part_path(path: &str, prefix: &str, suffix: &str) -> Option<u32>
 /// Other read/parse errors propagate as `PyIOError`. Constrained to
 /// `ZipArchive<File>` because `ooxml_util::zip_read_to_string_opt` is
 /// not generic; matches every caller in this module.
-fn load_or_empty_rels(
-    zip: &mut ZipArchive<File>,
-    path: &str,
-) -> PyResult<RelsGraph> {
+fn load_or_empty_rels(zip: &mut ZipArchive<File>, path: &str) -> PyResult<RelsGraph> {
     match ooxml_util::zip_read_to_string_opt(zip, path)? {
         Some(xml) => RelsGraph::parse(xml.as_bytes())
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse for '{path}': {e}"))),
@@ -2318,9 +2287,7 @@ impl XlsxPatcher {
                     .entry(sheet_name.clone())
                     .or_default();
                 for (part_name, ct) in result.new_content_types {
-                    ct_ops_for_sheet.push(content_types::ContentTypeOp::AddOverride(
-                        part_name, ct,
-                    ));
+                    ct_ops_for_sheet.push(content_types::ContentTypeOp::AddOverride(part_name, ct));
                 }
                 if !result.table_parts_block.is_empty() {
                     local_blocks
@@ -2391,11 +2358,7 @@ impl XlsxPatcher {
                     ))
                 })?;
             let (existing_comments_path, existing_vml_path) = {
-                let anc = self
-                    .ancillary
-                    .get(sheet_name)
-                    .cloned()
-                    .unwrap_or_default();
+                let anc = self.ancillary.get(sheet_name).cloned().unwrap_or_default();
                 (anc.comments_part, anc.vml_drawing_part)
             };
             if !self.rels_patches.contains_key(&rels_path) {
@@ -2405,15 +2368,11 @@ impl XlsxPatcher {
 
             // Read existing parts (if any) before we mutate the rels graph.
             let existing_comments_xml: Option<Vec<u8>> = match &existing_comments_path {
-                Some(p) => Some(
-                    ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes(),
-                ),
+                Some(p) => Some(ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes()),
                 None => None,
             };
             let existing_vml_xml: Option<Vec<u8>> = match &existing_vml_path {
-                Some(p) => Some(
-                    ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes(),
-                ),
+                Some(p) => Some(ooxml_util::zip_read_to_string(&mut zip, p)?.into_bytes()),
                 None => None,
             };
             let sheet_xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
@@ -2537,11 +2496,7 @@ impl XlsxPatcher {
         // `file_patches`. Sheet rels mutations land in
         // `rels_patches` which is serialized in the final emit pass.
         if !self.queued_images.is_empty() {
-            self.apply_image_adds_phase(
-                &mut file_patches,
-                &mut zip,
-                &mut part_id_allocator,
-            )?;
+            self.apply_image_adds_phase(&mut file_patches, &mut zip, &mut part_id_allocator)?;
         }
 
         // --- Phase 2.5l: Chart adds (Sprint Μ Pod-γ / RFC-046) ---
@@ -2559,11 +2514,7 @@ impl XlsxPatcher {
         // Phase 2.5l runs BEFORE Phase 3 so cell-range formulas in
         // chart XML can compose with cell rewrites in the same save.
         if !self.queued_charts.is_empty() {
-            self.apply_chart_adds_phase(
-                &mut file_patches,
-                &mut zip,
-                &mut part_id_allocator,
-            )?;
+            self.apply_chart_adds_phase(&mut file_patches, &mut zip, &mut part_id_allocator)?;
         }
 
         // --- Phase 2.5m: Pivot adds (Sprint Ν Pod-γ / RFC-047 + RFC-048) ---
@@ -2607,8 +2558,7 @@ impl XlsxPatcher {
         // coordinator on the Python side; the patcher just stashes
         // the strings on the queue for now.
         if !self.queued_sheet_setup.is_empty() {
-            let sheet_titles: Vec<String> =
-                self.queued_sheet_setup.keys().cloned().collect();
+            let sheet_titles: Vec<String> = self.queued_sheet_setup.keys().cloned().collect();
             for sheet_title in &sheet_titles {
                 let queued = match self.queued_sheet_setup.get(sheet_title) {
                     Some(q) => q.clone(),
@@ -2634,8 +2584,7 @@ impl XlsxPatcher {
                     }
                 }
                 if let Some(s) = &specs.sheet_protection {
-                    let bytes =
-                        wolfxl_writer::parse::sheet_setup::emit_sheet_protection(s);
+                    let bytes = wolfxl_writer::parse::sheet_setup::emit_sheet_protection(s);
                     if !bytes.is_empty() {
                         local_blocks
                             .entry(sheet_path.clone())
@@ -2689,8 +2638,7 @@ impl XlsxPatcher {
         // merger handles ECMA-376 §18.3.1.99 ordering (slots 4 /
         // 24 / 25).
         if !self.queued_page_breaks.is_empty() {
-            let sheet_titles: Vec<String> =
-                self.queued_page_breaks.keys().cloned().collect();
+            let sheet_titles: Vec<String> = self.queued_page_breaks.keys().cloned().collect();
             for sheet_title in &sheet_titles {
                 let queued = match self.queued_page_breaks.get(sheet_title) {
                     Some(q) => q.clone(),
@@ -2702,8 +2650,7 @@ impl XlsxPatcher {
                 };
 
                 if let Some(spec) = &queued.sheet_format {
-                    let bytes =
-                        wolfxl_writer::parse::page_breaks::emit_sheet_format_pr(spec);
+                    let bytes = wolfxl_writer::parse::page_breaks::emit_sheet_format_pr(spec);
                     if !bytes.is_empty() {
                         local_blocks
                             .entry(sheet_path.clone())
@@ -2822,11 +2769,7 @@ impl XlsxPatcher {
                 // to the data rows only.
                 let data_start = start_row + 1;
                 let rows_data = autofilter_helpers::extract_cell_grid(
-                    &xml_bytes,
-                    data_start,
-                    end_row,
-                    start_col,
-                    end_col,
+                    &xml_bytes, data_start, end_row, start_col, end_col,
                 )?;
 
                 // Drain.
@@ -2962,13 +2905,13 @@ impl XlsxPatcher {
             if !sec.is_empty() {
                 let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
                     Some(b) => b.clone(),
-                    None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
-                        .into_bytes(),
+                    None => {
+                        ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?.into_bytes()
+                    }
                 };
-                let updated = security::merge_workbook_security(&wb_bytes, sec)
-                    .map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("workbook-security merge: {e}"))
-                    })?;
+                let updated = security::merge_workbook_security(&wb_bytes, sec).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("workbook-security merge: {e}"))
+                })?;
                 workbook_xml_in_progress = Some(updated);
             }
         }
@@ -3002,15 +2945,13 @@ impl XlsxPatcher {
                 Some(b) => b,
                 None => match file_patches.get("xl/workbook.xml") {
                     Some(b) => b.clone(),
-                    None => ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?
-                        .into_bytes(),
+                    None => {
+                        ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?.into_bytes()
+                    }
                 },
             };
-            let result = sheet_order::merge_sheet_moves(
-                &wb_bytes,
-                &self.queued_sheet_moves,
-            )
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet-reorder merge: {e}")))?;
+            let result = sheet_order::merge_sheet_moves(&wb_bytes, &self.queued_sheet_moves)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet-reorder merge: {e}")))?;
             workbook_xml_in_progress = Some(result.workbook_xml);
             self.sheet_order = result.new_order;
         }
@@ -3037,11 +2978,9 @@ impl XlsxPatcher {
                     s.into_bytes()
                 }
             };
-            let updated = defined_names::merge_defined_names(
-                &wb_xml_bytes,
-                &self.queued_defined_names,
-            )
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("defined-names merge: {e}")))?;
+            let updated =
+                defined_names::merge_defined_names(&wb_xml_bytes, &self.queued_defined_names)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("defined-names merge: {e}")))?;
             file_patches.insert("xl/workbook.xml".to_string(), updated);
         } else if let Some(bytes) = workbook_xml_in_progress.take() {
             // No defined-names work, but Phase 2.5h produced a workbook
@@ -3103,8 +3042,8 @@ impl XlsxPatcher {
         }
         if !content_type_ops.is_empty() {
             let ct_xml = ooxml_util::zip_read_to_string(&mut zip, "[Content_Types].xml")?;
-            let mut graph = content_types::ContentTypesGraph::parse(ct_xml.as_bytes())
-                .map_err(|e| {
+            let mut graph =
+                content_types::ContentTypesGraph::parse(ct_xml.as_bytes()).map_err(|e| {
                     PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}"))
                 })?;
             for op in &content_type_ops {
@@ -3142,7 +3081,8 @@ impl XlsxPatcher {
             if core_in_source {
                 file_patches.insert("docProps/core.xml".into(), core_bytes);
             } else {
-                self.file_adds.insert("docProps/core.xml".into(), core_bytes);
+                self.file_adds
+                    .insert("docProps/core.xml".into(), core_bytes);
             }
             if app_in_source {
                 file_patches.insert("docProps/app.xml".into(), app_bytes);
@@ -3305,9 +3245,8 @@ impl XlsxPatcher {
                 let opts = SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated)
                     .last_modified_time(dt);
-                out.start_file(new_path, opts).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}"))
-                })?;
+                out.start_file(new_path, opts)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
                 out.write_all(bytes)
                     .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
             }
@@ -3353,11 +3292,7 @@ impl XlsxPatcher {
         let drained: Vec<(String, Vec<QueuedImageAdd>)> = self
             .sheet_order
             .iter()
-            .filter_map(|s| {
-                self.queued_images
-                    .remove(s)
-                    .map(|v| (s.clone(), v))
-            })
+            .filter_map(|s| self.queued_images.remove(s).map(|v| (s.clone(), v)))
             .collect();
         if drained.is_empty() {
             // Defensive — should be unreachable since the caller checked.
@@ -3369,13 +3304,9 @@ impl XlsxPatcher {
             if queued.is_empty() {
                 continue;
             }
-            let sheet_path = self
-                .sheet_paths
-                .get(&sheet_name)
-                .cloned()
-                .ok_or_else(|| {
-                    PyValueError::new_err(format!("queue_image_add: no such sheet: {sheet_name}"))
-                })?;
+            let sheet_path = self.sheet_paths.get(&sheet_name).cloned().ok_or_else(|| {
+                PyValueError::new_err(format!("queue_image_add: no such sheet: {sheet_name}"))
+            })?;
 
             // 1. Get sheet rels graph (from rels_patches → file_adds → ZIP).
             let sheet_rels_path = format!(
@@ -3383,22 +3314,19 @@ impl XlsxPatcher {
                 sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                 sheet_path.rsplit('/').next().unwrap_or("")
             );
-            let mut rels_graph: wolfxl_rels::RelsGraph = if let Some(g) =
-                self.rels_patches.get(&sheet_rels_path)
-            {
-                g.clone()
-            } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
-                })?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
-                    })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+            let mut rels_graph: wolfxl_rels::RelsGraph =
+                if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
+                    g.clone()
+                } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
+                    wolfxl_rels::RelsGraph::parse(bytes)
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
+                } else {
+                    match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                            .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
+                        None => wolfxl_rels::RelsGraph::new(),
+                    }
+                };
 
             // 2. Reject if drawing rel already exists.
             for r in rels_graph.iter() {
@@ -3417,15 +3345,16 @@ impl XlsxPatcher {
 
             // 3. Allocate part suffixes.
             let drawing_n = part_id_allocator.alloc_drawing();
-            let image_indices: Vec<u32> =
-                queued.iter().map(|_| part_id_allocator.alloc_image()).collect();
+            let image_indices: Vec<u32> = queued
+                .iter()
+                .map(|_| part_id_allocator.alloc_image())
+                .collect();
 
             // 4. Synthesize drawing part XML + rels.
             let drawing_xml = build_drawing_xml(&queued);
             let drawing_rels_xml = build_drawing_rels_xml(&queued, &image_indices);
             let drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
-            let drawing_rels_path =
-                format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
+            let drawing_rels_path = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
             self.file_adds
                 .insert(drawing_path.clone(), drawing_xml.into_bytes());
             self.file_adds
@@ -3458,8 +3387,7 @@ impl XlsxPatcher {
             // 7. Queue content-type ops.
             //    - one Default Extension per distinct extension
             //    - one Override per drawing part
-            let mut seen_exts: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
+            let mut seen_exts: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut ops: Vec<content_types::ContentTypeOp> = Vec::new();
             for img in &queued {
                 if seen_exts.insert(img.ext.clone()) {
@@ -3531,15 +3459,9 @@ impl XlsxPatcher {
             if queued.is_empty() {
                 continue;
             }
-            let sheet_path = self
-                .sheet_paths
-                .get(&sheet_name)
-                .cloned()
-                .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "queue_chart_add: no such sheet: {sheet_name}"
-                    ))
-                })?;
+            let sheet_path = self.sheet_paths.get(&sheet_name).cloned().ok_or_else(|| {
+                PyValueError::new_err(format!("queue_chart_add: no such sheet: {sheet_name}"))
+            })?;
 
             // 1. Get sheet rels graph (rels_patches → file_adds → ZIP).
             let sheet_rels_path = format!(
@@ -3547,23 +3469,19 @@ impl XlsxPatcher {
                 sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
                 sheet_path.rsplit('/').next().unwrap_or("")
             );
-            let mut sheet_rels: wolfxl_rels::RelsGraph = if let Some(g) =
-                self.rels_patches.get(&sheet_rels_path)
-            {
-                g.clone()
-            } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
-                })?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                        .map_err(|e| {
-                            PyErr::new::<PyIOError, _>(format!("rels parse: {e}"))
-                        })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+            let mut sheet_rels: wolfxl_rels::RelsGraph =
+                if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
+                    g.clone()
+                } else if let Some(bytes) = self.file_adds.get(&sheet_rels_path) {
+                    wolfxl_rels::RelsGraph::parse(bytes)
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
+                } else {
+                    match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                            .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
+                        None => wolfxl_rels::RelsGraph::new(),
+                    }
+                };
 
             // 2. Probe for existing drawing rel + drawing path.
             let mut existing_drawing_target: Option<String> = None;
@@ -3575,16 +3493,17 @@ impl XlsxPatcher {
             }
 
             // Allocate one chart part per queued chart.
-            let chart_indices: Vec<u32> =
-                queued.iter().map(|_| part_id_allocator.alloc_chart()).collect();
+            let chart_indices: Vec<u32> = queued
+                .iter()
+                .map(|_| part_id_allocator.alloc_chart())
+                .collect();
 
             // Pre-content-type ops accumulator for this sheet.
             let mut ct_ops: Vec<content_types::ContentTypeOp> = Vec::new();
             for &n in &chart_indices {
                 ct_ops.push(content_types::ContentTypeOp::AddOverride(
                     format!("/xl/charts/chart{n}.xml"),
-                    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
-                        .to_string(),
+                    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml".to_string(),
                 ));
             }
 
@@ -3614,18 +3533,13 @@ impl XlsxPatcher {
                     .to_string();
                 let resolved = resolve_relative_path(&sheet_dir, &target);
                 drawing_path = resolved.clone();
-                let n = drawing_n_from_path(&drawing_path).unwrap_or_else(|| {
-                    part_id_allocator.alloc_drawing()
-                });
+                let n = drawing_n_from_path(&drawing_path)
+                    .unwrap_or_else(|| part_id_allocator.alloc_drawing());
                 drawing_n = n;
-                drawing_rels_path = format!(
-                    "xl/drawings/_rels/drawing{drawing_n}.xml.rels"
-                );
+                drawing_rels_path = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
                 // Load existing drawing rels (if any) — drawing
                 // graphs without rels are legal but rare.
-                drawing_rels = if let Some(g) =
-                    self.rels_patches.get(&drawing_rels_path)
-                {
+                drawing_rels = if let Some(g) = self.rels_patches.get(&drawing_rels_path) {
                     g.clone()
                 } else if let Some(b) = self.file_adds.get(&drawing_rels_path) {
                     wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
@@ -3633,12 +3547,9 @@ impl XlsxPatcher {
                     })?
                 } else {
                     match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                            .map_err(|e| {
-                                PyErr::new::<PyIOError, _>(format!(
-                                    "drawing rels parse: {e}"
-                                ))
-                            })?,
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
+                        })?,
                         None => wolfxl_rels::RelsGraph::new(),
                     }
                 };
@@ -3653,27 +3564,19 @@ impl XlsxPatcher {
                     chart_rids.push(rid.0);
                 }
                 // Read existing drawing XML.
-                let existing_drawing_xml: Vec<u8> = if let Some(b) =
-                    file_patches.get(&drawing_path)
+                let existing_drawing_xml: Vec<u8> = if let Some(b) = file_patches.get(&drawing_path)
                 {
                     b.clone()
                 } else if let Some(b) = self.file_adds.get(&drawing_path) {
                     b.clone()
                 } else {
-                    let s =
-                        ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
-                            .unwrap_or_else(|| String::from(""));
+                    let s = ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
+                        .unwrap_or_else(|| String::from(""));
                     s.into_bytes()
                 };
                 // SAX-merge: append a graphicFrame per queued chart.
-                let merged = append_graphic_frames(
-                    &existing_drawing_xml,
-                    &queued,
-                    &chart_rids,
-                )
-                .map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("merge drawing: {e}"))
-                })?;
+                let merged = append_graphic_frames(&existing_drawing_xml, &queued, &chart_rids)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge drawing: {e}")))?;
                 new_drawing_xml_bytes = Some(merged);
                 // No new <Override> for the drawing — already in
                 // [Content_Types].xml.
@@ -3681,9 +3584,7 @@ impl XlsxPatcher {
                 // Fresh drawing.
                 drawing_n = part_id_allocator.alloc_drawing();
                 drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
-                drawing_rels_path = format!(
-                    "xl/drawings/_rels/drawing{drawing_n}.xml.rels"
-                );
+                drawing_rels_path = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
                 drawing_rels = wolfxl_rels::RelsGraph::new();
                 let mut chart_rids: Vec<String> = Vec::with_capacity(queued.len());
                 for &n in &chart_indices {
@@ -3711,9 +3612,7 @@ impl XlsxPatcher {
                     ooxml_util::zip_read_to_string(zip, &sheet_path)?
                 };
                 let after = splice_drawing_ref(&sheet_xml, &drawing_rid.0)
-                    .map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("splice drawing: {e}"))
-                    })?;
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("splice drawing: {e}")))?;
                 file_patches.insert(sheet_path.clone(), after.into_bytes());
                 ct_ops.push(content_types::ContentTypeOp::AddOverride(
                     format!("/xl/drawings/drawing{drawing_n}.xml"),
@@ -3735,8 +3634,7 @@ impl XlsxPatcher {
                     self.file_adds.insert(drawing_path.clone(), bytes);
                 }
             }
-            self.rels_patches
-                .insert(drawing_rels_path, drawing_rels);
+            self.rels_patches.insert(drawing_rels_path, drawing_rels);
 
             // Persist sheet rels mutation.
             self.rels_patches.insert(sheet_rels_path, sheet_rels);
@@ -3795,14 +3693,12 @@ impl XlsxPatcher {
             if let Some(g) = self.rels_patches.get(workbook_rels_path) {
                 g.clone()
             } else if let Some(b) = self.file_adds.get(workbook_rels_path) {
-                wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
-                })?
+                wolfxl_rels::RelsGraph::parse(b)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}")))?
             } else {
                 let s = ooxml_util::zip_read_to_string(zip, workbook_rels_path)?;
-                wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
-                })?
+                wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}")))?
             };
 
         let mut ct_ops: Vec<content_types::ContentTypeOp> = Vec::new();
@@ -3813,8 +3709,7 @@ impl XlsxPatcher {
 
             let def_path = format!("xl/pivotCache/pivotCacheDefinition{n}.xml");
             let rec_path = format!("xl/pivotCache/pivotCacheRecords{n}.xml");
-            let cache_rels_path =
-                format!("xl/pivotCache/_rels/pivotCacheDefinition{n}.xml.rels");
+            let cache_rels_path = format!("xl/pivotCache/_rels/pivotCacheDefinition{n}.xml.rels");
 
             self.file_adds
                 .insert(def_path.clone(), cache.cache_def_xml.clone());
@@ -3832,8 +3727,7 @@ impl XlsxPatcher {
                 &format!("pivotCacheRecords{n}.xml"),
                 wolfxl_rels::TargetMode::Internal,
             );
-            self.rels_patches
-                .insert(cache_rels_path, cache_rels);
+            self.rels_patches.insert(cache_rels_path, cache_rels);
 
             // Workbook rel → cache definition.
             let rid = workbook_rels.add(
@@ -3871,11 +3765,7 @@ impl XlsxPatcher {
                 ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes()
             };
             let updated = pivot::splice_pivot_caches(&wb_xml, &pivot_cache_refs)
-                .map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!(
-                        "splice <pivotCaches>: {e}"
-                    ))
-                })?;
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("splice <pivotCaches>: {e}")))?;
             file_patches.insert("xl/workbook.xml".to_string(), updated);
         }
 
@@ -3890,15 +3780,11 @@ impl XlsxPatcher {
                 Some(q) if !q.is_empty() => q,
                 _ => continue,
             };
-            let sheet_path = self
-                .sheet_paths
-                .get(sheet_name)
-                .cloned()
-                .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "queue_pivot_table_add: no such sheet: {sheet_name}"
-                    ))
-                })?;
+            let sheet_path = self.sheet_paths.get(sheet_name).cloned().ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "queue_pivot_table_add: no such sheet: {sheet_name}"
+                ))
+            })?;
 
             let sheet_rels_path = format!(
                 "{}/_rels/{}.rels",
@@ -3910,17 +3796,13 @@ impl XlsxPatcher {
                 if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
                     g.clone()
                 } else if let Some(b) = self.file_adds.get(&sheet_rels_path) {
-                    wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("sheet rels parse: {e}"))
-                    })?
+                    wolfxl_rels::RelsGraph::parse(b)
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet rels parse: {e}")))?
                 } else {
                     match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                            .map_err(|e| {
-                                PyErr::new::<PyIOError, _>(format!(
-                                    "sheet rels parse: {e}"
-                                ))
-                            })?,
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!("sheet rels parse: {e}"))
+                        })?,
                         None => wolfxl_rels::RelsGraph::new(),
                     }
                 };
@@ -3928,8 +3810,7 @@ impl XlsxPatcher {
             for table in queued {
                 let table_n = counters.alloc_table();
                 let table_path = format!("xl/pivotTables/pivotTable{table_n}.xml");
-                let table_rels_path =
-                    format!("xl/pivotTables/_rels/pivotTable{table_n}.xml.rels");
+                let table_rels_path = format!("xl/pivotTables/_rels/pivotTable{table_n}.xml.rels");
 
                 self.file_adds
                     .insert(table_path.clone(), table.table_xml.clone());
@@ -3962,8 +3843,7 @@ impl XlsxPatcher {
                     &format!("../pivotCache/pivotCacheDefinition{cache_n}.xml"),
                     wolfxl_rels::TargetMode::Internal,
                 );
-                self.rels_patches
-                    .insert(table_rels_path, table_rels);
+                self.rels_patches.insert(table_rels_path, table_rels);
 
                 // Sheet rel → pivot table.
                 sheet_rels.add(
@@ -4037,14 +3917,12 @@ impl XlsxPatcher {
             if let Some(g) = self.rels_patches.get(workbook_rels_path) {
                 g.clone()
             } else if let Some(b) = self.file_adds.get(workbook_rels_path) {
-                wolfxl_rels::RelsGraph::parse(b).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
-                })?
+                wolfxl_rels::RelsGraph::parse(b)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}")))?
             } else {
                 let s = ooxml_util::zip_read_to_string(zip, workbook_rels_path)?;
-                wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}"))
-                })?
+                wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("workbook rels parse: {e}")))?
             };
 
         // Per-sheet rels graphs cached so we can mutate-then-persist
@@ -4102,20 +3980,22 @@ impl XlsxPatcher {
                 sheet_path.rsplit('/').next().unwrap_or("")
             );
 
-            let sheet_rels = sheet_rels_cache.entry(sheet_rels_path.clone()).or_insert_with(|| {
-                if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
-                    g.clone()
-                } else if let Some(b) = self.file_adds.get(&sheet_rels_path) {
-                    wolfxl_rels::RelsGraph::parse(b).unwrap_or_default()
-                } else {
-                    match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path) {
-                        Ok(Some(s)) => {
-                            wolfxl_rels::RelsGraph::parse(s.as_bytes()).unwrap_or_default()
+            let sheet_rels = sheet_rels_cache
+                .entry(sheet_rels_path.clone())
+                .or_insert_with(|| {
+                    if let Some(g) = self.rels_patches.get(&sheet_rels_path) {
+                        g.clone()
+                    } else if let Some(b) = self.file_adds.get(&sheet_rels_path) {
+                        wolfxl_rels::RelsGraph::parse(b).unwrap_or_default()
+                    } else {
+                        match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path) {
+                            Ok(Some(s)) => {
+                                wolfxl_rels::RelsGraph::parse(s.as_bytes()).unwrap_or_default()
+                            }
+                            _ => wolfxl_rels::RelsGraph::new(),
                         }
-                        _ => wolfxl_rels::RelsGraph::new(),
                     }
-                }
-            });
+                });
             let slicer_rid = sheet_rels.add(
                 wolfxl_pivot::rt::SLICER,
                 &format!("../slicers/slicer{}.xml", out.slicer_id),
@@ -4185,12 +4065,9 @@ impl XlsxPatcher {
             // 1-presentation-file-per-slicer, so we point at each rid.
             let mut updated = sheet_xml;
             for rid in rids {
-                updated =
-                    pivot_slicer::splice_sheet_slicer_list(&updated, rid).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!(
-                            "splice sheet <x14:slicerList>: {e}"
-                        ))
-                    })?;
+                updated = pivot_slicer::splice_sheet_slicer_list(&updated, rid).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!("splice sheet <x14:slicerList>: {e}"))
+                })?;
             }
             file_patches.insert(sheet_path, updated);
         }
@@ -4268,11 +4145,17 @@ impl XlsxPatcher {
 
             // Discover this sheet's rels graph (for table/comments/vml lookups).
             // Use the ancillary registry to get the part paths.
-            let _ = self.ancillary.populate_for_sheet(zip, &op.sheet, &sheet_path);
+            let _ = self
+                .ancillary
+                .populate_for_sheet(zip, &op.sheet, &sheet_path);
 
             let (comments_part, vml_part, table_paths) = {
                 let anc = self.ancillary.get(&op.sheet).cloned().unwrap_or_default();
-                (anc.comments_part, anc.vml_drawing_part, anc.table_parts.clone())
+                (
+                    anc.comments_part,
+                    anc.vml_drawing_part,
+                    anc.table_parts.clone(),
+                )
             };
 
             // Read each.
@@ -4292,7 +4175,9 @@ impl XlsxPatcher {
             // Build inputs.
             let mut inputs = wolfxl_structural::SheetXmlInputs::empty();
             inputs.sheets.insert(op.sheet.clone(), sheet_xml.as_slice());
-            inputs.sheet_paths.insert(op.sheet.clone(), sheet_path.clone());
+            inputs
+                .sheet_paths
+                .insert(op.sheet.clone(), sheet_path.clone());
             if let Some(ref wb) = wb_xml {
                 inputs.workbook_xml = Some(wb.as_slice());
             }
@@ -4304,10 +4189,14 @@ impl XlsxPatcher {
                 inputs.tables.insert(op.sheet.clone(), parts);
             }
             if let Some((ref p, ref b)) = comments_bytes {
-                inputs.comments.insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+                inputs
+                    .comments
+                    .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
             }
             if let Some((ref p, ref b)) = vml_bytes {
-                inputs.vml.insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+                inputs
+                    .vml
+                    .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
             }
             inputs.sheet_positions = sheet_positions.clone();
 
@@ -4475,19 +4364,15 @@ impl XlsxPatcher {
             }
 
             // Read workbook.xml.
-            let workbook_xml = match get_bytes(
-                file_patches,
-                &self.file_adds,
-                zip,
-                "xl/workbook.xml",
-            ) {
-                Some(b) => b,
-                None => {
-                    return Err(PyErr::new::<PyIOError, _>(
-                        "Phase 2.7: xl/workbook.xml missing from source ZIP",
-                    ));
-                }
-            };
+            let workbook_xml =
+                match get_bytes(file_patches, &self.file_adds, zip, "xl/workbook.xml") {
+                    Some(b) => b,
+                    None => {
+                        return Err(PyErr::new::<PyIOError, _>(
+                            "Phase 2.7: xl/workbook.xml missing from source ZIP",
+                        ));
+                    }
+                };
 
             // Build planner inputs.
             let inputs = wolfxl_structural::sheet_copy::SheetCopyInputs {
@@ -4519,10 +4404,10 @@ impl XlsxPatcher {
                 .first()
                 .cloned()
                 .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "Phase 2.7: planner returned no workbook_rels_to_add entry",
-                    )
-                })?;
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "Phase 2.7: planner returned no workbook_rels_to_add entry",
+                )
+            })?;
             let new_rid = {
                 let g = self
                     .rels_patches
@@ -4572,8 +4457,10 @@ impl XlsxPatcher {
                         comments::CT_VML.to_string(),
                     ));
                 } else {
-                    ct_ops_for_sheet
-                        .push(content_types::ContentTypeOp::AddOverride(part_path, content_type));
+                    ct_ops_for_sheet.push(content_types::ContentTypeOp::AddOverride(
+                        part_path,
+                        content_type,
+                    ));
                 }
             }
             // The planner does NOT emit a vml Default itself (RFC-035
@@ -4618,13 +4505,14 @@ impl XlsxPatcher {
                 if already_queued {
                     continue;
                 }
-                self.queued_defined_names.push(defined_names::DefinedNameMut {
-                    name: dn.name,
-                    formula: dn.formula,
-                    local_sheet_id: Some(dn.local_sheet_id),
-                    hidden: None,
-                    comment: None,
-                });
+                self.queued_defined_names
+                    .push(defined_names::DefinedNameMut {
+                        name: dn.name,
+                        formula: dn.formula,
+                        local_sheet_id: Some(dn.local_sheet_id),
+                        hidden: None,
+                        comment: None,
+                    });
             }
 
             // Update running cloned-table-names accumulator (RFC-024
@@ -4814,9 +4702,8 @@ impl XlsxPatcher {
                 .as_bytes()
                 .to_vec()
         };
-        let mut graph = content_types::ContentTypesGraph::parse(&ct_xml).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}"))
-        })?;
+        let mut graph = content_types::ContentTypesGraph::parse(&ct_xml)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}")))?;
         graph.add_override("/xl/calcChain.xml", calcchain::CT_CALC_CHAIN);
         file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
 
@@ -4837,7 +4724,8 @@ impl XlsxPatcher {
             None
         };
         if let Some(bytes) = wb_rels_bytes_opt {
-            let mut graph = wolfxl_rels::RelsGraph::parse(&bytes).unwrap_or_else(|_| wolfxl_rels::RelsGraph::new());
+            let mut graph = wolfxl_rels::RelsGraph::parse(&bytes)
+                .unwrap_or_else(|_| wolfxl_rels::RelsGraph::new());
             // Idempotent: only add if no existing rel of this type
             // already targets calcChain.xml.
             let already = graph.iter().any(|r| {
@@ -4866,10 +4754,7 @@ impl XlsxPatcher {
 /// True if the source ZIP contains an entry with the exact given name.
 /// Used by RFC-020's Phase-2.5d to decide between `file_patches`
 /// (replace existing) and `file_adds` (append new).
-fn source_zip_has_entry<R: Read + std::io::Seek>(
-    zip: &mut ZipArchive<R>,
-    name: &str,
-) -> bool {
+fn source_zip_has_entry<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>, name: &str) -> bool {
     zip.by_name(name).is_ok()
 }
 
@@ -4887,18 +4772,14 @@ fn source_zip_has_entry<R: Read + std::io::Seek>(
 /// when locating the splice point. Bug #6 in
 /// `tests/parity/KNOWN_GAPS.md`'s "RFC-035 cross-RFC composition gaps"
 /// section tracked this — closed in Sprint Θ Pod-B.
-fn splice_into_sheets_block(
-    workbook_xml: &[u8],
-    new_sheet_element: &[u8],
-) -> PyResult<Vec<u8>> {
+fn splice_into_sheets_block(workbook_xml: &[u8], new_sheet_element: &[u8]) -> PyResult<Vec<u8>> {
     use quick_xml::events::Event as XmlEvent;
     use quick_xml::Reader as XmlReader;
 
     // quick-xml works on `&str`, so reject non-UTF-8 input up front
     // with a stable error. workbook.xml is always UTF-8 per ECMA-376.
-    let s = std::str::from_utf8(workbook_xml).map_err(|_| {
-        PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml is not valid UTF-8")
-    })?;
+    let s = std::str::from_utf8(workbook_xml)
+        .map_err(|_| PyErr::new::<PyIOError, _>("Phase 2.7: workbook.xml is not valid UTF-8"))?;
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
 
@@ -4972,8 +4853,7 @@ fn splice_into_sheets_block(
         return Ok(out);
     }
     if let Some((start, end)) = self_closing_range {
-        let mut out =
-            Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
         out.extend_from_slice(&workbook_xml[..start]);
         out.extend_from_slice(b"<sheets>");
         out.extend_from_slice(new_sheet_element);
@@ -4995,9 +4875,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Sprint Θ Pod-A — XML attribute-value escape used by the permissive
@@ -5101,8 +4979,22 @@ mod rfc013_tests {
         // `zip::DateTime` doesn't impl PartialEq, so compare via the
         // `(year, month, day, hour, minute, second)` quintuple.
         assert_eq!(
-            (dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), dt.second()),
-            (dt2.year(), dt2.month(), dt2.day(), dt2.hour(), dt2.minute(), dt2.second()),
+            (
+                dt.year(),
+                dt.month(),
+                dt.day(),
+                dt.hour(),
+                dt.minute(),
+                dt.second()
+            ),
+            (
+                dt2.year(),
+                dt2.month(),
+                dt2.day(),
+                dt2.hour(),
+                dt2.minute(),
+                dt2.second()
+            ),
         );
     }
 
@@ -5565,12 +5457,12 @@ fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
             formula: extract_str(d, "formula")?.unwrap_or_default(),
         },
         "colorScale" => {
-            let stops_obj = d.get_item("stops")?.ok_or_else(|| {
-                PyErr::new::<PyValueError, _>("colorScale rule requires 'stops'")
-            })?;
-            let stops_list = stops_obj.downcast::<pyo3::types::PyList>().map_err(|_| {
-                PyErr::new::<PyValueError, _>("'stops' must be a list of dicts")
-            })?;
+            let stops_obj = d
+                .get_item("stops")?
+                .ok_or_else(|| PyErr::new::<PyValueError, _>("colorScale rule requires 'stops'"))?;
+            let stops_list = stops_obj
+                .downcast::<pyo3::types::PyList>()
+                .map_err(|_| PyErr::new::<PyValueError, _>("'stops' must be a list of dicts"))?;
             let mut stops: Vec<ColorScaleStop> = Vec::with_capacity(stops_list.len());
             for s in stops_list.iter() {
                 let sd = s
@@ -5589,13 +5481,11 @@ fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
         }
         "dataBar" => CfRuleKind::DataBar {
             min: CfvoPatch {
-                cfvo_type: extract_str(d, "min_cfvo_type")?
-                    .unwrap_or_else(|| "min".to_string()),
+                cfvo_type: extract_str(d, "min_cfvo_type")?.unwrap_or_else(|| "min".to_string()),
                 val: extract_str(d, "min_val")?,
             },
             max: CfvoPatch {
-                cfvo_type: extract_str(d, "max_cfvo_type")?
-                    .unwrap_or_else(|| "max".to_string()),
+                cfvo_type: extract_str(d, "max_cfvo_type")?.unwrap_or_else(|| "max".to_string()),
                 val: extract_str(d, "max_val")?,
             },
             color_rgb: extract_str(d, "color_rgb")?.unwrap_or_default(),
@@ -5609,9 +5499,9 @@ fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
 
     let dxf = match d.get_item("dxf")? {
         Some(v) if !v.is_none() => {
-            let dd = v.downcast::<PyDict>().map_err(|_| {
-                PyErr::new::<PyValueError, _>("'dxf' must be a dict or None")
-            })?;
+            let dd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyErr::new::<PyValueError, _>("'dxf' must be a dict or None"))?;
             Some(extract_dxf_patch(dd)?)
         }
         _ => None,
@@ -5949,15 +5839,9 @@ pub(crate) fn ensure_xmlns_r_on_worksheet(sheet_xml: &str) -> String {
     }
     // Insert `xmlns:r="..."` just before the closing `>` (or `/>`).
     let inserted = if open_tag.ends_with("/>") {
-        format!(
-            "{} xmlns:r=\"{r_ns}\"/>",
-            &open_tag[..open_tag.len() - 2]
-        )
+        format!("{} xmlns:r=\"{r_ns}\"/>", &open_tag[..open_tag.len() - 2])
     } else {
-        format!(
-            "{} xmlns:r=\"{r_ns}\">",
-            &open_tag[..open_tag.len() - 1]
-        )
+        format!("{} xmlns:r=\"{r_ns}\">", &open_tag[..open_tag.len() - 1])
     };
     let mut out = String::with_capacity(sheet_xml.len() + 80);
     out.push_str(&sheet_xml[..start]);
@@ -5986,7 +5870,8 @@ mod image_helpers_tests {
 
     #[test]
     fn splice_drawing_errors_when_already_present() {
-        let xml = r#"<?xml version="1.0"?><worksheet><sheetData/><drawing r:id="rId7"/></worksheet>"#;
+        let xml =
+            r#"<?xml version="1.0"?><worksheet><sheetData/><drawing r:id="rId7"/></worksheet>"#;
         assert!(splice_drawing_ref(xml, "rId1").is_err());
     }
 
@@ -6053,18 +5938,15 @@ pub(crate) fn parse_a1_coord(s: &str) -> Option<(u32, u32)> {
 pub(crate) fn resolve_relative_path(base_dir: &str, target: &str) -> String {
     // Leading `/` means "internal absolute" — drop the prefix and
     // start from a fresh root.
-    let (mut parts, target_iter): (Vec<&str>, _) =
-        if let Some(stripped) = target.strip_prefix('/') {
-            (Vec::new(), stripped.split('/'))
-        } else {
-            (
-                base_dir
-                    .split('/')
-                    .filter(|p| !p.is_empty())
-                    .collect(),
-                target.split('/'),
-            )
-        };
+    let (mut parts, target_iter): (Vec<&str>, _) = if let Some(stripped) = target.strip_prefix('/')
+    {
+        (Vec::new(), stripped.split('/'))
+    } else {
+        (
+            base_dir.split('/').filter(|p| !p.is_empty()).collect(),
+            target.split('/'),
+        )
+    };
     for seg in target_iter {
         match seg {
             "" | "." => {}
@@ -6089,10 +5971,7 @@ pub(crate) fn drawing_n_from_path(path: &str) -> Option<u32> {
 /// `<xdr:oneCellAnchor>` wrapping a `<xdr:graphicFrame>` per queued
 /// chart. The chart rids are 1-indexed within the drawing's own
 /// rels file, exactly matching the order of `queued`/`chart_rids`.
-pub(crate) fn build_chart_drawing_xml(
-    queued: &[QueuedChartAdd],
-    chart_rids: &[String],
-) -> String {
+pub(crate) fn build_chart_drawing_xml(queued: &[QueuedChartAdd], chart_rids: &[String]) -> String {
     debug_assert_eq!(queued.len(), chart_rids.len());
     let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
     let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -6131,8 +6010,8 @@ pub(crate) fn append_graphic_frames(
     let use_xdr_prefix = body.contains("<xdr:wsDr") || body.contains("xmlns:xdr=");
     // Count existing anchors / picture frames to keep cNvPr ids
     // monotonic.
-    let existing_count: u32 = (body.matches("<graphicFrame").count()
-        + body.matches("<pic").count()) as u32;
+    let existing_count: u32 =
+        (body.matches("<graphicFrame").count() + body.matches("<pic").count()) as u32;
     let mut new_anchors = String::with_capacity(queued.len() * 512);
     for (i, (chart, rid)) in queued.iter().zip(chart_rids.iter()).enumerate() {
         new_anchors.push_str(&render_graphic_frame_anchor_styled(
@@ -6145,9 +6024,7 @@ pub(crate) fn append_graphic_frames(
     // Drawing XML may use either `<xdr:wsDr>` (prefixed) or
     // `<wsDr>` (default-namespaced — what openpyxl emits). Find
     // whichever close tag is present.
-    let pos_opt = body
-        .rfind("</xdr:wsDr>")
-        .or_else(|| body.rfind("</wsDr>"));
+    let pos_opt = body.rfind("</xdr:wsDr>").or_else(|| body.rfind("</wsDr>"));
     if let Some(pos) = pos_opt {
         let mut out = String::with_capacity(body.len() + new_anchors.len());
         out.push_str(&body[..pos]);
@@ -6156,11 +6033,9 @@ pub(crate) fn append_graphic_frames(
         Ok(out.into_bytes())
     } else {
         // Drawing body has no </xdr:wsDr> — wrap a minimal envelope.
-        let xdr_ns =
-            "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+        let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
         let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
-        let r_ns =
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
         let c_ns = "http://schemas.openxmlformats.org/drawingml/2006/chart";
         let mut out = String::with_capacity(new_anchors.len() + 256);
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
@@ -6177,11 +6052,7 @@ pub(crate) fn append_graphic_frames(
 /// for an embedded chart referenced by `chart_rid`, using `xdr:`
 /// prefixes (the historical default; matches our fresh-drawing
 /// envelope which declares `xmlns:xdr="..."`).
-fn render_graphic_frame_anchor(
-    chart: &QueuedChartAdd,
-    chart_rid: &str,
-    unique_id: u32,
-) -> String {
+fn render_graphic_frame_anchor(chart: &QueuedChartAdd, chart_rid: &str, unique_id: u32) -> String {
     render_graphic_frame_anchor_styled(chart, chart_rid, unique_id, true)
 }
 
@@ -6197,8 +6068,7 @@ fn render_graphic_frame_anchor_styled(
     unique_id: u32,
     use_xdr_prefix: bool,
 ) -> String {
-    let (col0, row0) = parse_a1_coord(&chart.anchor_a1)
-        .unwrap_or((3, 1)); // fallback: D2
+    let (col0, row0) = parse_a1_coord(&chart.anchor_a1).unwrap_or((3, 1)); // fallback: D2
     let cx = chart.width_emu;
     let cy = chart.height_emu;
     let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
@@ -6212,9 +6082,7 @@ fn render_graphic_frame_anchor_styled(
     let root_xmlns = if use_xdr_prefix {
         String::new()
     } else {
-        format!(
-            " xmlns=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" xmlns:c=\"{c_ns}\""
-        )
+        format!(" xmlns=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" xmlns:c=\"{c_ns}\"")
     };
 
     let mut out = String::with_capacity(640);

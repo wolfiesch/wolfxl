@@ -22,11 +22,10 @@ pub use chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
     ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
     GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
-    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle,
-    TickMark, Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
+    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark,
+    Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
 };
 pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
-pub use image::{ImageAnchor, SheetImage};
 pub use conditional::{
     CellIsOperator, ColorScaleStop, ConditionalFormat, ConditionalKind, ConditionalRule,
     ConditionalThreshold,
@@ -37,6 +36,7 @@ pub use format::{
     AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, FormatSpec,
     StylesBuilder,
 };
+pub use image::{ImageAnchor, SheetImage};
 pub use table::{Table, TableColumn, TableStyle};
 pub use validation::{DataValidation, ErrorStyle, ValidationOperator, ValidationType};
 pub use workbook::{DocProperties, Workbook};

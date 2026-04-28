@@ -33,8 +33,7 @@ const CT_COMMENTS: &str =
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
-const CT_CHART: &str =
-    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_CORE_PROPS: &str = "application/vnd.openxmlformats-package.core-properties+xml";
 const CT_APP_PROPS: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
 const CT_RELATIONSHIPS: &str = "application/vnd.openxmlformats-package.relationships+xml";

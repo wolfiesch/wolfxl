@@ -220,7 +220,11 @@ fn scatter_chart_round_trips() {
     // Scatter uses two valAx, no catAx.
     assert_not_contains(&bytes, "<c:catAx>");
     let text = std::str::from_utf8(&bytes).unwrap();
-    assert_eq!(text.matches("<c:valAx>").count(), 2, "two valAx for scatter");
+    assert_eq!(
+        text.matches("<c:valAx>").count(),
+        2,
+        "two valAx for scatter"
+    );
 }
 
 #[test]
@@ -428,10 +432,7 @@ fn legend_each_position() {
         });
         let bytes = emit_chart_xml(&c);
         parse_ok(&bytes);
-        assert_contains(
-            &bytes,
-            &format!("<c:legendPos val=\"{expected}\"/>"),
-        );
+        assert_contains(&bytes, &format!("<c:legendPos val=\"{expected}\"/>"));
     }
 }
 
@@ -486,14 +487,8 @@ fn error_bars_each_type_and_val_type() {
         c.y_axis = Some(y);
         let bytes = emit_chart_xml(&c);
         parse_ok(&bytes);
-        assert_contains(
-            &bytes,
-            &format!("<c:errBarType val=\"{}\"/>", bt.as_str()),
-        );
-        assert_contains(
-            &bytes,
-            &format!("<c:errValType val=\"{}\"/>", vt.as_str()),
-        );
+        assert_contains(&bytes, &format!("<c:errBarType val=\"{}\"/>", bt.as_str()));
+        assert_contains(&bytes, &format!("<c:errValType val=\"{}\"/>", vt.as_str()));
     }
 }
 
@@ -778,10 +773,10 @@ fn bar_overlap_emitted_when_set() {
 
 #[test]
 fn end_to_end_emits_chart_part_via_emit_xlsx() {
+    use std::io::Cursor;
     use wolfxl_writer::emit_xlsx;
     use wolfxl_writer::model::Worksheet;
     use wolfxl_writer::Workbook;
-    use std::io::Cursor;
 
     let mut wb = Workbook::new();
     let mut sheet = Worksheet::new("Sheet");

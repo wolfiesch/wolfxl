@@ -76,7 +76,10 @@ fn no_op_save_cycle_preserves_target_uniqueness() {
     let g1 = RelsGraph::parse(&bytes).unwrap();
     let g2 = RelsGraph::parse(&g1.serialize()).unwrap();
     assert_eq!(g1.len(), g2.len());
-    let mut targets: Vec<_> = g2.iter().map(|r| (&r.target, &r.rel_type, r.mode)).collect();
+    let mut targets: Vec<_> = g2
+        .iter()
+        .map(|r| (&r.target, &r.rel_type, r.mode))
+        .collect();
     targets.sort();
     targets.dedup();
     assert_eq!(targets.len(), g2.len(), "no duplicates after round-trip");

@@ -73,21 +73,11 @@ fn round_trip_every_rels_in_fixtures() {
         for (name, bytes) in entries {
             total_rels += 1;
             let g1 = RelsGraph::parse(&bytes).unwrap_or_else(|e| {
-                panic!(
-                    "parse failed for {} :: {} → {}",
-                    xlsx.display(),
-                    name,
-                    e
-                )
+                panic!("parse failed for {} :: {} → {}", xlsx.display(), name, e)
             });
             let serialized = g1.serialize();
             let g2 = RelsGraph::parse(&serialized).unwrap_or_else(|e| {
-                panic!(
-                    "re-parse failed for {} :: {} → {}",
-                    xlsx.display(),
-                    name,
-                    e
-                )
+                panic!("re-parse failed for {} :: {} → {}", xlsx.display(), name, e)
             });
             assert_eq!(
                 g1,
@@ -99,7 +89,8 @@ fn round_trip_every_rels_in_fixtures() {
             // serialize is deterministic on a fixed-point graph
             let serialized2 = g2.serialize();
             assert_eq!(
-                serialized, serialized2,
+                serialized,
+                serialized2,
                 "serialize is not byte-stable for {} :: {}",
                 xlsx.display(),
                 name

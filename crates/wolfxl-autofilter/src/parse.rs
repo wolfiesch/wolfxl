@@ -228,20 +228,20 @@ fn parse_filter(d: &DictValue) -> Result<FilterKind, String> {
             Ok(FilterKind::Icon(IconFilter { icon_set, icon_id }))
         }
         "number" => {
-            let filters = match dict.get("filters") {
-                None | Some(DictValue::Null) => Vec::new(),
-                Some(DictValue::List(l)) => {
-                    let mut out = Vec::with_capacity(l.len());
-                    for v in l {
-                        out.push(
-                            v.as_f64()
-                                .ok_or_else(|| "number filter values must be numeric".to_string())?,
-                        );
+            let filters =
+                match dict.get("filters") {
+                    None | Some(DictValue::Null) => Vec::new(),
+                    Some(DictValue::List(l)) => {
+                        let mut out = Vec::with_capacity(l.len());
+                        for v in l {
+                            out.push(v.as_f64().ok_or_else(|| {
+                                "number filter values must be numeric".to_string()
+                            })?);
+                        }
+                        out
                     }
-                    out
-                }
-                _ => return Err("number filter.filters: expected list".into()),
-            };
+                    _ => return Err("number filter.filters: expected list".into()),
+                };
             let blank = dict.get("blank").and_then(|v| v.as_bool()).unwrap_or(false);
             let calendar_type = dict
                 .get("calendar_type")
@@ -369,10 +369,7 @@ fn parse_sort_state(d: &DictValue) -> Result<SortState, String> {
         .get("case_sensitive")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let ref_ = dict
-        .get("ref")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    let ref_ = dict.get("ref").and_then(|v| v.as_str()).map(str::to_string);
     Ok(SortState {
         sort_conditions: conditions,
         column_sort,
@@ -398,8 +395,8 @@ fn parse_sort_condition(d: &DictValue) -> Result<SortCondition, String> {
         .get("sort_by")
         .and_then(|v| v.as_str())
         .unwrap_or("value");
-    let sort_by = SortBy::parse(sort_by_str)
-        .ok_or_else(|| format!("unknown sort_by {sort_by_str:?}"))?;
+    let sort_by =
+        SortBy::parse(sort_by_str).ok_or_else(|| format!("unknown sort_by {sort_by_str:?}"))?;
     let custom_list = dict
         .get("custom_list")
         .and_then(|v| v.as_str())
@@ -463,10 +460,7 @@ mod tests {
                             ("kind", DictValue::Str("number".into())),
                             (
                                 "filters",
-                                DictValue::List(vec![
-                                    DictValue::Float(1.0),
-                                    DictValue::Float(2.5),
-                                ]),
+                                DictValue::List(vec![DictValue::Float(1.0), DictValue::Float(2.5)]),
                             ),
                         ]),
                     ),

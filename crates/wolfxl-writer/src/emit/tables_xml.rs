@@ -12,10 +12,7 @@ pub fn emit(table: &Table, _sheet_idx: usize, table_idx: usize) -> Vec<u8> {
     let mut out = String::with_capacity(1024);
 
     let table_id = table_idx + 1;
-    let display_name = table
-        .display_name
-        .as_deref()
-        .unwrap_or(&table.name);
+    let display_name = table.display_name.as_deref().unwrap_or(&table.name);
 
     // XML declaration
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
@@ -41,10 +38,7 @@ pub fn emit(table: &Table, _sheet_idx: usize, table_idx: usize) -> Vec<u8> {
     }
 
     // <tableColumns count="N">
-    out.push_str(&format!(
-        "<tableColumns count=\"{}\">",
-        table.columns.len()
-    ));
+    out.push_str(&format!("<tableColumns count=\"{}\">", table.columns.len()));
     for (i, col) in table.columns.iter().enumerate() {
         let col_id = i + 1;
         out.push_str(&format!(
@@ -59,10 +53,7 @@ pub fn emit(table: &Table, _sheet_idx: usize, table_idx: usize) -> Vec<u8> {
             ));
         }
         if let Some(label) = &col.totals_label {
-            out.push_str(&format!(
-                " totalsRowLabel=\"{}\"",
-                xml_escape::attr(label)
-            ));
+            out.push_str(&format!(" totalsRowLabel=\"{}\"", xml_escape::attr(label)));
         }
         out.push_str("/>");
     }
@@ -148,16 +139,28 @@ mod tests {
         assert!(text.contains("<table "), "has table element: {text}");
         assert!(text.contains("id=\"1\""), "id=1: {text}");
         assert!(text.contains("name=\"MyTable\""), "name attr: {text}");
-        assert!(text.contains("displayName=\"MyTable\""), "displayName attr: {text}");
-        assert!(text.contains("<autoFilter ref=\"A1:B10\"/>"), "autoFilter: {text}");
-        assert!(text.contains("<tableColumns count=\"2\">"), "count=2: {text}");
+        assert!(
+            text.contains("displayName=\"MyTable\""),
+            "displayName attr: {text}"
+        );
+        assert!(
+            text.contains("<autoFilter ref=\"A1:B10\"/>"),
+            "autoFilter: {text}"
+        );
+        assert!(
+            text.contains("<tableColumns count=\"2\">"),
+            "count=2: {text}"
+        );
         assert!(text.contains("<tableColumn id=\"1\""), "col id=1: {text}");
         assert!(text.contains("<tableColumn id=\"2\""), "col id=2: {text}");
         assert!(
             text.contains("<tableStyleInfo name=\"TableStyleMedium9\""),
             "default style: {text}"
         );
-        assert!(text.contains("totalsRowShown=\"0\""), "totalsRowShown=0: {text}");
+        assert!(
+            text.contains("totalsRowShown=\"0\""),
+            "totalsRowShown=0: {text}"
+        );
     }
 
     // --- 2. display_name_differs_from_name ---
@@ -181,7 +184,10 @@ mod tests {
         let bytes = emit(&table, 0, 0);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("name=\"MyTable\""), "name attr: {text}");
-        assert!(text.contains("displayName=\"Display\""), "displayName differs: {text}");
+        assert!(
+            text.contains("displayName=\"Display\""),
+            "displayName differs: {text}"
+        );
     }
 
     // --- 3. autofilter_false_omits_element ---
@@ -193,7 +199,10 @@ mod tests {
         let bytes = emit(&table, 0, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("<autoFilter"), "no autoFilter when false: {text}");
+        assert!(
+            !text.contains("<autoFilter"),
+            "no autoFilter when false: {text}"
+        );
     }
 
     // --- 4. totals_row_true_sets_attr ---
@@ -205,7 +214,10 @@ mod tests {
         let bytes = emit(&table, 0, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("totalsRowShown=\"1\""), "totalsRowShown=1: {text}");
+        assert!(
+            text.contains("totalsRowShown=\"1\""),
+            "totalsRowShown=1: {text}"
+        );
     }
 
     // --- 5. totals_function_and_label_on_column ---
@@ -216,13 +228,11 @@ mod tests {
             name: "T".into(),
             display_name: None,
             range: "A1:B10".into(),
-            columns: vec![
-                TableColumn {
-                    name: "Header".into(),
-                    totals_function: Some("sum".into()),
-                    totals_label: Some("Total".into()),
-                },
-            ],
+            columns: vec![TableColumn {
+                name: "Header".into(),
+                totals_function: Some("sum".into()),
+                totals_label: Some("Total".into()),
+            }],
             header_row: true,
             totals_row: true,
             style: None,
@@ -231,8 +241,14 @@ mod tests {
         let bytes = emit(&table, 0, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("totalsRowFunction=\"sum\""), "totalsRowFunction: {text}");
-        assert!(text.contains("totalsRowLabel=\"Total\""), "totalsRowLabel: {text}");
+        assert!(
+            text.contains("totalsRowFunction=\"sum\""),
+            "totalsRowFunction: {text}"
+        );
+        assert!(
+            text.contains("totalsRowLabel=\"Total\""),
+            "totalsRowLabel: {text}"
+        );
     }
 
     // --- 6. column_without_totals_function_omits_attr ---
@@ -244,10 +260,19 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         // Column should have id and name but no totals attrs
-        assert!(!text.contains("totalsRowFunction"), "no totalsRowFunction: {text}");
-        assert!(!text.contains("totalsRowLabel"), "no totalsRowLabel: {text}");
+        assert!(
+            !text.contains("totalsRowFunction"),
+            "no totalsRowFunction: {text}"
+        );
+        assert!(
+            !text.contains("totalsRowLabel"),
+            "no totalsRowLabel: {text}"
+        );
         // Verify the tableColumn tag is self-closing: id="1" name="X"/>
-        assert!(text.contains("<tableColumn id=\"1\" name=\"X\"/>"), "self-closing col: {text}");
+        assert!(
+            text.contains("<tableColumn id=\"1\" name=\"X\"/>"),
+            "self-closing col: {text}"
+        );
     }
 
     // --- 7. custom_table_style_overrides_default ---
@@ -269,12 +294,27 @@ mod tests {
             text.contains("name=\"TableStyleLight1\""),
             "custom style name: {text}"
         );
-        assert!(text.contains("showFirstColumn=\"1\""), "showFirstColumn: {text}");
-        assert!(text.contains("showLastColumn=\"0\""), "showLastColumn: {text}");
-        assert!(text.contains("showRowStripes=\"0\""), "showRowStripes: {text}");
-        assert!(text.contains("showColumnStripes=\"1\""), "showColumnStripes: {text}");
+        assert!(
+            text.contains("showFirstColumn=\"1\""),
+            "showFirstColumn: {text}"
+        );
+        assert!(
+            text.contains("showLastColumn=\"0\""),
+            "showLastColumn: {text}"
+        );
+        assert!(
+            text.contains("showRowStripes=\"0\""),
+            "showRowStripes: {text}"
+        );
+        assert!(
+            text.contains("showColumnStripes=\"1\""),
+            "showColumnStripes: {text}"
+        );
         // Should NOT use default name
-        assert!(!text.contains("TableStyleMedium9"), "no default style: {text}");
+        assert!(
+            !text.contains("TableStyleMedium9"),
+            "no default style: {text}"
+        );
     }
 
     // --- 8. xml_attr_escape_in_column_name ---
@@ -370,8 +410,14 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("id=\"3\""), "table_idx=2 -> id=3: {text}");
-        assert!(text.contains("<tableColumns count=\"5\">"), "5 columns: {text}");
+        assert!(
+            text.contains("<tableColumns count=\"5\">"),
+            "5 columns: {text}"
+        );
         assert!(text.contains("totalsRowShown=\"1\""), "totals row: {text}");
-        assert!(text.contains("displayName=\"Sales Data\""), "displayName: {text}");
+        assert!(
+            text.contains("displayName=\"Sales Data\""),
+            "displayName: {text}"
+        );
     }
 }

@@ -239,9 +239,27 @@ mod tests {
             count: 3,
             manual_break_count: 2,
             breaks: vec![
-                BreakSpec { id: 2, min: None, max: None, man: true, pt: false },
-                BreakSpec { id: 5, min: None, max: None, man: false, pt: true },
-                BreakSpec { id: 9, min: None, max: None, man: true, pt: false },
+                BreakSpec {
+                    id: 2,
+                    min: None,
+                    max: None,
+                    man: true,
+                    pt: false,
+                },
+                BreakSpec {
+                    id: 5,
+                    min: None,
+                    max: None,
+                    man: false,
+                    pt: true,
+                },
+                BreakSpec {
+                    id: 9,
+                    min: None,
+                    max: None,
+                    man: true,
+                    pt: false,
+                },
             ],
         };
         let bytes = emit_col_breaks(&spec);
@@ -310,7 +328,13 @@ mod tests {
         let spec = PageBreakList {
             count: 1,
             manual_break_count: 1,
-            breaks: vec![BreakSpec { id: 4, min: None, max: None, man: true, pt: false }],
+            breaks: vec![BreakSpec {
+                id: 4,
+                min: None,
+                max: None,
+                man: true,
+                pt: false,
+            }],
         };
         let bytes = emit_row_breaks(&spec);
         let xml = std::str::from_utf8(&bytes).unwrap();
@@ -325,8 +349,20 @@ mod tests {
             count: 2,
             manual_break_count: 2,
             breaks: vec![
-                BreakSpec { id: 5, min: Some(0), max: Some(16383), man: true, pt: false },
-                BreakSpec { id: 10, min: Some(0), max: Some(16383), man: true, pt: false },
+                BreakSpec {
+                    id: 5,
+                    min: Some(0),
+                    max: Some(16383),
+                    man: true,
+                    pt: false,
+                },
+                BreakSpec {
+                    id: 10,
+                    min: Some(0),
+                    max: Some(16383),
+                    man: true,
+                    pt: false,
+                },
             ],
         };
         let a = emit_row_breaks(&spec);

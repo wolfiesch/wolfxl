@@ -13,9 +13,7 @@
 
 use crate::model::cache::{CacheValue, DataType};
 use crate::model::records::RecordCell;
-use crate::model::table::{
-    AxisItemType, AxisType, DataFunction, PivotItemType, ShowDataAs,
-};
+use crate::model::table::{AxisItemType, AxisType, DataFunction, PivotItemType, ShowDataAs};
 
 /// RFC-047 §10.3 — `data_type` string → typed enum.
 pub fn parse_data_type(s: &str) -> Result<DataType, String> {

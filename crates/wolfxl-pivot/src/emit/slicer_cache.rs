@@ -4,19 +4,15 @@
 //! shape openpyxl 3.1.x produces.
 
 use super::{esc_attr, push_attr, push_attr_if, xml_decl};
-use crate::model::slicer_cache::{SlicerCache, SlicerItem};
 #[cfg(test)]
 use crate::model::slicer_cache::SlicerSortOrder;
+use crate::model::slicer_cache::{SlicerCache, SlicerItem};
 
 /// Namespace URIs used by slicer caches.
-pub const NS_MAIN: &str =
-    "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-pub const NS_X14: &str =
-    "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
-pub const NS_XR10: &str =
-    "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
-pub const NS_MC: &str =
-    "http://schemas.openxmlformats.org/markup-compatibility/2006";
+pub const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+pub const NS_X14: &str = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
+pub const NS_XR10: &str = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision10";
+pub const NS_MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
 /// Emit a single slicer-cache part.
 ///
@@ -43,7 +39,11 @@ pub fn slicer_cache_xml(sc: &SlicerCache) -> Vec<u8> {
     // we point at the cache via rel-style `r:id="rId1"` recorded on
     // the slicer-cache part's rels file.
     push_attr(&mut out, "tabId", "1");
-    push_attr(&mut out, "name", &format!("PivotTable{}", sc.source_pivot_cache_id + 1));
+    push_attr(
+        &mut out,
+        "name",
+        &format!("PivotTable{}", sc.source_pivot_cache_id + 1),
+    );
     out.push_str("/>");
     out.push_str("</pivotTables>");
 
@@ -62,18 +62,8 @@ fn emit_olap_or_tabular(out: &mut String, sc: &SlicerCache) {
     push_attr(out, "pivotCacheId", &sc.source_pivot_cache_id.to_string());
     push_attr(out, "sortOrder", sc.sort_order.xml_value());
     push_attr_if(out, sc.custom_list_sort, "customListSort", "1");
-    push_attr_if(
-        out,
-        sc.hide_items_with_no_data,
-        "showHiddenItems",
-        "0",
-    );
-    push_attr_if(
-        out,
-        !sc.show_missing,
-        "showMissing",
-        "0",
-    );
+    push_attr_if(out, sc.hide_items_with_no_data, "showHiddenItems", "0");
+    push_attr_if(out, !sc.show_missing, "showMissing", "0");
     out.push('>');
 
     if !sc.items.is_empty() {
@@ -134,10 +124,7 @@ mod tests {
 
     fn dummy_cache() -> SlicerCache {
         let mut sc = SlicerCache::new("Slicer_region", 0, 0);
-        sc.items = vec![
-            SlicerItem::new("North"),
-            SlicerItem::new("South"),
-        ];
+        sc.items = vec![SlicerItem::new("North"), SlicerItem::new("South")];
         sc
     }
 

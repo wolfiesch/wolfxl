@@ -163,9 +163,7 @@ fn scan_layout(workbook_xml: &[u8]) -> Result<Layout, String> {
                     b"workbookProtection" => {
                         // Open form (rare). Search for the close.
                         let close = find_close_tag(workbook_xml, pos_after, b"workbookProtection")
-                            .ok_or_else(|| {
-                                "unclosed <workbookProtection>".to_string()
-                            })?;
+                            .ok_or_else(|| "unclosed <workbookProtection>".to_string())?;
                         layout.protection_outer = Some((pos_before, close));
                     }
                     b"fileSharing" => {
@@ -188,12 +186,17 @@ fn scan_layout(workbook_xml: &[u8]) -> Result<Layout, String> {
         .or(after_workbook_pr)
         .or(at_book_views)
         .or(at_sheets)
-        .ok_or_else(|| "could not find <fileVersion>/<workbookPr>/<bookViews>/<sheets> in workbook.xml".to_string())?;
+        .ok_or_else(|| {
+            "could not find <fileVersion>/<workbookPr>/<bookViews>/<sheets> in workbook.xml"
+                .to_string()
+        })?;
 
     layout.protection_inject_at = after_workbook_pr
         .or(at_book_views)
         .or(at_sheets)
-        .ok_or_else(|| "could not find <workbookPr>/<bookViews>/<sheets> in workbook.xml".to_string())?;
+        .ok_or_else(|| {
+            "could not find <workbookPr>/<bookViews>/<sheets> in workbook.xml".to_string()
+        })?;
 
     Ok(layout)
 }
@@ -359,7 +362,10 @@ mod tests {
             "<sheets>",
         ]
         .iter()
-        .map(|tag| text.find(tag).unwrap_or_else(|| panic!("missing {tag}: {text}")))
+        .map(|tag| {
+            text.find(tag)
+                .unwrap_or_else(|| panic!("missing {tag}: {text}"))
+        })
         .collect();
         for window in positions.windows(2) {
             assert!(window[0] < window[1], "ordering violated: {positions:?}");

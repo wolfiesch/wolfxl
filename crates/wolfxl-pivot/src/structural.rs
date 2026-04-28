@@ -79,11 +79,7 @@ pub fn deep_clone_pivot_table(
 /// Deep-clone a pivot-cache XML when the cache's source sheet is the
 /// sheet being copied. Used only for "self-cache copy" — RFC-047 §6.
 /// The general case keeps caches aliased.
-pub fn deep_clone_pivot_cache(
-    cache_xml: &[u8],
-    src_sheet: &str,
-    dst_sheet: &str,
-) -> Vec<u8> {
+pub fn deep_clone_pivot_cache(cache_xml: &[u8], src_sheet: &str, dst_sheet: &str) -> Vec<u8> {
     let s = String::from_utf8_lossy(cache_xml);
     let src_pat = format!("sheet=\"{}\"", xml_attr_escape(src_sheet));
     let dst_pat = format!("sheet=\"{}\"", xml_attr_escape(dst_sheet));

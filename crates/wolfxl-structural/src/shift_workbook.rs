@@ -41,7 +41,11 @@ pub struct AxisShiftOp {
 
 impl AxisShiftOp {
     fn plan(&self) -> ShiftPlan {
-        ShiftPlan { axis: self.axis, idx: self.idx, n: self.n }
+        ShiftPlan {
+            axis: self.axis,
+            idx: self.idx,
+            n: self.n,
+        }
     }
 }
 
@@ -93,10 +97,7 @@ pub struct WorkbookMutations {
 /// returns an empty `file_patches` map. Callers MUST short-circuit
 /// before calling if they want byte-identical output for an empty
 /// queue.
-pub fn apply_workbook_shift(
-    inputs: SheetXmlInputs<'_>,
-    ops: &[AxisShiftOp],
-) -> WorkbookMutations {
+pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> WorkbookMutations {
     let mut out = WorkbookMutations::default();
 
     if ops.is_empty() {
@@ -106,8 +107,11 @@ pub fn apply_workbook_shift(
     // Cache rewritten sheet bytes across ops in this call so a single
     // multi-op call sees its own rewrites. (In practice the patcher
     // calls one op at a time, but this future-proofs the API.)
-    let mut sheet_bytes: BTreeMap<String, Vec<u8>> =
-        inputs.sheets.iter().map(|(k, v)| (k.clone(), v.to_vec())).collect();
+    let mut sheet_bytes: BTreeMap<String, Vec<u8>> = inputs
+        .sheets
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_vec()))
+        .collect();
     let mut workbook_bytes: Option<Vec<u8>> = inputs.workbook_xml.map(|b| b.to_vec());
     let mut table_bytes: BTreeMap<String, BTreeMap<String, Vec<u8>>> = inputs
         .tables
@@ -191,7 +195,8 @@ pub fn apply_workbook_shift(
     if let Some(bytes) = &workbook_bytes {
         if let Some(orig) = inputs.workbook_xml {
             if bytes.as_slice() != orig {
-                out.file_patches.insert("xl/workbook.xml".to_string(), bytes.clone());
+                out.file_patches
+                    .insert("xl/workbook.xml".to_string(), bytes.clone());
             }
         }
     }
@@ -367,12 +372,16 @@ fn parse_col_letters(cell: &str) -> Option<u32> {
         i += 1;
     }
     while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-        n = n.checked_mul(26)?.checked_add(
-            (bytes[i].to_ascii_uppercase() - b'A' + 1) as u32,
-        )?;
+        n = n
+            .checked_mul(26)?
+            .checked_add((bytes[i].to_ascii_uppercase() - b'A' + 1) as u32)?;
         i += 1;
     }
-    if n == 0 { None } else { Some(n) }
+    if n == 0 {
+        None
+    } else {
+        Some(n)
+    }
 }
 
 /// Rewrite the `<tableColumns count="N">...</tableColumns>` block to
@@ -382,12 +391,7 @@ fn parse_col_letters(cell: &str) -> Option<u32> {
 /// - `shifted` — XML *after* `shift_table_xml_inner` has rewritten refs.
 /// - `plan` — the col-axis ShiftPlan.
 /// - `t_lo`, `t_hi` — the table's PRE-shift 1-based col band.
-fn rewrite_table_columns_block(
-    shifted: &[u8],
-    plan: &ShiftPlan,
-    t_lo: u32,
-    t_hi: u32,
-) -> Vec<u8> {
+fn rewrite_table_columns_block(shifted: &[u8], plan: &ShiftPlan, t_lo: u32, t_hi: u32) -> Vec<u8> {
     let s = match std::str::from_utf8(shifted) {
         Ok(s) => s.to_owned(),
         Err(_) => return shifted.to_vec(),
@@ -562,9 +566,8 @@ pub fn shift_comments_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                 }
                 if local.as_slice() == b"comment" {
                     let mut keep = true;
-                    let mut new_e = BytesStart::new(
-                        String::from_utf8_lossy(e.name().as_ref()).into_owned(),
-                    );
+                    let mut new_e =
+                        BytesStart::new(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                     for attr_res in e.attributes().with_checks(false) {
                         let Ok(attr) = attr_res else { continue };
                         let key = attr.key.as_ref();
@@ -599,9 +602,8 @@ pub fn shift_comments_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                 }
                 if local.as_slice() == b"comment" {
                     let mut keep = true;
-                    let mut new_e = BytesStart::new(
-                        String::from_utf8_lossy(e.name().as_ref()).into_owned(),
-                    );
+                    let mut new_e =
+                        BytesStart::new(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                     for attr_res in e.attributes().with_checks(false) {
                         let Ok(attr) = attr_res else { continue };
                         let key = attr.key.as_ref();
@@ -972,7 +974,9 @@ mod tests {
     fn shifts_sheet_xml_via_orchestrator() {
         let sheet_xml = r#"<sheetData><row r="5"><c r="A5"><v>1</v></c></row></sheetData>"#;
         let mut inputs = SheetXmlInputs::empty();
-        inputs.sheets.insert("Sheet1".to_string(), sheet_xml.as_bytes());
+        inputs
+            .sheets
+            .insert("Sheet1".to_string(), sheet_xml.as_bytes());
         inputs
             .sheet_paths
             .insert("Sheet1".to_string(), "xl/worksheets/sheet1.xml".to_string());
@@ -1096,8 +1100,14 @@ mod tests {
         assert!(s.contains(r#"<tableColumns count="7">"#), "got: {s}");
         assert!(s.contains(r#"<tableColumn id="1" name="H1"/>"#), "got: {s}");
         assert!(s.contains(r#"<tableColumn id="2" name="H2"/>"#), "got: {s}");
-        assert!(s.contains(r#"<tableColumn id="3" name="Column"#), "got: {s}");
-        assert!(s.contains(r#"<tableColumn id="4" name="Column"#), "got: {s}");
+        assert!(
+            s.contains(r#"<tableColumn id="3" name="Column"#),
+            "got: {s}"
+        );
+        assert!(
+            s.contains(r#"<tableColumn id="4" name="Column"#),
+            "got: {s}"
+        );
         assert!(s.contains(r#"<tableColumn id="5" name="H3"/>"#), "got: {s}");
         assert!(s.contains(r#"<tableColumn id="7" name="H5"/>"#), "got: {s}");
     }

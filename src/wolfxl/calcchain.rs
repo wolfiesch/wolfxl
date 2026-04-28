@@ -55,10 +55,7 @@ pub struct CalcChainEntry {
 ///
 /// Quick-XML based; tolerant of namespaces and arbitrary whitespace.
 /// Skips cells that have no formula.
-pub fn scan_sheet_for_formulas(
-    sheet_xml: &[u8],
-    sheet_index_1based: u32,
-) -> Vec<CalcChainEntry> {
+pub fn scan_sheet_for_formulas(sheet_xml: &[u8], sheet_index_1based: u32) -> Vec<CalcChainEntry> {
     let mut reader = XmlReader::from_reader(sheet_xml);
     reader.config_mut().trim_text(false);
 
@@ -136,8 +133,8 @@ pub fn scan_sheet_for_formulas(
             }
             Ok(Event::Eof) => break,
             Err(_) => break, // best-effort: a parse failure means we
-                             // skip this sheet rather than abort the
-                             // save.
+            // skip this sheet rather than abort the
+            // save.
             _ => {}
         }
         buf.clear();
@@ -157,9 +154,7 @@ pub fn render_calc_chain(entries: &[CalcChainEntry]) -> Option<Vec<u8>> {
     }
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-    out.push_str(
-        "<calcChain xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-    );
+    out.push_str("<calcChain xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
     for e in entries {
         // Escape `&`, `<`, `"` in the cell ref (defensive — Excel
         // never emits non-A1 refs but a corrupt source could).
@@ -168,10 +163,7 @@ pub fn render_calc_chain(entries: &[CalcChainEntry]) -> Option<Vec<u8>> {
             .replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('"', "&quot;");
-        out.push_str(&format!(
-            "<c r=\"{}\" i=\"{}\"/>",
-            escaped, e.sheet_index
-        ));
+        out.push_str(&format!("<c r=\"{}\" i=\"{}\"/>", escaped, e.sheet_index));
     }
     out.push_str("</calcChain>");
     Some(out.into_bytes())

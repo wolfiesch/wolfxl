@@ -123,9 +123,7 @@ pub fn scan_existing_tables<R: std::io::Read + std::io::Seek>(
 ) -> Result<ExistingTablesInventory, String> {
     let mut paths: Vec<String> = Vec::new();
     for i in 0..zip.len() {
-        let entry = zip
-            .by_index(i)
-            .map_err(|e| format!("zip index {i}: {e}"))?;
+        let entry = zip.by_index(i).map_err(|e| format!("zip index {i}: {e}"))?;
         let name = entry.name().to_string();
         if is_table_part_path(&name) {
             paths.push(name);
@@ -274,10 +272,7 @@ pub fn build_tables(
 
     for patch in patches {
         if names.contains(&patch.name) {
-            return Err(format!(
-                "Table with name {:?} already exists",
-                patch.name
-            ));
+            return Err(format!("Table with name {:?} already exists", patch.name));
         }
         // Allocate workbook-unique id (lowest free) and a part-filename
         // index (centralized via PartIdAllocator if supplied; legacy
@@ -330,10 +325,7 @@ pub fn build_tables(
         .collect();
     if !table_rids.is_empty() {
         let mut block = String::with_capacity(48 + table_rids.len() * 32);
-        block.push_str(&format!(
-            "<tableParts count=\"{}\">",
-            table_rids.len()
-        ));
+        block.push_str(&format!("<tableParts count=\"{}\">", table_rids.len()));
         for rid in &table_rids {
             block.push_str(&format!("<tablePart r:id=\"{}\"/>", rid.0));
         }

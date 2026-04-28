@@ -140,9 +140,8 @@ pub fn build_data_validations_block(
     existing_block: Option<&[u8]>,
     patches: &[DataValidationPatch],
 ) -> Vec<u8> {
-    let existing_children: Vec<Vec<u8>> = existing_block
-        .map(extract_dv_children)
-        .unwrap_or_default();
+    let existing_children: Vec<Vec<u8>> =
+        existing_block.map(extract_dv_children).unwrap_or_default();
 
     let total = existing_children.len() + patches.len();
 
@@ -429,7 +428,10 @@ mod tests {
         assert!(s.starts_with("<dataValidations count=\"3\">"), "got: {s}");
         // Existing children preserved verbatim — the X,Y inline list should still be there.
         assert!(s.contains("\"X,Y\""), "existing list preserved, got: {s}");
-        assert!(s.contains("\"Apple,Banana,Cherry\""), "new list present, got: {s}");
+        assert!(
+            s.contains("\"Apple,Banana,Cherry\""),
+            "new list present, got: {s}"
+        );
     }
 
     #[test]
@@ -453,7 +455,10 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("<formula1>Sheet2!$A$1:$A$5</formula1>"));
         // operator must NOT appear for list type
-        assert!(!s.contains("operator="), "operator should be omitted for list, got: {s}");
+        assert!(
+            !s.contains("operator="),
+            "operator should be omitted for list, got: {s}"
+        );
     }
 
     #[test]
@@ -483,7 +488,10 @@ mod tests {
         let out = build_data_validations_block(None, &[p]);
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("type=\"custom\""));
-        assert!(!s.contains("operator="), "custom must not emit operator, got: {s}");
+        assert!(
+            !s.contains("operator="),
+            "custom must not emit operator, got: {s}"
+        );
         // > inside text content must be escaped
         assert!(s.contains("<formula1>=LEN(A1)&gt;5</formula1>"));
     }
@@ -510,7 +518,10 @@ mod tests {
             ..Default::default()
         };
         let s = String::from_utf8(build_data_validations_block(None, &[stop])).unwrap();
-        assert!(!s.contains("errorStyle="), "default stop must be omitted, got: {s}");
+        assert!(
+            !s.contains("errorStyle="),
+            "default stop must be omitted, got: {s}"
+        );
     }
 
     #[test]

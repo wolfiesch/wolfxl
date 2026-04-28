@@ -168,10 +168,14 @@ pub fn parse_ref(value: &str) -> RefKind {
         return RefKind::Error(stripped.to_string());
     }
     if value.starts_with('[') {
-        return RefKind::ExternalBook { raw: value.to_string() };
+        return RefKind::ExternalBook {
+            raw: value.to_string(),
+        };
     }
     if value.starts_with('\'') && value.contains("[") && value.contains(".xlsx") {
-        return RefKind::ExternalBook { raw: value.to_string() };
+        return RefKind::ExternalBook {
+            raw: value.to_string(),
+        };
     }
 
     let (sheet, rest) = strip_sheet_prefix(value);
@@ -188,10 +192,18 @@ pub fn parse_ref(value: &str) -> RefKind {
 
     if let Some((l, r)) = split_top_level_colon(rest) {
         if let (Some(lr), Some(rr)) = (parse_row_only(l), parse_row_only(r)) {
-            return RefKind::RowRange { sheet, lhs: lr, rhs: rr };
+            return RefKind::RowRange {
+                sheet,
+                lhs: lr,
+                rhs: rr,
+            };
         }
         if let (Some(lc), Some(rc)) = (parse_col_only(l), parse_col_only(r)) {
-            return RefKind::ColRange { sheet, lhs: lc, rhs: rc };
+            return RefKind::ColRange {
+                sheet,
+                lhs: lc,
+                rhs: rc,
+            };
         }
         if let (Some(lhs), Some(rhs)) = (parse_cell(l), parse_cell(r)) {
             return RefKind::Range { sheet, lhs, rhs };
@@ -288,7 +300,14 @@ fn render_col(c: &A1Col) -> String {
 
 fn is_error_literal(s: &str) -> Option<&str> {
     const ERRS: &[&str] = &[
-        "#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A", "#GETTING_DATA",
+        "#NULL!",
+        "#DIV/0!",
+        "#VALUE!",
+        "#REF!",
+        "#NAME?",
+        "#NUM!",
+        "#N/A",
+        "#GETTING_DATA",
     ];
     for e in ERRS {
         if s == *e {
@@ -330,7 +349,13 @@ pub fn strip_sheet_prefix(s: &str) -> (Option<SheetPrefix>, &str) {
                     let inner = &s[1..i];
                     let decoded = inner.replace("''", "'");
                     let rest = &s[i + 2..];
-                    return (Some(SheetPrefix { name: decoded, quoted: true }), rest);
+                    return (
+                        Some(SheetPrefix {
+                            name: decoded,
+                            quoted: true,
+                        }),
+                        rest,
+                    );
                 }
                 return (None, s);
             }
@@ -348,7 +373,10 @@ pub fn strip_sheet_prefix(s: &str) -> (Option<SheetPrefix>, &str) {
                 let name = &s[..i];
                 if !name.is_empty() && is_valid_unquoted_sheet_name(name) {
                     return (
-                        Some(SheetPrefix { name: name.to_string(), quoted: false }),
+                        Some(SheetPrefix {
+                            name: name.to_string(),
+                            quoted: false,
+                        }),
                         &s[i + 1..],
                     );
                 }
@@ -410,7 +438,12 @@ pub fn parse_cell(s: &str) -> Option<A1Cell> {
     if row == 0 || row > MAX_ROW {
         return None;
     }
-    Some(A1Cell { row, col, col_abs, row_abs })
+    Some(A1Cell {
+        row,
+        col,
+        col_abs,
+        row_abs,
+    })
 }
 
 fn parse_row_only(s: &str) -> Option<A1Row> {
@@ -467,7 +500,10 @@ fn parse_col_only(s: &str) -> Option<A1Col> {
 /// consistency.
 pub fn parse_range_part(s: &str) -> Option<RefKind> {
     if let Some(c) = parse_cell(s) {
-        return Some(RefKind::Cell { sheet: None, cell: c });
+        return Some(RefKind::Cell {
+            sheet: None,
+            cell: c,
+        });
     }
     None
 }
@@ -536,7 +572,15 @@ mod tests {
     #[test]
     fn parse_simple_cell() {
         let c = parse_cell("A1").unwrap();
-        assert_eq!(c, A1Cell { row: 1, col: 1, col_abs: false, row_abs: false });
+        assert_eq!(
+            c,
+            A1Cell {
+                row: 1,
+                col: 1,
+                col_abs: false,
+                row_abs: false
+            }
+        );
         assert_eq!(render_cell(&c), "A1");
     }
 
@@ -670,13 +714,19 @@ mod tests {
 
     #[test]
     fn quoted_unnecessary_quotes_get_normalized() {
-        let s = SheetPrefix { name: "Sheet1".into(), quoted: false };
+        let s = SheetPrefix {
+            name: "Sheet1".into(),
+            quoted: false,
+        };
         assert_eq!(s.render(), "Sheet1!");
     }
 
     #[test]
     fn sheet_with_space_force_quote_even_if_unquoted_in_struct() {
-        let s = SheetPrefix { name: "My Sheet".into(), quoted: false };
+        let s = SheetPrefix {
+            name: "My Sheet".into(),
+            quoted: false,
+        };
         assert_eq!(s.render(), "'My Sheet'!");
     }
 }

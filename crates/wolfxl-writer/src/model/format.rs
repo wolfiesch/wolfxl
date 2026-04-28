@@ -189,16 +189,8 @@ impl StylesBuilder {
         if spec == &FormatSpec::default() {
             return 0;
         }
-        let font_id = spec
-            .font
-            .as_ref()
-            .map(|f| self.intern_font(f))
-            .unwrap_or(0);
-        let fill_id = spec
-            .fill
-            .as_ref()
-            .map(|f| self.intern_fill(f))
-            .unwrap_or(0);
+        let font_id = spec.font.as_ref().map(|f| self.intern_font(f)).unwrap_or(0);
+        let fill_id = spec.fill.as_ref().map(|f| self.intern_fill(f)).unwrap_or(0);
         let border_id = spec
             .border
             .as_ref()

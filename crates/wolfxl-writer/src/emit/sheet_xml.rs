@@ -287,12 +287,16 @@ fn emit_freeze_pane(out: &mut String, freeze: &crate::model::worksheet::FreezePa
         return; // freeze cell at A1 (or below) — degenerate, emit nothing.
     }
 
-    let tl_row = freeze.top_left.map(|t| t.0).unwrap_or_else(|| {
-        if has_row { freeze.freeze_row } else { 1 }
-    });
-    let tl_col = freeze.top_left.map(|t| t.1).unwrap_or_else(|| {
-        if has_col { freeze.freeze_col } else { 1 }
-    });
+    let tl_row =
+        freeze
+            .top_left
+            .map(|t| t.0)
+            .unwrap_or_else(|| if has_row { freeze.freeze_row } else { 1 });
+    let tl_col =
+        freeze
+            .top_left
+            .map(|t| t.1)
+            .unwrap_or_else(|| if has_col { freeze.freeze_col } else { 1 });
 
     let active_pane = if has_row && has_col {
         "bottomRight"
@@ -403,9 +407,10 @@ fn emit_row(
     sst: &mut SstBuilder,
 ) {
     // Check if any cells have content (non-blank or styled blank)
-    let has_real_cells = row.cells.values().any(|c| {
-        !matches!(c.value, WriteCellValue::Blank) || c.style_id.is_some()
-    });
+    let has_real_cells = row
+        .cells
+        .values()
+        .any(|c| !matches!(c.value, WriteCellValue::Blank) || c.style_id.is_some());
     let has_attrs = row.custom_height.is_some() || row.hidden || row.style_id.is_some();
 
     // If no cells and no attributes, still emit row if cells exist
@@ -530,10 +535,7 @@ fn emit_cell(
                         out.push_str(&format!(" s=\"{}\"", s));
                     }
                     let bval = if *b { 1 } else { 0 };
-                    out.push_str(&format!(
-                        "><f>{}</f><v>{}</v></c>",
-                        escaped_expr, bval
-                    ));
+                    out.push_str(&format!("><f>{}</f><v>{}</v></c>", escaped_expr, bval));
                 }
             }
         }
@@ -741,7 +743,11 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                 let priority = priority_0 + 1;
 
                 match &rule.kind {
-                    ConditionalKind::CellIs { operator, formula_a, formula_b } => {
+                    ConditionalKind::CellIs {
+                        operator,
+                        formula_a,
+                        formula_b,
+                    } => {
                         let op_str = match operator {
                             CellIsOperator::Equal => "equal",
                             CellIsOperator::NotEqual => "notEqual",
@@ -764,11 +770,20 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                             rules_buf.push_str(" stopIfTrue=\"1\"");
                         }
                         rules_buf.push('>');
-                        rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula_a)));
-                        let needs_second = matches!(operator, CellIsOperator::Between | CellIsOperator::NotBetween);
+                        rules_buf.push_str(&format!(
+                            "<formula>{}</formula>",
+                            xml_escape::text(formula_a)
+                        ));
+                        let needs_second = matches!(
+                            operator,
+                            CellIsOperator::Between | CellIsOperator::NotBetween
+                        );
                         if needs_second {
                             if let Some(fb) = formula_b {
-                                rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(fb)));
+                                rules_buf.push_str(&format!(
+                                    "<formula>{}</formula>",
+                                    xml_escape::text(fb)
+                                ));
                             }
                         }
                         rules_buf.push_str("</cfRule>");
@@ -786,11 +801,16 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                             rules_buf.push_str(" stopIfTrue=\"1\"");
                         }
                         rules_buf.push('>');
-                        rules_buf.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula)));
+                        rules_buf
+                            .push_str(&format!("<formula>{}</formula>", xml_escape::text(formula)));
                         rules_buf.push_str("</cfRule>");
                     }
 
-                    ConditionalKind::DataBar { color_rgb, min, max } => {
+                    ConditionalKind::DataBar {
+                        color_rgb,
+                        min,
+                        max,
+                    } => {
                         rules_buf.push_str(&format!(
                             "<cfRule type=\"dataBar\" priority=\"{}\">",
                             priority
@@ -892,7 +912,7 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
 /// Emit `<dataValidations count="N">…</dataValidations>` between the CF
 /// block and `<hyperlinks>`. Filled by W3C.
 fn emit_data_validations(out: &mut String, sheet: &Worksheet) {
-    use crate::model::validation::{ErrorStyle, ValidationType, ValidationOperator};
+    use crate::model::validation::{ErrorStyle, ValidationOperator, ValidationType};
 
     if !sheet.validations.is_empty() {
         out.push_str(&format!(
@@ -1012,13 +1032,22 @@ fn emit_cfvo(out: &mut String, threshold: &crate::model::conditional::Conditiona
             out.push_str(&format!("<cfvo type=\"num\" val=\"{}\"/>", format_f64(*x)));
         }
         ConditionalThreshold::Percent(x) => {
-            out.push_str(&format!("<cfvo type=\"percent\" val=\"{}\"/>", format_f64(*x)));
+            out.push_str(&format!(
+                "<cfvo type=\"percent\" val=\"{}\"/>",
+                format_f64(*x)
+            ));
         }
         ConditionalThreshold::Percentile(x) => {
-            out.push_str(&format!("<cfvo type=\"percentile\" val=\"{}\"/>", format_f64(*x)));
+            out.push_str(&format!(
+                "<cfvo type=\"percentile\" val=\"{}\"/>",
+                format_f64(*x)
+            ));
         }
         ConditionalThreshold::Formula(s) => {
-            out.push_str(&format!("<cfvo type=\"formula\" val=\"{}\"/>", xml_escape::attr(s)));
+            out.push_str(&format!(
+                "<cfvo type=\"formula\" val=\"{}\"/>",
+                xml_escape::attr(s)
+            ));
         }
     }
 }
@@ -1044,11 +1073,7 @@ fn emit_drawing_ref(out: &mut String, sheet: &Worksheet) {
     }
     let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
     let table_count = sheet.tables.len() as u32;
-    let external_hyperlinks = sheet
-        .hyperlinks
-        .values()
-        .filter(|h| !h.is_internal)
-        .count() as u32;
+    let external_hyperlinks = sheet.hyperlinks.values().filter(|h| !h.is_internal).count() as u32;
     let rid = comments_offset + table_count + external_hyperlinks + 1;
     out.push_str(&format!("<drawing r:id=\"rId{rid}\"/>"));
 }
@@ -1105,7 +1130,10 @@ mod tests {
         let (bytes, _sst) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("<dimension ref=\"A1\"/>"), "dimension: {text}");
+        assert!(
+            text.contains("<dimension ref=\"A1\"/>"),
+            "dimension: {text}"
+        );
         // sheetData should be empty self-close or open+close
         assert!(
             text.contains("<sheetData/>") || text.contains("<sheetData></sheetData>"),
@@ -1122,7 +1150,10 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("<c r=\"A1\" s=\"3\"/>"), "blank+style: {text}");
+        assert!(
+            text.contains("<c r=\"A1\" s=\"3\"/>"),
+            "blank+style: {text}"
+        );
     }
 
     // --- 3. Blank cell without style is skipped ---
@@ -1151,7 +1182,10 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<v>42</v>"), "integer value: {text}");
-        assert!(!text.contains("<v>42.0</v>"), "should not have decimal: {text}");
+        assert!(
+            !text.contains("<v>42.0</v>"),
+            "should not have decimal: {text}"
+        );
     }
 
     // --- 5. Number float ---
@@ -1193,7 +1227,10 @@ mod tests {
 
         let text = String::from_utf8(bytes).unwrap();
         // Should emit t="s" with SST index 0
-        assert!(text.contains("<c r=\"A1\" t=\"s\">"), "t=s attribute: {text}");
+        assert!(
+            text.contains("<c r=\"A1\" t=\"s\">"),
+            "t=s attribute: {text}"
+        );
         assert!(text.contains("<v>0</v>"), "sst index: {text}");
     }
 
@@ -1219,11 +1256,20 @@ mod tests {
 
         let text = String::from_utf8(bytes).unwrap();
         // A1 (row1,col1) = beta = index 0
-        assert!(text.contains("<c r=\"A1\" t=\"s\"><v>0</v></c>"), "A1 beta=0: {text}");
+        assert!(
+            text.contains("<c r=\"A1\" t=\"s\"><v>0</v></c>"),
+            "A1 beta=0: {text}"
+        );
         // A2 (row2,col1) = alpha = index 1
-        assert!(text.contains("<c r=\"A2\" t=\"s\"><v>1</v></c>"), "A2 alpha=1: {text}");
+        assert!(
+            text.contains("<c r=\"A2\" t=\"s\"><v>1</v></c>"),
+            "A2 alpha=1: {text}"
+        );
         // A3 (row3,col1) = beta = index 0 (deduped)
-        assert!(text.contains("<c r=\"A3\" t=\"s\"><v>0</v></c>"), "A3 beta=0: {text}");
+        assert!(
+            text.contains("<c r=\"A3\" t=\"s\"><v>0</v></c>"),
+            "A3 beta=0: {text}"
+        );
     }
 
     // --- 9. Boolean true and false ---
@@ -1289,7 +1335,10 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("<f>1+6</f><v>7</v>"), "formula+numeric result: {text}");
+        assert!(
+            text.contains("<f>1+6</f><v>7</v>"),
+            "formula+numeric result: {text}"
+        );
     }
 
     // --- 12. Formula with string result uses t="str" ---
@@ -1352,7 +1401,11 @@ mod tests {
     #[test]
     fn cell_style_id_emits_s_attribute() {
         let mut sheet = Worksheet::new("S");
-        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::Number(1.0)).with_style(5));
+        sheet.set_cell(
+            1,
+            1,
+            WriteCell::new(WriteCellValue::Number(1.0)).with_style(5),
+        );
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
@@ -1408,7 +1461,10 @@ mod tests {
         let sheet = Worksheet::new("S");
         let (bytes, _) = emit_sheet(&sheet, 0);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("<mergeCells"), "no mergeCells when none: {text}");
+        assert!(
+            !text.contains("<mergeCells"),
+            "no mergeCells when none: {text}"
+        );
     }
 
     // --- 19. Freeze rows only ---
@@ -1427,7 +1483,10 @@ mod tests {
         // OOXML: ySplit is the COUNT of frozen rows (= freeze_row - 1).
         assert!(text.contains("ySplit=\"2\""), "ySplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
-        assert!(text.contains("activePane=\"bottomLeft\""), "activePane: {text}");
+        assert!(
+            text.contains("activePane=\"bottomLeft\""),
+            "activePane: {text}"
+        );
         assert!(!text.contains("xSplit"), "no xSplit: {text}");
     }
 
@@ -1447,7 +1506,10 @@ mod tests {
         // OOXML: xSplit is the COUNT of frozen columns (= freeze_col - 1).
         assert!(text.contains("xSplit=\"1\""), "xSplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
-        assert!(text.contains("activePane=\"topRight\""), "activePane: {text}");
+        assert!(
+            text.contains("activePane=\"topRight\""),
+            "activePane: {text}"
+        );
         assert!(!text.contains("ySplit"), "no ySplit: {text}");
     }
 
@@ -1468,7 +1530,10 @@ mod tests {
         assert!(text.contains("xSplit=\"2\""), "xSplit: {text}");
         assert!(text.contains("ySplit=\"1\""), "ySplit: {text}");
         assert!(text.contains("state=\"frozen\""), "state=frozen: {text}");
-        assert!(text.contains("activePane=\"bottomRight\""), "activePane: {text}");
+        assert!(
+            text.contains("activePane=\"bottomRight\""),
+            "activePane: {text}"
+        );
     }
 
     // --- 21a. B2 freeze emits count one (W4-polish regression) ---
@@ -1487,10 +1552,19 @@ mod tests {
         assert!(text.contains("xSplit=\"1\""), "xSplit count: {text}");
         assert!(text.contains("ySplit=\"1\""), "ySplit count: {text}");
         assert!(text.contains("topLeftCell=\"B2\""), "topLeftCell: {text}");
-        assert!(text.contains("activePane=\"bottomRight\""), "activePane: {text}");
+        assert!(
+            text.contains("activePane=\"bottomRight\""),
+            "activePane: {text}"
+        );
         // Negative: must NOT emit the cell coordinate as the count.
-        assert!(!text.contains("xSplit=\"2\""), "xSplit must not be 2: {text}");
-        assert!(!text.contains("ySplit=\"2\""), "ySplit must not be 2: {text}");
+        assert!(
+            !text.contains("xSplit=\"2\""),
+            "xSplit must not be 2: {text}"
+        );
+        assert!(
+            !text.contains("ySplit=\"2\""),
+            "ySplit must not be 2: {text}"
+        );
     }
 
     // --- 21b. C5 freeze emits asymmetric counts ---
@@ -1525,7 +1599,10 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         // Both splits collapse to zero — emit no <pane> at all.
-        assert!(!text.contains("<pane"), "must not emit pane for A1 freeze: {text}");
+        assert!(
+            !text.contains("<pane"),
+            "must not emit pane for A1 freeze: {text}"
+        );
     }
 
     // --- 22. Split pane is not frozen ---
@@ -1541,7 +1618,10 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("state=\"frozen\""), "no frozen for split: {text}");
+        assert!(
+            !text.contains("state=\"frozen\""),
+            "no frozen for split: {text}"
+        );
         assert!(text.contains("<pane"), "has pane: {text}");
     }
 
@@ -1588,7 +1668,10 @@ mod tests {
             "col hidden+outline: {text}"
         );
         assert!(!text.contains("width="), "no width when none: {text}");
-        assert!(!text.contains("customWidth="), "no customWidth when none: {text}");
+        assert!(
+            !text.contains("customWidth="),
+            "no customWidth when none: {text}"
+        );
     }
 
     // --- 25. Columns with style_id ---
@@ -1607,7 +1690,10 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("style=\"4\" customFormat=\"1\""), "style+customFormat: {text}");
+        assert!(
+            text.contains("style=\"4\" customFormat=\"1\""),
+            "style+customFormat: {text}"
+        );
     }
 
     // --- 26. External hyperlink gets external rId ---
@@ -1628,7 +1714,10 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         // No comments, no tables → rId1
-        assert!(text.contains("r:id=\"rId1\""), "rId1 for ext hyperlink: {text}");
+        assert!(
+            text.contains("r:id=\"rId1\""),
+            "rId1 for ext hyperlink: {text}"
+        );
     }
 
     // --- 27. External hyperlink with comments starts at rId3 ---
@@ -1743,11 +1832,7 @@ mod tests {
             }),
         );
         sheet.set_cell(2, 2, WriteCell::new(WriteCellValue::DateSerial(44927.0)));
-        sheet.set_cell(
-            2,
-            3,
-            WriteCell::new(WriteCellValue::Blank).with_style(1),
-        );
+        sheet.set_cell(2, 3, WriteCell::new(WriteCellValue::Blank).with_style(1));
 
         // Merge
         sheet.merge(Merge {
@@ -1826,7 +1911,8 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
         // E10 is the single populated cell — A1:E10 bounding box (or just E10 for single-cell).
         assert!(
-            text.contains("<dimension ref=\"E10\"/>") || text.contains("<dimension ref=\"A1:E10\"/>"),
+            text.contains("<dimension ref=\"E10\"/>")
+                || text.contains("<dimension ref=\"A1:E10\"/>"),
             "styled blank should still count toward dimension: {text}"
         );
         // The cell MUST emit because it has a style.
@@ -1877,7 +1963,10 @@ mod tests {
         let sheet = Worksheet::new("S");
         let (bytes, _) = emit_sheet(&sheet, 0);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(!text.contains("<tableParts"), "no tableParts when none: {text}");
+        assert!(
+            !text.contains("<tableParts"),
+            "no tableParts when none: {text}"
+        );
     }
 
     // --- 37. table_parts_no_comments_starts_at_rid1 ---
@@ -2060,20 +2149,27 @@ mod tests {
         CellIsOperator, ColorScaleStop, ConditionalFormat, ConditionalKind, ConditionalRule,
         ConditionalThreshold,
     };
-    use crate::model::validation::{DataValidation, ErrorStyle, ValidationOperator, ValidationType};
+    use crate::model::validation::{
+        DataValidation, ErrorStyle, ValidationOperator, ValidationType,
+    };
 
-    fn make_cf(
-        sqref: &str,
-        rules: Vec<ConditionalRule>,
-    ) -> ConditionalFormat {
+    fn make_cf(sqref: &str, rules: Vec<ConditionalRule>) -> ConditionalFormat {
         ConditionalFormat {
             sqref: sqref.to_string(),
             rules,
         }
     }
 
-    fn make_rule(kind: ConditionalKind, dxf_id: Option<u32>, stop_if_true: bool) -> ConditionalRule {
-        ConditionalRule { kind, dxf_id, stop_if_true }
+    fn make_rule(
+        kind: ConditionalKind,
+        dxf_id: Option<u32>,
+        stop_if_true: bool,
+    ) -> ConditionalRule {
+        ConditionalRule {
+            kind,
+            dxf_id,
+            stop_if_true,
+        }
     }
 
     // --- 34. CF absent when no conditional formats ---
@@ -2103,7 +2199,9 @@ mod tests {
             Some(0),
             false,
         );
-        sheet.conditional_formats.push(make_cf("A1:A10", vec![rule]));
+        sheet
+            .conditional_formats
+            .push(make_cf("A1:A10", vec![rule]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
@@ -2112,7 +2210,9 @@ mod tests {
             "wrapper: {text}"
         );
         assert!(
-            text.contains("<cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" dxfId=\"0\">"),
+            text.contains(
+                "<cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" dxfId=\"0\">"
+            ),
             "cfRule attrs: {text}"
         );
         assert!(
@@ -2159,7 +2259,9 @@ mod tests {
     fn cf_expression_has_no_operator() {
         let mut sheet = Worksheet::new("S");
         let rule = make_rule(
-            ConditionalKind::Expression { formula: "A1>B1".into() },
+            ConditionalKind::Expression {
+                formula: "A1>B1".into(),
+            },
             Some(2),
             false,
         );
@@ -2176,7 +2278,10 @@ mod tests {
         let rule_start = text.find("<cfRule").expect("cfRule start");
         let rule_end = text[rule_start..].find('>').expect("cfRule end") + rule_start;
         let rule_tag = &text[rule_start..=rule_end];
-        assert!(!rule_tag.contains("operator="), "no operator on expression: {rule_tag}");
+        assert!(
+            !rule_tag.contains("operator="),
+            "no operator on expression: {rule_tag}"
+        );
         // Exactly one <formula> child
         assert_eq!(
             text.matches("<formula>").count(),
@@ -2196,17 +2301,23 @@ mod tests {
         let mut sheet = Worksheet::new("S");
         // Rule with stop_if_true=true
         let rule_stop = make_rule(
-            ConditionalKind::Expression { formula: "A1>0".into() },
+            ConditionalKind::Expression {
+                formula: "A1>0".into(),
+            },
             None,
             true,
         );
         // Rule with stop_if_true=false
         let rule_no_stop = make_rule(
-            ConditionalKind::Expression { formula: "A1<0".into() },
+            ConditionalKind::Expression {
+                formula: "A1<0".into(),
+            },
             None,
             false,
         );
-        sheet.conditional_formats.push(make_cf("A1", vec![rule_stop, rule_no_stop]));
+        sheet
+            .conditional_formats
+            .push(make_cf("A1", vec![rule_stop, rule_no_stop]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
@@ -2241,19 +2352,21 @@ mod tests {
             Some(99), // dxf_id should be ignored for DataBar
             false,
         );
-        sheet.conditional_formats.push(make_cf("A1:A10", vec![rule]));
+        sheet
+            .conditional_formats
+            .push(make_cf("A1:A10", vec![rule]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(
-            text.contains("type=\"dataBar\""),
-            "type=dataBar: {text}"
-        );
+        assert!(text.contains("type=\"dataBar\""), "type=dataBar: {text}");
         // The cfRule element must NOT have dxfId
         let rule_start = text.find("<cfRule").expect("cfRule");
         let rule_end = text[rule_start..].find('>').expect(">") + rule_start;
         let rule_tag = &text[rule_start..=rule_end];
-        assert!(!rule_tag.contains("dxfId"), "no dxfId on dataBar: {rule_tag}");
+        assert!(
+            !rule_tag.contains("dxfId"),
+            "no dxfId on dataBar: {rule_tag}"
+        );
         // Inner structure
         assert!(
             text.contains("<dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FFFF0000\"/></dataBar>"),
@@ -2269,14 +2382,22 @@ mod tests {
         let rule = make_rule(
             ConditionalKind::ColorScale {
                 stops: vec![
-                    ColorScaleStop { threshold: ConditionalThreshold::Min, color_rgb: "FF0000FF".into() },
-                    ColorScaleStop { threshold: ConditionalThreshold::Max, color_rgb: "FFFF0000".into() },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Min,
+                        color_rgb: "FF0000FF".into(),
+                    },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Max,
+                        color_rgb: "FFFF0000".into(),
+                    },
                 ],
             },
             None,
             false,
         );
-        sheet.conditional_formats.push(make_cf("A1:A10", vec![rule]));
+        sheet
+            .conditional_formats
+            .push(make_cf("A1:A10", vec![rule]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
@@ -2293,7 +2414,10 @@ mod tests {
         let rule_start = text.find("<cfRule").expect("cfRule");
         let rule_end = text[rule_start..].find('>').expect(">") + rule_start;
         let rule_tag = &text[rule_start..=rule_end];
-        assert!(!rule_tag.contains("dxfId"), "no dxfId on colorScale: {rule_tag}");
+        assert!(
+            !rule_tag.contains("dxfId"),
+            "no dxfId on colorScale: {rule_tag}"
+        );
     }
 
     // --- 41. CF colorScale 3 stops ---
@@ -2304,22 +2428,37 @@ mod tests {
         let rule = make_rule(
             ConditionalKind::ColorScale {
                 stops: vec![
-                    ColorScaleStop { threshold: ConditionalThreshold::Min, color_rgb: "FF0000FF".into() },
-                    ColorScaleStop { threshold: ConditionalThreshold::Percent(50.0), color_rgb: "FF00FF00".into() },
-                    ColorScaleStop { threshold: ConditionalThreshold::Max, color_rgb: "FFFF0000".into() },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Min,
+                        color_rgb: "FF0000FF".into(),
+                    },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Percent(50.0),
+                        color_rgb: "FF00FF00".into(),
+                    },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Max,
+                        color_rgb: "FFFF0000".into(),
+                    },
                 ],
             },
             None,
             false,
         );
-        sheet.conditional_formats.push(make_cf("A1:A10", vec![rule]));
+        sheet
+            .conditional_formats
+            .push(make_cf("A1:A10", vec![rule]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         // Three cfvo elements
         assert_eq!(text.matches("<cfvo").count(), 3, "three cfvo: {text}");
         // Three color elements
-        assert_eq!(text.matches("<color rgb=").count(), 3, "three colors: {text}");
+        assert_eq!(
+            text.matches("<color rgb=").count(),
+            3,
+            "three colors: {text}"
+        );
         // Percent threshold
         assert!(
             text.contains("<cfvo type=\"percent\" val=\"50\"/>"),
@@ -2339,12 +2478,10 @@ mod tests {
     #[test]
     fn cf_stub_variants_skipped() {
         let mut sheet = Worksheet::new("S");
-        let rule = make_rule(
-            ConditionalKind::Duplicate,
-            None,
-            false,
-        );
-        sheet.conditional_formats.push(make_cf("A1:A10", vec![rule]));
+        let rule = make_rule(ConditionalKind::Duplicate, None, false);
+        sheet
+            .conditional_formats
+            .push(make_cf("A1:A10", vec![rule]));
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
@@ -2411,7 +2548,9 @@ mod tests {
                     false,
                 ),
                 make_rule(
-                    ConditionalKind::Expression { formula: "A1>B1".into() },
+                    ConditionalKind::Expression {
+                        formula: "A1>B1".into(),
+                    },
                     Some(1),
                     false,
                 ),
@@ -2427,8 +2566,14 @@ mod tests {
                 make_rule(
                     ConditionalKind::ColorScale {
                         stops: vec![
-                            ColorScaleStop { threshold: ConditionalThreshold::Min, color_rgb: "FFF8696B".into() },
-                            ColorScaleStop { threshold: ConditionalThreshold::Max, color_rgb: "FF63BE7B".into() },
+                            ColorScaleStop {
+                                threshold: ConditionalThreshold::Min,
+                                color_rgb: "FFF8696B".into(),
+                            },
+                            ColorScaleStop {
+                                threshold: ConditionalThreshold::Max,
+                                color_rgb: "FF63BE7B".into(),
+                            },
                         ],
                     },
                     None,
@@ -2507,10 +2652,7 @@ mod tests {
             text.contains("<dataValidation type=\"list\""),
             "type=list: {text}"
         );
-        assert!(
-            text.contains("sqref=\"A1:A10\""),
-            "sqref: {text}"
-        );
+        assert!(text.contains("sqref=\"A1:A10\""), "sqref: {text}");
         assert!(
             text.contains("<formula1>\"Red,Green,Blue\"</formula1>"),
             "formula1: {text}"
@@ -2519,7 +2661,10 @@ mod tests {
         let dv_start = text.find("<dataValidation").expect("dataValidation");
         let dv_end = text[dv_start..].find('>').expect(">") + dv_start;
         let dv_tag = &text[dv_start..=dv_end];
-        assert!(!dv_tag.contains("operator="), "no operator for list: {dv_tag}");
+        assert!(
+            !dv_tag.contains("operator="),
+            "no operator for list: {dv_tag}"
+        );
     }
 
     // --- 46. DV list with range reference ---
@@ -2560,10 +2705,7 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(
-            text.contains("<formula1>1</formula1>"),
-            "formula1: {text}"
-        );
+        assert!(text.contains("<formula1>1</formula1>"), "formula1: {text}");
         assert!(
             text.contains("<formula2>100</formula2>"),
             "formula2: {text}"
@@ -2590,10 +2732,7 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(
-            text.contains("<formula1>0</formula1>"),
-            "formula1: {text}"
-        );
+        assert!(text.contains("<formula1>0</formula1>"), "formula1: {text}");
         assert!(
             !text.contains("<formula2>"),
             "no formula2 for greaterThan: {text}"
@@ -2620,15 +2759,15 @@ mod tests {
         let (bytes, _) = emit_sheet(&sheet, 0);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        assert!(
-            text.contains("type=\"custom\""),
-            "type=custom: {text}"
-        );
+        assert!(text.contains("type=\"custom\""), "type=custom: {text}");
         // No operator attr for custom
         let dv_start = text.find("<dataValidation").expect("dataValidation");
         let dv_end = text[dv_start..].find('>').expect(">") + dv_start;
         let dv_tag = &text[dv_start..=dv_end];
-        assert!(!dv_tag.contains("operator="), "no operator for custom: {dv_tag}");
+        assert!(
+            !dv_tag.contains("operator="),
+            "no operator for custom: {dv_tag}"
+        );
         // > in formula is escaped as &gt;
         assert!(
             text.contains("<formula1>A1&gt;0</formula1>"),
@@ -2641,7 +2780,13 @@ mod tests {
     #[test]
     fn dv_error_style_warning() {
         let mut sheet = Worksheet::new("S");
-        let mut dv = make_dv("F1", ValidationType::Whole, ValidationOperator::Between, Some("0"), Some("100"));
+        let mut dv = make_dv(
+            "F1",
+            ValidationType::Whole,
+            ValidationOperator::Between,
+            Some("0"),
+            Some("100"),
+        );
         dv.error_style = ErrorStyle::Warning;
         dv.error_title = Some("Oops".into());
         dv.error_message = Some("Invalid".into());
@@ -2653,10 +2798,7 @@ mod tests {
             text.contains("errorStyle=\"warning\""),
             "errorStyle=warning: {text}"
         );
-        assert!(
-            text.contains("errorTitle=\"Oops\""),
-            "errorTitle: {text}"
-        );
+        assert!(text.contains("errorTitle=\"Oops\""), "errorTitle: {text}");
         assert!(
             text.contains("error=\"Invalid\""),
             "error (not errorMessage): {text}"
@@ -2668,7 +2810,13 @@ mod tests {
     #[test]
     fn dv_show_flags() {
         let mut sheet = Worksheet::new("S");
-        let mut dv = make_dv("G1", ValidationType::Any, ValidationOperator::Between, None, None);
+        let mut dv = make_dv(
+            "G1",
+            ValidationType::Any,
+            ValidationOperator::Between,
+            None,
+            None,
+        );
         dv.allow_blank = true;
         dv.show_input_message = true;
         dv.show_error_message = true;
@@ -2678,19 +2826,40 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("allowBlank=\"1\""), "allowBlank: {text}");
-        assert!(text.contains("showInputMessage=\"1\""), "showInputMessage: {text}");
-        assert!(text.contains("showErrorMessage=\"1\""), "showErrorMessage: {text}");
+        assert!(
+            text.contains("showInputMessage=\"1\""),
+            "showInputMessage: {text}"
+        );
+        assert!(
+            text.contains("showErrorMessage=\"1\""),
+            "showErrorMessage: {text}"
+        );
 
         // Now with all false
         let mut sheet2 = Worksheet::new("S");
-        let dv2 = make_dv("G1", ValidationType::Any, ValidationOperator::Between, None, None);
+        let dv2 = make_dv(
+            "G1",
+            ValidationType::Any,
+            ValidationOperator::Between,
+            None,
+            None,
+        );
         // all flags default to false
         sheet2.validations.push(dv2);
         let (bytes2, _) = emit_sheet(&sheet2, 0);
         let text2 = String::from_utf8(bytes2).unwrap();
-        assert!(!text2.contains("allowBlank="), "no allowBlank when false: {text2}");
-        assert!(!text2.contains("showInputMessage="), "no showInputMessage when false: {text2}");
-        assert!(!text2.contains("showErrorMessage="), "no showErrorMessage when false: {text2}");
+        assert!(
+            !text2.contains("allowBlank="),
+            "no allowBlank when false: {text2}"
+        );
+        assert!(
+            !text2.contains("showInputMessage="),
+            "no showInputMessage when false: {text2}"
+        );
+        assert!(
+            !text2.contains("showErrorMessage="),
+            "no showErrorMessage when false: {text2}"
+        );
     }
 
     // --- 52. DV ordering: CF before DV before hyperlinks ---
@@ -2700,7 +2869,9 @@ mod tests {
         let mut sheet = Worksheet::new("S");
         // Add a conditional format
         let cf_rule = make_rule(
-            ConditionalKind::Expression { formula: "A1>0".into() },
+            ConditionalKind::Expression {
+                formula: "A1>0".into(),
+            },
             None,
             false,
         );
@@ -2736,7 +2907,9 @@ mod tests {
         let pos_hl = text.find("<hyperlinks>").expect("hyperlinks position");
 
         assert!(pos_cf < pos_dv, "CF before DV: cf={pos_cf} dv={pos_dv}");
-        assert!(pos_dv < pos_hl, "DV before hyperlinks: dv={pos_dv} hl={pos_hl}");
+        assert!(
+            pos_dv < pos_hl,
+            "DV before hyperlinks: dv={pos_dv} hl={pos_hl}"
+        );
     }
-
 }

@@ -21,10 +21,7 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
 
     // 1. numFmts — only custom (id >= 164); omit entirely when empty.
     if !styles.num_fmts.is_empty() {
-        out.push_str(&format!(
-            "<numFmts count=\"{}\">",
-            styles.num_fmts.len()
-        ));
+        out.push_str(&format!("<numFmts count=\"{}\">", styles.num_fmts.len()));
         for (id, code) in &styles.num_fmts {
             out.push_str(&format!(
                 "<numFmt numFmtId=\"{id}\" formatCode=\"{}\"/>",
@@ -307,15 +304,42 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
 
         assert!(text.contains("<styleSheet"), "missing <styleSheet");
-        assert!(text.contains("<fonts count=\"1\">"), "missing <fonts count=\"1\">");
-        assert!(text.contains("<fills count=\"2\">"), "missing <fills count=\"2\">");
-        assert!(text.contains("<borders count=\"1\">"), "missing <borders count=\"1\">");
-        assert!(text.contains("<cellStyleXfs count=\"1\">"), "missing <cellStyleXfs count=\"1\">");
-        assert!(text.contains("<cellXfs count=\"1\">"), "missing <cellXfs count=\"1\">");
-        assert!(text.contains("<cellStyles count=\"1\">"), "missing <cellStyles count=\"1\">");
-        assert!(text.contains("<dxfs count=\"0\"/>"), "missing <dxfs count=\"0\"/>");
-        assert!(text.contains("<tableStyles count=\"0\""), "missing <tableStyles count=\"0\"");
-        assert!(!text.contains("<numFmts"), "numFmts should be omitted when empty");
+        assert!(
+            text.contains("<fonts count=\"1\">"),
+            "missing <fonts count=\"1\">"
+        );
+        assert!(
+            text.contains("<fills count=\"2\">"),
+            "missing <fills count=\"2\">"
+        );
+        assert!(
+            text.contains("<borders count=\"1\">"),
+            "missing <borders count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellStyleXfs count=\"1\">"),
+            "missing <cellStyleXfs count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellXfs count=\"1\">"),
+            "missing <cellXfs count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellStyles count=\"1\">"),
+            "missing <cellStyles count=\"1\">"
+        );
+        assert!(
+            text.contains("<dxfs count=\"0\"/>"),
+            "missing <dxfs count=\"0\"/>"
+        );
+        assert!(
+            text.contains("<tableStyles count=\"0\""),
+            "missing <tableStyles count=\"0\""
+        );
+        assert!(
+            !text.contains("<numFmts"),
+            "numFmts should be omitted when empty"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -425,7 +449,10 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
 
-        assert!(text.contains("<numFmts count=\"1\">"), "missing numFmts count=1");
+        assert!(
+            text.contains("<numFmts count=\"1\">"),
+            "missing numFmts count=1"
+        );
         assert!(
             text.contains("numFmtId=\"164\""),
             "custom fmt should have id 164"
@@ -529,7 +556,10 @@ mod tests {
 
         assert!(text.contains("applyFont=\"1\""), "applyFont flag missing");
         assert!(text.contains("applyFill=\"1\""), "applyFill flag missing");
-        assert!(text.contains("applyBorder=\"1\""), "applyBorder flag missing");
+        assert!(
+            text.contains("applyBorder=\"1\""),
+            "applyBorder flag missing"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -564,7 +594,10 @@ mod tests {
         let mut styles = StylesBuilder::default();
         let id = styles.intern_num_fmt("0.00");
         assert_eq!(id, 2, "0.00 is builtin id 2");
-        assert!(styles.num_fmts.is_empty(), "no custom entry should be created");
+        assert!(
+            styles.num_fmts.is_empty(),
+            "no custom entry should be created"
+        );
         let text = emit_str(&styles);
         assert!(!text.contains("<numFmts"), "numFmts should be absent");
     }
@@ -807,8 +840,12 @@ mod tests {
             bg_color_rgb: Some("FF222222".into()),
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
-        let fg_pos = text.find("<fgColor rgb=\"FF111111\"/>").expect("fg present");
-        let bg_pos = text.find("<bgColor rgb=\"FF222222\"/>").expect("bg present");
+        let fg_pos = text
+            .find("<fgColor rgb=\"FF111111\"/>")
+            .expect("fg present");
+        let bg_pos = text
+            .find("<bgColor rgb=\"FF222222\"/>")
+            .expect("bg present");
         assert!(fg_pos < bg_pos, "fg must precede bg in OOXML; got:\n{text}");
     }
 

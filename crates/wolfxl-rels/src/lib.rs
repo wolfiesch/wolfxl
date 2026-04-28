@@ -209,12 +209,12 @@ impl RelsGraph {
 
                     for a in e.attributes().with_checks(false).flatten() {
                         let key = a.key.as_ref();
-                        let value = a
-                            .unescape_value()
-                            .map(|v| v.into_owned())
-                            .unwrap_or_else(|_| {
-                                String::from_utf8_lossy(a.value.as_ref()).into_owned()
-                            });
+                        let value =
+                            a.unescape_value()
+                                .map(|v| v.into_owned())
+                                .unwrap_or_else(|_| {
+                                    String::from_utf8_lossy(a.value.as_ref()).into_owned()
+                                });
                         match key {
                             b"Id" => id_str = Some(value),
                             b"Type" => rel_type = Some(value),
@@ -312,7 +312,10 @@ impl RelsGraph {
 
     /// Return all relationships of the given type, in source order.
     pub fn find_by_type(&self, rel_type: &str) -> Vec<&Relationship> {
-        self.rels.iter().filter(|r| r.rel_type == rel_type).collect()
+        self.rels
+            .iter()
+            .filter(|r| r.rel_type == rel_type)
+            .collect()
     }
 
     /// First match by `(target, mode)`, in source order. Used by callers to
@@ -548,9 +551,15 @@ mod tests {
             let g1 = RelsGraph::parse(input).expect("parse 1");
             let out1 = g1.serialize();
             let g2 = RelsGraph::parse(&out1).expect("parse 2");
-            assert_eq!(g1, g2, "parse(serialize(parse(input))) must equal parse(input)");
+            assert_eq!(
+                g1, g2,
+                "parse(serialize(parse(input))) must equal parse(input)"
+            );
             let out2 = g2.serialize();
-            assert_eq!(out1, out2, "serialize is byte-stable on a fixed-point graph");
+            assert_eq!(
+                out1, out2,
+                "serialize is byte-stable on a fixed-point graph"
+            );
         }
     }
 
@@ -568,7 +577,10 @@ mod tests {
         assert!(text.contains("TargetMode=\"External\""));
         // Round-trip preserves the unescaped value in memory.
         let g2 = RelsGraph::parse(&bytes).expect("re-parse");
-        assert_eq!(g2.iter().next().unwrap().target, "https://example.com/path?q=1&r=2");
+        assert_eq!(
+            g2.iter().next().unwrap().target,
+            "https://example.com/path?q=1&r=2"
+        );
     }
 
     #[test]
@@ -604,7 +616,10 @@ mod tests {
     fn rels_path_for_top_level_returns_root_rels() {
         // A bare path with no '/' is a root-level part; its rels lives at
         // "_rels/<name>.rels".
-        assert_eq!(rels_path_for("workbook.xml"), Some("_rels/workbook.xml.rels".into()));
+        assert_eq!(
+            rels_path_for("workbook.xml"),
+            Some("_rels/workbook.xml.rels".into())
+        );
     }
 
     #[test]

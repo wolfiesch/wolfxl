@@ -18,8 +18,8 @@
 //! (model types, function signatures, deterministic output) are
 //! production-grade.
 
-pub mod model;
 pub mod emit;
+pub mod model;
 pub mod parse;
 pub mod structural;
 
@@ -30,8 +30,8 @@ pub use model::records::{CacheRecord, RecordCell};
 pub use model::slicer::Slicer;
 pub use model::slicer_cache::{SlicerCache, SlicerItem, SlicerSortOrder};
 pub use model::table::{
-    AxisItem, AxisItemType, AxisType, DataField, DataFunction, Location, PageField,
-    PivotField, PivotItem, PivotItemType, PivotSource, PivotTable, PivotTableStyleInfo,
+    AxisItem, AxisItemType, AxisType, DataField, DataFunction, Location, PageField, PivotField,
+    PivotItem, PivotItemType, PivotSource, PivotTable, PivotTableStyleInfo,
 };
 
 /// Crate version string used for `created_version`, `refreshed_version`
@@ -45,8 +45,7 @@ pub const DEFAULT_MIN_REFRESHABLE_VERSION: u8 = 3;
 
 /// Namespace URIs.
 pub mod ns {
-    pub const SPREADSHEETML: &str =
-        "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    pub const SPREADSHEETML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
     pub const RELATIONSHIPS: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 }
@@ -60,11 +59,9 @@ pub mod ct {
     pub const PIVOT_TABLE: &str =
         "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml";
     /// RFC-061 — slicer cache part content-type.
-    pub const SLICER_CACHE: &str =
-        "application/vnd.ms-excel.slicerCache+xml";
+    pub const SLICER_CACHE: &str = "application/vnd.ms-excel.slicerCache+xml";
     /// RFC-061 — slicer presentation part content-type.
-    pub const SLICER: &str =
-        "application/vnd.ms-excel.slicer+xml";
+    pub const SLICER: &str = "application/vnd.ms-excel.slicer+xml";
 }
 
 /// Relationship-type URIs that the workbook / cache / sheet rels graphs
@@ -80,16 +77,13 @@ pub mod rt {
     pub const SLICER_CACHE: &str =
         "http://schemas.microsoft.com/office/2007/relationships/slicerCache";
     /// RFC-061 — sheet → slicer presentation rel type.
-    pub const SLICER: &str =
-        "http://schemas.microsoft.com/office/2007/relationships/slicer";
+    pub const SLICER: &str = "http://schemas.microsoft.com/office/2007/relationships/slicer";
 }
 
 /// `<extLst>` extension URIs (RFC-061 §3.1).
 pub mod ext_uri {
     /// Workbook-level `<x14:slicerCaches>` extension URI.
-    pub const WORKBOOK_SLICER_CACHES: &str =
-        "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}";
+    pub const WORKBOOK_SLICER_CACHES: &str = "{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}";
     /// Sheet-level `<x14:slicerList>` extension URI.
-    pub const SHEET_SLICER_LIST: &str =
-        "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}";
+    pub const SHEET_SLICER_LIST: &str = "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}";
 }

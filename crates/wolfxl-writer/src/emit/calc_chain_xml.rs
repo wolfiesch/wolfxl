@@ -43,9 +43,7 @@ pub fn emit(wb: &Workbook) -> Option<Vec<u8>> {
     let mut wrote_any = false;
 
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-    out.push_str(
-        "<calcChain xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
-    );
+    out.push_str("<calcChain xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
     for (sheet_idx, sheet) in wb.sheets.iter().enumerate() {
         let i = (sheet_idx as u32) + 1;
         // BTreeMap iteration is row-then-column ascending — matches
@@ -173,7 +171,9 @@ mod tests {
         let i_a2 = s.find("<c r=\"A2\"").unwrap();
         let i_c2 = s.find("<c r=\"C2\"").unwrap();
         let i_e5 = s.find("<c r=\"E5\"").unwrap();
-        assert!(i_a2 < i_c2 && i_c2 < i_e5, "got order: A2={i_a2}, C2={i_c2}, E5={i_e5}, full: {s}");
+        assert!(
+            i_a2 < i_c2 && i_c2 < i_e5,
+            "got order: A2={i_a2}, C2={i_c2}, E5={i_e5}, full: {s}"
+        );
     }
-
 }

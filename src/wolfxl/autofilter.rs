@@ -107,8 +107,7 @@ pub(crate) fn pyany_to_dictvalue(v: &Bound<'_, PyAny>) -> PyResult<DictValue> {
 #[pyfunction]
 pub fn serialize_autofilter_dict(d: &Bound<'_, PyDict>) -> PyResult<Vec<u8>> {
     let dv = pyany_to_dictvalue(&d.as_any().clone())?;
-    let af: AutoFilter =
-        af_parse::parse_autofilter(&dv).map_err(PyValueError::new_err)?;
+    let af: AutoFilter = af_parse::parse_autofilter(&dv).map_err(PyValueError::new_err)?;
     Ok(af_emit::emit(&af))
 }
 
@@ -132,8 +131,7 @@ pub fn evaluate_autofilter(
     ref_date_serial: Option<f64>,
 ) -> PyResult<PyObject> {
     let dv = pyany_to_dictvalue(&d.as_any().clone())?;
-    let af: AutoFilter =
-        af_parse::parse_autofilter(&dv).map_err(PyValueError::new_err)?;
+    let af: AutoFilter = af_parse::parse_autofilter(&dv).map_err(PyValueError::new_err)?;
 
     // Convert rows_data to Vec<Vec<Cell>>.
     let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(rows_data.len());

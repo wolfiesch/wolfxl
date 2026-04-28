@@ -231,8 +231,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut buf);
-            let opts =
-                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
             for (path, bytes) in entries {
                 writer.start_file(*path, opts).unwrap();
                 writer.write_all(bytes).unwrap();
@@ -401,7 +400,10 @@ mod tests {
 
     #[test]
     fn sheet_parent_dir_cases() {
-        assert_eq!(sheet_parent_dir("xl/worksheets/sheet1.xml"), "xl/worksheets/");
+        assert_eq!(
+            sheet_parent_dir("xl/worksheets/sheet1.xml"),
+            "xl/worksheets/"
+        );
         assert_eq!(sheet_parent_dir("xl/sheet1.xml"), "xl/");
         assert_eq!(sheet_parent_dir("sheet1.xml"), "");
     }

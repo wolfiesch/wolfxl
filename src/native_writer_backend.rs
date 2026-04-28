@@ -46,9 +46,9 @@ use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial}
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
 use wolfxl_writer::model::{
     AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, Comment, CommentAuthorTable,
-    ConditionalFormat, ConditionalKind, ConditionalRule, DataValidation, DefinedName, DocProperties,
-    DxfRecord, ErrorStyle, FillSpec, FontSpec, FormatSpec, Hyperlink, StylesBuilder, Table,
-    TableColumn, TableStyle, ValidationType, ValidationOperator, Worksheet, WriteCellValue,
+    ConditionalFormat, ConditionalKind, ConditionalRule, DataValidation, DefinedName,
+    DocProperties, DxfRecord, ErrorStyle, FillSpec, FontSpec, FormatSpec, Hyperlink, StylesBuilder,
+    Table, TableColumn, TableStyle, ValidationOperator, ValidationType, Worksheet, WriteCellValue,
 };
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
@@ -153,7 +153,10 @@ fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCell
             // W4E.R5: reject non-finite values (NaN, +/-Infinity) at the
             // boundary. Strings like "NaN" / "inf" parse to f64 successfully
             // but have no OOXML representation.
-            Ok(WriteCellValue::Number(require_finite_f64(n, "number cell")?))
+            Ok(WriteCellValue::Number(require_finite_f64(
+                n,
+                "number cell",
+            )?))
         }
         "boolean" => {
             let b = value_str.as_deref().map(parse_python_bool).unwrap_or(false);
@@ -164,10 +167,7 @@ fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCell
                 .or(value_str)
                 .map(|s| s.trim_start_matches('=').to_string())
                 .unwrap_or_default();
-            Ok(WriteCellValue::Formula {
-                expr,
-                result: None,
-            })
+            Ok(WriteCellValue::Formula { expr, result: None })
         }
         "error" => {
             // Native model has no Error variant yet — fall back to the
@@ -233,9 +233,7 @@ fn require_finite_f64(f: f64, context: &str) -> PyResult<f64> {
 /// rather than silently emitting invalid `"NaN"`/`"inf"` text in the
 /// output XML. `Ok(None)` still means "no usable coercion, skip" (oracle
 /// parity); `Err(…)` means the value was a finite-violating float.
-fn raw_python_to_write_cell_value(
-    value: &Bound<'_, PyAny>,
-) -> PyResult<Option<WriteCellValue>> {
+fn raw_python_to_write_cell_value(value: &Bound<'_, PyAny>) -> PyResult<Option<WriteCellValue>> {
     if value.is_none() {
         return Ok(None);
     }
@@ -251,7 +249,10 @@ fn raw_python_to_write_cell_value(
         return Ok(Some(WriteCellValue::Number(i as f64)));
     }
     if let Ok(f) = value.extract::<f64>() {
-        return Ok(Some(WriteCellValue::Number(require_finite_f64(f, "cell value")?)));
+        return Ok(Some(WriteCellValue::Number(require_finite_f64(
+            f,
+            "cell value",
+        )?)));
     }
     if let Ok(s) = value.extract::<String>() {
         if s.starts_with('=') {
@@ -516,10 +517,7 @@ fn dict_to_border_spec(dict: &Bound<'_, PyDict>) -> PyResult<BorderSpec> {
 // Helpers tying conversions to the model
 // ---------------------------------------------------------------------------
 
-fn intern_format_from_dict(
-    wb: &mut Workbook,
-    dict: &Bound<'_, PyDict>,
-) -> PyResult<u32> {
+fn intern_format_from_dict(wb: &mut Workbook, dict: &Bound<'_, PyDict>) -> PyResult<u32> {
     let spec = dict_to_format_spec(dict)?;
     Ok(wb.styles.intern_format(&spec))
 }
@@ -592,13 +590,15 @@ fn py_runs_to_rust_writer(
                             } else if let Ok(f) = v.extract::<f64>() {
                                 if !f.is_finite() {
                                     return Err(PyValueError::new_err(format!(
-                                        "{}: non-finite number", $k,
+                                        "{}: non-finite number",
+                                        $k,
                                     )));
                                 }
                                 f as i32
                             } else {
                                 return Err(PyValueError::new_err(format!(
-                                    "{}: expected integer", $k,
+                                    "{}: expected integer",
+                                    $k,
                                 )));
                             };
                             props.$field = Some(val);
@@ -806,7 +806,10 @@ fn dict_to_conditional_format(
                 if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
                     // "formula1,formula2" convention — split on the first comma.
                     if let Some(idx) = fstr.find(',') {
-                        (fstr[..idx].trim().to_string(), Some(fstr[idx + 1..].trim().to_string()))
+                        (
+                            fstr[..idx].trim().to_string(),
+                            Some(fstr[idx + 1..].trim().to_string()),
+                        )
                     } else {
                         (fstr.to_string(), None)
                     }
@@ -1023,8 +1026,9 @@ fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> 
     let subject: Option<String> = props.get_item("subject")?.and_then(|v| v.extract().ok());
     let creator: Option<String> = props.get_item("creator")?.and_then(|v| v.extract().ok());
     let keywords: Option<String> = props.get_item("keywords")?.and_then(|v| v.extract().ok());
-    let description: Option<String> =
-        props.get_item("description")?.and_then(|v| v.extract().ok());
+    let description: Option<String> = props
+        .get_item("description")?
+        .and_then(|v| v.extract().ok());
     let category: Option<String> = props.get_item("category")?.and_then(|v| v.extract().ok());
     // Python passes the OOXML-canonical camelCase key. The Python ->
     // emitter -> <cp:contentStatus> path is preserved verbatim from the
@@ -1033,15 +1037,13 @@ fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> 
         .get_item("contentStatus")?
         .and_then(|v| v.extract().ok());
 
-    let created: Option<chrono::NaiveDateTime> =
-        props.get_item("created")?.and_then(|v| {
-            v.extract::<String>().ok().and_then(|s| {
-                // Try datetime first, then date-only (with midnight time).
-                parse_iso_datetime(&s).or_else(|| {
-                    parse_iso_date(&s).and_then(|d| d.and_hms_opt(0, 0, 0))
-                })
-            })
-        });
+    let created: Option<chrono::NaiveDateTime> = props.get_item("created")?.and_then(|v| {
+        v.extract::<String>().ok().and_then(|s| {
+            // Try datetime first, then date-only (with midnight time).
+            parse_iso_datetime(&s)
+                .or_else(|| parse_iso_date(&s).and_then(|d| d.and_hms_opt(0, 0, 0)))
+        })
+    });
 
     Ok(DocProperties {
         title,
@@ -1209,12 +1211,8 @@ impl NativeWorkbook {
                     .map(|v| v.extract::<bool>())
                     .transpose()?
                     .unwrap_or(false);
-                let r1: Option<String> = payload
-                    .get_item("r1")?
-                    .and_then(|v| v.extract().ok());
-                let r2: Option<String> = payload
-                    .get_item("r2")?
-                    .and_then(|v| v.extract().ok());
+                let r1: Option<String> = payload.get_item("r1")?.and_then(|v| v.extract().ok());
+                let r2: Option<String> = payload.get_item("r2")?.and_then(|v| v.extract().ok());
                 WriteCellValue::DataTableFormula {
                     ref_range,
                     ca,
@@ -1433,8 +1431,7 @@ impl NativeWorkbook {
     pub fn merge_cells(&mut self, sheet: &str, range_str: &str) -> PyResult<()> {
         let cleaned = range_str.replace('$', "");
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.merge_cells(&cleaned)
-            .map_err(PyValueError::new_err)
+        ws.merge_cells(&cleaned).map_err(PyValueError::new_err)
     }
 
     /// Mirrors oracle: dict with keys `mode` ("freeze" | "split") and
@@ -1504,11 +1501,7 @@ impl NativeWorkbook {
     // Wave 4B rich-feature pymethods — real implementations.
     // =========================================================================
 
-    pub fn add_hyperlink(
-        &mut self,
-        sheet: &str,
-        link_dict: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    pub fn add_hyperlink(&mut self, sheet: &str, link_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = link_dict
             .downcast::<PyDict>()
             .map_err(|_| PyValueError::new_err("link must be a dict"))?;
@@ -1521,11 +1514,7 @@ impl NativeWorkbook {
         Ok(())
     }
 
-    pub fn add_comment(
-        &mut self,
-        sheet: &str,
-        comment_dict: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    pub fn add_comment(&mut self, sheet: &str, comment_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = comment_dict
             .downcast::<PyDict>()
             .map_err(|_| PyValueError::new_err("comment_dict must be a dict"))?;
@@ -1590,11 +1579,7 @@ impl NativeWorkbook {
     /// block via `wolfxl_autofilter::emit::emit`, and evaluates the
     /// filter against the worksheet's in-memory cells to stamp
     /// `row.hidden = true` on rows excluded by the filter.
-    pub fn set_autofilter_native(
-        &mut self,
-        sheet: &str,
-        d: &Bound<'_, PyDict>,
-    ) -> PyResult<()> {
+    pub fn set_autofilter_native(&mut self, sheet: &str, d: &Bound<'_, PyDict>) -> PyResult<()> {
         use wolfxl_autofilter::evaluate::{evaluate, Cell as AfCell};
         use wolfxl_writer::model::cell::WriteCellValue;
 
@@ -1719,11 +1704,7 @@ impl NativeWorkbook {
         Ok(())
     }
 
-    pub fn add_named_range(
-        &mut self,
-        sheet: &str,
-        named_range: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    pub fn add_named_range(&mut self, sheet: &str, named_range: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = named_range
             .downcast::<PyDict>()
             .map_err(|_| PyValueError::new_err("named_range must be a dict"))?;
@@ -1952,10 +1933,7 @@ impl NativeWorkbook {
 /// `None`. The returned bytes are a complete `xl/charts/chartN.xml`
 /// part, ready for the patcher's `file_adds`.
 #[pyfunction]
-pub fn serialize_chart_dict(
-    chart_dict: &Bound<'_, PyDict>,
-    anchor_a1: &str,
-) -> PyResult<Vec<u8>> {
+pub fn serialize_chart_dict(chart_dict: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Vec<u8>> {
     let chart = parse_chart_dict(chart_dict, anchor_a1)?;
     Ok(wolfxl_writer::emit::charts::emit_chart_xml(&chart))
 }
@@ -2014,9 +1992,9 @@ fn dict_to_workbook_security(
 
     let workbook_protection = match payload.get_item("workbook_protection")? {
         Some(v) if !v.is_none() => {
-            let d = v.downcast::<PyDict>().map_err(|_| {
-                PyValueError::new_err("workbook_protection must be a dict or None")
-            })?;
+            let d = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("workbook_protection must be a dict or None"))?;
             Some(WorkbookProtectionSpec {
                 lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
                 lock_windows: extract_bool(d, "lock_windows")?.unwrap_or(false),
@@ -2292,11 +2270,7 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
             "stacked" => BarGrouping::Stacked,
             "percentStacked" => BarGrouping::PercentStacked,
             "standard" => BarGrouping::Standard,
-            other => {
-                return Err(PyValueError::new_err(format!(
-                    "unknown grouping {other:?}"
-                )))
-            }
+            other => return Err(PyValueError::new_err(format!("unknown grouping {other:?}"))),
         });
     }
     if let Some(n) = py_opt_u32(d, "gap_width")? {
@@ -2367,9 +2341,9 @@ fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResult<Chart> {
     // dicts without this key parse identically to v1.7 output.
     if let Some(v) = d.get_item("pivot_source")? {
         if !v.is_none() {
-            let psd = v.downcast::<PyDict>().map_err(|_| {
-                PyValueError::new_err("pivot_source must be a dict or None")
-            })?;
+            let psd = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("pivot_source must be a dict or None"))?;
             chart.pivot_source = Some(parse_pivot_source(psd)?);
         }
     }
@@ -2399,9 +2373,9 @@ fn parse_pivot_source(d: &Bound<'_, PyDict>) -> PyResult<PivotSource> {
         )));
     }
     let fmt_id: u32 = match d.get_item("fmt_id")? {
-        Some(v) if !v.is_none() => v.extract().map_err(|_| {
-            PyValueError::new_err("pivot_source.fmt_id must be an int")
-        })?,
+        Some(v) if !v.is_none() => v
+            .extract()
+            .map_err(|_| PyValueError::new_err("pivot_source.fmt_id must be an int"))?,
         _ => 0,
     };
     if fmt_id > 65535 {
@@ -2525,9 +2499,9 @@ fn parse_chart_title(d: &Bound<'_, PyDict>) -> PyResult<ChartTitle> {
 
             if let Some(fv) = rd.get_item("font")? {
                 if !fv.is_none() {
-                    let fd = fv.downcast::<PyDict>().map_err(|_| {
-                        PyValueError::new_err("title run 'font' must be a dict")
-                    })?;
+                    let fd = fv
+                        .downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("title run 'font' must be a dict"))?;
                     if let Some(b) = py_opt_bool(fd, "bold")? {
                         bold = Some(b);
                     }
@@ -2667,12 +2641,16 @@ fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
             "val" => "value".to_string(),
             "date" => "date".to_string(),
             "ser" => "series".to_string(),
-            other => return Err(PyValueError::new_err(format!(
-                "unknown ax_type {other:?} (expected cat|val|date|ser)"
-            ))),
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown ax_type {other:?} (expected cat|val|date|ser)"
+                )))
+            }
         }
     } else {
-        return Err(PyValueError::new_err("axis dict missing 'kind' or 'ax_type'"));
+        return Err(PyValueError::new_err(
+            "axis dict missing 'kind' or 'ax_type'",
+        ));
     };
 
     let common = parse_axis_common(d)?;
@@ -2734,18 +2712,13 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
         .extract()?;
     // RFC-046 §10.7 calls the field `axis_position`; the legacy shape
     // used `ax_pos`. Accept both with `axis_position` taking precedence.
-    let ax_pos_raw = py_opt_str(d, "axis_position")?
-        .or(py_opt_str(d, "ax_pos")?);
+    let ax_pos_raw = py_opt_str(d, "axis_position")?.or(py_opt_str(d, "ax_pos")?);
     let ax_pos = match ax_pos_raw.as_deref() {
         Some("b") | None => AxisPos::Bottom,
         Some("t") => AxisPos::Top,
         Some("l") => AxisPos::Left,
         Some("r") => AxisPos::Right,
-        Some(other) => {
-            return Err(PyValueError::new_err(format!(
-                "unknown ax_pos {other:?}"
-            )))
-        }
+        Some(other) => return Err(PyValueError::new_err(format!("unknown ax_pos {other:?}"))),
     };
     // Orientation may live on the axis OR (RFC-046) under `scaling`.
     let mut orientation_raw = py_opt_str(d, "orientation")?;
@@ -2823,10 +2796,7 @@ fn parse_axis_common(d: &Bound<'_, PyDict>) -> PyResult<AxisCommon> {
 ///   - dict (possibly empty) → (false, Some(Gridlines{...})).
 ///
 /// Returns `(flag, obj)` to feed AxisCommon.
-fn parse_gridlines_field(
-    d: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<(bool, Option<Gridlines>)> {
+fn parse_gridlines_field(d: &Bound<'_, PyDict>, key: &str) -> PyResult<(bool, Option<Gridlines>)> {
     let Some(v) = d.get_item(key)? else {
         return Ok((false, None));
     };
@@ -2897,9 +2867,9 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
             // Legacy: {"strRef": {"sheet", "range"}} or {"literal": "..."}
             if let Ok(td) = v.downcast::<PyDict>() {
                 if let Some(rv) = td.get_item("strRef")? {
-                    let rd = rv.downcast::<PyDict>().map_err(|_| {
-                        PyValueError::new_err("strRef must be a dict")
-                    })?;
+                    let rd = rv
+                        .downcast::<PyDict>()
+                        .map_err(|_| PyValueError::new_err("strRef must be a dict"))?;
                     s.title = Some(SeriesTitle::StrRef(parse_reference(rd)?));
                 } else if let Some(lv) = td.get_item("literal")? {
                     let s_str: String = lv.extract()?;
@@ -2948,9 +2918,9 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
     // (list of dicts). Accept both.
     if let Some(v) = d.get_item("err_bars")? {
         if !v.is_none() {
-            let ed = v.downcast::<PyDict>().map_err(|_| {
-                PyValueError::new_err("err_bars must be a dict")
-            })?;
+            let ed = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("err_bars must be a dict"))?;
             s.error_bars.push(parse_error_bars(ed)?);
         }
     }
@@ -3014,9 +2984,7 @@ fn parse_series_ref_field(
 fn reference_from_a1(s: &str) -> PyResult<ChartReference> {
     let trimmed = s.trim();
     let (sheet, range) = trimmed.split_once('!').ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "expected A1 reference 'Sheet!A1:B2', got {s:?}"
-        ))
+        PyValueError::new_err(format!("expected A1 reference 'Sheet!A1:B2', got {s:?}"))
     })?;
     let sheet = sheet.trim_matches('\'').replace("''", "'");
     Ok(ChartReference::new(sheet, range))
@@ -3039,8 +3007,7 @@ fn parse_graphical_properties(d: &Bound<'_, PyDict>) -> PyResult<GraphicalProper
     // a nested `ln` dict with `solid_fill` / `prst_dash` / `w_emu`.
     // Earlier callers (legacy) used flat `fill_color` / `line_color` /
     // `line_dash` / `line_width_emu`. Accept either; §10 form wins.
-    let fill_color = py_opt_str(d, "solid_fill")?
-        .or(py_opt_str(d, "fill_color")?);
+    let fill_color = py_opt_str(d, "solid_fill")?.or(py_opt_str(d, "fill_color")?);
 
     // Nested ln dict per §10.9
     let mut line_color = py_opt_str(d, "line_color")?;
@@ -3195,8 +3162,7 @@ fn parse_trendline(d: &Bound<'_, PyDict>) -> PyResult<Trendline> {
     };
     // §10.6.4: disp_eq / disp_r_sqr; legacy: display_equation / display_r_squared.
     let display_equation = py_opt_bool(d, "disp_eq")?.or(py_opt_bool(d, "display_equation")?);
-    let display_r_squared =
-        py_opt_bool(d, "disp_r_sqr")?.or(py_opt_bool(d, "display_r_squared")?);
+    let display_r_squared = py_opt_bool(d, "disp_r_sqr")?.or(py_opt_bool(d, "display_r_squared")?);
     // intercept is in the contract but not in the underlying Trendline struct;
     // accept-and-ignore for forward-compat.
     let _ = py_opt_f64(d, "intercept")?;

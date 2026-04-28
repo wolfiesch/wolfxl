@@ -233,7 +233,14 @@ pub fn translate_with_meta(
 }
 
 fn detect_volatile(tokens: &[Token]) -> bool {
-    let names = ["INDIRECT(", "OFFSET(", "ADDRESS(", "INDEX(", "CHOOSE(", "HYPERLINK("];
+    let names = [
+        "INDIRECT(",
+        "OFFSET(",
+        "ADDRESS(",
+        "INDEX(",
+        "CHOOSE(",
+        "HYPERLINK(",
+    ];
     tokens.iter().any(|t| {
         t.kind == TokenKind::Func
             && t.subkind == TokenSubKind::Open
@@ -267,13 +274,19 @@ fn translate_cell(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix { name: new_name.clone(), quoted: s.quoted }
+            SheetPrefix {
+                name: new_name.clone(),
+                quoted: s.quoted,
+            }
         } else {
             s
         }
     });
 
-    let eff_sheet = sheet.as_ref().map(|s| s.name.as_str()).or(delta.formula_sheet.as_deref());
+    let eff_sheet = sheet
+        .as_ref()
+        .map(|s| s.name.as_str())
+        .or(delta.formula_sheet.as_deref());
 
     if let Some(d) = &delta.deleted_range {
         let matches = match (&delta.deleted_range_sheet, eff_sheet) {
@@ -347,7 +360,10 @@ fn translate_range_kind(
     delta: &RefDelta,
 ) -> (RefKind, bool, bool) {
     if let Some(d) = &delta.deleted_range {
-        let eff_sheet = sheet.as_ref().map(|s| s.name.as_str()).or(delta.formula_sheet.as_deref());
+        let eff_sheet = sheet
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .or(delta.formula_sheet.as_deref());
         let scope_match = match (&delta.deleted_range_sheet, eff_sheet) {
             (Some(want), Some(got)) => want == got,
             (Some(_), None) => false,
@@ -355,12 +371,21 @@ fn translate_range_kind(
         };
         if scope_match {
             if let Some((nlhs, nrhs)) = clip_range(&lhs, &rhs, d) {
-                let (s_a, c_a, err_a, _) = translate_cell_skip_tombstone(sheet.clone(), nlhs, delta);
+                let (s_a, c_a, err_a, _) =
+                    translate_cell_skip_tombstone(sheet.clone(), nlhs, delta);
                 let (_, c_b, err_b, _) = translate_cell_skip_tombstone(None, nrhs, delta);
                 if err_a || err_b {
                     return (RefKind::Error("#REF!".into()), true, true);
                 }
-                return (RefKind::Range { sheet: s_a, lhs: c_a, rhs: c_b }, true, false);
+                return (
+                    RefKind::Range {
+                        sheet: s_a,
+                        lhs: c_a,
+                        rhs: c_b,
+                    },
+                    true,
+                    false,
+                );
             } else {
                 return (RefKind::Error("#REF!".into()), true, true);
             }
@@ -375,7 +400,15 @@ fn translate_range_kind(
     if err_b {
         return (RefKind::Error("#REF!".into()), true, true);
     }
-    (RefKind::Range { sheet: s_a, lhs: c_a, rhs: c_b }, true, false)
+    (
+        RefKind::Range {
+            sheet: s_a,
+            lhs: c_a,
+            rhs: c_b,
+        },
+        true,
+        false,
+    )
 }
 
 fn translate_cell_skip_tombstone(
@@ -385,7 +418,10 @@ fn translate_cell_skip_tombstone(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix { name: new_name.clone(), quoted: s.quoted }
+            SheetPrefix {
+                name: new_name.clone(),
+                quoted: s.quoted,
+            }
         } else {
             s
         }
@@ -432,7 +468,12 @@ fn translate_cell_skip_tombstone(
         col = nc as u32;
     }
 
-    let new_cell = A1Cell { row, col, col_abs: cell.col_abs, row_abs: cell.row_abs };
+    let new_cell = A1Cell {
+        row,
+        col,
+        col_abs: cell.col_abs,
+        row_abs: cell.row_abs,
+    };
     let changed = new_cell != cell;
     (sheet, new_cell, false, changed)
 }
@@ -453,8 +494,16 @@ fn clip_range(lhs: &A1Cell, rhs: &A1Cell, d: &DeletedRange) -> Option<(A1Cell, A
         if d.min_row <= r_min && d.max_row >= r_max {
             return None;
         }
-        let new_r_min = if d.min_row <= r_min { d.max_row + 1 } else { r_min };
-        let new_r_max = if d.max_row >= r_max { d.min_row - 1 } else { r_max };
+        let new_r_min = if d.min_row <= r_min {
+            d.max_row + 1
+        } else {
+            r_min
+        };
+        let new_r_max = if d.max_row >= r_max {
+            d.min_row - 1
+        } else {
+            r_max
+        };
         if new_r_min > new_r_max {
             return None;
         }
@@ -464,8 +513,18 @@ fn clip_range(lhs: &A1Cell, rhs: &A1Cell, d: &DeletedRange) -> Option<(A1Cell, A
             (new_r_max, new_r_min)
         };
         return Some((
-            A1Cell { row: new_lhs_row, col: lhs.col, col_abs: lhs.col_abs, row_abs: lhs.row_abs },
-            A1Cell { row: new_rhs_row, col: rhs.col, col_abs: rhs.col_abs, row_abs: rhs.row_abs },
+            A1Cell {
+                row: new_lhs_row,
+                col: lhs.col,
+                col_abs: lhs.col_abs,
+                row_abs: lhs.row_abs,
+            },
+            A1Cell {
+                row: new_rhs_row,
+                col: rhs.col,
+                col_abs: rhs.col_abs,
+                row_abs: rhs.row_abs,
+            },
         ));
     }
 
@@ -476,8 +535,16 @@ fn clip_range(lhs: &A1Cell, rhs: &A1Cell, d: &DeletedRange) -> Option<(A1Cell, A
         if d.min_col <= c_min && d.max_col >= c_max {
             return None;
         }
-        let new_c_min = if d.min_col <= c_min { d.max_col + 1 } else { c_min };
-        let new_c_max = if d.max_col >= c_max { d.min_col - 1 } else { c_max };
+        let new_c_min = if d.min_col <= c_min {
+            d.max_col + 1
+        } else {
+            c_min
+        };
+        let new_c_max = if d.max_col >= c_max {
+            d.min_col - 1
+        } else {
+            c_max
+        };
         if new_c_min > new_c_max {
             return None;
         }
@@ -487,8 +554,18 @@ fn clip_range(lhs: &A1Cell, rhs: &A1Cell, d: &DeletedRange) -> Option<(A1Cell, A
             (new_c_max, new_c_min)
         };
         return Some((
-            A1Cell { row: lhs.row, col: new_lhs_col, col_abs: lhs.col_abs, row_abs: lhs.row_abs },
-            A1Cell { row: rhs.row, col: new_rhs_col, col_abs: rhs.col_abs, row_abs: rhs.row_abs },
+            A1Cell {
+                row: lhs.row,
+                col: new_lhs_col,
+                col_abs: lhs.col_abs,
+                row_abs: lhs.row_abs,
+            },
+            A1Cell {
+                row: rhs.row,
+                col: new_rhs_col,
+                col_abs: rhs.col_abs,
+                row_abs: rhs.row_abs,
+            },
         ));
     }
 
@@ -507,7 +584,10 @@ fn translate_row_range(
 ) -> (RefKind, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix { name: new_name.clone(), quoted: s.quoted }
+            SheetPrefix {
+                name: new_name.clone(),
+                quoted: s.quoted,
+            }
         } else {
             s
         }
@@ -525,7 +605,15 @@ fn translate_row_range(
     let new_l = shift_row(&lhs, delta);
     let new_r = shift_row(&rhs, delta);
     match (new_l, new_r) {
-        (Some(l), Some(r)) => (RefKind::RowRange { sheet, lhs: l, rhs: r }, true, false),
+        (Some(l), Some(r)) => (
+            RefKind::RowRange {
+                sheet,
+                lhs: l,
+                rhs: r,
+            },
+            true,
+            false,
+        ),
         _ => (RefKind::Error("#REF!".into()), true, true),
     }
 }
@@ -541,7 +629,10 @@ fn shift_row(r: &A1Row, delta: &RefDelta) -> Option<A1Row> {
     if nr < 1 || nr > MAX_ROW as i64 {
         return None;
     }
-    Some(A1Row { row: nr as u32, abs: r.abs })
+    Some(A1Row {
+        row: nr as u32,
+        abs: r.abs,
+    })
 }
 
 fn translate_col_range(
@@ -552,7 +643,10 @@ fn translate_col_range(
 ) -> (RefKind, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix { name: new_name.clone(), quoted: s.quoted }
+            SheetPrefix {
+                name: new_name.clone(),
+                quoted: s.quoted,
+            }
         } else {
             s
         }
@@ -570,7 +664,15 @@ fn translate_col_range(
     let new_l = shift_col(&lhs, delta);
     let new_r = shift_col(&rhs, delta);
     match (new_l, new_r) {
-        (Some(l), Some(r)) => (RefKind::ColRange { sheet, lhs: l, rhs: r }, true, false),
+        (Some(l), Some(r)) => (
+            RefKind::ColRange {
+                sheet,
+                lhs: l,
+                rhs: r,
+            },
+            true,
+            false,
+        ),
         _ => (RefKind::Error("#REF!".into()), true, true),
     }
 }
@@ -586,7 +688,10 @@ fn shift_col(c: &A1Col, delta: &RefDelta) -> Option<A1Col> {
     if nc < 1 || nc > MAX_COL as i64 {
         return None;
     }
-    Some(A1Col { col: nc as u32, abs: c.abs })
+    Some(A1Col {
+        col: nc as u32,
+        abs: c.abs,
+    })
 }
 
 #[allow(dead_code)]

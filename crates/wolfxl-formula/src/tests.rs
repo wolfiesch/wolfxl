@@ -18,7 +18,12 @@ use crate::translate::{
 fn t01_a1_relative_shift_rows() {
     let out = shift(
         "=A1+B5",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=A4+B8");
 }
@@ -27,7 +32,12 @@ fn t01_a1_relative_shift_rows() {
 fn t02_a1_absolute_shifts_when_respect_dollar_false() {
     let out = shift(
         "=$A$1+$B$5",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=$A$4+$B$8");
 }
@@ -36,7 +46,12 @@ fn t02_a1_absolute_shifts_when_respect_dollar_false() {
 fn t03_a1_absolute_does_not_shift_when_respect_dollar_true() {
     let out = shift(
         "=$A$1+$B$5",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: true },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: true,
+        },
     );
     assert_eq!(out, "=$A$1+$B$5");
 }
@@ -45,7 +60,12 @@ fn t03_a1_absolute_does_not_shift_when_respect_dollar_true() {
 fn t04_mixed_col_abs_only_shifts_row() {
     let out = shift(
         "=$A1",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 2, respect_dollar: true },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 2,
+            respect_dollar: true,
+        },
     );
     assert_eq!(out, "=$A3");
 }
@@ -54,7 +74,12 @@ fn t04_mixed_col_abs_only_shifts_row() {
 fn t05_mixed_row_abs_only_shifts_col() {
     let out = shift(
         "=A$1",
-        &ShiftPlan { axis: Axis::Col, at: 1, n: 2, respect_dollar: true },
+        &ShiftPlan {
+            axis: Axis::Col,
+            at: 1,
+            n: 2,
+            respect_dollar: true,
+        },
     );
     assert_eq!(out, "=C$1");
 }
@@ -63,7 +88,12 @@ fn t05_mixed_row_abs_only_shifts_col() {
 fn t06_range_translates_both_endpoints() {
     let out = shift(
         "=SUM(B5:D10)",
-        &ShiftPlan { axis: Axis::Row, at: 5, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 5,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM(B8:D13)");
 }
@@ -72,7 +102,12 @@ fn t06_range_translates_both_endpoints() {
 fn t07_range_absolute_endpoints() {
     let out = shift(
         "=SUM($B$5:$D$10)",
-        &ShiftPlan { axis: Axis::Row, at: 5, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 5,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM($B$8:$D$13)");
 }
@@ -81,7 +116,12 @@ fn t07_range_absolute_endpoints() {
 fn t08_whole_row_range_shifts_on_row_delta() {
     let out = shift(
         "=SUM(2:5)",
-        &ShiftPlan { axis: Axis::Row, at: 2, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 2,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM(5:8)");
 }
@@ -90,7 +130,12 @@ fn t08_whole_row_range_shifts_on_row_delta() {
 fn t09_whole_row_range_unchanged_on_col_delta() {
     let out = shift(
         "=SUM(2:5)",
-        &ShiftPlan { axis: Axis::Col, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Col,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM(2:5)");
 }
@@ -99,7 +144,12 @@ fn t09_whole_row_range_unchanged_on_col_delta() {
 fn t10_whole_col_range_shifts_on_col_delta() {
     let out = shift(
         "=SUM(A:C)",
-        &ShiftPlan { axis: Axis::Col, at: 1, n: 2, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Col,
+            at: 1,
+            n: 2,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM(C:E)");
 }
@@ -108,7 +158,12 @@ fn t10_whole_col_range_shifts_on_col_delta() {
 fn t11_whole_col_range_unchanged_on_row_delta() {
     let out = shift(
         "=SUM(A:C)",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=SUM(A:C)");
 }
@@ -117,7 +172,12 @@ fn t11_whole_col_range_unchanged_on_row_delta() {
 fn t12_3d_unquoted_sheet_passes_through_on_no_rename() {
     let out = shift(
         "=Sheet2!A1",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=Sheet2!A4");
 }
@@ -130,7 +190,11 @@ fn t13_3d_quoted_sheet_with_apostrophe_round_trip() {
 
 #[test]
 fn t14_3d_rename_sheet_unquoted() {
-    let out = rename_sheet("=Forecast!B5+SUM(Forecast!A1:A10)", "Forecast", "Forecast_v2");
+    let out = rename_sheet(
+        "=Forecast!B5+SUM(Forecast!A1:A10)",
+        "Forecast",
+        "Forecast_v2",
+    );
     assert_eq!(out, "=Forecast_v2!B5+SUM(Forecast_v2!A1:A10)");
 }
 
@@ -149,49 +213,105 @@ fn t16_3d_rename_sheet_adds_quotes_when_required() {
 #[test]
 fn t17_external_book_ref_passes_through() {
     let f = "=[Book2.xlsx]Sheet1!A1";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
 #[test]
 fn t18_quoted_external_book_ref_passes_through() {
     let f = "='C:\\path\\[Book2.xlsx]Sheet1'!A1";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
 #[test]
 fn t19_table_ref_simple_passes_through() {
     let f = "=Table1[Col1]";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
 #[test]
 fn t20_table_ref_special_passes_through() {
     let f = "=Table1[#Headers]";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
 #[test]
 fn t21_table_ref_nested_passes_through() {
     let f = "=Table1[[#This Row], [Col1]]";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
 #[test]
 fn t22_array_formula_inner_refs_translate() {
     let f = "={A1+B1,C1+D1;A2+B2,C2+D2}";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 1, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 1,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, "={A2+B2,C2+D2;A3+B3,C3+D3}");
 }
 
 #[test]
 fn t23_defined_name_passes_through() {
     let f = "=MyTotal+1";
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, f);
 }
 
@@ -199,7 +319,12 @@ fn t23_defined_name_passes_through() {
 fn t24_function_name_unchanged() {
     let out = shift(
         "=VLOOKUP(A1,B1:C10,2,FALSE)",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 1, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 1,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=VLOOKUP(A2,B2:C11,2,FALSE)");
 }
@@ -208,14 +333,27 @@ fn t24_function_name_unchanged() {
 fn t25_string_literal_refs_not_translated() {
     let out = shift(
         "=IF(A1=\"B5\",X1,Y1)",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=IF(A4=\"B5\",X4,Y4)");
 }
 
 #[test]
 fn t26_error_literal_passes_through() {
-    let out = shift("=#REF!", &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
+    let out = shift(
+        "=#REF!",
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: false,
+        },
+    );
     assert_eq!(out, "=#REF!");
 }
 
@@ -223,18 +361,20 @@ fn t26_error_literal_passes_through() {
 fn t27_indirect_text_arg_not_translated_but_other_refs_are() {
     let out = shift(
         "=INDIRECT(\"B5\")+B5",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: 3, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 3,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=INDIRECT(\"B5\")+B8");
-    let meta = translate_with_meta(
-        "=INDIRECT(\"B5\")+B5",
-        &{
-            let mut d = RefDelta::empty();
-            d.rows = 3;
-            d.anchor_row = 1;
-            d
-        },
-    )
+    let meta = translate_with_meta("=INDIRECT(\"B5\")+B5", &{
+        let mut d = RefDelta::empty();
+        d.rows = 3;
+        d.anchor_row = 1;
+        d
+    })
     .unwrap();
     assert!(meta.has_volatile_indirect);
 }
@@ -275,8 +415,24 @@ fn t28_identity_translation_byte_identical() {
 fn t29_round_trip_inverse_shift() {
     let inputs = ["=A1+B1", "=$A$1+B5", "=SUM(A1:B10)", "=Sheet2!C7"];
     for f in inputs {
-        let forward = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: false });
-        let back = shift(&forward, &ShiftPlan { axis: Axis::Row, at: 6, n: -5, respect_dollar: false });
+        let forward = shift(
+            f,
+            &ShiftPlan {
+                axis: Axis::Row,
+                at: 1,
+                n: 5,
+                respect_dollar: false,
+            },
+        );
+        let back = shift(
+            &forward,
+            &ShiftPlan {
+                axis: Axis::Row,
+                at: 6,
+                n: -5,
+                respect_dollar: false,
+            },
+        );
         assert_eq!(back, f, "round-trip failed for {}", f);
     }
 }
@@ -285,7 +441,12 @@ fn t29_round_trip_inverse_shift() {
 fn t30_out_of_bounds_becomes_ref_error() {
     let out = shift(
         "=A1",
-        &ShiftPlan { axis: Axis::Row, at: 1, n: -5, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: -5,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=#REF!");
 }
@@ -364,8 +525,18 @@ fn t34_cross_sheet_outside_deleted_sheet_unchanged() {
 #[test]
 fn t35_move_range_reanchor() {
     let f = "=B5+C7+Z99";
-    let src = Range { min_row: 5, max_row: 7, min_col: 2, max_col: 3 };
-    let dst = Range { min_row: 10, max_row: 12, min_col: 5, max_col: 6 };
+    let src = Range {
+        min_row: 5,
+        max_row: 7,
+        min_col: 2,
+        max_col: 3,
+    };
+    let dst = Range {
+        min_row: 10,
+        max_row: 12,
+        min_col: 5,
+        max_col: 6,
+    };
     let out = move_range(f, &src, &dst, true);
     assert_eq!(out, "=E10+F12+Z99");
 }
@@ -374,7 +545,15 @@ fn t35_move_range_reanchor() {
 fn t36_complex_formula_round_trip() {
     let f = "=SUM(IF($A1:$A100>0,$B1:$B100,0))";
     assert_eq!(translate(f, &RefDelta::empty()).unwrap(), f);
-    let out = shift(f, &ShiftPlan { axis: Axis::Row, at: 1, n: 5, respect_dollar: true });
+    let out = shift(
+        f,
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: 1,
+            n: 5,
+            respect_dollar: true,
+        },
+    );
     assert_eq!(out, "=SUM(IF($A6:$A105>0,$B6:$B105,0))");
 }
 
@@ -396,7 +575,12 @@ fn t38_quoted_sheet_with_space_translated_after_rename() {
 fn t39_negative_col_shift_into_oob_returns_ref_error() {
     let out = shift(
         "=A1",
-        &ShiftPlan { axis: Axis::Col, at: 1, n: -1, respect_dollar: false },
+        &ShiftPlan {
+            axis: Axis::Col,
+            at: 1,
+            n: -1,
+            respect_dollar: false,
+        },
     );
     assert_eq!(out, "=#REF!");
 }
@@ -418,7 +602,13 @@ fn t41_synthgl_corpus_round_trip() {
     let repo = std::env::current_dir().unwrap();
     let repo_root = repo
         .ancestors()
-        .find_map(|p| if p.join("Cargo.lock").is_file() { Some(p.to_path_buf()) } else { None })
+        .find_map(|p| {
+            if p.join("Cargo.lock").is_file() {
+                Some(p.to_path_buf())
+            } else {
+                None
+            }
+        })
         .expect("found repo root");
 
     let synthgl = repo_root.join("tests/parity/fixtures/synthgl_snapshot");
@@ -436,7 +626,11 @@ fn t41_synthgl_corpus_round_trip() {
 
     let mut failed = Vec::new();
     for f in &formulas {
-        let prefixed = if f.starts_with('=') { f.clone() } else { format!("={}", f) };
+        let prefixed = if f.starts_with('=') {
+            f.clone()
+        } else {
+            format!("={}", f)
+        };
         match translate(&prefixed, &RefDelta::empty()) {
             Ok(out) => {
                 if out != prefixed {
@@ -446,7 +640,11 @@ fn t41_synthgl_corpus_round_trip() {
             Err(_) => {}
         }
     }
-    assert!(failed.is_empty(), "round-trip failures: {:?}", &failed[..failed.len().min(5)]);
+    assert!(
+        failed.is_empty(),
+        "round-trip failures: {:?}",
+        &failed[..failed.len().min(5)]
+    );
 }
 
 fn collect_formulas(root: &std::path::Path) -> Vec<String> {
@@ -492,7 +690,10 @@ fn extract_f_text(xml: &str, out: &mut Vec<String>) {
     let mut i = 0;
     let bytes = xml.as_bytes();
     while i + 2 < bytes.len() {
-        if bytes[i] == b'<' && bytes[i + 1] == b'f' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'>') {
+        if bytes[i] == b'<'
+            && bytes[i + 1] == b'f'
+            && (bytes[i + 2] == b' ' || bytes[i + 2] == b'>')
+        {
             if let Some(close) = xml[i..].find('>') {
                 let after = i + close + 1;
                 if let Some(end_rel) = xml[after..].find("</f>") {
@@ -520,7 +721,12 @@ fn extract_f_text(xml: &str, out: &mut Vec<String>) {
 #[test]
 fn t42_perf_100k_formulas_under_1s() {
     let f = "=SUM($A$1:$A$100)+B5*VLOOKUP(C7,Sheet2!D1:E50,2,FALSE)";
-    let plan = ShiftPlan { axis: Axis::Row, at: 5, n: 3, respect_dollar: false };
+    let plan = ShiftPlan {
+        axis: Axis::Row,
+        at: 5,
+        n: 3,
+        respect_dollar: false,
+    };
     for _ in 0..100 {
         let _ = shift(f, &plan);
     }
@@ -532,7 +738,11 @@ fn t42_perf_100k_formulas_under_1s() {
     let elapsed = t0.elapsed();
     eprintln!("100k formulas: {:?}", elapsed);
     // 2x slack vs 1s budget for CI variability.
-    assert!(elapsed.as_secs_f64() < 2.0, "100k formulas took {:?}", elapsed);
+    assert!(
+        elapsed.as_secs_f64() < 2.0,
+        "100k formulas took {:?}",
+        elapsed
+    );
 }
 
 // ---------------- Sanity: tokenizer round-trip --------------------
@@ -569,7 +779,10 @@ fn t44_parse_ref_classification() {
     assert!(matches!(parse_ref("Sheet2!A1"), RefKind::Cell { .. }));
     assert!(matches!(parse_ref("'My Sheet'!A1"), RefKind::Cell { .. }));
     assert!(matches!(parse_ref("Table1[Col1]"), RefKind::Table(_)));
-    assert!(matches!(parse_ref("[Book.xlsx]Sheet1!A1"), RefKind::ExternalBook { .. }));
+    assert!(matches!(
+        parse_ref("[Book.xlsx]Sheet1!A1"),
+        RefKind::ExternalBook { .. }
+    ));
     assert!(matches!(parse_ref("MyName"), RefKind::Name(_)));
     assert!(matches!(parse_ref("#REF!"), RefKind::Error(_)));
 }

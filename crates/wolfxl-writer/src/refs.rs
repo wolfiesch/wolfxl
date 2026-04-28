@@ -524,10 +524,7 @@ mod tests {
     #[test]
     fn format_range_basic() {
         assert_eq!(format_range((1, 1), (20, 4)), "A1:D20");
-        assert_eq!(
-            format_range((1, 1), (MAX_ROW, MAX_COL)),
-            "A1:XFD1048576"
-        );
+        assert_eq!(format_range((1, 1), (MAX_ROW, MAX_COL)), "A1:XFD1048576");
     }
 
     #[test]

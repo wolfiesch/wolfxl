@@ -498,9 +498,7 @@ fn flush_pending_before(
         }
         if let Some(blocks) = pending.remove(&first_ord) {
             for b in blocks {
-                writer
-                    .get_mut()
-                    .extend_from_slice(b.bytes());
+                writer.get_mut().extend_from_slice(b.bytes());
             }
         }
     }
@@ -582,10 +580,7 @@ fn consume_until_matching_end<R: std::io::BufRead>(
 /// This is the *only* place the merger ever rewrites a non-block element
 /// (RFC-011 §8 risk #4). The rewrite preserves the original attribute slice
 /// byte-for-byte and appends a single new attribute at the tail.
-fn ensure_rel_namespace(
-    start: &BytesStart<'_>,
-    needs_rel_ns: bool,
-) -> Option<BytesStart<'static>> {
+fn ensure_rel_namespace(start: &BytesStart<'_>, needs_rel_ns: bool) -> Option<BytesStart<'static>> {
     if !needs_rel_ns {
         return None;
     }
@@ -599,8 +594,7 @@ fn ensure_rel_namespace(
     // attribute through `push_attribute((&[u8], &[u8]))` (quick-xml clones
     // into the BytesStart's owned buffer), then append `xmlns:r="…"`.
     let name_bytes = start.name().as_ref().to_vec();
-    let mut new_start =
-        BytesStart::new(String::from_utf8_lossy(&name_bytes).into_owned());
+    let mut new_start = BytesStart::new(String::from_utf8_lossy(&name_bytes).into_owned());
     for attr in start.attributes().with_checks(false).flatten() {
         // We need to materialize the key+value as owned bytes so the
         // tuple borrow lives long enough for push_attribute.
@@ -642,13 +636,22 @@ mod tests {
 
     #[test]
     fn root_local_name_for_each_variant() {
-        assert_eq!(SheetBlock::SheetViews(vec![]).root_local_name(), b"sheetViews");
+        assert_eq!(
+            SheetBlock::SheetViews(vec![]).root_local_name(),
+            b"sheetViews"
+        );
         assert_eq!(
             SheetBlock::SheetProtection(vec![]).root_local_name(),
             b"sheetProtection"
         );
-        assert_eq!(SheetBlock::AutoFilter(vec![]).root_local_name(), b"autoFilter");
-        assert_eq!(SheetBlock::MergeCells(vec![]).root_local_name(), b"mergeCells");
+        assert_eq!(
+            SheetBlock::AutoFilter(vec![]).root_local_name(),
+            b"autoFilter"
+        );
+        assert_eq!(
+            SheetBlock::MergeCells(vec![]).root_local_name(),
+            b"mergeCells"
+        );
         assert_eq!(
             SheetBlock::ConditionalFormatting(vec![]).root_local_name(),
             b"conditionalFormatting"
@@ -657,15 +660,30 @@ mod tests {
             SheetBlock::DataValidations(vec![]).root_local_name(),
             b"dataValidations"
         );
-        assert_eq!(SheetBlock::Hyperlinks(vec![]).root_local_name(), b"hyperlinks");
-        assert_eq!(SheetBlock::PageMargins(vec![]).root_local_name(), b"pageMargins");
-        assert_eq!(SheetBlock::PageSetup(vec![]).root_local_name(), b"pageSetup");
-        assert_eq!(SheetBlock::HeaderFooter(vec![]).root_local_name(), b"headerFooter");
+        assert_eq!(
+            SheetBlock::Hyperlinks(vec![]).root_local_name(),
+            b"hyperlinks"
+        );
+        assert_eq!(
+            SheetBlock::PageMargins(vec![]).root_local_name(),
+            b"pageMargins"
+        );
+        assert_eq!(
+            SheetBlock::PageSetup(vec![]).root_local_name(),
+            b"pageSetup"
+        );
+        assert_eq!(
+            SheetBlock::HeaderFooter(vec![]).root_local_name(),
+            b"headerFooter"
+        );
         assert_eq!(
             SheetBlock::LegacyDrawing(vec![]).root_local_name(),
             b"legacyDrawing"
         );
-        assert_eq!(SheetBlock::TableParts(vec![]).root_local_name(), b"tableParts");
+        assert_eq!(
+            SheetBlock::TableParts(vec![]).root_local_name(),
+            b"tableParts"
+        );
     }
 
     #[test]
@@ -694,7 +712,10 @@ mod tests {
         let s = std::str::from_utf8(&out).expect("utf8");
         let af = s.find("<autoFilter").unwrap();
         let mc = s.find("<mergeCells").unwrap();
-        assert!(af < mc, "autoFilter (slot 11) must precede mergeCells (slot 15)");
+        assert!(
+            af < mc,
+            "autoFilter (slot 11) must precede mergeCells (slot 15)"
+        );
     }
 
     #[test]
@@ -777,9 +798,7 @@ mod tests {
     }
 
     fn pos_of(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-        haystack
-            .windows(needle.len())
-            .position(|w| w == needle)
+        haystack.windows(needle.len()).position(|w| w == needle)
     }
 
     #[test]
@@ -817,7 +836,10 @@ mod tests {
         let out = merge_blocks(xml, vec![block]).expect("merge");
         let s = std::str::from_utf8(&out).expect("utf8");
         assert!(s.contains("NEW1"), "new hyperlink ref present: {s}");
-        assert!(!s.contains("OLD1"), "old hyperlink ref must be dropped: {s}");
+        assert!(
+            !s.contains("OLD1"),
+            "old hyperlink ref must be dropped: {s}"
+        );
         assert!(!s.contains("rIdOld"), "old rId must be dropped: {s}");
         // Exactly one <hyperlinks> block in output.
         assert_eq!(s.matches("<hyperlinks>").count(), 1);
@@ -880,8 +902,8 @@ mod tests {
 
         for case in cases {
             let block_root = case.block.root_local_name().to_vec();
-            let out = merge_blocks(minimal_with_pagemargins(), vec![case.block.clone()])
-                .expect("merge");
+            let out =
+                merge_blocks(minimal_with_pagemargins(), vec![case.block.clone()]).expect("merge");
             let earlier_pos = pos_of(&out, case.earlier)
                 .unwrap_or_else(|| panic!("earlier marker not found for {:?}", block_root));
             // The block we look for in output is the open tag of its root.
@@ -1097,7 +1119,10 @@ mod tests {
             output_size,
             input_size
         );
-        assert!(output_size > input_size, "output must contain the inserted block");
+        assert!(
+            output_size > input_size,
+            "output must contain the inserted block"
+        );
     }
 
     #[test]
@@ -1105,21 +1130,25 @@ mod tests {
         // Test #12: if the supplied bytes for a block exactly match what's
         // in the source, the output is byte-identical to the input.
         // Lets future RFC-022 etc. cheaply detect no-op patches.
-        let block_bytes: &[u8] =
-            br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#;
+        let block_bytes: &[u8] = br#"<hyperlinks><hyperlink ref="A1" r:id="rId1"/></hyperlinks>"#;
         let mut xml: Vec<u8> = b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheetData/>".to_vec();
         xml.extend_from_slice(block_bytes);
         xml.extend_from_slice(b"<pageMargins/></worksheet>");
 
-        let out = merge_blocks(&xml, vec![SheetBlock::Hyperlinks(block_bytes.to_vec())])
-            .expect("merge");
+        let out =
+            merge_blocks(&xml, vec![SheetBlock::Hyperlinks(block_bytes.to_vec())]).expect("merge");
         // The output's <hyperlinks> block bytes equal the supplied bytes.
         assert!(
             pos_of(&out, block_bytes).is_some(),
             "supplied block bytes appear verbatim in output"
         );
         // Output contains exactly one <hyperlinks> block.
-        assert_eq!(out.windows(b"<hyperlinks>".len()).filter(|w| *w == b"<hyperlinks>").count(), 1);
+        assert_eq!(
+            out.windows(b"<hyperlinks>".len())
+                .filter(|w| *w == b"<hyperlinks>")
+                .count(),
+            1
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1173,7 +1202,9 @@ mod tests {
         let out = merge_blocks(xml, vec![block]).expect("merge");
         let s = std::str::from_utf8(&out).expect("utf8");
         assert!(
-            s.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            s.contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
             "xmlns:r must be injected when missing: {s}"
         );
     }

@@ -45,11 +45,19 @@ pub struct ShiftPlan {
 impl ShiftPlan {
     /// Construct an insert plan: `n` positive new units at `idx`.
     pub fn insert(axis: Axis, idx: u32, n: u32) -> Self {
-        Self { axis, idx, n: n as i32 }
+        Self {
+            axis,
+            idx,
+            n: n as i32,
+        }
     }
     /// Construct a delete plan: `n` units removed starting at `idx`.
     pub fn delete(axis: Axis, idx: u32, n: u32) -> Self {
-        Self { axis, idx, n: -(n as i32) }
+        Self {
+            axis,
+            idx,
+            n: -(n as i32),
+        }
     }
 
     /// True if this plan inserts (n > 0).
@@ -99,7 +107,11 @@ mod tests {
 
     #[test]
     fn shift_plan_noop() {
-        let p = ShiftPlan { axis: Axis::Row, idx: 1, n: 0 };
+        let p = ShiftPlan {
+            axis: Axis::Row,
+            idx: 1,
+            n: 0,
+        };
         assert!(p.is_noop());
         assert!(!p.is_insert());
         assert!(!p.is_delete());

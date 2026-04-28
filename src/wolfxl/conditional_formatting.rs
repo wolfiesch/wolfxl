@@ -328,7 +328,11 @@ pub fn build_cf_blocks(
             };
 
             match &rule.kind {
-                CfRuleKind::CellIs { operator, formula_a, formula_b } => {
+                CfRuleKind::CellIs {
+                    operator,
+                    formula_a,
+                    formula_b,
+                } => {
                     rules_buf.extend_from_slice(
                         format!(
                             "<cfRule type=\"cellIs\" priority=\"{}\" operator=\"{}\"",
@@ -388,14 +392,17 @@ pub fn build_cf_blocks(
                     }
                     for stop in stops {
                         rules_buf.extend_from_slice(
-                            format!("<color rgb=\"{}\"/>", attr_escape(&stop.color_rgb))
-                                .as_bytes(),
+                            format!("<color rgb=\"{}\"/>", attr_escape(&stop.color_rgb)).as_bytes(),
                         );
                     }
                     rules_buf.extend_from_slice(b"</colorScale>");
                     rules_buf.extend_from_slice(b"</cfRule>");
                 }
-                CfRuleKind::DataBar { min, max, color_rgb } => {
+                CfRuleKind::DataBar {
+                    min,
+                    max,
+                    color_rgb,
+                } => {
                     rules_buf.extend_from_slice(
                         format!("<cfRule type=\"dataBar\" priority=\"{}\"", priority).as_bytes(),
                     );
@@ -425,13 +432,20 @@ pub fn build_cf_blocks(
         }
 
         out.extend_from_slice(
-            format!("<conditionalFormatting sqref=\"{}\">", attr_escape(&patch.sqref)).as_bytes(),
+            format!(
+                "<conditionalFormatting sqref=\"{}\">",
+                attr_escape(&patch.sqref)
+            )
+            .as_bytes(),
         );
         out.extend_from_slice(&rules_buf);
         out.extend_from_slice(b"</conditionalFormatting>");
     }
 
-    CfResult { block_bytes: out, new_dxfs }
+    CfResult {
+        block_bytes: out,
+        new_dxfs,
+    }
 }
 
 fn emit_cfvo(out: &mut Vec<u8>, cfvo: &CfvoPatch) {
@@ -497,7 +511,10 @@ pub fn dxf_to_xml(patch: &DxfPatch) -> String {
             s.push_str(&format!(" patternType=\"{}\"", attr_escape(pt)));
         }
         if let Some(ref c) = patch.fill_fg_color_rgb {
-            s.push_str(&format!("><fgColor rgb=\"{}\"/></patternFill>", attr_escape(c)));
+            s.push_str(&format!(
+                "><fgColor rgb=\"{}\"/></patternFill>",
+                attr_escape(c)
+            ));
         } else {
             s.push_str("/>");
         }
@@ -785,7 +802,8 @@ mod tests {
 
     #[test]
     fn count_dxfs_handles_self_closing_dxf() {
-        let xml = r#"<styleSheet><dxfs count="2"><dxf/><dxf><font><b/></font></dxf></dxfs></styleSheet>"#;
+        let xml =
+            r#"<styleSheet><dxfs count="2"><dxf/><dxf><font><b/></font></dxf></dxfs></styleSheet>"#;
         assert_eq!(count_dxfs(xml), 2);
     }
 
@@ -800,7 +818,9 @@ mod tests {
         let result = build_cf_blocks(&[], &patches, 0, 0);
         let s = String::from_utf8(result.block_bytes).unwrap();
         assert!(s.starts_with("<conditionalFormatting sqref=\"A1:A10\">"));
-        assert!(s.contains("<cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" dxfId=\"0\">"));
+        assert!(s.contains(
+            "<cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" dxfId=\"0\">"
+        ));
         assert!(s.contains("<formula>5</formula>"));
         assert!(s.ends_with("</conditionalFormatting>"));
         assert_eq!(result.new_dxfs.len(), 1);
@@ -842,11 +862,17 @@ mod tests {
                 kind: CfRuleKind::ColorScale {
                     stops: vec![
                         ColorScaleStop {
-                            cfvo: CfvoPatch { cfvo_type: "min".to_string(), val: None },
+                            cfvo: CfvoPatch {
+                                cfvo_type: "min".to_string(),
+                                val: None,
+                            },
                             color_rgb: "FFF8696B".to_string(),
                         },
                         ColorScaleStop {
-                            cfvo: CfvoPatch { cfvo_type: "max".to_string(), val: None },
+                            cfvo: CfvoPatch {
+                                cfvo_type: "max".to_string(),
+                                val: None,
+                            },
                             color_rgb: "FF63BE7B".to_string(),
                         },
                     ],
@@ -858,7 +884,10 @@ mod tests {
         let result = build_cf_blocks(&[], &patches, 5, 3);
         let s = String::from_utf8(result.block_bytes).unwrap();
         assert!(s.contains("type=\"colorScale\""));
-        assert!(!s.contains("dxfId="), "colorScale must not emit dxfId, got: {s}");
+        assert!(
+            !s.contains("dxfId="),
+            "colorScale must not emit dxfId, got: {s}"
+        );
         assert_eq!(result.new_dxfs.len(), 0);
         assert!(s.contains("priority=\"6\""));
         assert!(s.contains("<cfvo type=\"min\"/>"));
@@ -871,8 +900,14 @@ mod tests {
             sqref: "C1:C20".to_string(),
             rules: vec![CfRulePatch {
                 kind: CfRuleKind::DataBar {
-                    min: CfvoPatch { cfvo_type: "min".to_string(), val: None },
-                    max: CfvoPatch { cfvo_type: "max".to_string(), val: None },
+                    min: CfvoPatch {
+                        cfvo_type: "min".to_string(),
+                        val: None,
+                    },
+                    max: CfvoPatch {
+                        cfvo_type: "max".to_string(),
+                        val: None,
+                    },
                     color_rgb: "FF638EC6".to_string(),
                 },
                 dxf: None,
@@ -954,7 +989,10 @@ mod tests {
 
     #[test]
     fn dxf_to_xml_bold_only() {
-        let p = DxfPatch { font_bold: Some(true), ..Default::default() };
+        let p = DxfPatch {
+            font_bold: Some(true),
+            ..Default::default()
+        };
         assert_eq!(dxf_to_xml(&p), "<dxf><font><b/></font></dxf>");
     }
 
@@ -974,7 +1012,8 @@ mod tests {
 
     #[test]
     fn ensure_dxfs_inserts_when_absent() {
-        let xml = r#"<?xml version="1.0"?><styleSheet><fonts count="1"><font/></fonts></styleSheet>"#;
+        let xml =
+            r#"<?xml version="1.0"?><styleSheet><fonts count="1"><font/></fonts></styleSheet>"#;
         let new_xml = "<dxf><font><b/></font></dxf>";
         let out = ensure_dxfs_section(xml, new_xml);
         assert!(out.contains("<dxfs count=\"1\">"));

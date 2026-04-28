@@ -214,14 +214,10 @@ mod tests {
     use super::*;
     use calamine_styles::{Reader, Xls, Xlsb};
 
-    const XLSB_BYTES: &[u8] =
-        include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xlsb");
-    const XLS_BYTES: &[u8] =
-        include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xls");
-    const XLSX_BYTES: &[u8] =
-        include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xlsx");
-    const ODS_BYTES: &[u8] =
-        include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.ods");
+    const XLSB_BYTES: &[u8] = include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xlsb");
+    const XLS_BYTES: &[u8] = include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xls");
+    const XLSX_BYTES: &[u8] = include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.xlsx");
+    const ODS_BYTES: &[u8] = include_bytes!("../../../tests/fixtures/sprint_kappa_smoke.ods");
 
     #[test]
     fn classify_xlsx_bytes_smoke() {
@@ -304,9 +300,7 @@ mod tests {
     #[test]
     fn classify_missing_path_is_unknown() {
         assert_eq!(
-            classify_file_format_path(
-                "/tmp/wolfxl_does_not_exist_for_sprint_kappa.xlsb"
-            ),
+            classify_file_format_path("/tmp/wolfxl_does_not_exist_for_sprint_kappa.xlsb"),
             FileFormat::Unknown
         );
     }

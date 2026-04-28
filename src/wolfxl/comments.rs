@@ -97,7 +97,9 @@ impl CommentAuthorTable {
     }
 
     pub fn name_of(&self, id: u32) -> Option<&str> {
-        self.inner.iter().find_map(|(k, v)| if *v == id { Some(k.as_str()) } else { None })
+        self.inner
+            .iter()
+            .find_map(|(k, v)| if *v == id { Some(k.as_str()) } else { None })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {
@@ -310,8 +312,14 @@ fn parse_pt(s: &str) -> Option<f64> {
 }
 
 fn parse_anchor_cell_from_body(body: &str) -> Option<String> {
-    let row = extract_block_inner(body, "x:Row")?.trim().parse::<u32>().ok()?;
-    let col = extract_block_inner(body, "x:Column")?.trim().parse::<u32>().ok()?;
+    let row = extract_block_inner(body, "x:Row")?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
+    let col = extract_block_inner(body, "x:Column")?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
     Some(rowcol0_to_a1(row, col))
 }
 
@@ -711,7 +719,11 @@ pub fn build_comments(
 
     let comments_rid = match comments_rid_existing.clone() {
         Some(r) => r,
-        None => rels.add(rt::COMMENTS, &comments_target_relative, TargetMode::Internal),
+        None => rels.add(
+            rt::COMMENTS,
+            &comments_target_relative,
+            TargetMode::Internal,
+        ),
     };
     let vml_rid = match vml_rid_existing.clone() {
         Some(r) => r,
@@ -770,7 +782,10 @@ fn iter_top_level_elements(xml: &str, name: &str) -> Vec<String> {
     while let Some(rel_start) = xml[cursor..].find(&open_prefix) {
         let start = cursor + rel_start;
         let next_byte = xml.as_bytes().get(start + open_prefix.len()).copied();
-        if !matches!(next_byte, Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'/') | Some(b'>')) {
+        if !matches!(
+            next_byte,
+            Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'/') | Some(b'>')
+        ) {
             cursor = start + open_prefix.len();
             continue;
         }
@@ -1170,7 +1185,10 @@ mod tests {
         // Native writer would emit (1 * 48 + 59.25) = 107.25 pt regardless
         // of width. The patcher's width-aware path should reflect col A's
         // actual size: ORIGIN_LEFT_PT + 108.75 = 168 pt.
-        assert!(s.contains("margin-left:168pt"), "patcher uses actual width: {s}");
+        assert!(
+            s.contains("margin-left:168pt"),
+            "patcher uses actual width: {s}"
+        );
     }
 
     #[test]
@@ -1250,8 +1268,16 @@ mod tests {
 <v:shape id="_x0000_s1025" type="#_x0000_t202" style="margin-left:59.25pt; margin-top:1.5pt; width:96pt; height:55.5pt"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>
 </xml>"##;
         let mut rels = RelsGraph::new();
-        rels.add(rt::COMMENTS, "../comments/comments1.xml", TargetMode::Internal);
-        rels.add(rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal);
+        rels.add(
+            rt::COMMENTS,
+            "../comments/comments1.xml",
+            TargetMode::Internal,
+        );
+        rels.add(
+            rt::VML_DRAWING,
+            "../drawings/vmlDrawing1.vml",
+            TargetMode::Internal,
+        );
         let mut authors = CommentAuthorTable::new();
         let mut ops = BTreeMap::new();
         ops.insert("A1".to_string(), CommentOp::Delete);
@@ -1286,8 +1312,16 @@ mod tests {
 <v:shape id="_x0000_s1025" type="#_x0000_t202" style="margin-left:59.25pt; margin-top:1.5pt; width:96pt; height:55.5pt"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>
 </xml>"##;
         let mut rels = RelsGraph::new();
-        rels.add(rt::COMMENTS, "../comments/comments1.xml", TargetMode::Internal);
-        rels.add(rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal);
+        rels.add(
+            rt::COMMENTS,
+            "../comments/comments1.xml",
+            TargetMode::Internal,
+        );
+        rels.add(
+            rt::VML_DRAWING,
+            "../drawings/vmlDrawing1.vml",
+            TargetMode::Internal,
+        );
         let mut authors = CommentAuthorTable::new();
         let mut ops = BTreeMap::new();
         ops.insert("A1".to_string(), CommentOp::Delete);

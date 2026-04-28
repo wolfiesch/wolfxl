@@ -178,13 +178,14 @@ struct WorkbookLayout {
 
 impl WorkbookLayout {
     fn sheets_inner_len(&self) -> usize {
-        self.sheets_inner_end.saturating_sub(self.sheets_inner_start)
+        self.sheets_inner_end
+            .saturating_sub(self.sheets_inner_start)
     }
 }
 
 fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
-    let s = std::str::from_utf8(xml)
-        .map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
+    let s =
+        std::str::from_utf8(xml).map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -244,10 +245,10 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         buf.clear();
     }
 
-    let sheets_inner_start = sheets_inner_start
-        .ok_or_else(|| "workbook.xml has no <sheets> opening tag".to_string())?;
-    let sheets_inner_end = sheets_inner_end
-        .ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
+    let sheets_inner_start =
+        sheets_inner_start.ok_or_else(|| "workbook.xml has no <sheets> opening tag".to_string())?;
+    let sheets_inner_end =
+        sheets_inner_end.ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
 
     Ok(WorkbookLayout {
         sheets_inner_start,
@@ -292,10 +293,7 @@ fn splice_sheets_inner(
 // flow through unchanged.
 // ---------------------------------------------------------------------------
 
-fn rewrite_local_sheet_ids(
-    src: &[u8],
-    remap: &BTreeMap<u32, u32>,
-) -> Result<Vec<u8>, String> {
+fn rewrite_local_sheet_ids(src: &[u8], remap: &BTreeMap<u32, u32>) -> Result<Vec<u8>, String> {
     let s = std::str::from_utf8(src)
         .map_err(|e| format!("workbook.xml is not valid UTF-8 after sheets splice: {e}"))?;
     let mut reader = XmlReader::from_str(s);
@@ -357,10 +355,7 @@ fn rewrite_local_sheet_ids(
 /// `Attribute` struct directly, so we do a small ASCII scan of the
 /// tag bytes. Acceptable because attribute values are ASCII integers
 /// here — no Unicode escapes or entity refs.
-fn find_local_sheet_id_value(
-    src: &[u8],
-    tag_start: usize,
-) -> Option<(usize, usize, String)> {
+fn find_local_sheet_id_value(src: &[u8], tag_start: usize) -> Option<(usize, usize, String)> {
     // Find the matching `>` that closes this start tag (or self-close).
     // We need a quote-aware scan because `>` can appear inside attr values
     // in theory; in practice <definedName> attrs are simple, but be safe.
@@ -422,11 +417,7 @@ fn find_local_sheet_id_value(
                         if p < m {
                             let val_bytes = &tag_bytes[value_start_local..p];
                             let val = std::str::from_utf8(val_bytes).ok()?.to_string();
-                            return Some((
-                                tag_start + value_start_local,
-                                tag_start + p,
-                                val,
-                            ));
+                            return Some((tag_start + value_start_local, tag_start + p, val));
                         }
                     }
                 }
@@ -498,8 +489,7 @@ mod tests {
     #[test]
     fn forward_move_a_by_2_reorders_block() {
         let xml = workbook_with_four_sheets();
-        let res =
-            merge_sheet_moves(xml.as_bytes(), &[("A".to_string(), 2)]).expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("A".to_string(), 2)]).expect("merge");
         assert_eq!(res.new_order, vec!["B", "C", "A", "D"]);
         let text = std::str::from_utf8(&res.workbook_xml).unwrap();
         // `<sheets>` order matches new_order. Match the order of `name=`
@@ -517,8 +507,7 @@ mod tests {
         // Remap: 0→2 (A moved), 1→0 (B), 2→1 (C). 3→3 (D) is identity.
         // Defined names referenced 0/2/3 → after remap: 2/1/3.
         let xml = workbook_with_four_sheets();
-        let res =
-            merge_sheet_moves(xml.as_bytes(), &[("A".to_string(), 2)]).expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("A".to_string(), 2)]).expect("merge");
         let text = std::str::from_utf8(&res.workbook_xml).unwrap();
         assert!(
             text.contains(r#"<definedName name="X" localSheetId="2">A!$A$1</definedName>"#),
@@ -543,8 +532,7 @@ mod tests {
         // [A,B,C,D] → move D by -2 → [A,D,B,C].
         // Remap: 1→2 (B), 2→3 (C), 3→1 (D moved). 0→0 (A) identity.
         let xml = workbook_with_four_sheets();
-        let res =
-            merge_sheet_moves(xml.as_bytes(), &[("D".to_string(), -2)]).expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("D".to_string(), -2)]).expect("merge");
         assert_eq!(res.new_order, vec!["A", "D", "B", "C"]);
         let text = std::str::from_utf8(&res.workbook_xml).unwrap();
         // Z was at 3; D moved 3 → 1, so Z should now read 1.
@@ -554,8 +542,7 @@ mod tests {
     #[test]
     fn offset_zero_is_position_no_op_but_remap_is_empty() {
         let xml = workbook_with_four_sheets();
-        let res =
-            merge_sheet_moves(xml.as_bytes(), &[("B".to_string(), 0)]).expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("B".to_string(), 0)]).expect("merge");
         assert_eq!(res.new_order, vec!["A", "B", "C", "D"]);
         // The block is re-emitted (the remove-then-insert at the same
         // index still touches bytes when whitespace differs). What we
@@ -583,11 +570,7 @@ mod tests {
     #[test]
     fn workbook_with_no_defined_names_block_is_safe() {
         let xml = workbook_with_two_sheets_no_defined_names();
-        let res = merge_sheet_moves(
-            xml.as_bytes(),
-            &[("Sheet2".to_string(), -1)],
-        )
-        .expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("Sheet2".to_string(), -1)]).expect("merge");
         assert_eq!(res.new_order, vec!["Sheet2", "Sheet1"]);
         let text = std::str::from_utf8(&res.workbook_xml).unwrap();
         assert!(text.contains(r#"name="Sheet2""#));
@@ -597,11 +580,8 @@ mod tests {
     #[test]
     fn unknown_sheet_name_is_silent_skip() {
         let xml = workbook_with_four_sheets();
-        let res = merge_sheet_moves(
-            xml.as_bytes(),
-            &[("DOES_NOT_EXIST".to_string(), 1)],
-        )
-        .expect("merge");
+        let res =
+            merge_sheet_moves(xml.as_bytes(), &[("DOES_NOT_EXIST".to_string(), 1)]).expect("merge");
         // Unknown moves leave order unchanged; remap is empty.
         assert_eq!(res.new_order, vec!["A", "B", "C", "D"]);
     }
@@ -638,8 +618,7 @@ mod tests {
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheets><sheet name="Only" sheetId="1"/></sheets>
 </workbook>"#;
-        let res =
-            merge_sheet_moves(xml.as_bytes(), &[("Only".to_string(), 5)]).expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("Only".to_string(), 5)]).expect("merge");
         assert_eq!(res.new_order, vec!["Only"]);
     }
 
@@ -658,11 +637,7 @@ mod tests {
     <sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>
   </sheets>
 </workbook>"#;
-        let res = merge_sheet_moves(
-            xml.as_bytes(),
-            &[("Hidden".to_string(), -1)],
-        )
-        .expect("merge");
+        let res = merge_sheet_moves(xml.as_bytes(), &[("Hidden".to_string(), -1)]).expect("merge");
         let text = std::str::from_utf8(&res.workbook_xml).unwrap();
         // Hidden's state="hidden" attribute must survive verbatim.
         assert!(text.contains(r#"state="hidden""#));

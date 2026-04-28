@@ -43,9 +43,13 @@ pub struct QueuedSheetSetup {
 /// Python side.
 pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetSetupBlocks> {
     let page_setup = match payload.get_item("page_setup")? {
-        Some(v) if !v.is_none() => Some(parse_page_setup(v.downcast::<PyDict>().map_err(|_| {
-            PyValueError::new_err("queue_sheet_setup_update: 'page_setup' must be a dict or None")
-        })?)?),
+        Some(v) if !v.is_none() => {
+            Some(parse_page_setup(v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(
+                    "queue_sheet_setup_update: 'page_setup' must be a dict or None",
+                )
+            })?)?)
+        }
         _ => None,
     };
     let page_margins = match payload.get_item("page_margins")? {
@@ -69,9 +73,13 @@ pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetS
         _ => None,
     };
     let sheet_view = match payload.get_item("sheet_view")? {
-        Some(v) if !v.is_none() => Some(parse_sheet_view(v.downcast::<PyDict>().map_err(|_| {
-            PyValueError::new_err("queue_sheet_setup_update: 'sheet_view' must be a dict or None")
-        })?)?),
+        Some(v) if !v.is_none() => {
+            Some(parse_sheet_view(v.downcast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(
+                    "queue_sheet_setup_update: 'sheet_view' must be a dict or None",
+                )
+            })?)?)
+        }
         _ => None,
     };
     let sheet_protection = match payload.get_item("sheet_protection")? {
@@ -179,18 +187,13 @@ fn parse_header_footer_item(
     }
 }
 
-fn extract_dict<'py>(
-    d: &Bound<'py, PyDict>,
-    key: &str,
-) -> PyResult<Option<Bound<'py, PyDict>>> {
+fn extract_dict<'py>(d: &Bound<'py, PyDict>, key: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
     match d.get_item(key)? {
-        Some(v) if !v.is_none() => Ok(Some(
-            v.downcast_into::<PyDict>().map_err(|_| {
-                PyValueError::new_err(format!(
-                    "queue_sheet_setup_update: {key:?} must be a dict or None"
-                ))
-            })?,
-        )),
+        Some(v) if !v.is_none() => Ok(Some(v.downcast_into::<PyDict>().map_err(|_| {
+            PyValueError::new_err(format!(
+                "queue_sheet_setup_update: {key:?} must be a dict or None"
+            ))
+        })?)),
         _ => Ok(None),
     }
 }

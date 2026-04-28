@@ -268,18 +268,12 @@ fn emit_chart_anchor_open(out: &mut String, anchor: &ImageAnchor) {
 fn emit_graphic_frame(out: &mut String, cnv_id: u32, rid: &str, name: &str) {
     out.push_str("<xdr:graphicFrame macro=\"\">");
     out.push_str("<xdr:nvGraphicFramePr>");
-    out.push_str(&format!(
-        "<xdr:cNvPr id=\"{cnv_id}\" name=\"{name}\"/>"
-    ));
+    out.push_str(&format!("<xdr:cNvPr id=\"{cnv_id}\" name=\"{name}\"/>"));
     out.push_str("<xdr:cNvGraphicFramePr/>");
     out.push_str("</xdr:nvGraphicFramePr>");
-    out.push_str(
-        "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>",
-    );
+    out.push_str("<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>");
     out.push_str("<a:graphic>");
-    out.push_str(
-        "<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">",
-    );
+    out.push_str("<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">");
     out.push_str(&format!(
         "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" \
          xmlns:r=\"{R_NS}\" r:id=\"{rid}\"/>"
