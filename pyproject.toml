@@ -37,6 +37,7 @@ Changelog = "https://github.com/SynthGL/wolfxl/releases"
 bindings = "pyo3"
 module-name = "wolfxl._rust"
 python-source = "python"
+features = ["extension-module"]
 
 [tool.pyright]
 pythonVersion = "3.12"

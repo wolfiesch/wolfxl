@@ -533,7 +533,7 @@ mod tests {
         // 2 existing + 2 new = 4
         assert!(s.starts_with("<dataValidations count=\"4\">"), "got: {s}");
         // sanity: the 4 child tags all appear
-        let child_count = s.matches("<dataValidation").count();
+        let child_count = s.matches("<dataValidation ").count();
         assert_eq!(child_count, 4, "expected 4 child tags in: {s}");
     }
 

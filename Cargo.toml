@@ -31,8 +31,12 @@ build = "build.rs"
 name = "wolfxl"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "multiple-pymethods"] }
+pyo3 = { version = "0.28", features = ["multiple-pymethods"] }
 calamine-styles.workspace = true
 indexmap.workspace = true
 zip.workspace = true

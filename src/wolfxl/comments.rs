@@ -892,13 +892,20 @@ fn xml_unescape(s: &str) -> String {
 }
 
 fn find_self_closing_attr(xml: &str, name: &str, attr: &str) -> Option<String> {
-    let open_prefix = format!("<{}", name);
     let mut cursor = 0usize;
-    while let Some(rel_start) = xml[cursor..].find(&open_prefix) {
+    while let Some(rel_start) = xml[cursor..].find('<') {
         let start = cursor + rel_start;
+        if !tag_at_has_local_name(xml, start, name) {
+            cursor = start + 1;
+            continue;
+        }
         let after_open_rel = xml[start..].find('>')?;
         let after_open = start + after_open_rel + 1;
-        let attr_text = &xml[start + open_prefix.len()..after_open - 1];
+        let tag_end = xml[start + 1..after_open - 1]
+            .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+            .map(|rel| start + 1 + rel)
+            .unwrap_or(after_open - 1);
+        let attr_text = &xml[tag_end..after_open - 1];
         let mut attrs: Vec<(String, String)> = Vec::new();
         parse_attrs(attr_text.trim_end_matches('/').trim(), &mut attrs);
         for (k, v) in attrs {
@@ -909,6 +916,24 @@ fn find_self_closing_attr(xml: &str, name: &str, attr: &str) -> Option<String> {
         cursor = after_open;
     }
     None
+}
+
+fn tag_at_has_local_name(xml: &str, start: usize, expected: &str) -> bool {
+    if xml.as_bytes().get(start) != Some(&b'<') {
+        return false;
+    }
+    let rest = &xml[start + 1..];
+    if rest.starts_with('/') || rest.starts_with('!') || rest.starts_with('?') {
+        return false;
+    }
+    let tag_end = rest
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(rest.len());
+    let tag_name = &rest[..tag_end];
+    tag_name
+        .rsplit_once(':')
+        .map_or(tag_name, |(_, local)| local)
+        == expected
 }
 
 fn xml_escape_text(s: &str) -> String {
@@ -1181,12 +1206,12 @@ mod tests {
         );
         let bytes = build_vml(&merged, &[], &cols, None);
         let s = std::str::from_utf8(&bytes).unwrap();
-        // Column A 20 units → 145 px → 108.75 pt.
+        // Column A 20 units -> 149 px -> 111.75 pt.
         // Native writer would emit (1 * 48 + 59.25) = 107.25 pt regardless
         // of width. The patcher's width-aware path should reflect col A's
-        // actual size: ORIGIN_LEFT_PT + 108.75 = 168 pt.
+        // actual size: ORIGIN_LEFT_PT + 111.75 = 171.75 pt.
         assert!(
-            s.contains("margin-left:168pt"),
+            s.contains("margin-left:171.75pt"),
             "patcher uses actual width: {s}"
         );
     }

@@ -1,7 +1,8 @@
 # Compatibility Matrix
 
 > **Reference**: WolfXL **v2.0.0** (Sprint Ν).
-> **Status as of**: 2026-04-27 (v2.0.0 launch date).
+> **Status as of**: 2026-04-27 post-PR #23 audit. Release/public
+> launch is intentionally frozen until this audit is complete.
 
 Status legend:
 

@@ -1848,9 +1848,10 @@ impl XlsxPatcher {
             // `queued_defined_names`, RFC-024's `queued_tables`,
             // RFC-023's `queued_comments`, RFC-036's
             // `queued_sheet_moves`, RFC-030/031's
-            // `queued_axis_shifts`, and RFC-034's
-            // `queued_range_moves` so a no-op save remains
-            // byte-identical even after these primitives land.
+            // `queued_axis_shifts`, RFC-034's `queued_range_moves`,
+            // RFC-055/056/058/061/062 queues, and the pivot/chart
+            // queues so a no-op save remains byte-identical even
+            // after these primitives land.
             std::fs::copy(&self.file_path, output_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
             return Ok(());
@@ -5245,6 +5246,7 @@ mod rfc013_tests {
     fn splice_returns_error_when_no_sheets_block() {
         // Malformed input: no <sheets> at all. Preserve the historical
         // error message for callers.
+        pyo3::Python::initialize();
         let xml = br#"<?xml version="1.0"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
         let err = splice_into_sheets_block(xml, NEW_SHEET).unwrap_err();
@@ -6137,11 +6139,11 @@ mod chart_helpers_tests {
     #[test]
     fn resolve_relative_basic() {
         assert_eq!(
-            resolve_relative_path("xl/worksheets/_rels", "../drawings/drawing1.xml"),
+            resolve_relative_path("xl/worksheets", "../drawings/drawing1.xml"),
             "xl/drawings/drawing1.xml"
         );
         assert_eq!(
-            resolve_relative_path("xl/drawings/_rels", "../charts/chart1.xml"),
+            resolve_relative_path("xl/drawings", "../charts/chart1.xml"),
             "xl/charts/chart1.xml"
         );
     }

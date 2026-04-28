@@ -6,6 +6,11 @@
 > `docs/release-notes-2.0.md`.
 > SHAs and benchmark numbers are `<!-- TBD -->` until the
 > integrator finalize commit.
+> Post-PR #23 audit note: release/public launch remains frozen.
+> Older draft copy described slicers, calculated fields/items,
+> GroupItems, and chart display units/dPt overrides as future work;
+> those are now implemented, but this file still needs a final manual
+> truth pass before publication.
 
 This file holds the post drafts that ship with v2.0.0's public
 launch — the **full openpyxl replacement** release. Each draft is
@@ -86,11 +91,11 @@ What's also in the box (carried over from v1.7):
   comments, hyperlinks, tables, data validations, conditional
   formatting.
 
-What's NOT in v2.0:
+Still partial / not in v2.0:
 
-- Slicers (xl/slicers/, xl/slicerCaches/) — v2.1.
-- Pivot calculated fields / calculated items / GroupItems — v2.1.
-- Pivot-table styling beyond the named-style picker — v2.1.
+- Pivot-table styling beyond the named-style picker remains partial
+  (PivotArea formats and pivot-scoped CF exist; broader theme/banded
+  styling is still limited).
 - In-place pivot edits in modify mode — v2.2.
 - Combination charts (multi-plot — bar + line on shared axes).
 - OpenDocument (.ods) — not on the roadmap.
@@ -134,8 +139,8 @@ that got us here.
      XlsxWriter's docs explicitly call out "pivot tables not
      supported".
   2. "How do you handle X edge case?" — point at
-     `tests/parity/KNOWN_GAPS.md` "Out of scope" (now reduced to
-     six v2.1+ items).
+     `tests/parity/KNOWN_GAPS.md` "Out of scope" and the
+     post-PR #23 audit notes.
   3. "Why not contribute pivot construction to openpyxl?" —
      answer: wolfxl is a complementary tool that targets
      perf-sensitive workloads with a Rust backend; the
@@ -229,11 +234,9 @@ Touch 1 cell in a 100k-row workbook → <!-- TBD: BENCHMARK
 NUMBERS --> vs openpyxl <!-- TBD: BENCHMARK NUMBERS -->.
 
 7/8
-Not in v2.0:
+Still partial / not in v2.0:
 
-- Slicers → v2.1
-- Pivot calculated fields / items / GroupItems → v2.1
-- Pivot-table styling beyond named-style picker → v2.1
+- Pivot-table styling beyond named-style picker remains partial
 - In-place pivot edits in modify mode → v2.2
 - Combination charts (multi-plot)
 - OpenDocument (.ods) — not on roadmap
@@ -352,11 +355,9 @@ rewrite vs. openpyxl's full-DOM-rebuild.
   comments / hyperlinks / tables / DV / CF).
 - Reads .xlsb and .xls (via calamine).
 
-# What's NOT in 2.0
+# Still partial / not in 2.0
 
-- Slicers (v2.1).
-- Pivot calculated fields / calculated items / GroupItems (v2.1).
-- Pivot-table styling beyond the named-style picker (v2.1).
+- Pivot-table styling beyond the named-style picker remains partial.
 - In-place pivot edits in modify mode (v2.2).
 - Combination charts.
 - OpenDocument (.ods) — not on roadmap.
@@ -443,8 +444,9 @@ internals, the Rust crate split, or the migration path.
    faster than openpyxl on every benchmark we run. The "full
    openpyxl replacement" claim is now defensible.
 
-9. **What's next**: v2.1 — slicers, calculated fields, GroupItems,
-   pivot styling. v2.2 — in-place pivot edits in modify mode.
+9. **What's next**: finish the production-readiness audit, manual
+   advanced-pivot visual checks, and benchmark replacement before any
+   publish. v2.2 — in-place pivot edits in modify mode.
 
 **Action items for the writer**:
 
@@ -562,12 +564,13 @@ Most code is a one-line import swap. The new pivot APIs live at
 
 # Roadmap
 
-- **v2.1** — slicers, pivot calculated fields, calculated items,
-  GroupItems, pivot styling beyond named-style picker.
+- **Pre-release audit** — manual advanced-pivot/slicer visual
+  verification, benchmark replacement, and final truth pass before
+  any publish.
+- **v2.1** — broader pivot styling beyond named-style picker.
 - **v2.2** — in-place pivot edits in modify mode (source-range
   edit, field re-order, subtotal toggle).
-- **v2.x** — combination charts, `<c:displayUnits>` on value
-  axes, per-data-point overrides.
+- **v2.x** — combination charts.
 
 # Thank you
 
@@ -576,8 +579,8 @@ streaming-datetime drift, the RFC-035 cross-RFC composition
 bugs, the v1.7 launch-day surprises, and the 100 little things
 that surface at scale.
 
-The construction-side parity roadmap is now exhausted. From
-v2.1 onwards we extend the envelope rather than close gaps.
+The construction-side parity roadmap is now close to exhausted,
+subject to the final manual audit and benchmark replacement.
 ```
 
 ---
@@ -597,10 +600,11 @@ v2.1 onwards we extend the envelope rather than close gaps.
 - [ ] All draft channel posts above polished + reviewed for tone.
 - [ ] `pyproject.toml` and `Cargo.toml` reflect `2.0.0` (integrator finalize).
 - [ ] `wolfxl.__version__ == "2.0.0"` verified post-bump.
-- [ ] `cargo test --workspace --exclude wolfxl` GREEN.
-- [ ] `pytest tests/` GREEN.
+- [ ] `cargo test --workspace` GREEN.
+- [ ] `uv run pytest` GREEN.
 - [ ] `pytest tests/parity/` GREEN, no strict-xfail markers.
-- [ ] `tests/parity/KNOWN_GAPS.md` "Out of scope" lists only the v2.1+ items.
+- [ ] `tests/parity/KNOWN_GAPS.md` "Out of scope" matches the
+      post-PR #23 audit.
 - [ ] `tests/parity/openpyxl_surface.py` `wolfxl.pivot.PivotTable` flipped to `wolfxl_supported=True`.
 - [ ] `docs/release-notes-2.0.md` `<!-- TBD: SHA -->` and `<!-- TBD: BENCHMARK NUMBERS -->` markers all filled by integrator.
 - [ ] `Plans/launch-posts.md` (this file) `<!-- TBD -->` markers all filled by integrator.

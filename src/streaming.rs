@@ -677,7 +677,7 @@ mod tests {
         let xml = b"<row r=\"1\"><c r=\"A1\"><v>3</v></c></row>";
         assert_eq!(find_tag_open(xml, 0, b"row"), Some(0));
         assert_eq!(find_tag_open(xml, 0, b"c"), Some(11));
-        assert_eq!(find_tag_open(xml, 0, b"v"), Some(20));
+        assert_eq!(find_tag_open(xml, 0, b"v"), Some(21));
     }
 
     #[test]

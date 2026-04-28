@@ -130,12 +130,12 @@ Features marked **Preserved** are kept verbatim on modify-mode round-trip (open,
 | **Structure** | Multiple sheets, merged cells, defined names (read + write), freeze panes, row heights, column widths, document properties |
 | **Tables / Validation / CF** | `ws.tables`, `ws.add_table`, `ws.data_validations`, `ws.conditional_formatting` (read + write in `Workbook()` mode) |
 | **Charts** | 16 chart families — `BarChart`, `LineChart`, `PieChart`, `DoughnutChart`, `AreaChart`, `ScatterChart`, `BubbleChart`, `RadarChart`, `BarChart3D`, `LineChart3D`, `PieChart3D`, `AreaChart3D`, `SurfaceChart`, `SurfaceChart3D`, `StockChart`, `ProjectedPieChart` |
-| **Pivots** | `PivotCache`, `PivotTable`, `RowField` / `ColumnField` / `DataField` / `PageField`; pivot-chart linkage via `chart.pivot_source = pt`; deep-clone of pivot-bearing sheets |
+| **Pivots** | `PivotCache`, `PivotTable`, `RowField` / `ColumnField` / `DataField` / `PageField`; slicers, calculated fields/items, GroupItems; pivot-chart linkage via `chart.pivot_source = pt`; deep-clone of pivot-bearing sheets |
 | **Images** | `Image` (PNG / JPEG / GIF / BMP); one-cell, two-cell, absolute anchors; modify-mode `add_image` |
 | **Encryption** | Read + write Agile (AES-256 / SHA-512) via `wolfxl[encrypted]` |
 | **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
 | **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
-| **Preserved (read-only)** | Macros (VBA), embedded objects, slicers (v2.1 will construct slicers) — round-trip cleanly through modify mode |
+| **Preserved (read-only)** | Macros (VBA), embedded objects — round-trip cleanly through modify mode |
 
 ### openpyxl compatibility status
 

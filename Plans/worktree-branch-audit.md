@@ -12,8 +12,9 @@ out of scope.
 
 ## Current repository state
 
-- `main` is at `3bf845c` (`feat(writer): native xlsx writer`), the squash
-  merge commit for PR #23.
+- `main` started this audit at `3bf845c` (`feat(writer): native xlsx writer`),
+  the squash merge commit for PR #23. The local checkout is now ahead with
+  audit commits that have not been pushed.
 - PR #23 was merged after green CI and addressed review comments.
 - The old `feat/native-writer` remote branch was deleted after merge.
 - The stale worktree at
@@ -160,12 +161,19 @@ After the audit, the Rust tree was normalized with `cargo fmt --all`.
 - `uv run pytest`: passed with 2230 passed, 24 skipped, 10 warnings.
 - `cargo test --workspace --exclude wolfxl`: passed for the pure Rust crates
   (two non-snake-case test-name warnings remain in `wolfxl-rels`).
-- `cargo test --workspace`: currently fails while linking the `wolfxl` PyO3
-  crate tests on macOS because the standalone Rust test binary cannot resolve
-  Python C API symbols such as `_PyBaseObject_Type`, `_PyBool_Type`, and
-  related symbols. Treat this as a release-gate/tooling issue to resolve before
-  calling the full audit complete; the Python extension itself builds and the
-  Python-facing suite is green.
+- `cargo test --workspace`: now passes after splitting PyO3's
+  `extension-module` feature out of the default Cargo test build and enabling
+  it only through maturin. This fixed the macOS Python C API linker failure.
+- `cargo test -p wolfxl --lib`: 225 passed after refreshing stale assertions
+  and fixing VML `o:idmap` local-name parsing.
+- `uv run pytest tests/test_sheet_setup_copy_worksheet.py
+  tests/diffwriter/test_sheet_setup_bytes.py
+  tests/parity/test_print_settings_parity.py
+  tests/parity/test_sheet_protection_parity.py
+  tests/parity/test_workbook_security_parity.py
+  tests/test_autofilter_filters.py
+  tests/parity/test_openpyxl_path_compat.py tests/test_compat_shims.py -q`:
+  341 passed, 2 skipped.
 
 ## Branch audit queue
 
@@ -179,9 +187,13 @@ Highest-priority recovery branches:
 - `feat/sprint-pi-pod-epsilon`: RFC-060 cleanup / stale stub annotations.
 - `feat/sprint-omicron-pod-3-5`: advanced pivot/slicer cross-cutting tests.
 - `feat/sprint-omicron-pod-3`: pivot area formatting / chart formatting.
-- `feat/sprint-omicron-pod-1a5`: sheet setup / autofilter / security flush
-  guard fixes.
-- `feat/sprint-omicron-pod-2`: openpyxl-path drop-in import parity.
+- `feat/sprint-omicron-pod-1a5`: audited against current `main`; its
+  sheet-setup / page-break / autofilter / workbook-security no-op guard
+  queues are present in `XlsxPatcher::do_save`, and the focused Python proof
+  above is green.
+- `feat/sprint-omicron-pod-2`: audited against current `main`; the
+  openpyxl-path drop-in import parity test is present and included in the
+  341-test focused proof.
 - `feat/sprint-nu-pod-epsilon`: v2.0 final docs and launch claims; use only
   as evidence, not as publish-ready material.
 - `w2a/styles-xml`, `w2b/sheet-xml`, `w2c/sst-wb-xml`, `w3a/comments-vml`,

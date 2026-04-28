@@ -317,34 +317,33 @@ API differences:
 See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 Ν / v2.0)" for the full mapping.
 
-## Out of scope (deferred to v2.1+)
+## Out of scope / partial after post-PR #23 audit
 
-- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`). Separate XML
-  namespace; the slicer-cache-shared-with-pivot-cache wiring is
-  non-trivial. Tracked in v2.1 RFC backlog.
-- **Calculated fields** (`<calculatedField>`). Formula
-  expressions in the pivot's field list. v2.1.
-- **Calculated items** (`<calculatedItem>`). Formula expressions
-  inside row/col fields. v2.1.
-- **GroupItems** (date / range grouping —
-  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`).
-  Non-trivial recursion; deferred to v2.1.
+- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`) are now
+  implemented and covered by zip-integrity, copy-worksheet, and
+  openpyxl-load smoke tests. Full manual Excel/LibreOffice visual
+  verification remains a release-readiness task.
+- **Calculated fields** (`<calculatedField>`), **calculated items**
+  (`<calculatedItem>`), and **GroupItems** (`<fieldGroup>`) are now
+  implemented and covered by advanced pivot tests.
 - **OLAP / external pivot caches**. Needs the PowerPivot
   data-model (`xl/model/`). Out of scope permanently.
 - **Pivot-table styling beyond the named-style picker**.
-  Themes, banded formats, conditional formatting on pivots.
-  v2.1.
+  PivotArea formats and pivot-scoped conditional formatting are
+  implemented; broader theme/banded styling is still partial.
 - **In-place pivot edits in modify mode** beyond
   `add_pivot_table`. Editing an existing pivot's source range,
   field ordering, etc. v2.2.
+- **Combination charts** (multi-plot charts on shared axes) remain
+  post-v2.0.
 
 ## Verification
 
 | Surface | Status | Tooling |
 |---|---|---|
-| Rust unit tests | <!-- TBD: BENCHMARK NUMBERS --> tests, all green | `cargo test --workspace --exclude wolfxl` |
-| Python unit tests | <!-- TBD: BENCHMARK NUMBERS --> tests, all green | `pytest tests/` |
-| openpyxl-parity ratchet | <!-- TBD: BENCHMARK NUMBERS --> entries; pivot row flipped to `wolfxl_supported=True` | `pytest tests/parity/` |
+| Rust unit tests | full workspace green in the post-PR #23 audit | `cargo test --workspace` |
+| Python unit tests | 2230 passed, 24 skipped in the broad post-PR #23 run | `uv run pytest` |
+| openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
 | LibreOffice cross-renderer | Pivot construction fixture renders pivot table + linked chart correctly | `tests/fixtures/pivots/*.xlsx` opened in headless LibreOffice |
 | openpyxl interop | Pivot constructed by wolfxl reads via `openpyxl.load_workbook(...).pivots[0]` | `tests/parity/test_pivot_interop.py` |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
@@ -372,8 +371,9 @@ Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
 - `tests/parity/openpyxl_surface.py` — pivot row flipped:
   `wolfxl_supported=True`.
 - `tests/parity/KNOWN_GAPS.md` "Out of scope" section reduced
-  to: slicers, calculated fields, GroupItems, OLAP, pivot
-  styling beyond named-style picker, in-place pivot edits.
+  to: OLAP/external pivots, partial pivot styling, in-place pivot
+  edits, combination charts, chart removal for source-surviving
+  charts, and non-xlsx write/style-accessor limits.
 
 ## Pods that landed 2.0.0
 
@@ -403,8 +403,8 @@ Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
 
 ## Next
 
-**v2.1.x** — slicers (RFC backlog), calculated fields,
-calculated items, GroupItems, pivot styling beyond named-style
-picker. The construction-side parity claim ("full openpyxl
-replacement, period.") stands as of v2.0; v2.1 extends the
-pivot envelope rather than closing a gap.
+**Next audit focus** — finish manual Excel/LibreOffice visual
+checks for advanced pivots/slicers, run benchmark replacement for
+the remaining TBD numbers, and decide whether partial pivot styling
+is acceptable for the release claim. No publish/release step should
+run until those gates are complete.
