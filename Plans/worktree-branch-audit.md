@@ -178,6 +178,20 @@ cargo test -p wolfxl-pivot
 Result: 193 passed / 1 warning for the Python advanced-pivot slice, and 55
 passed for `wolfxl-pivot`.
 
+```bash
+uv run pytest \
+  tests/test_page_breaks.py \
+  tests/test_dimension_helpers.py \
+  tests/parity/test_page_breaks_parity.py \
+  tests/diffwriter/test_page_breaks_bytes.py \
+  -q
+cargo test -p wolfxl-writer
+```
+
+Result: 77 passed for the Pi-alpha page-break/dimension slice, and 355 unit
+tests / 47 chart integration tests / 2 roundtrip tests / 1 doctest passed for
+`wolfxl-writer`.
+
 ## Verification checkpoint
 
 After the audit, the Rust tree was normalized with `cargo fmt --all`.
@@ -186,10 +200,12 @@ After the audit, the Rust tree was normalized with `cargo fmt --all`.
 - `uv run ruff check .`: passed.
 - `uv run maturin develop`: passed; rebuilt and installed editable
   `wolfxl-2.0.0`.
-- `uv run pytest`: passed with 2230 passed, 24 skipped, 10 warnings.
+- `uv run pytest`: passed with 2248 passed, 24 skipped, 10 warnings on the
+  2026-04-28 post-branch-mining proof.
 - `cargo test --workspace --exclude wolfxl`: passed for the pure Rust crates
   (two non-snake-case test-name warnings remain in `wolfxl-rels`).
-- `cargo test --workspace`: now passes after splitting PyO3's
+- `cargo test --workspace`: passed on the 2026-04-28 post-branch-mining
+  proof after splitting PyO3's
   `extension-module` feature out of the default Cargo test build and enabling
   it only through maturin. This fixed the macOS Python C API linker failure.
 - `cargo test -p wolfxl --lib`: 225 passed after refreshing stale assertions
@@ -211,7 +227,10 @@ to merge wholesale.
 
 Highest-priority recovery branches:
 
-- `feat/sprint-pi-pod-alpha`: page breaks and dimension construction coverage.
+- `feat/sprint-pi-pod-alpha`: audited against current `main`; page-break and
+  dimension tests/code are already present and included in the 77-test focused
+  proof above. The only newer branch-only deltas in this slice are unused
+  imports, so nothing was ported.
 - `feat/sprint-pi-pod-epsilon`: audited/mined against current `main`; the
   useful RFC-060 cleanup was ported by removing stale `(stub)` annotations and
   adding representative former-stub constructors to `tests/test_compat_shims.py`.
@@ -231,9 +250,18 @@ Highest-priority recovery branches:
   341-test focused proof.
 - `feat/sprint-nu-pod-epsilon`: v2.0 final docs and launch claims; use only
   as evidence, not as publish-ready material.
-- `w2a/styles-xml`, `w2b/sheet-xml`, `w2c/sst-wb-xml`, `w3a/comments-vml`,
-  `w3b/tables-xml`, `w3c/cf-dv`: native-writer review fix branches; mine
-  individual fixes/tests only.
+- `w2a/styles-xml`: audited against current `main`; RGB attribute escaping for
+  styles plus regression tests are present in `crates/wolfxl-writer/src/emit/styles_xml.rs`.
+- `w2b/sheet-xml`: audited against current `main`; unstyled blank cells are
+  excluded from `<dimension ref>` and styled blanks still count.
+- `w2c/sst-wb-xml`: audited against current `main`; `_xlnm.Print_Area`
+  user-defined-name dedupe is present in `workbook_xml.rs`.
+- `w3a/comments-vml`: audited against current `main`; the VML shape-id formula
+  and anchor tuple comments are present.
+- `w3b/tables-xml`: audited against current `main`; multi-table `tableParts`
+  relationship-id coverage is present.
+- `w3c/cf-dv`: audited against current `main`; empty `<conditionalFormatting>`
+  wrappers are skipped when every rule is a stub variant.
 - `pyo3-bump`: Python 3.14 / PyO3 dependency upgrade candidate; handle as a
   separate dependency modernization PR after capability audit.
 
