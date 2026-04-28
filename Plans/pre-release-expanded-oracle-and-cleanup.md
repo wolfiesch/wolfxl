@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 6255 | Split patcher phases, queue models, and workbook mutation helpers behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 6148 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -215,6 +215,55 @@ Phase 3: only then reduce the PyO3 surface file.
   `mod.rs` while keeping public Python import behavior unchanged.
 - Stop immediately if a move forces a PyO3 signature change, changes save-path
   ordering, or requires broad fixture rewrites to explain output drift.
+
+Phase 0 inventory snapshot, 2026-04-28:
+
+- PyO3 class surface in this file is currently a single `#[pyclass]`:
+  `XlsxPatcher`.
+- Public constructor/save surface: `open`, `sheet_names`, `save`, and
+  `save_in_place`.
+- Public queue surface: `queue_value`, `queue_rich_text_value`,
+  `queue_array_formula`, `queue_format`, `queue_border`,
+  `queue_data_validation`, `queue_conditional_formatting`,
+  `queue_hyperlink`, `queue_hyperlink_delete`, `queue_comment`,
+  `queue_comment_delete`, `queue_table`, `queue_image_add`,
+  `queue_chart_add`, `queue_pivot_cache_add`, `queue_pivot_table_add`,
+  `queue_slicer_add`, `queue_autofilter`, `queue_sheet_setup_update`,
+  `queue_page_breaks_update`, `queue_workbook_security`,
+  `queue_defined_name`, `queue_sheet_move`, `queue_axis_shift`,
+  `queue_range_move`, `queue_sheet_copy`, and `queue_properties`.
+- Test-only PyO3 helpers still live on the public impl block:
+  `_test_inject_file_add`, `_test_queue_content_type_op`,
+  `_test_populate_ancillary`, `_test_ancillary_is_populated`,
+  `_test_ancillary_comments_part`, `_test_ancillary_vml_drawing_part`,
+  `_test_ancillary_table_parts`, `_test_ancillary_hyperlink_rids`,
+  `_test_inject_hyperlink`, `_test_inject_hyperlink_delete`, and
+  `_test_get_extracted_hyperlinks`.
+- Queue/model structs still local to `mod.rs`: `QueuedChartAdd`,
+  `QueuedImageAdd`, `QueuedImageAnchor`, `SheetCopyOp`, `AxisShift`, and
+  `RangeMove`. These are the safest first extraction candidates because they
+  are pure Rust data carriers with no PyO3 annotations.
+- Save-phase helpers already have natural seams inside the private impl:
+  `apply_image_adds_phase`, `apply_chart_adds_phase`,
+  `apply_pivot_adds_phase`, `apply_slicer_adds_phase`,
+  `apply_axis_shifts_phase`, `apply_sheet_copies_phase`,
+  `apply_range_moves_phase`, `rebuild_calc_chain_phase`, and
+  `ensure_calc_chain_metadata`.
+- Bottom-of-file parser/render helpers are a second split candidate after pure
+  queue models: `py_runs_to_rust`, `dict_to_format_spec`,
+  `dict_to_border_spec`, `extract_cf_rule`, `extract_dxf_patch`,
+  `parse_workbook_security_payload`, `parse_queued_image_anchor`, and chart
+  drawing render helpers.
+
+First no-behavior split target, completed 2026-04-28:
+
+1. Extract the six local queue/model types into `src/wolfxl/patcher_models.rs`
+   and re-export them privately into `mod.rs`. Commit target: pure Rust data
+   carriers only, with no PyO3 annotation or save-order changes.
+2. Verification completed: `cargo test`, `uv run --no-sync maturin develop`,
+   focused modify/oracle tests, and the full WolfXL suite.
+3. Only after that, move parser helpers grouped by queue owner: images/charts
+   first, then CF/styles, then workbook security.
 
 ## Verification gates
 

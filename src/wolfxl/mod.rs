@@ -16,6 +16,7 @@ pub mod content_types;
 pub mod defined_names;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
+pub mod patcher_models;
 pub mod properties;
 #[allow(dead_code)] // SST parser used in Phase 3 (format patching reads existing styles)
 pub mod shared_strings;
@@ -63,6 +64,9 @@ use zip::{ZipArchive, ZipWriter};
 use crate::ooxml_util;
 use conditional_formatting::{
     CfRuleKind, CfRulePatch, CfvoPatch, ColorScaleStop, ConditionalFormattingPatch, DxfPatch,
+};
+use patcher_models::{
+    AxisShift, QueuedChartAdd, QueuedImageAdd, QueuedImageAnchor, RangeMove, SheetCopyOp,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -311,117 +315,6 @@ pub struct XlsxPatcher {
     /// 2.5p (after Phase 2.5n sheet-setup, before Phase 2.5o
     /// autoFilter).
     queued_slicers: Vec<pivot_slicer::QueuedSlicer>,
-}
-
-/// Sprint Μ Pod-γ (RFC-046) — one chart queued for emit on a sheet.
-///
-/// The chart XML is pre-serialized by the caller (Pod-α's
-/// `emit_chart_xml(&Chart)`); the patcher only routes bytes through
-/// the OOXML rels graph + content-types + drawing layer.
-#[derive(Debug, Clone)]
-pub struct QueuedChartAdd {
-    /// Chart XML body — written into `xl/charts/chartN.xml`. Already
-    /// serialized by the caller (the patcher never builds this).
-    pub chart_xml: Vec<u8>,
-    /// A1-style anchor cell (e.g. `"D2"`). The patcher converts to
-    /// `(col0, row0)` for the `<xdr:from>` block.
-    pub anchor_a1: String,
-    /// Chart pixel size in EMU is fixed for the modify-mode v1: the
-    /// patcher emits a fixed `cx=12cm cy=8cm` extent per chart so we
-    /// don't need a width/height plumb. Pod-β wires width/height
-    /// through Worksheet.add_chart in the future.
-    pub width_emu: i64,
-    pub height_emu: i64,
-}
-
-/// Sprint Λ Pod-β (RFC-045) — one image queued for emit on a sheet.
-#[derive(Debug, Clone)]
-pub struct QueuedImageAdd {
-    /// Raw image bytes — written into `xl/media/imageN.<ext>`.
-    pub data: Vec<u8>,
-    /// Lowercase extension (`"png"`, `"jpeg"`, `"gif"`, `"bmp"`).
-    pub ext: String,
-    /// Pixel width (Excel uses 9525 EMU/px when computing extent).
-    pub width_px: u32,
-    pub height_px: u32,
-    /// Anchor flavour. Mirrors `wolfxl_writer::model::image::ImageAnchor`
-    /// but kept Python-shape so the patcher can stay independent of the
-    /// writer crate's data model.
-    pub anchor: QueuedImageAnchor,
-}
-
-#[derive(Debug, Clone)]
-pub enum QueuedImageAnchor {
-    OneCell {
-        from_col: u32,
-        from_row: u32,
-        from_col_off: i64,
-        from_row_off: i64,
-    },
-    TwoCell {
-        from_col: u32,
-        from_row: u32,
-        from_col_off: i64,
-        from_row_off: i64,
-        to_col: u32,
-        to_row: u32,
-        to_col_off: i64,
-        to_row_off: i64,
-        edit_as: String,
-    },
-    Absolute {
-        x_emu: i64,
-        y_emu: i64,
-        cx_emu: i64,
-        cy_emu: i64,
-    },
-}
-
-/// One queued sheet-copy op (RFC-035).
-#[derive(Debug, Clone)]
-pub struct SheetCopyOp {
-    /// Source sheet title (must exist in `self.sheet_paths`).
-    pub src_title: String,
-    /// Destination sheet title (pre-deduped by the Python coordinator).
-    pub dst_title: String,
-    /// Sprint Θ Pod-C2 — workbook-level
-    /// `wb.copy_options.deep_copy_images` snapshot at queue time.
-    /// `false` preserves the historical RFC-035 §5.3 alias-by-target
-    /// behaviour. Read by the planner via
-    /// [`SheetCopyInputs::deep_copy_images`].
-    pub deep_copy_images: bool,
-}
-
-/// One queued axis-shift op (RFC-030/031).
-#[derive(Debug, Clone)]
-pub struct AxisShift {
-    /// Sheet name (NOT path).
-    pub sheet: String,
-    /// `"row"` or `"col"`.
-    pub axis: String,
-    /// 1-based index where shifting begins.
-    pub idx: u32,
-    /// Signed shift count. Positive = insert; negative = delete.
-    pub n: i32,
-}
-
-/// One queued range-move op (RFC-034).
-#[derive(Debug, Clone)]
-pub struct RangeMove {
-    /// Sheet name (NOT path).
-    pub sheet: String,
-    /// 1-based inclusive source rectangle corners.
-    pub src_min_col: u32,
-    pub src_min_row: u32,
-    pub src_max_col: u32,
-    pub src_max_row: u32,
-    /// Signed delta. Positive shifts down/right; negative up/left.
-    pub d_row: i32,
-    pub d_col: i32,
-    /// If true, formulas in cells OUTSIDE the source rectangle that
-    /// reference cells INSIDE `src` are also re-anchored. Cells
-    /// INSIDE `src` are always paste-translated.
-    pub translate: bool,
 }
 
 #[pymethods]
