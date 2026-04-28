@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 5233 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 4619 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -270,8 +270,13 @@ First no-behavior split target, completed 2026-04-28:
    2026-04-28. Verification completed: `cargo test`, `uv run --no-sync
    maturin develop`, and focused formatting/CF/security/rich-text/external
    oracle Python tests.
-5. Next helper candidate: workbook-level mutation helpers around sheet copy,
-   workbook relationships, and minimal styles XML.
+5. Workbook relationship helpers, sheet-copy workbook splicing,
+   deterministic ZIP timestamps, and the minimal styles fallback moved into
+   `src/wolfxl/patcher_workbook.rs` on 2026-04-28. Verification completed:
+   `cargo test`, `uv run --no-sync maturin develop`, and focused
+   copy-worksheet/properties/patcher-infra/external-oracle Python tests.
+6. Next helper candidate: isolate the sheet-copy phase itself once the current
+   helper extraction has a full-suite green pass.
 
 ## Verification gates
 

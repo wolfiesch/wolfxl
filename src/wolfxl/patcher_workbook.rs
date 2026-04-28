@@ -1,0 +1,476 @@
+//! Workbook-level helpers used by the surgical xlsx patcher.
+
+use std::fs::File;
+use std::io::{Read, Seek};
+
+use pyo3::exceptions::PyIOError;
+use pyo3::prelude::*;
+use zip::ZipArchive;
+
+use crate::ooxml_util;
+use wolfxl_rels::RelsGraph;
+
+/// Maps a sheet XML path to its relationship sidecar path.
+pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
+    wolfxl_rels::rels_path_for(sheet_path).unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
+}
+
+/// Parses the trailing integer from an OOXML part path.
+pub(crate) fn parse_n_from_part_path(path: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let mid = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    mid.parse::<u32>().ok()
+}
+
+/// Loads a `.rels` part from the source ZIP, returning an empty graph when absent.
+pub(crate) fn load_or_empty_rels(zip: &mut ZipArchive<File>, path: &str) -> PyResult<RelsGraph> {
+    match ooxml_util::zip_read_to_string_opt(zip, path)? {
+        Some(xml) => RelsGraph::parse(xml.as_bytes())
+            .map_err(|e| PyIOError::new_err(format!("rels parse for '{path}': {e}"))),
+        None => Ok(RelsGraph::new()),
+    }
+}
+
+/// Returns true when the source ZIP contains an entry with the exact name.
+pub(crate) fn source_zip_has_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> bool {
+    zip.by_name(name).is_ok()
+}
+
+/// Inserts a `<sheet .../>` element into the workbook `<sheets>` block.
+pub(crate) fn splice_into_sheets_block(
+    workbook_xml: &[u8],
+    new_sheet_element: &[u8],
+) -> PyResult<Vec<u8>> {
+    use quick_xml::events::Event as XmlEvent;
+    use quick_xml::Reader as XmlReader;
+
+    let s0 = std::str::from_utf8(workbook_xml)
+        .map_err(|_| PyIOError::new_err("Phase 2.7: workbook.xml is not valid UTF-8"))?;
+    let owned;
+    let s = if new_sheet_element.windows(4).any(|w| w == b"r:id")
+        && !workbook_root_has_relationship_namespace(s0)?
+    {
+        owned = add_workbook_relationship_namespace(s0)?;
+        owned.as_str()
+    } else {
+        s0
+    };
+    let workbook_xml = s.as_bytes();
+    let mut reader = XmlReader::from_str(s);
+    reader.config_mut().trim_text(false);
+
+    let mut depth: i32 = 0;
+    let mut splice_pos: Option<usize> = None;
+    let mut sheets_open_depth: Option<i32> = None;
+    let mut self_closing_range: Option<(usize, usize)> = None;
+    let mut buf: Vec<u8> = Vec::new();
+
+    loop {
+        let pre = reader.buffer_position() as usize;
+        let evt = reader.read_event_into(&mut buf);
+        let post = reader.buffer_position() as usize;
+        match evt {
+            Ok(XmlEvent::Start(ref e)) => {
+                if e.local_name().as_ref() == b"sheets" && sheets_open_depth.is_none() {
+                    sheets_open_depth = Some(depth);
+                }
+                depth += 1;
+            }
+            Ok(XmlEvent::End(ref e)) => {
+                depth -= 1;
+                if e.local_name().as_ref() == b"sheets"
+                    && Some(depth) == sheets_open_depth
+                    && splice_pos.is_none()
+                {
+                    splice_pos = Some(pre);
+                    break;
+                }
+            }
+            Ok(XmlEvent::Empty(ref e)) => {
+                if e.local_name().as_ref() == b"sheets" && self_closing_range.is_none() {
+                    self_closing_range = Some((pre, post));
+                    break;
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        buf.clear();
+    }
+
+    if let Some(pos) = splice_pos {
+        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len());
+        out.extend_from_slice(&workbook_xml[..pos]);
+        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(&workbook_xml[pos..]);
+        return Ok(out);
+    }
+    if let Some((start, end)) = self_closing_range {
+        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        out.extend_from_slice(&workbook_xml[..start]);
+        out.extend_from_slice(b"<sheets>");
+        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(b"</sheets>");
+        out.extend_from_slice(&workbook_xml[end..]);
+        return Ok(out);
+    }
+    Err(PyIOError::new_err(
+        "Phase 2.7: workbook.xml has no <sheets> block",
+    ))
+}
+
+fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
+    let rel_end = s[open..].find('>').ok_or_else(|| {
+        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
+    })?;
+    Ok(s[open..open + rel_end].contains("xmlns:r="))
+}
+
+fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
+    let rel_end = s[open..].find('>').ok_or_else(|| {
+        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
+    })?;
+    let insert_at = open + rel_end;
+    let mut out = String::with_capacity(
+        s.len()
+            + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+                .len(),
+    );
+    out.push_str(&s[..insert_at]);
+    out.push_str(
+        " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+    );
+    out.push_str(&s[insert_at..]);
+    Ok(out)
+}
+
+/// Naive byte-substring search for tiny workbook XML payloads.
+#[allow(dead_code)]
+pub(crate) fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Escapes text for an XML attribute value.
+pub(crate) fn xml_escape_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Replaces the first occurrence of `needle` in `haystack`.
+pub(crate) fn replace_first_occurrence(
+    haystack: &str,
+    needle: &str,
+    replacement: &str,
+) -> Option<String> {
+    let idx = haystack.find(needle)?;
+    let mut out = String::with_capacity(haystack.len() - needle.len() + replacement.len());
+    out.push_str(&haystack[..idx]);
+    out.push_str(replacement);
+    out.push_str(&haystack[idx + needle.len()..]);
+    Some(out)
+}
+
+/// Returns a ZIP timestamp honoring `WOLFXL_TEST_EPOCH` when set.
+pub(crate) fn epoch_or_now() -> zip::DateTime {
+    use chrono::{Datelike, Timelike};
+    let secs = std::env::var("WOLFXL_TEST_EPOCH")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok());
+    let dt = match secs.and_then(|s| chrono::DateTime::<chrono::Utc>::from_timestamp(s, 0)) {
+        Some(d) => d,
+        None => chrono::Utc::now(),
+    };
+    let naive = dt.naive_utc();
+    let year = naive.year();
+    if year < 1980 {
+        return zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0)
+            .unwrap_or_else(|_| zip::DateTime::default());
+    }
+    if year > 2107 {
+        return zip::DateTime::from_date_and_time(2107, 12, 31, 23, 59, 58)
+            .unwrap_or_else(|_| zip::DateTime::default());
+    }
+    zip::DateTime::from_date_and_time(
+        year as u16,
+        naive.month() as u8,
+        naive.day() as u8,
+        naive.hour() as u8,
+        naive.minute() as u8,
+        naive.second() as u8,
+    )
+    .unwrap_or_else(|_| zip::DateTime::default())
+}
+
+/// Minimal styles part used when a workbook has style-dependent edits but no styles.xml.
+pub(crate) fn minimal_styles_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs>
+</styleSheet>"#
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::content_types::{ContentTypeOp, ContentTypesGraph};
+    use super::*;
+    use crate::ooxml_util;
+
+    #[test]
+    fn epoch_or_now_honors_test_epoch_zero() {
+        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt = epoch_or_now();
+        match prev {
+            Some(v) => std::env::set_var("WOLFXL_TEST_EPOCH", v),
+            None => std::env::remove_var("WOLFXL_TEST_EPOCH"),
+        }
+
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt2 = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+
+        assert_eq!(
+            (
+                dt.year(),
+                dt.month(),
+                dt.day(),
+                dt.hour(),
+                dt.minute(),
+                dt.second()
+            ),
+            (
+                dt2.year(),
+                dt2.month(),
+                dt2.day(),
+                dt2.hour(),
+                dt2.minute(),
+                dt2.second()
+            ),
+        );
+    }
+
+    #[test]
+    fn epoch_or_now_clamps_pre_1980_floor() {
+        std::env::set_var("WOLFXL_TEST_EPOCH", "0");
+        let dt = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        assert_eq!(dt.year(), 1980);
+        assert_eq!(dt.month(), 1);
+        assert_eq!(dt.day(), 1);
+    }
+
+    #[test]
+    fn epoch_or_now_handles_recent_timestamp() {
+        std::env::set_var("WOLFXL_TEST_EPOCH", "1704067200");
+        let dt = epoch_or_now();
+        std::env::remove_var("WOLFXL_TEST_EPOCH");
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.month(), 1);
+        assert_eq!(dt.day(), 1);
+    }
+
+    #[test]
+    fn sheet_order_parser_preserves_workbook_xml_order() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Apples"  sheetId="1" r:id="rId1"/>
+    <sheet name="Bananas" sheetId="2" r:id="rId2"/>
+    <sheet name="Cherries" sheetId="3" r:id="rId3"/>
+  </sheets>
+</workbook>"#;
+        let pairs = ooxml_util::parse_workbook_sheet_rids(xml).unwrap();
+        let names: Vec<&str> = pairs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["Apples", "Bananas", "Cherries"]);
+    }
+
+    const SOURCE_CT_XML: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"#;
+
+    #[test]
+    fn phase_2_5c_no_ops_is_no_op() {
+        let ops: Vec<ContentTypeOp> = Vec::new();
+        assert!(ops.is_empty(), "no-op precondition: no queued ops");
+    }
+
+    #[test]
+    fn phase_2_5c_aggregates_overrides_into_single_mutation() {
+        let ops = vec![
+            ContentTypeOp::AddOverride(
+                "/xl/comments1.xml".into(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml".into(),
+            ),
+            ContentTypeOp::EnsureDefault(
+                "vml".into(),
+                "application/vnd.openxmlformats-officedocument.vmlDrawing".into(),
+            ),
+            ContentTypeOp::AddOverride(
+                "/xl/tables/table1.xml".into(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml".into(),
+            ),
+        ];
+        let mut graph = ContentTypesGraph::parse(SOURCE_CT_XML).expect("parse source");
+        for op in &ops {
+            graph.apply_op(op);
+        }
+        let bytes = graph.serialize();
+        let text = std::str::from_utf8(&bytes).expect("utf8 round-trip");
+        assert!(text.contains("/xl/comments1.xml"), "comments override");
+        assert!(text.contains("/xl/tables/table1.xml"), "table override");
+        assert!(text.contains(r#"Extension="vml""#), "vml default");
+        assert!(text.contains("/xl/workbook.xml"));
+        assert!(text.contains("/xl/styles.xml"));
+    }
+
+    #[test]
+    fn phase_2_5c_preserves_source_order_for_existing_overrides() {
+        let ops = vec![ContentTypeOp::AddOverride(
+            "/xl/comments1.xml".into(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml".into(),
+        )];
+        let mut graph = ContentTypesGraph::parse(SOURCE_CT_XML).expect("parse");
+        for op in &ops {
+            graph.apply_op(op);
+        }
+        let bytes = graph.serialize();
+        let text = std::str::from_utf8(&bytes).expect("utf8");
+        let idx_workbook = text.find("/xl/workbook.xml").expect("workbook");
+        let idx_sheet1 = text.find("/xl/worksheets/sheet1.xml").expect("sheet1");
+        let idx_styles = text.find("/xl/styles.xml").expect("styles");
+        let idx_comments = text.find("/xl/comments1.xml").expect("comments");
+        assert!(
+            idx_workbook < idx_sheet1 && idx_sheet1 < idx_styles,
+            "source overrides retain document order",
+        );
+        assert!(
+            idx_styles < idx_comments,
+            "new overrides append after source ones, not interleaved",
+        );
+    }
+
+    const NEW_SHEET: &[u8] = br#"<sheet name="Copy" sheetId="2" r:id="rId99"/>"#;
+
+    #[test]
+    fn splice_normal_sheets_block_inserts_before_close() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let rid1 = s.find("r:id=\"rId1\"").unwrap();
+        let rid99 = s.find("r:id=\"rId99\"").unwrap();
+        let close = s.find("</sheets>").unwrap();
+        assert!(rid1 < rid99, "new sheet appended after Sheet1");
+        assert!(rid99 < close, "new sheet inserted BEFORE </sheets>");
+        assert_eq!(s.matches("</sheets>").count(), 1);
+    }
+
+    #[test]
+    fn splice_adds_root_rel_namespace_when_only_existing_sheet_has_it() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheets><sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_start = s.find("<workbook").unwrap();
+        let root_end = root_start + s[root_start..].find('>').unwrap();
+        assert!(
+            s[root_start..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "new sheet r:id must be bound by the workbook root namespace"
+        );
+        assert!(s.contains("r:id=\"rId99\""));
+    }
+
+    #[test]
+    fn splice_handles_self_closing_sheets() {
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets/>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(s.contains("<sheets>"), "open tag emitted");
+        assert!(s.contains("</sheets>"), "close tag emitted");
+        assert!(s.contains("rId99"), "new sheet entry inserted");
+        assert_eq!(s.matches("<sheets>").count(), 1);
+        assert_eq!(s.matches("</sheets>").count(), 1);
+        assert!(!s.contains("<sheets/>"));
+    }
+
+    #[test]
+    fn splice_ignores_fake_close_tag_inside_comment() {
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<!-- FUZZTOKEN: this fakeout closes </sheets> here, naive splice would bite -->
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(s.contains("FUZZTOKEN"), "comment survives splice");
+        let open = s.find("<sheets>").expect("real <sheets> open");
+        let close = s.rfind("</sheets>").expect("real </sheets> close");
+        let rid99 = s.find("rId99").expect("new entry present");
+        assert!(open < rid99, "new entry after real <sheets> open");
+        assert!(rid99 < close, "new entry before real </sheets> close");
+    }
+
+    #[test]
+    fn splice_ignores_fake_close_tag_inside_cdata() {
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"><![CDATA[fake </sheets> token]]></sheet></sheets>
+</workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let rid99 = s.find("rId99").expect("new entry present");
+        let cdata_close = s.find("]]>").expect("cdata close");
+        let real_close = s.rfind("</sheets>").expect("real close");
+        assert!(cdata_close < rid99, "new entry follows CDATA");
+        assert!(rid99 < real_close, "new entry before real </sheets>");
+    }
+
+    #[test]
+    fn splice_returns_error_when_no_sheets_block() {
+        pyo3::Python::initialize();
+        let xml = br#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+        let err = splice_into_sheets_block(xml, NEW_SHEET).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no <sheets>"),
+            "preserves historical error message, got: {msg}"
+        );
+    }
+}
