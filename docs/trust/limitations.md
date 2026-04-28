@@ -36,5 +36,8 @@ These openpyxl APIs are still incomplete or intentionally narrower:
 ## Integrity guidance
 
 - Use reproducible fixtures and benchmarks for acceptance testing.
+- Before public releases, run the local external-oracle fixture pack generated
+  by ExcelBench. It currently exercises Excelize, ClosedXML, NPOI, ExcelJS, and
+  Apache POI outputs through LibreOffice and WolfXL preservation checks.
 - Review output workbooks in Excel for business-critical templates.
 - WolfXL's fidelity is tracked by [ExcelBench](https://excelbench.vercel.app) — check the dashboard for current scores.

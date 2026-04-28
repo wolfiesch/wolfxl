@@ -122,6 +122,17 @@ Implementation checkpoint, 2026-04-28:
   WolfXL's permissive reader saw it. The fix teaches the stream patcher to
   preserve the worksheet element prefix for inserted/replaced cells and adds a
   regression test with a prefixed namespace worksheet.
+- ExcelBench commit `d2c21ba` adds the NPOI fixture generator, commit
+  `623de0e` adds the ExcelJS fixture generator, and commit `dee7cc0` adds the
+  Apache POI fixture generator with pinned Maven Central dependency downloads.
+- Current external fixture pack: seven workbooks from Excelize, ClosedXML,
+  NPOI, ExcelJS, and Apache POI. The 2026-04-28 local truth pass validated the
+  full pack with LibreOffice headless open/save, LibreOffice PDF export, WolfXL
+  read, and WolfXL in-place modify-save preservation.
+- WolfXL now has a local pre-release gate in
+  `tests/test_external_oracle_preservation.py`. It runs against
+  `WOLFXL_EXTERNAL_FIXTURES_DIR` or the sibling ExcelBench generated fixture
+  directory when present, and skips cleanly in isolated checkouts.
 
 ## Cleanup plan
 
@@ -169,6 +180,9 @@ For every cleanup branch:
 - Run relevant Rust crate tests.
 - Rebuild the extension with `uv run --no-sync maturin develop` when PyO3/Rust
   changes affect Python behavior.
+- When the generated ExcelBench fixture pack is available, run
+  `uv run --no-sync pytest tests/test_external_oracle_preservation.py -q` to
+  catch modify-mode drift against external writer outputs.
 - Run a representative ExcelBench local comparison before merging broad
   refactors.
 - Preserve the current no-release freeze until the expanded oracle matrix has
