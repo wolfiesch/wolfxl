@@ -241,10 +241,10 @@ Release-claim branch audit:
   or soften "full openpyxl replacement" and "only Python OOXML library that
   constructs pivotCacheRecords" language; decide whether partial pivot styling,
   OLAP/external pivot caches, and in-place pivot edits are clearly deferred.
-- `CHANGELOG.md` still has stale v2.1/future-work language around slicers,
-  calculated fields/items, and GroupItems even though the post-PR #23 audit
-  slice has code and focused tests for those capabilities. Fix this before
-  treating the changelog as release collateral.
+- `CHANGELOG.md` stale v2.1/future-work language around slicers, calculated
+  fields/items, and GroupItems has been cleaned up in the audit pass. It now
+  treats those as shipped/supported and keeps only broader pivot styling,
+  OLAP/external caches, and in-place pivot edits as deferred.
 - Release readiness still requires GitHub Actions plus clean install/import
   smoke from the published artifact/wheels. The local full-suite proof is
   necessary evidence, not sufficient release evidence.
@@ -269,6 +269,28 @@ Local release-artifact smoke, 2026-04-28:
 - This is useful local artifact evidence only. It does not replace CI matrix
   wheel builds, cross-platform fresh installs, benchmark refresh, or manual
   Excel/LibreOffice visual checks before publish.
+
+Advanced pivot/slicer cross-renderer smoke, 2026-04-28:
+
+- `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest
+  tests/test_advanced_pivots_save_smoke.py tests/test_pivot_slicers.py
+  tests/test_slicer_copy_worksheet.py
+  tests/diffwriter/test_advanced_pivots_bytes.py
+  tests/parity/test_advanced_pivots_parity.py
+  tests/test_pivot_advanced_styling.py -q`: 96 passed, 1 warning
+  (openpyxl warns that the unknown slicer extension is unsupported and will
+  be removed on its own rewrite).
+- A fresh temporary workbook containing a pivot cache/table, calculated
+  field, calculated item, grouped revenue field, pivot-area format, slicer
+  cache, and slicer presentation was generated with the public modify-mode
+  APIs. `/opt/homebrew/bin/soffice --headless --convert-to xlsx` and
+  `--convert-to pdf` both exited 0, produced valid outputs, and emitted no
+  repair/error stderr. The source ZIP contained the expected
+  `xl/pivotCache/*`, `xl/pivotTables/*`, `xl/slicerCaches/*`, and
+  `xl/slicers/*` parts.
+- This closes an automated LibreOffice smoke slice for advanced pivots and
+  slicers. It still does not replace manual Excel GUI inspection of the
+  rendered layout and slicer interactivity before public release.
 
 Dependency-modernization branch audit:
 

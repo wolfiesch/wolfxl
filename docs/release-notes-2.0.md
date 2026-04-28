@@ -354,6 +354,7 @@ See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 | openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
 | LibreOffice cross-renderer | 47 opt-in smoke tests passed, including copy_worksheet, array formulas, and pivot-chart render smoke | `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest ...` |
 | openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
+| Advanced pivot/slicer smoke | 96 focused tests passed; a generated advanced pivot+slicer workbook converted through LibreOffice headless to XLSX and PDF without repair/error output | advanced pivot/slicer focused pytest slice + `/opt/homebrew/bin/soffice --headless --convert-to ...` |
 | Local release artifact smoke | macOS arm64 CPython 3.14 wheel builds and installs in a fresh venv; import/build_info, write-mode chart save, and modify-mode pivot construction smoke all pass | `uv run --no-sync maturin build --release --out dist` + fresh-venv smoke |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |
