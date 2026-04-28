@@ -394,6 +394,39 @@ def test_scatter_chart_marker_symbol(tmp_path: Path) -> None:
     assert "square" in xml
 
 
+def test_pie_chart_data_point_override(tmp_path: Path) -> None:
+    from wolfxl.chart.marker import DataPoint  # type: ignore[import]
+    from wolfxl.chart.shapes import GraphicalProperties  # type: ignore[import]
+
+    def _set_point(c: Any) -> None:
+        c.series[0].data_points = [
+            DataPoint(
+                idx=1,
+                explosion=20,
+                spPr=GraphicalProperties(solidFill="FF0000"),
+            )
+        ]
+
+    out = _save_with_chart(PieChart, tmp_path=tmp_path, extra=_set_point)
+    xml = zipfile.ZipFile(out).read("xl/charts/chart1.xml").decode()
+    assert "<c:dPt>" in xml
+    assert '<c:idx val="1"/>' in xml
+    assert '<c:explosion val="20"/>' in xml
+    assert '<a:srgbClr val="FF0000"/>' in xml
+
+
+def test_bar_chart_value_axis_display_units(tmp_path: Path) -> None:
+    from wolfxl.chart.axis import DisplayUnitsLabelList  # type: ignore[import]
+
+    def _set_units(c: Any) -> None:
+        c.y_axis.dispUnits = DisplayUnitsLabelList(builtInUnit="millions")
+
+    out = _save_with_chart(BarChart, tmp_path=tmp_path, extra=_set_units)
+    xml = zipfile.ZipFile(out).read("xl/charts/chart1.xml").decode()
+    assert "<c:dispUnits>" in xml
+    assert '<c:builtInUnit val="millions"/>' in xml
+
+
 # ---------------------------------------------------------------------------
 # Graphical properties on series (line color, fill, dash)
 # ---------------------------------------------------------------------------

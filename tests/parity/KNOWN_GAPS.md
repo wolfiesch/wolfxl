@@ -23,9 +23,11 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 The openpyxl-parity roadmap is now exhausted at the read level
 (1.0–1.4) AND at the full construction level (1.5 encryption +
 images, 1.6–1.6.1 charts, 1.7 chart-stack debt + RichText titles,
-**2.0 pivot tables**). The "Out of scope" section below now lists
-only deferred-to-v2.1+ items (slicers, calc fields, GroupItems,
-OLAP, pivot styling, in-place pivot edits).
+**2.0 pivot tables**, and the post-PR #23 audit slice for slicers,
+pivot calculated fields/items, GroupItems, and the remaining chart
+display-unit / data-point overrides). The "Out of scope" section
+below now lists only OLAP/external caches, deeper pivot-editing
+work, and intentionally deferred file formats.
 
 ## Gate
 
@@ -182,23 +184,20 @@ and documented here before the ratchet baseline is updated.
 - ~~**Pivot-chart linkage**~~ — ✅ SHIPPED in 2.0 (Sprint Ν Pod-δ,
   RFC-049). `chart.pivot_source = pt` on every chart family.
   See "Closed in 2.0 (Sprint Ν)" below.
-- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`) — deferred
-  to **v2.1**. Separate XML namespace; the slicer-cache-shared-
-  with-pivot-cache wiring is non-trivial. Pivots round-trip
-  without slicers in v2.0; if a source workbook has slicers,
-  modify-mode round-trip preserves them.
-- **Pivot calculated fields** (`<calculatedField>`) — deferred
-  to **v2.1**. Formula expressions in the pivot's field list.
-- **Pivot calculated items** (`<calculatedItem>`) — deferred
-  to **v2.1**. Formula expressions inside row / col fields.
-- **Pivot GroupItems** (date / range grouping —
-  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)
-  — deferred to **v2.1**. Non-trivial recursion.
+- ~~**Slicers** (`xl/slicers/` + `xl/slicerCaches/`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice; covered by slicer copy,
+  advanced-pivot bytes, and parity tests.
+- ~~**Pivot calculated fields** (`<calculatedField>`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice.
+- ~~**Pivot calculated items** (`<calculatedItem>`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice.
+- ~~**Pivot GroupItems** (date / range grouping —
+  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)~~
+  — ✅ SHIPPED in the post-PR #23 audit slice.
 - **OLAP / external pivot caches** (`xl/model/`, PowerPivot
   data-model) — out of scope permanently.
-- **Pivot-table styling beyond named-style picker** (themes,
-  banded formats, pivot-cell conditional formatting) — deferred
-  to **v2.1**.
+- **Pivot-table styling beyond current PivotArea / pivot-CF support**
+  (broader themes and banded-format polish) — partial.
 - **In-place pivot edits in modify mode** beyond
   `add_pivot_table` (editing an existing pivot's source range,
   field re-ordering, subtotal toggling, etc.) — deferred to

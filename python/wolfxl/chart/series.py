@@ -242,6 +242,9 @@ class Series:
             if md:
                 d["marker"] = _marker_to_snake(md)
 
+        if self.dPt:
+            d["data_points"] = [_data_point_to_snake(dp.to_dict()) for dp in self.dPt]
+
         if self.smooth is not None:
             d["smooth"] = self.smooth
 
@@ -335,6 +338,23 @@ def _marker_to_snake(md: dict[str, Any]) -> dict[str, Any]:
         out["size"] = md["size"]
     if "spPr" in md:
         out["graphical_properties"] = _gp_to_snake(md["spPr"])
+    return out
+
+
+def _data_point_to_snake(dp: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if "idx" in dp:
+        out["idx"] = dp["idx"]
+    if "invertIfNegative" in dp:
+        out["invert_if_negative"] = dp["invertIfNegative"]
+    if "marker" in dp:
+        out["marker"] = _marker_to_snake(dp["marker"])
+    if "bubble3D" in dp:
+        out["bubble_3d"] = dp["bubble3D"]
+    if "explosion" in dp:
+        out["explosion"] = dp["explosion"]
+    if "spPr" in dp:
+        out["graphical_properties"] = _gp_to_snake(dp["spPr"])
     return out
 
 

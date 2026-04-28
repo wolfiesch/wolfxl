@@ -20,10 +20,10 @@ pub mod worksheet;
 pub use cell::{WriteCell, WriteCellValue};
 pub use chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
-    ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
-    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark,
-    Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
+    ChartKind, DataLabels, DataPoint, DateAxis, DisplayBlanksAs, DisplayUnits, ErrorBarType,
+    ErrorBarValType, ErrorBars, GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition,
+    Marker, MarkerSymbol, PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis,
+    SeriesTitle, TickMark, Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
 };
 pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
 pub use conditional::{

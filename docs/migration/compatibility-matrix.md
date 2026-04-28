@@ -69,6 +69,8 @@ including pivot tables and pivot-chart linkage.
 | `Worksheet.add_chart(chart, anchor)` (write + modify mode) | Supported |
 | `Worksheet.remove_chart(chart)` (NEW v1.7) | Supported |
 | `Worksheet.replace_chart(old, new)` (NEW v1.7) | Supported |
+| Value-axis display units (`<c:dispUnits>`) | Supported |
+| Per-data-point overrides (`<c:dPt>`) | Supported |
 | Combination charts (e.g. bar + line on shared axes) | Not Yet — post-v2.0 |
 | Pivot-chart linkage (`<c:pivotSource>`) | Supported (v2.0 — RFC-049). `chart.pivot_source = pt` on every chart family. |
 
@@ -89,12 +91,12 @@ including pivot tables and pivot-chart linkage.
 | Explicit-builder axis specs (`rows=[RowField("region")]`) | Supported |
 | `chart.pivot_source = pt` (chart-pivot linkage) | Supported (RFC-049; emits `<c:pivotSource>` + per-series `<c:fmtId>`) |
 | `copy_worksheet` of pivot-bearing sheet (deep-clone) | Supported (RFC-035 §6 extension; cache aliased, table fresh-id'd, source-range hint re-pointed) |
-| Slicers (`xl/slicers/`, `xl/slicerCaches/`) | Not Yet — v2.1 |
-| Calculated fields (`<calculatedField>`) | Not Yet — v2.1 |
-| Calculated items (`<calculatedItem>`) | Not Yet — v2.1 |
-| GroupItems (date / range grouping `<fieldGroup>`) | Not Yet — v2.1 |
+| Slicers (`xl/slicers/`, `xl/slicerCaches/`) | Supported |
+| Calculated fields (`<calculatedField>`) | Supported |
+| Calculated items (`<calculatedItem>`) | Supported |
+| GroupItems (date / range grouping `<fieldGroup>`) | Supported |
 | OLAP / external pivot caches (`xl/model/`) | Out of scope |
-| Pivot-table styling beyond named-style picker | Not Yet — v2.1 |
+| Pivot-table styling beyond named-style picker | Partial — PivotArea formats and pivot-scoped conditional formats are supported; broader theme/banded styling remains limited |
 | In-place pivot edits in modify mode (source-range edit, field re-order, ...) | Not Yet — v2.2 |
 
 ### Images (v1.5 — RFC-045)
@@ -168,16 +170,10 @@ verbatim.
 
 | Capability | Status | Tracked at |
 |---|---|---|
-| Slicers (`xl/slicers/` + `xl/slicerCaches/`) | Not Yet — v2.1 | `Plans/sprint-nu.md` "Out of scope" |
-| Pivot calculated fields (`<calculatedField>`) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
-| Pivot calculated items (`<calculatedItem>`) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
-| Pivot GroupItems (date / range grouping) | Not Yet — v2.1 | `Plans/sprint-nu.md` |
 | OLAP / external pivot caches (`xl/model/`) | Out of scope | Not on roadmap (PowerPivot data-model) |
-| Pivot-table styling beyond named-style picker | Not Yet — v2.1 | `Plans/sprint-nu.md` |
+| Pivot-table styling themes / banded formats beyond current PivotArea + pivot-CF support | Partial | Advanced visual polish backlog |
 | In-place pivot edits in modify mode | Not Yet — v2.2 | `Plans/sprint-nu.md` |
 | Combination charts (multi-plot) | Not Yet | RFC-046 v1.6.1 release notes "Out of scope" |
-| `<c:displayUnits>` on value axes | Not Yet | RFC-046 §9 |
-| Per-data-point overrides (`<c:dPt>`) | Not Yet | RFC-046 §9 |
 | Removal of charts that survive from source workbook | Not Yet — v1.8 | RFC-050 §6 / `Worksheet.remove_chart` docstring |
 | OpenDocument (`.ods`) | Out of scope | Not on roadmap |
 | `.xlsb` / `.xls` writes | Out of scope | xlsx-only; transcribe via fresh `Workbook()` |

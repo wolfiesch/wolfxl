@@ -92,19 +92,18 @@ in the docs.
   (`<calculatedItem>`): implemented/tested in current `main`. Evidence:
   `python/wolfxl/pivot/_calc.py`, `tests/test_pivot_calculated_fields.py`,
   and `tests/test_pivot_advanced_styling.py`.
-- Pivot GroupItems/date-range grouping (`<fieldGroup>`): still needs a focused
-  proof pass; current tests mention advanced pivot coverage, but this should be
-  isolated before docs are updated.
-- Pivot-table styling beyond the named-style picker: partially implemented
-  enough for current advanced-pivot tests; still needs docs/API review before
-  flipping public docs.
+- Pivot GroupItems/date-range grouping (`<fieldGroup>`): implemented/tested.
+  Evidence: `tests/test_pivot_group_items.py`.
+- Pivot-table styling beyond the named-style picker: partially implemented.
+  PivotArea formats and pivot-scoped conditional formats are covered by
+  `tests/test_pivot_advanced_styling.py`; broader theme/banded-format polish
+  remains a partial capability.
 - In-place pivot edits in modify mode: planned v2.2 territory.
 - Combination charts / multi-plot charts: post-v2.0.
-- Value-axis display units (`<c:displayUnits>`): still needs a focused proof
-  pass.
-- Per-data-point chart overrides (`<c:dPt>`): model support exists in
-  `python/wolfxl/chart/marker.py` and `python/wolfxl/chart/series.py`; needs
-  a focused parity/doc pass before public docs flip.
+- Value-axis display units (`<c:dispUnits>`): implemented in this audit slice
+  across Python dict serialization, PyO3 parsing, and Rust XML emit.
+- Per-data-point chart overrides (`<c:dPt>`): implemented in this audit slice
+  across Python dict serialization, PyO3 parsing, and Rust XML emit.
 - Removing charts that survive from a source workbook: v1.8 follow-up in docs.
 - `.ods`: out of scope.
 - `.xlsb` / `.xls` writes: out of scope; xlsx-only transcribe path.
@@ -126,6 +125,30 @@ uv run pytest \
 
 Result: 87 passed, 1 skipped, 1 warning.
 
+Additional focused proof commands:
+
+```bash
+uv run pytest \
+  tests/test_page_breaks.py \
+  tests/test_dimension_helpers.py \
+  tests/parity/test_page_breaks_parity.py \
+  tests/diffwriter/test_page_breaks_bytes.py \
+  tests/test_pivot_group_items.py \
+  tests/test_pivot_advanced_styling.py \
+  -q
+```
+
+Result: 147 passed.
+
+```bash
+uv run pytest tests/test_charts_write.py tests/parity/test_charts_parity.py -q
+cargo test -p wolfxl-writer --test charts
+cargo test -p wolfxl-writer --lib emit::charts
+```
+
+Result: 47 passed / 2 skipped for Python chart tests, 47 passed for the
+writer chart integration tests, and 13 passed for chart emitter unit tests.
+
 ## Verification checkpoint
 
 After the audit, the Rust tree was normalized with `cargo fmt --all`.
@@ -134,8 +157,9 @@ After the audit, the Rust tree was normalized with `cargo fmt --all`.
 - `uv run ruff check .`: passed.
 - `uv run maturin develop`: passed; rebuilt and installed editable
   `wolfxl-2.0.0`.
-- `uv run pytest`: passed with 2228 passed, 24 skipped, 10 warnings.
-- `cargo test --workspace --exclude wolfxl`: passed for the pure Rust crates.
+- `uv run pytest`: passed with 2230 passed, 24 skipped, 10 warnings.
+- `cargo test --workspace --exclude wolfxl`: passed for the pure Rust crates
+  (two non-snake-case test-name warnings remain in `wolfxl-rels`).
 - `cargo test --workspace`: currently fails while linking the `wolfxl` PyO3
   crate tests on macOS because the standalone Rust test binary cannot resolve
   Python C API symbols such as `_PyBaseObject_Type`, `_PyBool_Type`, and

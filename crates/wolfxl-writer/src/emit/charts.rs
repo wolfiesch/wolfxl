@@ -42,10 +42,10 @@
 //! openpyxl's "leave it off" rule.
 
 use crate::model::chart::{
-    Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DateAxis,
-    ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker, PivotSource, RadarStyle,
-    Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline,
-    TrendlineKind, ValueAxis, View3D,
+    Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
+    DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker,
+    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle, Title,
+    TitleRun, Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use crate::xml_escape;
 
@@ -318,6 +318,10 @@ fn emit_series(out: &mut String, ser: &Series, kind: ChartKind, pivot_fmt_id: Op
 
     if let Some(b) = ser.invert_if_negative {
         out.push_str(&format!("<c:invertIfNegative val=\"{}\"/>", bool_str(b)));
+    }
+
+    for dp in &ser.data_points {
+        emit_data_point(out, dp);
     }
 
     if let Some(d) = &ser.data_labels {
@@ -658,6 +662,27 @@ fn emit_marker(out: &mut String, m: &Marker) {
     out.push_str("</c:marker>");
 }
 
+fn emit_data_point(out: &mut String, d: &DataPoint) {
+    out.push_str("<c:dPt>");
+    out.push_str(&format!("<c:idx val=\"{}\"/>", d.idx));
+    if let Some(b) = d.invert_if_negative {
+        out.push_str(&format!("<c:invertIfNegative val=\"{}\"/>", bool_str(b)));
+    }
+    if let Some(m) = &d.marker {
+        emit_marker(out, m);
+    }
+    if let Some(b) = d.bubble_3d {
+        out.push_str(&format!("<c:bubble3D val=\"{}\"/>", bool_str(b)));
+    }
+    if let Some(n) = d.explosion {
+        out.push_str(&format!("<c:explosion val=\"{n}\"/>"));
+    }
+    if let Some(g) = &d.graphical_properties {
+        emit_graphical_props(out, g);
+    }
+    out.push_str("</c:dPt>");
+}
+
 fn emit_graphical_props(out: &mut String, g: &GraphicalProperties) {
     out.push_str("<c:spPr>");
     // Fill.
@@ -816,7 +841,21 @@ fn emit_value_axis(out: &mut String, v: &ValueAxis) {
     if let Some(u) = v.minor_unit {
         out.push_str(&format!("<c:minorUnit val=\"{}\"/>", fmt_f64(u)));
     }
+    if let Some(d) = &v.display_units {
+        emit_display_units(out, d);
+    }
     out.push_str("</c:valAx>");
+}
+
+fn emit_display_units(out: &mut String, d: &DisplayUnits) {
+    out.push_str("<c:dispUnits>");
+    if let Some(u) = d.custom_unit {
+        out.push_str(&format!("<c:custUnit val=\"{}\"/>", fmt_f64(u)));
+    }
+    if let Some(u) = &d.built_in_unit {
+        out.push_str(&format!("<c:builtInUnit val=\"{}\"/>", xml_escape::attr(u)));
+    }
+    out.push_str("</c:dispUnits>");
 }
 
 fn emit_date_axis(out: &mut String, d: &DateAxis) {
@@ -920,9 +959,9 @@ fn fmt_f64(v: f64) -> String {
 mod tests {
     use super::*;
     use crate::model::chart::{
-        Axis, AxisCommon, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels,
-        ErrorBarType, ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker, MarkerSymbol,
-        Reference, ScatterStyle, Series, SeriesTitle, Title, Trendline, TrendlineKind, ValueAxis,
+        Axis, AxisCommon, AxisPos, CategoryAxis, Chart, ChartKind, DataLabels, ErrorBarType,
+        ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker, MarkerSymbol, Reference,
+        Series, SeriesTitle, Title, Trendline, TrendlineKind, ValueAxis,
     };
     use crate::model::image::ImageAnchor;
     use quick_xml::events::Event;
@@ -965,6 +1004,7 @@ mod tests {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         c
@@ -1033,6 +1073,7 @@ mod tests {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         c.y_axis = Some(Axis::Value(ValueAxis {
@@ -1041,6 +1082,7 @@ mod tests {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         let bytes = emit_chart_xml(&c);
@@ -1147,6 +1189,7 @@ mod tests {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         let bytes = emit_chart_xml(&c);
@@ -1175,6 +1218,7 @@ mod tests {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         let bytes = emit_chart_xml(&c);

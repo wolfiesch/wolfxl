@@ -15,9 +15,9 @@ use quick_xml::Reader;
 use wolfxl_writer::emit::charts::emit_chart_xml;
 use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarGrouping, CategoryAxis, Chart, ChartKind,
-    DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
-    MarkerSymbol, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title,
+    DataLabels, DataPoint, DateAxis, DisplayBlanksAs, DisplayUnits, ErrorBarType, ErrorBarValType,
+    ErrorBars, GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition,
+    Marker, MarkerSymbol, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title,
     TitleRun, Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use wolfxl_writer::model::image::ImageAnchor;
@@ -76,6 +76,7 @@ fn cat_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     (cat, val)
@@ -88,6 +89,7 @@ fn dual_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     let y = Axis::Value(ValueAxis {
@@ -96,6 +98,7 @@ fn dual_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     (x, y)
@@ -283,6 +286,7 @@ fn category_axis_emits_lbl_offset() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -306,6 +310,7 @@ fn value_axis_emits_min_max_units() {
         max: Some(100.0),
         major_unit: Some(20.0),
         minor_unit: Some(5.0),
+        display_units: None,
         crosses: Some("autoZero".to_string()),
     }));
     let bytes = emit_chart_xml(&c);
@@ -335,6 +340,7 @@ fn date_axis_emits_base_time_unit() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -359,6 +365,7 @@ fn title_with_rich_text_runs() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     c.title = Some(Title {
@@ -423,6 +430,7 @@ fn legend_each_position() {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         c.legend = Some(Legend {
@@ -596,6 +604,7 @@ fn major_and_minor_gridlines_emitted() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -653,6 +662,31 @@ fn marker_symbol_size_emitted() {
 }
 
 #[test]
+fn data_point_overrides_emitted_on_series() {
+    let mut c = Chart::new(ChartKind::Pie, anchor_at(0, 0));
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("S", "B2:B6"));
+    s.data_points.push(DataPoint {
+        idx: 2,
+        invert_if_negative: None,
+        marker: None,
+        bubble_3d: None,
+        explosion: Some(15),
+        graphical_properties: Some(GraphicalProperties {
+            fill_color: Some("FFFF0000".into()),
+            ..GraphicalProperties::default()
+        }),
+    });
+    c.add_series(s);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:dPt>");
+    assert_contains(&bytes, "<c:idx val=\"2\"/>");
+    assert_contains(&bytes, "<c:explosion val=\"15\"/>");
+    assert_contains(&bytes, "<a:srgbClr val=\"FF0000\"/>");
+}
+
+#[test]
 fn multi_series_chart_emits_distinct_idx_order() {
     let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
     for i in 0..3 {
@@ -706,6 +740,7 @@ fn series_axis_shape_emitted() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -734,6 +769,7 @@ fn axis_orientation_and_tick_marks() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -756,6 +792,28 @@ fn display_blanks_as_emitted() {
     parse_ok(&bytes);
     assert_contains(&bytes, "<c:dispBlanksAs val=\"span\"/>");
     assert_contains(&bytes, "<c:plotVisOnly val=\"1\"/>");
+}
+
+#[test]
+fn value_axis_display_units_emitted() {
+    let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    let (x, mut y) = cat_value_pair();
+    if let Axis::Value(ref mut val) = y {
+        val.display_units = Some(DisplayUnits {
+            built_in_unit: Some("millions".into()),
+            custom_unit: Some(1000.0),
+        });
+    }
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:dispUnits>");
+    assert_contains(&bytes, "<c:custUnit val=\"1000\"/>");
+    assert_contains(&bytes, "<c:builtInUnit val=\"millions\"/>");
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(text.find("<c:custUnit").unwrap() < text.find("<c:builtInUnit").unwrap());
 }
 
 #[test]
@@ -994,6 +1052,7 @@ fn major_gridlines_obj_with_graphical_properties() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -1022,6 +1081,7 @@ fn empty_gridlines_obj_emits_self_closing_tag() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);

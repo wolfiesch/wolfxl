@@ -36,11 +36,11 @@ use pyo3::types::PyDict;
 
 use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
-    ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
-    MarkerSymbol, PivotSource, RadarStyle, Reference as ChartReference, ScatterStyle, Series,
-    SeriesAxis, SeriesTitle, TickMark, Title as ChartTitle, TitleRun, Trendline, TrendlineKind,
-    ValueAxis, View3D,
+    ChartKind, DataLabels, DataPoint, DateAxis, DisplayBlanksAs, DisplayUnits, ErrorBarType,
+    ErrorBarValType, ErrorBars, GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend,
+    LegendPosition, Marker, MarkerSymbol, PivotSource, RadarStyle, Reference as ChartReference,
+    ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark, Title as ChartTitle, TitleRun,
+    Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
@@ -2670,6 +2670,7 @@ fn parse_axis(d: &Bound<'_, PyDict>) -> PyResult<Axis> {
             max: scaled_max.or(py_opt_f64(d, "max")?),
             major_unit: py_opt_f64(d, "major_unit")?,
             minor_unit: py_opt_f64(d, "minor_unit")?,
+            display_units: parse_display_units(d)?,
             crosses: py_opt_str(d, "crosses")?,
         })),
         "date" => Ok(Axis::Date(DateAxis {
@@ -2830,6 +2831,24 @@ fn parse_axis_number_format(d: &Bound<'_, PyDict>) -> PyResult<Option<String>> {
     Ok(None)
 }
 
+fn parse_display_units(d: &Bound<'_, PyDict>) -> PyResult<Option<DisplayUnits>> {
+    let Some(v) = d.get_item("disp_units")?.or(d.get_item("display_units")?) else {
+        return Ok(None);
+    };
+    if v.is_none() {
+        return Ok(None);
+    }
+    let dd = v
+        .downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("disp_units must be a dict or None"))?;
+    Ok(Some(DisplayUnits {
+        built_in_unit: py_opt_str(dd, "built_in_unit")?.or(py_opt_str(dd, "builtInUnit")?),
+        custom_unit: py_opt_f64(dd, "custom_unit")?
+            .or(py_opt_f64(dd, "cust_unit")?)
+            .or(py_opt_f64(dd, "custUnit")?),
+    }))
+}
+
 fn parse_tick_mark(s: &str) -> PyResult<TickMark> {
     Ok(match s {
         "none" => TickMark::None,
@@ -2904,6 +2923,17 @@ fn parse_series(d: &Bound<'_, PyDict>) -> PyResult<Series> {
                 .downcast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("marker must be a dict"))?;
             s.marker = Some(parse_marker(md)?);
+        }
+    }
+    if let Some(v) = d.get_item("data_points")?.or(d.get_item("dPt")?) {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+            for dv in list.iter() {
+                let dd = dv
+                    .downcast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("data point must be a dict"))?;
+                s.data_points.push(parse_data_point(dd)?);
+            }
         }
     }
     if let Some(v) = d.get_item("data_labels")? {
@@ -3081,6 +3111,49 @@ fn parse_marker(d: &Bound<'_, PyDict>) -> PyResult<Marker> {
     Ok(Marker {
         symbol,
         size: py_opt_u32(d, "size")?,
+        graphical_properties,
+    })
+}
+
+fn parse_data_point(d: &Bound<'_, PyDict>) -> PyResult<DataPoint> {
+    let idx = match d.get_item("idx")? {
+        Some(v) if !v.is_none() => v
+            .extract()
+            .map_err(|_| PyValueError::new_err("data point idx must be an int"))?,
+        _ => 0,
+    };
+    let marker = if let Some(v) = d.get_item("marker")? {
+        if v.is_none() {
+            None
+        } else {
+            let md = v
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("data point marker must be a dict"))?;
+            Some(parse_marker(md)?)
+        }
+    } else {
+        None
+    };
+    let graphical_properties =
+        if let Some(v) = d.get_item("graphical_properties")?.or(d.get_item("spPr")?) {
+            if v.is_none() {
+                None
+            } else {
+                let gd = v.downcast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err("data point graphical_properties must be a dict")
+                })?;
+                Some(parse_graphical_properties(gd)?)
+            }
+        } else {
+            None
+        };
+    Ok(DataPoint {
+        idx,
+        invert_if_negative: py_opt_bool(d, "invert_if_negative")?
+            .or(py_opt_bool(d, "invertIfNegative")?),
+        marker,
+        bubble_3d: py_opt_bool(d, "bubble_3d")?.or(py_opt_bool(d, "bubble3D")?),
+        explosion: py_opt_u32(d, "explosion")?,
         graphical_properties,
     })
 }

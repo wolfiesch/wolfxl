@@ -84,8 +84,8 @@ pub fn parse_runs_in_element(
     let mut t_buf = String::new();
 
     let mut runs: Vec<RichTextRun> = Vec::new();
-    /// True when at least one `<r>` was seen — used to decide between
-    /// "single plain text" vs. "rich-text cell with one run".
+    // True when at least one `<r>` was seen — used to decide between
+    // "single plain text" vs. "rich-text cell with one run".
     let mut saw_r = false;
     let mut plain_t_text = String::new();
     let mut plain_t_active = false;

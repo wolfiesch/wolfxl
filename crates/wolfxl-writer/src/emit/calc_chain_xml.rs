@@ -68,7 +68,7 @@ pub fn emit(wb: &Workbook) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::cell::{FormulaResult, WriteCell, WriteCellValue};
+    use crate::model::cell::{FormulaResult, WriteCellValue};
     use crate::model::worksheet::Worksheet;
 
     #[test]

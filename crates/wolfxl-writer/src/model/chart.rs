@@ -248,6 +248,10 @@ pub struct Series {
     /// Marker (Line/Scatter/Radar). Has no effect on Bar/Pie/Area.
     pub marker: Option<Marker>,
 
+    /// Per-data-point overrides (`<c:dPt>`): point-specific colors,
+    /// markers, explosion offsets, and related flags.
+    pub data_points: Vec<DataPoint>,
+
     /// Per-series data labels.
     pub data_labels: Option<DataLabels>,
 
@@ -278,6 +282,7 @@ impl Series {
             bubble_size: None,
             graphical_properties: None,
             marker: None,
+            data_points: Vec::new(),
             data_labels: None,
             error_bars: Vec::new(),
             trendlines: Vec::new(),
@@ -434,6 +439,8 @@ pub struct ValueAxis {
     pub max: Option<f64>,
     pub major_unit: Option<f64>,
     pub minor_unit: Option<f64>,
+    /// `<dispUnits>` for display units such as thousands or millions.
+    pub display_units: Option<DisplayUnits>,
     /// `<crosses val="…"/>` — `autoZero`, `min`, `max`.
     pub crosses: Option<String>,
 }
@@ -719,6 +726,35 @@ pub struct Marker {
     pub symbol: MarkerSymbol,
     pub size: Option<u32>,
     pub graphical_properties: Option<GraphicalProperties>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataPoint {
+    pub idx: u32,
+    pub invert_if_negative: Option<bool>,
+    pub marker: Option<Marker>,
+    pub bubble_3d: Option<bool>,
+    pub explosion: Option<u32>,
+    pub graphical_properties: Option<GraphicalProperties>,
+}
+
+impl DataPoint {
+    pub fn new(idx: u32) -> Self {
+        Self {
+            idx,
+            invert_if_negative: None,
+            marker: None,
+            bubble_3d: None,
+            explosion: None,
+            graphical_properties: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayUnits {
+    pub built_in_unit: Option<String>,
+    pub custom_unit: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

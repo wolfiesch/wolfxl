@@ -361,22 +361,12 @@ as the caption. Use the explicit builders (`RowField`,
 `ColumnField`, `DataField`, `PageField`) for custom captions,
 custom subtotals, or custom sort orders.
 
-#### Limits (deferred to v2.1+)
+#### Limits
 
-- **Slicers** — `xl/slicers/` and `xl/slicerCaches/` are not yet
-  constructible. Pivots round-trip without slicers; if a source
-  workbook has them, modify-mode round-trip preserves them.
-- **Calculated fields** (`<calculatedField>`) and **calculated
-  items** (`<calculatedItem>`) — formula expressions in the
-  pivot's field list / row-or-col items. v2.1.
-- **GroupItems** (date / range grouping —
-  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)
-  — non-trivial recursion. v2.1.
 - **OLAP / external pivot caches** — needs the PowerPivot
   data-model (`xl/model/`). Out of scope permanently.
-- **Pivot-table styling beyond the named-style picker** —
-  themes, banded formats, pivot-cell conditional formatting.
-  v2.1.
+- **Pivot-table styling beyond the current PivotArea / pivot-CF
+  support** — broader themes and banded-format polish remain limited.
 - **In-place pivot edits in modify mode** beyond
   `add_pivot_table` — editing an existing pivot's source range,
   field ordering, subtotals, etc. v2.2.
@@ -433,12 +423,10 @@ row before constructing.
 
 - You construct OpenDocument (`.ods`) files.
 - You need the deepest features of openpyxl's chart layer
-  (combination charts, `<c:displayUnits>` on value axes,
-  per-data-point overrides via `dPt`).
-- You construct pivot tables that need slicers, calculated
-  fields / items, GroupItems, or pivot-styling beyond the
-  named-style picker. Those are deferred to v2.1+ (see "Limits"
-  in the Pivot tables section above).
+  (combination charts / multi-plot charts).
+- You construct pivot tables that need OLAP / external caches,
+  in-place editing of existing pivot definitions, or visual styling
+  beyond the current PivotArea / pivot-CF support.
 
 For everything else, v2.0 is a drop-in replacement.
 
