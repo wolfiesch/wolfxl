@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">WolfXL</h1>
   <p align="center">
-    <strong>Full openpyxl replacement, drop-in compatible, 10×–100× faster.</strong><br>
-    Pivot tables, charts, encryption, structural ops — every construction idiom that openpyxl 3.1.x supports, with a Rust backend.
+    <strong>Openpyxl-compatible Excel automation with a Rust backend.</strong><br>
+    Read, write, and surgically modify workbooks, including charts, images, encryption, structural ops, and pivot-table construction.
   </p>
 </p>
 
@@ -15,7 +15,7 @@
 
 ---
 
-## Replaces openpyxl. One import change.
+## Openpyxl-style imports. One import change.
 
 ```diff
 - from openpyxl import load_workbook, Workbook
@@ -23,7 +23,9 @@
 + from wolfxl import load_workbook, Workbook, Font, PatternFill, Alignment, Border
 ```
 
-Your existing code works as-is. Same `ws["A1"].value`, same `Font(bold=True)`, same `wb.save()`.
+Most workbook automation keeps the same shape: `ws["A1"].value`,
+`Font(bold=True)`, and `wb.save()` all work the way openpyxl users
+expect.
 
 ---
 
@@ -36,7 +38,8 @@ Your existing code works as-is. Same `ws["A1"].value`, same `Font(bold=True)`, s
 </p>
 
 <p align="center">
-  <sub>Measured with <a href="https://excelbench.vercel.app">ExcelBench</a> on Apple M4 Pro, Python 3.12, median of 3 runs.</sub>
+  <sub>ExcelBench-backed performance artifacts are being refreshed for the
+  v2.0 audit before public release claims are made.</sub>
 </p>
 
 ## Install
@@ -89,7 +92,11 @@ ws.add_pivot_table(pt)
 wb.save("pivot.xlsx")
 ```
 
-WolfXL is the only Python OOXML library that constructs pivot tables with **pre-aggregated records** — pivots open in Excel, LibreOffice, and openpyxl with data populated, no refresh-on-open required. (openpyxl preserves pivots on round-trip but doesn't construct them; XlsxWriter doesn't support pivots at all.)
+WolfXL constructs pivot tables with **pre-aggregated records** —
+pivots open in Excel, LibreOffice, and openpyxl with data populated,
+no refresh-on-open required. In the project comparison below, openpyxl
+preserves pivots on round-trip but does not provide this constructor,
+and XlsxWriter does not support pivots.
 
 Link a chart to the pivot:
 
@@ -161,20 +168,21 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 
 ## Performance at Scale
 
-| Scale | File size | WolfXL Read | openpyxl Read | WolfXL Write | openpyxl Write |
-|-------|-----------|-------------|---------------|--------------|----------------|
-| 100K cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 1M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 5M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 10M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Pivot construction (100k source rows, 4-field layout) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+The v2.0 benchmark table is intentionally withheld until the current
+audit refreshes the ExcelBench run, pivot-construction microbenchmark,
+and clean install/import smoke from the release artifact. Do not use
+draft `10×-100×` marketing copy or placeholder benchmark rows as
+release evidence.
 
-Throughput stays flat as files grow — no hidden O(n^2) pathology.
-Pivot construction scales linearly with source-row count.
+The implementation goal remains stable throughput as files grow, with
+linear pivot construction over source-row count.
 
 ## How WolfXL Compares
 
-Every Rust-backed Python Excel project picks a different slice of the problem. WolfXL is the only one that covers all four: formatting, modify mode, openpyxl API compatibility, and pivot-table construction.
+Every Rust-backed Python Excel project picks a different slice of the
+problem. WolfXL is the only one in this comparison that covers all
+four: formatting, modify mode, openpyxl API compatibility, and
+pivot-table construction.
 
 | Library | Read | Write | Modify | Styling | openpyxl API | Pivots |
 |---------|:----:|:-----:|:------:|:-------:|:------------:|:------:|
@@ -191,7 +199,10 @@ Every Rust-backed Python Excel project picks a different slice of the problem. W
 - **openpyxl API** = same `load_workbook`, `Workbook`, `Cell`, `Font`, `PatternFill` objects
 - **Pivots** = construct a pivot table from Python with pre-aggregated records (the file opens in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open)
 
-*openpyxl preserves pivot tables on round-trip but does not provide a Python-side constructor that emits the `pivotCacheRecords` snapshot. WolfXL is the first Python OOXML library to do so.
+*openpyxl preserves pivot tables on round-trip but does not provide a
+Python-side constructor that emits the `pivotCacheRecords` snapshot.
+WolfXL's release claim that it is first here is pending the final
+public-launch truth pass.
 
 Upstream [calamine](https://github.com/tafia/calamine) does not parse styles. WolfXL's read engine uses [calamine-styles](https://crates.io/crates/calamine-styles), a fork that adds Font/Fill/Border/Alignment/NumberFormat extraction from OOXML.
 

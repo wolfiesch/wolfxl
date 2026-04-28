@@ -1,6 +1,11 @@
-# wolfxl 2.0.0 — full openpyxl replacement, pivot tables included
+# wolfxl 2.0.0 audit draft — pivot tables included
 
 _Date: 2026-04-27_
+
+> **Audit status**: draft release collateral. Do not publish, tag, or
+> post externally from this file until the v2.0 benchmark replacement,
+> manual advanced-pivot/slicer checks, clean release-artifact smoke, and
+> final wording truth pass are complete.
 
 WolfXL 2.0.0 closes the last construction-side gap on the
 openpyxl-parity roadmap: **pivot tables, pivot caches, and
@@ -8,9 +13,9 @@ pivot-chart linkage**. After 24 RFCs across 9 sprints
 (Δ → Ν), every construction idiom that openpyxl 3.1.x supports
 works with the same Python code.
 
-The marketing claim shifts from "openpyxl parity for the
-95th-percentile case" (v1.7) to **"full openpyxl replacement,
-period."**
+The marketing goal shifts from "openpyxl parity for the
+95th-percentile case" (v1.7) toward a full replacement claim, but that
+public wording remains gated on the final audit.
 
 ## TL;DR
 
@@ -18,11 +23,10 @@ period."**
   `PivotTable` / `RowField` / `ColumnField` / `DataField` /
   `PageField` / `PivotItem` are real classes with full layout
   pre-computation. Replaces the v0.5+ `_make_stub`.
-- ✅ **`pivotCacheRecords{N}.xml` emit from scratch.** wolfxl is
-  the first Python OOXML library to construct pivot tables with a
-  pre-aggregated records snapshot. Pivots open in Excel,
-  LibreOffice, and openpyxl with data populated — without
-  requiring an Excel-side refresh round-trip.
+- ✅ **`pivotCacheRecords{N}.xml` emit from scratch.** wolfxl
+  constructs pivot tables with a pre-aggregated records snapshot.
+  Pivots open in Excel, LibreOffice, and openpyxl with data
+  populated — without requiring an Excel-side refresh round-trip.
 - ✅ **Pivot-chart linkage** — `chart.pivot_source = pt` on every
   one of the 16 chart families. Emits `<c:pivotSource>` at the
   start of `<c:chart>` and per-series `<c:fmtId val="0"/>` per
@@ -36,12 +40,14 @@ period."**
   `wolfxl.__version__` reports `2.0.0`. PyPI classifier stays
   `Development Status :: 5 - Production/Stable` (promoted in
   v1.7).
-- ✅ **README rewritten** — "Full openpyxl replacement, drop-in
-  compatible, 10×–100× faster."
+- ✅ **README rewritten for the audit** — openpyxl-compatible Excel
+  automation with pivot construction; final benchmark claims are held
+  until the v2.0 ExcelBench refresh lands.
 - ✅ **Migration guide + Compatibility Matrix updated.**
-  "Pivot table construction" flips from ❌ to ✅. wolfxl is the
-  only Python OOXML library that constructs pivot tables with
-  pre-aggregated records.
+  "Pivot table construction" flips from ❌ to ✅. The current
+  comparison identifies wolfxl as the sole Python OOXML library in
+  scope with pivot construction backed by pre-aggregated records;
+  public "first/only" wording remains gated on the final truth pass.
 - ✅ **RFC-046 §13 legacy chart-dict key sunset.** The Rust
   parser's accept-also for `fill_color` / `line_color` /
   `line_dash` / `line_width_emu` (deprecated in v1.7) is
@@ -234,7 +240,8 @@ This RFC has no code; it's the launch-day envelope:
   snippets in HN / Twitter / r/Python / dev.to / GH Discussions
   drafts.
 - `CHANGELOG.md` — v2.0.0 entry replaces the WIP `2.0.0-dev`.
-- README rewrite — "Full openpyxl replacement" headline.
+- README rewrite — openpyxl-compatible positioning with release-claim
+  caveats.
 
 ## Sprint Ν acknowledgements
 
@@ -249,9 +256,9 @@ This RFC has no code; it's the launch-day envelope:
 Sprint Ν used the parallel-pod orchestration that landed v1.6 /
 v1.6.1 / v1.7. Pre-dispatch §10 contracts (RFC-047 §10, RFC-048
 §10, RFC-049 §10) were authored before any pod opened a worktree
-— Sprint Μ-prime lesson #12. Pod-ε scaffolded with `<!-- TBD:
-SHA -->` markers (lesson #3); the integrator finalize commit
-filled them after γ / δ merge.
+— Sprint Μ-prime lesson #12. Pod-ε scaffolded with SHA markers
+(lesson #3); the post-PR #23 audit keeps final branch evidence gated
+until the release truth pass reconciles it.
 
 ## Migration notes
 
@@ -345,22 +352,17 @@ See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 | Python unit tests | 2230 passed, 24 skipped in the broad post-PR #23 run | `uv run pytest` |
 | openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
 | LibreOffice cross-renderer | Pivot construction fixture renders pivot table + linked chart correctly | `tests/fixtures/pivots/*.xlsx` opened in headless LibreOffice |
-| openpyxl interop | Pivot constructed by wolfxl reads via `openpyxl.load_workbook(...).pivots[0]` | `tests/parity/test_pivot_interop.py` |
+| openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |
 
 ### Benchmark headline (v2.0)
 
-| Workload | openpyxl 3.1.5 | wolfxl 2.0.0 | Speedup |
-|---|---|---|---|
-| Read 100k rows | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Write 100k rows | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Touch 1 cell + save (100k-row workbook) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| `copy_worksheet` (10k-row + table + DV + CF + pivot) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Pivot construction (100k source rows, 4-field layout) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-
-Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
-`python scripts/bench-all.py --include-pivot`.
+Benchmark numbers are intentionally withheld until the v2.0 ExcelBench
+refresh is rerun and checked against the release artifact. The release
+benchmark grid should cover read, write, modify/touch-one-cell,
+`copy_worksheet`, and pivot construction workloads before any public
+speedup claim is restored.
 
 ## Stats (post-2.0.0)
 

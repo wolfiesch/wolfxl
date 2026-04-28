@@ -11,12 +11,12 @@ Status legend:
 - **Not Yet** — not implemented; tracked via RFC.
 - **Out of scope** — explicitly out of roadmap.
 
-## Construction-side parity (the v2.0 headline)
+## Construction-side parity (the v2.0 audit target)
 
 The following constructors all work at the same call site you'd use
-in openpyxl 3.1.x. **As of v2.0, this list is complete** — every
-construction idiom in openpyxl 3.1.x has a wolfxl equivalent,
-including pivot tables and pivot-chart linkage.
+in openpyxl 3.1.x. The tracked parity ratchet is currently green and
+the remaining work before public launch is a truth pass over wording,
+benchmarks, and manual advanced-pivot visual checks.
 
 ### Workbook + Worksheet
 
@@ -86,7 +86,7 @@ including pivot tables and pivot-chart linkage.
 | `Reference` (for the pivot's source range) | Supported (re-uses `wolfxl.chart.Reference`; mirrors openpyxl 3.1.x) |
 | `Workbook.add_pivot_cache(cache)` | Supported (workbook-scoped; one cache can serve N tables) |
 | `Worksheet.add_pivot_table(pt, anchor)` | Supported (sheet-scoped; anchor accepts `"F2"`-style coords) |
-| `pivotCacheRecords{N}.xml` emit (pre-aggregated records) | **Supported — wolfxl is the only Python OOXML library that constructs this part from scratch.** openpyxl preserves on round-trip but doesn't construct; XlsxWriter doesn't support pivots at all. |
+| `pivotCacheRecords{N}.xml` emit (pre-aggregated records) | Supported. Among the Python OOXML libraries in this comparison, wolfxl is currently the sole one identified as constructing this part from scratch; keep the public "first/only" wording gated on the final launch truth pass. |
 | 11 aggregator functions (sum / count / average / max / min / product / count_nums / std_dev / std_dev_p / var / var_p) | Supported |
 | Bare-string axis specs (`rows=["region"]`) | Supported |
 | Explicit-builder axis specs (`rows=[RowField("region")]`) | Supported |
@@ -200,14 +200,14 @@ verbatim.
 | Pivot table construction | Round-trip preserve only* | No | No | **Yes (with pre-aggregated records)** |
 | Pivot-chart linkage (`chart.pivot_source = pt`) | Yes | No | No | **Yes** |
 | Same API as openpyxl | Native | Different API | Different | **Native** |
-| Performance (relative) | 1× | ~1.5× write | ~1× (wraps openpyxl) | **<!-- TBD: BENCHMARK NUMBERS -->×** read+write+modify |
+| Performance (relative) | 1× | ~1.5× write | ~1× (wraps openpyxl) | Pending v2.0 ExcelBench refresh |
 
 *openpyxl preserves pivot tables verbatim on round-trip but does
 not provide a Python-side constructor that emits the
-`pivotCacheRecords` snapshot. WolfXL 2.0 is the first Python OOXML
-library to construct pivots with a pre-aggregated records part —
-the saved workbook opens in Excel / LibreOffice / openpyxl with
-data populated, no refresh-on-open required.
+`pivotCacheRecords` snapshot. WolfXL 2.0 constructs pivots with a
+pre-aggregated records part, so the saved workbook opens in Excel /
+LibreOffice / openpyxl with data populated and no refresh-on-open
+required.
 
 ### Rust-backed libraries
 
@@ -222,10 +222,9 @@ data populated, no refresh-on-open required.
 | Charts / images / structural ops | No | No | No | Partial (charts only) | **Yes** |
 | Pivot tables (construction + linkage) | No | No | No | No | **Yes** |
 
-WolfXL is the only Rust-backed Python library — and the only
-Python OOXML library, period — that targets the **full openpyxl
-construction surface including pivot tables with pre-aggregated
-records**.
+WolfXL is the only Rust-backed Python library in this comparison that
+targets the tracked openpyxl construction surface, including pivot
+tables with pre-aggregated records.
 
 ## Footnotes on the underlying readers
 

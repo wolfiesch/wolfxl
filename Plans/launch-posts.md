@@ -1,7 +1,7 @@
 # Launch posts — WolfXL 2.0
 
-> **Status**: drafts (Sprint Ν Pod-ε ε.6, finalize from Sprint Ξ
-> scaffold).
+> **Status**: internal drafts only (Sprint Ν Pod-ε ε.6, finalize from
+> Sprint Ξ scaffold).
 > Linked from `Plans/rfcs/INDEX.md` (RFC-054) and
 > `docs/release-notes-2.0.md`.
 > SHAs and benchmark numbers are `<!-- TBD -->` until the
@@ -12,10 +12,10 @@
 > those are now implemented, but this file still needs a final manual
 > truth pass before publication.
 
-This file holds the post drafts that ship with v2.0.0's public
-launch — the **full openpyxl replacement** release. Each draft is
-meant to be tweaked for tone-of-channel before posting; the
-technical bones and pivot-construction snippets are stable.
+This file holds launch-post drafts for the v2.0.0 public release. They
+must not be posted until benchmark numbers, release SHAs, clean
+artifact smoke, and the final "first/full replacement" wording pass are
+complete.
 
 ---
 
@@ -589,11 +589,11 @@ subject to the final manual audit and benchmark replacement.
 
 | Channel        | Tone        | Length    | Status |
 |----------------|-------------|-----------|--------|
-| HN "Show HN"   | Technical   | Medium    | Final draft — pivot pre-aggregated-records claim is the lede |
-| Twitter / X    | Direct, hooky | 8 tweets | Final draft — opens with the "first" claim, snippets as code blocks in tweets 3 + 4 |
-| r/Python       | Detailed, comparative | Medium-long | Final draft — pivot snippet near the top |
+| HN "Show HN"   | Technical   | Medium    | Draft — blocked on benchmarks, artifact smoke, and claim verification |
+| Twitter / X    | Direct, hooky | 8 tweets | Draft — blocked on benchmarks, artifact smoke, and claim verification |
+| r/Python       | Detailed, comparative | Medium-long | Draft — blocked on benchmarks, artifact smoke, and claim verification |
 | dev.to         | Long-form, narrative | Long | Outline — focuses on the pivot-engineering story |
-| GH Discussions | Announcement, supportive | Medium | Final draft — the v2.0 changelog mirror |
+| GH Discussions | Announcement, supportive | Medium | Draft — changelog mirror needs final truth pass |
 
 ## Pre-launch checklist
 

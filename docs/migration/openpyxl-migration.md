@@ -1,11 +1,11 @@
 # Migrate from openpyxl
 
-> **WolfXL 2.0** is the full openpyxl-replacement release: every
-> construction idiom that openpyxl 3.1.x supports works with the
-> same Python code, **including pivot tables, pivot caches, and
-> pivot-chart linkage** (Sprint Ν / v2.0.0 closes the last gap).
-> This guide walks through the API mapping for the eight idioms
-> that cover the entire openpyxl construction surface.
+> **WolfXL 2.0 audit note**: the tracked openpyxl-parity surface is
+> green, including pivot tables, pivot caches, and pivot-chart linkage.
+> Release/public-launch wording remains frozen until the benchmark,
+> manual visual-check, and final truth-pass gates are complete. This
+> guide walks through the API mapping for the main openpyxl construction
+> idioms.
 
 ## TL;DR — minimal import change
 
@@ -53,12 +53,13 @@ ws.cell(row=3, column=2, value="x")
 wb.save("out.xlsx")
 ```
 
-## Construction-side parity (complete in v2.0)
+## Construction-side parity (v2.0 audit target)
 
 WolfXL 1.7 was the first release where the non-pivot construction-side
 idioms all work end-to-end with the same code you'd write against
-openpyxl 3.1.x. **WolfXL 2.0 closes the pivot-table gap** — the full
-construction surface is now drop-in.
+openpyxl 3.1.x. **WolfXL 2.0 closes the pivot-table gap** in the
+tracked parity matrix; the remaining pre-release work is proof
+packaging, benchmarks, and wording.
 
 ### Charts (v1.6 + v1.6.1)
 
