@@ -147,7 +147,7 @@ Current largest WolfXL hotspots:
 | `src/wolfxl/mod.rs` | 6255 | Split patcher phases, queue models, and workbook mutation helpers behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
-| `python/wolfxl/_worksheet.py` | 3203 | Extract pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
+| `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2915 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 2516 | Separate workbook orchestration from feature registration and save pipeline helpers. |
 
@@ -171,6 +171,50 @@ Suggested sprint sequence:
 6. **Cleanup Sprint F: calamine reader and patcher split.**
    Split the reader and `src/wolfxl/mod.rs` after the external oracle corpus is
    broad enough to catch drift.
+
+### Rust `src/wolfxl/mod.rs` split entry plan
+
+Treat `src/wolfxl/mod.rs` as the highest-risk cleanup target because it owns
+the PyO3 entrypoints, patcher queues, and workbook mutation ordering in one
+file. The first split should reduce file size without changing exported names
+or OOXML write order.
+
+Phase 0: inventory and characterization.
+
+- Map every `#[pyclass]`, `#[pymethods]`, and `#[pyfunction]` item, plus each
+  queue type consumed by `XlsxPatcher.save`, before moving code.
+- Pin a focused behavior baseline with `cargo test`, `uv run --no-sync maturin
+  develop`, modify-mode Python tests, and the external oracle preservation
+  gate.
+- Current known-good evidence before this split track: WolfXL full suite
+  `2285 passed, 29 skipped`, and the ExcelBench external fixture validator
+  passed the seven-workbook pack with `55` readback probes and no failures.
+
+Phase 1: extract pure models first.
+
+- Move queue payload structs and small helper enums into a private Rust module
+  such as `src/wolfxl/patcher_models.rs` or `src/wolfxl/patcher/queues.rs`.
+- Keep PyO3 class/function definitions and `XlsxPatcher` method signatures in
+  place until the compiler proves the model split is mechanical.
+- Avoid path/order churn in emitted ZIP parts unless byte-level regression tests
+  prove the change is intentional.
+
+Phase 2: split patcher flush phases one group at a time.
+
+- Start with isolated queue drainers: cells/formats, relationships/drawings,
+  worksheet setup, workbook metadata, and then pivots/slicers.
+- Each extracted phase should expose a small Rust function that receives the
+  existing patcher state rather than inventing new ownership boundaries.
+- After each phase, rerun the focused tests for the touched feature plus
+  `tests/test_external_oracle_preservation.py` when the ExcelBench fixture pack
+  is present.
+
+Phase 3: only then reduce the PyO3 surface file.
+
+- Once phase helpers are stable, move internal implementation blocks out of
+  `mod.rs` while keeping public Python import behavior unchanged.
+- Stop immediately if a move forces a PyO3 signature change, changes save-path
+  ordering, or requires broad fixture rewrites to explain output drift.
 
 ## Verification gates
 

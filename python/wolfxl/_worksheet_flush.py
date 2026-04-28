@@ -1,0 +1,246 @@
+"""Write-mode worksheet flush helpers."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from wolfxl._worksheet import Worksheet
+
+
+def flush_autofilter_post_cells(ws: Worksheet, writer: Any) -> None:
+    """Flush the auto-filter after cell values have reached the writer."""
+    sheet = ws._title  # noqa: SLF001
+    af = ws._auto_filter  # noqa: SLF001
+    af_has_state = (
+        af.ref is not None
+        or bool(af.filter_columns)
+        or af.sort_state is not None
+    )
+    if af_has_state and hasattr(writer, "set_autofilter_native"):
+        try:
+            writer.set_autofilter_native(sheet, af.to_rust_dict())
+        except Exception:
+            # Defensive: do not poison the save path on a malformed filter spec.
+            pass
+
+
+def flush_compat_properties(ws: Worksheet, writer: Any) -> None:
+    """Flush openpyxl compatibility metadata to the write-mode backend."""
+    sheet = ws._title  # noqa: SLF001
+
+    _flush_sheet_layout(ws, writer, sheet)
+    _flush_sheet_setup(ws, writer, sheet)
+    _flush_page_breaks(ws, writer, sheet)
+    _flush_pending_hyperlinks(ws, writer, sheet)
+    _flush_pending_comments(ws, writer, sheet)
+    _flush_pending_tables(ws, writer, sheet)
+    _flush_pending_data_validations(ws, writer, sheet)
+    _flush_pending_conditional_formats(ws, writer, sheet)
+    _flush_pending_images(ws, writer, sheet)
+    _flush_pending_charts(ws, writer, sheet)
+
+
+def _flush_sheet_layout(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush freeze panes, dimensions, and print area metadata."""
+    if ws._freeze_panes is not None:  # noqa: SLF001
+        writer.set_freeze_panes(
+            sheet, {"mode": "freeze", "top_left_cell": ws._freeze_panes},  # noqa: SLF001
+        )
+
+    for row_num, height in ws._row_heights.items():  # noqa: SLF001
+        if height is not None:
+            writer.set_row_height(sheet, row_num, height)
+
+    for col_letter, width in ws._col_widths.items():  # noqa: SLF001
+        if width is not None:
+            writer.set_column_width(sheet, col_letter, width)
+
+    if ws._print_area is not None and hasattr(writer, "set_print_area"):  # noqa: SLF001
+        writer.set_print_area(sheet, ws._print_area)  # noqa: SLF001
+
+
+def _flush_sheet_setup(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush page setup, margins, headers, views, protection, and titles."""
+    if not hasattr(writer, "set_sheet_setup_native"):
+        return
+    has_setup = (
+        ws._page_setup is not None  # noqa: SLF001
+        or ws._page_margins is not None  # noqa: SLF001
+        or ws._header_footer is not None  # noqa: SLF001
+        or ws._sheet_view is not None  # noqa: SLF001
+        or ws._protection is not None  # noqa: SLF001
+        or getattr(ws, "_print_title_rows", None) is not None
+        or getattr(ws, "_print_title_cols", None) is not None
+    )
+    if not has_setup:
+        return
+    try:
+        payload = ws.to_rust_setup_dict()
+        if any(v is not None for v in payload.values()):
+            writer.set_sheet_setup_native(sheet, payload)
+    except Exception:
+        # Defensive: Python wrapper validators should already reject bad specs.
+        pass
+
+
+def _flush_page_breaks(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush page breaks and sheet format metadata."""
+    if not hasattr(writer, "set_page_breaks_native"):
+        return
+    has_breaks = (
+        ws._row_breaks is not None  # noqa: SLF001
+        or ws._col_breaks is not None  # noqa: SLF001
+        or ws._sheet_format is not None  # noqa: SLF001
+    )
+    if not has_breaks:
+        return
+    try:
+        breaks_dict = ws.to_rust_page_breaks_dict()
+        payload = {
+            "row_breaks": breaks_dict.get("row_breaks"),
+            "col_breaks": breaks_dict.get("col_breaks"),
+            "sheet_format": ws.to_rust_sheet_format_dict(),
+        }
+        if any(v is not None for v in payload.values()):
+            writer.set_page_breaks_native(sheet, payload)
+    except Exception:
+        # Defensive: do not poison the save path.
+        pass
+
+
+def _flush_pending_hyperlinks(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode hyperlinks."""
+    if not ws._pending_hyperlinks:  # noqa: SLF001
+        return
+    for coord, hl in ws._pending_hyperlinks.items():  # noqa: SLF001
+        if hl is None:
+            continue
+        target = hl.target
+        internal = False
+        if target is None and hl.location is not None:
+            target = hl.location
+            internal = True
+        if not target:
+            continue
+        writer.add_hyperlink(
+            sheet,
+            {
+                "cell": coord,
+                "target": target,
+                "display": hl.display,
+                "tooltip": hl.tooltip,
+                "internal": internal,
+            },
+        )
+    ws._pending_hyperlinks.clear()  # noqa: SLF001
+
+
+def _flush_pending_comments(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode comments."""
+    if not ws._pending_comments:  # noqa: SLF001
+        return
+    for coord, comment in ws._pending_comments.items():  # noqa: SLF001
+        if comment is None:
+            continue
+        writer.add_comment(
+            sheet,
+            {
+                "cell": coord,
+                "text": comment.text,
+                "author": comment.author,
+            },
+        )
+    ws._pending_comments.clear()  # noqa: SLF001
+
+
+def _flush_pending_tables(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode tables."""
+    if not ws._pending_tables:  # noqa: SLF001
+        return
+    for table in ws._pending_tables:  # noqa: SLF001
+        style_name = table.tableStyleInfo.name if table.tableStyleInfo else None
+        col_names = [col.name for col in table.tableColumns] if table.tableColumns else []
+        writer.add_table(
+            sheet,
+            {
+                "name": table.name,
+                "ref": table.ref,
+                "style": style_name,
+                "columns": col_names,
+                "header_row": table.headerRowCount > 0,
+                "totals_row": table.totalsRowCount > 0,
+            },
+        )
+    ws._pending_tables.clear()  # noqa: SLF001
+
+
+def _flush_pending_data_validations(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode data validations."""
+    if not ws._pending_data_validations:  # noqa: SLF001
+        return
+    for dv in ws._pending_data_validations:  # noqa: SLF001
+        writer.add_data_validation(
+            sheet,
+            {
+                "range": dv.sqref,
+                "validation_type": dv.type,
+                "operator": dv.operator,
+                "formula1": dv.formula1,
+                "formula2": dv.formula2,
+                "allow_blank": dv.allowBlank,
+                "error_title": dv.errorTitle,
+                "error": dv.error,
+            },
+        )
+    ws._pending_data_validations.clear()  # noqa: SLF001
+
+
+def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode conditional formats."""
+    if not ws._pending_conditional_formats:  # noqa: SLF001
+        return
+    for range_string, rule in ws._pending_conditional_formats:  # noqa: SLF001
+        formula = rule.formula[0] if rule.formula else None
+        writer.add_conditional_format(
+            sheet,
+            {
+                "range": range_string,
+                "rule_type": rule.type,
+                "operator": rule.operator,
+                "formula": formula,
+                "stop_if_true": rule.stopIfTrue,
+            },
+        )
+    ws._pending_conditional_formats.clear()  # noqa: SLF001
+
+
+def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode images."""
+    if not ws._pending_images or not hasattr(writer, "add_image"):  # noqa: SLF001
+        return
+    from wolfxl._images import image_to_writer_payload
+
+    for image in ws._pending_images:  # noqa: SLF001
+        writer.add_image(sheet, image_to_writer_payload(image))
+    ws._pending_images.clear()  # noqa: SLF001
+
+
+def _flush_pending_charts(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode charts."""
+    if not ws._pending_charts:  # noqa: SLF001
+        return
+    if hasattr(writer, "add_chart_native"):
+        for chart in ws._pending_charts:  # noqa: SLF001
+            writer.add_chart_native(sheet, chart.to_rust_dict(), chart._anchor)  # noqa: SLF001
+    else:
+        import warnings
+
+        warnings.warn(
+            "wolfxl.chart: native chart write requires Pod-alpha's "
+            "add_chart_native binding (not yet available). "
+            f"Dropping {len(ws._pending_charts)} chart(s) on sheet {sheet!r}.",  # noqa: SLF001
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    ws._pending_charts.clear()  # noqa: SLF001

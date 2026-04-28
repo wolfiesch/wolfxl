@@ -18,6 +18,10 @@ from wolfxl._worksheet_features import (
     get_hyperlinks_map,
     get_tables_map,
 )
+from wolfxl._worksheet_flush import (
+    flush_autofilter_post_cells,
+    flush_compat_properties,
+)
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
@@ -2443,218 +2447,12 @@ class Worksheet:
             )
 
     def _flush_autofilter_post_cells(self, writer: Any) -> None:
-        """Sprint Ο Pod 1B (RFC-056) — flush the autoFilter to the
-        Rust writer AFTER cells have been populated, so the
-        evaluator sees the real grid and can stamp `row.hidden`
-        flags on filtered-out rows.
-
-        Modify mode goes through
-        `Workbook._flush_pending_autofilters_to_patcher` instead.
-        """
-        sheet = self._title
-        af = self._auto_filter
-        af_has_state = (
-            af.ref is not None
-            or bool(af.filter_columns)
-            or af.sort_state is not None
-        )
-        if af_has_state and hasattr(writer, "set_autofilter_native"):
-            try:
-                writer.set_autofilter_native(sheet, af.to_rust_dict())
-            except Exception:
-                # Defensive: don't poison the save path on a malformed
-                # autofilter spec.
-                pass
+        """Flush write-mode auto-filter metadata after cell values."""
+        flush_autofilter_post_cells(self, writer)
 
     def _flush_compat_properties(self, writer: Any) -> None:
-        """Flush openpyxl compat properties (freeze_panes, dimensions, etc.)."""
-        sheet = self._title
-
-        # Freeze panes
-        if self._freeze_panes is not None:
-            writer.set_freeze_panes(
-                sheet, {"mode": "freeze", "top_left_cell": self._freeze_panes},
-            )
-
-        # Row heights
-        for row_num, height in self._row_heights.items():
-            if height is not None:
-                writer.set_row_height(sheet, row_num, height)
-
-        # Column widths
-        for col_letter, width in self._col_widths.items():
-            if width is not None:
-                writer.set_column_width(sheet, col_letter, width)
-
-        # Print area (flush only if the Rust writer supports it)
-        if self._print_area is not None and hasattr(writer, "set_print_area"):
-            writer.set_print_area(sheet, self._print_area)
-
-        # Sprint Ο Pod 1A.5 (RFC-055) — sheet-setup blocks on write
-        # mode. Cheap probe first; only call set_sheet_setup_native
-        # when at least one slot has been mutated by the user.
-        if hasattr(writer, "set_sheet_setup_native"):
-            has_setup = (
-                self._page_setup is not None
-                or self._page_margins is not None
-                or self._header_footer is not None
-                or self._sheet_view is not None
-                or self._protection is not None
-                or getattr(self, "_print_title_rows", None) is not None
-                or getattr(self, "_print_title_cols", None) is not None
-            )
-            if has_setup:
-                try:
-                    payload = self.to_rust_setup_dict()
-                    if any(v is not None for v in payload.values()):
-                        writer.set_sheet_setup_native(sheet, payload)
-                except Exception:
-                    # Defensive: don't poison the save path on a
-                    # malformed setup spec; the Python class
-                    # validators should already have caught it.
-                    pass
-
-        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr on
-        # write mode. Cheap probe first; only call when at least one
-        # slot has been mutated by the user.
-        if hasattr(writer, "set_page_breaks_native"):
-            has_breaks = (
-                self._row_breaks is not None
-                or self._col_breaks is not None
-                or self._sheet_format is not None
-            )
-            if has_breaks:
-                try:
-                    breaks_dict = self.to_rust_page_breaks_dict()
-                    fmt_dict = self.to_rust_sheet_format_dict()
-                    payload = {
-                        "row_breaks": breaks_dict.get("row_breaks"),
-                        "col_breaks": breaks_dict.get("col_breaks"),
-                        "sheet_format": fmt_dict,
-                    }
-                    if any(v is not None for v in payload.values()):
-                        writer.set_page_breaks_native(sheet, payload)
-                except Exception:
-                    # Defensive: don't poison the save path.
-                    pass
-
-        # Sprint Ο Pod 1B (RFC-056) — autoFilter on write-mode sheets.
-        # Modify mode goes through `Workbook._flush_pending_autofilters_to_patcher`
-        # instead.
-        # AutoFilter is flushed separately AFTER cells so the
-        # evaluator can see the populated grid; see
-        # `_flush_autofilter_post_cells`.
-
-        # T1 PR4: cell-level write features — hyperlinks, comments.
-        # Setters populate ``_pending_hyperlinks`` / ``_pending_comments`` and
-        # the Rust writer already has ``add_hyperlink`` / ``add_comment`` —
-        # we just translate the openpyxl-shaped dataclasses into the dict
-        # shapes those methods expect.
-        if self._pending_hyperlinks:
-            for coord, hl in self._pending_hyperlinks.items():
-                if hl is None:
-                    # Explicit-delete sentinel — there's nothing to flush
-                    # in write mode (no prior hyperlink existed). Modify
-                    # mode would honor this, but that's a T1.5 path.
-                    continue
-                target = hl.target
-                internal = False
-                if target is None and hl.location is not None:
-                    target = hl.location
-                    internal = True
-                if not target:
-                    continue
-                writer.add_hyperlink(sheet, {
-                    "cell": coord,
-                    "target": target,
-                    "display": hl.display,
-                    "tooltip": hl.tooltip,
-                    "internal": internal,
-                })
-            self._pending_hyperlinks.clear()
-
-        if self._pending_comments:
-            for coord, c in self._pending_comments.items():
-                if c is None:
-                    continue
-                writer.add_comment(sheet, {
-                    "cell": coord,
-                    "text": c.text,
-                    "author": c.author,
-                })
-            self._pending_comments.clear()
-
-        # T1 PR5: worksheet-level writes — tables, DVs, conditional formats.
-        if self._pending_tables:
-            for t in self._pending_tables:
-                style_name = t.tableStyleInfo.name if t.tableStyleInfo else None
-                col_names = [c.name for c in t.tableColumns] if t.tableColumns else []
-                writer.add_table(sheet, {
-                    "name": t.name,
-                    "ref": t.ref,
-                    "style": style_name,
-                    "columns": col_names,
-                    "header_row": t.headerRowCount > 0,
-                    "totals_row": t.totalsRowCount > 0,
-                })
-            self._pending_tables.clear()
-
-        if self._pending_data_validations:
-            for dv in self._pending_data_validations:
-                writer.add_data_validation(sheet, {
-                    "range": dv.sqref,
-                    "validation_type": dv.type,
-                    "operator": dv.operator,
-                    "formula1": dv.formula1,
-                    "formula2": dv.formula2,
-                    "allow_blank": dv.allowBlank,
-                    "error_title": dv.errorTitle,
-                    "error": dv.error,
-                })
-            self._pending_data_validations.clear()
-
-        if self._pending_conditional_formats:
-            for range_string, rule in self._pending_conditional_formats:
-                formula = rule.formula[0] if rule.formula else None
-                writer.add_conditional_format(sheet, {
-                    "range": range_string,
-                    "rule_type": rule.type,
-                    "operator": rule.operator,
-                    "formula": formula,
-                    "stop_if_true": rule.stopIfTrue,
-                })
-            self._pending_conditional_formats.clear()
-
-        # Sprint Λ Pod-β (RFC-045) — drain pending images.
-        if self._pending_images and hasattr(writer, "add_image"):
-            from wolfxl._images import image_to_writer_payload
-
-            for img in self._pending_images:
-                payload = image_to_writer_payload(img)
-                writer.add_image(sheet, payload)
-            self._pending_images.clear()
-
-        # Sprint Μ Pod-β (RFC-046) — drain pending charts.
-        # Pod-α ships ``add_chart_native`` on the Rust writer; until that
-        # binding lands the queue is silently dropped (with a warning) so
-        # existing tests that don't construct charts don't regress.
-        if self._pending_charts:
-            if hasattr(writer, "add_chart_native"):
-                for chart in self._pending_charts:
-                    payload = chart.to_rust_dict()
-                    writer.add_chart_native(sheet, payload, chart._anchor)  # noqa: SLF001
-            else:
-                import warnings
-
-                warnings.warn(
-                    "wolfxl.chart: native chart write requires Pod-α's "
-                    "add_chart_native binding (not yet available). "
-                    f"Dropping {len(self._pending_charts)} chart(s) on "
-                    f"sheet {sheet!r}.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            self._pending_charts.clear()
+        """Flush openpyxl compatibility metadata to the write-mode backend."""
+        flush_compat_properties(self, writer)
 
     # ------------------------------------------------------------------
     # wolfxl-core classifier bridge (delegates to the single Rust
