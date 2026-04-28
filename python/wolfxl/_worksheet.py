@@ -11,6 +11,13 @@ from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
 from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
 from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
 from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
+from wolfxl._worksheet_features import (
+    get_comments_map,
+    get_conditional_formatting,
+    get_data_validations,
+    get_hyperlinks_map,
+    get_tables_map,
+)
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
@@ -1985,64 +1992,11 @@ class Worksheet:
 
     def _get_comments_map(self) -> dict[str, Any]:
         """Return ``{cell_ref: Comment}`` for this sheet, cached per instance."""
-        if self._comments_cache is not None:
-            return self._comments_cache
-        from wolfxl.comments import Comment
-
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._comments_cache = {}
-            return self._comments_cache
-        try:
-            entries = wb._rust_reader.read_comments(self._title)  # noqa: SLF001
-        except Exception:
-            entries = []
-        result: dict[str, Any] = {}
-        for e in entries:
-            cell_ref = e.get("cell")
-            if not cell_ref:
-                continue
-            result[cell_ref] = Comment(
-                text=e.get("text", ""),
-                author=e.get("author") or None,
-            )
-        self._comments_cache = result
-        return result
+        return get_comments_map(self)
 
     def _get_hyperlinks_map(self) -> dict[str, Any]:
         """Return ``{cell_ref: Hyperlink}`` for this sheet, cached per instance."""
-        if self._hyperlinks_cache is not None:
-            return self._hyperlinks_cache
-        from wolfxl.worksheet.hyperlink import Hyperlink
-
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._hyperlinks_cache = {}
-            return self._hyperlinks_cache
-        try:
-            entries = wb._rust_reader.read_hyperlinks(self._title)  # noqa: SLF001
-        except Exception:
-            entries = []
-        result: dict[str, Any] = {}
-        for e in entries:
-            cell_ref = e.get("cell")
-            if not cell_ref:
-                continue
-            # Rust marks intra-workbook refs with ``internal=True`` and
-            # puts the destination in ``target``. openpyxl splits the two:
-            # external links use ``target``, internal use ``location``.
-            is_internal = bool(e.get("internal", False))
-            raw_target = e.get("target")
-            hl = Hyperlink(
-                ref=cell_ref,
-                target=None if is_internal else raw_target,
-                location=raw_target if is_internal else None,
-                display=e.get("display") or None,
-                tooltip=e.get("tooltip") or None,
-            )
-            result[cell_ref] = hl
-        self._hyperlinks_cache = result
-        return result
+        return get_hyperlinks_map(self)
 
     # ------------------------------------------------------------------
     # T1 PR2 — Worksheet collections (tables, DVs, conditional formats).
@@ -2057,47 +2011,7 @@ class Worksheet:
         Loaded from the Rust reader on first access. In write mode the
         dict starts empty and is populated by ``add_table()``.
         """
-        if self._tables_cache is not None:
-            return self._tables_cache
-        from wolfxl.worksheet.table import Table, TableColumn, TableStyleInfo
-
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._tables_cache = {}
-            return self._tables_cache
-        try:
-            entries = wb._rust_reader.read_tables(self._title)  # noqa: SLF001
-        except Exception:
-            entries = []
-        result: dict[str, Any] = {}
-        for e in entries:
-            name = e.get("name") or e.get("displayName")
-            if not name:
-                continue
-            style_name = e.get("style") or e.get("style_name")
-            tsi = TableStyleInfo(
-                name=style_name,
-                showRowStripes=bool(e.get("show_row_stripes", False)),
-                showColumnStripes=bool(e.get("show_column_stripes", False)),
-                showFirstColumn=bool(e.get("show_first_column", False)),
-                showLastColumn=bool(e.get("show_last_column", False)),
-            ) if style_name is not None else None
-            cols_raw = e.get("columns") or []
-            tcols = [
-                TableColumn(id=i + 1, name=str(c))
-                for i, c in enumerate(cols_raw)
-            ]
-            result[name] = Table(
-                name=name,
-                displayName=e.get("displayName") or name,
-                ref=e.get("ref", ""),
-                headerRowCount=1 if e.get("header_row", True) else 0,
-                totalsRowCount=1 if e.get("totals_row", False) else 0,
-                tableStyleInfo=tsi,
-                tableColumns=tcols,
-            )
-        self._tables_cache = result
-        return result
+        return get_tables_map(self)
 
     def add_table(self, table: Any) -> None:
         """Attach a table to this worksheet.
@@ -2128,36 +2042,7 @@ class Worksheet:
     @property
     def data_validations(self) -> Any:
         """Return the ``DataValidationList`` for this sheet (lazy-loaded)."""
-        if self._data_validations_cache is not None:
-            return self._data_validations_cache
-        from wolfxl.worksheet.datavalidation import DataValidation, DataValidationList
-
-        wb = self._workbook
-        dvl = DataValidationList(ws=self)
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._data_validations_cache = dvl
-            return dvl
-        try:
-            entries = wb._rust_reader.read_data_validations(self._title)  # noqa: SLF001
-        except Exception:
-            entries = []
-        for e in entries:
-            dvl.dataValidation.append(DataValidation(
-                type=e.get("validation_type") or e.get("type"),
-                operator=e.get("operator"),
-                formula1=e.get("formula1"),
-                formula2=e.get("formula2"),
-                allowBlank=bool(e.get("allow_blank", False)),
-                showErrorMessage=bool(e.get("show_error_message", False)),
-                showInputMessage=bool(e.get("show_input_message", False)),
-                error=e.get("error"),
-                errorTitle=e.get("error_title"),
-                prompt=e.get("prompt"),
-                promptTitle=e.get("prompt_title"),
-                sqref=e.get("range") or e.get("sqref") or "",
-            ))
-        self._data_validations_cache = dvl
-        return dvl
+        return get_data_validations(self)
 
     def add_data_validation(self, dv: Any) -> None:
         """openpyxl-style alias for ``ws.data_validations.append(dv)``."""
@@ -2166,46 +2051,7 @@ class Worksheet:
     @property
     def conditional_formatting(self) -> Any:
         """Return the ``ConditionalFormattingList`` for this sheet."""
-        if self._conditional_formatting_cache is not None:
-            return self._conditional_formatting_cache
-        from wolfxl.formatting import ConditionalFormatting, ConditionalFormattingList
-        from wolfxl.formatting.rule import Rule
-
-        wb = self._workbook
-        cfl = ConditionalFormattingList(ws=self)
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._conditional_formatting_cache = cfl
-            return cfl
-        try:
-            entries = wb._rust_reader.read_conditional_formats(self._title)  # noqa: SLF001
-        except Exception:
-            entries = []
-        # Group by sqref the way openpyxl does — same range = one entry.
-        grouped: dict[str, list[Rule]] = {}
-        order: list[str] = []
-        for e in entries:
-            sqref = e.get("range") or e.get("sqref") or ""
-            if sqref not in grouped:
-                grouped[sqref] = []
-                order.append(sqref)
-            formula = e.get("formula")
-            if formula is None:
-                formula_list: list[str] = []
-            elif isinstance(formula, list):
-                formula_list = [str(f) for f in formula]
-            else:
-                formula_list = [str(formula)]
-            grouped[sqref].append(Rule(
-                type=e.get("rule_type") or e.get("type") or "expression",
-                operator=e.get("operator"),
-                formula=formula_list,
-                stopIfTrue=bool(e.get("stop_if_true", False)),
-                priority=int(e.get("priority", 1)),
-            ))
-        for sqref in order:
-            cfl._append_entry(ConditionalFormatting(sqref=sqref, rules=grouped[sqref]))  # noqa: SLF001
-        self._conditional_formatting_cache = cfl
-        return cfl
+        return get_conditional_formatting(self)
 
     # ------------------------------------------------------------------
     # Flush pending writes to Rust
