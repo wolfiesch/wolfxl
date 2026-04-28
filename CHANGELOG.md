@@ -86,12 +86,12 @@ library in this set with this constructor; keep the public
 - **`docs/migration/openpyxl-migration.md`** — new "Pivot tables
   (Sprint Ν / v2.0)" section covering the 6-line snippet, chart
   linkage, openpyxl→wolfxl import-path mapping, two-step
-  cache + table API explanation, 11 aggregator functions, v2.1+
+  cache + table API explanation, 11 aggregator functions, remaining
   limits, empty-cache caveat.
 - **`docs/migration/compatibility-matrix.md`** — pivot row flips
   ❌ → ✅ with full sub-table covering import paths, public
   APIs, aggregator functions, axis-spec forms, chart linkage,
-  deep-clone, and v2.1+ deferred items. Ecosystem comparison
+  deep-clone, and remaining deferred/partial items. Ecosystem comparison
   gains a Pivots column showing wolfxl as the only compared library
   that constructs pivots with pre-aggregated records.
 - **`tests/parity/KNOWN_GAPS.md`** — "Pivot table construction"
@@ -179,6 +179,8 @@ library in this set with this constructor; keep the public
   workspace tests.
 - `uv run pytest` — 2248 passed, 24 skipped, 10 warnings in the
   2026-04-28 post-branch-mining proof.
+- `uv run --no-sync pytest -q` — 2278 passed, 29 skipped, 10 warnings in
+  the 2026-04-28 post-chart/LibreOffice truth pass.
 - `uv run pytest tests/parity -q -x` — 445 passed, 4 skipped, 1
   warning; pivot ratchet is `wolfxl_supported=True`.
 - Focused pivot coverage includes `tests/test_pivot_construction.py`,

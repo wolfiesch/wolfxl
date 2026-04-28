@@ -145,12 +145,13 @@ field, and emits two XML parts:
   `<x v="N"/>` indices into SharedItems for shared values and
   inline `<n v=42/>` / `<s v="text"/>` for non-shared.
 
-The records emit is the **Option A** differentiator: no other
-Python OOXML library writes the records snapshot from scratch,
-so Excel / LibreOffice / openpyxl all read the pivot's data
-without an Excel-side refresh. (openpyxl preserves records on
-round-trip but doesn't construct them; XlsxWriter doesn't
-support pivots at all.)
+The records emit is the **Option A** differentiator: in the current
+project comparison, no other Python OOXML library has been identified
+that writes the records snapshot from scratch, so Excel / LibreOffice /
+openpyxl all read the pivot's data without an Excel-side refresh.
+(openpyxl preserves records on round-trip but doesn't construct them;
+XlsxWriter doesn't support pivots at all.) Keep any public "first/only"
+wording gated on the final launch truth pass.
 
 The workbook-side splice (`<pivotCaches>` collection in
 `xl/workbook.xml` + a rel of type `pivotCacheDefinition` in
@@ -349,9 +350,9 @@ See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 | Surface | Status | Tooling |
 |---|---|---|
 | Rust unit tests | full workspace green in the post-PR #23 audit | `cargo test --workspace` |
-| Python unit tests | 2230 passed, 24 skipped in the broad post-PR #23 run | `uv run pytest` |
+| Python unit tests | 2278 passed, 29 skipped in the post-chart/LibreOffice truth pass | `uv run --no-sync pytest -q` |
 | openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
-| LibreOffice cross-renderer | Pivot construction fixture renders pivot table + linked chart correctly | `tests/fixtures/pivots/*.xlsx` opened in headless LibreOffice |
+| LibreOffice cross-renderer | 47 opt-in smoke tests passed, including copy_worksheet, array formulas, and pivot-chart render smoke | `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest ...` |
 | openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |

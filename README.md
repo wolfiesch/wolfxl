@@ -155,16 +155,16 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 | `DataValidation`, `Table`, `TableStyleInfo`, `TableColumn` | Read + write (write mode); modify-mode setters T1.5 |
 | `CellIsRule`, `FormulaRule`, `ColorScaleRule`, `DataBarRule`, `IconSetRule` | Read + write (write mode); modify-mode setters T1.5 |
 | `DefinedName`, `DocumentProperties` | Read + write (write mode); modify-mode setters T1.5 |
-| `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Stub (raises `NotImplementedError`) |
+| `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Constructor / dataclass support |
 | `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | **Full support** (1.6+) — 16 chart families incl. 3D / Stock / Surface / ProjectedPie |
 | `Image` (from `wolfxl.drawing.image`) | **Full support** (1.5+) — PNG / JPEG / GIF / BMP, all anchor types |
 | `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — construction + chart linkage + deep-clone |
-| `AutoFilter` | Stub - preserved on modify-mode round-trip |
+| `AutoFilter` | Read + write support |
 | `ws.insert_rows`, `ws.delete_rows` | **Full support** (modify mode, 1.1+) — RFC-030 |
 | `ws.insert_cols`, `ws.delete_cols` | **Full support** (modify mode, 1.1+) — RFC-031 |
 | `ws.move_range` | **Full support** (modify mode, 1.1+) — RFC-034 |
 | `wb.move_sheet` | **Full support** (modify mode, 1.1+) — RFC-036 |
-| `wb.copy_worksheet` | **Full support** (modify mode only, 1.1+) — RFC-035 |
+| `wb.copy_worksheet` | **Full support** (write + modify mode, 1.1+) — RFC-035 |
 
 ## Performance at Scale
 

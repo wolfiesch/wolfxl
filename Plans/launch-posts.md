@@ -4,8 +4,9 @@
 > Sprint Ξ scaffold).
 > Linked from `Plans/rfcs/INDEX.md` (RFC-054) and
 > `docs/release-notes-2.0.md`.
-> SHAs and benchmark numbers are `<!-- TBD -->` until the
-> integrator finalize commit.
+> SHAs and benchmark numbers are `<!-- TBD -->` until the release
+> truth pass reconciles them against the final audited commit and
+> release artifacts.
 > Post-PR #23 audit note: release/public launch remains frozen.
 > Older draft copy described slicers, calculated fields/items,
 > GroupItems, and chart display units/dPt overrides as future work;
@@ -16,6 +17,11 @@ This file holds launch-post drafts for the v2.0.0 public release. They
 must not be posted until benchmark numbers, release SHAs, clean
 artifact smoke, and the final "first/full replacement" wording pass are
 complete.
+
+The body drafts below intentionally preserve bolder launch phrasing for
+editing context; treat any `10×-100×`, "full openpyxl replacement", and
+"first" wording as unsafe until the benchmark and ecosystem-claim proof
+gates are complete.
 
 ---
 
