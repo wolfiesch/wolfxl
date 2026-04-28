@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
-from wolfxl._compat import _make_stub
+from dataclasses import dataclass
+from typing import Any
 
-DifferentialStyle = _make_stub(
-    "DifferentialStyle",
-    "Differential styles are tied to conditional formatting, which wolfxl preserves "
-    "in modify mode but does not construct.",
-)
+
+@dataclass
+class DifferentialStyle:
+    """Conditional-format differential style value object."""
+
+    font: Any = None
+    numFmt: Any = None  # noqa: N815
+    fill: Any = None
+    alignment: Any = None
+    border: Any = None
+    protection: Any = None
+
+    def to_rust_dict(self) -> dict[str, Any]:
+        return {
+            "font": _style_to_dict(self.font),
+            "num_fmt": _style_to_dict(self.numFmt),
+            "fill": _style_to_dict(self.fill),
+            "alignment": _style_to_dict(self.alignment),
+            "border": _style_to_dict(self.border),
+            "protection": _style_to_dict(self.protection),
+        }
+
+
+def _style_to_dict(value: Any) -> dict[str, Any] | Any:
+    if hasattr(value, "to_rust_dict"):
+        return value.to_rust_dict()
+    return value
 
 __all__ = ["DifferentialStyle"]

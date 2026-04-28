@@ -11,8 +11,8 @@ when it queues the image.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from dataclasses import dataclass, field
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # XDR coordinate primitives
@@ -97,17 +97,16 @@ class AbsoluteAnchor:
             self.ext = XDRPositiveSize2D()
 
 
-# ---------------------------------------------------------------------------
-# Pod 2 (RFC-060) — openpyxl-shaped drawing-container shim.
-# ---------------------------------------------------------------------------
+@dataclass
+class SpreadsheetDrawing:
+    """Passive drawing container matching openpyxl's constructor shape."""
 
-from wolfxl._compat import _make_stub  # noqa: E402
-
-SpreadsheetDrawing = _make_stub(
-    "SpreadsheetDrawing",
-    "Wolfxl manages drawings internally on the Worksheet; user-side "
-    "construction is not exposed.",
-)
+    twoCellAnchor: list[Any] = field(default_factory=list)  # noqa: N815
+    oneCellAnchor: list[Any] = field(default_factory=list)  # noqa: N815
+    absoluteAnchor: list[Any] = field(default_factory=list)  # noqa: N815
+    charts: list[Any] = field(default_factory=list)
+    images: list[Any] = field(default_factory=list)
+    _rels: list[Any] = field(default_factory=list)
 
 
 __all__ = [

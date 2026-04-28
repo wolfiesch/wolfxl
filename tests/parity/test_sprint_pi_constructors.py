@@ -60,6 +60,15 @@ SPRINT_PI_LANDED_CONSTRUCTORS: tuple[
     # RFC-065 / Π-delta: workbook calculation + workbook properties.
     ("wolfxl.workbook.properties", "CalcProperties", _construct_no_args),
     ("wolfxl.workbook.properties", "WorkbookProperties", _construct_no_args),
+    ("wolfxl.workbook.child", "_WorkbookChild", _construct_no_args),
+    ("wolfxl.comments.comments", "CommentSheet", _construct_no_args),
+    ("wolfxl.drawing.spreadsheet_drawing", "SpreadsheetDrawing", _construct_no_args),
+    # RFC-064 / Π-gamma: style support types.
+    ("wolfxl.styles", "NamedStyle", _construct_no_args),
+    ("wolfxl.styles", "Protection", _construct_no_args),
+    ("wolfxl.styles", "GradientFill", _construct_no_args),
+    ("wolfxl.styles.fills", "Fill", _construct_no_args),
+    ("wolfxl.styles.differential", "DifferentialStyle", _construct_no_args),
 )
 
 
@@ -178,3 +187,47 @@ def test_workbook_property_dataclasses_export_rust_contract() -> None:
     assert calc.to_rust_dict()["force_full_calc"] is True
     assert props.to_rust_dict()["date1904"] is True
     assert props.to_rust_dict()["code_name"] == "ThisWorkbook"
+
+
+def test_named_style_registry_and_style_helpers() -> None:
+    from wolfxl.styles import GradientFill, NamedStyle, Protection
+    from wolfxl.styles._named_style import _NamedStyleList
+    from wolfxl.styles.differential import DifferentialStyle
+    from wolfxl.styles.fills import Fill
+
+    from wolfxl import PatternFill
+
+    registry = _NamedStyleList()
+    custom = NamedStyle(
+        name="Metric",
+        fill=PatternFill(fill_type="solid", fgColor="FF00AA00"),
+        protection=Protection(hidden=True),
+    )
+    registry.append(custom)
+
+    assert "Normal" in registry
+    assert registry["Metric"] is custom
+    assert registry.user_styles() == [custom]
+    assert custom.to_rust_dict()["fill"]["patternType"] == "solid"
+    assert custom.to_rust_dict()["protection"] == {"locked": True, "hidden": True}
+    assert GradientFill(stop=["FF0000"]).to_rust_dict()["stop"] == ["FF0000"]
+    assert Fill().to_rust_dict() == {"tagname": None}
+    assert DifferentialStyle(fill=GradientFill()).to_rust_dict()["fill"]["type"] == "linear"
+
+
+def test_remaining_internal_containers_construct_and_mutate() -> None:
+    from wolfxl.comments import Comment
+    from wolfxl.comments.comments import CommentSheet
+    from wolfxl.drawing.spreadsheet_drawing import OneCellAnchor, SpreadsheetDrawing
+    from wolfxl.workbook.child import _WorkbookChild
+
+    child = _WorkbookChild(title="Sheet 1")
+    comments = CommentSheet()
+    drawing = SpreadsheetDrawing(oneCellAnchor=[OneCellAnchor()])
+
+    comments.append(Comment("hello", author="wolfxl"))
+
+    assert child.title == "Sheet 1"
+    assert child.encoding == "utf-8"
+    assert comments.authors == ["wolfxl"]
+    assert len(drawing.oneCellAnchor) == 1

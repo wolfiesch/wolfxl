@@ -1,14 +1,23 @@
-"""``openpyxl.styles.protection`` — cell-protection re-export.
-
-Wolfxl exposes :class:`Protection` as a ``NotImplementedError`` stub on the
-:mod:`wolfxl.styles` package; this module surfaces it under the
-openpyxl-shaped path so import statements port mechanically.
-
-Pod 2 (RFC-060).
-"""
+"""``openpyxl.styles.protection`` — cell-protection value type."""
 
 from __future__ import annotations
 
-from wolfxl.styles import Protection
+from dataclasses import dataclass
+
+
+@dataclass
+class Protection:
+    """Cell protection flags.
+
+    Matches openpyxl's lightweight ``Protection(locked=True, hidden=False)``
+    construction surface. Sheet-level enforcement still lives in
+    ``wolfxl.worksheet.protection.SheetProtection``.
+    """
+
+    locked: bool = True
+    hidden: bool = False
+
+    def to_rust_dict(self) -> dict[str, bool]:
+        return {"locked": self.locked, "hidden": self.hidden}
 
 __all__ = ["Protection"]
