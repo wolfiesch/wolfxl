@@ -7,11 +7,12 @@ _Date: 2026-04-27_
 > manual advanced-pivot/slicer checks, clean release-artifact smoke, and
 > final wording truth pass are complete.
 
-WolfXL 2.0.0 closes the last construction-side gap on the
+WolfXL 2.0.0 closes the tracked construction-side pivot gap on the
 openpyxl-parity roadmap: **pivot tables, pivot caches, and
 pivot-chart linkage**. After 24 RFCs across 9 sprints
-(Δ → Ν), every construction idiom that openpyxl 3.1.x supports
-works with the same Python code.
+(Delta to Nu), the release-candidate surface now covers the project
+parity roadmap, with final public replacement wording still gated on
+the release audit.
 
 The marketing goal shifts from "openpyxl parity for the
 95th-percentile case" (v1.7) toward a full replacement claim, but that
@@ -56,23 +57,17 @@ public wording remains gated on the final audit.
 
 ## Three things you can now do
 
-### 1. Construct a pivot in 6 lines
+### 1. Construct a pivot through modify mode
 
 ```python
 import wolfxl
 from wolfxl.chart import Reference
 from wolfxl.pivot import PivotCache, PivotTable
 
-wb = wolfxl.Workbook()
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 ws = wb.active
 
-# Source data
-ws.append(["region", "quarter", "product", "revenue"])
-ws.append(["NA",     "Q1",      "Widget",  100])
-ws.append(["NA",     "Q2",      "Widget",  120])
-ws.append(["EU",     "Q1",      "Widget",   80])
-ws.append(["EU",     "Q2",      "Widget",   95])
-# ... fill source data ...
+# Source data already exists in the loaded workbook.
 
 src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
 cache = wb.add_pivot_cache(PivotCache(source=src))
@@ -152,6 +147,11 @@ openpyxl all read the pivot's data without an Excel-side refresh.
 (openpyxl preserves records on round-trip but doesn't construct them;
 XlsxWriter doesn't support pivots at all.) Keep any public "first/only"
 wording gated on the final launch truth pass.
+
+Pivot construction currently runs through modify mode
+(`load_workbook(..., modify=True)`) so the patcher can add the
+workbook-level cache rels, content-type overrides, and sheet-level
+pivot table parts in one save.
 
 The workbook-side splice (`<pivotCaches>` collection in
 `xl/workbook.xml` + a rel of type `pivotCacheDefinition` in
@@ -354,6 +354,7 @@ See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 | openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
 | LibreOffice cross-renderer | 47 opt-in smoke tests passed, including copy_worksheet, array formulas, and pivot-chart render smoke | `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest ...` |
 | openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
+| Local release artifact smoke | macOS arm64 CPython 3.14 wheel builds and installs in a fresh venv; import/build_info, write-mode chart save, and modify-mode pivot construction smoke all pass | `uv run --no-sync maturin build --release --out dist` + fresh-venv smoke |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |
 

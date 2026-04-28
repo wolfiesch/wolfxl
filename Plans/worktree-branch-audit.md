@@ -249,6 +249,27 @@ Release-claim branch audit:
   smoke from the published artifact/wheels. The local full-suite proof is
   necessary evidence, not sufficient release evidence.
 
+Local release-artifact smoke, 2026-04-28:
+
+- `uv run --no-sync maturin build --release --out dist` passed and built the
+  macOS arm64 CPython 3.14 wheel
+  `wolfxl-2.0.0-cp314-cp314-macosx_11_0_arm64.whl`.
+- A fresh temporary venv installed that wheel with `openpyxl` and `Pillow`.
+  Import/version smoke passed: `wolfxl.__version__ == "2.0.0"` and
+  `wolfxl._rust.build_info()` reported enabled backends
+  `calamine-styles`, `wolfxl`, and `native`.
+- The fresh-venv artifact smoke created a write-mode chart workbook via
+  `Workbook()`/`add_chart`, reopened it with openpyxl, and confirmed chart
+  parts were present.
+- The same fresh-venv smoke created a modify-mode pivot workbook via
+  `load_workbook(..., modify=True)`, `add_pivot_cache`, and
+  `add_pivot_table`, reopened it with openpyxl, and confirmed both
+  `xl/pivotTables/pivotTable*` and `xl/pivotCache/pivotCacheRecords*` parts
+  were present.
+- This is useful local artifact evidence only. It does not replace CI matrix
+  wheel builds, cross-platform fresh installs, benchmark refresh, or manual
+  Excel/LibreOffice visual checks before publish.
+
 Dependency-modernization branch audit:
 
 - `pyo3-bump` was audited and is superseded by current `main`. No branch port

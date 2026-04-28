@@ -271,7 +271,7 @@ import wolfxl
 from wolfxl.chart import Reference, BarChart
 from wolfxl.pivot import PivotCache, PivotTable
 
-wb = wolfxl.Workbook()
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 ws = wb.active
 ws.append(["region", "quarter", "product", "revenue"])
 ws.append(["NA",     "Q1",      "Widget",  100])
@@ -305,11 +305,12 @@ wb.save("pivot.xlsx")
 
 Open `pivot.xlsx` in Excel, LibreOffice, or read it with
 `openpyxl.load_workbook(...)` — the pivot's data is already
-populated; **no refresh-on-open is required**. WolfXL is the only
-Python OOXML library that constructs pivot tables with
-pre-aggregated `pivotCacheRecords` (openpyxl preserves them on
-round-trip but doesn't construct them; XlsxWriter doesn't support
-pivots at all).
+populated; **no refresh-on-open is required**. In the current project
+comparison, WolfXL is the only Python OOXML library we have identified
+that constructs pivot tables with pre-aggregated `pivotCacheRecords`
+(openpyxl preserves them on round-trip but doesn't construct them;
+XlsxWriter doesn't support pivots at all). Keep public "first/only"
+wording behind the final launch truth pass.
 
 #### Import paths
 
@@ -327,7 +328,8 @@ openpyxl exposes a one-step `ws.add_pivot(table)` (where the
 cache is implied). WolfXL splits cache and table into two steps:
 
 ```python
-# wolfxl — explicit two-step
+# wolfxl — explicit two-step, modify-mode workbook
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 cache = wb.add_pivot_cache(PivotCache(source=src))
 pt    = PivotTable(cache=cache, location="F2", ...)
 ws.add_pivot_table(pt)

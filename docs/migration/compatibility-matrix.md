@@ -84,8 +84,8 @@ benchmarks, and manual advanced-pivot visual checks.
 | `PivotField`, `DataField`, `RowField`, `ColumnField`, `PageField`, `PivotItem` | Supported (`from wolfxl.pivot import ...`) |
 | `Location`, `PivotTableStyleInfo`, `SharedItems`, `CacheField`, `WorksheetSource` | Supported |
 | `Reference` (for the pivot's source range) | Supported (re-uses `wolfxl.chart.Reference`; mirrors openpyxl 3.1.x) |
-| `Workbook.add_pivot_cache(cache)` | Supported (workbook-scoped; one cache can serve N tables) |
-| `Worksheet.add_pivot_table(pt, anchor)` | Supported (sheet-scoped; anchor accepts `"F2"`-style coords) |
+| `Workbook.add_pivot_cache(cache)` | Supported in modify mode (workbook-scoped; one cache can serve N tables) |
+| `Worksheet.add_pivot_table(pt, anchor)` | Supported in modify mode (sheet-scoped; anchor accepts `"F2"`-style coords) |
 | `pivotCacheRecords{N}.xml` emit (pre-aggregated records) | Supported. Among the Python OOXML libraries in this comparison, wolfxl is currently the sole one identified as constructing this part from scratch; keep the public "first/only" wording gated on the final launch truth pass. |
 | 11 aggregator functions (sum / count / average / max / min / product / count_nums / std_dev / std_dev_p / var / var_p) | Supported |
 | Bare-string axis specs (`rows=["region"]`) | Supported |

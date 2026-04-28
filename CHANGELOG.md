@@ -14,7 +14,7 @@ openpyxl-parity roadmap: **pivot tables, pivot caches, and
 pivot-chart linkage**. After 24 RFCs across 9 sprints
 (Δ → Ν), every construction idiom that openpyxl 3.1.x supports
 works with the same Python code in the tracked parity matrix. The
-public "full openpyxl replacement" wording is a release target, not a
+"full openpyxl replacement" wording is a release target, not a
 publishable claim until the final audit closes.
 
 User picked **Option A — full pivot construction** on
@@ -49,13 +49,15 @@ library in this set with this constructor; keep the public
   intersection — that's what makes the pivot open with data
   populated.
 - **`Workbook.add_pivot_cache(cache)`** (RFC-047 §6, Pod-γ).
+  Supported on workbooks opened with `load_workbook(..., modify=True)`.
   Returns the cache id; splices the cache into
   `<pivotCaches>` in `xl/workbook.xml`; adds a rel of type
   `pivotCacheDefinition` in `xl/_rels/workbook.xml.rels`. ID
   allocation goes through `PartIdAllocator` (the same mechanism
   RFC-035 / RFC-046 use).
 - **`Worksheet.add_pivot_table(pt, anchor)`** (RFC-048 §6,
-  Pod-γ). Allocates a fresh `pivotTable{N}.xml`; wires the
+  Pod-γ). Supported on modify-mode worksheets. Allocates a fresh
+  `pivotTable{N}.xml`; wires the
   sheet's rels to the cache's; emits the table XML through
   `file_adds`. Anchor accepts `"F2"`-style coords or the
   RFC-045 anchor helper classes.
@@ -107,7 +109,7 @@ library in this set with this constructor; keep the public
   blocked on benchmark replacement, artifact smoke, and the final
   truth pass.
 - **`README.md` rewrite** — moves to openpyxl-compatible Excel
-  automation with a Rust backend, adds "Pivot tables in 6 lines",
+  automation with a Rust backend, adds modify-mode pivot construction,
   and withholds benchmark headline claims until the v2.0 ExcelBench
   refresh is complete.
 

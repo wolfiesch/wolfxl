@@ -72,16 +72,15 @@ for row in ws.iter_rows(values_only=False):
 wb.close()
 ```
 
-## Pivot tables in 6 lines
+## Pivot tables through modify mode
 
 ```python
 import wolfxl
 from wolfxl.chart import Reference
 from wolfxl.pivot import PivotCache, PivotTable
 
-wb = wolfxl.Workbook()
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 ws = wb.active
-# ... fill source data ...
 src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
 cache = wb.add_pivot_cache(PivotCache(source=src))
 pt = PivotTable(
@@ -94,7 +93,8 @@ wb.save("pivot.xlsx")
 
 WolfXL constructs pivot tables with **pre-aggregated records** —
 pivots open in Excel, LibreOffice, and openpyxl with data populated,
-no refresh-on-open required. In the project comparison below, openpyxl
+through the modify-mode patcher (`load_workbook(..., modify=True)`),
+with no refresh-on-open required. In the project comparison below, openpyxl
 preserves pivots on round-trip but does not provide this constructor,
 and XlsxWriter does not support pivots.
 
@@ -158,7 +158,7 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 | `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Constructor / dataclass support |
 | `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | **Full support** (1.6+) — 16 chart families incl. 3D / Stock / Surface / ProjectedPie |
 | `Image` (from `wolfxl.drawing.image`) | **Full support** (1.5+) — PNG / JPEG / GIF / BMP, all anchor types |
-| `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — construction + chart linkage + deep-clone |
+| `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — modify-mode construction + chart linkage + deep-clone |
 | `AutoFilter` | Read + write support |
 | `ws.insert_rows`, `ws.delete_rows` | **Full support** (modify mode, 1.1+) — RFC-030 |
 | `ws.insert_cols`, `ws.delete_cols` | **Full support** (modify mode, 1.1+) — RFC-031 |
@@ -201,7 +201,7 @@ pivot-table construction.
 
 *openpyxl preserves pivot tables on round-trip but does not provide a
 Python-side constructor that emits the `pivotCacheRecords` snapshot.
-WolfXL's release claim that it is first here is pending the final
+WolfXL's public ecosystem claim here is pending the final
 public-launch truth pass.
 
 Upstream [calamine](https://github.com/tafia/calamine) does not parse styles. WolfXL's read engine uses [calamine-styles](https://crates.io/crates/calamine-styles), a fork that adds Font/Fill/Border/Alignment/NumberFormat extraction from OOXML.
@@ -228,7 +228,10 @@ ws.write_rows(data_grid, start_row=5, start_col=1)
 wb.save("output.xlsx")
 ```
 
-For reads, `iter_rows(values_only=True)` uses a fast bulk path that reads all values in a single Rust call (6.7x faster than openpyxl):
+For reads, `iter_rows(values_only=True)` uses a fast bulk path that
+reads all values in a single Rust call. Historical ExcelBench numbers
+are shown below; the v2.0 release audit is refreshing them before any
+new public speedup headline is made.
 
 ```python
 wb = load_workbook("data.xlsx")
@@ -252,7 +255,7 @@ for record in records:
     print(record["row"], record["column"], record["value"], record.get("number_format"))
 ```
 
-| API | vs openpyxl | How |
+| API | Last audited vs openpyxl | How |
 |-----|-------------|-----|
 | `ws.append(row)` | **3.7x** faster write | Buffers rows, single Rust call at save |
 | `ws.write_rows(grid)` | **3.7x** faster write | Same mechanism, arbitrary start position |
