@@ -88,7 +88,7 @@ def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | 
 
     This lives at module scope so both the write-mode and modify-mode
     flush paths can share it.  The Rust side reconstructs runs via
-    ``py_runs_to_rust`` in ``src/wolfxl/mod.rs``.
+    ``py_runs_to_rust`` in ``src/wolfxl/patcher_payload.rs``.
     """
     out: list[tuple[str, dict[str, Any] | None]] = []
     for item in crt:

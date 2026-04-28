@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 5327 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 5233 | Continue splitting patcher phases, parser helpers, and workbook mutation helpers behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -249,11 +249,10 @@ Phase 0 inventory snapshot, 2026-04-28:
   `apply_axis_shifts_phase`, `apply_sheet_copies_phase`,
   `apply_range_moves_phase`, `rebuild_calc_chain_phase`, and
   `ensure_calc_chain_metadata`.
-- Bottom-of-file parser/render helpers are a second split candidate after pure
-  queue models: `py_runs_to_rust`, `dict_to_format_spec`,
-  `dict_to_border_spec`, `extract_cf_rule`, `extract_dxf_patch`,
-  `parse_workbook_security_payload`, `parse_queued_image_anchor`, and chart
-  drawing render helpers.
+- Bottom-of-file parser/render helpers were the second split track after pure
+  queue models: rich-text, format, border, conditional-format,
+  workbook-security, image-anchor, and chart drawing helpers now live in
+  focused patcher modules.
 
 First no-behavior split target, completed 2026-04-28:
 
@@ -266,11 +265,13 @@ First no-behavior split target, completed 2026-04-28:
    `src/wolfxl/patcher_drawing.rs` on 2026-04-28. Verification completed:
    `cargo test`, `uv run --no-sync maturin develop`, and focused
    image/chart/external-oracle Python tests.
-4. Format, border, conditional-format, workbook-security, and generic dict payload parsers moved
-   into `src/wolfxl/patcher_payload.rs` on 2026-04-28. Verification completed:
-   `cargo test`, `uv run --no-sync maturin develop`, and focused
-   formatting/CF/security/external-oracle Python tests.
-5. Next parser-helper candidate: rich-text run conversion.
+4. Rich-text, format, border, conditional-format, workbook-security, and
+   generic dict payload parsers moved into `src/wolfxl/patcher_payload.rs` on
+   2026-04-28. Verification completed: `cargo test`, `uv run --no-sync
+   maturin develop`, and focused formatting/CF/security/rich-text/external
+   oracle Python tests.
+5. Next helper candidate: workbook-level mutation helpers around sheet copy,
+   workbook relationships, and minimal styles XML.
 
 ## Verification gates
 
