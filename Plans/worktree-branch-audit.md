@@ -324,6 +324,12 @@ Highest-priority recovery branches:
   fields/items, field grouping, PivotArea formatting, pivot CFs, and
   chart-format coverage are already present and included in the focused proof
   above.
+- `feat/sprint-omicron-pod-1a`: audited against current `main`; its branch
+  tip was deferral documentation for unfinished sheet-setup scope. Current
+  `main` already has the closed follow-up doc at
+  `Plans/followups/omicron-pod-1a-deferrals.md`, with Pod 1A.5 marking the
+  native-writer emit, patcher drain, PyO3 parser/bindings, copy-worksheet
+  deep-clone, and tests as landed.
 - `feat/sprint-omicron-pod-1a5`: audited against current `main`; its
   sheet-setup / page-break / autofilter / workbook-security no-op guard
   queues are present in `XlsxPatcher::do_save`, and the focused Python proof
@@ -403,6 +409,92 @@ Highest-priority recovery branches:
   PyO3 0.28 dependency upgrade and `extension-module` feature split are
   already present. Remaining work is warning cleanup / Python 3.14 smoke on a
   fresh branch.
+- `feat/release-1.1-notes-and-fuzz`, `feat/rfc-001-w5-ripout`,
+  `feat/rfc-035-copy-worksheet-spec`, and
+  `feat/rfc-035-bugfixes-and-status`: audited as historical release/RFC
+  collateral. Current `main` already has the RFC-035 spec, v1.1 release notes,
+  rust-xlsxwriter ripout, and later copy-worksheet fixes; no branch-wide port
+  is needed.
+- `feat/sprint-theta-pod-a`, `feat/sprint-theta-pod-b`,
+  `feat/sprint-theta-pod-c`, and `feat/sprint-theta-pod-d`: audited as
+  superseded by current `main`. The useful self-closing `<sheets/>`
+  permissive loader, CDATA-safe splice path, image deep-clone follow-up, and
+  v1.2 release notes are already present. Current copy-worksheet proof is
+  covered by the 127-test RFC-035 focused run above plus the full-suite proof.
+- `feat/sprint-iota-pod-alpha`, `feat/sprint-iota-pod-beta`,
+  `feat/sprint-iota-pod-gamma`, and `feat/sprint-iota-pod-delta`: audited as
+  superseded. Current `main` carries rich-text reads, streaming reads,
+  password reads, and v1.3 release collateral. Focused proof remains in the
+  broad parity/full-suite runs; password read/write surfaces were rechecked
+  in the 145-test trust/surface proof below.
+- `feat/sprint-kappa-pod-alpha`, `feat/sprint-kappa-pod-beta`,
+  `feat/sprint-kappa-pod-gamma`, and `feat/sprint-kappa-pod-delta`: audited
+  as present on current `main`. `.xlsb` / `.xls` value reads, bytes /
+  `BytesIO` / file-like dispatch, format classification, fixtures, and
+  parity tests are present. Focused proof:
+  `uv run --no-sync pytest tests/test_format_dispatch.py
+  tests/parity/test_xlsb_reads.py tests/parity/test_xls_reads.py -q`
+  passed as part of the 145-test trust/surface proof below.
+- `feat/sprint-lambda-pod-alpha`, `feat/sprint-lambda-pod-beta`,
+  `feat/sprint-lambda-pod-gamma`, and `feat/sprint-lambda-pod-delta`:
+  audited as present on current `main`. Write-side Agile encryption,
+  image construction / add-image, streaming datetime hardening, and v1.5
+  release notes are present. A stale trust/docstring truth-pass was ported
+  from repo reality, not by merging the old branch tips.
+- `feat/sprint-mu-pod-alpha`, `feat/sprint-mu-pod-beta`,
+  `feat/sprint-mu-pod-gamma`, `feat/sprint-mu-pod-delta`,
+  `feat/sprint-mu-pod-epsilon`, `feat/sprint-mu-prime-pod-alpha`,
+  `feat/sprint-mu-prime-pod-beta`, `feat/sprint-mu-prime-pod-gamma`, and
+  `feat/sprint-mu-prime-pod-delta`: audited as present on current `main`.
+  Chart construction, modify-mode chart adds, chart fixtures, deep-clone
+  tests, 3D-family tests, and v1.6/v1.6.1 notes are already in-tree. Focused
+  proof included `tests/test_charts_write.py`, `tests/test_charts_3d.py`, and
+  `tests/test_copy_worksheet_chart_deep_clone.py` in the 206-test proof.
+- `feat/sprint-nu-pod-gamma` and `feat/sprint-nu-pod-delta`: audited as
+  present on current `main`. Pivot modify-mode integration, pivot-bearing
+  copy tests, and pivot-chart linkage tests are in-tree. Focused proof
+  included `tests/test_pivot_modify.py`,
+  `tests/test_copy_worksheet_pivot_deep_clone.py`, and
+  `tests/test_pivot_charts.py` in the 206-test proof.
+- `codex/synthgl-cell-records-contract`: audited as superseded. Its branch
+  tip only cached style IDs before record-format population; current `main`
+  already has the same `record_style_id` /
+  `populate_record_format_for_style_id` shape in
+  `src/calamine_styled_backend.rs`.
+- `backup-main-pre-rebase`: audited as historical only. The branch tip is an
+  old pre-workspace snapshot (`feat(read): bulk styled cell records +
+  dimension hardening`) and its branch-wide diff would delete the modern
+  writer/pivot/structural crates, release docs, fixtures, and parity tests.
+  Current `main` already carries the useful `cell_records()` and dimension
+  hardening surfaces.
+
+Trust/docs truth-pass after this branch audit:
+
+```bash
+uv run --no-sync pytest \
+  tests/test_format_dispatch.py tests/parity/test_xlsb_reads.py \
+  tests/parity/test_xls_reads.py tests/test_encrypted_writes.py \
+  tests/parity/test_encrypted_write_parity.py tests/test_images_write.py \
+  tests/test_images_modify.py tests/parity/test_images_parity.py \
+  tests/test_copy_worksheet_deep_clone_images.py tests/test_charts_write.py \
+  tests/test_charts_3d.py tests/test_copy_worksheet_chart_deep_clone.py \
+  tests/test_pivot_modify.py tests/test_copy_worksheet_pivot_deep_clone.py \
+  tests/test_pivot_charts.py -q
+```
+
+Result: 206 passed, 4 skipped, 1 warning.
+
+```bash
+uv run --no-sync pytest \
+  tests/parity/test_surface_smoke.py tests/test_format_dispatch.py \
+  tests/parity/test_xlsb_reads.py tests/parity/test_xls_reads.py \
+  tests/test_encrypted_writes.py tests/parity/test_encrypted_write_parity.py \
+  tests/test_images_write.py tests/test_images_modify.py \
+  tests/parity/test_images_parity.py -q
+```
+
+Result: 145 passed, 3 skipped. `uv run --no-sync ruff check
+python/wolfxl/__init__.py tests/parity/openpyxl_surface.py` passed.
 
 ## Recommended recovery procedure
 

@@ -591,11 +591,10 @@ _UTILS_ENTRIES: tuple[SurfaceEntry, ...] = (
 # closer for them — that's the signal for the integrator to flip the
 # flag and remove the matching KNOWN_GAPS.md row.
 #
-# Sprint Ι: Pods α (rich text), β (streaming), γ (password) closed
-# the first three rows in 1.3 — they're now reflected with
-# ``wolfxl_supported=True`` and a ``shipped-1.3`` tag, kept as
-# regression pins. Phase 5 (.xls / .xlsb) stays open into a future
-# release.
+# Sprint Ι closed rich text, streaming reads, and password reads in
+# 1.3. Sprint Κ closed bytes/file-like dispatch plus .xlsb/.xls reads
+# in 1.4. These rows remain here as regression pins with
+# ``wolfxl_supported=True`` tags instead of live known gaps.
 # ---------------------------------------------------------------------------
 _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
     SurfaceEntry(
@@ -642,8 +641,9 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "is a lazy optional dep (install via "
             "``pip install wolfxl[encrypted]``); decrypted bytes route "
             "through a tempfile to the existing path-based readers. "
-            "Modify mode + password works; saved output is plaintext "
-            "(write-side encryption explicitly raises NotImplementedError). "
+            "Modify mode + password works. Saving without ``password=`` "
+            "emits plaintext; ``Workbook.save(path, password=...)`` "
+            "re-encrypts via the optional write-side encryption path. "
             "The ``(password kwarg)`` annotation is a parametric marker; "
             "the smoke test strips it via ``split(' ')[0]`` and verifies "
             "the bare ``load_workbook`` symbol resolves."

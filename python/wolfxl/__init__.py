@@ -101,9 +101,10 @@ def load_workbook(
         in-memory buffer, then dispatches through the standard reader
         (or patcher, when ``modify=True``). On a non-encrypted file the
         password is silently ignored, matching openpyxl's behaviour.
-        Wrong / missing passwords surface as ``ValueError``. Write-side
-        encryption is **not** supported; saving a workbook opened with
-        ``password=`` produces a plaintext output.
+        Wrong / missing passwords surface as ``ValueError``. Saving without
+        ``password=`` emits plaintext; passing ``password=`` to
+        :meth:`Workbook.save` re-encrypts the output via the optional
+        encryption dependency.
 
     rich_text : bool
         Sprint Ι Pod-α: if True, ``Cell.value`` returns a

@@ -2,32 +2,30 @@
 
 WolfXL targets high-impact openpyxl-style workflows, not complete openpyxl API parity. This page lists concrete gaps so you can evaluate fit before migrating.
 
-## Not yet supported
+## Current hard limits
 
 | Feature | Read | Write | Modify | Notes |
 |---------|:----:|:-----:|:------:|-------|
-| Images (pictures/drawings) | No | No | — | Preserved in modify mode but not accessible via API |
-| Diagonal borders | Partial | Yes | — | Read extracts top/bottom/left/right; diagonal is recognized but fidelity score is 1 |
-| Charts | No | No | — | Preserved untouched in modify mode |
-| Pivot tables | No | No | — | Preserved in modify mode; creation requires Excel |
-| VBA macros | No | No | — | Preserved in modify mode (`.xlsm` files) |
-| DefinedName manipulation | No | No | No | Named ranges can be read; programmatic creation not yet exposed |
-| Print settings | No | No | — | Page setup, margins, headers/footers |
-| Protection (sheet/workbook) | No | No | — | Password-protected files cannot be opened |
-| Rich text (mixed fonts in one cell) | No | No | No | Font applies per-cell, not per-run |
+| `.ods` workbooks | No | No | No | OpenDocument is out of scope. |
+| `.xlsb` / `.xls` writes | No | No | No | Binary and legacy formats are read-only; transcribe to `.xlsx` with a new workbook. |
+| Styles on `.xlsb` / `.xls` reads | No | No | No | Calamine surfaces values and cached formulas, not full style objects for these formats. |
+| VBA macros | Preserve | No | Preserve | `.xlsm` parts survive modify-mode saves, but WolfXL does not inspect or generate VBA. |
+| In-place pivot-table edits | Partial | Partial | Partial | WolfXL can construct pivot caches/tables/charts and copy pivot-bearing sheets; editing arbitrary existing pivot definitions remains limited. |
+| Image replacement/deletion | Partial | Yes | Partial | `Image(...)` and `ws.add_image(...)` are supported; replacing or deleting existing image media is not a public API yet. |
+| Combination / multi-plot charts | Partial | No | Partial | Single-family chart construction is covered; combination charts are deferred. |
+| Diagonal border fidelity | Partial | Yes | Partial | Read recognizes diagonal metadata, but full diagonal style parity is still lower-confidence than top/bottom/left/right borders. |
 
-"Preserved in modify mode" means the feature survives a load-modify-save cycle untouched, even though WolfXL cannot read or create it programmatically.
+"Preserve" means the feature survives a load-modify-save cycle untouched, even
+though WolfXL does not expose a full authoring API for that surface.
 
 ## API surface gaps vs openpyxl
 
-These openpyxl APIs do not have WolfXL equivalents yet:
+These openpyxl APIs are still incomplete or intentionally narrower:
 
-- `ws.add_image()`, `ws.add_chart()`
-- `ws.protection`, `wb.security`
-- `ws.page_setup`, `ws.print_options`
-- `ws.auto_filter` (preserved in modify, not creatable)
-- `ws.conditional_formatting` complex rule builders (basic rules work)
-- `copy_worksheet()`
+- `ws.add_image()` and `ws.add_chart()` support construction, but not public replace/delete operations.
+- `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
+- `.xlsb` / `.xls` workbooks expose value reads only; style accessors raise by design.
+- Existing pivot-table mutation is narrower than construction and copy support.
 
 ## Performance claim guardrails
 
