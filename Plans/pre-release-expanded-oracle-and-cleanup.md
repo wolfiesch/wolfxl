@@ -114,6 +114,14 @@ Implementation checkpoint, 2026-04-28:
   the patcher's atomic `save_in_place()` path and adds a regression test.
 - ExcelBench commit `2de89d2` adds a repeatable local fixture-pack generator:
   `uv run python scripts/generate_external_oracle_fixtures.py`.
+- ExcelBench commit `133d3ab` adds a WolfXL preservation validator for those
+  generated external fixtures.
+- The first ClosedXML truth pass produced a second real WolfXL bug: prefixed
+  worksheet XML such as `<x:c>` received unprefixed inserted cells during
+  modify-mode saves. Openpyxl ignored the un-namespaced marker even though
+  WolfXL's permissive reader saw it. The fix teaches the stream patcher to
+  preserve the worksheet element prefix for inserted/replaced cells and adds a
+  regression test with a prefixed namespace worksheet.
 
 ## Cleanup plan
 

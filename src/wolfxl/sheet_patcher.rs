@@ -108,11 +108,13 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
     let mut current_row_cols_seen: Vec<u32> = Vec::new(); // cols we've seen in current row
     let mut rows_seen: Vec<u32> = Vec::new();
     let mut skip_until_cell_end = false; // skip children of a cell being replaced
+    let mut worksheet_prefix: Option<String> = None;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let tag = e.local_name().as_ref().to_vec();
+                capture_prefix(&mut worksheet_prefix, e.name().as_ref(), &tag);
 
                 if tag == b"sheetData" {
                     in_sheet_data = true;
@@ -125,7 +127,12 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     // Insert any missing rows that should come before this one
                     for &pr in row_patches.keys() {
                         if pr < row_num && !rows_seen.contains(&pr) {
-                            write_new_row(&mut writer, pr, row_patches.get(&pr).unwrap())?;
+                            write_new_row(
+                                &mut writer,
+                                pr,
+                                row_patches.get(&pr).unwrap(),
+                                worksheet_prefix.as_deref(),
+                            )?;
                             rows_seen.push(pr);
                         }
                     }
@@ -146,11 +153,23 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                             // If it's style-only (no value change), preserve the original
                             // children (<v>, <f>, etc.) and only rewrite the <c ...> attrs.
                             if patch.value.is_none() && patch.style_index.is_some() {
-                                write_style_only_cell_start(&mut writer, &cell_ref, e, patch)?;
+                                write_style_only_cell_start(
+                                    &mut writer,
+                                    &cell_ref,
+                                    e,
+                                    patch,
+                                    worksheet_prefix.as_deref(),
+                                )?;
                                 // Do NOT skip children.
                             } else {
                                 // Value patch: replace the entire cell element.
-                                write_patched_cell(&mut writer, &cell_ref, e, patch)?;
+                                write_patched_cell(
+                                    &mut writer,
+                                    &cell_ref,
+                                    e,
+                                    patch,
+                                    worksheet_prefix.as_deref(),
+                                )?;
                                 skip_until_cell_end = true;
                             }
                         } else {
@@ -168,6 +187,7 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
             }
             Ok(Event::Empty(ref e)) => {
                 let tag = e.local_name().as_ref().to_vec();
+                capture_prefix(&mut worksheet_prefix, e.name().as_ref(), &tag);
 
                 if tag == b"row" && in_sheet_data {
                     // Self-closing empty row — handle insertions
@@ -177,7 +197,12 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
 
                     for &pr in row_patches.keys() {
                         if pr < row_num && !rows_seen.contains(&pr) {
-                            write_new_row(&mut writer, pr, row_patches.get(&pr).unwrap())?;
+                            write_new_row(
+                                &mut writer,
+                                pr,
+                                row_patches.get(&pr).unwrap(),
+                                worksheet_prefix.as_deref(),
+                            )?;
                             rows_seen.push(pr);
                         }
                     }
@@ -185,7 +210,7 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
 
                     // If this empty row has patches, expand it
                     if let Some(row_map) = row_patches.get(&row_num) {
-                        write_new_row(&mut writer, row_num, row_map)?;
+                        write_new_row(&mut writer, row_num, row_map, worksheet_prefix.as_deref())?;
                     } else {
                         write_event(&mut writer, Event::Empty(e.to_owned()))?;
                     }
@@ -198,7 +223,13 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
 
                     if let Some(row_map) = current_row.and_then(|r| row_patches.get(&r)) {
                         if let Some(patch) = row_map.get(&col) {
-                            write_patched_cell(&mut writer, &cell_ref, e, patch)?;
+                            write_patched_cell(
+                                &mut writer,
+                                &cell_ref,
+                                e,
+                                patch,
+                                worksheet_prefix.as_deref(),
+                            )?;
                         } else {
                             write_event(&mut writer, Event::Empty(e.to_owned()))?;
                         }
@@ -207,13 +238,17 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     }
                 } else if tag == b"sheetData" {
                     // Empty <sheetData/> — need to insert all rows
-                    let start = BytesStart::new("sheetData");
+                    let sheet_data_name = qname(worksheet_prefix.as_deref(), "sheetData");
+                    let start = BytesStart::new(sheet_data_name.as_str());
                     write_event(&mut writer, Event::Start(start))?;
                     for (&row_num, row_map) in &row_patches {
-                        write_new_row(&mut writer, row_num, row_map)?;
+                        write_new_row(&mut writer, row_num, row_map, worksheet_prefix.as_deref())?;
                         rows_seen.push(row_num);
                     }
-                    write_event(&mut writer, Event::End(BytesEnd::new("sheetData")))?;
+                    write_event(
+                        &mut writer,
+                        Event::End(BytesEnd::new(sheet_data_name.as_str())),
+                    )?;
                 } else {
                     if !skip_until_cell_end {
                         write_event(&mut writer, Event::Empty(e.to_owned()))?;
@@ -233,7 +268,12 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                             for (&col, patch) in row_map.iter() {
                                 if !current_row_cols_seen.contains(&col) {
                                     let cell_ref = col_row_to_a1(col, r);
-                                    write_new_cell(&mut writer, &cell_ref, patch)?;
+                                    write_new_cell(
+                                        &mut writer,
+                                        &cell_ref,
+                                        patch,
+                                        worksheet_prefix.as_deref(),
+                                    )?;
                                 }
                             }
                         }
@@ -244,7 +284,12 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     // Before closing sheetData, insert any remaining rows
                     for (&row_num, row_map) in &row_patches {
                         if !rows_seen.contains(&row_num) {
-                            write_new_row(&mut writer, row_num, row_map)?;
+                            write_new_row(
+                                &mut writer,
+                                row_num,
+                                row_map,
+                                worksheet_prefix.as_deref(),
+                            )?;
                         }
                     }
                     in_sheet_data = false;
@@ -289,8 +334,10 @@ fn write_style_only_cell_start<W: Write>(
     cell_ref: &str,
     original: &BytesStart<'_>,
     patch: &CellPatch,
+    prefix: Option<&str>,
 ) -> Result<(), String> {
-    let mut elem = BytesStart::new("c");
+    let cell_name = qname_for_original(original.name().as_ref(), "c", prefix);
+    let mut elem = BytesStart::new(cell_name.as_str());
 
     // Copy all original attributes except r/s. We'll re-add r and (patched) s.
     for a in original.attributes() {
@@ -327,8 +374,16 @@ fn write_patched_cell<W: Write>(
     cell_ref: &str,
     original: &BytesStart<'_>,
     patch: &CellPatch,
+    prefix: Option<&str>,
 ) -> Result<(), String> {
-    let mut elem = BytesStart::new("c");
+    let original_name = original.name();
+    let effective_prefix = prefix_for_original(original_name.as_ref(), b"c").or(prefix);
+    let cell_name = qname(effective_prefix, "c");
+    let value_name = qname(effective_prefix, "v");
+    let formula_name = qname(effective_prefix, "f");
+    let inline_string_name = qname(effective_prefix, "is");
+
+    let mut elem = BytesStart::new(cell_name.as_str());
     elem.push_attribute(("r", cell_ref));
 
     // Style index: use patch value if set, otherwise preserve original
@@ -371,7 +426,7 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
             // <v>number</v>
-            let v_start = BytesStart::new("v");
+            let v_start = BytesStart::new(value_name.as_str());
             writer
                 .write_event(Event::Start(v_start))
                 .map_err(|e| format!("XML write error: {e}"))?;
@@ -384,10 +439,10 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Text(BytesText::new(&text)))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("v")))
+                .write_event(Event::End(BytesEnd::new(value_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::String(s)) => {
@@ -395,7 +450,7 @@ fn write_patched_cell<W: Write>(
             writer
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
-            let v_start = BytesStart::new("v");
+            let v_start = BytesStart::new(value_name.as_str());
             writer
                 .write_event(Event::Start(v_start))
                 .map_err(|e| format!("XML write error: {e}"))?;
@@ -403,10 +458,10 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Text(BytesText::new(s)))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("v")))
+                .write_event(Event::End(BytesEnd::new(value_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::Boolean(b)) => {
@@ -414,7 +469,7 @@ fn write_patched_cell<W: Write>(
             writer
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
-            let v_start = BytesStart::new("v");
+            let v_start = BytesStart::new(value_name.as_str());
             writer
                 .write_event(Event::Start(v_start))
                 .map_err(|e| format!("XML write error: {e}"))?;
@@ -423,10 +478,10 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Text(BytesText::new(val)))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("v")))
+                .write_event(Event::End(BytesEnd::new(value_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::Formula(f)) => {
@@ -434,7 +489,7 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
             // <f>formula</f> — no <v> (force recalc)
-            let f_start = BytesStart::new("f");
+            let f_start = BytesStart::new(formula_name.as_str());
             writer
                 .write_event(Event::Start(f_start))
                 .map_err(|e| format!("XML write error: {e}"))?;
@@ -442,10 +497,10 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Text(BytesText::new(f)))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("f")))
+                .write_event(Event::End(BytesEnd::new(formula_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::ArrayFormula { ref_range, text }) => {
@@ -453,7 +508,7 @@ fn write_patched_cell<W: Write>(
             writer
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
-            let mut f_start = BytesStart::new("f");
+            let mut f_start = BytesStart::new(formula_name.as_str());
             f_start.push_attribute(("t", "array"));
             f_start.push_attribute(("ref", ref_range.as_str()));
             writer
@@ -463,10 +518,10 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Text(BytesText::new(text)))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("f")))
+                .write_event(Event::End(BytesEnd::new(formula_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::DataTableFormula {
@@ -481,7 +536,7 @@ fn write_patched_cell<W: Write>(
             writer
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
-            let mut f_empty = BytesStart::new("f");
+            let mut f_empty = BytesStart::new(formula_name.as_str());
             f_empty.push_attribute(("t", "dataTable"));
             f_empty.push_attribute(("ref", ref_range.as_str()));
             if *ca {
@@ -503,7 +558,7 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Empty(f_empty))
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
         Some(CellValue::SpillChild) => {
@@ -526,7 +581,7 @@ fn write_patched_cell<W: Write>(
                 .write_event(Event::Start(elem))
                 .map_err(|e| format!("XML write error: {e}"))?;
             let body = wolfxl_writer::rich_text::emit_runs(runs);
-            let raw = format!("<is>{body}</is>");
+            let raw = format!("<{inline_string_name}>{body}</{inline_string_name}>");
             // BytesText would re-escape; we want the run XML emitted
             // verbatim. quick-xml's `Writer::get_mut()` lets us drop in
             // raw bytes between events without breaking the surrounding
@@ -536,7 +591,7 @@ fn write_patched_cell<W: Write>(
                 .write_all(raw.as_bytes())
                 .map_err(|e| format!("XML write error: {e}"))?;
             writer
-                .write_event(Event::End(BytesEnd::new("c")))
+                .write_event(Event::End(BytesEnd::new(cell_name.as_str())))
                 .map_err(|e| format!("XML write error: {e}"))?;
         }
     }
@@ -549,9 +604,10 @@ fn write_new_cell<W: Write>(
     writer: &mut XmlWriter<W>,
     cell_ref: &str,
     patch: &CellPatch,
+    prefix: Option<&str>,
 ) -> Result<(), String> {
     let dummy = BytesStart::new("c");
-    write_patched_cell(writer, cell_ref, &dummy, patch)
+    write_patched_cell(writer, cell_ref, &dummy, patch, prefix)
 }
 
 /// Write a brand-new `<row>` element containing patched cells.
@@ -559,8 +615,10 @@ fn write_new_row<W: Write>(
     writer: &mut XmlWriter<W>,
     row_num: u32,
     cells: &BTreeMap<u32, &CellPatch>,
+    prefix: Option<&str>,
 ) -> Result<(), String> {
-    let mut row_elem = BytesStart::new("row");
+    let row_name = qname(prefix, "row");
+    let mut row_elem = BytesStart::new(row_name.as_str());
     row_elem.push_attribute(("r", row_num.to_string().as_str()));
 
     writer
@@ -569,14 +627,49 @@ fn write_new_row<W: Write>(
 
     for (&col, patch) in cells {
         let cell_ref = col_row_to_a1(col, row_num);
-        write_new_cell(writer, &cell_ref, patch)?;
+        write_new_cell(writer, &cell_ref, patch, prefix)?;
     }
 
     writer
-        .write_event(Event::End(BytesEnd::new("row")))
+        .write_event(Event::End(BytesEnd::new(row_name.as_str())))
         .map_err(|e| format!("XML write error: {e}"))?;
 
     Ok(())
+}
+
+fn capture_prefix(prefix: &mut Option<String>, qname: &[u8], local: &[u8]) {
+    if prefix.is_some() {
+        return;
+    }
+    if let Some(found) = prefix_for_original(qname, local) {
+        *prefix = Some(found.to_string());
+    }
+}
+
+fn qname(prefix: Option<&str>, local: &str) -> String {
+    match prefix {
+        Some(prefix) if !prefix.is_empty() => format!("{prefix}:{local}"),
+        _ => local.to_string(),
+    }
+}
+
+fn qname_for_original(qname_bytes: &[u8], local: &str, fallback_prefix: Option<&str>) -> String {
+    let local_bytes = local.as_bytes();
+    qname(
+        prefix_for_original(qname_bytes, local_bytes).or(fallback_prefix),
+        local,
+    )
+}
+
+fn prefix_for_original<'a>(qname: &'a [u8], local: &[u8]) -> Option<&'a str> {
+    if !qname.ends_with(local) {
+        return None;
+    }
+    let prefix_len = qname.len().checked_sub(local.len() + 1)?;
+    if qname.get(prefix_len) != Some(&b':') {
+        return None;
+    }
+    std::str::from_utf8(&qname[..prefix_len]).ok()
 }
 
 /// Parse a cell reference like "B3" into (row=3, col=2) — both 1-based.
@@ -665,6 +758,22 @@ mod tests {
         assert!(result.contains("r=\"C1\""));
         assert!(result.contains("t=\"str\""));
         assert!(result.contains("<v>new</v>"));
+    }
+
+    #[test]
+    fn test_patch_insert_new_cell_preserves_prefixed_namespace() {
+        let xml = r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData><x:row r="1"><x:c r="A1" t="s"><x:v>0</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
+
+        let patches = vec![CellPatch {
+            row: 1,
+            col: 10, // J1 — doesn't exist
+            value: Some(CellValue::String("wolfxl_modify_smoke".to_string())),
+            style_index: None,
+        }];
+
+        let result = patch_worksheet(xml, &patches).unwrap();
+        assert!(result.contains(r#"<x:c r="J1" t="str"><x:v>wolfxl_modify_smoke</x:v></x:c>"#));
+        assert!(!result.contains(r#"<c r="J1""#));
     }
 
     #[test]
