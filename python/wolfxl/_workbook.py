@@ -1983,12 +1983,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_axis_shifts:
-            return
-        for sheet_title, axis, idx, n in self._pending_axis_shifts:
-            patcher.queue_axis_shift(sheet_title, axis, idx, n)
-        self._pending_axis_shifts.clear()
+        _workbook_patcher_flush.flush_pending_axis_shifts_to_patcher(self)
 
     def _flush_pending_range_moves_to_patcher(self) -> None:
         """Drain ``_pending_range_moves`` into the patcher (RFC-034).
@@ -2005,30 +2000,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_range_moves:
-            return
-        for (
-            sheet_title,
-            src_min_col,
-            src_min_row,
-            src_max_col,
-            src_max_row,
-            d_row,
-            d_col,
-            translate,
-        ) in self._pending_range_moves:
-            patcher.queue_range_move(
-                sheet_title,
-                src_min_col,
-                src_min_row,
-                src_max_col,
-                src_max_row,
-                d_row,
-                d_col,
-                translate,
-            )
-        self._pending_range_moves.clear()
+        _workbook_patcher_flush.flush_pending_range_moves_to_patcher(self)
 
     def _flush_pending_sheet_copies_to_patcher(self) -> None:
         """Drain ``_pending_sheet_copies`` into the patcher (RFC-035).
@@ -2044,12 +2016,7 @@ class Workbook:
         so a subsequent ``save()`` on the same workbook doesn't
         double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_sheet_copies:
-            return
-        for src_title, dst_title, deep_copy_images in self._pending_sheet_copies:
-            patcher.queue_sheet_copy(src_title, dst_title, deep_copy_images)
-        self._pending_sheet_copies.clear()
+        _workbook_patcher_flush.flush_pending_sheet_copies_to_patcher(self)
 
     def _flush_defined_names_to_patcher(self) -> None:
         """Drain ``_pending_defined_names`` into the patcher (RFC-021).
@@ -2068,24 +2035,7 @@ class Workbook:
         side's no-op guard is the second line of defence — workbook.xml
         is left untouched if no upserts arrive).
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_defined_names:
-            return
-        for _, dn in self._pending_defined_names.items():
-            payload: dict[str, Any] = {
-                "name": dn.name,
-                "formula": dn.value,
-            }
-            if dn.localSheetId is not None:
-                payload["local_sheet_id"] = dn.localSheetId
-            if dn.hidden:
-                # Only forward when truthy — the Rust side treats
-                # missing-key and `None` as "preserve / omit".
-                payload["hidden"] = True
-            if dn.comment is not None:
-                payload["comment"] = dn.comment
-            patcher.queue_defined_name(payload)
-        self._pending_defined_names.clear()
+        _workbook_patcher_flush.flush_defined_names_to_patcher(self)
 
     def _flush_security_to_patcher(self) -> None:
         """Drain ``_security`` / ``_file_sharing`` into the patcher (RFC-058).
@@ -2097,12 +2047,7 @@ class Workbook:
         Empty (no setter ever ran) ⇒ no-op; the patcher leaves
         workbook.xml byte-identical with the source.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_security_update:
-            return
-        payload = self._build_security_dict()
-        patcher.queue_workbook_security(payload)
-        self._pending_security_update = False
+        _workbook_patcher_flush.flush_security_to_patcher(self)
 
     def _build_security_dict(self) -> dict[str, Any]:
         """Return the RFC-058 §10 flat dict for the workbook's security blocks.
@@ -2111,16 +2056,7 @@ class Workbook:
         slots). Always returns a dict — never ``None`` — so callers can
         unconditionally forward to the Rust side.
         """
-        return {
-            "workbook_protection": (
-                self._security.to_dict() if self._security is not None else None
-            ),
-            "file_sharing": (
-                self._file_sharing.to_dict()
-                if self._file_sharing is not None
-                else None
-            ),
-        }
+        return _workbook_patcher_flush.build_security_dict(self)
 
     def _flush_pending_sheet_moves_to_patcher(self, name: str, offset: int) -> None:
         """Queue a single sheet-reorder on the patcher (RFC-036).
@@ -2159,40 +2095,7 @@ class Workbook:
         ``1970-01-01T00:00:00Z`` for byte-identical save tests). If the
         user explicitly set ``props.modified``, that value wins.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        props = self._properties_cache
-        if props is None:
-            self._properties_dirty = False
-            return
-        # Per-field "user explicitly set this" set, populated by
-        # ``DocumentProperties.__setattr__`` after ``_attach_workbook``.
-        # Used below to decide whether to forward ``modified``: by
-        # default a dirty save re-stamps it to save-time (Rust side),
-        # which is what users expect. The cache hydrates ``modified``
-        # from the source on first ``wb.properties`` read — we'd
-        # otherwise echo the source's old timestamp forever.
-        user_set: set[str] = getattr(props, "_user_set", set())
-        modified_iso: str | None = None
-        if "modified" in user_set and props.modified is not None:
-            modified_iso = props.modified.isoformat()
-        payload: dict[str, Any] = {
-            "title": props.title,
-            "subject": props.subject,
-            "creator": props.creator,
-            "keywords": props.keywords,
-            "description": props.description,
-            "last_modified_by": props.lastModifiedBy,
-            "category": props.category,
-            "content_status": props.contentStatus,
-            "created_iso": props.created.isoformat() if props.created else None,
-            "modified_iso": modified_iso,
-            "sheet_names": list(self._sheet_names),
-        }
-        payload = {k: v for k, v in payload.items() if v is not None}
-        patcher.queue_properties(payload)
-        self._properties_dirty = False
+        _workbook_patcher_flush.flush_properties_to_patcher(self)
 
     def _flush_workbook_writes(self) -> None:
         """Push workbook-level metadata + defined names into the Rust writer."""

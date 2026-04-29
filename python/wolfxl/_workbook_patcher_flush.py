@@ -153,3 +153,126 @@ def flush_pending_conditional_formats_to_patcher(wb: Any) -> None:
                 _cf_to_patcher_dict(sqref, by_sqref[sqref]),
             )
         pending.clear()
+
+
+def flush_pending_axis_shifts_to_patcher(wb: Any) -> None:
+    """Drain pending row/column structural shifts into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not wb._pending_axis_shifts:  # noqa: SLF001
+        return
+    for sheet_title, axis, idx, n in wb._pending_axis_shifts:  # noqa: SLF001
+        patcher.queue_axis_shift(sheet_title, axis, idx, n)
+    wb._pending_axis_shifts.clear()  # noqa: SLF001
+
+
+def flush_pending_range_moves_to_patcher(wb: Any) -> None:
+    """Drain pending range moves into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not wb._pending_range_moves:  # noqa: SLF001
+        return
+    for (
+        sheet_title,
+        src_min_col,
+        src_min_row,
+        src_max_col,
+        src_max_row,
+        d_row,
+        d_col,
+        translate,
+    ) in wb._pending_range_moves:  # noqa: SLF001
+        patcher.queue_range_move(
+            sheet_title,
+            src_min_col,
+            src_min_row,
+            src_max_col,
+            src_max_row,
+            d_row,
+            d_col,
+            translate,
+        )
+    wb._pending_range_moves.clear()  # noqa: SLF001
+
+
+def flush_pending_sheet_copies_to_patcher(wb: Any) -> None:
+    """Drain pending sheet-copy operations into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not wb._pending_sheet_copies:  # noqa: SLF001
+        return
+    for src_title, dst_title, deep_copy_images in wb._pending_sheet_copies:  # noqa: SLF001
+        patcher.queue_sheet_copy(src_title, dst_title, deep_copy_images)
+    wb._pending_sheet_copies.clear()  # noqa: SLF001
+
+
+def flush_defined_names_to_patcher(wb: Any) -> None:
+    """Drain pending workbook defined-name writes into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not wb._pending_defined_names:  # noqa: SLF001
+        return
+    for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
+        payload: dict[str, Any] = {
+            "name": defined_name.name,
+            "formula": defined_name.value,
+        }
+        if defined_name.localSheetId is not None:
+            payload["local_sheet_id"] = defined_name.localSheetId
+        if defined_name.hidden:
+            payload["hidden"] = True
+        if defined_name.comment is not None:
+            payload["comment"] = defined_name.comment
+        patcher.queue_defined_name(payload)
+    wb._pending_defined_names.clear()  # noqa: SLF001
+
+
+def build_security_dict(wb: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for workbook security blocks."""
+    return {
+        "workbook_protection": (
+            wb._security.to_dict() if wb._security is not None else None  # noqa: SLF001
+        ),
+        "file_sharing": (
+            wb._file_sharing.to_dict()  # noqa: SLF001
+            if wb._file_sharing is not None  # noqa: SLF001
+            else None
+        ),
+    }
+
+
+def flush_security_to_patcher(wb: Any) -> None:
+    """Drain workbook security metadata into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not wb._pending_security_update:  # noqa: SLF001
+        return
+    patcher.queue_workbook_security(build_security_dict(wb))
+    wb._pending_security_update = False  # noqa: SLF001
+
+
+def flush_properties_to_patcher(wb: Any) -> None:
+    """Drain dirty workbook document properties into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    props = wb._properties_cache  # noqa: SLF001
+    if props is None:
+        wb._properties_dirty = False  # noqa: SLF001
+        return
+
+    user_set: set[str] = getattr(props, "_user_set", set())
+    modified_iso: str | None = None
+    if "modified" in user_set and props.modified is not None:
+        modified_iso = props.modified.isoformat()
+    payload: dict[str, Any] = {
+        "title": props.title,
+        "subject": props.subject,
+        "creator": props.creator,
+        "keywords": props.keywords,
+        "description": props.description,
+        "last_modified_by": props.lastModifiedBy,
+        "category": props.category,
+        "content_status": props.contentStatus,
+        "created_iso": props.created.isoformat() if props.created else None,
+        "modified_iso": modified_iso,
+        "sheet_names": list(wb._sheet_names),  # noqa: SLF001
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+    patcher.queue_properties(payload)
+    wb._properties_dirty = False  # noqa: SLF001
