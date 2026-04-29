@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +23,14 @@ from wolfxl._worksheet_flush import (
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl._worksheet_patcher_flush import flush_to_patcher
+from wolfxl._worksheet_records import (
+    cached_formula_values as _cached_formula_values,
+    canonical_data_type as _canonical_data_type,  # noqa: F401 - legacy import path
+    iter_cell_records as _iter_cell_records,
+    iter_cell_records_python as _iter_cell_records_python,
+    schema as _infer_worksheet_schema,
+    sheet_visibility as _sheet_visibility,
+)
 from wolfxl._worksheet_writer_flush import flush_to_writer
 from wolfxl._worksheet_write_buffers import (
     batch_write_dicts,
@@ -54,41 +61,6 @@ def _coerce_col_idx(idx: int | str, op: str) -> int:
         raise ValueError(f"{op}: idx must be >= 1, got {idx!r}")
     return i
 
-
-def _canonical_data_type(value: Any) -> str:
-    """Map a Python value to the same canonical label the Rust reader emits.
-
-    Rust's `read_sheet_records` returns `data_type` strings from a closed set
-    (`string` / `number` / `boolean` / `datetime` / `error` / `formula` /
-    `blank`). Overlay/Python-side records must use the same vocabulary so
-    consumers that filter by these tokens see one schema across pure-read
-    mode, modify mode, and pure-write mode.
-
-    A string value beginning with ``=`` is classified as ``"formula"`` to
-    match openpyxl's convention (and Rust's formula_map_cache path) — without
-    this, pending formula edits in modify mode would silently downgrade to
-    plain strings and any consumer counting/filtering formula records would
-    miss them.
-    """
-    if value is None:
-        return "blank"
-    # bool is a subclass of int — check it first or "number" wins.
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "formula" if value.startswith("=") else "string"
-    # All temporal types collapse to "datetime" to match the Rust reader,
-    # whose `data_type_name()` emits a single "datetime" label for both
-    # `Data::DateTime` and `Data::DateTimeIso`. Returning "date" for a
-    # `datetime.date` would produce mixed schemas inside one
-    # `cell_records()` result whenever an overlay edit touched a date
-    # cell — consumers filtering on the documented tokens would silently
-    # miss those records.
-    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
-        return "datetime"
-    return "string"
 
 def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | None]]:
     """Sprint Ι Pod-α: convert a ``CellRichText`` into the Rust-side
@@ -1151,111 +1123,21 @@ class Worksheet:
         ``include_cached_formula_value=True`` to include a ``cached_value`` key
         on formula records that have a saved cached result.
         """
-        if self._workbook._rust_reader is None:  # noqa: SLF001
-            yield from self._iter_cell_records_python(
-                min_row=min_row,
-                max_row=max_row,
-                min_col=min_col,
-                max_col=max_col,
-                include_empty=include_empty,
-                include_coordinate=include_coordinate,
-            )
-            return
-
-        reader = self._workbook._rust_reader  # noqa: SLF001
-        effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
-        overlay = self._collect_pending_overlay()
-        unbounded_sparse_read = (
-            min_row is None
-            and max_row is None
-            and min_col is None
-            and max_col is None
-            and not include_empty
-            and not overlay
+        yield from _iter_cell_records(
+            self,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            data_only=data_only,
+            include_format=include_format,
+            include_empty=include_empty,
+            include_formula_blanks=include_formula_blanks,
+            include_coordinate=include_coordinate,
+            include_style_id=include_style_id,
+            include_extended_format=include_extended_format,
+            include_cached_formula_value=include_cached_formula_value,
         )
-        if unbounded_sparse_read:
-            r_min = c_min = 1
-            r_max = c_max = None
-            range_str = None
-        else:
-            r_min = min_row or 1
-            r_max = max_row or self._max_row()
-            c_min = min_col or 1
-            c_max = max_col or self._max_col()
-            range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
-        records = reader.read_sheet_records(
-            self._title,
-            range_str,
-            effective_data_only,
-            include_format,
-            include_empty,
-            include_formula_blanks,
-            include_coordinate,
-            include_style_id,
-            include_extended_format,
-            include_cached_formula_value,
-        )
-
-        # Modify mode can have pending Python-side edits the Rust reader
-        # can't see. Overlay them on top of the on-disk records so the
-        # iterator reflects current worksheet state, not the last save.
-        # The overlay is only built when something is dirty — pure read
-        # mode pays no extra cost.
-        if not overlay:
-            yield from records
-            return
-
-        seen: set[tuple[int, int]] = set()
-        for record in records:
-            row, col = int(record["row"]), int(record["column"])
-            key = (row, col)
-            if key not in overlay:
-                yield record
-                continue
-            seen.add(key)
-            new_value = overlay[key]
-            if new_value is None and not include_empty:
-                continue
-            patched = dict(record)
-            patched["value"] = new_value
-            patched["data_type"] = _canonical_data_type(new_value)
-            # The on-disk record may carry a "formula" field from the
-            # original cell. After an overlay edit, that field is stale:
-            # a literal-overwrites-formula edit must drop it, and a
-            # formula-overwrites-literal edit must replace it. Strip the
-            # leading "=" to match the Rust reader's convention (formula
-            # text is stored without the prefix; openpyxl writes it back).
-            if isinstance(new_value, str) and new_value.startswith("="):
-                patched["formula"] = new_value[1:]
-            else:
-                patched.pop("formula", None)
-            patched.pop("cached_value", None)
-            yield patched
-
-        # Yield pending edits that were inside the requested range but the
-        # Rust reader didn't return (e.g. empty-on-disk cell user just set).
-        for (row, col), value in overlay.items():
-            if (row, col) in seen:
-                continue
-            if not (r_min <= row <= r_max and c_min <= col <= c_max):
-                continue
-            if value is None and not include_empty:
-                continue
-            extra: dict[str, Any] = {
-                "row": row,
-                "column": col,
-                "value": value,
-                "data_type": _canonical_data_type(value),
-            }
-            # Mirror the patched-overlay branch: a formula string emits the
-            # `formula` key (Rust-style, leading "=" stripped) so consumers
-            # that pull `record["formula"]` for formula cells see the
-            # expression for unsaved edits, not just on-disk records.
-            if isinstance(value, str) and value.startswith("="):
-                extra["formula"] = value[1:]
-            if include_coordinate:
-                extra["coordinate"] = rowcol_to_a1(row, col)
-            yield extra
 
     def _collect_pending_overlay(self) -> dict[tuple[int, int], Any]:
         """Return ``{(row, col): value}`` for cells modified since the last save.
@@ -1308,13 +1190,7 @@ class Worksheet:
         Only formula cells with saved cached values are included; uncached
         template formulas are omitted.
         """
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            return {}
-        values = dict(wb._rust_reader.read_cached_formula_values(self._title))  # noqa: SLF001
-        if not qualified:
-            return values
-        return {f"{self._title}!{cell_ref}": value for cell_ref, value in values.items()}
+        return _cached_formula_values(self, qualified=qualified)
 
     def sheet_visibility(self) -> dict[str, Any]:
         """Return hidden rows/columns and outline levels for this sheet.
@@ -1324,20 +1200,7 @@ class Worksheet:
         ``hidden_rows``, ``hidden_columns``, ``row_outline_levels``, and
         ``column_outline_levels``.
         """
-        if self._sheet_visibility_cache is not None:
-            return self._sheet_visibility_cache
-
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._sheet_visibility_cache = {
-                "hidden_rows": [],
-                "hidden_columns": [],
-                "row_outline_levels": {},
-                "column_outline_levels": {},
-            }
-            return self._sheet_visibility_cache
-        self._sheet_visibility_cache = dict(wb._rust_reader.read_sheet_visibility(self._title))  # noqa: SLF001
-        return self._sheet_visibility_cache
+        return _sheet_visibility(self)
 
     def _iter_cell_records_python(
         self,
@@ -1349,25 +1212,15 @@ class Worksheet:
         include_empty: bool,
         include_coordinate: bool = True,
     ) -> Iterator[dict[str, Any]]:
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-        for row in range(r_min, r_max + 1):
-            for col in range(c_min, c_max + 1):
-                cell = self._get_or_create_cell(row, col)
-                value = cell.value
-                if value is None and not include_empty:
-                    continue
-                record: dict[str, Any] = {
-                    "row": row,
-                    "column": col,
-                    "value": value,
-                    "data_type": _canonical_data_type(value),
-                }
-                if include_coordinate:
-                    record["coordinate"] = rowcol_to_a1(row, col)
-                yield record
+        yield from _iter_cell_records_python(
+            self,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            include_empty=include_empty,
+            include_coordinate=include_coordinate,
+        )
 
     def calculate_dimension(self) -> str:
         """Return the used worksheet range in openpyxl's ``A1:C10`` form."""
@@ -2260,33 +2113,7 @@ class Worksheet:
         are overlaid before inference so unsaved worksheet changes are
         included too.
         """
-        from wolfxl._cell import _UNSET
-        from wolfxl._rust import infer_sheet_schema as _infer_sheet_schema
-
-        max_row = self._max_row()
-        max_col = self._max_col()
-        values: list[list[Any]] = [[None] * max_col for _ in range(max_row)]
-        fmts: list[list[str | None]] = [[None] * max_col for _ in range(max_row)]
-        for record in self.iter_cell_records(
-            include_format=True,
-            include_empty=False,
-            include_coordinate=False,
-        ):
-            r = int(record["row"]) - 1
-            c = int(record["column"]) - 1
-            if r >= max_row or c >= max_col:
-                continue
-            values[r][c] = record.get("value")
-            nf = record.get("number_format")
-            if nf:
-                fmts[r][c] = nf
-        for (row, col), cell in self._cells.items():
-            if row > max_row or col > max_col:
-                continue
-            nf = cell._number_format
-            if nf is not _UNSET and nf:
-                fmts[row - 1][col - 1] = nf
-        return _infer_sheet_schema(values, self._title, fmts)
+        return _infer_worksheet_schema(self)
 
     def __repr__(self) -> str:
         """Return a compact debug representation for this worksheet.
