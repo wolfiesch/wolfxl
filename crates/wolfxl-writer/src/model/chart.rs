@@ -8,7 +8,7 @@
 //! # Coverage
 //!
 //! Common openpyxl-compatible chart families are represented, including
-//! 2D charts, 3D variants, Stock, Surface, and ProjectedPie.
+//! 2D charts, 3D variants, Stock, Surface, and OfPie / projected pie.
 //!
 //! Every sub-feature is an `Option<T>` so absent → no XML element
 //! emitted. Defaults match openpyxl's "leave the attribute off" rule
@@ -19,8 +19,8 @@ use super::image::ImageAnchor;
 
 /// Re-export of [`wolfxl_pivot::PivotSource`] so the chart model owns a
 /// stable name for downstream callers without forcing them to reach into
-/// the pivot crate. The chart crate cannot define this type itself; it
-/// only borrows it as an `Option<PivotSource>` on [`Chart`].
+/// the pivot crate. This module cannot define the type itself; it only
+/// borrows it as an `Option<PivotSource>` on [`Chart`].
 pub use wolfxl_pivot::PivotSource;
 
 /// Top-level chart kind. Each variant maps to one OOXML plot-area
@@ -1140,27 +1140,62 @@ mod tests {
 
     #[test]
     fn chart_kind_plot_element_names() {
-        assert_eq!(ChartKind::Bar.plot_element_name(), "barChart");
-        assert_eq!(ChartKind::Line.plot_element_name(), "lineChart");
-        assert_eq!(ChartKind::Pie.plot_element_name(), "pieChart");
-        assert_eq!(ChartKind::Doughnut.plot_element_name(), "doughnutChart");
-        assert_eq!(ChartKind::Area.plot_element_name(), "areaChart");
-        assert_eq!(ChartKind::Scatter.plot_element_name(), "scatterChart");
-        assert_eq!(ChartKind::Bubble.plot_element_name(), "bubbleChart");
-        assert_eq!(ChartKind::Radar.plot_element_name(), "radarChart");
+        let cases = [
+            (ChartKind::Bar, "barChart"),
+            (ChartKind::Line, "lineChart"),
+            (ChartKind::Pie, "pieChart"),
+            (ChartKind::Doughnut, "doughnutChart"),
+            (ChartKind::Area, "areaChart"),
+            (ChartKind::Scatter, "scatterChart"),
+            (ChartKind::Bubble, "bubbleChart"),
+            (ChartKind::Radar, "radarChart"),
+            (ChartKind::Bar3D, "bar3DChart"),
+            (ChartKind::Line3D, "line3DChart"),
+            (ChartKind::Pie3D, "pie3DChart"),
+            (ChartKind::Area3D, "area3DChart"),
+            (ChartKind::Surface, "surfaceChart"),
+            (ChartKind::Surface3D, "surface3DChart"),
+            (ChartKind::Stock, "stockChart"),
+            (ChartKind::OfPie, "ofPieChart"),
+        ];
+        for (kind, element_name) in cases {
+            assert_eq!(kind.plot_element_name(), element_name);
+        }
     }
 
     #[test]
     fn chart_kind_axis_classification() {
-        assert!(ChartKind::Bar.has_category_axis());
-        assert!(ChartKind::Line.has_category_axis());
-        assert!(!ChartKind::Pie.has_category_axis());
-        assert!(!ChartKind::Pie.has_dual_value_axes());
-        assert!(ChartKind::Pie.is_axis_free());
-        assert!(ChartKind::Doughnut.is_axis_free());
-        assert!(ChartKind::Scatter.has_dual_value_axes());
-        assert!(ChartKind::Bubble.has_dual_value_axes());
-        assert!(!ChartKind::Bar.has_dual_value_axes());
+        for kind in [
+            ChartKind::Bar,
+            ChartKind::Line,
+            ChartKind::Area,
+            ChartKind::Radar,
+            ChartKind::Bar3D,
+            ChartKind::Line3D,
+            ChartKind::Area3D,
+            ChartKind::Surface,
+            ChartKind::Surface3D,
+            ChartKind::Stock,
+        ] {
+            assert!(kind.has_category_axis(), "{kind:?}");
+            assert!(!kind.has_dual_value_axes(), "{kind:?}");
+            assert!(!kind.is_axis_free(), "{kind:?}");
+        }
+        for kind in [ChartKind::Scatter, ChartKind::Bubble] {
+            assert!(!kind.has_category_axis(), "{kind:?}");
+            assert!(kind.has_dual_value_axes(), "{kind:?}");
+            assert!(!kind.is_axis_free(), "{kind:?}");
+        }
+        for kind in [
+            ChartKind::Pie,
+            ChartKind::Doughnut,
+            ChartKind::Pie3D,
+            ChartKind::OfPie,
+        ] {
+            assert!(!kind.has_category_axis(), "{kind:?}");
+            assert!(!kind.has_dual_value_axes(), "{kind:?}");
+            assert!(kind.is_axis_free(), "{kind:?}");
+        }
     }
 
     #[test]

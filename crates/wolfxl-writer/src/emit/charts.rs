@@ -20,7 +20,7 @@
 //!       [varyColors?]
 //!       <ser>+
 //!       [gapWidth? / overlap? / holeSize? / scatterStyle? / radarStyle? / ...]
-//!       <axId>+   <!-- 0 axis ids for Pie, 2 for Bar/Line/Area/Radar/Scatter/Bubble -->
+//!       <axId>*   <!-- omitted for axis-free families; otherwise two axis ids -->
 //!     </{kind}Chart>
 //!     [catAx?] [valAx?] [dateAx?] [serAx?]
 //!   </plotArea>
@@ -63,9 +63,7 @@ const C_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const A_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const R_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-/// Emit `xl/charts/chartN.xml` bytes from `chart`. `axis_id_a` and
-/// `axis_id_b` are the per-chart axis ids (typically 1-based, distinct
-/// within a chart). Pie/Doughnut ignore them.
+/// Emit `xl/charts/chartN.xml` bytes from `chart`.
 pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
     // Allocate axis ids deterministically — they only need to be
     // unique within this chart. Use 10 + 100 like openpyxl's golden
