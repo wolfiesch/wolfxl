@@ -23,6 +23,7 @@ from wolfxl._worksheet_flush import (
     flush_compat_properties,
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
+from wolfxl._worksheet_patcher_flush import flush_to_patcher
 from wolfxl._worksheet_write_buffers import (
     batch_write_dicts,
     extract_non_batchable,
@@ -2395,87 +2396,16 @@ class Worksheet:
         alignment_to_format_dict: Any, border_to_rust_dict: Any,
     ) -> None:
         """Flush dirty cells to the XlsxPatcher backend (modify mode)."""
-        from wolfxl._cell import _UNSET
-        from wolfxl.cell.rich_text import CellRichText
-
-        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
-
-        # RFC-057: emit spill-child placeholders too — they are NOT in
-        # ``self._dirty`` because no Cell object was ever instantiated
-        # for them, only the master cell triggered the
-        # ``_populate_spill_placeholders`` map population.
-        spill_children: set[tuple[int, int]] = {
-            key
-            for key, (kind, _payload) in self._pending_array_formulas.items()
-            if kind == "spill_child" and key not in self._dirty
-        }
-
-        for row, col in self._dirty:
-            cell = self._cells.get((row, col))
-            if cell is None:
-                continue
-            coord = rowcol_to_a1(row, col)
-
-            if cell._value_dirty:  # noqa: SLF001
-                val = cell._value  # noqa: SLF001
-                if isinstance(val, ArrayFormula):
-                    patcher.queue_array_formula(
-                        self._title,
-                        coord,
-                        {
-                            "kind": "array",
-                            "ref": val.ref,
-                            "text": val.text,
-                        },
-                    )
-                elif isinstance(val, DataTableFormula):
-                    patcher.queue_array_formula(
-                        self._title,
-                        coord,
-                        {
-                            "kind": "data_table",
-                            "ref": val.ref,
-                            "ca": val.ca,
-                            "dt2D": val.dt2D,
-                            "dtr": val.dtr,
-                            "r1": val.r1,
-                            "r2": val.r2,
-                        },
-                    )
-                elif isinstance(val, CellRichText):
-                    runs_payload = _cellrichtext_to_runs_payload(val)
-                    patcher.queue_rich_text_value(self._title, coord, runs_payload)
-                else:
-                    payload = python_value_to_payload(val)
-                    patcher.queue_value(self._title, coord, payload)
-
-            if cell._format_dirty:  # noqa: SLF001
-                fmt: dict[str, Any] = {}
-
-                if cell._font is not _UNSET and cell._font is not None:  # noqa: SLF001
-                    fmt.update(font_to_format_dict(cell._font))  # noqa: SLF001
-                if cell._fill is not _UNSET and cell._fill is not None:  # noqa: SLF001
-                    fmt.update(fill_to_format_dict(cell._fill))  # noqa: SLF001
-                if cell._alignment is not _UNSET and cell._alignment is not None:  # noqa: SLF001
-                    fmt.update(alignment_to_format_dict(cell._alignment))  # noqa: SLF001
-                if cell._number_format is not _UNSET and cell._number_format is not None:  # noqa: SLF001
-                    fmt["number_format"] = cell._number_format  # noqa: SLF001
-
-                if fmt:
-                    patcher.queue_format(self._title, coord, fmt)
-
-                if cell._border is not _UNSET and cell._border is not None:  # noqa: SLF001
-                    bdict = border_to_rust_dict(cell._border)  # noqa: SLF001
-                    if bdict:
-                        patcher.queue_border(self._title, coord, bdict)
-
-        for (row, col) in spill_children:
-            coord = rowcol_to_a1(row, col)
-            patcher.queue_array_formula(
-                self._title,
-                coord,
-                {"kind": "spill_child"},
-            )
+        flush_to_patcher(
+            self,
+            patcher,
+            python_value_to_payload,
+            font_to_format_dict,
+            fill_to_format_dict,
+            alignment_to_format_dict,
+            border_to_rust_dict,
+            _cellrichtext_to_runs_payload,
+        )
 
     def _flush_autofilter_post_cells(self, writer: Any) -> None:
         """Flush write-mode auto-filter metadata after cell values."""
