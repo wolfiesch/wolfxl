@@ -107,14 +107,27 @@ def copy_worksheet_write_mode(
     Returns:
         The newly created destination worksheet.
     """
-    from wolfxl._cell import _UNSET
+    _materialize_copy_source(source)
+    dst = create_sheet(wb, new_title)
+    _copy_cells_write_mode(source, dst)
+    _copy_layout_state(source, dst)
+    _copy_autofilter_state(source, dst)
+    _copy_sheet_setup_state(source, dst)
+    _copy_print_titles(source, dst)
+    return dst
 
+
+def _materialize_copy_source(source: Worksheet) -> None:
+    """Materialize pending write buffers before copying a worksheet."""
     if source._append_buffer:  # noqa: SLF001
         source._materialize_append_buffer()  # noqa: SLF001
     if source._bulk_writes:  # noqa: SLF001
         source._materialize_bulk_writes()  # noqa: SLF001
 
-    dst = create_sheet(wb, new_title)
+
+def _copy_cells_write_mode(source: Worksheet, dst: Worksheet) -> None:
+    """Replay dirty write-mode cells from ``source`` onto ``dst``."""
+    from wolfxl._cell import _UNSET
 
     for (row, col), src_cell in source._cells.items():  # noqa: SLF001
         value = src_cell._value  # noqa: SLF001
@@ -143,6 +156,9 @@ def copy_worksheet_write_mode(
         if number_format is not _UNSET:
             dst_cell.number_format = number_format  # type: ignore[assignment]
 
+
+def _copy_layout_state(source: Worksheet, dst: Worksheet) -> None:
+    """Copy row, column, merge, freeze-pane, and print-area state."""
     for r, h in source._row_heights.items():  # noqa: SLF001
         dst._row_heights[r] = h  # noqa: SLF001
     for letter, w in source._col_widths.items():  # noqa: SLF001
@@ -153,11 +169,6 @@ def copy_worksheet_write_mode(
         dst._freeze_panes = source._freeze_panes  # noqa: SLF001
     if source._print_area is not None:  # noqa: SLF001
         dst._print_area = source._print_area  # noqa: SLF001
-
-    _copy_autofilter_state(source, dst)
-    _copy_sheet_setup_state(source, dst)
-    _copy_print_titles(source, dst)
-    return dst
 
 
 def move_sheet(wb: Any, sheet: Worksheet | str, offset: int = 0) -> None:
