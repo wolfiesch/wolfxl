@@ -815,6 +815,12 @@ class Workbook:
 
     @security.setter
     def security(self, value: Any) -> None:
+        """Set workbook protection metadata.
+
+        Args:
+            value: A ``WorkbookProtection`` instance, or ``None`` to clear the
+                in-memory protection block before the next save.
+        """
         from wolfxl.workbook.protection import WorkbookProtection
 
         if value is not None and not isinstance(value, WorkbookProtection):
@@ -837,6 +843,12 @@ class Workbook:
 
     @fileSharing.setter
     def fileSharing(self, value: Any) -> None:  # noqa: N802
+        """Set workbook file-sharing metadata.
+
+        Args:
+            value: A ``FileSharing`` instance, or ``None`` to clear the
+                in-memory file-sharing block before the next save.
+        """
         from wolfxl.workbook.protection import FileSharing
 
         if value is not None and not isinstance(value, FileSharing):
@@ -2444,6 +2456,11 @@ class Workbook:
         self.close()
 
     def __repr__(self) -> str:
+        """Return a compact debug representation for this workbook.
+
+        Returns:
+            A string containing the workbook mode and sheet names.
+        """
         if self._rust_patcher is not None:
             mode = "modify"
         elif self._rust_reader is not None:

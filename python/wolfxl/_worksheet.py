@@ -299,6 +299,12 @@ class Worksheet:
 
     @freeze_panes.setter
     def freeze_panes(self, value: str | None) -> None:
+        """Set the freeze panes cell reference.
+
+        Args:
+            value: The top-left scrollable cell, such as ``"B2"``, or
+                ``None`` to clear frozen panes.
+        """
         self._freeze_panes = value
         # Mirror the mutation onto sheet_view.pane so callers reading
         # ``ws.sheet_view.pane`` after a ``ws.freeze_panes = "B2"``
@@ -335,6 +341,12 @@ class Worksheet:
 
     @page_setup.setter
     def page_setup(self, value: Any) -> None:
+        """Replace the worksheet page setup block.
+
+        Args:
+            value: Page setup object compatible with WolfXL's page setup
+                serializer.
+        """
         self._page_setup = value
 
     @property
@@ -347,6 +359,12 @@ class Worksheet:
 
     @page_margins.setter
     def page_margins(self, value: Any) -> None:
+        """Replace the worksheet page margins block.
+
+        Args:
+            value: Page margins object compatible with WolfXL's page margins
+                serializer.
+        """
         self._page_margins = value
 
     @property
@@ -364,6 +382,12 @@ class Worksheet:
 
     @header_footer.setter
     def header_footer(self, value: Any) -> None:
+        """Replace the worksheet header/footer block.
+
+        Args:
+            value: Header/footer object compatible with WolfXL's
+                header/footer serializer.
+        """
         self._header_footer = value
 
     @property
@@ -397,6 +421,12 @@ class Worksheet:
 
     @sheet_view.setter
     def sheet_view(self, value: Any) -> None:
+        """Replace the worksheet view block.
+
+        Args:
+            value: Sheet view object compatible with WolfXL's sheet view
+                serializer.
+        """
         self._sheet_view = value
 
     @property
@@ -409,6 +439,12 @@ class Worksheet:
 
     @protection.setter
     def protection(self, value: Any) -> None:
+        """Replace the worksheet protection block.
+
+        Args:
+            value: Sheet protection object compatible with WolfXL's sheet
+                protection serializer.
+        """
         self._protection = value
 
     # ------------------------------------------------------------------
@@ -425,6 +461,11 @@ class Worksheet:
 
     @row_breaks.setter
     def row_breaks(self, value: Any) -> None:
+        """Replace the horizontal page-break collection.
+
+        Args:
+            value: Page break collection for row breaks.
+        """
         self._row_breaks = value
 
     @property
@@ -437,6 +478,11 @@ class Worksheet:
 
     @col_breaks.setter
     def col_breaks(self, value: Any) -> None:
+        """Replace the vertical page-break collection.
+
+        Args:
+            value: Page break collection for column breaks.
+        """
         self._col_breaks = value
 
     @property
@@ -446,6 +492,11 @@ class Worksheet:
 
     @page_breaks.setter
     def page_breaks(self, value: Any) -> None:
+        """Set the openpyxl row-break alias.
+
+        Args:
+            value: Page break collection assigned to ``row_breaks``.
+        """
         self._row_breaks = value
 
     @property
@@ -458,6 +509,12 @@ class Worksheet:
 
     @sheet_format.setter
     def sheet_format(self, value: Any) -> None:
+        """Replace the sheet format properties block.
+
+        Args:
+            value: Sheet format properties object compatible with WolfXL's
+                sheet format serializer.
+        """
         self._sheet_format = value
 
     @property
@@ -504,6 +561,12 @@ class Worksheet:
 
     @print_title_rows.setter
     def print_title_rows(self, value: str | None) -> None:
+        """Set repeat rows for printed pages.
+
+        Args:
+            value: Row range string such as ``"1:3"``, or ``None`` to clear
+                repeat rows.
+        """
         if value is not None:
             from wolfxl.worksheet.print_settings import RowRange
             # Validate and normalize.
@@ -518,6 +581,12 @@ class Worksheet:
 
     @print_title_cols.setter
     def print_title_cols(self, value: str | None) -> None:
+        """Set repeat columns for printed pages.
+
+        Args:
+            value: Column range string such as ``"A:C"``, or ``None`` to clear
+                repeat columns.
+        """
         if value is not None:
             from wolfxl.worksheet.print_settings import ColRange
             self._print_title_cols = str(ColRange.from_string(value))
@@ -592,6 +661,12 @@ class Worksheet:
 
     @print_area.setter
     def print_area(self, value: str | None) -> None:
+        """Set the worksheet print area.
+
+        Args:
+            value: A worksheet range string, or ``None`` to clear the print
+                area.
+        """
         self._print_area = value
 
     # ------------------------------------------------------------------
@@ -2534,4 +2609,9 @@ class Worksheet:
         return _infer_sheet_schema(values, self._title, fmts)
 
     def __repr__(self) -> str:
+        """Return a compact debug representation for this worksheet.
+
+        Returns:
+            A string containing the worksheet title.
+        """
         return f"<Worksheet [{self._title}]>"
