@@ -9,8 +9,8 @@ use zip::ZipArchive;
 
 use crate::ooxml_util;
 
-use super::patcher_workbook::minimal_styles_xml;
-use super::{autofilter, autofilter_helpers, sheet_patcher, XlsxPatcher};
+use super::patcher_workbook::{load_or_empty_rels, minimal_styles_xml, sheet_rels_path_for};
+use super::{autofilter, autofilter_helpers, hyperlinks, sheet_patcher, XlsxPatcher};
 use sheet_patcher::CellPatch;
 use wolfxl_merger::SheetBlock;
 
@@ -92,6 +92,53 @@ pub(super) fn apply_conditional_formatting_phase(
         };
         let updated = super::conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
         *styles_xml = Some(updated);
+    }
+
+    Ok(())
+}
+
+pub(super) fn apply_hyperlinks_phase(
+    patcher: &mut XlsxPatcher,
+    local_blocks: &mut HashMap<String, Vec<SheetBlock>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let sheet_order_local: Vec<String> = patcher.sheet_order.clone();
+    for sheet_name in &sheet_order_local {
+        let ops = match patcher.queued_hyperlinks.get(sheet_name) {
+            Some(o) if !o.is_empty() => o.clone(),
+            _ => continue,
+        };
+        let sheet_path = match patcher.sheet_paths.get(sheet_name).cloned() {
+            Some(p) => p,
+            None => continue,
+        };
+        let rels_path = sheet_rels_path_for(&sheet_path);
+        patcher
+            .ancillary
+            .populate_for_sheet(zip, sheet_name, &sheet_path)
+            .map_err(|e| {
+                PyIOError::new_err(format!("ancillary populate for '{sheet_name}': {e}"))
+            })?;
+        if !patcher.rels_patches.contains_key(&rels_path) {
+            let graph = load_or_empty_rels(zip, &rels_path)?;
+            patcher.rels_patches.insert(rels_path.clone(), graph);
+        }
+        let rels = patcher
+            .rels_patches
+            .get_mut(&rels_path)
+            .expect("just inserted above");
+        let xml = ooxml_util::zip_read_to_string(zip, &sheet_path)?;
+        let existing = hyperlinks::extract_hyperlinks(xml.as_bytes(), rels);
+        let had_existing = !existing.is_empty();
+        let (block_bytes, _deleted_rids) = hyperlinks::build_hyperlinks_block(existing, &ops, rels);
+
+        if block_bytes.is_empty() && !had_existing {
+            continue;
+        }
+        local_blocks
+            .entry(sheet_path)
+            .or_default()
+            .push(SheetBlock::Hyperlinks(block_bytes));
     }
 
     Ok(())

@@ -1872,46 +1872,7 @@ impl XlsxPatcher {
         // Cloning `sheet_order` into a local Vec sidesteps the
         // immutable-borrow-on-self-while-mutating-self.{ancillary,
         // rels_patches} conflict (same trick as Phase 2.5d).
-        let sheet_order_local: Vec<String> = self.sheet_order.clone();
-        for sheet_name in &sheet_order_local {
-            let ops = match self.queued_hyperlinks.get(sheet_name) {
-                Some(o) if !o.is_empty() => o.clone(),
-                _ => continue,
-            };
-            let sheet_path = match self.sheet_paths.get(sheet_name).cloned() {
-                Some(p) => p,
-                None => continue, // unknown sheet name — silently skip
-            };
-            let rels_path = sheet_rels_path_for(&sheet_path);
-            self.ancillary
-                .populate_for_sheet(&mut zip, sheet_name, &sheet_path)
-                .map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!(
-                        "ancillary populate for '{sheet_name}': {e}"
-                    ))
-                })?;
-            if !self.rels_patches.contains_key(&rels_path) {
-                let g = load_or_empty_rels(&mut zip, &rels_path)?;
-                self.rels_patches.insert(rels_path.clone(), g);
-            }
-            let rels = self
-                .rels_patches
-                .get_mut(&rels_path)
-                .expect("just inserted above");
-            let xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
-            let existing = hyperlinks::extract_hyperlinks(xml.as_bytes(), rels);
-            let had_existing = !existing.is_empty();
-            let (block_bytes, _deleted_rids) =
-                hyperlinks::build_hyperlinks_block(existing, &ops, rels);
-            // No-op if there was nothing to delete and nothing to add.
-            if block_bytes.is_empty() && !had_existing {
-                continue;
-            }
-            local_blocks
-                .entry(sheet_path.clone())
-                .or_default()
-                .push(SheetBlock::Hyperlinks(block_bytes));
-        }
+        patcher_sheet_blocks::apply_hyperlinks_phase(self, &mut local_blocks, &mut zip)?;
 
         // --- Phase 2.5f: Tables (RFC-024) ---
         //
@@ -1946,6 +1907,7 @@ impl XlsxPatcher {
         // sheet flushes still see each others' allocations and
         // collisions surface deterministically. (Same trick as the
         // CF cross-sheet dxfId counter in Phase 2.5b.)
+        let sheet_order_local: Vec<String> = self.sheet_order.clone();
         if !self.queued_tables.is_empty() {
             let mut tables_inventory = tables::scan_existing_tables(&mut zip)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
