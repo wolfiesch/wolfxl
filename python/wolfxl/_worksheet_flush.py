@@ -8,6 +8,50 @@ if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
 
 
+def flush_worksheet(ws: Worksheet) -> None:
+    """Write all pending worksheet changes to the active Rust backend."""
+    from wolfxl._cell import (
+        alignment_to_format_dict,
+        border_to_rust_dict,
+        fill_to_format_dict,
+        font_to_format_dict,
+        python_value_to_payload,
+    )
+
+    wb = ws._workbook  # noqa: SLF001
+    patcher = wb._rust_patcher  # noqa: SLF001
+    writer = wb._rust_writer  # noqa: SLF001
+
+    if writer is not None:
+        ws._flush_compat_properties(writer)  # noqa: SLF001
+
+    if patcher is not None:
+        if ws._append_buffer:  # noqa: SLF001
+            ws._materialize_append_buffer()  # noqa: SLF001
+        if ws._bulk_writes:  # noqa: SLF001
+            ws._materialize_bulk_writes()  # noqa: SLF001
+        ws._flush_to_patcher(  # noqa: SLF001
+            patcher,
+            python_value_to_payload,
+            font_to_format_dict,
+            fill_to_format_dict,
+            alignment_to_format_dict,
+            border_to_rust_dict,
+        )
+    elif writer is not None:
+        ws._flush_to_writer(  # noqa: SLF001
+            writer,
+            python_value_to_payload,
+            font_to_format_dict,
+            fill_to_format_dict,
+            alignment_to_format_dict,
+            border_to_rust_dict,
+        )
+        ws._flush_autofilter_post_cells(writer)  # noqa: SLF001
+
+    ws._dirty.clear()  # noqa: SLF001
+
+
 def flush_autofilter_post_cells(ws: Worksheet, writer: Any) -> None:
     """Flush the auto-filter after cell values have reached the writer."""
     sheet = ws._title  # noqa: SLF001

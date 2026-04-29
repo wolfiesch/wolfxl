@@ -35,6 +35,7 @@ from wolfxl._worksheet_features import (
 from wolfxl._worksheet_flush import (
     flush_autofilter_post_cells,
     flush_compat_properties,
+    flush_worksheet,
 )
 from wolfxl._worksheet_iteration import (
     iter_cols as _iter_cols,
@@ -1299,42 +1300,8 @@ class Worksheet:
     # ------------------------------------------------------------------
 
     def _flush(self) -> None:
-        """Write all dirty cells to the Rust backend. Called by Workbook.save()."""
-        from wolfxl._cell import (
-            alignment_to_format_dict,
-            border_to_rust_dict,
-            fill_to_format_dict,
-            font_to_format_dict,
-            python_value_to_payload,
-        )
-
-        wb = self._workbook
-        patcher = wb._rust_patcher  # noqa: SLF001
-        writer = wb._rust_writer  # noqa: SLF001
-
-        # Flush openpyxl compat properties to writer
-        if writer is not None:
-            self._flush_compat_properties(writer)
-
-        if patcher is not None:
-            # Modify mode: materialize buffers first (patcher has no batch
-            # API), then flush dirty cells individually.
-            if self._append_buffer:
-                self._materialize_append_buffer()
-            if self._bulk_writes:
-                self._materialize_bulk_writes()
-            self._flush_to_patcher(patcher, python_value_to_payload,
-                                   font_to_format_dict, fill_to_format_dict,
-                                   alignment_to_format_dict, border_to_rust_dict)
-        elif writer is not None:
-            self._flush_to_writer(writer, python_value_to_payload,
-                                  font_to_format_dict, fill_to_format_dict,
-                                  alignment_to_format_dict, border_to_rust_dict)
-            # AutoFilter must be flushed after cells so the evaluator sees the
-            # populated grid.
-            self._flush_autofilter_post_cells(writer)
-
-        self._dirty.clear()
+        """Write all pending changes to the active Rust backend."""
+        flush_worksheet(self)
 
     def _flush_to_writer(
         self, writer: Any, python_value_to_payload: Any,
