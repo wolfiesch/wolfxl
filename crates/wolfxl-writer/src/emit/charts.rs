@@ -41,16 +41,18 @@
 //! Skipping any optional sub-element produces no XML — this matches
 //! openpyxl's "leave it off" rule.
 
+mod pivot;
 mod primitives;
 
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
     DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker,
-    PivotSource, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, Title, TitleRun,
-    Trendline, TrendlineKind, ValueAxis, View3D,
+    RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline,
+    TrendlineKind, ValueAxis, View3D,
 };
 use crate::xml_escape;
 
+use pivot::emit_pivot_source;
 use primitives::{bool_str, fmt_f64, strip_alpha};
 
 const C_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -74,10 +76,8 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
 
     out.push_str("<c:chart>");
 
-    // Sprint Ν Pod-δ — RFC-049 §10. ``<c:pivotSource>`` MUST be the
-    // first child of `<c:chart>` per ECMA-376 Part 1 §21.2.2.27 (the
-    // chart sequence is `pivotSource? title? autoTitleDeleted?
-    // view3D? plotArea legend? plotVisOnly? dispBlanksAs? extLst?`).
+    // Per ECMA-376 Part 1 section 21.2.2.27, pivotSource is the first
+    // optional child in the chart sequence.
     if let Some(ps) = &chart.pivot_source {
         emit_pivot_source(&mut out, ps);
     }
@@ -424,19 +424,6 @@ fn emit_num_ref(out: &mut String, r: &Reference) {
         xml_escape::text(&r.to_formula_string())
     ));
     out.push_str("</c:numRef>");
-}
-
-/// Sprint Ν Pod-δ — RFC-049 §10.1. Emits the chart-level
-/// `<c:pivotSource><c:name>…</c:name><c:fmtId val="…"/></c:pivotSource>`
-/// block. `name` is XML-escaped (per the §2 OOXML spec, the inner
-/// element is text-content, not an attribute).
-fn emit_pivot_source(out: &mut String, ps: &PivotSource) {
-    out.push_str("<c:pivotSource>");
-    out.push_str("<c:name>");
-    out.push_str(&xml_escape::text(&ps.name));
-    out.push_str("</c:name>");
-    out.push_str(&format!("<c:fmtId val=\"{}\"/>", ps.fmt_id));
-    out.push_str("</c:pivotSource>");
 }
 
 fn emit_title(out: &mut String, t: &Title) {
@@ -937,8 +924,8 @@ mod tests {
     use super::*;
     use crate::model::chart::{
         Axis, AxisCommon, AxisPos, CategoryAxis, Chart, ChartKind, DataLabels, ErrorBarType,
-        ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker, MarkerSymbol, Reference,
-        Series, SeriesTitle, Title, Trendline, TrendlineKind, ValueAxis,
+        ErrorBarValType, ErrorBars, Legend, LegendPosition, Marker, MarkerSymbol, PivotSource,
+        Reference, Series, SeriesTitle, Title, Trendline, TrendlineKind, ValueAxis,
     };
     use crate::model::image::ImageAnchor;
     use quick_xml::events::Event;
