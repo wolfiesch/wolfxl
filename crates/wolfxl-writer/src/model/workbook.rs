@@ -37,9 +37,9 @@ pub struct Workbook {
     /// bug that motivated this rewrite.
     pub comment_authors: CommentAuthorTable,
 
-    /// RFC-058 — workbook-level security blocks (`<workbookProtection>`
-    /// and `<fileSharing>`). Both are optional; when both are `None`
-    /// the emitter writes neither element.
+    /// Workbook-level security blocks (`<workbookProtection>` and
+    /// `<fileSharing>`). Both are optional; when both are `None` the
+    /// emitter writes neither element.
     pub security: WorkbookSecurity,
 }
 

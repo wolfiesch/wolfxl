@@ -63,22 +63,21 @@ pub struct Worksheet {
     /// Whether the sheet tab is visible, hidden, or very-hidden.
     pub visibility: SheetVisibility,
 
-    /// Sprint Λ Pod-β (RFC-045) — images attached to this sheet via
-    /// `ws.add_image(img, anchor)`. Drained at emit time into
+    /// Images attached to this sheet via `ws.add_image(img, anchor)`.
+    /// Drained at emit time into
     /// `xl/drawings/drawingN.xml` + `xl/media/imageN.<ext>`.
     pub images: Vec<SheetImage>,
 
-    /// Sprint Μ Pod-α (RFC-046) — charts attached to this sheet. Each
-    /// chart becomes one `xl/charts/chartN.xml` part referenced from
-    /// the sheet's drawing via `<xdr:graphicFrame>`. A sheet can mix
-    /// images and charts in a single drawing.
+    /// Charts attached to this sheet. Each chart becomes one
+    /// `xl/charts/chartN.xml` part referenced from the sheet's drawing
+    /// via `<xdr:graphicFrame>`. A sheet can mix images and charts in a
+    /// single drawing.
     pub charts: Vec<Chart>,
 
-    /// Sprint Ο Pod 1B (RFC-056) — pre-emitted `<autoFilter>` block
-    /// bytes. The native writer doesn't run filter evaluation (no
-    /// existing-cell read-back path); it just splices the XML at
-    /// slot 11 of the worksheet element. Modify mode runs evaluation
-    /// in Phase 2.5o instead.
+    /// Pre-emitted `<autoFilter>` block bytes. The native writer does not
+    /// run filter evaluation (no existing-cell read-back path); it just
+    /// splices the XML at slot 11 of the worksheet element. Modify mode
+    /// runs evaluation in the patcher instead.
     ///
     /// `None` (default) → no `<autoFilter>` block emitted. The
     /// caller (workbook-level coordinator) sets this from the
@@ -86,36 +85,31 @@ pub struct Worksheet {
     /// `wolfxl_autofilter::emit::emit`.
     pub auto_filter_xml: Option<Vec<u8>>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — optional `<sheetView>` override.
-    /// When set, the native writer's `<sheetViews>` slot uses the
-    /// typed spec instead of the legacy hardcoded freeze-pane path.
-    /// `None` keeps the pre-RFC-055 behaviour (default sheet view +
-    /// `Worksheet.freeze` / `Worksheet.split` pane mapping).
+    /// Optional `<sheetView>` override. When set, the native writer's
+    /// `<sheetViews>` slot uses the typed spec instead of the legacy
+    /// hardcoded freeze-pane path. `None` keeps the default sheet view plus
+    /// `Worksheet.freeze` / `Worksheet.split` pane mapping.
     pub views: Option<crate::parse::sheet_setup::SheetViewSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<sheetProtection>` slot 8.
+    /// `<sheetProtection>` slot 8.
     pub protection: Option<crate::parse::sheet_setup::SheetProtectionSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageMargins>` slot 21.
-    /// Overrides the default margins emitted at slot 21.
+    /// `<pageMargins>` slot 21. Overrides the default margins.
     pub page_margins: Option<crate::parse::sheet_setup::PageMarginsSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageSetup>` slot 22.
+    /// `<pageSetup>` slot 22.
     pub page_setup: Option<crate::parse::sheet_setup::PageSetupSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<headerFooter>` slot 23.
+    /// `<headerFooter>` slot 23.
     pub header_footer: Option<crate::parse::sheet_setup::HeaderFooterSpec>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<rowBreaks>` slot 24.
-    /// `None` ⇒ no row-breaks element emitted.
+    /// `<rowBreaks>` slot 24. `None` means no row-breaks element is emitted.
     pub row_breaks: Option<crate::parse::page_breaks::PageBreakList>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<colBreaks>` slot 25.
-    /// `None` ⇒ no col-breaks element emitted.
+    /// `<colBreaks>` slot 25. `None` means no col-breaks element is emitted.
     pub col_breaks: Option<crate::parse::page_breaks::PageBreakList>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<sheetFormatPr>` slot 4.
-    /// `None` ⇒ the writer keeps the legacy hardcoded
+    /// `<sheetFormatPr>` slot 4. `None` means the writer keeps the legacy
     /// `<sheetFormatPr defaultRowHeight="15"/>` emit path.
     pub sheet_format: Option<crate::parse::page_breaks::SheetFormatProperties>,
 }

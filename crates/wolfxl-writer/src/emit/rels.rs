@@ -76,8 +76,8 @@ pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
         TargetMode::Internal,
     );
     next_rid += 1;
-    // Sprint Θ Pod-C3: calcChain rel, only when the workbook has at
-    // least one formula (matches the gate in `emit_xlsx`).
+    // calcChain rel, only when the workbook has at least one formula
+    // (matches the gate in `emit_xlsx`).
     if crate::emit::calc_chain_xml::has_any_formula(wb) {
         g.add_with_id(
             RelId(format!("rId{next_rid}")),
@@ -191,12 +191,12 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     g.serialize()
 }
 
-/// Sprint Λ Pod-β — emit `xl/drawings/_rels/drawingN.xml.rels` for the
-/// drawing part on `sheet_idx`. Each image becomes one `image`
-/// relationship pointing at `../media/imageM.<ext>` where M is the
-/// global image index assigned by the caller (`image_indices` is
-/// parallel to `sheet.images`). Returns the allocated `rId`s in image
-/// order so the drawings emitter can reference them.
+/// Emit `xl/drawings/_rels/drawingN.xml.rels` for image-only drawings.
+///
+/// Each image becomes one `image` relationship pointing at
+/// `../media/imageM.<ext>` where M is the global image index assigned by the
+/// caller (`image_indices` is parallel to `sheet.images`). Returns the
+/// allocated `rId`s in image order so the drawings emitter can reference them.
 pub fn emit_drawing_rels(
     sheet: &crate::model::worksheet::Worksheet,
     image_indices: &[u32],
@@ -215,12 +215,12 @@ pub fn emit_drawing_rels(
     (g.serialize(), rids)
 }
 
-/// Sprint Μ Pod-α (RFC-046) — emit `xl/drawings/_rels/drawingN.xml.rels`
-/// for a drawing that may contain both images and charts. Returns the
-/// rels bytes plus two parallel `Vec<String>` of rIds — one for images
-/// (in `sheet.images` order) and one for charts (in `sheet.charts`
-/// order). Image rels come first so existing image-only sheets keep
-/// their rId allocation stable.
+/// Emit `xl/drawings/_rels/drawingN.xml.rels` for mixed image/chart drawings.
+///
+/// Returns the rels bytes plus two parallel `Vec<String>` of rIds: one for
+/// images (in `sheet.images` order) and one for charts (in `sheet.charts`
+/// order). Image rels come first so existing image-only sheets keep their
+/// rId allocation stable.
 pub fn emit_drawing_rels_with_charts(
     sheet: &crate::model::worksheet::Worksheet,
     image_indices: &[u32],

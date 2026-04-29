@@ -101,8 +101,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         "<fileVersion appName=\"xl\" lastEdited=\"7\" lowestEdited=\"7\" rupBuild=\"10000\"/>",
     );
 
-    // RFC-058: <fileSharing> sits between <fileVersion> and <workbookPr>
-    // per ECMA-376 CT_Workbook child ordering. Empty bytes ⇒ no element.
+    // <fileSharing> sits between <fileVersion> and <workbookPr> per
+    // ECMA-376 CT_Workbook child ordering. Empty bytes mean no element.
     if let Some(spec) = wb.security.file_sharing.as_ref() {
         let bytes = emit_file_sharing(spec);
         if !bytes.is_empty() {
@@ -114,8 +114,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
 
     out.push_str("<workbookPr date1904=\"false\"/>");
 
-    // RFC-058: <workbookProtection> sits between <workbookPr> and
-    // <bookViews>. Empty bytes ⇒ no element.
+    // <workbookProtection> sits between <workbookPr> and <bookViews>.
+    // Empty bytes mean no element.
     if let Some(spec) = wb.security.workbook_protection.as_ref() {
         let bytes = emit_workbook_protection(spec);
         if !bytes.is_empty() {
@@ -459,8 +459,7 @@ mod tests {
         assert!(text.contains("localSheetId=\"1\""), "{text}");
     }
 
-    // 14. RFC-058: <workbookProtection> emits between <workbookPr> and
-    // <bookViews>.
+    // 14. <workbookProtection> emits between <workbookPr> and <bookViews>.
     #[test]
     fn workbook_protection_emitted_between_pr_and_book_views() {
         use crate::parse::workbook_security::{WorkbookProtectionSpec, WorkbookSecurity};
@@ -493,8 +492,7 @@ mod tests {
         assert!(text.contains("lockWindows=\"1\""));
     }
 
-    // 15. RFC-058: <fileSharing> emits between <fileVersion> and
-    // <workbookPr>.
+    // 15. <fileSharing> emits between <fileVersion> and <workbookPr>.
     #[test]
     fn file_sharing_emitted_between_file_version_and_workbook_pr() {
         use crate::parse::workbook_security::{FileSharingSpec, WorkbookSecurity};
@@ -521,7 +519,7 @@ mod tests {
         assert!(text.contains("userName=\"alice\""));
     }
 
-    // 16. RFC-058: empty security ⇒ no new XML elements emitted.
+    // 16. Empty security emits no new XML elements.
     #[test]
     fn empty_security_emits_nothing() {
         let mut wb = Workbook::new();
@@ -533,7 +531,7 @@ mod tests {
         assert!(!text.contains("fileSharing"));
     }
 
-    // 17. RFC-058: both blocks emit at correct positions.
+    // 17. Both security blocks emit at correct positions.
     #[test]
     fn both_security_blocks_canonical_positions() {
         use crate::parse::workbook_security::{

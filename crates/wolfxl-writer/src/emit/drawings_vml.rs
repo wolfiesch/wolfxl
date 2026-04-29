@@ -1,25 +1,25 @@
-//! `xl/drawings/vmlDrawing{N}.vml` emitter — legacy VML anchor shapes for
-//! comment boxes. Wave 3A.
+//! `xl/drawings/vmlDrawing{N}.vml` emitter: legacy VML anchor shapes for
+//! comment boxes.
 //!
 //! VML is an ancient Microsoft XML dialect kept around specifically for
 //! comment boxes and form controls. Modern OOXML uses DrawingML for
 //! everything else, but comments still need VML to show Excel a
 //! yellow-rectangle shape anchored to a cell.
 //!
-//! ## Per-column width handling (Sprint Ι Pod-δ D3)
+//! ## Per-column width handling
 //!
 //! [`compute_margin_with_widths`] mirrors the modify-mode patcher's
 //! `compute_margin_with_widths` in `src/wolfxl/comments.rs`: when a
 //! sheet has a `<cols>` block with overrides, the comment's
 //! `margin-left` is summed from per-column widths (in points) instead
 //! of multiplying by the OOXML default of 48pt. The two helpers must
-//! stay in agreement — see the parity test in
+//! stay in agreement; see the parity test in
 //! `tests/test_native_writer_comments.py`.
 
 use crate::model::worksheet::Worksheet;
 use crate::refs;
 
-/// Default per-column shape origin offset (pt) — assumes Excel's
+/// Default per-column shape origin offset (pt); assumes Excel's
 /// default column width. The math `col0 * COL_WIDTH_PT + ORIGIN_LEFT_PT`
 /// matches `rust_xlsxwriter`'s VML output exactly, so any cell with a
 /// comment lands at the same on-screen position under either backend.

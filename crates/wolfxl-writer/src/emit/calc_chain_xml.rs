@@ -1,4 +1,4 @@
-//! `xl/calcChain.xml` emitter (Sprint Θ Pod-C3).
+//! `xl/calcChain.xml` emitter.
 //!
 //! Walks the workbook's sheets in tab order and emits a `<c r="…" i="…"/>`
 //! entry for every cell holding a `WriteCellValue::Formula`. The result is

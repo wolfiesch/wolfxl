@@ -1,4 +1,4 @@
-//! Sprint Π Pod Π-alpha (RFC-062) page-break slot emitters.
+//! Page-break slot emitters.
 
 pub use crate::parse::page_breaks::{emit_col_breaks, emit_row_breaks, BreakSpec, PageBreakList};
 

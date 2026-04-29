@@ -1,5 +1,5 @@
-//! `xl/worksheets/sheet{N}.xml` emitter — rows, cells, merges, freeze,
-//! columns, print area, and extension hooks for CF/DV. Wave 2B.
+//! `xl/worksheets/sheet{N}.xml` emitter: rows, cells, merges, panes,
+//! columns, print area, and sheet-scope feature blocks.
 //!
 //! # Element ordering
 //!
@@ -29,14 +29,6 @@
 //! `r:id` attributes in `<hyperlink>` elements, or Excel will follow
 //! mismatched rIds and silently drop hyperlink targets.
 //!
-//! # Extension hooks (Wave 3)
-//!
-//! The emitter leaves `// EXT-W3A:`, `// EXT-W3B:`, and `// EXT-W3C:`
-//! marker comments at the three insertion points where Wave 3 agents
-//! plug in comments/VML bridging, tables, conditional formats, and
-//! data validations. Keep them even when the related collections
-//! are empty — Wave 3 may need to emit structural parents.
-
 use crate::intern::SstBuilder;
 use crate::model::format::StylesBuilder;
 use crate::model::worksheet::Worksheet;
@@ -66,17 +58,16 @@ pub fn emit(
 
     // Slot 3: <sheetViews>
     //
-    // RFC-055 §3 (Sprint Ο Pod 1A.5): if the user set a typed
-    // `views` spec on the Worksheet, prefer it; the legacy path is
-    // still used otherwise so freeze/split panes set via
-    // `set_freeze`/`set_split` continue to work.
+    // If the user set a typed `views` spec on the Worksheet, prefer it;
+    // the legacy path is still used otherwise so freeze/split panes set
+    // via `set_freeze`/`set_split` continue to work.
     super::sheet_setup::emit_sheet_views(&mut out, sheet, sheet_idx);
 
     // Slot 4: <sheetFormatPr>
     //
-    // RFC-062: if the user set a typed `sheet_format` spec on the
-    // Worksheet, prefer it; the legacy hardcoded default is still
-    // emitted otherwise so unmodified sheets keep byte-stable.
+    // If the user set a typed `sheet_format` spec on the Worksheet,
+    // prefer it; the legacy hardcoded default is still emitted otherwise
+    // so unmodified sheets keep byte-stable.
     super::sheet_setup::emit_sheet_format(&mut out, sheet);
 
     // Slot 5: <cols> (only if non-empty)
@@ -87,12 +78,12 @@ pub fn emit(
     // Slot 6: <sheetData>
     super::sheet_data::emit(&mut out, sheet, sst);
 
-    // Slot 8: <sheetProtection> — Sprint Ο Pod 1A.5 (RFC-055).
+    // Slot 8: <sheetProtection>
     super::sheet_setup::emit_sheet_protection(&mut out, sheet);
 
-    // Slot 11: <autoFilter> — Sprint Ο Pod 1B (RFC-056). The bytes
-    // are pre-emitted by the workbook-level coordinator from the
-    // Python `ws.auto_filter.to_rust_dict()` payload via
+    // Slot 11: <autoFilter>. The bytes are pre-emitted by the
+    // workbook-level coordinator from the Python
+    // `ws.auto_filter.to_rust_dict()` payload via
     // `wolfxl_autofilter::emit::emit`.
     if let Some(bytes) = &sheet.auto_filter_xml {
         out.push_str(std::str::from_utf8(bytes).unwrap_or(""));
@@ -103,10 +94,10 @@ pub fn emit(
         super::merges::emit(&mut out, sheet);
     }
 
-    // Slot 17: <conditionalFormatting> — EXT-W3C; 0..N elements per spec
+    // Slot 17: <conditionalFormatting>; 0..N elements per spec
     super::conditional_formats::emit(&mut out, sheet);
 
-    // Slot 18: <dataValidations> — EXT-W3C
+    // Slot 18: <dataValidations>
     super::data_validations::emit(&mut out, sheet);
 
     // Slot 19: <hyperlinks> (only if any exist)
@@ -114,30 +105,29 @@ pub fn emit(
         super::hyperlinks::emit(&mut out, sheet);
     }
 
-    // Slot 21: <pageMargins> — RFC-055 typed override or default.
+    // Slot 21: <pageMargins>; typed override or default.
     super::sheet_setup::emit_page_margins(&mut out, sheet);
 
-    // Slot 22: <pageSetup> — RFC-055 (only emitted when set).
+    // Slot 22: <pageSetup>; only emitted when set.
     super::sheet_setup::emit_page_setup(&mut out, sheet);
 
-    // Slot 23: <headerFooter> — RFC-055 (only emitted when set).
+    // Slot 23: <headerFooter>; only emitted when set.
     super::sheet_setup::emit_header_footer(&mut out, sheet);
 
-    // Slot 24: <rowBreaks> — RFC-062 (only emitted when set+non-empty).
-    // Slot 25: <colBreaks> — RFC-062 (only emitted when set+non-empty).
+    // Slot 24: <rowBreaks>; only emitted when set and non-empty.
+    // Slot 25: <colBreaks>; only emitted when set and non-empty.
     super::page_breaks::emit(&mut out, sheet);
 
-    // Slot 30: <drawing r:id="..."/> — Sprint Λ Pod-β (RFC-045);
-    // emitted iff !sheet.images.is_empty(). The rId is appended at
-    // the END of the sheet's rels graph (after comments, vml, tables,
-    // and external hyperlinks) so the existing rId conventions for
-    // those entries are preserved.
+    // Slot 30: <drawing r:id="..."/>. Emitted when the sheet has images or
+    // charts. The rId is appended at the end of the sheet's rels graph
+    // (after comments, vml, tables, and external hyperlinks) so the
+    // existing rId conventions for those entries are preserved.
     super::drawing_refs::emit_drawing(&mut out, sheet);
 
-    // Slot 31: <legacyDrawing> — EXT-W3A; emitted iff !sheet.comments.is_empty(); rId via convention
+    // Slot 31: <legacyDrawing>; emitted when the sheet has comments.
     super::drawing_refs::emit_legacy(&mut out, sheet);
 
-    // Slot 37: <tableParts> — EXT-W3B; one <tablePart r:id=...> per table
+    // Slot 37: <tableParts>; one <tablePart r:id=...> per table
     super::table_parts::emit(&mut out, sheet);
 
     // Slot numbers above match wolfxl_merger::ct_worksheet_order::ECMA_ORDER

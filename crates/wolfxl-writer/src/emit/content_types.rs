@@ -60,9 +60,9 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         ));
     }
 
-    // Sprint Λ Pod-β (RFC-045) — Default Extension entries for any
-    // image extensions used across the workbook. Excel only requires
-    // one per distinct extension. We emit them in stable
+    // Default Extension entries for any image extensions used across
+    // the workbook. Excel only requires one per distinct extension.
+    // We emit them in stable
     // (sheet-order, intra-sheet image-order, dedup) order so two
     // saves of the same workbook produce identical bytes.
     let mut seen_exts: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -124,9 +124,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Λ Pod-β + Sprint Μ Pod-α — per-drawing overrides.
-    // Drawings are numbered globally (1..N) across all sheets, one
-    // drawing per sheet that has at least one image OR chart.
+    // Per-drawing overrides. Drawings are numbered globally (1..N) across
+    // all sheets, one drawing per sheet that has at least one image OR chart.
     let mut drawing_counter: usize = 0;
     for sheet in &wb.sheets {
         if !sheet.images.is_empty() || !sheet.charts.is_empty() {
@@ -138,9 +137,9 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Μ Pod-α (RFC-046) — per-chart overrides. Charts are
-    // numbered globally (1..N) across all sheets in sheet+intra-sheet
-    // order. Each chart becomes one xl/charts/chartN.xml part.
+    // Per-chart overrides. Charts are numbered globally (1..N) across all
+    // sheets in sheet+intra-sheet order. Each chart becomes one
+    // xl/charts/chartN.xml part.
     let mut chart_counter: usize = 0;
     for sheet in &wb.sheets {
         for _chart in &sheet.charts {
@@ -152,9 +151,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Θ Pod-C3: calcChain.xml override, only when the workbook
-    // has at least one formula (matches the emit-side gate in
-    // `emit_xlsx`).
+    // calcChain.xml override, only when the workbook has at least one formula
+    // (matches the emit-side gate in `emit_xlsx`).
     if crate::emit::calc_chain_xml::has_any_formula(wb) {
         out.push_str(&format!(
             "<Override PartName=\"/xl/calcChain.xml\" ContentType=\"{}\"/>",
