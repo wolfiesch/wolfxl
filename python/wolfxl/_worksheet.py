@@ -988,182 +988,129 @@ class Worksheet:
 
     @property
     def _charts(self) -> list[Any]:
-        """Sprint Μ Pod-β (RFC-046) — list of charts queued via ``add_chart``.
+        """Return the charts attached to this worksheet.
 
-        Mirrors ``openpyxl.worksheet.worksheet.Worksheet._charts``. Returns
-        the live pending list so mutations propagate to the next save and
-        ``len(ws._charts)`` works in user code that mirrors openpyxl's
-        read-side behaviour.
+        The returned list is live, matching openpyxl's private ``_charts``
+        compatibility surface. Mutating it affects the next save.
         """
         return self._pending_charts
 
     def add_chart(self, chart: Any, anchor: Any = None) -> None:
-        """Sprint Μ Pod-β (RFC-046) — attach a chart to this worksheet.
+        """Attach a chart to this worksheet.
 
         Mirrors :meth:`openpyxl.worksheet.worksheet.Worksheet.add_chart`.
 
-        Parameters
-        ----------
-        chart : wolfxl.chart.ChartBase subclass
-            The chart to embed (BarChart / LineChart / PieChart / …).
-        anchor : str | None
-            Where to anchor the chart. Accepts an A1-style cell ref
-            (``"D2"``) or ``None`` (defaults to ``"E15"`` to match
-            openpyxl's :class:`ChartBase` default).
+        Args:
+            chart: Chart object to embed, such as a bar, line, or pie chart.
+            anchor: Optional A1-style anchor cell. ``None`` uses the chart's
+                default anchor, matching openpyxl behavior.
 
-        The chart is queued until ``Workbook.save()``, at which point
-        the writer (write mode) or patcher (modify mode) emits the
-        chart/drawing/rels parts.
+        Raises:
+            TypeError: If ``chart`` is not a supported chart object.
+            ValueError: If ``anchor`` is not a valid A1-style cell reference.
         """
         _add_chart(self, chart, anchor)
 
     def add_pivot_table(self, pivot_table: Any) -> None:
-        """Sprint Ν Pod-γ (RFC-048) — anchor a pivot table on this sheet.
+        """Attach a pivot table to this worksheet.
 
-        The pivot table's ``cache`` MUST already be registered on the
-        owning workbook via :meth:`Workbook.add_pivot_cache` (so the
-        cache has a populated ``_cache_id``). The table is queued and
-        drained at ``Workbook.save()`` time via
-        ``_workbook._flush_pending_pivots_to_patcher``.
+        The pivot table's cache must already be registered on the owning
+        workbook with :meth:`Workbook.add_pivot_cache`.
 
         Args:
-            pivot_table: A :class:`wolfxl.pivot.PivotTable` instance.
+            pivot_table: Pivot table object to attach.
 
         Raises:
-            TypeError: If ``pivot_table`` is not a
-                :class:`PivotTable`.
-            ValueError: If the pivot table's cache has not been
-                registered yet (its ``_cache_id`` is ``None``).
+            TypeError: If ``pivot_table`` is not a supported pivot table.
+            ValueError: If the pivot table cache has not been registered.
             RuntimeError: If the workbook is not in modify mode.
         """
         _add_pivot_table(self, pivot_table)
 
     def add_slicer(self, slicer: Any, anchor: str) -> None:
-        """RFC-061 §2.1 — anchor a slicer presentation on this sheet.
+        """Attach a slicer presentation to this worksheet.
 
-        The slicer's ``cache`` MUST already be registered on the
-        workbook via :meth:`Workbook.add_slicer_cache`. The slicer
-        is queued and drained at ``Workbook.save()`` time via
-        ``_workbook._flush_pending_slicers_to_patcher``.
+        The slicer's cache must already be registered on the workbook with
+        :meth:`Workbook.add_slicer_cache`.
 
         Args:
-            slicer: A :class:`wolfxl.pivot.Slicer` instance.
-            anchor: A1-style anchor cell (top-left of the slicer's
-                graphic frame), e.g. ``"H2"``.
+            slicer: Slicer object to attach.
+            anchor: A1-style top-left anchor cell, such as ``"H2"``.
 
         Raises:
-            TypeError: If ``slicer`` is not a Slicer.
-            ValueError: If the slicer's cache has not been registered
-                or ``anchor`` is not a valid A1 string.
+            TypeError: If ``slicer`` is not a supported slicer object.
+            ValueError: If the slicer's cache is not registered or ``anchor``
+                is not a valid A1-style cell reference.
             RuntimeError: If the workbook is not in modify mode.
         """
         _add_slicer(self, slicer, anchor)
 
     @staticmethod
     def _validate_a1_anchor(anchor: str) -> None:
-        """Raise :class:`ValueError` if *anchor* is not a valid A1 cell ref.
+        """Validate an A1-style single-cell anchor.
 
-        Per RFC-046 §10.11.2: ``r"^[A-Z]+[0-9]+$"`` — single cell
-        coordinates only (e.g. ``"E15"``, ``"AA200"``). Range refs and
-        sheet-qualified refs are rejected; pass an anchor object for
-        more complex placements. Excel's column max is ``XFD`` (16384)
-        and row max is 1048576; refs outside those bounds raise.
+        Args:
+            anchor: Cell reference such as ``"E15"`` or ``"AA200"``.
+
+        Raises:
+            ValueError: If ``anchor`` is a range, sheet-qualified reference,
+                malformed cell reference, or outside Excel's worksheet bounds.
         """
         _validate_a1_anchor(anchor)
 
     def remove_chart(self, chart: Any) -> None:
-        """Sprint Ξ (RFC-050) — remove a previously-added chart.
+        """Remove a chart that was previously attached to this worksheet.
 
         Mirrors the openpyxl idiom ``ws._charts.remove(chart)``.
 
-        Parameters
-        ----------
-        chart : wolfxl.chart.ChartBase subclass
-            A chart instance previously passed to :meth:`add_chart`
-            on this worksheet. Identity is matched by Python ``is``,
-            not equality, so the caller must pass the same object.
+        Args:
+            chart: Chart instance previously passed to :meth:`add_chart`.
 
-        Raises
-        ------
-        ValueError
-            If *chart* was never added to this worksheet (or has
-            already been removed).
-
-        Notes
-        -----
-        In **write mode** this removes the chart from the
-        ``_pending_charts`` list; the writer simply does not emit
-        the chart part on save.
-
-        In **modify mode** (where the chart was already persisted on
-        disk) this method currently only handles the
-        not-yet-flushed case (chart is still in
-        ``_pending_charts``); removing a chart that survives from
-        the source workbook is tracked as a v1.8 follow-up
-        (``Worksheet.delete_chart_persisted`` — needs the patcher to
-        emit a chart-removal queue alongside ``queue_chart_add``).
+        Raises:
+            ValueError: If ``chart`` was never attached to this worksheet or
+                has already been removed.
         """
         _remove_chart(self, chart)
 
     def replace_chart(self, old: Any, new: Any) -> None:
-        """Sprint Ξ (RFC-050) — replace one chart with another in place.
+        """Replace one attached chart with another.
 
-        Convenience for ``ws.remove_chart(old); ws.add_chart(new, old._anchor)``
-        that preserves the anchor and the position in the chart list
-        (so deterministic ID allocation matches the pre-replace layout).
+        The replacement keeps the old chart's anchor and list position unless
+        the new chart already has an explicit anchor.
 
-        Parameters
-        ----------
-        old : wolfxl.chart.ChartBase subclass
-            The chart to replace. Must have been added via
-            :meth:`add_chart`.
-        new : wolfxl.chart.ChartBase subclass
-            The replacement. Inherits *old*'s anchor unless
-            ``new._anchor`` was already set explicitly.
+        Args:
+            old: Chart instance previously passed to :meth:`add_chart`.
+            new: Replacement chart object.
 
-        Raises
-        ------
-        ValueError
-            If *old* was never added to this worksheet.
-        TypeError
-            If *new* is not a :class:`ChartBase` instance.
+        Raises:
+            TypeError: If ``new`` is not a supported chart object.
+            ValueError: If ``old`` was never attached to this worksheet.
         """
         _replace_chart(self, old, new)
 
     @property
     def _images(self) -> list[Any]:
-        """Sprint Λ Pod-β (RFC-045) — list of images queued via ``add_image``.
+        """Return the images attached to this worksheet.
 
-        Used by openpyxl-compat code that iterates ``ws._images`` (e.g.
-        SynthGL utilities that mirror openpyxl's read-side behaviour).
-        Returns the live list so mutations propagate to the next save.
+        The returned list is live, matching openpyxl's private ``_images``
+        compatibility surface. Mutating it affects the next save.
         """
         return self._pending_images
 
     def add_image(self, img: Any, anchor: Any = None) -> None:
-        """Sprint Λ Pod-β (RFC-045) — attach an image to this worksheet.
+        """Attach an image to this worksheet.
 
         Mirrors :meth:`openpyxl.worksheet.worksheet.Worksheet.add_image`.
 
-        Parameters
-        ----------
-        img : wolfxl.drawing.image.Image
-            The image to embed. Constructed from a path/BytesIO/bytes.
-        anchor : str | TwoCellAnchor | AbsoluteAnchor | None
-            Where to anchor the image. Accepts:
+        Args:
+            img: Image object to embed.
+            anchor: Optional placement. Accepts an A1-style cell reference,
+                ``TwoCellAnchor``, ``AbsoluteAnchor``, or ``None``. ``None``
+                defaults to ``"A1"``.
 
-            - ``"B5"`` (A1 cell ref) — one-cell anchor, image extends
-              naturally from its top-left corner. This is what
-              openpyxl users overwhelmingly write.
-            - :class:`wolfxl.drawing.spreadsheet_drawing.TwoCellAnchor`
-              — image stretches between two cells.
-            - :class:`wolfxl.drawing.spreadsheet_drawing.AbsoluteAnchor`
-              — pure EMU coordinates, no cell binding.
-            - ``None`` — defaults to ``"A1"`` (matches openpyxl).
-
-        The image is queued until ``Workbook.save()``, at which point
-        the writer (write mode) or the patcher (modify mode) emits the
-        drawing/media/rels parts.
+        Raises:
+            TypeError: If ``img`` or ``anchor`` is not supported.
+            ValueError: If an A1-style ``anchor`` is malformed.
         """
         _add_image(self, img, anchor)
 

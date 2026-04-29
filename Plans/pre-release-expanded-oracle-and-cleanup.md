@@ -567,7 +567,10 @@ First no-behavior split target, completed 2026-04-28:
    `emit/conditional_formats.rs` and `emit/data_validations.rs` on 2026-04-29,
    leaving `sheet_xml.rs` with only empty-sheet, kitchen-sink well-formedness,
    and CF/DV/hyperlink ordering checks.
-80. Next helper candidate: continue with another narrow Rust save phase only if
+80. Worksheet chart, pivot, slicer, image, and anchor validation docstrings
+   were rewritten into user-facing Google-style API docs on 2026-04-29,
+   removing sprint/RFC implementation language without behavior changes.
+81. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
