@@ -34,6 +34,15 @@ from wolfxl._worksheet_iteration import (
     iter_rows as _iter_rows,
     iter_rows_bulk as _iter_rows_bulk,
 )
+from wolfxl._worksheet_media import (
+    add_chart as _add_chart,
+    add_image as _add_image,
+    add_pivot_table as _add_pivot_table,
+    add_slicer as _add_slicer,
+    remove_chart as _remove_chart,
+    replace_chart as _replace_chart,
+    validate_a1_anchor as _validate_a1_anchor,
+)
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl._worksheet_patcher_flush import flush_to_patcher
 from wolfxl._worksheet_records import (
@@ -1201,26 +1210,7 @@ class Worksheet:
         the writer (write mode) or patcher (modify mode) emits the
         chart/drawing/rels parts.
         """
-        from wolfxl.chart._chart import ChartBase as _ChartBase
-
-        if not isinstance(chart, _ChartBase):
-            raise TypeError(
-                f"add_chart expected wolfxl.chart.ChartBase, got "
-                f"{type(chart).__name__}"
-            )
-
-        if anchor is None:
-            anchor = chart.anchor if chart.anchor is not None else "E15"
-
-        # RFC-046 §10.11.2 — anchor must be a valid A1 cell ref or a
-        # recognized anchor object (RFC-045 OneCellAnchor / TwoCellAnchor /
-        # AbsoluteAnchor). Strings are validated via the A1 regex; non-str
-        # values are accepted opaquely (the writer validates further).
-        if isinstance(anchor, str):
-            self._validate_a1_anchor(anchor)
-
-        chart._anchor = anchor  # noqa: SLF001
-        self._pending_charts.append(chart)
+        _add_chart(self, chart, anchor)
 
     def add_pivot_table(self, pivot_table: Any) -> None:
         """Sprint Ν Pod-γ (RFC-048) — anchor a pivot table on this sheet.
@@ -1241,30 +1231,7 @@ class Worksheet:
                 registered yet (its ``_cache_id`` is ``None``).
             RuntimeError: If the workbook is not in modify mode.
         """
-        from wolfxl.pivot import PivotTable as _PivotTable
-
-        if not isinstance(pivot_table, _PivotTable):
-            raise TypeError(
-                f"add_pivot_table expected wolfxl.pivot.PivotTable, "
-                f"got {type(pivot_table).__name__}"
-            )
-        if self._workbook._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError(
-                "add_pivot_table requires modify mode — open the "
-                "workbook with load_workbook(..., modify=True). "
-                "Write-mode pivot table emission is not yet supported."
-            )
-        if pivot_table.cache._cache_id is None:  # noqa: SLF001
-            raise ValueError(
-                "PivotTable.cache has not been registered with the "
-                "workbook yet. Call Workbook.add_pivot_cache(cache) "
-                "before Worksheet.add_pivot_table(pt)."
-            )
-        # Compute the layout up-front so any field-axis errors surface
-        # synchronously here rather than at save() time.
-        if hasattr(pivot_table, "_compute_layout"):
-            pivot_table._compute_layout()
-        self._pending_pivot_tables.append(pivot_table)
+        _add_pivot_table(self, pivot_table)
 
     def add_slicer(self, slicer: Any, anchor: str) -> None:
         """RFC-061 §2.1 — anchor a slicer presentation on this sheet.
@@ -1285,31 +1252,7 @@ class Worksheet:
                 or ``anchor`` is not a valid A1 string.
             RuntimeError: If the workbook is not in modify mode.
         """
-        from wolfxl.pivot import Slicer as _Slicer
-
-        if not isinstance(slicer, _Slicer):
-            raise TypeError(
-                f"add_slicer expected wolfxl.pivot.Slicer, got "
-                f"{type(slicer).__name__}"
-            )
-        if self._workbook._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError(
-                "add_slicer requires modify mode — open the workbook "
-                "with load_workbook(..., modify=True)."
-            )
-        if slicer.cache._slicer_cache_id is None:  # noqa: SLF001
-            raise ValueError(
-                "Slicer.cache has not been registered with the "
-                "workbook yet. Call Workbook.add_slicer_cache(cache) "
-                "before Worksheet.add_slicer(slicer, anchor)."
-            )
-        if not isinstance(anchor, str) or not anchor:
-            raise ValueError(
-                "Worksheet.add_slicer: anchor must be a non-empty A1 string"
-            )
-        self._validate_a1_anchor(anchor)
-        slicer.anchor = anchor
-        self._pending_slicers.append(slicer)
+        _add_slicer(self, slicer, anchor)
 
     @staticmethod
     def _validate_a1_anchor(anchor: str) -> None:
@@ -1321,30 +1264,7 @@ class Worksheet:
         more complex placements. Excel's column max is ``XFD`` (16384)
         and row max is 1048576; refs outside those bounds raise.
         """
-        import re
-        if not anchor:
-            raise ValueError("anchor must not be empty")
-        m = re.match(r"^([A-Z]+)([0-9]+)$", anchor)
-        if not m:
-            raise ValueError(
-                f"anchor={anchor!r} must be a single A1 cell ref like 'E15' "
-                f"(regex ^[A-Z]+[0-9]+$); for ranged or absolute placement "
-                f"pass an OneCellAnchor / TwoCellAnchor / AbsoluteAnchor"
-            )
-        col_letters, row_str = m.group(1), m.group(2)
-        # Column letters → 1-based index.
-        col_idx = 0
-        for ch in col_letters:
-            col_idx = col_idx * 26 + (ord(ch) - ord("A") + 1)
-        if col_idx > 16384:
-            raise ValueError(
-                f"anchor={anchor!r}: column {col_letters!r} exceeds Excel max XFD (16384)"
-            )
-        row_idx = int(row_str)
-        if row_idx < 1 or row_idx > 1_048_576:
-            raise ValueError(
-                f"anchor={anchor!r}: row {row_idx} out of Excel range [1, 1048576]"
-            )
+        _validate_a1_anchor(anchor)
 
     def remove_chart(self, chart: Any) -> None:
         """Sprint Ξ (RFC-050) — remove a previously-added chart.
@@ -1378,15 +1298,7 @@ class Worksheet:
         (``Worksheet.delete_chart_persisted`` — needs the patcher to
         emit a chart-removal queue alongside ``queue_chart_add``).
         """
-        try:
-            self._pending_charts.remove(chart)
-        except ValueError:
-            raise ValueError(
-                "chart was not added to this worksheet via add_chart() "
-                "(or has already been removed). Removal of charts that "
-                "survive from the source workbook is a v1.8 follow-up; "
-                "see RFC-050 §6."
-            ) from None
+        _remove_chart(self, chart)
 
     def replace_chart(self, old: Any, new: Any) -> None:
         """Sprint Ξ (RFC-050) — replace one chart with another in place.
@@ -1411,25 +1323,7 @@ class Worksheet:
         TypeError
             If *new* is not a :class:`ChartBase` instance.
         """
-        from wolfxl.chart._chart import ChartBase as _ChartBase
-        if not isinstance(new, _ChartBase):
-            raise TypeError(
-                f"replace_chart expected wolfxl.chart.ChartBase for new, got "
-                f"{type(new).__name__}"
-            )
-        try:
-            idx = self._pending_charts.index(old)
-        except ValueError:
-            raise ValueError(
-                "old chart was not added to this worksheet via add_chart()"
-            ) from None
-        anchor = new._anchor if new._anchor is not None else old._anchor  # noqa: SLF001
-        if anchor is None:
-            anchor = "E15"
-        if isinstance(anchor, str):
-            self._validate_a1_anchor(anchor)
-        new._anchor = anchor  # noqa: SLF001
-        self._pending_charts[idx] = new
+        _replace_chart(self, old, new)
 
     @property
     def _images(self) -> list[Any]:
@@ -1466,21 +1360,7 @@ class Worksheet:
         the writer (write mode) or the patcher (modify mode) emits the
         drawing/media/rels parts.
         """
-        from wolfxl.drawing.image import Image as _Image
-
-        if not isinstance(img, _Image):
-            raise TypeError(
-                f"add_image expected wolfxl.drawing.image.Image, got {type(img).__name__}"
-            )
-
-        if anchor is None:
-            anchor = "A1"
-
-        # Stash the resolved anchor on the image (openpyxl semantics)
-        # AND on a local copy so this exact call's anchor is captured
-        # even if the user reuses the Image object.
-        img.anchor = anchor
-        self._pending_images.append(img)
+        _add_image(self, img, anchor)
 
     # ------------------------------------------------------------------
     # End add_image
