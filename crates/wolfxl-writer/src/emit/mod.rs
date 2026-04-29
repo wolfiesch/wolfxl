@@ -21,6 +21,7 @@ pub mod charts;
 pub mod comments_xml;
 pub mod content_types;
 pub mod data_validations;
+pub mod dimension;
 pub mod doc_props;
 pub mod drawing_refs;
 pub mod drawings;

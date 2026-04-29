@@ -64,7 +64,7 @@ pub fn emit(
     out.push_str("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
 
     // Slot 2: <dimension>
-    emit_dimension(&mut out, sheet);
+    super::dimension::emit(&mut out, sheet);
 
     // Slot 3: <sheetViews>
     //
@@ -218,36 +218,6 @@ const _PIN_SLOT_NUMBERS: () = {
     assert!(order[30].1 == 31); // legacyDrawing
     assert!(order[36].1 == 37); // tableParts
 };
-
-/// Compute bounding box of all populated cells and emit `<dimension ref="…"/>`.
-fn emit_dimension(out: &mut String, sheet: &Worksheet) {
-    let mut min_row = u32::MAX;
-    let mut max_row = 0u32;
-    let mut min_col = u32::MAX;
-    let mut max_col = 0u32;
-
-    for (&row_num, row) in &sheet.rows {
-        for (&col_num, cell) in &row.cells {
-            if matches!(cell.value, WriteCellValue::Blank) && cell.style_id.is_none() {
-                continue;
-            }
-            min_row = min_row.min(row_num);
-            max_row = max_row.max(row_num);
-            min_col = min_col.min(col_num);
-            max_col = max_col.max(col_num);
-        }
-        // Also consider rows with custom attrs but no cells (they don't expand bounding box
-        // unless they have cells — spec says dimension is the range of cell data)
-    }
-
-    if max_row == 0 {
-        // No cells — emit minimal A1 reference
-        out.push_str("<dimension ref=\"A1\"/>");
-    } else {
-        let range = refs::format_range((min_row, min_col), (max_row, max_col));
-        out.push_str(&format!("<dimension ref=\"{}\"/>", range));
-    }
-}
 
 /// Emit `<sheetViews><sheetView …>…</sheetView></sheetViews>`.
 fn emit_sheet_views(out: &mut String, sheet: &Worksheet, sheet_idx: u32) {
