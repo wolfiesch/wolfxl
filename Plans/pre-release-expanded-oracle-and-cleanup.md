@@ -670,7 +670,10 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so hyperlink,
    table, comment, defined-name, and document-property payloads are built in
    named helpers before queueing.
-111. Next helper candidate: continue with another narrow Rust save phase only if
+111. Write-mode worksheet compatibility payload construction was split in
+   `python/wolfxl/_worksheet_flush.py` on 2026-04-29 so hyperlink, comment,
+   and table payloads are built in named helpers before native writer queueing.
+112. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

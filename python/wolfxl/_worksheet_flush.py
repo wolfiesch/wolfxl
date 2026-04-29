@@ -167,17 +167,24 @@ def _flush_pending_hyperlinks(ws: Worksheet, writer: Any, sheet: str) -> None:
             internal = True
         if not target:
             continue
-        writer.add_hyperlink(
-            sheet,
-            {
-                "cell": coord,
-                "target": target,
-                "display": hl.display,
-                "tooltip": hl.tooltip,
-                "internal": internal,
-            },
-        )
+        writer.add_hyperlink(sheet, _hyperlink_payload(coord, hl, target, internal))
     ws._pending_hyperlinks.clear()  # noqa: SLF001
+
+
+def _hyperlink_payload(
+    coord: str,
+    hyperlink: Any,
+    target: str,
+    internal: bool,
+) -> dict[str, Any]:
+    """Build the native writer payload for a worksheet hyperlink."""
+    return {
+        "cell": coord,
+        "target": target,
+        "display": hyperlink.display,
+        "tooltip": hyperlink.tooltip,
+        "internal": internal,
+    }
 
 
 def _flush_pending_comments(ws: Worksheet, writer: Any, sheet: str) -> None:
@@ -187,15 +194,17 @@ def _flush_pending_comments(ws: Worksheet, writer: Any, sheet: str) -> None:
     for coord, comment in ws._pending_comments.items():  # noqa: SLF001
         if comment is None:
             continue
-        writer.add_comment(
-            sheet,
-            {
-                "cell": coord,
-                "text": comment.text,
-                "author": comment.author,
-            },
-        )
+        writer.add_comment(sheet, _comment_payload(coord, comment))
     ws._pending_comments.clear()  # noqa: SLF001
+
+
+def _comment_payload(coord: str, comment: Any) -> dict[str, Any]:
+    """Build the native writer payload for a worksheet comment."""
+    return {
+        "cell": coord,
+        "text": comment.text,
+        "author": comment.author,
+    }
 
 
 def _flush_pending_tables(ws: Worksheet, writer: Any, sheet: str) -> None:
@@ -203,20 +212,22 @@ def _flush_pending_tables(ws: Worksheet, writer: Any, sheet: str) -> None:
     if not ws._pending_tables:  # noqa: SLF001
         return
     for table in ws._pending_tables:  # noqa: SLF001
-        style_name = table.tableStyleInfo.name if table.tableStyleInfo else None
-        col_names = [col.name for col in table.tableColumns] if table.tableColumns else []
-        writer.add_table(
-            sheet,
-            {
-                "name": table.name,
-                "ref": table.ref,
-                "style": style_name,
-                "columns": col_names,
-                "header_row": table.headerRowCount > 0,
-                "totals_row": table.totalsRowCount > 0,
-            },
-        )
+        writer.add_table(sheet, _table_payload(table))
     ws._pending_tables.clear()  # noqa: SLF001
+
+
+def _table_payload(table: Any) -> dict[str, Any]:
+    """Build the native writer payload for a worksheet table."""
+    style_name = table.tableStyleInfo.name if table.tableStyleInfo else None
+    col_names = [col.name for col in table.tableColumns] if table.tableColumns else []
+    return {
+        "name": table.name,
+        "ref": table.ref,
+        "style": style_name,
+        "columns": col_names,
+        "header_row": table.headerRowCount > 0,
+        "totals_row": table.totalsRowCount > 0,
+    }
 
 
 def _flush_pending_data_validations(ws: Worksheet, writer: Any, sheet: str) -> None:
