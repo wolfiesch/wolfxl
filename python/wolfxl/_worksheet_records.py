@@ -267,6 +267,13 @@ def sheet_visibility(ws: Worksheet) -> dict[str, Any]:
     return ws._sheet_visibility_cache  # noqa: SLF001
 
 
+def classify_format(fmt: str) -> str:
+    """Classify an Excel number-format string through the Rust classifier."""
+    from wolfxl._rust import classify_format as _classify_format
+
+    return _classify_format(fmt)
+
+
 def schema(ws: Worksheet) -> dict[str, Any]:
     """Infer a worksheet schema through the shared Rust schema engine."""
     from wolfxl._cell import _UNSET

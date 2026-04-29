@@ -56,6 +56,7 @@ from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bo
 from wolfxl._worksheet_patcher_flush import flush_to_patcher
 from wolfxl._worksheet_records import (
     cached_formula_values as _cached_formula_values,
+    classify_format as _classify_worksheet_format,
     canonical_data_type as _canonical_data_type,  # noqa: F401 - legacy import path
     iter_cell_records as _iter_cell_records,
     iter_cell_records_python as _iter_cell_records_python,
@@ -719,6 +720,23 @@ class Worksheet:
         alignment, and border cues. Pass
         ``include_cached_formula_value=True`` to include a ``cached_value`` key
         on formula records that have a saved cached result.
+
+        Args:
+            min_row: Optional 1-based first row.
+            max_row: Optional 1-based last row.
+            min_col: Optional 1-based first column.
+            max_col: Optional 1-based last column.
+            data_only: Override workbook formula mode for this scan.
+            include_format: Include number-format and style summary fields.
+            include_empty: Include empty cells inside the requested bounds.
+            include_formula_blanks: Include formulas without cached values.
+            include_coordinate: Include A1 coordinate strings.
+            include_style_id: Include workbook-internal style identifiers.
+            include_extended_format: Include fill, alignment, and border cues.
+            include_cached_formula_value: Include saved cached formula values.
+
+        Yields:
+            Compact dictionaries for worksheet cells in row-major order.
         """
         yield from _iter_cell_records(
             self,
@@ -761,7 +779,26 @@ class Worksheet:
         include_extended_format: bool = True,
         include_cached_formula_value: bool = False,
     ) -> list[dict[str, Any]]:
-        """Return ``iter_cell_records(...)`` as a list."""
+        """Return ``iter_cell_records(...)`` as a list.
+
+        Args:
+            min_row: Optional 1-based first row.
+            max_row: Optional 1-based last row.
+            min_col: Optional 1-based first column.
+            max_col: Optional 1-based last column.
+            data_only: Override workbook formula mode for this scan.
+            include_format: Include number-format and style summary fields.
+            include_empty: Include empty cells inside the requested bounds.
+            include_formula_blanks: Include formulas without cached values.
+            include_coordinate: Include A1 coordinate strings.
+            include_style_id: Include workbook-internal style identifiers.
+            include_extended_format: Include fill, alignment, and border cues.
+            include_cached_formula_value: Include saved cached formula values.
+
+        Returns:
+            A list containing the same dictionaries yielded by
+            :meth:`iter_cell_records`.
+        """
         return list(
             self.iter_cell_records(
                 min_row=min_row,
@@ -786,6 +823,12 @@ class Worksheet:
         ``"Sheet!A1"`` keys, matching :meth:`Workbook.cached_formula_values`.
         Only formula cells with saved cached values are included; uncached
         template formulas are omitted.
+
+        Args:
+            qualified: Include the worksheet name in each key.
+
+        Returns:
+            Mapping of cell reference to saved cached formula value.
         """
         return _cached_formula_values(self, qualified=qualified)
 
@@ -1299,10 +1342,15 @@ class Worksheet:
         ``"text"``. The method is an
         instance method for discoverability; it doesn't use any
         worksheet state.
-        """
-        from wolfxl._rust import classify_format as _classify_format
 
-        return _classify_format(fmt)
+        Args:
+            fmt: Excel number-format string.
+
+        Returns:
+            Category string such as ``"general"``, ``"currency"``, or
+            ``"date"``.
+        """
+        return _classify_worksheet_format(fmt)
 
     def schema(self) -> dict[str, Any]:
         """Infer this worksheet's schema via ``wolfxl_core::infer_sheet_schema``.
@@ -1333,6 +1381,10 @@ class Worksheet:
         drift from the CLI's. Pending in-memory ``number_format`` edits
         are overlaid before inference so unsaved worksheet changes are
         included too.
+
+        Returns:
+            Dict shaped like a single ``wolfxl schema --format json`` sheet
+            entry, with ``name``, ``rows``, and ``columns`` keys.
         """
         return _infer_worksheet_schema(self)
 
