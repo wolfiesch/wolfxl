@@ -32,6 +32,37 @@ def from_reader(
     )
 
 
+def _open_plain_xlsx_source(
+    cls: type,
+    *,
+    path: str | None,
+    data: bytes | bytearray | memoryview | None,
+    data_only: bool,
+    permissive: bool,
+    modify: bool,
+    read_only: bool,
+) -> Any:
+    """Open an unencrypted XLSX path or byte buffer with the requested mode."""
+    if path is not None:
+        if modify:
+            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+        return from_reader(
+            cls,
+            path,
+            data_only=data_only,
+            permissive=permissive,
+            read_only=read_only,
+        )
+    return from_bytes(
+        cls,
+        bytes(data),  # type: ignore[arg-type]
+        data_only=data_only,
+        permissive=permissive,
+        modify=modify,
+        read_only=read_only,
+    )
+
+
 def from_encrypted(
     cls: type,
     path: str | None = None,
@@ -54,21 +85,10 @@ def from_encrypted(
         is_plain_xlsx = bytes(data).startswith(b"PK")  # type: ignore[arg-type]
 
     if is_plain_xlsx:
-        if path is not None:
-            if modify:
-                return from_patcher(
-                    cls, path, data_only=data_only, permissive=permissive
-                )
-            return from_reader(
-                cls,
-                path,
-                data_only=data_only,
-                permissive=permissive,
-                read_only=read_only,
-            )
-        return from_bytes(
+        return _open_plain_xlsx_source(
             cls,
-            bytes(data),  # type: ignore[arg-type]
+            path=path,
+            data=data,
             data_only=data_only,
             permissive=permissive,
             modify=modify,
@@ -99,21 +119,10 @@ def from_encrypted(
             is_encrypted = False
 
         if not is_encrypted:
-            if path is not None:
-                if modify:
-                    return from_patcher(
-                        cls, path, data_only=data_only, permissive=permissive
-                    )
-                return from_reader(
-                    cls,
-                    path,
-                    data_only=data_only,
-                    permissive=permissive,
-                    read_only=read_only,
-                )
-            return from_bytes(
+            return _open_plain_xlsx_source(
                 cls,
-                bytes(data),  # type: ignore[arg-type]
+                path=path,
+                data=data,
                 data_only=data_only,
                 permissive=permissive,
                 modify=modify,
