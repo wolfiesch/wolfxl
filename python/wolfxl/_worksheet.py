@@ -274,12 +274,12 @@ class Worksheet:
         set_freeze_panes(self, value)
 
     # ------------------------------------------------------------------
-    # Sprint Ο Pod 1A (RFC-055) — print / view / protection accessors
+    # Print, view, and protection accessors
     # ------------------------------------------------------------------
 
     @property
     def page_setup(self) -> Any:
-        """Lazy ``PageSetup`` accessor (RFC-055 §2.1)."""
+        """Return the worksheet page setup settings, creating them lazily."""
         return get_page_setup(self)
 
     @page_setup.setter
@@ -294,7 +294,7 @@ class Worksheet:
 
     @property
     def page_margins(self) -> Any:
-        """Lazy ``PageMargins`` accessor (RFC-055 §2.2)."""
+        """Return the worksheet page margins, creating them lazily."""
         return get_page_margins(self)
 
     @page_margins.setter
@@ -314,7 +314,7 @@ class Worksheet:
 
     @property
     def header_footer(self) -> Any:
-        """Lazy ``HeaderFooter`` accessor (RFC-055 §2.3)."""
+        """Return the worksheet header/footer settings, creating them lazily."""
         return get_header_footer(self)
 
     @header_footer.setter
@@ -329,7 +329,7 @@ class Worksheet:
 
     @property
     def sheet_view(self) -> Any:
-        """Lazy ``SheetView`` accessor (RFC-055 §2.5).
+        """Return the primary worksheet view settings.
 
         ``ws.freeze_panes`` mutations are mirrored into ``sheet_view.pane``
         on the setter side; on the getter side, if a sheet view has a
@@ -349,7 +349,7 @@ class Worksheet:
 
     @property
     def protection(self) -> Any:
-        """Lazy ``SheetProtection`` accessor (RFC-055 §2.6)."""
+        """Return the worksheet protection settings, creating them lazily."""
         return get_protection(self)
 
     @protection.setter
@@ -363,12 +363,12 @@ class Worksheet:
         self._protection = value
 
     # ------------------------------------------------------------------
-    # Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format props
+    # Page breaks and sheet format properties
     # ------------------------------------------------------------------
 
     @property
     def row_breaks(self) -> Any:
-        """Lazy ``PageBreakList`` of horizontal page breaks (RFC-062 §3)."""
+        """Return the horizontal page-break collection, creating it lazily."""
         return get_row_breaks(self)
 
     @row_breaks.setter
@@ -382,7 +382,7 @@ class Worksheet:
 
     @property
     def col_breaks(self) -> Any:
-        """Lazy ``PageBreakList`` of vertical page breaks (RFC-062 §3)."""
+        """Return the vertical page-break collection, creating it lazily."""
         return get_col_breaks(self)
 
     @col_breaks.setter
@@ -410,7 +410,7 @@ class Worksheet:
 
     @property
     def sheet_format(self) -> Any:
-        """Lazy ``SheetFormatProperties`` accessor (RFC-062 §3)."""
+        """Return sheet format properties, creating them lazily."""
         return get_sheet_format(self)
 
     @sheet_format.setter
@@ -448,7 +448,7 @@ class Worksheet:
 
     @property
     def print_title_rows(self) -> str | None:
-        """Repeat-rows for printing (RFC-055 §2.4)."""
+        """Row range repeated at the top of each printed page."""
         return self._print_title_rows
 
     @print_title_rows.setter
@@ -463,7 +463,7 @@ class Worksheet:
 
     @property
     def print_title_cols(self) -> str | None:
-        """Repeat-cols for printing (RFC-055 §2.4)."""
+        """Column range repeated at the left of each printed page."""
         return self._print_title_cols
 
     @print_title_cols.setter
