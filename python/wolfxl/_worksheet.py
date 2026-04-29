@@ -97,6 +97,7 @@ from wolfxl._worksheet_write_buffers import (
     extract_non_batchable,
     materialize_append_buffer,
     materialize_bulk_writes,
+    write_rows as _write_rows,
 )
 
 if TYPE_CHECKING:
@@ -556,11 +557,7 @@ class Worksheet:
 
         ``rows`` is a list of lists. Each inner list is one row of values.
         """
-        if not rows:
-            return
-        # Store a shallow copy so flush can safely mutate without affecting caller.
-        copied = [list(row) for row in rows]
-        self._bulk_writes.append((copied, start_row, start_col))
+        _write_rows(self, rows, start_row, start_col)
 
     def _materialize_bulk_writes(self) -> None:
         """Convert bulk write buffers into Cell objects.

@@ -21,6 +21,19 @@ def append_row(ws: Worksheet, iterable: Iterable[Any]) -> None:
     ws._next_append_row += 1  # noqa: SLF001
 
 
+def write_rows(
+    ws: Worksheet,
+    rows: list[list[Any]],
+    start_row: int = 1,
+    start_col: int = 1,
+) -> None:
+    """Queue a 2D value grid for a later batch write."""
+    if not rows:
+        return
+    copied = [list(row) for row in rows]
+    ws._bulk_writes.append((copied, start_row, start_col))  # noqa: SLF001
+
+
 def materialize_append_buffer(ws: Worksheet) -> None:
     """Convert a worksheet append buffer into dirty Cell objects."""
     start = ws._append_buffer_start  # noqa: SLF001
