@@ -17,6 +17,7 @@ from wolfxl._workbook_state import (
     xlsb_xls_via_tempfile,
 )
 from wolfxl import _workbook_patcher_flush
+from wolfxl import _workbook_sheets
 from wolfxl import _workbook_writer_flush
 from wolfxl._worksheet import Worksheet
 
@@ -677,20 +678,7 @@ class Workbook:
         not yet support sheet removal (the patcher has no ``remove_sheet``
         API surface), so it also raises.
         """
-        if self._rust_writer is None:
-            raise RuntimeError("remove requires write mode")
-        if worksheet.title not in self._sheets:
-            raise ValueError(f"Worksheet '{worksheet.title}' is not in this workbook")
-        title = worksheet.title
-        self._sheet_names.remove(title)
-        self._sheets.pop(title)
-        # If the Rust writer exposes remove_sheet, call it so the saved file
-        # doesn't include the now-dropped sheet. If the writer lacks the
-        # method, the Python bookkeeping still produces the right output
-        # because ``save()`` iterates our ``_sheets`` dict.
-        remove_fn = getattr(self._rust_writer, "remove_sheet", None)
-        if remove_fn is not None:
-            remove_fn(title)
+        _workbook_sheets.remove_sheet(self, worksheet)
 
     def remove_sheet(self, worksheet: Worksheet) -> None:
         """openpyxl alias for :meth:`remove` (deprecated there, kept for parity)."""
@@ -878,15 +866,7 @@ class Workbook:
             RuntimeError: If the workbook is not in write mode.
             ValueError: If ``title`` already exists.
         """
-        if self._rust_writer is None:
-            raise RuntimeError("create_sheet requires write mode")
-        if title in self._sheets:
-            raise ValueError(f"Sheet '{title}' already exists")
-        self._rust_writer.add_sheet(title)
-        self._sheet_names.append(title)
-        ws = Worksheet(self, title)
-        self._sheets[title] = ws
-        return ws
+        return _workbook_sheets.create_sheet(self, title)
 
     def copy_worksheet(
         self, source: Worksheet, *, name: str | None = None
@@ -912,78 +892,7 @@ class Workbook:
         ranges, freeze pane). Native-writer-tracked features added by
         the API after `copy_worksheet` returns flow through normally.
         """
-        if not isinstance(source, Worksheet):
-            raise TypeError(
-                f"copy_worksheet: source must be a Worksheet, got {type(source).__name__}"
-            )
-        if source._workbook is not self:  # noqa: SLF001
-            raise ValueError(
-                "copy_worksheet: source must belong to this workbook"
-            )
-        if self._rust_patcher is None and self._rust_writer is None:
-            raise RuntimeError(
-                "copy_worksheet requires write or modify mode"
-            )
-
-        # Compute the new title. Explicit `name` wins; otherwise dedup
-        # against the running tab list.
-        if name is not None:
-            if not isinstance(name, str) or not name:
-                raise ValueError("copy_worksheet: name must be a non-empty string")
-            if name in self._sheets:
-                raise ValueError(f"copy_worksheet: sheet '{name}' already exists")
-            new_title = name
-        else:
-            base = f"{source.title} Copy"
-            new_title = base
-            suffix = 2
-            while new_title in self._sheets:
-                new_title = f"{base} {suffix}"
-                suffix += 1
-
-        if self._rust_patcher is not None:
-            # Modify-mode path — queue + tab-list update; ZIP-level clone
-            # happens during save() via Phase 2.7. Snapshot the
-            # deep_copy_images flag at queue time so a later toggle
-            # of wb.copy_options doesn't retroactively affect this
-            # already-queued copy.
-            self._pending_sheet_copies.append(
-                (source.title, new_title, bool(self.copy_options.deep_copy_images))
-            )
-            self._sheet_names.append(new_title)
-            ws = Worksheet(self, new_title)
-            self._sheets[new_title] = ws
-            # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
-            # slots into the new proxy so per-sheet divergence after a
-            # copy is preserved. The patcher's Phase 2.7 clones the
-            # source XML (which captures whatever setup is currently
-            # on disk); Phase 2.5n then re-splices our Python-side
-            # mutations onto each sheet independently. Without this
-            # deep-clone, mutating src.page_setup before save() would
-            # silently NOT propagate to dst.
-            import copy as _copy
-            for slot in (
-                "_page_setup",
-                "_page_margins",
-                "_header_footer",
-                "_sheet_view",
-                "_protection",
-                # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
-                "_row_breaks",
-                "_col_breaks",
-                "_sheet_format",
-            ):
-                src_v = getattr(source, slot, None)
-                if src_v is not None:
-                    setattr(ws, slot, _copy.deepcopy(src_v))
-            if getattr(source, "_print_title_rows", None) is not None:
-                ws._print_title_rows = source._print_title_rows  # noqa: SLF001
-            if getattr(source, "_print_title_cols", None) is not None:
-                ws._print_title_cols = source._print_title_cols  # noqa: SLF001
-            return ws
-
-        # Write-mode path (Sprint Θ Pod-C1).
-        return self._copy_worksheet_write_mode(source, new_title)
+        return _workbook_sheets.copy_worksheet(self, source, name=name)
 
     def _copy_worksheet_write_mode(
         self, source: Worksheet, new_title: str
@@ -999,114 +908,7 @@ class Workbook:
         with the native writer via ``create_sheet`` so that downstream
         save/flush passes see it like any other sheet.
         """
-        from wolfxl._cell import _UNSET
-
-        # 1. Materialise the source's pending buffers so every value is
-        #    in `_cells` and discoverable. These helpers are idempotent.
-        if source._append_buffer:  # noqa: SLF001
-            source._materialize_append_buffer()  # noqa: SLF001
-        if source._bulk_writes:  # noqa: SLF001
-            source._materialize_bulk_writes()  # noqa: SLF001
-
-        # 2. Add a fresh destination sheet. Use the public-ish helper so
-        #    the Rust writer gets the new sheet registered first.
-        dst = self.create_sheet(new_title)
-
-        # 3. Walk the source's cell map. We iterate `_cells` (not
-        #    `_dirty`) because cells materialised from append/bulk
-        #    buffers go through `cell(...)` which writes via the
-        #    public setter that flips `_value_dirty` — so they're in
-        #    `_dirty` too — but a future caller might construct cells
-        #    via direct attribute writes. Using `_cells` is the
-        #    superset and makes the snapshot deterministic.
-        for (row, col), src_cell in source._cells.items():  # noqa: SLF001
-            value = src_cell._value  # noqa: SLF001
-            has_value = value is not _UNSET and src_cell._value_dirty  # noqa: SLF001
-            font = src_cell._font  # noqa: SLF001
-            fill = src_cell._fill  # noqa: SLF001
-            border = src_cell._border  # noqa: SLF001
-            alignment = src_cell._alignment  # noqa: SLF001
-            number_format = src_cell._number_format  # noqa: SLF001
-            has_format = src_cell._format_dirty  # noqa: SLF001
-
-            if not has_value and not has_format:
-                # Cell exists only because it was probed for read; do
-                # not propagate (would inflate destination dimensions).
-                continue
-
-            # Use cell() which builds a Cell, so the value/format
-            # setters mark dirty correctly for downstream `_flush`.
-            dst_cell = dst.cell(row=row, column=col)
-            if has_value:
-                dst_cell.value = value
-            if font is not _UNSET:
-                dst_cell.font = font  # type: ignore[assignment]
-            if fill is not _UNSET:
-                dst_cell.fill = fill  # type: ignore[assignment]
-            if border is not _UNSET:
-                dst_cell.border = border  # type: ignore[assignment]
-            if alignment is not _UNSET:
-                dst_cell.alignment = alignment  # type: ignore[assignment]
-            if number_format is not _UNSET:
-                dst_cell.number_format = number_format  # type: ignore[assignment]
-
-        # 4. Sheet-scope properties.
-        for r, h in source._row_heights.items():  # noqa: SLF001
-            dst._row_heights[r] = h  # noqa: SLF001
-        for letter, w in source._col_widths.items():  # noqa: SLF001
-            dst._col_widths[letter] = w  # noqa: SLF001
-        # Merges: round-trip through merge_cells so the Rust writer
-        # also gets the merge — `_merged_ranges` is just the Python
-        # mirror set; the writer needs an explicit call to record it.
-        for rng in source._merged_ranges:  # noqa: SLF001
-            dst.merge_cells(rng)
-        if source._freeze_panes is not None:  # noqa: SLF001
-            dst._freeze_panes = source._freeze_panes  # noqa: SLF001
-        if source._print_area is not None:  # noqa: SLF001
-            dst._print_area = source._print_area  # noqa: SLF001
-        # Sprint Ο Pod 1B (RFC-056) — deep-clone the autoFilter state.
-        # Phase 2.5o on the cloned sheet will re-evaluate against the
-        # cloned data (which the user may have mutated post-copy).
-        src_af = source._auto_filter  # noqa: SLF001
-        if (
-            src_af.ref is not None
-            or src_af.filter_columns
-            or src_af.sort_state is not None
-        ):
-            import copy as _copy
-
-            dst._auto_filter._ref = src_af.ref  # noqa: SLF001
-            dst._auto_filter.filter_columns = _copy.deepcopy(src_af.filter_columns)  # noqa: SLF001
-            dst._auto_filter.sort_state = _copy.deepcopy(src_af.sort_state)  # noqa: SLF001
-
-        # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
-        # slots so per-sheet divergence after a copy is preserved.
-        # `copy.deepcopy` is safe for the dataclass-shaped Pod 1A
-        # classes; we only deep-copy the underscore-private slots
-        # that have actually been initialised.
-        import copy as _copy
-        for slot in (
-            "_page_setup",
-            "_page_margins",
-            "_header_footer",
-            "_sheet_view",
-            "_protection",
-            # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
-            "_row_breaks",
-            "_col_breaks",
-            "_sheet_format",
-        ):
-            src_v = getattr(source, slot, None)
-            if src_v is not None:
-                setattr(dst, slot, _copy.deepcopy(src_v))
-        # print_titles are workbook-scope definedNames; clone the
-        # per-sheet selectors so the cloned sheet can retitle them.
-        if getattr(source, "_print_title_rows", None) is not None:
-            dst._print_title_rows = source._print_title_rows  # noqa: SLF001
-        if getattr(source, "_print_title_cols", None) is not None:
-            dst._print_title_cols = source._print_title_cols  # noqa: SLF001
-
-        return dst
+        return _workbook_sheets.copy_worksheet_write_mode(self, source, new_title)
 
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
         """Move *sheet* by *offset* positions within the workbook tab list.
@@ -1135,53 +937,7 @@ class Workbook:
                 is rejected explicitly).
             KeyError: the resolved sheet name is not in this workbook.
         """
-        # Type-check sheet.
-        if isinstance(sheet, Worksheet):
-            name = sheet.title
-        elif isinstance(sheet, str):
-            name = sheet
-        else:
-            raise TypeError(
-                f"move_sheet: 'sheet' must be a Worksheet or str, got {type(sheet).__name__}"
-            )
-
-        # Reject bool explicitly (isinstance(True, int) is True in Python,
-        # which would silently treat True as 1 / False as 0).
-        if isinstance(offset, bool) or not isinstance(offset, int):
-            raise TypeError(
-                f"move_sheet: 'offset' must be an int, got {type(offset).__name__}"
-            )
-
-        # Validate sheet name.
-        if name not in self._sheet_names:
-            raise KeyError(name)
-
-        n = len(self._sheet_names)
-        idx = self._sheet_names.index(name)
-        new_pos = idx + offset
-        # Clamp to [0, n-1], matching the patcher-side rule. Python's
-        # list.insert clamps too, but we do it explicitly so the queued
-        # offset matches the position the patcher will compute.
-        if new_pos < 0:
-            new_pos = 0
-        if new_pos > n - 1:
-            new_pos = n - 1
-
-        # Update the in-memory tab list. Even when no actual position
-        # change happens (offset=0 or clamped no-op), we still walk the
-        # patcher-queue path so a downstream caller observing the queue
-        # matches the user's intent.
-        del self._sheet_names[idx]
-        self._sheet_names.insert(new_pos, name)
-
-        # Queue the move on the patcher in modify mode. The Rust side
-        # re-resolves the offset against its own running tab list, so
-        # we pass the user's original offset (not the clamped one) for
-        # symmetry with the openpyxl signature.
-        if self._rust_patcher is not None:
-            self._flush_pending_sheet_moves_to_patcher(name, offset)
-        if self._rust_writer is not None:
-            self._rust_writer.move_sheet(name, offset)
+        _workbook_sheets.move_sheet(self, sheet, offset)
 
     def save(
         self,
