@@ -197,3 +197,22 @@ def get_conditional_formatting(ws: Worksheet) -> Any:
         )
     ws._conditional_formatting_cache = formatting_list  # noqa: SLF001
     return formatting_list
+
+
+def add_table(ws: Worksheet, table: Any) -> None:
+    """Attach a table to ``ws`` and queue it for save-time flushing."""
+    from wolfxl.worksheet.table import Table
+
+    if not isinstance(table, Table):
+        raise TypeError(
+            f"add_table() expects a wolfxl.worksheet.table.Table, got {type(table).__name__}"
+        )
+    if ws._tables_cache is None:  # noqa: SLF001
+        ws._tables_cache = {}  # noqa: SLF001
+    ws._tables_cache[table.name] = table  # noqa: SLF001
+    ws._pending_tables.append(table)  # noqa: SLF001
+
+
+def add_data_validation(ws: Worksheet, validation: Any) -> None:
+    """Openpyxl-style alias for ``ws.data_validations.append(validation)``."""
+    get_data_validations(ws).append(validation)

@@ -24,6 +24,8 @@ from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
 from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
 from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
 from wolfxl._worksheet_features import (
+    add_data_validation as _add_data_validation,
+    add_table as _add_table,
     get_comments_map,
     get_conditional_formatting,
     get_data_validations,
@@ -1375,17 +1377,7 @@ class Worksheet:
         where the user opens a multi-table file and re-uses a numeric
         id by accident.
         """
-        from wolfxl.worksheet.table import Table
-
-        if not isinstance(table, Table):
-            raise TypeError(
-                f"add_table() expects a wolfxl.worksheet.table.Table, got {type(table).__name__}"
-            )
-        # Make sure the cache exists so ws.tables[name] sees the queued one.
-        if self._tables_cache is None:
-            self._tables_cache = {}
-        self._tables_cache[table.name] = table
-        self._pending_tables.append(table)
+        _add_table(self, table)
 
     @property
     def data_validations(self) -> Any:
@@ -1394,7 +1386,7 @@ class Worksheet:
 
     def add_data_validation(self, dv: Any) -> None:
         """openpyxl-style alias for ``ws.data_validations.append(dv)``."""
-        self.data_validations.append(dv)
+        _add_data_validation(self, dv)
 
     @property
     def conditional_formatting(self) -> Any:
