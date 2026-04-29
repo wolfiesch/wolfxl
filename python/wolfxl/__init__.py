@@ -103,6 +103,7 @@ def load_workbook(
             password cannot decrypt it.
     """
     from wolfxl._loader import classify_input
+    from wolfxl._workbook_sources import open_workbook_source
 
     fmt, data, path = classify_input(filename)
 
@@ -154,48 +155,17 @@ def load_workbook(
             "expected xlsx/xlsb/xls"
         )
 
-    # Dispatch.
-    if fmt == "xlsx":
-        if password is not None:
-            wb = Workbook._from_encrypted(  # noqa: SLF001
-                path=path,
-                data=data,
-                password=password,
-                data_only=data_only,
-                permissive=permissive,
-                modify=modify,
-                read_only=read_only,
-            )
-        elif data is not None:
-            # Bytes / BytesIO input: dispatch through the bytes shim.
-            wb = Workbook._from_bytes(
-                data,
-                data_only=data_only,
-                permissive=permissive,
-                modify=modify,
-                read_only=read_only,
-            )
-        elif modify:
-            wb = Workbook._from_patcher(  # noqa: SLF001
-                path, data_only=data_only, permissive=permissive
-            )
-        else:
-            wb = Workbook._from_reader(  # noqa: SLF001
-                path,
-                data_only=data_only,
-                permissive=permissive,
-                read_only=read_only,
-            )
-    elif fmt == "xlsb":
-        wb = Workbook._from_xlsb(  # noqa: SLF001
-            path=path, data=data, data_only=data_only, permissive=permissive,
-        )
-    elif fmt == "xls":
-        wb = Workbook._from_xls(  # noqa: SLF001
-            path=path, data=data, data_only=data_only, permissive=permissive,
-        )
-    else:  # pragma: no cover — defensive; classify_input only emits the above.
-        raise InvalidFileException(f"unsupported file format: {fmt!r}")
+    wb = open_workbook_source(
+        Workbook,
+        fmt=fmt,
+        path=path,
+        data=data,
+        password=password,
+        data_only=data_only,
+        permissive=permissive,
+        modify=modify,
+        read_only=read_only,
+    )
 
     wb._rich_text = rich_text  # noqa: SLF001
     return wb

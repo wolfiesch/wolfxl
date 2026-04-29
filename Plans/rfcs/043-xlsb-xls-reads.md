@@ -187,10 +187,10 @@ filled in by the integrator post-merge.
 1. **Rust unit tests** — magic-byte sniffer (xlsx / xlsb / xls / ods
    / garbage); each backend's `open_from_bytes` round-trip; `Source`
    enum's `Read+Seek` impl on both arms.
-2. **Python round-trip** — `tests/test_xlsb_reads.py` +
-   `tests/test_xls_reads.py` cover values + formulas + sheet
-   ordering; `test_bytes_input.py` covers path / BytesIO / bytes /
-   file-like input across all three formats.
+2. **Python round-trip** — `tests/parity/test_xlsb_reads.py` +
+   `tests/parity/test_xls_reads.py` cover values + formulas + sheet
+   ordering, including path / BytesIO / bytes / file-like input across
+   both binary formats.
 3. **Parity** — `tests/parity/test_xlsb_reads.py` +
    `tests/parity/test_xls_reads.py` element-wise vs
    `pandas.read_excel(engine="calamine")`.
@@ -198,9 +198,9 @@ filled in by the integrator post-merge.
    tempfile workaround is gone, but the user-facing contract is
    unchanged); `modify=True` + xlsb raises with the RFC pointer;
    `read_only=True` + xlsb raises.
-5. **Regression fixture** — `tests/fixtures/finance_q3.xlsb`
-   (cached formulas + multi-sheet) and `tests/fixtures/legacy_erp.xls`
-   (single sheet, dates + numbers + strings). Both checked in.
+5. **Regression fixtures** — committed samples under
+   `tests/parity/fixtures/xlsb/` and `tests/parity/fixtures/xls/`
+   cover formulas, multi-sheet workbooks, dates, numbers, and strings.
 6. **LibreOffice cross-renderer** — N/A (read-only path; no bytes
    emitted).
 

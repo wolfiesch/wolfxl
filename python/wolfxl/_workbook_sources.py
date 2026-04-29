@@ -11,6 +11,86 @@ from wolfxl._workbook_state import (
 )
 
 
+def open_workbook_source(
+    cls: type,
+    *,
+    fmt: str,
+    path: str | None,
+    data: bytes | None,
+    password: str | bytes | None,
+    data_only: bool,
+    permissive: bool,
+    modify: bool,
+    read_only: bool,
+) -> Any:
+    """Open a classified workbook source through the matching constructor.
+
+    Args:
+        cls: Workbook class to materialize.
+        fmt: File format returned by ``_loader.classify_input``.
+        path: Source path for path-backed inputs.
+        data: Source bytes for in-memory inputs.
+        password: Password for OOXML-encrypted XLSX inputs.
+        data_only: Return cached formula values when available.
+        permissive: Enable recoverable malformed-workbook fallbacks.
+        modify: Open XLSX inputs in read-modify-write mode.
+        read_only: Enable streaming XLSX row iteration.
+
+    Returns:
+        A workbook instance opened in the requested mode.
+    """
+    if fmt == "xlsx":
+        if password is not None:
+            return from_encrypted(
+                cls,
+                path=path,
+                data=data,
+                password=password,
+                data_only=data_only,
+                permissive=permissive,
+                modify=modify,
+                read_only=read_only,
+            )
+        if data is not None:
+            return from_bytes(
+                cls,
+                data,
+                data_only=data_only,
+                permissive=permissive,
+                modify=modify,
+                read_only=read_only,
+            )
+        if modify:
+            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+        return from_reader(
+            cls,
+            path,
+            data_only=data_only,
+            permissive=permissive,
+            read_only=read_only,
+        )
+
+    if fmt == "xlsb":
+        return from_xlsb(
+            cls,
+            path=path,
+            data=data,
+            data_only=data_only,
+            permissive=permissive,
+        )
+
+    if fmt == "xls":
+        return from_xls(
+            cls,
+            path=path,
+            data=data,
+            data_only=data_only,
+            permissive=permissive,
+        )
+
+    raise ValueError(f"unsupported workbook format: {fmt!r}")
+
+
 def from_reader(
     cls: type,
     path: str,
