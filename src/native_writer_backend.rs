@@ -60,6 +60,7 @@ use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
     dict_to_table, unwrap_optional_wrapper,
 };
+use crate::native_writer_sheet_state::apply_freeze_panes;
 use crate::native_writer_workbook_metadata::{
     dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
 };
@@ -405,48 +406,8 @@ impl NativeWorkbook {
     /// either `top_left_cell` (freeze) or `x_split` / `y_split` (split).
     /// Optional wrapper key `freeze` is also accepted.
     pub fn set_freeze_panes(&mut self, sheet: &str, settings: &Bound<'_, PyAny>) -> PyResult<()> {
-        let dict = settings
-            .cast::<PyDict>()
-            .map_err(|_| PyValueError::new_err("settings must be a dict"))?;
-
-        let inner: Option<Bound<'_, PyAny>> = dict.get_item("freeze")?;
-        let cfg: &Bound<'_, PyDict> = match &inner {
-            Some(v) => v.cast::<PyDict>().unwrap_or(dict),
-            None => dict,
-        };
-
-        let mode: String = cfg
-            .get_item("mode")?
-            .and_then(|v| v.extract::<String>().ok())
-            .unwrap_or_else(|| "freeze".to_string());
-
         let ws = require_sheet(&mut self.inner, sheet)?;
-
-        if mode == "freeze" {
-            let top_left: Option<String> = cfg
-                .get_item("top_left_cell")?
-                .and_then(|v| v.extract::<String>().ok());
-            if let Some(cell) = top_left {
-                let (row, col) = parse_a1_to_row_col(&cell)?;
-                // freeze_row/col semantics in the model: rows above
-                // `freeze_row` and columns left of `freeze_col` stay
-                // pinned; the top-left cell's (row, col) IS the
-                // freeze split point.
-                ws.set_freeze(row, col, Some((row, col)));
-            }
-        } else if mode == "split" {
-            let x_split: f64 = cfg
-                .get_item("x_split")?
-                .and_then(|v| v.extract::<f64>().ok())
-                .unwrap_or(0.0);
-            let y_split: f64 = cfg
-                .get_item("y_split")?
-                .and_then(|v| v.extract::<f64>().ok())
-                .unwrap_or(0.0);
-            ws.set_split(x_split, y_split, None);
-        }
-
-        Ok(())
+        apply_freeze_panes(ws, settings)
     }
 
     pub fn save(&mut self, path: &str) -> PyResult<()> {
