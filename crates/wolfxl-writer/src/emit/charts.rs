@@ -1,9 +1,9 @@
-//! `xl/charts/chartN.xml` emitter — Sprint Μ Pod-α (RFC-046 §4).
+//! `xl/charts/chartN.xml` emitter.
 //!
 //! One `xl/charts/chartN.xml` per [`Chart`] anchored on a sheet. The
 //! emitter produces a `<c:chartSpace>` element with the `c:` (chart) and
 //! `a:` (drawingml) namespaces declared on the root, matching openpyxl's
-//! emit shape so byte-parity tests can pass downstream (Pod-δ).
+//! emit shape so byte-parity tests can pass downstream.
 //!
 //! # Element ordering
 //!
@@ -41,6 +41,8 @@
 //! Skipping any optional sub-element produces no XML — this matches
 //! openpyxl's "leave it off" rule.
 
+mod primitives;
+
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
     DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Layout, Legend, Marker,
@@ -48,6 +50,8 @@ use crate::model::chart::{
     Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use crate::xml_escape;
+
+use primitives::{bool_str, fmt_f64, strip_alpha};
 
 const C_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const A_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -926,35 +930,6 @@ fn emit_series_axis(out: &mut String, s: &SeriesAxis) {
     out.push_str("<c:serAx>");
     emit_axis_common_pre(out, &s.common);
     out.push_str("</c:serAx>");
-}
-
-fn bool_str(b: bool) -> &'static str {
-    if b {
-        "1"
-    } else {
-        "0"
-    }
-}
-
-/// Strip the leading alpha from an 8-char ARGB color, leaving the 6-char
-/// RGB. Drawingml's `<a:srgbClr val>` expects RGB, not ARGB.
-fn strip_alpha(c: &str) -> String {
-    if c.len() == 8 {
-        c[2..].to_string()
-    } else {
-        c.to_string()
-    }
-}
-
-/// Format f64 deterministically for OOXML — drop trailing zeros so
-/// `1.0` becomes `"1"`, but keep precision for fractional values.
-fn fmt_f64(v: f64) -> String {
-    if v == v.trunc() && v.abs() < 1e16 {
-        format!("{}", v as i64)
-    } else {
-        // Use `{}` Rust default; for now this is good enough.
-        format!("{v}")
-    }
 }
 
 #[cfg(test)]

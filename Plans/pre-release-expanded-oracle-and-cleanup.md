@@ -591,7 +591,10 @@ First no-behavior split target, completed 2026-04-28:
 87. Workbook, Worksheet, and Cell slot/init source comments were cleaned on
    2026-04-29 to remove stale sprint/RFC labels from the most visible core
    object setup blocks without behavior changes.
-88. Next helper candidate: continue with another narrow Rust save phase only if
+88. Chart XML primitive helpers (`bool_str`, `strip_alpha`, `fmt_f64`) were
+   extracted into `crates/wolfxl-writer/src/emit/charts/primitives.rs` on
+   2026-04-29 while keeping `emit_chart_xml` as the unchanged public facade.
+89. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
