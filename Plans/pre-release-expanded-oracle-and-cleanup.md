@@ -133,6 +133,23 @@ Implementation checkpoint, 2026-04-28:
   `tests/test_external_oracle_preservation.py`. It runs against
   `WOLFXL_EXTERNAL_FIXTURES_DIR` or the sibling ExcelBench generated fixture
   directory when present, and skips cleanly in isolated checkouts.
+- The 2026-04-29 WolfXL audit re-ran the generated pack through
+  `uv run --no-sync pytest tests/test_external_oracle_preservation.py -q`
+  (`1 passed`) and confirmed the sibling ExcelBench fixture pack exists under
+  `/Users/wolfgangschoenberger/Projects/ExcelBench/results_dev_external/fixtures`.
+  Follow-up gap: this is still a local generated corpus, not a pinned fixture
+  artifact or CI-enforced gate.
+- Additional beyond-openpyxl gates on 2026-04-29:
+  `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest
+  tests/diffwriter/soffice_smoke.py -q` passed `43` cases. The `.xls` /
+  `.xlsb` calamine parity command skipped locally because its optional fixtures
+  were not present in this checkout.
+- Open-source producers/readers still worth considering for the external
+  matrix, after the current Excelize / ClosedXML / NPOI / ExcelJS / Apache POI
+  pack, are SheetJS CE, `xlsx-populate`, PhpSpreadsheet, libxlsxwriter /
+  `rust_xlsxwriter`, and Gnumeric `ssconvert`. Treat these as optional
+  producers or validators, not release claims, until fixture determinism and
+  post-WolfXL semantic readback are audited.
 
 ## Cleanup plan
 
@@ -144,12 +161,12 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 2525 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 529 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
-| `python/wolfxl/_worksheet.py` | 1513 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
+| `src/native_writer_backend.rs` | 527 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
+| `python/wolfxl/_worksheet.py` | 1395 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 386 | Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage. |
-| `python/wolfxl/_workbook.py` | 1321 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
+| `python/wolfxl/_workbook.py` | 1001 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
 
 Suggested sprint sequence:
 
@@ -705,10 +722,21 @@ First no-behavior split target, completed 2026-04-28:
 121. Worksheet record iteration was split in `python/wolfxl/_worksheet_records.py`
    on 2026-04-29 so Rust scan-range planning, pending-overlay patching, and
    extra overlay record emission are named helper phases.
-122. Next helper candidate: continue with another narrow Rust save phase only if
-   the state boundary is clean, or switch to Python public API docstrings and
-   `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
-   coupled for another safe extraction.
+122. Cell payload conversion and style mutation paths were split on
+   2026-04-29 so Python payload/style conversions live in
+   `python/wolfxl/_cell_payloads.py` and cell style setters share a single
+   private mutation helper.
+123. Rust save orchestration now has an explicit `SaveWorkspace` in
+   `src/wolfxl/mod.rs` to group the shared save-phase state: replacement
+   patches, the part-id allocator, cloned table names, and local sheet blocks.
+   This is the first low-risk step toward breaking up `XlsxPatcher::do_save`
+   without changing the ordered phase calls.
+124. Next helper candidate: continue splitting Rust save orchestration only
+   where the state boundary is clean. The next high-value but higher-risk
+   targets are `XlsxPatcher::do_save` phase extraction, then
+   `src/calamine_styled_backend.rs` record-building / OOXML feature-reader
+   extraction. Lower-risk polish remains public API docstrings for chart,
+   pivot, protection, and calc surfaces.
 
 ## Verification gates
 
@@ -750,7 +778,15 @@ For every external oracle branch:
   https://github.com/closedxml/closedxml/wiki/Conditional-Formatting
 - SheetJS CE docs:
   https://docs.sheetjs.com/docs/
+- xlsx-populate:
+  https://github.com/dtjohnson/xlsx-populate
+- PhpSpreadsheet:
+  https://github.com/PHPOffice/PhpSpreadsheet
 - libxlsxwriter conditional-formatting docs:
   https://libxlsxwriter.github.io/working_with_conditional_formatting.html
 - libxlsxwriter chart docs:
   https://libxlsxwriter.github.io/working_with_charts.html
+- rust_xlsxwriter docs:
+  https://docs.rs/rust_xlsxwriter/
+- Gnumeric / ssconvert:
+  https://github.com/GNOME/gnumeric

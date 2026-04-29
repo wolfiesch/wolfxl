@@ -1679,6 +1679,30 @@ impl XlsxPatcher {
 // Save implementation
 // ---------------------------------------------------------------------------
 
+struct SaveWorkspace {
+    file_patches: HashMap<String, Vec<u8>>,
+    part_id_allocator: wolfxl_rels::PartIdAllocator,
+    cloned_table_names: HashSet<String>,
+    local_blocks: HashMap<String, Vec<SheetBlock>>,
+}
+
+impl SaveWorkspace {
+    fn new(zip: &mut ZipArchive<File>, queued_blocks: &HashMap<String, Vec<SheetBlock>>) -> Self {
+        let names: Vec<String> = (0..zip.len())
+            .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
+            .collect();
+
+        Self {
+            file_patches: HashMap::new(),
+            part_id_allocator: wolfxl_rels::PartIdAllocator::from_zip_parts(
+                names.iter().map(|s| s.as_str()),
+            ),
+            cloned_table_names: HashSet::new(),
+            local_blocks: queued_blocks.clone(),
+        }
+    }
+}
+
 impl XlsxPatcher {
     fn do_save(&mut self, output_path: &str) -> PyResult<()> {
         if !self.has_pending_save_work() {
@@ -1698,27 +1722,18 @@ impl XlsxPatcher {
         // suffixes never collide with source entries. Shared by Phase
         // 2.7 (sheet copies), Phase 2.5f (tables), and Phase 2.5g
         // (comments + VML).
-        let mut part_id_allocator: wolfxl_rels::PartIdAllocator = {
-            let names: Vec<String> = (0..zip.len())
-                .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
-                .collect();
-            wolfxl_rels::PartIdAllocator::from_zip_parts(names.iter().map(|s| s.as_str()))
-        };
+        let mut save = SaveWorkspace::new(&mut zip, &self.queued_blocks);
 
         // RFC-035 §8 risk #6: when Phase 2.7 clones tables onto cloned
         // sheets, those new table names must be visible to Phase 2.5f's
         // collision-scan so a user `add_table` in the same save against
         // an as-yet-unflushed cloned name surfaces a clean error rather
         // than a silent rId/file collision.
-        let mut cloned_table_names: HashSet<String> = HashSet::new();
-
         // `file_patches` is the running map of source-ZIP entries that
         // will be REPLACED on emit. Phase 2.7 (RFC-035) is the first
         // phase to write into it (workbook.xml + workbook.xml.rels).
         // Phase 3 mutates it further with per-sheet rewrites.
-        let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
-
-        self.drain_permissive_seed_file_patches_phase(&mut file_patches);
+        self.drain_permissive_seed_file_patches_phase(&mut save.file_patches);
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //
@@ -1746,10 +1761,10 @@ impl XlsxPatcher {
         // been part of the source workbook.
         if !self.queued_sheet_copies.is_empty() {
             self.apply_sheet_copies_phase(
-                &mut file_patches,
+                &mut save.file_patches,
                 &mut zip,
-                &mut part_id_allocator,
-                &mut cloned_table_names,
+                &mut save.part_id_allocator,
+                &mut save.cloned_table_names,
             )?;
         }
 
@@ -1770,15 +1785,13 @@ impl XlsxPatcher {
         // reserved for setters that produce blocks pre-save (future
         // RFCs).  A local map keeps this slice's wiring contained
         // and safe to compose with future block-producing setters.
-        let mut local_blocks: HashMap<String, Vec<SheetBlock>> = self.queued_blocks.clone();
-
-        // Note: `part_id_allocator` is now built earlier (before
+        // Note: `save.part_id_allocator` is now built earlier (before
         // Phase 2.7) so the centralized allocator can mint cloned-sheet
         // suffixes for RFC-035. Phase 2.5f (tables) + Phase 2.5g
         // (comments + VML) consume the same instance below so
         // workbook-wide suffix uniqueness is preserved across phases.
 
-        patcher_sheet_blocks::apply_data_validations_phase(self, &mut local_blocks, &mut zip)?;
+        patcher_sheet_blocks::apply_data_validations_phase(self, &mut save.local_blocks, &mut zip)?;
 
         // --- Phase 2.5b: Build <conditionalFormatting> blocks from
         // queued CF patches (RFC-026). Cross-sheet coordination: a
@@ -1795,7 +1808,7 @@ impl XlsxPatcher {
         // is not a side-effect of our setter call.
         patcher_sheet_blocks::apply_conditional_formatting_phase(
             self,
-            &mut local_blocks,
+            &mut save.local_blocks,
             &mut styles_xml,
             &mut zip,
         )?;
@@ -1812,7 +1825,7 @@ impl XlsxPatcher {
         //      `<hyperlinks>` block (resolving rIds → URLs via the rels
         //      graph), and merge with the queued ops.
         //   4. Push a `SheetBlock::Hyperlinks` (slot 19) into
-        //      `local_blocks` so Phase 3's merge_blocks call inserts it.
+        //      `save.local_blocks` so Phase 3's merge_blocks call inserts it.
         //
         // No `ContentTypeOp`s are emitted here — the worksheet content
         // type is already declared in every source ZIP, and external
@@ -1825,7 +1838,7 @@ impl XlsxPatcher {
         // Cloning `sheet_order` into a local Vec sidesteps the
         // immutable-borrow-on-self-while-mutating-self.{ancillary,
         // rels_patches} conflict (same trick as Phase 2.5d).
-        patcher_sheet_blocks::apply_hyperlinks_phase(self, &mut local_blocks, &mut zip)?;
+        patcher_sheet_blocks::apply_hyperlinks_phase(self, &mut save.local_blocks, &mut zip)?;
 
         // --- Phase 2.5f: Tables (RFC-024) ---
         //
@@ -1850,7 +1863,7 @@ impl XlsxPatcher {
         //      so Phase 2.5c aggregates them into one
         //      `[Content_Types].xml` mutation.
         //   5. Push `SheetBlock::TableParts(block_bytes)` (slot 37)
-        //      into `local_blocks` so Phase-3's `merge_blocks` call
+        //      into `save.local_blocks` so Phase-3's `merge_blocks` call
         //      replaces the sheet's existing `<tableParts>` (if any)
         //      with the merged block.
         //
@@ -1862,11 +1875,11 @@ impl XlsxPatcher {
         // CF cross-sheet dxfId counter in Phase 2.5b.)
         patcher_sheet_blocks::apply_tables_phase(
             self,
-            &mut local_blocks,
-            &file_patches,
+            &mut save.local_blocks,
+            &save.file_patches,
             &mut zip,
-            &mut part_id_allocator,
-            &cloned_table_names,
+            &mut save.part_id_allocator,
+            &save.cloned_table_names,
         )?;
 
         // --- Phase 2.5g: Comments + VML drawings (RFC-023) ---
@@ -1881,7 +1894,7 @@ impl XlsxPatcher {
         //   4. Choose a workbook-wide unique `comments_n` / `vml_n`
         //      for sheets gaining their first comments part.
         //   5. Push a `SheetBlock::LegacyDrawing` (slot 31) into
-        //      `local_blocks` so the merger injects it (deletes the
+        //      `save.local_blocks` so the merger injects it (deletes the
         //      tag if the rel was removed and the sheet had one).
         //   6. Route comment/vml part bytes:
         //      - if `merged.is_empty()` and no preserved VML shapes
@@ -1893,16 +1906,16 @@ impl XlsxPatcher {
         // Workbook-scope author table (`comment_authors`) lives on
         // the stack so all sheets share dedup. New `comments<N>.xml`
         // and `vmlDrawing<N>.vml` suffixes come from the shared
-        // `part_id_allocator` (RFC-035 §5.2) — already pre-seeded by
+        // `save.part_id_allocator` (RFC-035 §5.2) — already pre-seeded by
         // a single pass over the source ZIP listing earlier in
         // Phase 2.5, so this loop only needs to populate the
         // ancillary registry for path-lookup purposes.
         let (comments_file_writes, comments_file_deletes) =
             patcher_sheet_blocks::apply_comments_phase(
                 self,
-                &mut local_blocks,
+                &mut save.local_blocks,
                 &mut zip,
-                &mut part_id_allocator,
+                &mut save.part_id_allocator,
             )?;
 
         // --- Phase 2.5k: Image adds (Sprint Λ Pod-β / RFC-045) ---
@@ -1928,10 +1941,14 @@ impl XlsxPatcher {
         //
         // Phase 2.5k runs BEFORE Phase 3 so the cell/block merge
         // pass picks up any drawing-element splice we put into
-        // `file_patches`. Sheet rels mutations land in
+        // `save.file_patches`. Sheet rels mutations land in
         // `rels_patches` which is serialized in the final emit pass.
         if !self.queued_images.is_empty() {
-            self.apply_image_adds_phase(&mut file_patches, &mut zip, &mut part_id_allocator)?;
+            self.apply_image_adds_phase(
+                &mut save.file_patches,
+                &mut zip,
+                &mut save.part_id_allocator,
+            )?;
         }
 
         // --- Phase 2.5l: Chart adds (Sprint Μ Pod-γ / RFC-046) ---
@@ -1949,7 +1966,11 @@ impl XlsxPatcher {
         // Phase 2.5l runs BEFORE Phase 3 so cell-range formulas in
         // chart XML can compose with cell rewrites in the same save.
         if !self.queued_charts.is_empty() {
-            self.apply_chart_adds_phase(&mut file_patches, &mut zip, &mut part_id_allocator)?;
+            self.apply_chart_adds_phase(
+                &mut save.file_patches,
+                &mut zip,
+                &mut save.part_id_allocator,
+            )?;
         }
 
         // --- Phase 2.5m: Pivot adds (Sprint Ν Pod-γ / RFC-047 + RFC-048) ---
@@ -1973,14 +1994,14 @@ impl XlsxPatcher {
         //      * Add a sheet-rel of type PIVOT_TABLE.
         //      * Add a content-type override.
         if !self.queued_pivot_caches.is_empty() || !self.queued_pivot_tables.is_empty() {
-            self.apply_pivot_adds_phase(&mut file_patches, &mut zip)?;
+            self.apply_pivot_adds_phase(&mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5n: Sheet setup (Sprint Ο Pod 1A.5 / RFC-055) ---
         //
         // Drains queued sheet-setup mutations (sheetView /
         // sheetProtection / pageMargins / pageSetup / headerFooter)
-        // into per-sheet `local_blocks` for splice via merge_blocks
+        // into per-sheet `save.local_blocks` for splice via merge_blocks
         // in Phase 3. Sequenced AFTER pivots (2.5m) and BEFORE
         // autoFilter (2.5o) so a later sheet-protection toggle can
         // observe the pivot-table block when computing its allowed
@@ -1993,13 +2014,13 @@ impl XlsxPatcher {
         // coordinator on the Python side; the patcher just stashes
         // the strings on the queue for now.
         if !self.queued_sheet_setup.is_empty() {
-            patcher_sheet_blocks::apply_sheet_setup_phase(self, &mut local_blocks);
+            patcher_sheet_blocks::apply_sheet_setup_phase(self, &mut save.local_blocks);
         }
 
         // --- Phase 2.5r: Page breaks + sheetFormatPr (Sprint Π Pod Π-α / RFC-062) ---
         //
         // Drains queued <rowBreaks> / <colBreaks> / <sheetFormatPr>
-        // mutations into per-sheet `local_blocks` for splice via
+        // mutations into per-sheet `save.local_blocks` for splice via
         // merge_blocks in Phase 3. Sequenced AFTER sheet-setup
         // (2.5n) and BEFORE slicers (2.5p) per RFC-062 §6 — page
         // breaks must land before slicer extLst entries because
@@ -2009,7 +2030,7 @@ impl XlsxPatcher {
         // merger handles ECMA-376 §18.3.1.99 ordering (slots 4 /
         // 24 / 25).
         if !self.queued_page_breaks.is_empty() {
-            patcher_sheet_blocks::apply_page_breaks_phase(self, &mut local_blocks);
+            patcher_sheet_blocks::apply_page_breaks_phase(self, &mut save.local_blocks);
         }
 
         // --- Phase 2.5p: Slicer caches + presentations (Sprint Ο Pod 3.5 / RFC-061 §3.1) ---
@@ -2032,7 +2053,7 @@ impl XlsxPatcher {
         //      owner sheet.
         //   8. Add content-type Overrides for both parts.
         if !self.queued_slicers.is_empty() {
-            self.apply_slicer_adds_phase(&mut file_patches, &mut zip)?;
+            self.apply_slicer_adds_phase(&mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5o: AutoFilter (Sprint Ο Pod 1B / RFC-056) ---
@@ -2046,7 +2067,7 @@ impl XlsxPatcher {
         //      from the source XML (or file_adds for cloned sheets).
         //   3. Run `wolfxl_autofilter::evaluate` to compute the
         //      hidden-row offsets + sort permutation.
-        //   4. Push a `SheetBlock::AutoFilter` into `local_blocks`
+        //   4. Push a `SheetBlock::AutoFilter` into `save.local_blocks`
         //      (replaces any existing `<autoFilter>` element).
         //   5. Stash the hidden-row offsets in `autofilter_hidden_rows`
         //      so Phase 3 can apply `<row hidden="1">` markers AFTER
@@ -2059,8 +2080,8 @@ impl XlsxPatcher {
         } else {
             patcher_sheet_blocks::apply_autofilter_phase(
                 self,
-                &mut local_blocks,
-                &file_patches,
+                &mut save.local_blocks,
+                &save.file_patches,
                 &mut zip,
             )?
         };
@@ -2072,21 +2093,22 @@ impl XlsxPatcher {
         // commute (cells live inside <sheetData>, blocks are siblings) so
         // composing them is straightforward.
         //
-        // `file_patches` was declared early (before Phase 2.7) so RFC-035
+        // `save.file_patches` was declared early (before Phase 2.7) so RFC-035
         // can write workbook.xml + workbook.xml.rels into it before the
         // per-sheet phases run.
 
         self.apply_worksheet_xml_patch_phase(
             &sheet_cell_patches,
-            &local_blocks,
+            &save.local_blocks,
             &autofilter_hidden_rows,
-            &mut file_patches,
+            &mut save.file_patches,
             &mut zip,
         )?;
 
         // Add styles.xml patch if modified
         if let Some(ref sxml) = styles_xml {
-            file_patches.insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
+            save.file_patches
+                .insert("xl/styles.xml".to_string(), sxml.as_bytes().to_vec());
         }
 
         // --- Phase 2.5q: Workbook security (Sprint Ο Pod 1D / RFC-058) ---
@@ -2105,15 +2127,15 @@ impl XlsxPatcher {
         //
         // Empty queue ⇒ identity: workbook.xml flows through
         // unchanged (no extra parse, no extra serialize).
-        self.apply_workbook_xml_phases(&mut file_patches, &mut zip)?;
+        self.apply_workbook_xml_phases(&mut save.file_patches, &mut zip)?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
         // the path already exists in the source ZIP:
-        //   - present → `file_patches` replaces it in place (RFC-020 precedent)
+        //   - present → `save.file_patches` replaces it in place (RFC-020 precedent)
         //   - absent  → `file_adds` appends a brand-new entry (RFC-013)
         // The "absent" branch is the common case for RFC-022 on a clean
         // file that had zero hyperlinks before.
-        self.serialize_rels_patches_phase(&mut file_patches, &mut zip)?;
+        self.serialize_rels_patches_phase(&mut save.file_patches, &mut zip)?;
 
         // --- Phase 2.5c: Content-types aggregation (RFC-013) ---
         //
@@ -2130,14 +2152,14 @@ impl XlsxPatcher {
         // via new `xl/comments<N>.xml` Overrides + a vml `Default`),
         // and RFC-024 (Tables via new `xl/tables/tableN.xml` Overrides)
         // will be the first volume producers.
-        self.apply_content_types_phase(&mut file_patches, &mut zip)?;
+        self.apply_content_types_phase(&mut save.file_patches, &mut zip)?;
 
         // --- Phase 2.5d: Document properties (RFC-020) ---
         //
         // Full rewrite of `docProps/core.xml` + `docProps/app.xml` when
         // `queued_props` is set. Routing depends on whether each part
         // already exists in the source ZIP:
-        //   - present → file_patches replaces it in place
+        //   - present → save.file_patches replaces it in place
         //   - absent  → file_adds appends a brand-new entry (RFC-013)
         //
         // `docProps/core.xml` is OPTIONAL in OOXML (some minimal xlsx
@@ -2147,14 +2169,14 @@ impl XlsxPatcher {
         // If the caller didn't supply `sheet_names`, we thread the
         // patcher's `sheet_order` in so app.xml's `<TitlesOfParts>`
         // matches the workbook's tab order.
-        self.apply_document_properties_phase(&mut file_patches, &mut zip)?;
+        self.apply_document_properties_phase(&mut save.file_patches, &mut zip)?;
 
         // Route RFC-023 comments/vml part bytes into the right
         // primitive (in-place patch vs. new add) and delete dropped
         // parts. Done after Phase 2.5d so we already know which paths
         // exist in the source ZIP.
         self.route_part_writes_and_deletes_phase(
-            &mut file_patches,
+            &mut save.file_patches,
             &mut zip,
             comments_file_writes,
             comments_file_deletes,
@@ -2163,7 +2185,7 @@ impl XlsxPatcher {
         // --- Phase 2.5i: Structural axis shifts (RFC-030 / RFC-031) ---
         //
         // Drains `queued_axis_shifts` in append order. For each op:
-        //   1. Read sheet XML from `file_patches` if already mutated,
+        //   1. Read sheet XML from `save.file_patches` if already mutated,
         //      else from the source ZIP.
         //   2. Read every table part attached to the sheet (via the
         //      ancillary registry's source-side scan).
@@ -2172,8 +2194,8 @@ impl XlsxPatcher {
         //      flush block) for defined-name shifts.
         //   5. Build `wolfxl_structural::SheetXmlInputs` and call
         //      `apply_workbook_shift` with this single op.
-        //   6. Merge the returned `file_patches` back into our
-        //      `file_patches`.
+        //   6. Merge the returned `save.file_patches` back into our
+        //      `save.file_patches`.
         //
         // The empty-queue path is the no-op identity: a workbook with
         // zero queued shifts produces byte-identical output (the
@@ -2181,20 +2203,20 @@ impl XlsxPatcher {
         // handles the global no-op case; this block handles the
         // partial case where some other RFC also queued ops).
         if !self.queued_axis_shifts.is_empty() {
-            self.apply_axis_shifts_phase(&mut file_patches, &mut zip)?;
+            self.apply_axis_shifts_phase(&mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5j: Range moves (RFC-034) ---
         //
         // Drains `queued_range_moves` in append order. Each op reads
-        // the affected sheet XML from `file_patches` if already
+        // the affected sheet XML from `save.file_patches` if already
         // mutated (e.g. by Phase 2.5i axis shifts), else from the
         // source ZIP, and routes through
         // `wolfxl_structural::apply_range_move`. Multi-op sequencing
         // mirrors Phase 2.5i: each op runs against the post-previous
         // bytes.
         if !self.queued_range_moves.is_empty() {
-            self.apply_range_moves_phase(&mut file_patches, &mut zip)?;
+            self.apply_range_moves_phase(&mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.8: calcChain.xml rebuild (Sprint Θ Pod-C3) ---
@@ -2212,12 +2234,12 @@ impl XlsxPatcher {
         // The no-op short-circuit at the top of `do_save` already
         // bypasses this whole flush, so byte-identical no-op saves
         // are unaffected.
-        self.rebuild_calc_chain_phase(&mut file_patches, &mut zip)?;
+        self.rebuild_calc_chain_phase(&mut save.file_patches, &mut zip)?;
 
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
-        self.rewrite_zip_phase(&file_patches, output_path)
+        self.rewrite_zip_phase(&save.file_patches, output_path)
     }
 
     /// Sprint Λ Pod-β (RFC-045) — drain `self.queued_images`.
