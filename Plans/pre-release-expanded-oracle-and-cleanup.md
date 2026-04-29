@@ -649,7 +649,10 @@ First no-behavior split target, completed 2026-04-28:
 104. Range-move formula text wrapping/unwrapping was centralized in
    `crates/wolfxl-structural/src/range_move.rs` on 2026-04-29 so moved cell
    formulas and translated DV/CF formulas share the same `=` preservation path.
-105. Next helper candidate: continue with another narrow Rust save phase only if
+105. VML comment-shape anchor shifting was extracted into
+   `crates/wolfxl-structural/src/vml_shift.rs` on 2026-04-29, keeping
+   `shift_workbook.rs` focused on orchestration, comments, and defined names.
+106. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

@@ -40,6 +40,7 @@ pub mod shift_cells;
 pub mod shift_formulas;
 pub mod shift_workbook;
 pub(crate) mod table_shift;
+pub(crate) mod vml_shift;
 
 #[cfg(test)]
 mod tests;
