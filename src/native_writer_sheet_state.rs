@@ -6,6 +6,25 @@ use pyo3::types::PyDict;
 use wolfxl_writer::model::Worksheet;
 use wolfxl_writer::refs;
 
+/// Apply a 1-based row height to a worksheet.
+pub(crate) fn apply_row_height(ws: &mut Worksheet, row: u32, height: f64) {
+    ws.set_row_height(row, height);
+}
+
+/// Apply a column width from an Excel column-letter string.
+pub(crate) fn apply_column_width(ws: &mut Worksheet, col_str: &str, width: f64) -> PyResult<()> {
+    let col = refs::letters_to_col(col_str)
+        .ok_or_else(|| PyValueError::new_err(format!("Invalid column letter: {col_str}")))?;
+    ws.set_column_width(col, width);
+    Ok(())
+}
+
+/// Add a merged-cell range after normalizing absolute markers.
+pub(crate) fn apply_merged_range(ws: &mut Worksheet, range_str: &str) -> PyResult<()> {
+    let cleaned = range_str.replace('$', "");
+    ws.merge_cells(&cleaned).map_err(PyValueError::new_err)
+}
+
 /// Apply oracle-shaped freeze/split pane settings to a worksheet.
 pub(crate) fn apply_freeze_panes(ws: &mut Worksheet, settings: &Bound<'_, PyAny>) -> PyResult<()> {
     let dict = settings
@@ -46,6 +65,33 @@ pub(crate) fn apply_freeze_panes(ws: &mut Worksheet, settings: &Bound<'_, PyAny>
         ws.set_split(x_split, y_split, None);
     }
 
+    Ok(())
+}
+
+/// Apply print area metadata to a worksheet.
+pub(crate) fn apply_print_area(ws: &mut Worksheet, range_str: &str) {
+    ws.print_area = Some(range_str.to_string());
+}
+
+/// Apply parsed sheet setup blocks to a worksheet.
+pub(crate) fn apply_sheet_setup(ws: &mut Worksheet, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+    let specs = crate::wolfxl::sheet_setup::parse_sheet_setup_payload(payload)?;
+    ws.views = specs.sheet_view;
+    ws.protection = specs.sheet_protection;
+    ws.page_margins = specs.page_margins;
+    ws.page_setup = specs.page_setup;
+    ws.header_footer = specs.header_footer;
+    // print_titles is workbook-scope; routed via definedNames queue on the
+    // Python side, not here.
+    Ok(())
+}
+
+/// Apply parsed page-break and sheet-format blocks to a worksheet.
+pub(crate) fn apply_page_breaks(ws: &mut Worksheet, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+    let queued = crate::wolfxl::page_breaks::parse_page_breaks_payload(payload)?;
+    ws.row_breaks = queued.row_breaks;
+    ws.col_breaks = queued.col_breaks;
+    ws.sheet_format = queued.sheet_format;
     Ok(())
 }
 

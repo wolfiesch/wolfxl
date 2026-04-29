@@ -51,7 +51,10 @@ use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
     dict_to_table, unwrap_optional_wrapper,
 };
-use crate::native_writer_sheet_state::apply_freeze_panes;
+use crate::native_writer_sheet_state::{
+    apply_column_width, apply_freeze_panes, apply_merged_range, apply_page_breaks,
+    apply_print_area, apply_row_height, apply_sheet_setup,
+};
 use crate::native_writer_workbook_metadata::{
     dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
 };
@@ -375,22 +378,18 @@ impl NativeWorkbook {
         // Python passes 1-based rows (openpyxl convention). The native
         // model is also 1-based, so no `saturating_sub(1)` like oracle.
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.set_row_height(row, height);
+        apply_row_height(ws, row, height);
         Ok(())
     }
 
     pub fn set_column_width(&mut self, sheet: &str, col_str: &str, width: f64) -> PyResult<()> {
-        let col = refs::letters_to_col(col_str)
-            .ok_or_else(|| PyValueError::new_err(format!("Invalid column letter: {col_str}")))?;
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.set_column_width(col, width);
-        Ok(())
+        apply_column_width(ws, col_str, width)
     }
 
     pub fn merge_cells(&mut self, sheet: &str, range_str: &str) -> PyResult<()> {
-        let cleaned = range_str.replace('$', "");
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.merge_cells(&cleaned).map_err(PyValueError::new_err)
+        apply_merged_range(ws, range_str)
     }
 
     /// Mirrors oracle: dict with keys `mode` ("freeze" | "split") and
@@ -449,7 +448,7 @@ impl NativeWorkbook {
 
     pub fn set_print_area(&mut self, sheet: &str, range_str: &str) -> PyResult<()> {
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.print_area = Some(range_str.to_string());
+        apply_print_area(ws, range_str);
         Ok(())
     }
 
@@ -463,16 +462,8 @@ impl NativeWorkbook {
         sheet: &str,
         payload: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
-        let specs = crate::wolfxl::sheet_setup::parse_sheet_setup_payload(payload)?;
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.views = specs.sheet_view;
-        ws.protection = specs.sheet_protection;
-        ws.page_margins = specs.page_margins;
-        ws.page_setup = specs.page_setup;
-        ws.header_footer = specs.header_footer;
-        // print_titles is workbook-scope; routed via definedNames
-        // queue on the Python side, not here.
-        Ok(())
+        apply_sheet_setup(ws, payload)
     }
 
     /// Sprint Π Pod Π-α (RFC-062) — install page-breaks +
@@ -485,12 +476,8 @@ impl NativeWorkbook {
         sheet: &str,
         payload: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
-        let queued = crate::wolfxl::page_breaks::parse_page_breaks_payload(payload)?;
         let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.row_breaks = queued.row_breaks;
-        ws.col_breaks = queued.col_breaks;
-        ws.sheet_format = queued.sheet_format;
-        Ok(())
+        apply_page_breaks(ws, payload)
     }
 
     /// Sprint Ο Pod 1B (RFC-056) — install an autoFilter on a write-

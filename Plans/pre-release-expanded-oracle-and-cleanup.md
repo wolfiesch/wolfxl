@@ -146,7 +146,7 @@ Current largest WolfXL hotspots:
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 762 | Split the remaining Python-to-writer bridge into sheet setup and workbook-save helpers while keeping the PyO3 surface stable. |
+| `src/native_writer_backend.rs` | 739 | Split the remaining Python-to-writer bridge into style application and workbook-save helpers while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1489 | Separate workbook orchestration from feature registration and save pipeline helpers. |
@@ -503,7 +503,12 @@ First no-behavior split target, completed 2026-04-28:
    on 2026-04-29 while preserving add-chart, modify-mode chart XML, pivot
    source, anchor, axis, series, data-label, error-bar, trendline, and 3D chart
    payload semantics.
-65. Next helper candidate: continue with another narrow Rust save phase only if
+65. Native writer worksheet state application in
+   `src/native_writer_sheet_state.rs` expanded on 2026-04-29 to cover row and
+   column dimensions, merged ranges, print areas, sheet setup blocks, page
+   breaks, and sheet format blocks while preserving existing PyO3 method
+   names.
+66. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
