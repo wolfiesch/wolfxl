@@ -677,8 +677,8 @@ class Worksheet:
     ) -> Iterator[tuple[Any, ...]]:
         """Iterate over rows in a range. Matches openpyxl's iter_rows API.
 
-        Sprint Ι Pod-β: when the workbook was opened with
-        ``read_only=True`` (or when this sheet has more than
+        When the workbook was opened with ``read_only=True`` (or when this
+        sheet has more than
         :data:`wolfxl._streaming.AUTO_STREAM_ROW_THRESHOLD` rows) this
         method becomes a true SAX-streaming generator backed by the
         Rust ``StreamingSheetReader``. Cells yielded in that path are

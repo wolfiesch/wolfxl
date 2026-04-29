@@ -579,7 +579,10 @@ First no-behavior split target, completed 2026-04-28:
 83. Worksheet print, view, protection, page-break, sheet-format, and print-title
    accessor docs were rewritten into user-facing Google-style docs on
    2026-04-29 without behavior changes.
-84. Next helper candidate: continue with another narrow Rust save phase only if
+84. Streaming iteration docs, compatibility shim wording, and the public
+   file-format detector re-export comment were cleaned on 2026-04-29 to remove
+   stale sprint/roadmap phrasing without behavior changes.
+85. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
