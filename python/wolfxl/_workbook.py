@@ -16,6 +16,7 @@ from wolfxl._workbook_state import (
     same_existing_path,
     xlsb_xls_via_tempfile,
 )
+from wolfxl import _workbook_patcher_flush
 from wolfxl._worksheet import Worksheet
 
 
@@ -1366,28 +1367,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_hyperlinks  # noqa: SLF001
-            if not pending:
-                continue
-            for coord, hl in pending.items():
-                if hl is None:
-                    patcher.queue_hyperlink_delete(ws.title, coord)
-                    continue
-                payload: dict[str, Any] = {}
-                if hl.target is not None:
-                    payload["target"] = hl.target
-                if hl.location is not None:
-                    payload["location"] = hl.location
-                if hl.tooltip is not None:
-                    payload["tooltip"] = hl.tooltip
-                if hl.display is not None:
-                    payload["display"] = hl.display
-                patcher.queue_hyperlink(ws.title, coord, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_hyperlinks_to_patcher(self)
 
     def _flush_pending_tables_to_patcher(self) -> None:
         """Drain ``_pending_tables`` on every sheet into the patcher (RFC-024).
@@ -1408,34 +1388,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_tables  # noqa: SLF001
-            if not pending:
-                continue
-            for t in pending:
-                payload: dict[str, Any] = {
-                    "name": t.name,
-                    "ref": t.ref,
-                    "columns": [c.name for c in t.tableColumns] if t.tableColumns else [],
-                    "header_row_count": int(t.headerRowCount or 0),
-                    "totals_row_shown": bool(t.totalsRowCount and t.totalsRowCount > 0),
-                    "autofilter": True,
-                }
-                if t.displayName and t.displayName != t.name:
-                    payload["display_name"] = t.displayName
-                if t.tableStyleInfo is not None and t.tableStyleInfo.name:
-                    payload["style"] = {
-                        "name": t.tableStyleInfo.name,
-                        "show_first_column": bool(t.tableStyleInfo.showFirstColumn),
-                        "show_last_column": bool(t.tableStyleInfo.showLastColumn),
-                        "show_row_stripes": bool(t.tableStyleInfo.showRowStripes),
-                        "show_column_stripes": bool(t.tableStyleInfo.showColumnStripes),
-                    }
-                patcher.queue_table(ws.title, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_tables_to_patcher(self)
 
     def _flush_pending_images_to_patcher(self) -> None:
         """Sprint Λ Pod-β (RFC-045) — drain pending images into the patcher.
@@ -1449,19 +1402,7 @@ class Workbook:
         ``NotImplementedError`` from the patcher at save time —
         appending to an existing drawing is a v1.5 follow-up.
         """
-        from wolfxl._images import image_to_writer_payload
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_images  # noqa: SLF001
-            if not pending:
-                continue
-            for img in pending:
-                payload = image_to_writer_payload(img)
-                patcher.queue_image_add(ws.title, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_images_to_patcher(self)
 
     def _flush_pending_charts_to_patcher(self) -> None:
         """Sprint Μ-prime Pod-γ′ (RFC-046 §6, §10.12) — drain pending
@@ -1992,27 +1933,7 @@ class Workbook:
         patcher's flat-dict shape and routed to ``queue_comment``;
         the ``None`` sentinel routes to ``queue_comment_delete``.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_comments  # noqa: SLF001
-            if not pending:
-                continue
-            for coord, c in pending.items():
-                if c is None:
-                    patcher.queue_comment_delete(ws.title, coord)
-                    continue
-                payload: dict[str, Any] = {
-                    "text": c.text,
-                    "author": c.author or "wolfxl",
-                }
-                if getattr(c, "width", None) is not None:
-                    payload["width_pt"] = float(c.width)
-                if getattr(c, "height", None) is not None:
-                    payload["height_pt"] = float(c.height)
-                patcher.queue_comment(ws.title, coord, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_comments_to_patcher(self)
 
     def _flush_pending_data_validations_to_patcher(self) -> None:
         """Drain ``_pending_data_validations`` on every sheet into the patcher.
@@ -2028,18 +1949,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        from wolfxl.worksheet.datavalidation import _dv_to_patcher_dict
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_data_validations  # noqa: SLF001
-            if not pending:
-                continue
-            for dv in pending:
-                patcher.queue_data_validation(ws.title, _dv_to_patcher_dict(dv))
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_data_validations_to_patcher(self)
 
     def _flush_pending_conditional_formats_to_patcher(self) -> None:
         """Drain ``_pending_conditional_formats`` on every sheet into the patcher.
@@ -2057,27 +1967,7 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        from wolfxl.formatting import _cf_to_patcher_dict
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_conditional_formats  # noqa: SLF001
-            if not pending:
-                continue
-            by_sqref: dict[str, list[Any]] = {}
-            order: list[str] = []
-            for sqref, rule in pending:
-                if sqref not in by_sqref:
-                    by_sqref[sqref] = []
-                    order.append(sqref)
-                by_sqref[sqref].append(rule)
-            for sqref in order:
-                patcher.queue_conditional_formatting(
-                    ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
-                )
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_conditional_formats_to_patcher(self)
 
     def _flush_pending_axis_shifts_to_patcher(self) -> None:
         """Drain ``_pending_axis_shifts`` into the patcher (RFC-030 / RFC-031).

@@ -149,7 +149,7 @@ Current largest WolfXL hotspots:
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2617 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2915 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
-| `python/wolfxl/_workbook.py` | 2470 | Separate workbook orchestration from feature registration and save pipeline helpers. |
+| `python/wolfxl/_workbook.py` | 2360 | Separate workbook orchestration from feature registration and save pipeline helpers. |
 
 Suggested sprint sequence:
 
@@ -342,7 +342,11 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_streaming.py` completed on 2026-04-28 by adding concise
    Google-style docstrings to remaining public property setters, core cell
    accessors, streaming-cell accessors, and debug representations.
-24. Next helper candidate: continue with another narrow Rust save phase only if
+24. Simple modify-mode feature drains for hyperlinks, tables, images,
+   comments, data validations, and conditional formatting moved into
+   `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-28 while preserving
+   the existing `_workbook.py` wrapper methods and save-order call sites.
+25. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
