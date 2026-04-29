@@ -184,10 +184,10 @@ pub fn emit(
     // the END of the sheet's rels graph (after comments, vml, tables,
     // and external hyperlinks) so the existing rId conventions for
     // those entries are preserved.
-    emit_drawing_ref(&mut out, sheet);
+    super::drawing_refs::emit_drawing(&mut out, sheet);
 
     // Slot 31: <legacyDrawing> — EXT-W3A; emitted iff !sheet.comments.is_empty(); rId via convention
-    emit_legacy_drawing(&mut out, sheet);
+    super::drawing_refs::emit_legacy(&mut out, sheet);
 
     // Slot 37: <tableParts> — EXT-W3B; one <tablePart r:id=...> per table
     super::table_parts::emit(&mut out, sheet);
@@ -879,32 +879,6 @@ fn emit_cfvo(out: &mut String, threshold: &crate::model::conditional::Conditiona
             ));
         }
     }
-}
-
-/// Emit `<legacyDrawing r:id="rId2"/>` when comments exist. The rId is a
-/// hardcoded convention (see `rels::emit_sheet`): with comments present,
-/// rId1 → commentsN.xml and rId2 → vmlDrawingN.vml. Filled by W3A.
-fn emit_legacy_drawing(out: &mut String, sheet: &Worksheet) {
-    if !sheet.comments.is_empty() {
-        out.push_str("<legacyDrawing r:id=\"rId2\"/>");
-    }
-}
-
-/// Sprint Λ Pod-β + Sprint Μ Pod-α — emit `<drawing r:id="rIdN"/>`
-/// when the sheet has at least one image or chart. The rId is
-/// allocated at the END of the sheet's rels graph: comments offset (2
-/// if any comments) + table count + external-hyperlink count + 1.
-/// This mirrors the allocation in `rels::emit_sheet` so the rId
-/// numbering stays in lock-step.
-fn emit_drawing_ref(out: &mut String, sheet: &Worksheet) {
-    if sheet.images.is_empty() && sheet.charts.is_empty() {
-        return;
-    }
-    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
-    let table_count = sheet.tables.len() as u32;
-    let external_hyperlinks = sheet.hyperlinks.values().filter(|h| !h.is_internal).count() as u32;
-    let rid = comments_offset + table_count + external_hyperlinks + 1;
-    out.push_str(&format!("<drawing r:id=\"rId{rid}\"/>"));
 }
 
 #[cfg(test)]
