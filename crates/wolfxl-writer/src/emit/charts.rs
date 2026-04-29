@@ -93,7 +93,7 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
 
     // Auto-title deleted is implicit when title is absent + we emit no element.
 
-    // Optional <c:view3D> for 3D variants. Sprint Μ-prime / RFC-046 §10.10.
+    // Optional <c:view3D> for 3D variants.
     if chart.kind.is_3d() {
         if let Some(v) = &chart.view_3d {
             emit_view_3d(&mut out, v);
@@ -411,7 +411,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // Sprint Ν Pod-δ — pivot-chart linkage (RFC-049)
+    // Pivot-chart linkage.
     // ----------------------------------------------------------------
 
     #[test]
@@ -440,8 +440,8 @@ mod tests {
             "<c:pivotSource><c:name>MyPivot</c:name><c:fmtId val=\"0\"/></c:pivotSource>"
         ));
         // 3) Per-series `<c:fmtId val="0"/>` injected RIGHT AFTER the
-        //    series-order block. RFC-049 §2 — Excel rejects pivot
-        //    charts whose series lack `<c:fmtId>`.
+        //    series-order block. Excel rejects pivot charts whose
+        //    series lack `<c:fmtId>`.
         assert!(
             text.contains("<c:order val=\"0\"/><c:fmtId val=\"0\"/>"),
             "missing per-series fmtId after order: {text}"

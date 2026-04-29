@@ -617,7 +617,10 @@ First no-behavior split target, completed 2026-04-28:
 95. Chart per-type plot XML emission was extracted into
    `crates/wolfxl-writer/src/emit/charts/plot.rs` on 2026-04-29 while keeping
    chart-space orchestration, layout, axes, and legend ordering in the facade.
-96. Next helper candidate: continue with another narrow Rust save phase only if
+96. Chart emitter and chart model comments were cleaned on 2026-04-29 to remove
+   stale sprint/RFC phrasing and current-state drift without changing chart
+   behavior.
+97. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

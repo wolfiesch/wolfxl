@@ -1,13 +1,10 @@
-//! Integration tests for the chart emit pipeline — Sprint Μ Pod-α
-//! (RFC-046).
+//! Integration tests for the chart emit pipeline.
 //!
 //! Each test builds a [`Chart`] in memory, emits its
 //! `xl/charts/chartN.xml` via [`wolfxl_writer::emit::charts::emit_chart_xml`],
 //! then re-parses the bytes with `quick-xml` to assert structural
-//! invariants. Eight kind-specific tests + 12 sub-feature tests.
-//!
-//! Pod-β (Python) and Pod-δ (cross-language byte parity) will layer
-//! their own tests on top; this file owns the Rust-only contract.
+//! invariants. The Python API and cross-language parity suites layer their
+//! own tests on top; this file owns the Rust-only contract.
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -863,7 +860,7 @@ fn end_to_end_emits_chart_part_via_emit_xlsx() {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint Μ-prime Pod-α' — new family round-trips + new sub-features
+// Additional chart-family round-trips and sub-features.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -962,7 +959,7 @@ fn surface3d_chart_round_trips() {
 fn stock_chart_emits_hilow_and_updown_bars() {
     let mut c = Chart::new(ChartKind::Stock, anchor_at(0, 0));
     // 4 series typical (Open, High, Low, Close), but emit accepts any
-    // count — semantic validation is Pod-β's job.
+    // count; semantic validation lives in the Python API tests.
     for i in 0..4u32 {
         let mut s = Series::new(i);
         s.values = Some(Reference::new("Sheet", &format!("B{}:B{}", 2 + i, 6 + i)));

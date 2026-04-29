@@ -1,4 +1,4 @@
-//! Chart data model — Sprint Μ Pod-α (RFC-046).
+//! Chart data model.
 //!
 //! Pure data only; no I/O, no XML emission. Consumed by
 //! [`crate::emit::charts`] which renders one `xl/charts/chartN.xml` per
@@ -7,9 +7,8 @@
 //!
 //! # Coverage
 //!
-//! Eight chart kinds with full openpyxl per-type feature depth:
-//! Bar, Line, Pie, Doughnut, Area, Scatter, Bubble, Radar. The 3D
-//! variants, Stock, Surface, and ProjectedPie are deferred to v1.6.1.
+//! Common openpyxl-compatible chart families are represented, including
+//! 2D charts, 3D variants, Stock, Surface, and ProjectedPie.
 //!
 //! Every sub-feature is an `Option<T>` so absent → no XML element
 //! emitted. Defaults match openpyxl's "leave the attribute off" rule
@@ -18,19 +17,17 @@
 
 use super::image::ImageAnchor;
 
-/// Re-export of [`wolfxl_pivot::PivotSource`] so Pod-δ's chart model
-/// owns a stable name for downstream callers without forcing them to
-/// reach into the pivot crate. The chart crate cannot define this type
-/// itself (Pod-α already shipped the canonical struct in
-/// `wolfxl-pivot`); it only borrows it as an `Option<PivotSource>` on
-/// [`Chart`]. RFC-049 §10.
+/// Re-export of [`wolfxl_pivot::PivotSource`] so the chart model owns a
+/// stable name for downstream callers without forcing them to reach into
+/// the pivot crate. The chart crate cannot define this type itself; it
+/// only borrows it as an `Option<PivotSource>` on [`Chart`].
 pub use wolfxl_pivot::PivotSource;
 
 /// Top-level chart kind. Each variant maps to one OOXML plot-area
 /// element name (e.g. `<barChart>`, `<lineChart>`).
 ///
-/// Sprint Μ-prime (RFC-046 §11) added 8 new variants for 3D / Stock /
-/// Surface / OfPie families. The 2D originals are unchanged.
+/// Includes both the original 2D chart families and the later 3D, Stock,
+/// Surface, and OfPie families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartKind {
     Bar,
@@ -41,7 +38,6 @@ pub enum ChartKind {
     Scatter,
     Bubble,
     Radar,
-    // Sprint Μ-prime additions (v1.6.1).
     Bar3D,
     Line3D,
     Pie3D,
@@ -352,7 +348,6 @@ pub struct AxisCommon {
     /// `<minorGridlines/>` present when true (legacy short-form flag).
     pub minor_gridlines: bool,
     /// `<majorGridlines>` rich form (with optional graphical properties).
-    /// Sprint Μ-prime — RFC-046 §10.7.1.
     pub major_gridlines_obj: Option<Gridlines>,
     /// `<minorGridlines>` rich form.
     pub minor_gridlines_obj: Option<Gridlines>,
@@ -496,7 +491,7 @@ impl Title {
 }
 
 /// 3D chart view parameters — emitted as `<c:view3D>` at the chart level
-/// (before plotArea) for 3D variants. RFC-046 §10.10.
+/// before `<plotArea>` for 3D variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct View3D {
     /// `<c:rotX val="…"/>` — typically -90..90 (or 0..30 for Bar3D).
@@ -515,7 +510,7 @@ pub struct View3D {
     pub h_percent: Option<u32>,
 }
 
-/// `<c:majorGridlines>` / `<c:minorGridlines>` content. RFC-046 §10.7.1.
+/// `<c:majorGridlines>` / `<c:minorGridlines>` content.
 ///
 /// `None` at the parent axis means "no gridlines". Empty `Gridlines`
 /// (default) means "draw default gridlines" (an empty self-closing
@@ -999,31 +994,29 @@ pub struct Chart {
     /// per-series).
     pub smoothing: Option<bool>,
 
-    /// Sprint Μ-prime (RFC-046 §10.10) — 3D view parameters; only
-    /// emitted when `kind.is_3d()`.
+    /// 3D view parameters; only emitted when `kind.is_3d()`.
     pub view_3d: Option<View3D>,
 
-    /// Sprint Μ-prime (RFC-046 §11.3) — Surface chart wireframe toggle.
+    /// Surface chart wireframe toggle.
     pub wireframe: Option<bool>,
 
-    /// Sprint Μ-prime — `<c:ofPieType val="bar|pie"/>` for OfPie kind.
+    /// `<c:ofPieType val="bar|pie"/>` for OfPie kind.
     pub of_pie_type: Option<String>,
 
-    /// Sprint Μ-prime — `<c:splitType val="auto|cust|percent|pos|val"/>`
-    /// for OfPie kind.
+    /// `<c:splitType val="auto|cust|percent|pos|val"/>` for OfPie kind.
     pub split_type: Option<String>,
 
-    /// Sprint Μ-prime — `<c:splitPos val="…"/>` for OfPie when
-    /// `split_type` requires a numeric split point.
+    /// `<c:splitPos val="…"/>` for OfPie when `split_type` requires a
+    /// numeric split point.
     pub split_pos: Option<f64>,
 
-    /// Sprint Μ-prime — `<c:secondPieSize val="…"/>` for OfPie (5..200).
+    /// `<c:secondPieSize val="…"/>` for OfPie (5..200).
     pub second_pie_size: Option<u32>,
 
-    /// Sprint Ν Pod-δ — RFC-049 §10. When `Some`, the chart is a
-    /// pivot-chart and the emitter writes a `<c:pivotSource>` block
-    /// inside `<c:chart>` (between the `<c:chart>` open and the title)
-    /// **and** injects a `<c:fmtId val="0"/>` element on every series.
+    /// When `Some`, the chart is a pivot chart and the emitter writes a
+    /// `<c:pivotSource>` block inside `<c:chart>` (between the `<c:chart>`
+    /// open and the title) and injects a `<c:fmtId val="0"/>` element on
+    /// every series.
     pub pivot_source: Option<PivotSource>,
 }
 

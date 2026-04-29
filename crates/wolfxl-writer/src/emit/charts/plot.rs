@@ -64,10 +64,10 @@ pub(super) fn emit_plot_chart(out: &mut String, chart: &Chart, ax_a: u32, ax_b: 
         _ => {}
     }
 
-    // Series. Sprint Ν Pod-δ — when the chart has a `pivot_source`,
+    // Series. When the chart has a `pivot_source`,
     // each `<c:ser>` MUST carry a `<c:fmtId val="0"/>` element matching
     // the pivot source's fmt_id; Excel rejects pivot charts whose
-    // series lack `<c:fmtId>`. RFC-049 §2.
+    // series lack `<c:fmtId>`.
     let pivot_fmt_id = chart.pivot_source.as_ref().map(|ps| ps.fmt_id);
     for ser in &chart.series {
         emit_series(out, ser, chart.kind, pivot_fmt_id);
