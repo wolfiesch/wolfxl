@@ -274,63 +274,21 @@ class Cell:
         # The metadata is populated either by the setter or by the
         # read-back path (parse_cell in the calamine backend tags the
         # cell post-read; pending-array map carries write-side state).
-        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+        pending_value = self._value_from_pending_formula()
+        if pending_value is not _UNSET:
+            return pending_value
 
-        ws = self._ws
-        # Pre-save visibility for write-mode / modify-mode setters: any
-        # pending array-formula entry on the worksheet wins over the
-        # cached value.
-        pending = ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
-        if pending is not None:
-            kind, payload = pending
-            if kind == "spill_child":
-                return None
-            if kind == "array":
-                return ArrayFormula(payload["ref"], payload["text"])
-            if kind == "data_table":
-                return DataTableFormula(
-                    ref=payload["ref"],
-                    ca=payload.get("ca", False),
-                    dt2D=payload.get("dt2D", False),
-                    dtr=payload.get("dtr", False),
-                    r1=payload.get("r1"),
-                    r2=payload.get("r2"),
-                )
-        # Read-side: if a previous read populated _formula_type, we
-        # surface the typed instance.
-        if self._formula_type == "array":
-            return ArrayFormula(self._array_ref or "", self._formula_text or "")
-        if self._formula_type == "dataTable":
-            return DataTableFormula(
-                ref=self._array_ref or "",
-                ca=self._dt_ca,
-                dt2D=self._dt_2d,
-                dtr=self._dt_r,
-                r1=self._dt_r1,
-                r2=self._dt_r2,
-            )
-        if self._formula_type == "array_child":
-            # Cell inside a spill range that isn't the master.  openpyxl
-            # also returns None here — Excel computes the spill on open.
-            return None
+        formula_value = self._value_from_formula_metadata()
+        if formula_value is not _UNSET:
+            return formula_value
 
         if self._value is _UNSET:
             self._value = self._read_value()
             # _read_value may have populated the formula metadata —
             # re-check after the read.
-            if self._formula_type == "array":
-                return ArrayFormula(self._array_ref or "", self._formula_text or "")
-            if self._formula_type == "dataTable":
-                return DataTableFormula(
-                    ref=self._array_ref or "",
-                    ca=self._dt_ca,
-                    dt2D=self._dt_2d,
-                    dtr=self._dt_r,
-                    r1=self._dt_r1,
-                    r2=self._dt_r2,
-                )
-            if self._formula_type == "array_child":
-                return None
+            formula_value = self._value_from_formula_metadata()
+            if formula_value is not _UNSET:
+                return formula_value
         # Sprint Ι Pod-α: when the workbook was opened with
         # ``rich_text=True``, surface ``CellRichText`` for cells whose
         # backing string carries `<r>` runs.  Default load mode mirrors
@@ -371,62 +329,16 @@ class Cell:
 
         # RFC-057 — array / data-table formula assignment.
         if isinstance(val, ArrayFormula):
-            self._formula_type = "array"
-            self._array_ref = val.ref
-            self._formula_text = val.text
-            self._value = val
-            self._value_dirty = True
-            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
-            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
-                "array",
-                {"ref": val.ref, "text": val.text},
-            )
-            # Populate placeholder entries for cells inside the spill
-            # range (excluding the master).  These show up as
-            # ``<c r="..."/>`` placeholders so Excel sees the spill
-            # area pre-populated; without them the spill master would
-            # be the only cell in the range.
-            self._populate_spill_placeholders(val.ref)
-            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            self._queue_array_formula(val)
             return
 
         if isinstance(val, DataTableFormula):
-            self._formula_type = "dataTable"
-            self._array_ref = val.ref
-            self._dt_ca = val.ca
-            self._dt_2d = val.dt2D
-            self._dt_r = val.dtr
-            self._dt_r1 = val.r1
-            self._dt_r2 = val.r2
-            self._value = val
-            self._value_dirty = True
-            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
-            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
-                "data_table",
-                {
-                    "ref": val.ref,
-                    "ca": val.ca,
-                    "dt2D": val.dt2D,
-                    "dtr": val.dtr,
-                    "r1": val.r1,
-                    "r2": val.r2,
-                },
-            )
-            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            self._queue_data_table_formula(val)
             return
 
         # Plain assignment — clear any previous array / data-table
         # state so a former master cell can be replaced cleanly.
-        if self._formula_type in ("array", "dataTable", "array_child"):
-            self._formula_type = None
-            self._array_ref = None
-            self._formula_text = None
-            self._dt_ca = False
-            self._dt_2d = False
-            self._dt_r = False
-            self._dt_r1 = None
-            self._dt_r2 = None
-        ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+        self._clear_formula_metadata()
 
         self._value = val
         self._value_dirty = True
@@ -440,6 +352,105 @@ class Cell:
         else:
             # Clearing or replacing with plain — drop any prior rich entry.
             ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _value_from_pending_formula(self) -> Any:
+        """Return pending array/data-table formula value or ``_UNSET``."""
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        pending = self._ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
+        if pending is None:
+            return _UNSET
+        kind, payload = pending
+        if kind == "spill_child":
+            return None
+        if kind == "array":
+            return ArrayFormula(payload["ref"], payload["text"])
+        if kind == "data_table":
+            return DataTableFormula(
+                ref=payload["ref"],
+                ca=payload.get("ca", False),
+                dt2D=payload.get("dt2D", False),
+                dtr=payload.get("dtr", False),
+                r1=payload.get("r1"),
+                r2=payload.get("r2"),
+            )
+        return _UNSET
+
+    def _value_from_formula_metadata(self) -> Any:
+        """Return read-side formula metadata value or ``_UNSET``."""
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        if self._formula_type == "array":
+            return ArrayFormula(self._array_ref or "", self._formula_text or "")
+        if self._formula_type == "dataTable":
+            return DataTableFormula(
+                ref=self._array_ref or "",
+                ca=self._dt_ca,
+                dt2D=self._dt_2d,
+                dtr=self._dt_r,
+                r1=self._dt_r1,
+                r2=self._dt_r2,
+            )
+        if self._formula_type == "array_child":
+            return None
+        return _UNSET
+
+    def _clear_formula_metadata(self) -> None:
+        """Clear array/data-table metadata and pending formula state."""
+        self._formula_type = None
+        self._array_ref = None
+        self._formula_text = None
+        self._dt_ca = False
+        self._dt_2d = False
+        self._dt_r = False
+        self._dt_r1 = None
+        self._dt_r2 = None
+        self._ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _queue_array_formula(self, val: Any) -> None:
+        """Queue an array formula assignment for save."""
+        ws = self._ws
+        self._formula_type = "array"
+        self._array_ref = val.ref
+        self._formula_text = val.text
+        self._value = val
+        self._value_dirty = True
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+            "array",
+            {"ref": val.ref, "text": val.text},
+        )
+        # Populate placeholder entries for cells inside the spill range
+        # (excluding the master). These show up as ``<c r="..."/>``
+        # placeholders so Excel sees the spill area pre-populated.
+        self._populate_spill_placeholders(val.ref)
+        ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _queue_data_table_formula(self, val: Any) -> None:
+        """Queue a data-table formula assignment for save."""
+        ws = self._ws
+        self._formula_type = "dataTable"
+        self._array_ref = val.ref
+        self._dt_ca = val.ca
+        self._dt_2d = val.dt2D
+        self._dt_r = val.dtr
+        self._dt_r1 = val.r1
+        self._dt_r2 = val.r2
+        self._value = val
+        self._value_dirty = True
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+            "data_table",
+            {
+                "ref": val.ref,
+                "ca": val.ca,
+                "dt2D": val.dt2D,
+                "dtr": val.dtr,
+                "r1": val.r1,
+                "r2": val.r2,
+            },
+        )
+        ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
 
     def _populate_spill_placeholders(self, ref: str) -> None:
         """Mark every non-master cell in ``ref`` as a spill child.
