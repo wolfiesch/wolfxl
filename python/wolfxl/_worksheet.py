@@ -92,6 +92,7 @@ from wolfxl._worksheet_structural import (
 from wolfxl._worksheet_state import initialize_worksheet_state
 from wolfxl._worksheet_writer_flush import flush_to_writer
 from wolfxl._worksheet_write_buffers import (
+    append_row,
     batch_write_dicts,
     extract_non_batchable,
     materialize_append_buffer,
@@ -530,14 +531,7 @@ class Worksheet:
         access is needed later (e.g. ``ws.cell(1,1).font = ...``), the buffer
         is materialized into Cell objects on demand.
         """
-        row = list(iterable)
-        if not self._append_buffer:
-            self._append_buffer_start = self._next_append_row
-        self._append_buffer.append(row)
-        ncols = len(row)
-        if ncols > self._max_col_idx:
-            self._max_col_idx = ncols
-        self._next_append_row += 1
+        append_row(self, iterable)
 
     def _materialize_append_buffer(self) -> None:
         """Convert the append buffer into Cell objects.

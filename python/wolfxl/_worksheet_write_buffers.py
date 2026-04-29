@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
+
+
+def append_row(ws: Worksheet, iterable: Iterable[Any]) -> None:
+    """Append a row of values to the worksheet's write buffer."""
+    row = list(iterable)
+    if not ws._append_buffer:  # noqa: SLF001
+        ws._append_buffer_start = ws._next_append_row  # noqa: SLF001
+    ws._append_buffer.append(row)  # noqa: SLF001
+    ncols = len(row)
+    if ncols > ws._max_col_idx:  # noqa: SLF001
+        ws._max_col_idx = ncols  # noqa: SLF001
+    ws._next_append_row += 1  # noqa: SLF001
 
 
 def materialize_append_buffer(ws: Worksheet) -> None:
