@@ -148,7 +148,7 @@ Current largest WolfXL hotspots:
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 529 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
-| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
+| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 1989 | Continue splitting sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1321 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
 
 Suggested sprint sequence:
@@ -535,7 +535,12 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_workbook_lifecycle.py` on 2026-04-29 while preserving
    `close`, context-manager entry/exit, tempfile cleanup, and debug
    representation behavior.
-73. Next helper candidate: continue with another narrow Rust save phase only if
+73. Writer sheet setup and page-break slot adapters moved out of
+   `crates/wolfxl-writer/src/emit/sheet_xml.rs` on 2026-04-29 into
+   `emit/sheet_setup.rs` and `emit/page_breaks.rs` while preserving typed
+   sheet views, sheet format defaults, sheet protection, page margins, page
+   setup, header/footer, and row/column page-break slot ordering.
+74. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

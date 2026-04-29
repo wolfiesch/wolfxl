@@ -70,32 +70,14 @@ pub fn emit(
     // `views` spec on the Worksheet, prefer it; the legacy path is
     // still used otherwise so freeze/split panes set via
     // `set_freeze`/`set_split` continue to work.
-    if let Some(view_spec) = sheet.views.as_ref() {
-        let bytes = crate::parse::sheet_setup::emit_sheet_views(view_spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        } else {
-            super::sheet_views::emit(&mut out, sheet, sheet_idx);
-        }
-    } else {
-        super::sheet_views::emit(&mut out, sheet, sheet_idx);
-    }
+    super::sheet_setup::emit_sheet_views(&mut out, sheet, sheet_idx);
 
     // Slot 4: <sheetFormatPr>
     //
     // RFC-062: if the user set a typed `sheet_format` spec on the
     // Worksheet, prefer it; the legacy hardcoded default is still
     // emitted otherwise so unmodified sheets keep byte-stable.
-    if let Some(spec) = sheet.sheet_format.as_ref() {
-        let bytes = crate::parse::page_breaks::emit_sheet_format_pr(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        } else {
-            out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
-        }
-    } else {
-        out.push_str("<sheetFormatPr defaultRowHeight=\"15\"/>");
-    }
+    super::sheet_setup::emit_sheet_format(&mut out, sheet);
 
     // Slot 5: <cols> (only if non-empty)
     if !sheet.columns.is_empty() {
@@ -106,12 +88,7 @@ pub fn emit(
     super::sheet_data::emit(&mut out, sheet, sst);
 
     // Slot 8: <sheetProtection> — Sprint Ο Pod 1A.5 (RFC-055).
-    if let Some(spec) = sheet.protection.as_ref() {
-        let bytes = crate::parse::sheet_setup::emit_sheet_protection(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        }
-    }
+    super::sheet_setup::emit_sheet_protection(&mut out, sheet);
 
     // Slot 11: <autoFilter> — Sprint Ο Pod 1B (RFC-056). The bytes
     // are pre-emitted by the workbook-level coordinator from the
@@ -138,44 +115,17 @@ pub fn emit(
     }
 
     // Slot 21: <pageMargins> — RFC-055 typed override or default.
-    if let Some(spec) = sheet.page_margins.as_ref() {
-        let bytes = crate::parse::sheet_setup::emit_page_margins(spec);
-        out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-    } else {
-        out.push_str("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
-    }
+    super::sheet_setup::emit_page_margins(&mut out, sheet);
 
     // Slot 22: <pageSetup> — RFC-055 (only emitted when set).
-    if let Some(spec) = sheet.page_setup.as_ref() {
-        let bytes = crate::parse::sheet_setup::emit_page_setup(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        }
-    }
+    super::sheet_setup::emit_page_setup(&mut out, sheet);
 
     // Slot 23: <headerFooter> — RFC-055 (only emitted when set).
-    if let Some(spec) = sheet.header_footer.as_ref() {
-        let bytes = crate::parse::sheet_setup::emit_header_footer(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        }
-    }
+    super::sheet_setup::emit_header_footer(&mut out, sheet);
 
     // Slot 24: <rowBreaks> — RFC-062 (only emitted when set+non-empty).
-    if let Some(spec) = sheet.row_breaks.as_ref() {
-        let bytes = crate::parse::page_breaks::emit_row_breaks(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        }
-    }
-
     // Slot 25: <colBreaks> — RFC-062 (only emitted when set+non-empty).
-    if let Some(spec) = sheet.col_breaks.as_ref() {
-        let bytes = crate::parse::page_breaks::emit_col_breaks(spec);
-        if !bytes.is_empty() {
-            out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
-        }
-    }
+    super::page_breaks::emit(&mut out, sheet);
 
     // Slot 30: <drawing r:id="..."/> — Sprint Λ Pod-β (RFC-045);
     // emitted iff !sheet.images.is_empty(). The rId is appended at

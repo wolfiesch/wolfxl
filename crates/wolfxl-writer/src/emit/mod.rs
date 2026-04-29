@@ -35,6 +35,7 @@ pub mod rels;
 pub mod shared_strings_xml;
 pub mod sheet_data;
 pub mod sheet_format;
+pub mod sheet_setup;
 pub mod sheet_views;
 pub mod sheet_xml;
 pub mod styles_xml;
