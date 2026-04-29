@@ -631,7 +631,12 @@ First no-behavior split target, completed 2026-04-28:
    `crates/wolfxl-structural/src/sheet_copy.rs` as of 2026-04-29, reducing
    repeated comments/VML/direct-chart/slicer rel bookkeeping while leaving
    nested drawing and pivot clone logic unchanged.
-100. Next helper candidate: continue with another narrow Rust save phase only if
+100. Workbook source-opening dispatch was extracted into
+   `python/wolfxl/_workbook_sources.py` on 2026-04-29, leaving the
+   `Workbook._from_*` classmethods as thin compatibility wrappers while moving
+   reader, patcher, bytes, encrypted, xlsb, and xls construction details out
+   of the main workbook facade.
+101. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
