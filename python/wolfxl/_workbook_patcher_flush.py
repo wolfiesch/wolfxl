@@ -501,6 +501,13 @@ def flush_pending_pivots_to_patcher(wb: Any) -> None:
     if not any_caches and not any_tables:
         return
 
+    serializers = _pivot_serializers()
+    cache_dicts = _flush_pending_pivot_caches(wb, patcher, serializers)
+    _flush_pending_pivot_tables(wb, patcher, serializers, cache_dicts)
+
+
+def _pivot_serializers() -> tuple[Any, Any, Any]:
+    """Load the Rust pivot serializer exports required for modify-mode saves."""
     try:
         from wolfxl._rust import (  # type: ignore[attr-defined]
             serialize_pivot_cache_dict,
@@ -514,7 +521,20 @@ def flush_pending_pivots_to_patcher(wb: Any) -> None:
             "serialize_pivot_*_dict PyO3 exports. Build the wolfxl wheel "
             "from a branch that includes the Pod-γ commits."
         ) from exc
+    return (
+        serialize_pivot_cache_dict,
+        serialize_pivot_records_dict,
+        serialize_pivot_table_dict,
+    )
 
+
+def _flush_pending_pivot_caches(
+    wb: Any,
+    patcher: Any,
+    serializers: tuple[Any, Any, Any],
+) -> dict[int, dict[str, Any]]:
+    """Drain pending pivot caches and return their definition dicts by cache id."""
+    serialize_pivot_cache_dict, serialize_pivot_records_dict, _ = serializers
     cache_dicts: dict[int, dict[str, Any]] = {}
     for cache in wb._pending_pivot_caches:  # noqa: SLF001
         definition_dict = cache.to_rust_dict()
@@ -530,7 +550,17 @@ def flush_pending_pivots_to_patcher(wb: Any) -> None:
                 f"bug in _flush_pending_pivots_to_patcher."
             )
     wb._pending_pivot_caches.clear()  # noqa: SLF001
+    return cache_dicts
 
+
+def _flush_pending_pivot_tables(
+    wb: Any,
+    patcher: Any,
+    serializers: tuple[Any, Any, Any],
+    cache_dicts: dict[int, dict[str, Any]],
+) -> None:
+    """Drain pending pivot tables into the Rust patcher."""
+    _, _, serialize_pivot_table_dict = serializers
     for ws in wb._sheets.values():  # noqa: SLF001
         pending = getattr(ws, "_pending_pivot_tables", None)
         if not pending:
