@@ -23,6 +23,11 @@ from wolfxl._worksheet_flush import (
     flush_compat_properties,
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
+from wolfxl._worksheet_write_buffers import (
+    extract_non_batchable,
+    materialize_append_buffer,
+    materialize_bulk_writes,
+)
 from wolfxl.utils.cell import column_index_from_string, range_boundaries
 
 
@@ -843,18 +848,7 @@ class Worksheet:
         appending.  After this call ``_append_buffer`` is empty and all values
         live in the normal ``_cells`` / ``_dirty`` tracking.
         """
-        start = self._append_buffer_start
-        buf = self._append_buffer
-        if not buf:
-            return
-        # Temporarily clear the buffer FIRST to avoid re-entrant
-        # materialization when self.cell() calls _get_or_create_cell().
-        self._append_buffer = []
-        for i, row_vals in enumerate(buf):
-            r = start + i
-            for c, val in enumerate(row_vals, start=1):
-                self.cell(row=r, column=c, value=val)
-        # Buffer is already cleared above.
+        materialize_append_buffer(self)
 
     def write_rows(
         self,
@@ -882,15 +876,7 @@ class Worksheet:
         Called before the patcher flush path which has no batch API and
         needs all values as individual dirty cells.
         """
-        writes = self._bulk_writes
-        if not writes:
-            return
-        self._bulk_writes = []
-        for grid, sr, sc in writes:
-            for ri, row in enumerate(grid):
-                for ci, val in enumerate(row):
-                    if val is not None:
-                        self.cell(row=sr + ri, column=sc + ci, value=val)
+        materialize_bulk_writes(self)
 
     @staticmethod
     def _extract_non_batchable(
@@ -902,17 +888,7 @@ class Worksheet:
         non-primitive types (dates, datetimes, etc.).  These require
         per-cell ``write_cell_value()`` calls with type-preserving payloads.
         """
-        indiv: list[tuple[int, int, Any]] = []
-        for ri, row in enumerate(grid):
-            for ci, val in enumerate(row):
-                if val is not None and (
-                    isinstance(val, bool)
-                    or (isinstance(val, str) and val.startswith("="))
-                    or not isinstance(val, (int, float, str))
-                ):
-                    indiv.append((start_row + ri, start_col + ci, val))
-                    row[ci] = None
-        return indiv
+        return extract_non_batchable(grid, start_row, start_col)
 
     # ------------------------------------------------------------------
     # Iteration
