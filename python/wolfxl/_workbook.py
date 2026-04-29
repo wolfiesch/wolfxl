@@ -17,6 +17,7 @@ from wolfxl._workbook_state import (
     xlsb_xls_via_tempfile,
 )
 from wolfxl import _workbook_patcher_flush
+from wolfxl import _workbook_writer_flush
 from wolfxl._worksheet import Worksheet
 
 
@@ -1812,10 +1813,7 @@ class Workbook:
         means ``queued_sheet_moves`` is empty, which in turn keeps
         ``xl/workbook.xml`` byte-identical with the source.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        patcher.queue_sheet_move(name, offset)
+        _workbook_patcher_flush.queue_sheet_move_to_patcher(self, name, offset)
 
     def _flush_properties_to_patcher(self) -> None:
         """Drain dirty document properties into the patcher (RFC-020).
@@ -1838,67 +1836,7 @@ class Workbook:
 
     def _flush_workbook_writes(self) -> None:
         """Push workbook-level metadata + defined names into the Rust writer."""
-        writer = self._rust_writer
-        if writer is None:
-            return
-
-        if self._properties_dirty and self._properties_cache is not None:
-            props = self._properties_cache
-            payload = {
-                "title": props.title,
-                "subject": props.subject,
-                "creator": props.creator,
-                "keywords": props.keywords,
-                "description": props.description,
-                "lastModifiedBy": props.lastModifiedBy,
-                "category": props.category,
-                "contentStatus": props.contentStatus,
-                "identifier": props.identifier,
-                "language": props.language,
-                "revision": props.revision,
-                "version": props.version,
-                "created": props.created.isoformat() if props.created else None,
-                "modified": props.modified.isoformat() if props.modified else None,
-            }
-            writer.set_properties(payload)
-            self._properties_dirty = False
-
-        if self._pending_defined_names:
-            # The native writer's add_named_range expects a sheet hint
-            # plus an explicit ``scope`` token — workbook-scoped names
-            # use the first sheet (the value is ignored when scope ==
-            # "workbook"), sheet-scoped names resolve to the sheet at
-            # ``localSheetId``.
-            primary_sheet = self._sheet_names[0] if self._sheet_names else "Sheet"
-            for _, dn in self._pending_defined_names.items():
-                if dn.localSheetId is not None:
-                    if 0 <= dn.localSheetId < len(self._sheet_names):
-                        sheet_hint = self._sheet_names[dn.localSheetId]
-                    else:
-                        sheet_hint = primary_sheet
-                    scope = "sheet"
-                else:
-                    sheet_hint = primary_sheet
-                    scope = "workbook"
-                writer.add_named_range(sheet_hint, {
-                    "name": dn.name,
-                    "refers_to": dn.value,
-                    "scope": scope,
-                    "comment": dn.comment,
-                    "local_sheet_id": dn.localSheetId,
-                    "hidden": dn.hidden,
-                })
-            self._pending_defined_names.clear()
-
-        # RFC-058 — workbook-level security. The native writer accepts
-        # the §10 dict via ``set_workbook_security`` (PyO3 binding).
-        # Either branch may be ``None``; the writer side handles
-        # absence gracefully (no XML emitted for that block).
-        if self._pending_security_update:
-            payload = self._build_security_dict()
-            if hasattr(writer, "set_workbook_security"):
-                writer.set_workbook_security(payload)
-            self._pending_security_update = False
+        _workbook_writer_flush.flush_workbook_writes(self)
 
     # ------------------------------------------------------------------
     # Formula evaluation (requires wolfxl.calc)

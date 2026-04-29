@@ -203,6 +203,14 @@ def flush_pending_sheet_copies_to_patcher(wb: Any) -> None:
     wb._pending_sheet_copies.clear()  # noqa: SLF001
 
 
+def queue_sheet_move_to_patcher(wb: Any, name: str, offset: int) -> None:
+    """Queue one sheet move into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    patcher.queue_sheet_move(name, offset)
+
+
 def flush_defined_names_to_patcher(wb: Any) -> None:
     """Drain pending workbook defined-name writes into the Rust patcher."""
     patcher = wb._rust_patcher  # noqa: SLF001
