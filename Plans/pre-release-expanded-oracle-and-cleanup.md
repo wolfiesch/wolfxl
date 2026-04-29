@@ -623,7 +623,11 @@ First no-behavior split target, completed 2026-04-28:
 97. Python workbook/worksheet facade comments were cleaned on 2026-04-29 to
    remove stale sprint labels and dead line-number references from load,
    save, and patcher-drain paths without changing behavior.
-98. Next helper candidate: continue with another narrow Rust save phase only if
+98. Structural table XML shifting was extracted into
+   `crates/wolfxl-structural/src/table_shift.rs` on 2026-04-29, keeping
+   workbook-level shift orchestration in `shift_workbook.rs` while preserving
+   table ref, formula, and column-band behavior.
+99. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
