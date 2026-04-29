@@ -32,5 +32,6 @@ pub mod shared_strings_xml;
 pub mod sheet_format;
 pub mod sheet_xml;
 pub mod styles_xml;
+pub mod table_parts;
 pub mod tables_xml;
 pub mod workbook_xml;

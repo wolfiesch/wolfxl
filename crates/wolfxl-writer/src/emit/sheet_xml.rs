@@ -190,7 +190,7 @@ pub fn emit(
     emit_legacy_drawing(&mut out, sheet);
 
     // Slot 37: <tableParts> — EXT-W3B; one <tablePart r:id=...> per table
-    emit_table_parts(&mut out, sheet);
+    super::table_parts::emit(&mut out, sheet);
 
     // Slot numbers above match wolfxl_merger::ct_worksheet_order::ECMA_ORDER
     // (the merger crate's own tests assert the table is the canonical 38-slot
@@ -905,21 +905,6 @@ fn emit_drawing_ref(out: &mut String, sheet: &Worksheet) {
     let external_hyperlinks = sheet.hyperlinks.values().filter(|h| !h.is_internal).count() as u32;
     let rid = comments_offset + table_count + external_hyperlinks + 1;
     out.push_str(&format!("<drawing r:id=\"rId{rid}\"/>"));
-}
-
-/// Emit `<tableParts count="N">…<tablePart r:id="rIdX"/>…</tableParts>`.
-/// rId starts after comments (offset = 2 iff comments exist, else 0),
-/// one rId per table in sheet-local order. Filled by W3B.
-fn emit_table_parts(out: &mut String, sheet: &Worksheet) {
-    if !sheet.tables.is_empty() {
-        let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
-        out.push_str(&format!("<tableParts count=\"{}\">", sheet.tables.len()));
-        for (local_idx, _) in sheet.tables.iter().enumerate() {
-            let rid = comments_offset + local_idx as u32 + 1;
-            out.push_str(&format!("<tablePart r:id=\"rId{}\"/>", rid));
-        }
-        out.push_str("</tableParts>");
-    }
 }
 
 #[cfg(test)]
