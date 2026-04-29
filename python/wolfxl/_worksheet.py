@@ -24,6 +24,7 @@ from wolfxl._worksheet_flush import (
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl._worksheet_write_buffers import (
+    batch_write_dicts,
     extract_non_batchable,
     materialize_append_buffer,
     materialize_bulk_writes,
@@ -2386,28 +2387,7 @@ class Worksheet:
         entries: list[tuple[int, int, dict[str, Any]]],
     ) -> None:
         """Build a bounding-box grid of dicts and call a batch Rust method."""
-        min_r = entries[0][0]
-        min_c = entries[0][1]
-        max_r = min_r
-        max_c = min_c
-        for r, c, _ in entries:
-            if r < min_r:
-                min_r = r
-            if r > max_r:
-                max_r = r
-            if c < min_c:
-                min_c = c
-            if c > max_c:
-                max_c = c
-
-        num_rows = max_r - min_r + 1
-        num_cols = max_c - min_c + 1
-        grid: list[list[Any]] = [[None] * num_cols for _ in range(num_rows)]
-        for r, c, d in entries:
-            grid[r - min_r][c - min_c] = d
-
-        start = rowcol_to_a1(min_r, min_c)
-        batch_fn(self._title, start, grid)
+        batch_write_dicts(self, batch_fn, entries)
 
     def _flush_to_patcher(
         self, patcher: Any, python_value_to_payload: Any,

@@ -57,3 +57,35 @@ def extract_non_batchable(
                 )
                 row_values[col_offset] = None
     return individual
+
+
+def batch_write_dicts(
+    ws: Worksheet,
+    batch_fn: Any,
+    entries: list[tuple[int, int, dict[str, Any]]],
+) -> None:
+    """Build a bounding-box grid of dicts and call a batch Rust method."""
+    min_row = entries[0][0]
+    min_col = entries[0][1]
+    max_row = min_row
+    max_col = min_col
+    for row, col, _payload in entries:
+        if row < min_row:
+            min_row = row
+        if row > max_row:
+            max_row = row
+        if col < min_col:
+            min_col = col
+        if col > max_col:
+            max_col = col
+
+    num_rows = max_row - min_row + 1
+    num_cols = max_col - min_col + 1
+    grid: list[list[Any]] = [[None] * num_cols for _ in range(num_rows)]
+    for row, col, payload in entries:
+        grid[row - min_row][col - min_col] = payload
+
+    from wolfxl._utils import rowcol_to_a1
+
+    start = rowcol_to_a1(min_row, min_col)
+    batch_fn(ws._title, start, grid)  # noqa: SLF001
