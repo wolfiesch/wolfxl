@@ -37,6 +37,19 @@ class InlineFont:
     for italic, ``u`` for underline style, etc.).  All fields default
     to ``None`` so an empty ``InlineFont()`` round-trips as a run with
     no explicit ``<rPr>`` block.
+
+    Attributes:
+        rFont: Font family name.
+        charset: Font character set id.
+        family: Font family id.
+        b: Bold flag.
+        i: Italic flag.
+        strike: Strikethrough flag.
+        color: ARGB hex string or theme/indexed color descriptor.
+        sz: Font size in points.
+        u: Underline style.
+        vertAlign: Vertical alignment.
+        scheme: Font scheme.
     """
 
     rFont: Optional[str] = None
@@ -82,6 +95,12 @@ class TextBlock:
     text: str
 
     def __init__(self, font: InlineFont, text: str) -> None:
+        """Create a styled rich-text run.
+
+        Args:
+            font: Inline font applied to this run.
+            text: Plain text for this run.
+        """
         # openpyxl positions ``font`` first to match the ``<r><rPr>...</rPr><t>...</t></r>``
         # XML reading order.  Mirror that signature.
         self.font = font
@@ -115,6 +134,12 @@ class CellRichText(list):
     """
 
     def __init__(self, items: Optional[Iterable[Union[str, TextBlock]]] = None) -> None:
+        """Create a rich-text run list.
+
+        Args:
+            items: Optional iterable of ``str`` and ``TextBlock`` runs. A
+                single ``str`` or ``TextBlock`` is also accepted.
+        """
         super().__init__()
         if items is None:
             return
@@ -126,6 +151,14 @@ class CellRichText(list):
             self.append(item)
 
     def append(self, value: Union[str, TextBlock]) -> None:  # type: ignore[override]
+        """Append one rich-text run.
+
+        Args:
+            value: Plain string run or styled ``TextBlock``.
+
+        Raises:
+            TypeError: If ``value`` is not a string or ``TextBlock``.
+        """
         if not isinstance(value, (str, TextBlock)):
             raise TypeError(
                 "CellRichText items must be str or TextBlock, "
@@ -157,6 +190,9 @@ class CellRichText(list):
 
         Convenience for callers that want to avoid handing the
         underlying mutable list to downstream code.
+
+        Returns:
+            A shallow list copy of the current rich-text runs.
         """
         return list(self)
 

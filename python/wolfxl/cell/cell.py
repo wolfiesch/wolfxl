@@ -32,22 +32,24 @@ class ArrayFormula:
     ``cell.value = ArrayFormula(ref="A1:A10", text="B1:B10*2")``
     Just Works.
 
-    Attributes
-    ----------
-    ref:
-        Spill / array range, e.g. ``"A1:A10"`` for a single-column
-        spill. The cell holding the formula is the *master* of this
-        range — every other cell inside ``ref`` reads back as ``None``
-        from openpyxl/wolfxl, matching Excel's spill model.
-    text:
-        Formula body **without** the leading ``"="`` and **without**
-        the surrounding ``{}`` braces.  ``"B1:B10*2"`` not
-        ``"=B1:B10*2"`` and not ``"{=B1:B10*2}"``.
+    Attributes:
+        ref: Spill / array range, e.g. ``"A1:A10"`` for a single-column
+            spill. The cell holding the formula is the *master* of this
+            range; every other cell inside ``ref`` reads back as ``None``.
+        text: Formula body without the leading ``"="`` and without
+            surrounding ``{}`` braces.
     """
 
     __slots__ = ("ref", "text")
 
     def __init__(self, ref: str, text: str) -> None:
+        """Create an array-formula value.
+
+        Args:
+            ref: Spill or array range, such as ``"A1:A10"``.
+            text: Formula text, with or without a leading ``=`` or wrapping
+                CSE braces. The stored value is normalized to the bare body.
+        """
         self.ref = ref
         # Strip any leading "=" the caller may have passed for
         # convenience — matches openpyxl's coercion.  Also strip
@@ -78,21 +80,13 @@ class DataTableFormula:
 
     Constructor signature mirrors openpyxl's ``DataTableFormula``.
 
-    Attributes
-    ----------
-    ref:
-        Range that the data table fills, e.g. ``"B2:F11"``.
-    ca:
-        Always-calculate flag (``calcArray``).  Stored verbatim so the
-        round-trip preserves what Excel wrote.
-    dt2D:
-        Two-variable (2D) data-table flag.  ``True`` for a 2D table.
-    dtr:
-        Row-input flag.  ``True`` if the data-table input is a row.
-    r1:
-        First input cell (column input for 1D, first input for 2D).
-    r2:
-        Second input cell (only meaningful for 2D tables).
+    Attributes:
+        ref: Range that the data table fills, e.g. ``"B2:F11"``.
+        ca: Always-calculate flag (``calcArray``).
+        dt2D: Two-variable data-table flag.
+        dtr: Row-input flag.
+        r1: First input cell.
+        r2: Second input cell for 2D tables.
     """
 
     __slots__ = ("ref", "ca", "dt2D", "dtr", "r1", "r2")
@@ -106,6 +100,16 @@ class DataTableFormula:
         r1: Optional[str] = None,
         r2: Optional[str] = None,
     ) -> None:
+        """Create a data-table formula value.
+
+        Args:
+            ref: Range that the data table fills.
+            ca: Always-calculate flag.
+            dt2D: Whether this is a two-variable data table.
+            dtr: Whether the data-table input is a row.
+            r1: First input cell reference.
+            r2: Second input cell reference for two-variable tables.
+        """
         self.ref = ref
         self.ca = bool(ca)
         self.dt2D = bool(dt2D)
