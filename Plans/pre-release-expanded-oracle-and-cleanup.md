@@ -149,7 +149,7 @@ Current largest WolfXL hotspots:
 | `src/native_writer_backend.rs` | 546 | Split the remaining Python-to-writer bridge into workbook-save/helpers while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
-| `python/wolfxl/_workbook.py` | 1357 | Separate workbook orchestration from feature registration and save pipeline helpers. |
+| `python/wolfxl/_workbook.py` | 1339 | Continue separating workbook orchestration from calculation, feature registration, and save pipeline helpers. |
 
 Suggested sprint sequence:
 
@@ -523,7 +523,11 @@ First no-behavior split target, completed 2026-04-28:
    on 2026-04-29 while preserving the public `Workbook.save` wrapper,
    encrypted-save behavior, modify-mode flush order, same-path in-place saves,
    and write-mode workbook/sheet flush ordering.
-70. Next helper candidate: continue with another narrow Rust save phase only if
+70. Workbook formula calculation helpers moved into
+   `python/wolfxl/_workbook_calc.py` on 2026-04-29 while preserving
+   `calculate`, `recalculate`, evaluator caching, and workbook-level cached
+   formula value aggregation.
+71. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

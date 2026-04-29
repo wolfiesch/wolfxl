@@ -17,6 +17,7 @@ from wolfxl._workbook_state import (
     xlsb_xls_via_tempfile,
 )
 from wolfxl import _workbook_features
+from wolfxl import _workbook_calc
 from wolfxl import _workbook_metadata
 from wolfxl import _workbook_patcher_flush
 from wolfxl import _workbook_save
@@ -1268,13 +1269,7 @@ class Workbook:
         The internal evaluator is cached so that a subsequent
         :meth:`recalculate` call can reuse it without rescanning.
         """
-        from wolfxl.calc._evaluator import WorkbookEvaluator
-
-        ev = WorkbookEvaluator()
-        ev.load(self)
-        result = ev.calculate()
-        self._evaluator = ev  # cache for recalculate()
-        return result
+        return _workbook_calc.calculate_workbook(self)
 
     def cached_formula_values(self) -> dict[str, Any]:
         """Return Excel-saved cached formula results for every sheet.
@@ -1284,12 +1279,7 @@ class Workbook:
         Excel's last-calculated formula values without evaluating formulas in
         Python. Cells whose formulas have no cached value are omitted.
         """
-        if self._rust_reader is None:
-            return {}
-        values: dict[str, Any] = {}
-        for sheet_name in self._sheet_names:
-            values.update(self._sheets[sheet_name].cached_formula_values(qualified=True))
-        return values
+        return _workbook_calc.cached_formula_values(self)
 
     def recalculate(
         self,
@@ -1304,15 +1294,7 @@ class Workbook:
         If :meth:`calculate` was called first, the cached evaluator is
         reused (avoiding a full rescan + recalculate).
         """
-        ev = self._evaluator
-        if ev is None:
-            from wolfxl.calc._evaluator import WorkbookEvaluator
-
-            ev = WorkbookEvaluator()
-            ev.load(self)
-            ev.calculate()
-            self._evaluator = ev
-        return ev.recalculate(perturbations, tolerance)
+        return _workbook_calc.recalculate_workbook(self, perturbations, tolerance)
 
     # ------------------------------------------------------------------
     # Context manager + cleanup
