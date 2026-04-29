@@ -598,7 +598,10 @@ First no-behavior split target, completed 2026-04-28:
    `crates/wolfxl-writer/src/emit/charts/pivot.rs` on 2026-04-29 while
    preserving the required `<c:pivotSource>` ordering at the top of
    `<c:chart>`.
-90. Next helper candidate: continue with another narrow Rust save phase only if
+90. Chart layout, legend, and 3D-view emission were extracted into
+   `crates/wolfxl-writer/src/emit/charts/layout.rs` on 2026-04-29 while
+   preserving chart XML ordering through the existing `emit_chart_xml` facade.
+91. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
