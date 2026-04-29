@@ -14,12 +14,12 @@ from wolfxl._workbook_state import (
     CopyOptions,
     build_xlsx_wb,
     build_xlsb_xls_wb,
-    same_existing_path,
     xlsb_xls_via_tempfile,
 )
 from wolfxl import _workbook_features
 from wolfxl import _workbook_metadata
 from wolfxl import _workbook_patcher_flush
+from wolfxl import _workbook_save
 from wolfxl import _workbook_sheets
 from wolfxl import _workbook_writer_flush
 from wolfxl._worksheet import Worksheet
@@ -815,117 +815,7 @@ class Workbook:
             RuntimeError: If the workbook mode cannot save the requested
                 pending changes.
         """
-        filename = str(filename)
-        if password is not None:
-            # Validate password early so we don't write a plaintext
-            # tempfile that we'd then have to throw away.
-            from wolfxl._encryption import _coerce_password
-
-            _coerce_password(password)  # raises ValueError on empty
-            self._save_encrypted(filename, password)
-            return
-        if self._rust_patcher is not None:
-            # Modify mode — workbook-level metadata writes don't have a
-            # patcher path yet (T1.5 follow-up). Surface the limitation
-            # before mutating the file rather than silently dropping the
-            # user's edits.
-            # RFC-020: properties round-trip (Phase 2.5d in the patcher).
-            # Workbook-level, so it flushes before the per-sheet drains.
-            if self._properties_dirty:
-                self._flush_properties_to_patcher()
-            if self._pending_defined_names:
-                self._flush_defined_names_to_patcher()
-            # RFC-058: workbook-level security (workbookProtection +
-            # fileSharing). Drained BEFORE sheet flushes so the patcher's
-            # Phase 2.5q composes against the source workbook.xml.
-            if self._pending_security_update:
-                self._flush_security_to_patcher()
-            for ws in self._sheets.values():
-                ws._flush()  # noqa: SLF001
-            # RFC-035: sheet copies must flush BEFORE every per-sheet
-            # phase so cloned sheets are visible to downstream drains
-            # (cell patches, hyperlinks, tables, comments, axis shifts,
-            # range moves) as if they had always been part of the
-            # source workbook.
-            self._flush_pending_sheet_copies_to_patcher()
-            # RFC-022: hyperlinks share the sheet rels graph with future
-            # rels-touching writers (RFC-024 tables, RFC-023 comments).
-            # Flush them first so DV/CF (which don't touch rels) run
-            # afterward against an already-stable rels graph.
-            self._flush_pending_hyperlinks_to_patcher()
-            # RFC-024: tables also touch the rels graph + add new ZIP
-            # parts + content-type Overrides. Flush after hyperlinks
-            # so the rels graph already carries any external-hyperlink
-            # rIds when build_tables iterates rels.iter() to assemble
-            # the merged <tableParts> block.
-            self._flush_pending_tables_to_patcher()
-            # RFC-023: comments + VML drawings.
-            self._flush_pending_comments_to_patcher()
-            # RFC-025: flush worksheet-level setters that the patcher
-            # accepts. The cell-level _flush above handles values +
-            # formats; data validations are a separate patcher API
-            # because they live in a sibling block, not in <sheetData>.
-            self._flush_pending_data_validations_to_patcher()
-            # RFC-026: conditional formatting also lives in a sibling
-            # block (slot 17). Cross-sheet dxfId allocation happens
-            # inside the patcher's Phase-2.5b on the Rust side.
-            self._flush_pending_conditional_formats_to_patcher()
-            # RFC-030 / RFC-031: structural axis shifts (insert/delete
-            # rows/cols). Drained LAST so it sees the per-cell + per-block
-            # rewrites from the earlier flush calls and shifts them too.
-            self._flush_pending_axis_shifts_to_patcher()
-            # RFC-034: range moves. Drained AFTER axis shifts so a
-            # sequence like `insert_rows(2, 3)` then
-            # `move_range("C3:E10", rows=5)` is applied in source order
-            # against the post-shift coordinate space.
-            self._flush_pending_range_moves_to_patcher()
-            # Sprint Λ Pod-β (RFC-045): drain pending images.
-            self._flush_pending_images_to_patcher()
-            # Sprint Μ Pod-γ (RFC-046): drain pending chart adds.
-            # Sequenced AFTER images / axis shifts but BEFORE the
-            # final patcher.save() so chart cell-range formulas can
-            # compose with cell rewrites in the same save (the
-            # patcher's Phase 2.5l runs before Phase 3 cell patches).
-            self._flush_pending_charts_to_patcher()
-            # Sprint Ν Pod-γ (RFC-047 / RFC-048): drain pending pivot
-            # caches and pivot tables. Sequenced AFTER charts so the
-            # patcher's Phase 2.5m runs against an already-stable
-            # rels graph (Phase 2.5l added drawing rels first).
-            self._flush_pending_pivots_to_patcher()
-            # Sprint Ο Pod 1A.5 (RFC-055) — flush sheet-setup blocks
-            # (sheetView / sheetProtection / pageMargins / pageSetup /
-            # headerFooter) to the patcher's Phase 2.5n queue.
-            # Sequenced AFTER pivots and BEFORE slicers/autoFilter so a
-            # later protection toggle can lock the autoFilter range.
-            self._flush_pending_sheet_setup_to_patcher()
-            # Sprint Π Pod Π-α (RFC-062) — flush page breaks +
-            # sheetFormatPr to the patcher's Phase 2.5r queue.
-            # Sequenced AFTER sheet-setup (2.5n) and BEFORE slicers
-            # (2.5p) per RFC-062 §6 — page breaks must land before
-            # slicer extLst entries because slicer-list refs can
-            # anchor to break-bounded cells.
-            self._flush_pending_page_breaks_to_patcher()
-            # Sprint Ο Pod 3.5 (RFC-061 §3.1) — flush slicers to the
-            # patcher's Phase 2.5p queue. Sequenced AFTER sheet-setup
-            # (whose <extLst> blocks live alongside slicer-list refs)
-            # and BEFORE autofilters so slicer-list <extLst> entries
-            # land before any autoFilter row hides.
-            self._flush_pending_slicers_to_patcher()
-            # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
-            # the patcher's Phase 2.5o queue.
-            self._flush_pending_autofilters_to_patcher()
-            if same_existing_path(filename, self._source_path):
-                self._rust_patcher.save_in_place()
-            else:
-                self._rust_patcher.save(filename)
-        elif self._rust_writer is not None:
-            # Write mode — flush workbook-level writes, then sheets.
-            self._flush_workbook_writes()
-            for ws in self._sheets.values():
-                ws._flush()  # noqa: SLF001
-            self._rust_writer.save(filename)
-        else:
-            raise RuntimeError("save requires write or modify mode")
+        _workbook_save.save_workbook(self, filename, password=password)
 
     def _save_encrypted(
         self,
@@ -944,29 +834,7 @@ class Workbook:
         The plaintext tempfile is always cleaned up — including on
         error paths — so we never leak unencrypted user data on disk.
         """
-        import tempfile
-
-        from wolfxl._encryption import encrypt_xlsx_to_path
-
-        tmp_fd, tmp_name = tempfile.mkstemp(
-            prefix=".wolfxl-plain-",
-            suffix=".xlsx",
-        )
-        os.close(tmp_fd)
-        try:
-            # Re-enter save() in plaintext mode by calling the original
-            # path. Doing the call without ``password=`` keeps the
-            # branch logic simple and ensures both writer and patcher
-            # paths are exercised identically.
-            self.save(tmp_name)
-            with open(tmp_name, "rb") as fp:
-                plaintext_bytes = fp.read()
-            encrypt_xlsx_to_path(plaintext_bytes, password, filename)
-        finally:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+        _workbook_save.save_encrypted(self, filename, password)
 
     def _flush_pending_hyperlinks_to_patcher(self) -> None:
         """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
