@@ -224,7 +224,9 @@ fn format_f64(n: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::conditional::{ConditionalFormat, ConditionalRule};
+    use crate::model::conditional::{ColorScaleStop, ConditionalFormat, ConditionalRule};
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
 
     fn rule(kind: ConditionalKind) -> ConditionalRule {
         ConditionalRule {
@@ -234,37 +236,322 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cell_is_rule_emits_wrapper_and_formula() {
-        let mut sheet = Worksheet::new("S");
-        sheet.conditional_formats.push(ConditionalFormat {
-            sqref: "A1:A3".into(),
-            rules: vec![rule(ConditionalKind::CellIs {
-                operator: CellIsOperator::GreaterThan,
-                formula_a: "10".into(),
-                formula_b: None,
-            })],
-        });
+    fn styled_rule(
+        kind: ConditionalKind,
+        dxf_id: Option<u32>,
+        stop_if_true: bool,
+    ) -> ConditionalRule {
+        ConditionalRule {
+            kind,
+            dxf_id,
+            stop_if_true,
+        }
+    }
+
+    fn cf(sqref: &str, rules: Vec<ConditionalRule>) -> ConditionalFormat {
+        ConditionalFormat {
+            sqref: sqref.into(),
+            rules,
+        }
+    }
+
+    fn emit_sheet_fragment(sheet: &Worksheet) -> String {
         let mut out = String::new();
+        emit(&mut out, sheet);
+        out
+    }
 
-        emit(&mut out, &sheet);
+    fn emit_one_cf(rules: Vec<ConditionalRule>) -> String {
+        let mut sheet = Worksheet::new("S");
+        sheet.conditional_formats.push(cf("A1:A10", rules));
+        emit_sheet_fragment(&sheet)
+    }
 
-        assert!(out.contains("<conditionalFormatting sqref=\"A1:A3\">"));
-        assert!(out.contains("type=\"cellIs\""));
-        assert!(out.contains("<formula>10</formula>"));
+    fn assert_fragment_parses(fragment: &str) {
+        let wrapped = format!("<root>{fragment}</root>");
+        let mut reader = Reader::from_str(&wrapped);
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Eof) => break,
+                Err(e) => panic!("XML parse error: {e}; fragment: {fragment}"),
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
+
+    fn first_cf_rule_tag(xml: &str) -> &str {
+        let start = xml.find("<cfRule").expect("cfRule start");
+        let end = xml[start..].find('>').expect("cfRule end") + start;
+        &xml[start..=end]
+    }
+
+    fn contains_text_rule() -> ConditionalRule {
+        rule(ConditionalKind::ContainsText {
+            text: "late".into(),
+        })
+    }
+
+    #[test]
+    fn absent_when_no_conditional_formats() {
+        let sheet = Worksheet::new("S");
+
+        let out = emit_sheet_fragment(&sheet);
+
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn cell_is_greater_than_emits_dxf_id_operator_and_formula() {
+        let out = emit_one_cf(vec![styled_rule(
+            ConditionalKind::CellIs {
+                operator: CellIsOperator::GreaterThan,
+                formula_a: "100".into(),
+                formula_b: None,
+            },
+            Some(0),
+            false,
+        )]);
+
+        assert_fragment_parses(&out);
+        assert_eq!(
+            out,
+            "<conditionalFormatting sqref=\"A1:A10\"><cfRule type=\"cellIs\" priority=\"1\" operator=\"greaterThan\" dxfId=\"0\"><formula>100</formula></cfRule></conditionalFormatting>"
+        );
+    }
+
+    #[test]
+    fn cell_is_between_emits_two_formulas() {
+        let out = emit_one_cf(vec![styled_rule(
+            ConditionalKind::CellIs {
+                operator: CellIsOperator::Between,
+                formula_a: "10".into(),
+                formula_b: Some("20".into()),
+            },
+            Some(1),
+            false,
+        )]);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("operator=\"between\" dxfId=\"1\""));
+        assert!(out.contains("<formula>10</formula><formula>20</formula>"));
+    }
+
+    #[test]
+    fn expression_emits_formula_without_operator_attribute() {
+        let out = emit_one_cf(vec![styled_rule(
+            ConditionalKind::Expression {
+                formula: "A1>B1".into(),
+            },
+            Some(2),
+            false,
+        )]);
+
+        assert_fragment_parses(&out);
+        let tag = first_cf_rule_tag(&out);
+        assert!(tag.contains("type=\"expression\""));
+        assert!(tag.contains("dxfId=\"2\""));
+        assert!(!tag.contains("operator="), "unexpected operator: {tag}");
+        assert!(out.contains("<formula>A1&gt;B1</formula>"));
+    }
+
+    #[test]
+    fn stop_if_true_emits_attribute_only_when_true() {
+        let out = emit_one_cf(vec![
+            styled_rule(
+                ConditionalKind::Expression {
+                    formula: "A1>0".into(),
+                },
+                None,
+                true,
+            ),
+            styled_rule(
+                ConditionalKind::Expression {
+                    formula: "A1<0".into(),
+                },
+                None,
+                false,
+            ),
+        ]);
+
+        assert_fragment_parses(&out);
+        assert_eq!(out.matches("stopIfTrue=\"1\"").count(), 1);
+        assert!(!out.contains("stopIfTrue=\"0\""));
+    }
+
+    #[test]
+    fn data_bar_ignores_dxf_id_and_emits_thresholds_and_color() {
+        let out = emit_one_cf(vec![styled_rule(
+            ConditionalKind::DataBar {
+                color_rgb: "FFFF0000".into(),
+                min: ConditionalThreshold::Min,
+                max: ConditionalThreshold::Max,
+            },
+            Some(99),
+            false,
+        )]);
+
+        assert_fragment_parses(&out);
+        let tag = first_cf_rule_tag(&out);
+        assert_eq!(tag, "<cfRule type=\"dataBar\" priority=\"1\">");
+        assert!(!tag.contains("dxfId"));
+        assert!(out.contains(
+            "<dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FFFF0000\"/></dataBar>"
+        ));
+    }
+
+    #[test]
+    fn color_scale_two_stops_emits_cfvos_before_colors() {
+        let out = emit_one_cf(vec![styled_rule(
+            ConditionalKind::ColorScale {
+                stops: vec![
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Min,
+                        color_rgb: "FF0000FF".into(),
+                    },
+                    ColorScaleStop {
+                        threshold: ConditionalThreshold::Max,
+                        color_rgb: "FFFF0000".into(),
+                    },
+                ],
+            },
+            Some(99),
+            false,
+        )]);
+
+        assert_fragment_parses(&out);
+        let tag = first_cf_rule_tag(&out);
+        assert_eq!(tag, "<cfRule type=\"colorScale\" priority=\"1\">");
+        assert!(out.contains(
+            "<colorScale><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FF0000FF\"/><color rgb=\"FFFF0000\"/></colorScale>"
+        ));
+    }
+
+    #[test]
+    fn color_scale_three_stops_emits_all_cfvos_before_all_colors() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::ColorScale {
+            stops: vec![
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Min,
+                    color_rgb: "FF0000FF".into(),
+                },
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Percent(50.0),
+                    color_rgb: "FF00FF00".into(),
+                },
+                ColorScaleStop {
+                    threshold: ConditionalThreshold::Max,
+                    color_rgb: "FFFF0000".into(),
+                },
+            ],
+        })]);
+
+        assert_fragment_parses(&out);
+        assert_eq!(out.matches("<cfvo").count(), 3);
+        assert_eq!(out.matches("<color rgb=").count(), 3);
+        assert!(out.contains("<cfvo type=\"percent\" val=\"50\"/>"));
+
+        let color_scale_start = out.find("<colorScale>").expect("colorScale");
+        let color_scale_end = out.find("</colorScale>").expect("/colorScale");
+        let color_scale = &out[color_scale_start..color_scale_end];
+        let last_cfvo = color_scale.rfind("<cfvo").expect("last cfvo");
+        let first_color = color_scale.find("<color rgb=").expect("first color");
+        assert!(last_cfvo < first_color, "{color_scale}");
+    }
+
+    #[test]
+    fn stub_variants_are_skipped_but_supported_rules_still_emit() {
+        let mut sheet = Worksheet::new("S");
+        sheet.conditional_formats.push(cf(
+            "A1:A10",
+            vec![
+                contains_text_rule(),
+                rule(ConditionalKind::Expression {
+                    formula: "A1>0".into(),
+                }),
+                rule(ConditionalKind::IconSet {
+                    set_name: "3TrafficLights1".into(),
+                    thresholds: vec![ConditionalThreshold::Percent(33.0)],
+                }),
+            ],
+        ));
+
+        let out = emit_sheet_fragment(&sheet);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("<conditionalFormatting sqref=\"A1:A10\">"));
+        assert_eq!(out.matches("<cfRule").count(), 1);
+        assert!(out.contains("<cfRule type=\"expression\" priority=\"2\">"));
+        assert!(!out.contains("containsText"));
+        assert!(!out.contains("iconSet"));
     }
 
     #[test]
     fn all_stub_rules_emit_no_wrapper() {
-        let mut sheet = Worksheet::new("S");
-        sheet.conditional_formats.push(ConditionalFormat {
-            sqref: "A1:A3".into(),
-            rules: vec![rule(ConditionalKind::Duplicate)],
-        });
-        let mut out = String::new();
-
-        emit(&mut out, &sheet);
+        let out = emit_one_cf(vec![
+            rule(ConditionalKind::Duplicate),
+            rule(ConditionalKind::Unique),
+            contains_text_rule(),
+        ]);
 
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn supported_kitchen_sink_is_well_formed() {
+        let mut sheet = Worksheet::new("Kitchen");
+        sheet.conditional_formats.push(cf(
+            "A1:D10",
+            vec![
+                styled_rule(
+                    ConditionalKind::CellIs {
+                        operator: CellIsOperator::GreaterThan,
+                        formula_a: "50".into(),
+                        formula_b: None,
+                    },
+                    Some(0),
+                    false,
+                ),
+                styled_rule(
+                    ConditionalKind::Expression {
+                        formula: "A1>B1".into(),
+                    },
+                    Some(1),
+                    true,
+                ),
+                rule(ConditionalKind::DataBar {
+                    color_rgb: "FF0070C0".into(),
+                    min: ConditionalThreshold::Min,
+                    max: ConditionalThreshold::Max,
+                }),
+                rule(ConditionalKind::ColorScale {
+                    stops: vec![
+                        ColorScaleStop {
+                            threshold: ConditionalThreshold::Min,
+                            color_rgb: "FFF8696B".into(),
+                        },
+                        ColorScaleStop {
+                            threshold: ConditionalThreshold::Percentile(50.0),
+                            color_rgb: "FFFFEB84".into(),
+                        },
+                        ColorScaleStop {
+                            threshold: ConditionalThreshold::Formula("$D$1".into()),
+                            color_rgb: "FF63BE7B".into(),
+                        },
+                    ],
+                }),
+            ],
+        ));
+
+        let out = emit_sheet_fragment(&sheet);
+
+        assert_fragment_parses(&out);
+        assert!(out.starts_with("<conditionalFormatting sqref=\"A1:D10\">"));
+        assert_eq!(out.matches("<cfRule").count(), 4);
+        assert!(out.contains("<cfvo type=\"percentile\" val=\"50\"/>"));
+        assert!(out.contains("<cfvo type=\"formula\" val=\"$D$1\"/>"));
+        assert!(out.ends_with("</conditionalFormatting>"));
     }
 }

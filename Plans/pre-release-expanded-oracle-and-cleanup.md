@@ -148,7 +148,7 @@ Current largest WolfXL hotspots:
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 529 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1513 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
-| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 1058 | Continue splitting sheet emission into validations, CF, drawings, and remaining integration-only coverage. |
+| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 386 | Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage. |
 | `python/wolfxl/_workbook.py` | 1321 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
 
 Suggested sprint sequence:
@@ -562,7 +562,12 @@ First no-behavior split target, completed 2026-04-28:
    `emit/hyperlinks.rs`, `emit/dimension.rs`, `emit/drawing_refs.rs`, and
    `emit/table_parts.rs` modules on 2026-04-29 while preserving rId offset and
    dimension edge-case coverage.
-79. Next helper candidate: continue with another narrow Rust save phase only if
+79. Conditional-formatting and data-validation unit coverage moved from
+   `crates/wolfxl-writer/src/emit/sheet_xml.rs` into
+   `emit/conditional_formats.rs` and `emit/data_validations.rs` on 2026-04-29,
+   leaving `sheet_xml.rs` with only empty-sheet, kitchen-sink well-formedness,
+   and CF/DV/hyperlink ordering checks.
+80. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
