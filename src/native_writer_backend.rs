@@ -54,6 +54,7 @@ use wolfxl_writer::Workbook;
 
 use crate::native_writer_cells::{payload_to_write_cell_value, raw_python_to_write_cell_value};
 use crate::native_writer_formats::{intern_border_only, intern_format_from_dict, parse_hex_color};
+use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::util::{parse_iso_date, parse_iso_datetime};
 
 // ---------------------------------------------------------------------------
@@ -70,97 +71,6 @@ fn parse_a1_to_row_col(a1: &str) -> PyResult<(u32, u32)> {
     let cleaned = a1.replace('$', "");
     refs::parse_a1(&cleaned)
         .ok_or_else(|| PyValueError::new_err(format!("Invalid A1 reference: {a1}")))
-}
-
-/// Sprint Ι Pod-α: same conversion as ``py_runs_to_rust`` in the
-/// patcher module, but typed against the writer's own re-exported
-/// types.  Kept separate to avoid introducing a cross-module use of
-/// the patcher helpers (the native writer doesn't depend on the
-/// patcher).
-fn py_runs_to_rust_writer(
-    runs: &Bound<'_, pyo3::types::PyList>,
-) -> PyResult<Vec<wolfxl_writer::rich_text::RichTextRun>> {
-    use wolfxl_writer::rich_text::{InlineFontProps, RichTextRun};
-    let mut out: Vec<RichTextRun> = Vec::with_capacity(runs.len());
-    for entry in runs.iter() {
-        let seq: &Bound<'_, pyo3::types::PySequence> = entry.cast()?;
-        if seq.len()? < 2 {
-            return Err(PyValueError::new_err(
-                "rich-text run must be a (text, font_or_none) pair",
-            ));
-        }
-        let text: String = seq.get_item(0)?.extract()?;
-        let font_obj = seq.get_item(1)?;
-        let font = if font_obj.is_none() {
-            None
-        } else {
-            let d: &Bound<'_, PyDict> = font_obj.cast()?;
-            let mut props = InlineFontProps::default();
-            macro_rules! pull_bool {
-                ($k:literal, $field:ident) => {
-                    if let Some(v) = d.get_item($k)? {
-                        if !v.is_none() {
-                            props.$field = Some(v.extract::<bool>()?);
-                        }
-                    }
-                };
-            }
-            macro_rules! pull_str {
-                ($k:literal, $field:ident) => {
-                    if let Some(v) = d.get_item($k)? {
-                        if !v.is_none() {
-                            let s: String = v.extract()?;
-                            props.$field = Some(s);
-                        }
-                    }
-                };
-            }
-            macro_rules! pull_i32 {
-                ($k:literal, $field:ident) => {
-                    if let Some(v) = d.get_item($k)? {
-                        if !v.is_none() {
-                            // Accept int or float (Pod-β stores via _BoundedNumber).
-                            let val = if let Ok(i) = v.extract::<i32>() {
-                                i
-                            } else if let Ok(f) = v.extract::<f64>() {
-                                if !f.is_finite() {
-                                    return Err(PyValueError::new_err(format!(
-                                        "{}: non-finite number",
-                                        $k,
-                                    )));
-                                }
-                                f as i32
-                            } else {
-                                return Err(PyValueError::new_err(format!(
-                                    "{}: expected integer",
-                                    $k,
-                                )));
-                            };
-                            props.$field = Some(val);
-                        }
-                    }
-                };
-            }
-            pull_bool!("b", bold);
-            pull_bool!("i", italic);
-            pull_bool!("strike", strike);
-            pull_str!("u", underline);
-            if let Some(v) = d.get_item("sz")? {
-                if !v.is_none() {
-                    props.size = Some(v.extract::<f64>()?);
-                }
-            }
-            pull_str!("color", color);
-            pull_str!("rFont", name);
-            pull_i32!("family", family);
-            pull_i32!("charset", charset);
-            pull_str!("vertAlign", vert_align);
-            pull_str!("scheme", scheme);
-            Some(props)
-        };
-        out.push(RichTextRun { text, font });
-    }
-    Ok(out)
 }
 
 fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {

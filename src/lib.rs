@@ -8,6 +8,7 @@ mod calamine_xlsb_xls_backend;
 mod native_writer_backend;
 mod native_writer_cells;
 mod native_writer_formats;
+mod native_writer_rich_text;
 mod ooxml_util;
 mod streaming;
 mod util;
