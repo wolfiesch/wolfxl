@@ -357,18 +357,38 @@ class PivotTable:
 
     @property
     def rows(self) -> list[RowField]:
+        """Return row-field specifications for this pivot table.
+
+        Returns:
+            The normalized row field list, preserving the caller's field order.
+        """
         return self._row_field_specs
 
     @property
     def cols(self) -> list[ColumnField]:
+        """Return column-field specifications for this pivot table.
+
+        Returns:
+            The normalized column field list.
+        """
         return self._col_field_specs
 
     @property
     def page(self) -> list[PageField]:
+        """Return report-filter page fields for this pivot table.
+
+        Returns:
+            The normalized page field list.
+        """
         return self._page_field_specs
 
     @property
     def data(self) -> list[DataField]:
+        """Return data-value fields for this pivot table.
+
+        Returns:
+            The normalized data field list.
+        """
         return self._data_field_specs
 
     # ------------------------------------------------------------------

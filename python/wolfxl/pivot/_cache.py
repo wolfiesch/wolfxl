@@ -43,18 +43,51 @@ class CacheValue:
 
     @classmethod
     def string(cls, s: str) -> "CacheValue":
+        """Create a string pivot-cache value.
+
+        Args:
+            s: Text value to store in the cache record.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"string"``.
+        """
         return cls("string", s)
 
     @classmethod
     def number(cls, n: float) -> "CacheValue":
+        """Create a numeric pivot-cache value.
+
+        Args:
+            n: Numeric value to store. Values are normalized to ``float``.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"number"``.
+        """
         return cls("number", float(n))
 
     @classmethod
     def boolean(cls, b: bool) -> "CacheValue":
+        """Create a boolean pivot-cache value.
+
+        Args:
+            b: Truth value to store.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"boolean"``.
+        """
         return cls("boolean", bool(b))
 
     @classmethod
     def date(cls, d: str | date | datetime) -> "CacheValue":
+        """Create a datetime-like pivot-cache value.
+
+        Args:
+            d: ISO-like string, ``date``, or ``datetime`` value. ``date``
+                inputs are normalized to midnight ISO datetimes.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"date"``.
+        """
         if isinstance(d, datetime):
             iso = d.isoformat()
         elif isinstance(d, date):
@@ -65,10 +98,23 @@ class CacheValue:
 
     @classmethod
     def missing(cls) -> "CacheValue":
+        """Create a missing-value pivot-cache marker.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"missing"`` with no payload.
+        """
         return cls("missing", None)
 
     @classmethod
     def error(cls, s: str) -> "CacheValue":
+        """Create an error pivot-cache value.
+
+        Args:
+            s: Excel-style error token, such as ``"#N/A"``.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"error"``.
+        """
         return cls("error", s)
 
     def to_rust_dict(self) -> dict:

@@ -127,10 +127,26 @@ class ChartBase:
     # ------------------------------------------------------------------
     @property
     def style(self) -> int | None:
+        """Return the chart style index.
+
+        Returns:
+            An Excel chart style number in the inclusive range ``1..48``, or
+            ``None`` when no explicit style is set.
+        """
         return self._style
 
     @style.setter
     def style(self, value: int | None) -> None:
+        """Set the chart style index.
+
+        Args:
+            value: Excel chart style number in ``1..48``, or ``None`` to clear
+                the explicit style.
+
+        Raises:
+            ValueError: If ``value`` falls outside Excel's supported style
+                range.
+        """
         if value is None:
             self._style = None
             return
