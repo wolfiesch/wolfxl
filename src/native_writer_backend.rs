@@ -42,7 +42,6 @@ use wolfxl_writer::model::chart::{
     ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark, Title as ChartTitle, TitleRun,
     Trendline, TrendlineKind, ValueAxis, View3D,
 };
-use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
 use wolfxl_writer::model::{
     AlignmentSpec, BorderSideSpec, BorderSpec, CellIsOperator, ColorScaleStop, Comment,
@@ -54,6 +53,7 @@ use wolfxl_writer::model::{
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
 
+use crate::native_writer_cells::{payload_to_write_cell_value, raw_python_to_write_cell_value};
 use crate::util::{parse_iso_date, parse_iso_datetime};
 
 // ---------------------------------------------------------------------------
@@ -106,180 +106,6 @@ fn parse_hex_color(input: &str) -> Option<String> {
         8 => Some(upper),
         _ => None,
     }
-}
-
-// ---------------------------------------------------------------------------
-// Python value → WriteCellValue
-// ---------------------------------------------------------------------------
-
-/// Convert oracle-shape cell payload dict into a `WriteCellValue`.
-///
-/// The Python flush path passes `python_value_to_payload(value)` which
-/// always returns a dict like `{"type": "string", "value": "x"}` (see
-/// `python/wolfxl/_cell.py:518`). We extract the `type` and decode
-/// `value` / `formula` per the historical oracle mapping (preserved
-/// verbatim from the W5-removed `rust_xlsxwriter_backend`'s `write_cell`)
-/// so any pre-W5 Python flush payload still routes correctly.
-fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
-    let dict = payload
-        .cast::<PyDict>()
-        .map_err(|_| PyValueError::new_err("payload must be a dict"))?;
-
-    let type_str: String = dict
-        .get_item("type")?
-        .ok_or_else(|| PyValueError::new_err("payload missing 'type'"))?
-        .extract()?;
-
-    // The oracle accepts strings or numbers for `value` and converts to
-    // String; we mirror that so flush-path round-trips stay identical.
-    let value_str: Option<String> = dict.get_item("value")?.and_then(|v| {
-        v.extract::<String>().ok().or_else(|| {
-            v.extract::<f64>()
-                .map(|n| n.to_string())
-                .ok()
-                .or_else(|| v.extract::<bool>().map(|b| b.to_string()).ok())
-        })
-    });
-    let formula_str: Option<String> = dict.get_item("formula")?.and_then(|v| v.extract().ok());
-
-    match type_str.as_str() {
-        "blank" => Ok(WriteCellValue::Blank),
-        "string" => Ok(WriteCellValue::String(value_str.unwrap_or_default())),
-        "number" => {
-            let n: f64 = value_str
-                .as_deref()
-                .unwrap_or("0")
-                .parse()
-                .map_err(|_| PyValueError::new_err("number parse failed"))?;
-            // W4E.R5: reject non-finite values (NaN, +/-Infinity) at the
-            // boundary. Strings like "NaN" / "inf" parse to f64 successfully
-            // but have no OOXML representation.
-            Ok(WriteCellValue::Number(require_finite_f64(
-                n,
-                "number cell",
-            )?))
-        }
-        "boolean" => {
-            let b = value_str.as_deref().map(parse_python_bool).unwrap_or(false);
-            Ok(WriteCellValue::Boolean(b))
-        }
-        "formula" => {
-            let expr = formula_str
-                .or(value_str)
-                .map(|s| s.trim_start_matches('=').to_string())
-                .unwrap_or_default();
-            Ok(WriteCellValue::Formula { expr, result: None })
-        }
-        "error" => {
-            // Native model has no Error variant yet — fall back to the
-            // raw token as a string so the cell isn't lost. Mirrors the
-            // oracle's last-resort branch (line 530-534).
-            Ok(WriteCellValue::String(value_str.unwrap_or_default()))
-        }
-        "date" => {
-            let s = value_str.unwrap_or_default();
-            if let Some(d) = parse_iso_date(&s) {
-                if let Some(serial) = date_to_excel_serial(d) {
-                    return Ok(WriteCellValue::DateSerial(serial));
-                }
-            }
-            Ok(WriteCellValue::String(s))
-        }
-        "datetime" => {
-            let s = value_str.unwrap_or_default();
-            if let Some(dt) = parse_iso_datetime(&s) {
-                if let Some(serial) = datetime_to_excel_serial(dt) {
-                    return Ok(WriteCellValue::DateSerial(serial));
-                }
-            }
-            Ok(WriteCellValue::String(s))
-        }
-        other => Err(PyValueError::new_err(format!(
-            "Unsupported cell type: {other}"
-        ))),
-    }
-}
-
-fn parse_python_bool(s: &str) -> bool {
-    matches!(
-        s.trim().to_ascii_lowercase().as_str(),
-        "true" | "1" | "t" | "yes" | "y"
-    )
-}
-
-/// Reject non-finite floats (NaN, +/-Infinity) at the pyclass boundary so
-/// the emitter never has to format them. OOXML has no representation for
-/// these values; without the guard, `format_number` in the writer would
-/// emit literal `"NaN"`/`"inf"` and Excel/LO would reject the file.
-/// Returns the value unchanged if finite, or a `PyValueError` otherwise.
-/// W4E.R5.
-fn require_finite_f64(f: f64, context: &str) -> PyResult<f64> {
-    if !f.is_finite() {
-        return Err(PyValueError::new_err(format!(
-            "{context}: non-finite floats (NaN, Infinity) are not representable in xlsx; got {f}",
-        )));
-    }
-    Ok(f)
-}
-
-/// Coerce a raw Python value (from `write_sheet_values`'s 2-D list) to a
-/// `WriteCellValue`. The order-of-attempts mirrors the historical
-/// `rust_xlsxwriter_backend` (removed in W5) but fixes a subtle bug: the
-/// legacy oracle tried `f64` before `bool`, so `True`/`False` (which
-/// extract as `1.0`/`0.0`) silently became numbers. The Python flush path
-/// avoids this by routing booleans through `write_cell_value` instead,
-/// but we tighten the rule here for correctness — bool first.
-///
-/// W4E.R5: returns `PyResult<Option<…>>` so non-finite floats can raise
-/// rather than silently emitting invalid `"NaN"`/`"inf"` text in the
-/// output XML. `Ok(None)` still means "no usable coercion, skip" (oracle
-/// parity); `Err(…)` means the value was a finite-violating float.
-fn raw_python_to_write_cell_value(value: &Bound<'_, PyAny>) -> PyResult<Option<WriteCellValue>> {
-    if value.is_none() {
-        return Ok(None);
-    }
-    // Boolean check via `is_instance_of` (rather than `extract`) since
-    // `extract::<bool>()` would succeed on `0`/`1` ints too.
-    let py = value.py();
-    let bool_type = py.get_type::<pyo3::types::PyBool>();
-    if value.is_instance(&bool_type).unwrap_or(false) {
-        let b = value.extract::<bool>()?;
-        return Ok(Some(WriteCellValue::Boolean(b)));
-    }
-    if let Ok(i) = value.extract::<i64>() {
-        return Ok(Some(WriteCellValue::Number(i as f64)));
-    }
-    if let Ok(f) = value.extract::<f64>() {
-        return Ok(Some(WriteCellValue::Number(require_finite_f64(
-            f,
-            "cell value",
-        )?)));
-    }
-    if let Ok(s) = value.extract::<String>() {
-        if s.starts_with('=') {
-            return Ok(Some(WriteCellValue::Formula {
-                expr: s.trim_start_matches('=').to_string(),
-                result: None,
-            }));
-        }
-        return Ok(Some(WriteCellValue::String(s)));
-    }
-    // Datetime / date — best-effort via isoformat() if exposed.
-    if let Ok(iso) = value.call_method0("isoformat") {
-        if let Ok(s) = iso.extract::<String>() {
-            if let Some(dt) = parse_iso_datetime(&s) {
-                if let Some(serial) = datetime_to_excel_serial(dt) {
-                    return Ok(Some(WriteCellValue::DateSerial(serial)));
-                }
-            }
-            if let Some(d) = parse_iso_date(&s) {
-                if let Some(serial) = date_to_excel_serial(d) {
-                    return Ok(Some(WriteCellValue::DateSerial(serial)));
-                }
-            }
-        }
-    }
-    Ok(None)
 }
 
 // ---------------------------------------------------------------------------

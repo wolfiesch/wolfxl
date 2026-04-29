@@ -6,6 +6,7 @@ type PyObject = Py<PyAny>;
 mod calamine_styled_backend;
 mod calamine_xlsb_xls_backend;
 mod native_writer_backend;
+mod native_writer_cells;
 mod ooxml_util;
 mod streaming;
 mod util;
