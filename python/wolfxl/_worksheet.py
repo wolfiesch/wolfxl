@@ -61,6 +61,7 @@ from wolfxl._worksheet_records import (
     schema as _infer_worksheet_schema,
     sheet_visibility as _sheet_visibility,
 )
+from wolfxl._worksheet_repr import worksheet_repr as _worksheet_repr
 from wolfxl._worksheet_rich_text import cellrichtext_to_runs_payload
 from wolfxl._worksheet_setup import (
     get_col_breaks,
@@ -1509,4 +1510,4 @@ class Worksheet:
         Returns:
             A string containing the worksheet title.
         """
-        return f"<Worksheet [{self._title}]>"
+        return _worksheet_repr(self._title)
