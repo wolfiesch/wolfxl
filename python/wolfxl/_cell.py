@@ -85,14 +85,17 @@ class Cell:
 
     @property
     def coordinate(self) -> str:
+        """Return this cell's A1-style coordinate."""
         return rowcol_to_a1(self._row, self._col)
 
     @property
     def row(self) -> int:
+        """Return this cell's 1-based row index."""
         return self._row
 
     @property
     def column(self) -> int:
+        """Return this cell's 1-based column index."""
         return self._col
 
     @property
@@ -195,6 +198,11 @@ class Cell:
 
     @style.setter
     def style(self, value: Any) -> None:  # noqa: ARG002
+        """Reject named style assignment until WolfXL supports named styles.
+
+        Args:
+            value: Ignored pending future named-style support.
+        """
         raise NotImplementedError(
             "Named styles are not yet supported by wolfxl. "
             "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
@@ -212,6 +220,7 @@ class Cell:
 
     @property
     def hyperlink(self) -> Any:
+        """Return the cell hyperlink, including pending unsaved edits."""
         # Pre-save visibility: a queued hyperlink shows up immediately
         # without waiting for ``save()`` to flush to the writer.
         ws = self._ws
@@ -225,6 +234,12 @@ class Cell:
 
     @hyperlink.setter
     def hyperlink(self, value: Any) -> None:
+        """Set or clear the cell hyperlink.
+
+        Args:
+            value: ``Hyperlink`` instance, URL string, or ``None`` to delete
+                the hyperlink on the next save.
+        """
         from wolfxl.worksheet.hyperlink import Hyperlink
 
         ws = self._ws
@@ -257,6 +272,7 @@ class Cell:
 
     @property
     def comment(self) -> Any:
+        """Return the cell comment, including pending unsaved edits."""
         ws = self._ws
         coord = self.coordinate
         pending = ws._pending_comments.get(coord, _UNSET)  # noqa: SLF001
@@ -268,6 +284,12 @@ class Cell:
 
     @comment.setter
     def comment(self, value: Any) -> None:
+        """Set or clear the cell comment.
+
+        Args:
+            value: ``Comment`` instance, or ``None`` to delete the comment on
+                the next save.
+        """
         from wolfxl.comments import Comment
 
         ws = self._ws
@@ -300,6 +322,7 @@ class Cell:
 
     @property
     def value(self) -> Any:
+        """Return the cell value using openpyxl-compatible Python types."""
         # RFC-057: surface array / data-table formulas as the typed
         # instance regardless of what's been cached in ``_value``.
         # The metadata is populated either by the setter or by the
@@ -377,6 +400,12 @@ class Cell:
 
     @value.setter
     def value(self, val: Any) -> None:
+        """Set the cell value and queue it for the next workbook save.
+
+        Args:
+            val: Scalar value, formula string, rich text object, array formula,
+                data-table formula, or ``None``.
+        """
         # Accept CellRichText pass-through: if the user assigns a
         # CellRichText, defer rich-text serialization to the writer.
         # Plain strings keep the existing fast path.
@@ -594,6 +623,7 @@ class Cell:
 
     @property
     def font(self) -> Font:
+        """Return the resolved cell font."""
         self._require_xlsx_for_style("font")
         if self._font is _UNSET:
             self._font = self._read_font()
@@ -601,6 +631,11 @@ class Cell:
 
     @font.setter
     def font(self, val: Font) -> None:
+        """Set the cell font.
+
+        Args:
+            val: Font object to apply to the cell.
+        """
         self._require_xlsx_for_style("font")
         self._font = val
         self._format_dirty = True
@@ -612,6 +647,7 @@ class Cell:
 
     @property
     def fill(self) -> PatternFill:
+        """Return the resolved cell fill."""
         self._require_xlsx_for_style("fill")
         if self._fill is _UNSET:
             self._fill = self._read_fill()
@@ -619,6 +655,11 @@ class Cell:
 
     @fill.setter
     def fill(self, val: PatternFill) -> None:
+        """Set the cell fill.
+
+        Args:
+            val: Pattern fill object to apply to the cell.
+        """
         self._require_xlsx_for_style("fill")
         self._fill = val
         self._format_dirty = True
@@ -630,6 +671,7 @@ class Cell:
 
     @property
     def border(self) -> Border:
+        """Return the resolved cell border."""
         self._require_xlsx_for_style("border")
         if self._border is _UNSET:
             self._border = self._read_border()
@@ -637,6 +679,11 @@ class Cell:
 
     @border.setter
     def border(self, val: Border) -> None:
+        """Set the cell border.
+
+        Args:
+            val: Border object to apply to the cell.
+        """
         self._require_xlsx_for_style("border")
         self._border = val
         self._format_dirty = True
@@ -648,6 +695,7 @@ class Cell:
 
     @property
     def alignment(self) -> Alignment:
+        """Return the resolved cell alignment."""
         self._require_xlsx_for_style("alignment")
         if self._alignment is _UNSET:
             self._alignment = self._read_alignment()
@@ -655,6 +703,11 @@ class Cell:
 
     @alignment.setter
     def alignment(self, val: Alignment) -> None:
+        """Set the cell alignment.
+
+        Args:
+            val: Alignment object to apply to the cell.
+        """
         self._require_xlsx_for_style("alignment")
         self._alignment = val
         self._format_dirty = True
@@ -666,6 +719,7 @@ class Cell:
 
     @property
     def number_format(self) -> str | None:
+        """Return the resolved number format string."""
         self._require_xlsx_for_style("number_format")
         if self._number_format is _UNSET:
             self._number_format = self._read_number_format()
@@ -673,6 +727,11 @@ class Cell:
 
     @number_format.setter
     def number_format(self, val: str | None) -> None:
+        """Set the cell number format.
+
+        Args:
+            val: Number format code, or ``None`` to clear the cached format.
+        """
         self._require_xlsx_for_style("number_format")
         self._number_format = val
         self._format_dirty = True
@@ -765,6 +824,7 @@ class Cell:
         return None
 
     def __repr__(self) -> str:
+        """Return a compact debug representation for this cell."""
         return f"<Cell {self.coordinate}>"
 
 
@@ -783,6 +843,7 @@ class _Sentinel:
         return cls._instance
 
     def __repr__(self) -> str:
+        """Return the sentinel's debug label."""
         return "<UNSET>"
 
     def __bool__(self) -> bool:

@@ -337,10 +337,11 @@ First no-behavior split target, completed 2026-04-28:
 22. No-op save detection, source-file copy, and permissive seed draining moved
    into `src/wolfxl/patcher_workbook.rs` on 2026-04-28 while preserving
    byte-identical no-op saves and one-shot permissive workbook XML rewrites.
-23. Public API docstring inventory for `python/wolfxl/_workbook.py` and
-   `python/wolfxl/_worksheet.py` completed on 2026-04-28 by adding concise
-   Google-style docstrings to remaining public property setters and debug
-   representations.
+23. Public API docstring inventory for `python/wolfxl/_workbook.py`,
+   `python/wolfxl/_worksheet.py`, `python/wolfxl/_cell.py`, and
+   `python/wolfxl/_streaming.py` completed on 2026-04-28 by adding concise
+   Google-style docstrings to remaining public property setters, core cell
+   accessors, streaming-cell accessors, and debug representations.
 24. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
