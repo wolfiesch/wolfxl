@@ -1681,46 +1681,8 @@ impl XlsxPatcher {
 
 impl XlsxPatcher {
     fn do_save(&mut self, output_path: &str) -> PyResult<()> {
-        if self.value_patches.is_empty()
-            && self.format_patches.is_empty()
-            && self.rels_patches.is_empty()
-            && self.queued_blocks.is_empty()
-            && self.queued_dv_patches.is_empty()
-            && self.queued_cf_patches.is_empty()
-            && self.file_adds.is_empty()
-            && self.file_deletes.is_empty()
-            && self.queued_content_type_ops.is_empty()
-            && self.queued_props.is_none()
-            && self.queued_hyperlinks.is_empty()
-            && self.queued_defined_names.is_empty()
-            && self.queued_tables.is_empty()
-            && self.queued_comments.is_empty()
-            && self.queued_sheet_moves.is_empty()
-            && self.queued_axis_shifts.is_empty()
-            && self.queued_range_moves.is_empty()
-            && self.queued_sheet_copies.is_empty()
-            && self.queued_images.is_empty()
-            && self.queued_charts.is_empty()
-            && self.queued_pivot_caches.is_empty()
-            && self.queued_pivot_tables.is_empty()
-            && self.queued_sheet_setup.is_empty()
-            && self.queued_page_breaks.is_empty()
-            && self.queued_autofilters.is_empty()
-            && self.queued_workbook_security.is_none()
-            && self.queued_slicers.is_empty()
-        {
-            // No changes — just copy. Includes RFC-013's `file_adds`,
-            // `file_deletes`, `queued_content_type_ops`, RFC-020's
-            // `queued_props`, RFC-022's `queued_hyperlinks`, RFC-021's
-            // `queued_defined_names`, RFC-024's `queued_tables`,
-            // RFC-023's `queued_comments`, RFC-036's
-            // `queued_sheet_moves`, RFC-030/031's
-            // `queued_axis_shifts`, RFC-034's `queued_range_moves`,
-            // RFC-055/056/058/061/062 queues, and the pivot/chart
-            // queues so a no-op save remains byte-identical even
-            // after these primitives land.
-            std::fs::copy(&self.file_path, output_path)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Copy failed: {e}")))?;
+        if !self.has_pending_save_work() {
+            self.copy_source_file_phase(output_path)?;
             return Ok(());
         }
 
@@ -1756,13 +1718,7 @@ impl XlsxPatcher {
         // Phase 3 mutates it further with per-sheet rewrites.
         let mut file_patches: HashMap<String, Vec<u8>> = HashMap::new();
 
-        // Sprint Θ Pod-A: pre-seed `file_patches` with any permissive-
-        // mode rewrites that `XlsxPatcher::open` produced (e.g. the
-        // `<sheets/>` → `<sheets>...</sheets>` normalization). We move
-        // (`drain`) rather than clone because the seed is one-shot.
-        for (k, v) in self.permissive_seed_file_patches.drain() {
-            file_patches.insert(k, v);
-        }
+        self.drain_permissive_seed_file_patches_phase(&mut file_patches);
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //
@@ -2453,6 +2409,21 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_workbook::apply_workbook_xml_phases(self, file_patches, zip)
+    }
+
+    fn has_pending_save_work(&self) -> bool {
+        patcher_workbook::has_pending_save_work(self)
+    }
+
+    fn copy_source_file_phase(&self, output_path: &str) -> PyResult<()> {
+        patcher_workbook::copy_source_file_phase(self, output_path)
+    }
+
+    fn drain_permissive_seed_file_patches_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+    ) {
+        patcher_workbook::drain_permissive_seed_file_patches_phase(self, file_patches)
     }
 
     fn serialize_rels_patches_phase(

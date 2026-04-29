@@ -405,6 +405,51 @@ pub(super) fn apply_workbook_xml_phases(
     Ok(())
 }
 
+pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
+    !patcher.value_patches.is_empty()
+        || !patcher.format_patches.is_empty()
+        || !patcher.rels_patches.is_empty()
+        || !patcher.queued_blocks.is_empty()
+        || !patcher.queued_dv_patches.is_empty()
+        || !patcher.queued_cf_patches.is_empty()
+        || !patcher.file_adds.is_empty()
+        || !patcher.file_deletes.is_empty()
+        || !patcher.queued_content_type_ops.is_empty()
+        || patcher.queued_props.is_some()
+        || !patcher.queued_hyperlinks.is_empty()
+        || !patcher.queued_defined_names.is_empty()
+        || !patcher.queued_tables.is_empty()
+        || !patcher.queued_comments.is_empty()
+        || !patcher.queued_sheet_moves.is_empty()
+        || !patcher.queued_axis_shifts.is_empty()
+        || !patcher.queued_range_moves.is_empty()
+        || !patcher.queued_sheet_copies.is_empty()
+        || !patcher.queued_images.is_empty()
+        || !patcher.queued_charts.is_empty()
+        || !patcher.queued_pivot_caches.is_empty()
+        || !patcher.queued_pivot_tables.is_empty()
+        || !patcher.queued_sheet_setup.is_empty()
+        || !patcher.queued_page_breaks.is_empty()
+        || !patcher.queued_autofilters.is_empty()
+        || patcher.queued_workbook_security.is_some()
+        || !patcher.queued_slicers.is_empty()
+}
+
+pub(super) fn copy_source_file_phase(patcher: &XlsxPatcher, output_path: &str) -> PyResult<()> {
+    std::fs::copy(&patcher.file_path, output_path)
+        .map_err(|e| PyIOError::new_err(format!("Copy failed: {e}")))?;
+    Ok(())
+}
+
+pub(super) fn drain_permissive_seed_file_patches_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+) {
+    for (k, v) in patcher.permissive_seed_file_patches.drain() {
+        file_patches.insert(k, v);
+    }
+}
+
 pub(super) fn serialize_rels_patches_phase(
     patcher: &mut XlsxPatcher,
     file_patches: &mut HashMap<String, Vec<u8>>,
