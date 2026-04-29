@@ -9,8 +9,8 @@ just enough to guarantee that:
    `open_from_bytes` siblings) accept real, parseable input.
 3. The strict-raise style accessors fire `NotImplementedError`.
 
-Pod-γ owns the curated parity fixtures and will replace these once
-their full parity matrix is in place.
+Curated parity fixtures live under `tests/parity/fixtures/{xls,xlsb}/`.
+This directory remains the minimal format-dispatch smoke corpus.
 
 ## Files
 

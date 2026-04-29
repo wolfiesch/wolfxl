@@ -19,9 +19,8 @@ fixtures/
 │   ├── cross_ref/      # Buried-header entity rollups
 │   ├── key_value/      # Report metadata blocks
 │   └── stress/         # Archetype-confusion cases
-├── encrypted/          # Phase 2 — password-protected xlsx (one agile, one standard)
 ├── xls/                # Sprint Κ — legacy BIFF8 (5 fixtures via LibreOffice)
-└── xlsb/               # Sprint Κ — binary xlsx (5 fixtures via LibreOffice)
+└── xlsb/               # Sprint Κ — binary Excel (5 fixtures vendored from calamine)
 ```
 
 Large/messy corpora (ExcelBench tier2/3) stay in the ExcelBench repo — the

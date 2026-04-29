@@ -225,7 +225,7 @@ Verification matrix coverage (six-layer):
 | 3. openpyxl parity | `tests/parity/test_encrypted_write_parity.py` (above). |
 | 4. LibreOffice cross-renderer | Manual: open the encrypted output in LibreOffice with the password prompt; document in PR. |
 | 5. Cross-mode | `tests/test_encrypted_writes.py` covers write mode + modify mode. |
-| 6. Regression fixture | `tests/fixtures/encrypted_writeback.xlsx` (encrypted source, password "hunter2") — checked in. |
+| 6. Regression fixture | `tests/fixtures/minimal.xlsx` is loaded, encrypted into a pytest tmp dir, then decrypted and reopened. |
 
 ## 8. Drift / open questions
 

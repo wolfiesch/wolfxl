@@ -122,8 +122,9 @@ Pod 3 runs in parallel with Pods 1A-1E.
 1. The post-Sprint-Ν audit script reports **zero** Tier 1 gaps.
 2. The audit reports **zero** Tier 3 gaps from scope (a).
 3. `from openpyxl.X import Y` → `from wolfxl.X import Y` works for
-   every path in RFC-060's map (~70 paths).
-4. `tests/parity/test_dropin_imports.py` 70/70 green.
+   every path in RFC-060's current 211-pair map.
+4. `tests/parity/test_openpyxl_path_compat.py` covers the current
+   211 `(path, symbol)` pairs.
 5. `pytest tests/` total ~1600 green.
 6. `cargo test --workspace --exclude wolfxl` ~900 green.
 7. README headline claim defensible: "Full openpyxl replacement,

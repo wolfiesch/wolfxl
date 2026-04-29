@@ -228,20 +228,20 @@ on `.coord`.
 ## 4. Drop-in test harness
 
 ```python
-# tests/parity/test_dropin_imports.py
+# tests/parity/test_openpyxl_path_compat.py
 import pytest
 
-DROP_IN_PAIRS = [
+PATHS = [
     # (openpyxl_path, symbol_name)
     ("openpyxl.worksheet.cell_range", "CellRange"),
     ("openpyxl.worksheet.cell_range", "MultiCellRange"),
     ("openpyxl.worksheet.dimensions", "ColumnDimension"),
     ("openpyxl.worksheet.dimensions", "RowDimension"),
     ("openpyxl.worksheet.dimensions", "DimensionHolder"),
-    # ... (~70 entries)
+    # ... (211 entries)
 ]
 
-@pytest.mark.parametrize("openpyxl_path,symbol", DROP_IN_PAIRS)
+@pytest.mark.parametrize("openpyxl_path,symbol", PATHS)
 def test_wolfxl_provides_openpyxl_shaped_path(openpyxl_path, symbol):
     """Search-and-replace 'openpyxl' → 'wolfxl' in the import statement
     must produce a working import."""
@@ -268,7 +268,7 @@ matter"). Skip.
 
 ## 6. Testing
 
-- `tests/parity/test_dropin_imports.py` — ~70 parametrized tests.
+- `tests/parity/test_openpyxl_path_compat.py` — 211 parametrized tests.
 - `tests/test_cell_range.py` — full CellRange API (~30 tests).
 - `tests/test_multi_cell_range.py` (~10 tests).
 - `tests/test_color_scale_rule.py` (~10 tests).
@@ -285,7 +285,8 @@ DifferentialStyle) emit dicts compatible with the existing
 
 ## 11. Acceptance
 
-- `tests/parity/test_dropin_imports.py` 70/70 green.
+- `tests/parity/test_openpyxl_path_compat.py` covers the current
+  211 `(path, symbol)` pairs.
 - `from openpyxl.X import Y as Z` → `from wolfxl.X import Y as Z`
   works for every path in §2.
 - `CellRange("A1:B10").bounds == (1, 1, 2, 10)`.

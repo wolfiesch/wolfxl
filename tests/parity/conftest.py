@@ -7,8 +7,8 @@ Sources:
 2. ``$SYNTHGL_FIXTURES`` env var — live directory (typically
    ``/Users/.../SynthGL/tests/app/fixtures/ingestion``). Optional; when set,
    runs the harness against the freshest real corpus.
-3. ``tests/parity/fixtures/encrypted/``, ``xls/``, ``xlsb/`` — format-specific
-   fixtures surfaced as their own parametrize groups.
+3. ``tests/parity/fixtures/xls/`` and ``xlsb/`` — format-specific fixtures
+   surfaced as their own parametrize groups.
 
 Each discovered xlsx becomes a parametrized test case identified by a stable
 ID (the relative path), so pytest-xdist can shard them safely.

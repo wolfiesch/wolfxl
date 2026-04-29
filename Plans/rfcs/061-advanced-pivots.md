@@ -263,7 +263,7 @@ on open. This matches the v2.0 "no runtime evaluation" stance.
 - `tests/test_pivot_calculated_items.py` (~25 tests).
 - `tests/test_pivot_group_items.py` (~30 tests).
 - `tests/test_pivot_advanced_styling.py` (~25 tests).
-- `tests/parity/test_pivot_advanced_parity.py` (~10 tests).
+- `tests/parity/test_advanced_pivots_parity.py` (~10 tests).
 - `tests/diffwriter/test_pivot_advanced_*.py` (~5 tests).
 - LibreOffice + Excel-online fixture regression (~5 manual).
 

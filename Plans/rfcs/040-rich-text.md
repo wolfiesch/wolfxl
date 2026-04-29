@@ -177,7 +177,9 @@ rich text. Tracked as a future RFC; see §10.
    openpyxl on the same fixture.
 4. **Cross-mode** — modify-mode reads rich text the same way; tested
    on a modify-mode loaded workbook.
-5. **Regression fixture** — checked into `tests/fixtures/rich_text/`.
+5. **Regression fixtures** — generated in-test by
+   `tests/parity/test_rich_text_parity.py` and
+   `tests/test_rich_text_read.py`.
 6. **LibreOffice cross-renderer** — N/A (read-only RFC).
 
 ## 7. Cross-Mode Asymmetries (BREAKING)
