@@ -652,7 +652,10 @@ First no-behavior split target, completed 2026-04-28:
 105. VML comment-shape anchor shifting was extracted into
    `crates/wolfxl-structural/src/vml_shift.rs` on 2026-04-29, keeping
    `shift_workbook.rs` focused on orchestration, comments, and defined names.
-106. Next helper candidate: continue with another narrow Rust save phase only if
+106. Worksheet construction defaults were moved into
+   `python/wolfxl/_worksheet_state.py` on 2026-04-29 so the public
+   `Worksheet` facade keeps construction, accessors, and behavior separate.
+107. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

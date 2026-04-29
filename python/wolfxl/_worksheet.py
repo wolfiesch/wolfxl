@@ -89,6 +89,7 @@ from wolfxl._worksheet_structural import (
     insert_rows as _insert_rows,
     move_range as _move_range,
 )
+from wolfxl._worksheet_state import initialize_worksheet_state
 from wolfxl._worksheet_writer_flush import flush_to_writer
 from wolfxl._worksheet_write_buffers import (
     batch_write_dicts,
@@ -149,71 +150,7 @@ class Worksheet:
     )
 
     def __init__(self, workbook: Workbook, title: str) -> None:
-        self._workbook = workbook
-        self._title = title
-        self._cells: dict[tuple[int, int], Cell] = {}
-        self._dirty: set[tuple[int, int]] = set()
-        self._dimensions: tuple[int, int] | None = None
-        self._max_col_idx: int = 0
-        self._next_append_row: int = 1
-        # Fast-path append buffer: raw value lists, no Cell objects.
-        self._append_buffer: list[list[Any]] = []
-        self._append_buffer_start: int = 1
-        # Bulk write buffer: list of (grid, start_row, start_col) tuples.
-        self._bulk_writes: list[tuple[list[list[Any]], int, int]] = []
-        # openpyxl compat properties
-        self._freeze_panes: str | None = None
-        self._auto_filter = _AutoFilter()
-        self._row_heights: dict[int, float | None] = {}
-        self._col_widths: dict[str, float | None] = {}
-        self._merged_ranges: set[str] = set()
-        self._print_area: str | None = None
-        self._sheet_visibility_cache: dict[str, Any] | None = None
-        # Read caches (None = not loaded yet; dict/list = loaded, possibly empty).
-        self._comments_cache: dict[str, Any] | None = None
-        self._hyperlinks_cache: dict[str, Any] | None = None
-        self._tables_cache: dict[str, Any] | None = None
-        self._data_validations_cache: Any | None = None
-        self._conditional_formatting_cache: Any | None = None
-        # Write-mode pending queues (flushed in _flush() on save()).
-        self._pending_comments: dict[str, Any] = {}
-        self._pending_hyperlinks: dict[str, Any] = {}
-        # Keyed by (row, col) so the flush layer can look values up without
-        # a coordinate-string round-trip.
-        self._pending_rich_text: dict[tuple[int, int], Any] = {}
-        # Pending array / data-table
-        # formulas keyed by ``(row, col)``.  Each entry is a
-        # ``(kind, payload)`` tuple.  Master cells get
-        # ``("array", {"ref": ..., "text": ...})`` or
-        # ``("data_table", {...})``; cells inside the spill range
-        # become ``("spill_child", {})`` placeholders.
-        self._pending_array_formulas: dict[tuple[int, int], tuple[str, dict[str, Any]]] = {}
-        self._pending_tables: list[Any] = []
-        self._pending_data_validations: list[Any] = []
-        self._pending_conditional_formats: list[tuple[str, Any]] = []
-        # Pending images attached to this sheet via ``add_image``.
-        self._pending_images: list[Any] = []
-        # Pending charts queued via ``add_chart``.
-        self._pending_charts: list[Any] = []
-        # Pending pivot table queue. Modify-mode pivots drain through the
-        # workbook save pipeline; write-mode pivot tables fail at add time.
-        self._pending_pivot_tables: list[Any] = []
-        # Print/view/protection wrappers are instantiated only on first
-        # access so untouched surfaces pay no construction overhead.
-        self._page_setup: Any = None
-        self._page_margins: Any = None
-        self._header_footer: Any = None
-        self._sheet_view: Any = None
-        self._protection: Any = None
-        self._print_title_rows: str | None = None
-        self._print_title_cols: str | None = None
-        # Pending slicer presentations.
-        self._pending_slicers: list[Any] = []
-        # Page breaks + sheet format defaults. Instantiate wrappers only on
-        # first access so untouched surfaces pay no construction overhead.
-        self._row_breaks: Any = None
-        self._col_breaks: Any = None
-        self._sheet_format: Any = None
+        initialize_worksheet_state(self, workbook, title)
 
     @property
     def title(self) -> str:
