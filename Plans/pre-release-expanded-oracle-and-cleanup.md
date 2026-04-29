@@ -611,7 +611,10 @@ First no-behavior split target, completed 2026-04-28:
    trendlines, markers, data points, and numeric references, was extracted
    into `crates/wolfxl-writer/src/emit/charts/series.rs` on 2026-04-29 while
    leaving plot and axis sequencing in the chart facade.
-94. Next helper candidate: continue with another narrow Rust save phase only if
+94. Chart axis id selection and axis XML emission were extracted into
+   `crates/wolfxl-writer/src/emit/charts/axes.rs` on 2026-04-29 while
+   preserving plot/axis ordering through the chart facade.
+95. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
