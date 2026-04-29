@@ -3,7 +3,7 @@
 //! Emits the workbook XML part that lists sheets, defined names,
 //! and a handful of fixed metadata elements that Excel requires.
 
-use crate::model::defined_name::BuiltinName;
+use crate::model::defined_name::{BuiltinName, DefinedName};
 use crate::model::workbook::Workbook;
 use crate::model::worksheet::SheetVisibility;
 use crate::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
@@ -25,13 +25,66 @@ fn builtin_name_str(b: BuiltinName) -> &'static str {
 /// True iff `defined_names` already carries a `PrintArea` builtin scoped
 /// to sheet `idx`. Used to suppress the `Worksheet::print_area` auto-inject
 /// when the caller has declared the print area explicitly via `DefinedName`.
-fn has_user_print_area_for_sheet(
-    defined_names: &[crate::model::defined_name::DefinedName],
-    idx: usize,
-) -> bool {
+fn has_user_print_area_for_sheet(defined_names: &[DefinedName], idx: usize) -> bool {
     defined_names.iter().any(|dn| {
         matches!(dn.builtin, Some(BuiltinName::PrintArea)) && dn.scope_sheet_index == Some(idx)
     })
+}
+
+fn emit_defined_names(out: &mut String, wb: &Workbook) {
+    let has_user_names = !wb.defined_names.is_empty();
+    let has_print_areas = wb.sheets.iter().any(|s| s.print_area.is_some());
+
+    if !has_user_names && !has_print_areas {
+        return;
+    }
+
+    out.push_str("<definedNames>");
+    emit_user_defined_names(out, &wb.defined_names);
+    emit_sheet_print_areas(out, wb);
+    out.push_str("</definedNames>");
+}
+
+fn emit_user_defined_names(out: &mut String, defined_names: &[DefinedName]) {
+    for dn in defined_names {
+        let name_str = match dn.builtin {
+            Some(b) => builtin_name_str(b).to_string(),
+            None => dn.name.clone(),
+        };
+        let name_escaped = xml_escape::attr(&name_str);
+
+        let local_attr = match dn.scope_sheet_index {
+            Some(idx) => format!(" localSheetId=\"{idx}\""),
+            None => String::new(),
+        };
+
+        let hidden_attr = if dn.hidden {
+            " hidden=\"1\"".to_string()
+        } else {
+            String::new()
+        };
+
+        let formula_escaped = xml_escape::text(&dn.formula);
+        out.push_str(&format!(
+            "<definedName name=\"{name_escaped}\"{local_attr}{hidden_attr}>{formula_escaped}</definedName>"
+        ));
+    }
+}
+
+fn emit_sheet_print_areas(out: &mut String, wb: &Workbook) {
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if let Some(ref range) = sheet.print_area {
+            if has_user_print_area_for_sheet(&wb.defined_names, idx) {
+                continue;
+            }
+            let quoted_name = quote_sheet_name_if_needed(&sheet.name);
+            let formula = format!("{quoted_name}!{range}");
+            let formula_escaped = xml_escape::text(&formula);
+            out.push_str(&format!(
+                "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{idx}\">{formula_escaped}</definedName>"
+            ));
+        }
+    }
 }
 
 /// Emit `xl/workbook.xml` as UTF-8 bytes.
@@ -93,61 +146,7 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
     }
     out.push_str("</sheets>");
 
-    // Collect all defined names:
-    //   1. User-defined (from wb.defined_names).
-    //   2. Auto-injected print areas from sheets that have print_area set.
-    //
-    // Only emit the <definedNames> block when there is at least one entry.
-    let has_user_names = !wb.defined_names.is_empty();
-    let has_print_areas = wb.sheets.iter().any(|s| s.print_area.is_some());
-
-    if has_user_names || has_print_areas {
-        out.push_str("<definedNames>");
-
-        // User-defined names.
-        for dn in &wb.defined_names {
-            let name_str = match dn.builtin {
-                Some(b) => builtin_name_str(b).to_string(),
-                None => dn.name.clone(),
-            };
-            let name_escaped = xml_escape::attr(&name_str);
-
-            let local_attr = match dn.scope_sheet_index {
-                Some(idx) => format!(" localSheetId=\"{idx}\""),
-                None => String::new(),
-            };
-
-            let hidden_attr = if dn.hidden {
-                " hidden=\"1\"".to_string()
-            } else {
-                String::new()
-            };
-
-            let formula_escaped = xml_escape::text(&dn.formula);
-            out.push_str(&format!(
-                "<definedName name=\"{name_escaped}\"{local_attr}{hidden_attr}>{formula_escaped}</definedName>"
-            ));
-        }
-
-        // Auto-injected print areas. If the caller already declared a
-        // `_xlnm.Print_Area` `DefinedName` for this sheet, skip — emitting
-        // both would produce a malformed workbook. User-declared wins.
-        for (idx, sheet) in wb.sheets.iter().enumerate() {
-            if let Some(ref range) = sheet.print_area {
-                if has_user_print_area_for_sheet(&wb.defined_names, idx) {
-                    continue;
-                }
-                let quoted_name = quote_sheet_name_if_needed(&sheet.name);
-                let formula = format!("{quoted_name}!{range}");
-                let formula_escaped = xml_escape::text(&formula);
-                out.push_str(&format!(
-                    "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{idx}\">{formula_escaped}</definedName>"
-                ));
-            }
-        }
-
-        out.push_str("</definedNames>");
-    }
+    emit_defined_names(&mut out, wb);
 
     // calcId="171027" is the openpyxl-matching stamp; Excel accepts it unchanged.
     out.push_str("<calcPr calcId=\"171027\"/>");

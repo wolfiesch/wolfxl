@@ -658,7 +658,11 @@ First no-behavior split target, completed 2026-04-28:
 107. `crates/wolfxl-writer/src/emit/styles_xml.rs` now has named section
    emitters as of 2026-04-29, keeping `styles.xml` ordering explicit while
    separating numFmts/fonts/fills/borders/xfs/dxfs/tableStyles emission.
-108. Next helper candidate: continue with another narrow Rust save phase only if
+108. Workbook defined-name rendering was split into named helpers in
+   `crates/wolfxl-writer/src/emit/workbook_xml.rs` on 2026-04-29 so
+   user-defined names and auto-injected print areas share one explicit block
+   emitter.
+109. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
