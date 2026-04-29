@@ -61,6 +61,7 @@ from wolfxl._worksheet_records import (
     schema as _infer_worksheet_schema,
     sheet_visibility as _sheet_visibility,
 )
+from wolfxl._worksheet_rich_text import cellrichtext_to_runs_payload
 from wolfxl._worksheet_setup import (
     get_col_breaks,
     get_dimension_holder,
@@ -93,48 +94,6 @@ from wolfxl._worksheet_write_buffers import (
     materialize_append_buffer,
     materialize_bulk_writes,
 )
-
-def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | None]]:
-    """Sprint Ι Pod-α: convert a ``CellRichText`` into the Rust-side
-    payload (a list of ``(text, font_dict_or_None)`` tuples).
-
-    This lives at module scope so both the write-mode and modify-mode
-    flush paths can share it.  The Rust side reconstructs runs via
-    ``py_runs_to_rust`` in ``src/wolfxl/patcher_payload.rs``.
-    """
-    out: list[tuple[str, dict[str, Any] | None]] = []
-    for item in crt:
-        if isinstance(item, str):
-            out.append((item, None))
-            continue
-        # TextBlock — pull font props.
-        font = item.font
-        d: dict[str, Any] = {}
-        if font.b is not None:
-            d["b"] = bool(font.b)
-        if font.i is not None:
-            d["i"] = bool(font.i)
-        if font.strike is not None:
-            d["strike"] = bool(font.strike)
-        if font.u is not None:
-            d["u"] = font.u
-        if font.sz is not None:
-            d["sz"] = float(font.sz)
-        if font.color is not None:
-            d["color"] = font.color
-        if font.rFont is not None:
-            d["rFont"] = font.rFont
-        if font.family is not None:
-            d["family"] = int(font.family)
-        if font.charset is not None:
-            d["charset"] = int(font.charset)
-        if font.vertAlign is not None:
-            d["vertAlign"] = font.vertAlign
-        if font.scheme is not None:
-            d["scheme"] = font.scheme
-        out.append((item.text, d if d else None))
-    return out
-
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -1455,7 +1414,7 @@ class Worksheet:
             fill_to_format_dict,
             alignment_to_format_dict,
             border_to_rust_dict,
-            _cellrichtext_to_runs_payload,
+            cellrichtext_to_runs_payload,
         )
 
     def _batch_write_dicts(
@@ -1480,7 +1439,7 @@ class Worksheet:
             fill_to_format_dict,
             alignment_to_format_dict,
             border_to_rust_dict,
-            _cellrichtext_to_runs_payload,
+            cellrichtext_to_runs_payload,
         )
 
     def _flush_autofilter_post_cells(self, writer: Any) -> None:
