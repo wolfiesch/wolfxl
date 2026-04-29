@@ -372,7 +372,7 @@ class Workbook:
         return _workbook_metadata.get_defined_names(self)
 
     # ------------------------------------------------------------------
-    # RFC-058 — workbook-level security
+    # Workbook-level security
     # ------------------------------------------------------------------
 
     @property
@@ -543,7 +543,7 @@ class Workbook:
         _workbook_save.save_encrypted(self, filename, password)
 
     def _flush_pending_hyperlinks_to_patcher(self) -> None:
-        """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
+        """Drain each sheet's pending hyperlinks into the patcher.
 
         Modify-mode counterpart to the writer-side compatibility flush.
         Each ``Hyperlink`` is converted to the patcher's flat-dict shape
@@ -556,7 +556,7 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_hyperlinks_to_patcher(self)
 
     def _flush_pending_tables_to_patcher(self) -> None:
-        """Drain ``_pending_tables`` on every sheet into the patcher (RFC-024).
+        """Drain each sheet's pending tables into the patcher.
 
         Modify-mode counterpart to the writer-side compatibility flush.
         Each ``Table`` is converted to the patcher's flat-dict shape and
@@ -612,10 +612,9 @@ class Workbook:
            producing chart XML bytes that are routed through the same
            ``patcher.queue_chart_add`` path as the bytes escape hatch.
 
-        Sequenced AFTER images / axis shifts but BEFORE the final
+        Sequenced after images / axis shifts but before the final
         ``patcher.save()`` so chart cell-range formulas can compose
-        with cell rewrites in the same save (the patcher's Phase 2.5l
-        runs before Phase 3 cell patches).
+        with cell rewrites in the same save.
         """
         _workbook_patcher_flush.flush_pending_charts_to_patcher(self)
 
@@ -644,8 +643,8 @@ class Workbook:
         For each worksheet, iterate over ``ws._pending_slicers`` and
         bridge the (cache, slicer) pair to the Rust patcher via
         ``queue_slicer_add(sheet_title, cache_dict, slicer_dict)``.
-        Sequenced AFTER pivots (Phase 2.5m) + sheet-setup (Phase 2.5n)
-        and BEFORE autofilters (Phase 2.5o).
+        Sequenced after pivots and sheet setup, and before autofilters, so the
+        relationship graph is stable before filter rows are rewritten.
         """
         _workbook_patcher_flush.flush_pending_slicers_to_patcher(self)
 
@@ -681,8 +680,8 @@ class Workbook:
         them into the sheet via wolfxl_merger::merge_blocks.
 
         ``print_titles`` (workbook-scope ``_xlnm.Print_Titles``
-        definedName) does NOT route through Phase 2.5n on the
-        patcher side; it composes through the existing defined-names queue.
+        definedName) does not route through this sheet-setup patch; it
+        composes through the existing defined-names queue.
         The dict still includes a ``print_titles`` slot for the writer-mode
         path.
         """
@@ -731,9 +730,8 @@ class Workbook:
            through ``serialize_pivot_table_dict`` and routed to
            ``patcher.queue_pivot_table_add(sheet, xml, cache_id)``.
 
-        Sequenced AFTER charts (Phase 2.5l) and BEFORE the final
-        ``patcher.save()`` so the patcher's Phase 2.5m runs against
-        an already-stable rels graph.
+        Sequenced after charts and before the final ``patcher.save()`` so
+        pivot relationships are added against an already-stable rels graph.
         """
         _workbook_patcher_flush.flush_pending_pivots_to_patcher(self)
 
@@ -772,7 +770,7 @@ class Workbook:
         )
 
     def _flush_pending_comments_to_patcher(self) -> None:
-        """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
+        """Drain each sheet's pending comments into the patcher.
 
         Modify-mode counterpart to the writer-side compatibility flush.
         Each ``Comment`` is converted to the patcher's flat-dict shape and
@@ -805,8 +803,8 @@ class Workbook:
         priority ordering within a wrapper reflects insertion order.
         Multiple ``add()`` calls with different sqrefs produce multiple
         patches; the patcher then emits them in encounter order while
-        threading the workbook-wide ``running_dxf_count`` through
-        Phase-2.5b on the Rust side.
+        threading the workbook-wide ``running_dxf_count`` through the Rust
+        writer.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
@@ -814,12 +812,11 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_conditional_formats_to_patcher(self)
 
     def _flush_pending_axis_shifts_to_patcher(self) -> None:
-        """Drain ``_pending_axis_shifts`` into the patcher (RFC-030 / RFC-031).
+        """Drain queued row and column shifts into the patcher.
 
         Each tuple ``(sheet_title, axis, idx, n)`` is forwarded to
-        ``_rust_patcher.queue_axis_shift(sheet, axis, idx, n)``. The
-        patcher's Phase 2.5i drains the queue in append order during
-        ``save()``.
+        ``_rust_patcher.queue_axis_shift(sheet, axis, idx, n)``. The patcher
+        drains the queue in append order during ``save()``.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation.
@@ -830,13 +827,12 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_axis_shifts_to_patcher(self)
 
     def _flush_pending_range_moves_to_patcher(self) -> None:
-        """Drain ``_pending_range_moves`` into the patcher (RFC-034).
+        """Drain queued range moves into the patcher.
 
         Each tuple ``(sheet_title, src_min_col, src_min_row,
         src_max_col, src_max_row, d_row, d_col, translate)`` is
-        forwarded to ``_rust_patcher.queue_range_move(...)``. The
-        patcher's Phase 2.5j drains the queue in append order during
-        ``save()``.
+        forwarded to ``_rust_patcher.queue_range_move(...)``. The patcher
+        drains the queue in append order during ``save()``.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation.
@@ -847,13 +843,12 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_range_moves_to_patcher(self)
 
     def _flush_pending_sheet_copies_to_patcher(self) -> None:
-        """Drain ``_pending_sheet_copies`` into the patcher (RFC-035).
+        """Drain queued sheet copies into the patcher.
 
         Each ``(src_title, dst_title)`` pair forwards to
-        ``_rust_patcher.queue_sheet_copy(src, dst)``. The patcher's
-        Phase 2.7 drains the queue in append order during ``save()``,
-        BEFORE every per-sheet phase so the cloned sheets are visible
-        to downstream drains.
+        ``_rust_patcher.queue_sheet_copy(src, dst)``. The patcher drains the
+        queue in append order before per-sheet mutations, so cloned sheets
+        are visible to downstream drains.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation. Cleared after queueing
@@ -863,7 +858,7 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_sheet_copies_to_patcher(self)
 
     def _flush_defined_names_to_patcher(self) -> None:
-        """Drain ``_pending_defined_names`` into the patcher (RFC-021).
+        """Drain pending defined-name updates into the patcher.
 
         Modify-mode counterpart to ``_flush_workbook_writes``'s
         defined-name branch. Each ``DefinedName`` is converted to the
@@ -876,25 +871,25 @@ class Workbook:
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit. Empty queue is a no-op (the Rust
-        side's no-op guard is the second line of defence — workbook.xml
+        side's no-op guard is the second line of defence; workbook.xml
         is left untouched if no upserts arrive).
         """
         _workbook_patcher_flush.flush_defined_names_to_patcher(self)
 
     def _flush_security_to_patcher(self) -> None:
-        """Drain ``_security`` / ``_file_sharing`` into the patcher (RFC-058).
+        """Drain workbook security and file-sharing state into the patcher.
 
-        Builds the §10 flat dict and forwards it to
-        ``_rust_patcher.queue_workbook_security``. The Rust side merges
-        the payload into ``xl/workbook.xml`` during Phase 2.5q.
+        Builds the flat dict and forwards it to
+        ``_rust_patcher.queue_workbook_security``. The Rust side merges the
+        payload into ``xl/workbook.xml``.
 
-        Empty (no setter ever ran) ⇒ no-op; the patcher leaves
+        Empty (no setter ever ran) is a no-op; the patcher leaves
         workbook.xml byte-identical with the source.
         """
         _workbook_patcher_flush.flush_security_to_patcher(self)
 
     def _build_security_dict(self) -> dict[str, Any]:
-        """Return the RFC-058 §10 flat dict for the workbook's security blocks.
+        """Return the flat dict for the workbook's security blocks.
 
         Either branch may be ``None`` (the user only set one of the two
         slots). Always returns a dict — never ``None`` — so callers can
@@ -903,14 +898,13 @@ class Workbook:
         return _workbook_patcher_flush.build_security_dict(self)
 
     def _flush_pending_sheet_moves_to_patcher(self, name: str, offset: int) -> None:
-        """Queue a single sheet-reorder on the patcher (RFC-036).
+        """Queue a single sheet reorder on the patcher.
 
         Called eagerly from ``move_sheet`` rather than batched at
         ``save()`` time: each ``move_sheet`` call queues exactly one
         entry, and the patcher composes them in queue order against
         its own running tab list (which is initialised from the
-        source ZIP's ``xl/workbook.xml`` and updated in place by
-        Phase 2.5h on save).
+        source ZIP's ``xl/workbook.xml`` and updated in place on save).
 
         The empty-queue invariant lives on the Rust side: an unused
         ``move_sheet`` call (i.e. modify-mode workbook never touched)
@@ -920,7 +914,7 @@ class Workbook:
         _workbook_patcher_flush.queue_sheet_move_to_patcher(self, name, offset)
 
     def _flush_properties_to_patcher(self) -> None:
-        """Drain dirty document properties into the patcher (RFC-020).
+        """Drain dirty document properties into the patcher.
 
         Modify-mode counterpart to ``_flush_workbook_writes``'s
         property branch. Builds a flat dict keyed with the patcher's

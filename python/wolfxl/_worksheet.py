@@ -354,7 +354,7 @@ class Worksheet:
         return get_dimension_holder(self)
 
     def to_rust_page_breaks_dict(self) -> dict[str, Any]:
-        """Return the §10 dict shape for ``<rowBreaks>`` / ``<colBreaks>``.
+        """Return the flat dict shape for ``<rowBreaks>`` / ``<colBreaks>``.
 
         Each side is ``None`` when the corresponding ``PageBreakList``
         is un-touched OR carries zero breaks — the patcher / writer
@@ -363,7 +363,7 @@ class Worksheet:
         return _to_rust_page_breaks_dict(self)
 
     def to_rust_sheet_format_dict(self) -> dict[str, Any] | None:
-        """Return the §10 dict for ``<sheetFormatPr>`` or ``None``.
+        """Return the flat dict for ``<sheetFormatPr>`` or ``None``.
 
         Returns ``None`` when the wrapper is un-touched OR at all-default
         values — the writer then keeps the legacy hardcoded
@@ -402,7 +402,7 @@ class Worksheet:
         set_print_title_cols(self, value)
 
     def to_rust_setup_dict(self) -> dict[str, Any]:
-        """Return the §10 dict contract for the Rust patcher / writer.
+        """Return the flat dict contract for the Rust patcher / writer.
 
         Returns ``None`` for any sub-block whose Python wrapper is at
         its construction defaults — the Rust side then knows to skip
@@ -1038,10 +1038,6 @@ class Worksheet:
             ValueError: If an A1-style ``anchor`` is malformed.
         """
         _add_image(self, img, anchor)
-
-    # ------------------------------------------------------------------
-    # End add_image
-    # ------------------------------------------------------------------
 
     @property
     def merged_cells(self) -> _MergedCellsProxy:
