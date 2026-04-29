@@ -680,7 +680,11 @@ First no-behavior split target, completed 2026-04-28:
 113. Modify-mode chart flushing was split in
    `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so pre-serialized
    chart XML and high-level chart objects drain through separate helper paths.
-114. Next helper candidate: continue with another narrow Rust save phase only if
+114. Modify-mode slicer queueing was split in
+   `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so each slicer
+   presentation serializes and queues through one helper while preserving the
+   existing skip-on-error behavior.
+115. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

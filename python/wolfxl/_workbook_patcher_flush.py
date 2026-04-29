@@ -465,21 +465,26 @@ def flush_pending_slicers_to_patcher(wb: Any) -> None:
         if not pending:
             continue
         for slicer in pending:
-            cache = slicer.cache
-            try:
-                cache_dict = cache.to_rust_dict()
-            except Exception:
-                continue
-            try:
-                slicer_dict = slicer.to_rust_dict()
-            except Exception:
-                continue
-            try:
-                patcher.queue_slicer_add(ws.title, cache_dict, slicer_dict)
-            except Exception:
-                continue
+            _queue_slicer_add(patcher, ws.title, slicer)
         ws._pending_slicers = []  # noqa: SLF001
     wb._pending_slicer_caches = []  # noqa: SLF001
+
+
+def _queue_slicer_add(patcher: Any, sheet_title: str, slicer: Any) -> None:
+    """Queue one slicer presentation, preserving the historical skip-on-error path."""
+    cache = slicer.cache
+    try:
+        cache_dict = cache.to_rust_dict()
+    except Exception:
+        return
+    try:
+        slicer_dict = slicer.to_rust_dict()
+    except Exception:
+        return
+    try:
+        patcher.queue_slicer_add(sheet_title, cache_dict, slicer_dict)
+    except Exception:
+        return
 
 
 def flush_pending_pivots_to_patcher(wb: Any) -> None:
