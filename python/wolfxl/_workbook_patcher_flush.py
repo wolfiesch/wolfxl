@@ -338,27 +338,45 @@ def flush_pending_page_breaks_to_patcher(wb: Any) -> None:
     if patcher is None:
         return
     for ws in wb._sheets.values():  # noqa: SLF001
-        row_breaks = getattr(ws, "_row_breaks", None)
-        col_breaks = getattr(ws, "_col_breaks", None)
-        sheet_format = getattr(ws, "_sheet_format", None)
-        if row_breaks is None and col_breaks is None and sheet_format is None:
+        if not _has_page_break_updates(ws):
             continue
-        try:
-            breaks_dict = ws.to_rust_page_breaks_dict()
-            fmt_dict = ws.to_rust_sheet_format_dict()
-        except Exception:
-            continue
-        payload = {
-            "row_breaks": breaks_dict.get("row_breaks"),
-            "col_breaks": breaks_dict.get("col_breaks"),
-            "sheet_format": fmt_dict,
-        }
-        if all(value is None for value in payload.values()):
-            continue
-        try:
-            patcher.queue_page_breaks_update(ws.title, payload)
-        except Exception:
-            continue
+        _queue_page_breaks_update(patcher, ws)
+
+
+def _has_page_break_updates(ws: Any) -> bool:
+    """Return whether a worksheet has pending page-break or format state."""
+    row_breaks = getattr(ws, "_row_breaks", None)
+    col_breaks = getattr(ws, "_col_breaks", None)
+    sheet_format = getattr(ws, "_sheet_format", None)
+    return row_breaks is not None or col_breaks is not None or sheet_format is not None
+
+
+def _page_breaks_payload(ws: Any) -> dict[str, Any] | None:
+    """Build the Rust patcher payload for page breaks and sheet format."""
+    try:
+        breaks_dict = ws.to_rust_page_breaks_dict()
+        fmt_dict = ws.to_rust_sheet_format_dict()
+    except Exception:
+        return None
+    payload = {
+        "row_breaks": breaks_dict.get("row_breaks"),
+        "col_breaks": breaks_dict.get("col_breaks"),
+        "sheet_format": fmt_dict,
+    }
+    if all(value is None for value in payload.values()):
+        return None
+    return payload
+
+
+def _queue_page_breaks_update(patcher: Any, ws: Any) -> None:
+    """Queue one page-break update, preserving the historical skip-on-error path."""
+    payload = _page_breaks_payload(ws)
+    if payload is None:
+        return
+    try:
+        patcher.queue_page_breaks_update(ws.title, payload)
+    except Exception:
+        return
 
 
 def flush_pending_autofilters_to_patcher(wb: Any) -> None:
@@ -368,21 +386,30 @@ def flush_pending_autofilters_to_patcher(wb: Any) -> None:
         return
     for ws in wb._sheets.values():  # noqa: SLF001
         autofilter = ws._auto_filter  # noqa: SLF001
-        has_state = (
-            autofilter.ref is not None
-            or bool(autofilter.filter_columns)
-            or autofilter.sort_state is not None
-        )
-        if not has_state:
+        if not _autofilter_has_state(autofilter):
             continue
-        try:
-            payload = autofilter.to_rust_dict()
-        except Exception:
-            continue
-        try:
-            patcher.queue_autofilter(ws.title, payload)
-        except Exception:
-            continue
+        _queue_autofilter(patcher, ws.title, autofilter)
+
+
+def _autofilter_has_state(autofilter: Any) -> bool:
+    """Return whether an autofilter contains state worth queueing."""
+    return (
+        autofilter.ref is not None
+        or bool(autofilter.filter_columns)
+        or autofilter.sort_state is not None
+    )
+
+
+def _queue_autofilter(patcher: Any, sheet_title: str, autofilter: Any) -> None:
+    """Queue one autofilter update, preserving the historical skip-on-error path."""
+    try:
+        payload = autofilter.to_rust_dict()
+    except Exception:
+        return
+    try:
+        patcher.queue_autofilter(sheet_title, payload)
+    except Exception:
+        return
 
 
 def flush_pending_charts_to_patcher(wb: Any) -> None:
