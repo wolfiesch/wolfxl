@@ -235,20 +235,22 @@ def _flush_pending_data_validations(ws: Worksheet, writer: Any, sheet: str) -> N
     if not ws._pending_data_validations:  # noqa: SLF001
         return
     for dv in ws._pending_data_validations:  # noqa: SLF001
-        writer.add_data_validation(
-            sheet,
-            {
-                "range": dv.sqref,
-                "validation_type": dv.type,
-                "operator": dv.operator,
-                "formula1": dv.formula1,
-                "formula2": dv.formula2,
-                "allow_blank": dv.allowBlank,
-                "error_title": dv.errorTitle,
-                "error": dv.error,
-            },
-        )
+        writer.add_data_validation(sheet, _data_validation_payload(dv))
     ws._pending_data_validations.clear()  # noqa: SLF001
+
+
+def _data_validation_payload(data_validation: Any) -> dict[str, Any]:
+    """Build the native writer payload for a worksheet data validation."""
+    return {
+        "range": data_validation.sqref,
+        "validation_type": data_validation.type,
+        "operator": data_validation.operator,
+        "formula1": data_validation.formula1,
+        "formula2": data_validation.formula2,
+        "allow_blank": data_validation.allowBlank,
+        "error_title": data_validation.errorTitle,
+        "error": data_validation.error,
+    }
 
 
 def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -> None:
@@ -256,18 +258,22 @@ def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -
     if not ws._pending_conditional_formats:  # noqa: SLF001
         return
     for range_string, rule in ws._pending_conditional_formats:  # noqa: SLF001
-        formula = rule.formula[0] if rule.formula else None
         writer.add_conditional_format(
-            sheet,
-            {
-                "range": range_string,
-                "rule_type": rule.type,
-                "operator": rule.operator,
-                "formula": formula,
-                "stop_if_true": rule.stopIfTrue,
-            },
+            sheet, _conditional_format_payload(range_string, rule)
         )
     ws._pending_conditional_formats.clear()  # noqa: SLF001
+
+
+def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
+    """Build the native writer payload for a worksheet conditional format."""
+    formula = rule.formula[0] if rule.formula else None
+    return {
+        "range": range_string,
+        "rule_type": rule.type,
+        "operator": rule.operator,
+        "formula": formula,
+        "stop_if_true": rule.stopIfTrue,
+    }
 
 
 def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:

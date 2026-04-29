@@ -673,7 +673,11 @@ First no-behavior split target, completed 2026-04-28:
 111. Write-mode worksheet compatibility payload construction was split in
    `python/wolfxl/_worksheet_flush.py` on 2026-04-29 so hyperlink, comment,
    and table payloads are built in named helpers before native writer queueing.
-112. Next helper candidate: continue with another narrow Rust save phase only if
+112. Write-mode worksheet validation and conditional-format payload
+   construction was split in `python/wolfxl/_worksheet_flush.py` on
+   2026-04-29 so every compatibility payload in that flush layer now has a
+   named builder.
+113. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
