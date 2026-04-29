@@ -671,20 +671,7 @@ fn translate_cell_formula(children: &[u8], src: &Range, dst: &Range) -> Vec<u8> 
                         Ok(c) => c.into_owned(),
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
-                    let wrapped = if raw.starts_with('=') {
-                        raw.clone()
-                    } else {
-                        format!("={raw}")
-                    };
-                    let translated = formula_move_range(&wrapped, src, dst, true);
-                    let unwrapped = if !raw.starts_with('=') {
-                        translated
-                            .strip_prefix('=')
-                            .unwrap_or(&translated)
-                            .to_string()
-                    } else {
-                        translated
-                    };
+                    let unwrapped = translate_formula_text(&raw, src, dst);
                     let new_t = BytesText::new(&unwrapped);
                     let _ = writer.write_event(Event::Text(new_t));
                 } else {
@@ -702,6 +689,25 @@ fn translate_cell_formula(children: &[u8], src: &Range, dst: &Range) -> Vec<u8> 
     }
 
     writer.into_inner().into_inner()
+}
+
+/// Translate an OOXML formula text payload while preserving its leading `=`.
+fn translate_formula_text(raw: &str, src: &Range, dst: &Range) -> String {
+    let has_equals = raw.starts_with('=');
+    let wrapped = if has_equals {
+        raw.to_string()
+    } else {
+        format!("={raw}")
+    };
+    let translated = formula_move_range(&wrapped, src, dst, true);
+    if has_equals {
+        translated
+    } else {
+        translated
+            .strip_prefix('=')
+            .unwrap_or(&translated)
+            .to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -797,25 +803,11 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
                         Ok(c) => c.into_owned(),
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
-                    let wrapped = if raw.starts_with('=') {
-                        raw.clone()
-                    } else {
-                        format!("={raw}")
-                    };
-                    let translated = formula_move_range(
-                        &wrapped,
+                    let unwrapped = translate_formula_text(
+                        &raw,
                         &plan.formula_src_range(),
                         &plan.formula_dst_range(),
-                        true,
                     );
-                    let unwrapped = if !raw.starts_with('=') {
-                        translated
-                            .strip_prefix('=')
-                            .unwrap_or(&translated)
-                            .to_string()
-                    } else {
-                        translated
-                    };
                     let new_t = BytesText::new(&unwrapped);
                     let _ = writer.write_event(Event::Text(new_t));
                 } else {
