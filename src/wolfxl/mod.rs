@@ -70,7 +70,7 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::ooxml_util;
-use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch, DxfPatch};
+use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
 use patcher_drawing::parse_queued_image_anchor;
 use patcher_models::{AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp};
 use patcher_payload::{
@@ -78,8 +78,8 @@ use patcher_payload::{
     extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
 };
 use patcher_workbook::{
-    epoch_or_now, load_or_empty_rels, minimal_styles_xml, parse_n_from_part_path,
-    replace_first_occurrence, sheet_rels_path_for, xml_escape_attr,
+    epoch_or_now, load_or_empty_rels, parse_n_from_part_path, replace_first_occurrence,
+    sheet_rels_path_for, xml_escape_attr,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -1825,20 +1825,7 @@ impl XlsxPatcher {
         // (comments + VML) consume the same instance below so
         // workbook-wide suffix uniqueness is preserved across phases.
 
-        for (sheet_name, patches) in &self.queued_dv_patches {
-            let sheet_path = match self.sheet_paths.get(sheet_name) {
-                Some(p) => p,
-                None => continue, // unknown sheet name — silently skip (mirrors value/format paths)
-            };
-            let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
-            let existing = validations::extract_existing_dv_block(&xml);
-            let block_bytes =
-                validations::build_data_validations_block(existing.as_deref(), patches);
-            local_blocks
-                .entry(sheet_path.clone())
-                .or_default()
-                .push(SheetBlock::DataValidations(block_bytes));
-        }
+        patcher_sheet_blocks::apply_data_validations_phase(self, &mut local_blocks, &mut zip)?;
 
         // --- Phase 2.5b: Build <conditionalFormatting> blocks from
         // queued CF patches (RFC-026). Cross-sheet coordination: a
@@ -1853,60 +1840,12 @@ impl XlsxPatcher {
         // first and re-include them verbatim at the head of each
         // sheet's payload so byte-preservation of unchanged CF rules
         // is not a side-effect of our setter call.
-        let mut new_dxfs_total: Vec<DxfPatch> = Vec::new();
-        let mut styles_loaded: Option<String> = None;
-        let mut running_dxf_count: u32 = 0;
-        let mut cf_sheet_names: Vec<&String> = self.queued_cf_patches.keys().collect();
-        cf_sheet_names.sort();
-        for sheet_name in cf_sheet_names {
-            let patches = &self.queued_cf_patches[sheet_name];
-            let sheet_path = match self.sheet_paths.get(sheet_name) {
-                Some(p) => p,
-                None => continue,
-            };
-            let xml = ooxml_util::zip_read_to_string(&mut zip, sheet_path)?;
-
-            if styles_loaded.is_none() {
-                let raw = ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")?
-                    .unwrap_or_else(|| minimal_styles_xml());
-                running_dxf_count = conditional_formatting::count_dxfs(&raw);
-                styles_loaded = Some(raw);
-            }
-
-            let existing = conditional_formatting::extract_existing_cf_blocks(&xml);
-            let pmax = conditional_formatting::scan_max_cf_priority(&xml);
-            let result = conditional_formatting::build_cf_blocks(
-                &existing,
-                patches,
-                pmax,
-                running_dxf_count,
-            );
-            running_dxf_count += result.new_dxfs.len() as u32;
-            new_dxfs_total.extend(result.new_dxfs);
-            local_blocks
-                .entry(sheet_path.clone())
-                .or_default()
-                .push(SheetBlock::ConditionalFormatting(result.block_bytes));
-        }
-        // If CF patches added new <dxf> entries, fold them into the
-        // styles.xml that Phase 1's format patching may have already
-        // mutated. We share `styles_xml` so a single save with both
-        // cell-format edits and CF rules produces one styles.xml write.
-        if !new_dxfs_total.is_empty() {
-            let new_dxfs_xml: String = new_dxfs_total
-                .iter()
-                .map(conditional_formatting::dxf_to_xml)
-                .collect::<Vec<_>>()
-                .join("");
-            let base = match styles_xml.take() {
-                Some(s) => s,
-                None => styles_loaded
-                    .clone()
-                    .unwrap_or_else(|| minimal_styles_xml()),
-            };
-            let updated = conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
-            styles_xml = Some(updated);
-        }
+        patcher_sheet_blocks::apply_conditional_formatting_phase(
+            self,
+            &mut local_blocks,
+            &mut styles_xml,
+            &mut zip,
+        )?;
 
         // --- Phase 2.5e: Hyperlinks (RFC-022) ---
         //

@@ -9,9 +9,93 @@ use zip::ZipArchive;
 
 use crate::ooxml_util;
 
+use super::patcher_workbook::minimal_styles_xml;
 use super::{autofilter, autofilter_helpers, sheet_patcher, XlsxPatcher};
 use sheet_patcher::CellPatch;
 use wolfxl_merger::SheetBlock;
+
+pub(super) fn apply_data_validations_phase(
+    patcher: &XlsxPatcher,
+    local_blocks: &mut HashMap<String, Vec<SheetBlock>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    for (sheet_name, patches) in &patcher.queued_dv_patches {
+        let sheet_path = match patcher.sheet_paths.get(sheet_name) {
+            Some(p) => p,
+            None => continue,
+        };
+        let xml = ooxml_util::zip_read_to_string(zip, sheet_path)?;
+        let existing = super::validations::extract_existing_dv_block(&xml);
+        let block_bytes =
+            super::validations::build_data_validations_block(existing.as_deref(), patches);
+        local_blocks
+            .entry(sheet_path.clone())
+            .or_default()
+            .push(SheetBlock::DataValidations(block_bytes));
+    }
+
+    Ok(())
+}
+
+pub(super) fn apply_conditional_formatting_phase(
+    patcher: &XlsxPatcher,
+    local_blocks: &mut HashMap<String, Vec<SheetBlock>>,
+    styles_xml: &mut Option<String>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let mut new_dxfs_total: Vec<super::conditional_formatting::DxfPatch> = Vec::new();
+    let mut styles_loaded: Option<String> = None;
+    let mut running_dxf_count: u32 = 0;
+    let mut cf_sheet_names: Vec<&String> = patcher.queued_cf_patches.keys().collect();
+    cf_sheet_names.sort();
+
+    for sheet_name in cf_sheet_names {
+        let patches = &patcher.queued_cf_patches[sheet_name];
+        let sheet_path = match patcher.sheet_paths.get(sheet_name) {
+            Some(p) => p,
+            None => continue,
+        };
+        let xml = ooxml_util::zip_read_to_string(zip, sheet_path)?;
+
+        if styles_loaded.is_none() {
+            let raw = ooxml_util::zip_read_to_string_opt(zip, "xl/styles.xml")?
+                .unwrap_or_else(minimal_styles_xml);
+            running_dxf_count = super::conditional_formatting::count_dxfs(&raw);
+            styles_loaded = Some(raw);
+        }
+
+        let existing = super::conditional_formatting::extract_existing_cf_blocks(&xml);
+        let pmax = super::conditional_formatting::scan_max_cf_priority(&xml);
+        let result = super::conditional_formatting::build_cf_blocks(
+            &existing,
+            patches,
+            pmax,
+            running_dxf_count,
+        );
+        running_dxf_count += result.new_dxfs.len() as u32;
+        new_dxfs_total.extend(result.new_dxfs);
+        local_blocks
+            .entry(sheet_path.clone())
+            .or_default()
+            .push(SheetBlock::ConditionalFormatting(result.block_bytes));
+    }
+
+    if !new_dxfs_total.is_empty() {
+        let new_dxfs_xml: String = new_dxfs_total
+            .iter()
+            .map(super::conditional_formatting::dxf_to_xml)
+            .collect::<Vec<_>>()
+            .join("");
+        let base = match styles_xml.take() {
+            Some(s) => s,
+            None => styles_loaded.unwrap_or_else(minimal_styles_xml),
+        };
+        let updated = super::conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
+        *styles_xml = Some(updated);
+    }
+
+    Ok(())
+}
 
 pub(super) fn apply_sheet_setup_phase(
     patcher: &XlsxPatcher,
