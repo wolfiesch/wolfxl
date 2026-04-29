@@ -17,6 +17,7 @@ from wolfxl._workbook_state import (
     same_existing_path,
     xlsb_xls_via_tempfile,
 )
+from wolfxl import _workbook_features
 from wolfxl import _workbook_metadata
 from wolfxl import _workbook_patcher_flush
 from wolfxl import _workbook_sheets
@@ -1068,31 +1069,7 @@ class Workbook:
             RuntimeError: If the workbook is not open in modify mode.
             ValueError: If the cache has already been registered.
         """
-        if self._rust_patcher is None:
-            raise RuntimeError(
-                "add_pivot_cache requires modify mode — open the "
-                "workbook with load_workbook(..., modify=True)"
-            )
-        if getattr(cache, "_cache_id", None) is not None:
-            raise ValueError(
-                f"Pivot cache already registered with cache_id="
-                f"{cache._cache_id}"
-            )
-        cache._cache_id = self._next_pivot_cache_id
-        self._next_pivot_cache_id += 1
-        # Materialize fields + records against the source worksheet
-        # (RFC-047 §10.9 inference). Skip if already materialized
-        # (caller can pre-materialize against a stub worksheet).
-        if cache._fields is None:
-            ws_obj = cache.source.worksheet
-            if ws_obj is None:
-                raise ValueError(
-                    "PivotCache.source.worksheet is None — pivot cache "
-                    "must reference a real worksheet"
-                )
-            cache._materialize(ws_obj)
-        self._pending_pivot_caches.append(cache)
-        return cache
+        return _workbook_features.add_pivot_cache(self, cache)
 
     def _flush_pending_slicers_to_patcher(self) -> None:
         """Sprint Ο Pod 3.5 (RFC-061 §3.1) — drain queued slicers
@@ -1126,34 +1103,7 @@ class Workbook:
             ValueError: If the cache has already been registered or
                 the source pivot cache is not registered.
         """
-        if self._rust_patcher is None:
-            raise RuntimeError(
-                "add_slicer_cache requires modify mode — open the "
-                "workbook with load_workbook(..., modify=True)"
-            )
-        if getattr(cache, "_slicer_cache_id", None) is not None:
-            raise ValueError(
-                f"Slicer cache already registered with id="
-                f"{cache._slicer_cache_id}"
-            )
-        if cache.source_pivot_cache._cache_id is None:
-            raise ValueError(
-                "SlicerCache.source_pivot_cache must be registered "
-                "via Workbook.add_pivot_cache(...) before "
-                "add_slicer_cache(...)"
-            )
-        cache._slicer_cache_id = self._next_slicer_cache_id
-        self._next_slicer_cache_id += 1
-        # If the caller didn't seed items explicitly, populate from the
-        # source cache's <sharedItems> per RFC-061 §3.1 default.
-        if not cache.items:
-            try:
-                cache.populate_items_from_cache()
-            except Exception:
-                # Source cache field has no enumeration; leave empty.
-                pass
-        self._pending_slicer_caches.append(cache)
-        return cache
+        return _workbook_features.add_slicer_cache(self, cache)
 
     def _flush_pending_sheet_setup_to_patcher(self) -> None:
         """Sprint Ο Pod 1A.5 (RFC-055) — drain each sheet's queued
@@ -1255,26 +1205,14 @@ class Workbook:
             width_emu: Chart width in EMU (defaults to ~12 cm).
             height_emu: Chart height in EMU (defaults to ~7.25 cm).
         """
-        if self._rust_patcher is None:
-            raise NotImplementedError(
-                "add_chart_modify_mode requires modify mode "
-                "(load_workbook(path, modify=True))"
-            )
-        if sheet_title not in self._sheets:
-            raise ValueError(
-                f"add_chart_modify_mode: no such sheet: {sheet_title!r}"
-            )
-        if not isinstance(chart_xml, (bytes, bytearray)):
-            raise TypeError(
-                "add_chart_modify_mode: chart_xml must be bytes "
-                f"(got {type(chart_xml).__name__})"
-            )
-        if not anchor_a1 or not isinstance(anchor_a1, str):
-            raise ValueError(
-                "add_chart_modify_mode: anchor_a1 must be a non-empty A1 string"
-            )
-        bucket = self._pending_chart_adds.setdefault(sheet_title, [])
-        bucket.append((bytes(chart_xml), anchor_a1, int(width_emu), int(height_emu)))
+        _workbook_features.add_chart_modify_mode(
+            self,
+            sheet_title,
+            chart_xml,
+            anchor_a1,
+            width_emu,
+            height_emu,
+        )
 
     def _flush_pending_comments_to_patcher(self) -> None:
         """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
