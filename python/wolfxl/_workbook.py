@@ -17,6 +17,7 @@ from wolfxl._workbook_state import (
     same_existing_path,
     xlsb_xls_via_tempfile,
 )
+from wolfxl import _workbook_metadata
 from wolfxl import _workbook_patcher_flush
 from wolfxl import _workbook_sheets
 from wolfxl import _workbook_writer_flush
@@ -627,23 +628,7 @@ class Workbook:
         assignments flip ``self._properties_dirty`` so :meth:`save` knows
         to flush them.
         """
-        if self._properties_cache is not None:
-            return self._properties_cache
-        from wolfxl.packaging.core import DocumentProperties, _doc_props_from_dict
-
-        if self._rust_reader is not None:
-            try:
-                raw = self._rust_reader.read_doc_properties()
-            except Exception:
-                raw = {}
-            props = _doc_props_from_dict(raw)
-        else:
-            props = DocumentProperties()
-        # Attach the back-reference so subsequent ``props.title = "X"``
-        # marks the workbook dirty without further user action.
-        props._attach_workbook(self)  # noqa: SLF001
-        self._properties_cache = props
-        return props
+        return _workbook_metadata.get_properties(self)
 
     @properties.setter
     def properties(self, value: Any) -> None:
@@ -654,15 +639,7 @@ class Workbook:
         Sets the dirty flag unconditionally — replacing the object is by
         definition a write intent.
         """
-        from wolfxl.packaging.core import DocumentProperties
-
-        if not isinstance(value, DocumentProperties):
-            raise TypeError(
-                f"properties must be a DocumentProperties, got {type(value).__name__}"
-            )
-        value._attach_workbook(self)  # noqa: SLF001
-        self._properties_cache = value
-        self._properties_dirty = True
+        _workbook_metadata.set_properties(self, value)
 
     # ------------------------------------------------------------------
     # Named ranges
@@ -678,42 +655,7 @@ class Workbook:
         Mutations (``wb.defined_names["X"] = DefinedName(...)``) queue
         through to the Rust writer in write mode.
         """
-        if self._defined_names_cache is not None:
-            return self._defined_names_cache
-        from wolfxl.workbook import DefinedNameDict
-        from wolfxl.workbook.defined_name import DefinedName
-
-        dnd = DefinedNameDict()
-        if self._rust_reader is not None:
-            seen: set[str] = set()
-            for sheet_name in self._sheet_names:
-                try:
-                    entries = self._rust_reader.read_named_ranges(sheet_name)
-                except Exception:
-                    continue
-                for entry in entries:
-                    name = entry["name"]
-                    if name in seen:
-                        continue
-                    seen.add(name)
-                    refers_to = entry["refers_to"]
-                    if refers_to.startswith("="):
-                        refers_to = refers_to[1:]
-                    scope = entry.get("scope", "workbook")
-                    local_id: int | None = None
-                    if scope == "sheet":
-                        # The sheet-scope encoding in the Rust reader puts
-                        # the sheet name in the ``refers_to`` prefix; we
-                        # don't try to recover the original index.
-                        local_id = None
-                    dn = DefinedName(name=name, value=refers_to, localSheetId=local_id)
-                    # Bypass __setitem__'s queue side-effect — this is a
-                    # pure read, not a user write.
-                    dict.__setitem__(dnd, name, dn)
-        # Attach the workbook back-ref so subsequent user writes queue.
-        dnd._wb = self  # noqa: SLF001
-        self._defined_names_cache = dnd
-        return dnd
+        return _workbook_metadata.get_defined_names(self)
 
     # ------------------------------------------------------------------
     # RFC-058 — workbook-level security
@@ -740,15 +682,7 @@ class Workbook:
             value: A ``WorkbookProtection`` instance, or ``None`` to clear the
                 in-memory protection block before the next save.
         """
-        from wolfxl.workbook.protection import WorkbookProtection
-
-        if value is not None and not isinstance(value, WorkbookProtection):
-            raise TypeError(
-                "wb.security must be a WorkbookProtection or None, "
-                f"got {type(value).__name__}"
-            )
-        self._security = value
-        self._pending_security_update = True
+        _workbook_metadata.set_security(self, value)
 
     @property
     def fileSharing(self) -> Any:  # noqa: N802 — openpyxl-shape camelCase
@@ -768,15 +702,7 @@ class Workbook:
             value: A ``FileSharing`` instance, or ``None`` to clear the
                 in-memory file-sharing block before the next save.
         """
-        from wolfxl.workbook.protection import FileSharing
-
-        if value is not None and not isinstance(value, FileSharing):
-            raise TypeError(
-                "wb.fileSharing must be a FileSharing or None, "
-                f"got {type(value).__name__}"
-            )
-        self._file_sharing = value
-        self._pending_security_update = True
+        _workbook_metadata.set_file_sharing(self, value)
 
     # ------------------------------------------------------------------
     # Write-mode operations
