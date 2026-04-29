@@ -576,10 +576,7 @@ class Cell:
         Args:
             val: Font object to apply to the cell.
         """
-        self._require_xlsx_for_style("font")
-        self._font = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        self._set_style_value("font", "_font", val)
 
     # ------------------------------------------------------------------
     # Fill
@@ -600,10 +597,7 @@ class Cell:
         Args:
             val: Pattern fill object to apply to the cell.
         """
-        self._require_xlsx_for_style("fill")
-        self._fill = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        self._set_style_value("fill", "_fill", val)
 
     # ------------------------------------------------------------------
     # Border
@@ -624,10 +618,7 @@ class Cell:
         Args:
             val: Border object to apply to the cell.
         """
-        self._require_xlsx_for_style("border")
-        self._border = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        self._set_style_value("border", "_border", val)
 
     # ------------------------------------------------------------------
     # Alignment
@@ -648,10 +639,7 @@ class Cell:
         Args:
             val: Alignment object to apply to the cell.
         """
-        self._require_xlsx_for_style("alignment")
-        self._alignment = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        self._set_style_value("alignment", "_alignment", val)
 
     # ------------------------------------------------------------------
     # Number format
@@ -672,8 +660,12 @@ class Cell:
         Args:
             val: Number format code, or ``None`` to clear the cached format.
         """
-        self._require_xlsx_for_style("number_format")
-        self._number_format = val
+        self._set_style_value("number_format", "_number_format", val)
+
+    def _set_style_value(self, public_attr: str, storage_attr: str, value: Any) -> None:
+        """Set a cached style value and mark the cell dirty."""
+        self._require_xlsx_for_style(public_attr)
+        setattr(self, storage_attr, value)
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
 
