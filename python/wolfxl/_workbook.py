@@ -919,21 +919,17 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_charts_to_patcher(self)
 
     def add_pivot_cache(self, cache: Any) -> Any:
-        """Sprint Ν Pod-γ (RFC-047) — register a pivot cache against
-        this workbook in modify mode.
+        """Register a pivot cache with this workbook.
 
-        The cache must already be materialised (see
-        ``wolfxl.pivot.PivotCache.from_worksheet``); this call assigns
-        the workbook-scoped 0-based ``cache_id`` and queues the cache
-        for emission at ``save()`` time. The same ``cache`` instance
-        can be referenced by multiple ``PivotTable`` objects.
+        The cache should already be materialized, for example with
+        ``wolfxl.pivot.PivotCache.from_worksheet``. A registered cache can be
+        referenced by one or more pivot tables.
 
         Args:
-            cache: A :class:`wolfxl.pivot.PivotCache` instance.
+            cache: Pivot cache object to register.
 
         Returns:
-            The same cache (with ``_cache_id`` populated) so callers
-            can chain the call.
+            The same cache object, with its workbook-scoped cache id set.
 
         Raises:
             RuntimeError: If the workbook is not open in modify mode.
@@ -954,19 +950,18 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_slicers_to_patcher(self)
 
     def add_slicer_cache(self, cache: Any) -> Any:
-        """RFC-061 §2.1 — register a slicer cache against this workbook.
+        """Register a slicer cache with this workbook.
 
-        Slicer caches are workbook-scoped: one cache can be referenced
-        by multiple slicer presentations on different sheets.
-
-        The source pivot cache must already be registered via
-        :meth:`add_pivot_cache` BEFORE the slicer cache is added.
+        Slicer caches are workbook-scoped, and one cache can be referenced by
+        multiple slicer presentations. The source pivot cache must already be
+        registered with :meth:`add_pivot_cache`.
 
         Args:
-            cache: A :class:`wolfxl.pivot.SlicerCache` instance.
+            cache: Slicer cache object to register.
 
         Returns:
-            The same cache (with ``_slicer_cache_id`` populated).
+            The same cache object, with its workbook-scoped slicer cache id
+            set.
 
         Raises:
             RuntimeError: If the workbook is not open in modify mode.
@@ -1056,24 +1051,22 @@ class Workbook:
         width_emu: int = 4_572_000,
         height_emu: int = 2_743_200,
     ) -> None:
-        """Sprint Μ Pod-γ (RFC-046 §6) — modify-mode chart add public API.
+        """Queue a pre-serialized chart XML part for a worksheet.
 
-        Stub-friendly entry point that the integrator can plumb
-        through Pod-α's ``emit_chart_xml(&Chart)`` once the writer
-        crate's chart serializer ships. Today the caller passes
-        pre-serialized chart XML bytes (e.g. from openpyxl's
-        ``ChartWriter`` or a hand-rolled minimal ``<chartSpace>``
-        for tests).
-
-        The chart is queued onto ``_pending_chart_adds`` and drained
-        by ``_flush_pending_charts_to_patcher`` at save time.
+        This lower-level API is for callers that already have chart XML bytes
+        and want to attach them while modifying an existing workbook. Most
+        callers should prefer :meth:`Worksheet.add_chart` with a chart object.
 
         Args:
-            sheet_title: Target worksheet by title — must exist.
-            chart_xml: Already-serialized chart XML bytes.
-            anchor_a1: A1-style anchor cell, e.g. ``"D2"``.
-            width_emu: Chart width in EMU (defaults to ~12 cm).
-            height_emu: Chart height in EMU (defaults to ~7.25 cm).
+            sheet_title: Title of the target worksheet.
+            chart_xml: Serialized ``<chartSpace>`` XML bytes.
+            anchor_a1: A1-style anchor cell, such as ``"D2"``.
+            width_emu: Chart width in EMUs.
+            height_emu: Chart height in EMUs.
+
+        Raises:
+            ValueError: If ``sheet_title`` or ``anchor_a1`` is invalid.
+            RuntimeError: If the workbook is not open in modify mode.
         """
         _workbook_features.add_chart_modify_mode(
             self,

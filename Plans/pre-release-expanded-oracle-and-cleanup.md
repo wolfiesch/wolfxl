@@ -570,7 +570,10 @@ First no-behavior split target, completed 2026-04-28:
 80. Worksheet chart, pivot, slicer, image, and anchor validation docstrings
    were rewritten into user-facing Google-style API docs on 2026-04-29,
    removing sprint/RFC implementation language without behavior changes.
-81. Next helper candidate: continue with another narrow Rust save phase only if
+81. Workbook public pivot-cache, slicer-cache, and pre-serialized chart XML
+   API docstrings were rewritten into user-facing Google-style docs on
+   2026-04-29 while preserving behavior.
+82. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
