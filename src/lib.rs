@@ -9,6 +9,7 @@ mod native_writer_anchors;
 mod native_writer_backend;
 mod native_writer_cells;
 mod native_writer_formats;
+mod native_writer_images;
 mod native_writer_rich_text;
 mod native_writer_sheet_features;
 mod native_writer_workbook_metadata;

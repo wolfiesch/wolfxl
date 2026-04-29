@@ -42,7 +42,7 @@ use wolfxl_writer::model::chart::{
     ScatterStyle, Series, SeriesAxis, SeriesTitle, TickMark, Title as ChartTitle, TitleRun,
     Trendline, TrendlineKind, ValueAxis, View3D,
 };
-use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
+use wolfxl_writer::model::image::ImageAnchor;
 use wolfxl_writer::model::{FormatSpec, Worksheet, WriteCellValue};
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
@@ -53,6 +53,7 @@ use crate::native_writer_cells::{
     raw_python_to_write_cell_value,
 };
 use crate::native_writer_formats::{intern_border_only, intern_format_from_dict};
+use crate::native_writer_images::dict_to_sheet_image;
 use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
@@ -742,40 +743,7 @@ impl NativeWorkbook {
         let dict = image_dict
             .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("image must be a dict"))?;
-
-        let data: Vec<u8> = dict
-            .get_item("data")?
-            .ok_or_else(|| PyValueError::new_err("image dict missing 'data'"))?
-            .extract()?;
-        let ext: String = dict
-            .get_item("ext")?
-            .ok_or_else(|| PyValueError::new_err("image dict missing 'ext'"))?
-            .extract()?;
-        let width: u32 = dict
-            .get_item("width")?
-            .ok_or_else(|| PyValueError::new_err("image dict missing 'width'"))?
-            .extract()?;
-        let height: u32 = dict
-            .get_item("height")?
-            .ok_or_else(|| PyValueError::new_err("image dict missing 'height'"))?
-            .extract()?;
-        let anchor_obj = dict
-            .get_item("anchor")?
-            .ok_or_else(|| PyValueError::new_err("image dict missing 'anchor'"))?;
-        let anchor_dict = anchor_obj
-            .cast::<PyDict>()
-            .map_err(|_| PyValueError::new_err("anchor must be a dict"))?;
-
-        let anchor = parse_image_anchor(anchor_dict)?;
-
-        let img = SheetImage {
-            data,
-            ext: ext.to_ascii_lowercase(),
-            width_px: width,
-            height_px: height,
-            anchor,
-        };
-
+        let img = dict_to_sheet_image(dict)?;
         let ws = require_sheet(&mut self.inner, sheet)?;
         ws.images.push(img);
         Ok(())
