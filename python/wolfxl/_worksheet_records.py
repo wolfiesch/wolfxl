@@ -61,24 +61,15 @@ def iter_cell_records(
         ws._workbook._data_only if data_only is None else data_only  # noqa: SLF001
     )
     overlay = ws._collect_pending_overlay()  # noqa: SLF001
-    unbounded_sparse_read = (
-        min_row is None
-        and max_row is None
-        and min_col is None
-        and max_col is None
-        and not include_empty
-        and not overlay
+    row_min, row_max, col_min, col_max, range_str = _record_scan_range(
+        ws,
+        min_row=min_row,
+        max_row=max_row,
+        min_col=min_col,
+        max_col=max_col,
+        include_empty=include_empty,
+        has_overlay=bool(overlay),
     )
-    if unbounded_sparse_read:
-        row_min = col_min = 1
-        row_max = col_max = None
-        range_str = None
-    else:
-        row_min = min_row or 1
-        row_max = max_row or ws._max_row()  # noqa: SLF001
-        col_min = min_col or 1
-        col_max = max_col or ws._max_col()  # noqa: SLF001
-        range_str = f"{rowcol_to_a1(row_min, col_min)}:{rowcol_to_a1(row_max, col_max)}"
     records = reader.read_sheet_records(
         ws._title,  # noqa: SLF001
         range_str,
@@ -104,39 +95,113 @@ def iter_cell_records(
             yield record
             continue
         seen.add(key)
-        new_value = overlay[key]
-        if new_value is None and not include_empty:
-            continue
-        patched = dict(record)
-        patched["value"] = new_value
-        patched["data_type"] = canonical_data_type(new_value)
-        if isinstance(new_value, str) and new_value.startswith("="):
-            patched["formula"] = new_value[1:]
-        else:
-            patched.pop("formula", None)
-        patched.pop("cached_value", None)
-        yield patched
+        patched = _patched_overlay_record(
+            record,
+            overlay[key],
+            include_empty=include_empty,
+        )
+        if patched is not None:
+            yield patched
 
     for (row, col), value in overlay.items():
-        if (row, col) in seen:
-            continue
-        if row_max is None or col_max is None:
-            continue
-        if not (row_min <= row <= row_max and col_min <= col <= col_max):
-            continue
-        if value is None and not include_empty:
-            continue
-        extra: dict[str, Any] = {
-            "row": row,
-            "column": col,
-            "value": value,
-            "data_type": canonical_data_type(value),
-        }
-        if isinstance(value, str) and value.startswith("="):
-            extra["formula"] = value[1:]
-        if include_coordinate:
-            extra["coordinate"] = rowcol_to_a1(row, col)
-        yield extra
+        extra = _extra_overlay_record(
+            row,
+            col,
+            value,
+            seen=seen,
+            row_min=row_min,
+            row_max=row_max,
+            col_min=col_min,
+            col_max=col_max,
+            include_empty=include_empty,
+            include_coordinate=include_coordinate,
+        )
+        if extra is not None:
+            yield extra
+
+
+def _record_scan_range(
+    ws: Worksheet,
+    *,
+    min_row: int | None,
+    max_row: int | None,
+    min_col: int | None,
+    max_col: int | None,
+    include_empty: bool,
+    has_overlay: bool,
+) -> tuple[int, int | None, int, int | None, str | None]:
+    """Return scan bounds and optional A1 range for Rust record reads."""
+    unbounded_sparse_read = (
+        min_row is None
+        and max_row is None
+        and min_col is None
+        and max_col is None
+        and not include_empty
+        and not has_overlay
+    )
+    if unbounded_sparse_read:
+        return 1, None, 1, None, None
+    row_min = min_row or 1
+    row_max = max_row or ws._max_row()  # noqa: SLF001
+    col_min = min_col or 1
+    col_max = max_col or ws._max_col()  # noqa: SLF001
+    range_str = f"{rowcol_to_a1(row_min, col_min)}:{rowcol_to_a1(row_max, col_max)}"
+    return row_min, row_max, col_min, col_max, range_str
+
+
+def _patched_overlay_record(
+    record: dict[str, Any],
+    value: Any,
+    *,
+    include_empty: bool,
+) -> dict[str, Any] | None:
+    """Return a Rust record patched with a pending overlay value."""
+    if value is None and not include_empty:
+        return None
+    patched = dict(record)
+    patched["value"] = value
+    patched["data_type"] = canonical_data_type(value)
+    if isinstance(value, str) and value.startswith("="):
+        patched["formula"] = value[1:]
+    else:
+        patched.pop("formula", None)
+    patched.pop("cached_value", None)
+    return patched
+
+
+def _extra_overlay_record(
+    row: int,
+    col: int,
+    value: Any,
+    *,
+    seen: set[tuple[int, int]],
+    row_min: int,
+    row_max: int | None,
+    col_min: int,
+    col_max: int | None,
+    include_empty: bool,
+    include_coordinate: bool,
+) -> dict[str, Any] | None:
+    """Build a record for a pending edit outside the Rust record stream."""
+    if (row, col) in seen:
+        return None
+    if row_max is None or col_max is None:
+        return None
+    if not (row_min <= row <= row_max and col_min <= col <= col_max):
+        return None
+    if value is None and not include_empty:
+        return None
+    record: dict[str, Any] = {
+        "row": row,
+        "column": col,
+        "value": value,
+        "data_type": canonical_data_type(value),
+    }
+    if isinstance(value, str) and value.startswith("="):
+        record["formula"] = value[1:]
+    if include_coordinate:
+        record["coordinate"] = rowcol_to_a1(row, col)
+    return record
 
 
 def iter_cell_records_python(

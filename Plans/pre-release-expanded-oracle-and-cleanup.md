@@ -702,7 +702,10 @@ First no-behavior split target, completed 2026-04-28:
 120. Workbook sheet moving was split in `python/wolfxl/_workbook_sheets.py` on
    2026-04-29 so sheet-name resolution, offset validation, in-memory tab-order
    updates, and native backend notification are separate steps.
-121. Next helper candidate: continue with another narrow Rust save phase only if
+121. Worksheet record iteration was split in `python/wolfxl/_worksheet_records.py`
+   on 2026-04-29 so Rust scan-range planning, pending-overlay patching, and
+   extra overlay record emission are named helper phases.
+122. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
