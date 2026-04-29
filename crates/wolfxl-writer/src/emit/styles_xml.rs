@@ -19,80 +19,15 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
         "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
     );
 
-    // 1. numFmts — only custom (id >= 164); omit entirely when empty.
-    if !styles.num_fmts.is_empty() {
-        out.push_str(&format!("<numFmts count=\"{}\">", styles.num_fmts.len()));
-        for (id, code) in &styles.num_fmts {
-            out.push_str(&format!(
-                "<numFmt numFmtId=\"{id}\" formatCode=\"{}\"/>",
-                xml_escape::attr(code)
-            ));
-        }
-        out.push_str("</numFmts>");
-    }
-
-    // 2. fonts
-    out.push_str(&format!("<fonts count=\"{}\">", styles.fonts.len()));
-    for font in &styles.fonts {
-        out.push_str(&font_to_xml(font));
-    }
-    out.push_str("</fonts>");
-
-    // 3. fills
-    out.push_str(&format!("<fills count=\"{}\">", styles.fills.len()));
-    for fill in &styles.fills {
-        out.push_str(&fill_to_xml(fill));
-    }
-    out.push_str("</fills>");
-
-    // 4. borders
-    out.push_str(&format!("<borders count=\"{}\">", styles.borders.len()));
-    for border in &styles.borders {
-        out.push_str(&border_to_xml(border));
-    }
-    out.push_str("</borders>");
-
-    // 5. cellStyleXfs — singleton required by Excel schema validators.
-    out.push_str(
-        "<cellStyleXfs count=\"1\">\
-         <xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>\
-         </cellStyleXfs>",
-    );
-
-    // 6. cellXfs
-    out.push_str(&format!("<cellXfs count=\"{}\">", styles.cell_xfs.len()));
-    for xf in &styles.cell_xfs {
-        out.push_str(&xf_to_xml(xf));
-    }
-    out.push_str("</cellXfs>");
-
-    // 7. cellStyles — singleton hardcoded Normal style.
-    out.push_str(
-        "<cellStyles count=\"1\">\
-         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>\
-         </cellStyles>",
-    );
-
-    // 8. dxfs — differential formats referenced by conditional-formatting
-    //    rules. Empty is the common case; when populated, each dxf emits
-    //    whichever of <font>/<fill>/<border> is `Some` — number formats
-    //    and alignment are not valid children of <dxf>.
-    if styles.dxfs.is_empty() {
-        out.push_str("<dxfs count=\"0\"/>");
-    } else {
-        out.push_str(&format!("<dxfs count=\"{}\">", styles.dxfs.len()));
-        for dxf in &styles.dxfs {
-            out.push_str(&dxf_to_xml(dxf));
-        }
-        out.push_str("</dxfs>");
-    }
-
-    // 9. tableStyles
-    out.push_str(
-        "<tableStyles count=\"0\" \
-         defaultTableStyle=\"TableStyleMedium9\" \
-         defaultPivotStyle=\"PivotStyleLight16\"/>",
-    );
+    emit_num_fmts(&mut out, styles);
+    emit_fonts(&mut out, styles);
+    emit_fills(&mut out, styles);
+    emit_borders(&mut out, styles);
+    emit_cell_style_xfs(&mut out);
+    emit_cell_xfs(&mut out, styles);
+    emit_cell_styles(&mut out);
+    emit_dxfs(&mut out, styles);
+    emit_table_styles(&mut out);
 
     out.push_str("</styleSheet>");
     out.into_bytes()
@@ -101,6 +36,88 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
 // ---------------------------------------------------------------------------
 // Per-element helpers (private)
 // ---------------------------------------------------------------------------
+
+fn emit_num_fmts(out: &mut String, styles: &StylesBuilder) {
+    if styles.num_fmts.is_empty() {
+        return;
+    }
+    out.push_str(&format!("<numFmts count=\"{}\">", styles.num_fmts.len()));
+    for (id, code) in &styles.num_fmts {
+        out.push_str(&format!(
+            "<numFmt numFmtId=\"{id}\" formatCode=\"{}\"/>",
+            xml_escape::attr(code)
+        ));
+    }
+    out.push_str("</numFmts>");
+}
+
+fn emit_fonts(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<fonts count=\"{}\">", styles.fonts.len()));
+    for font in &styles.fonts {
+        out.push_str(&font_to_xml(font));
+    }
+    out.push_str("</fonts>");
+}
+
+fn emit_fills(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<fills count=\"{}\">", styles.fills.len()));
+    for fill in &styles.fills {
+        out.push_str(&fill_to_xml(fill));
+    }
+    out.push_str("</fills>");
+}
+
+fn emit_borders(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<borders count=\"{}\">", styles.borders.len()));
+    for border in &styles.borders {
+        out.push_str(&border_to_xml(border));
+    }
+    out.push_str("</borders>");
+}
+
+fn emit_cell_style_xfs(out: &mut String) {
+    out.push_str(
+        "<cellStyleXfs count=\"1\">\
+         <xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>\
+         </cellStyleXfs>",
+    );
+}
+
+fn emit_cell_xfs(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<cellXfs count=\"{}\">", styles.cell_xfs.len()));
+    for xf in &styles.cell_xfs {
+        out.push_str(&xf_to_xml(xf));
+    }
+    out.push_str("</cellXfs>");
+}
+
+fn emit_cell_styles(out: &mut String) {
+    out.push_str(
+        "<cellStyles count=\"1\">\
+         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>\
+         </cellStyles>",
+    );
+}
+
+fn emit_dxfs(out: &mut String, styles: &StylesBuilder) {
+    if styles.dxfs.is_empty() {
+        out.push_str("<dxfs count=\"0\"/>");
+        return;
+    }
+    out.push_str(&format!("<dxfs count=\"{}\">", styles.dxfs.len()));
+    for dxf in &styles.dxfs {
+        out.push_str(&dxf_to_xml(dxf));
+    }
+    out.push_str("</dxfs>");
+}
+
+fn emit_table_styles(out: &mut String) {
+    out.push_str(
+        "<tableStyles count=\"0\" \
+         defaultTableStyle=\"TableStyleMedium9\" \
+         defaultPivotStyle=\"PivotStyleLight16\"/>",
+    );
+}
 
 fn font_to_xml(spec: &FontSpec) -> String {
     let mut parts = String::new();

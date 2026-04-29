@@ -655,7 +655,10 @@ First no-behavior split target, completed 2026-04-28:
 106. Worksheet construction defaults were moved into
    `python/wolfxl/_worksheet_state.py` on 2026-04-29 so the public
    `Worksheet` facade keeps construction, accessors, and behavior separate.
-107. Next helper candidate: continue with another narrow Rust save phase only if
+107. `crates/wolfxl-writer/src/emit/styles_xml.rs` now has named section
+   emitters as of 2026-04-29, keeping `styles.xml` ordering explicit while
+   separating numFmts/fonts/fills/borders/xfs/dxfs/tableStyles emission.
+108. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
