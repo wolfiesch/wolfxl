@@ -183,20 +183,37 @@ def move_sheet(wb: Any, sheet: Worksheet | str, offset: int = 0) -> None:
         TypeError: If ``sheet`` or ``offset`` has the wrong type.
         KeyError: If the sheet is not present.
     """
-    if isinstance(sheet, Worksheet):
-        name = sheet.title
-    elif isinstance(sheet, str):
-        name = sheet
-    else:
-        raise TypeError(
-            f"move_sheet: 'sheet' must be a Worksheet or str, got {type(sheet).__name__}"
-        )
+    name = _resolve_sheet_name(sheet)
+    _validate_sheet_offset(offset)
+    _move_sheet_in_memory(wb, name, offset)
 
+    if wb._rust_patcher is not None:  # noqa: SLF001
+        wb._flush_pending_sheet_moves_to_patcher(name, offset)  # noqa: SLF001
+    if wb._rust_writer is not None:  # noqa: SLF001
+        wb._rust_writer.move_sheet(name, offset)  # noqa: SLF001
+
+
+def _resolve_sheet_name(sheet: Worksheet | str) -> str:
+    """Return a sheet title from a worksheet object or title string."""
+    if isinstance(sheet, Worksheet):
+        return sheet.title
+    if isinstance(sheet, str):
+        return sheet
+    raise TypeError(
+        f"move_sheet: 'sheet' must be a Worksheet or str, got {type(sheet).__name__}"
+    )
+
+
+def _validate_sheet_offset(offset: int) -> None:
+    """Validate the ``Workbook.move_sheet`` offset argument."""
     if isinstance(offset, bool) or not isinstance(offset, int):
         raise TypeError(
             f"move_sheet: 'offset' must be an int, got {type(offset).__name__}"
         )
 
+
+def _move_sheet_in_memory(wb: Any, name: str, offset: int) -> None:
+    """Move one sheet title within ``wb``'s in-memory tab order."""
     if name not in wb._sheet_names:  # noqa: SLF001
         raise KeyError(name)
 
@@ -206,11 +223,6 @@ def move_sheet(wb: Any, sheet: Worksheet | str, offset: int = 0) -> None:
 
     del wb._sheet_names[idx]  # noqa: SLF001
     wb._sheet_names.insert(new_pos, name)  # noqa: SLF001
-
-    if wb._rust_patcher is not None:  # noqa: SLF001
-        wb._flush_pending_sheet_moves_to_patcher(name, offset)  # noqa: SLF001
-    if wb._rust_writer is not None:  # noqa: SLF001
-        wb._rust_writer.move_sheet(name, offset)  # noqa: SLF001
 
 
 def _new_copy_title(
