@@ -1,15 +1,16 @@
 //! Sheet-scoped block save phases for the surgical xlsx patcher.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use zip::ZipArchive;
 
 use crate::ooxml_util;
 
-use super::{autofilter, autofilter_helpers, XlsxPatcher};
+use super::{autofilter, autofilter_helpers, sheet_patcher, XlsxPatcher};
+use sheet_patcher::CellPatch;
 use wolfxl_merger::SheetBlock;
 
 pub(super) fn apply_sheet_setup_phase(
@@ -196,4 +197,67 @@ pub(super) fn apply_autofilter_phase(
     }
 
     Ok(autofilter_hidden_rows)
+}
+
+pub(super) fn apply_worksheet_xml_patch_phase(
+    patcher: &mut XlsxPatcher,
+    sheet_cell_patches: &HashMap<String, Vec<CellPatch>>,
+    local_blocks: &HashMap<String, Vec<SheetBlock>>,
+    autofilter_hidden_rows: &HashMap<String, Vec<u32>>,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let mut all_sheet_paths: HashSet<String> = HashSet::new();
+    all_sheet_paths.extend(sheet_cell_patches.keys().cloned());
+    all_sheet_paths.extend(local_blocks.keys().cloned());
+    all_sheet_paths.extend(autofilter_hidden_rows.keys().cloned());
+
+    for sheet_path in &all_sheet_paths {
+        // Compose cell edits, sibling OOXML blocks, and autoFilter row hiding
+        // against the newest sheet bytes, including Phase 2.7 cloned sheets.
+        let xml = if let Some(bytes) = file_patches.get(sheet_path) {
+            String::from_utf8_lossy(bytes).into_owned()
+        } else if let Some(bytes) = patcher.file_adds.get(sheet_path) {
+            String::from_utf8_lossy(bytes).into_owned()
+        } else {
+            ooxml_util::zip_read_to_string(zip, sheet_path)?
+        };
+
+        let after_cells: Vec<u8> = if let Some(patches) = sheet_cell_patches.get(sheet_path) {
+            sheet_patcher::patch_worksheet(&xml, patches)
+                .map_err(|e| PyIOError::new_err(format!("Patch failed: {e}")))?
+                .into_bytes()
+        } else {
+            xml.into_bytes()
+        };
+
+        let after_blocks = if let Some(blocks) = local_blocks.get(sheet_path) {
+            if blocks.is_empty() {
+                after_cells
+            } else {
+                wolfxl_merger::merge_blocks(&after_cells, blocks.clone())
+                    .map_err(|e| PyIOError::new_err(format!("Merge failed: {e}")))?
+            }
+        } else {
+            after_cells
+        };
+
+        let after_blocks = if let Some(rows) = autofilter_hidden_rows.get(sheet_path) {
+            if rows.is_empty() {
+                after_blocks
+            } else {
+                autofilter_helpers::stamp_row_hidden(&after_blocks, rows)?
+            }
+        } else {
+            after_blocks
+        };
+
+        if patcher.file_adds.contains_key(sheet_path) {
+            patcher.file_adds.insert(sheet_path.clone(), after_blocks);
+        } else {
+            file_patches.insert(sheet_path.clone(), after_blocks);
+        }
+    }
+
+    Ok(())
 }

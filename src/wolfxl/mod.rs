@@ -2511,77 +2511,13 @@ impl XlsxPatcher {
         // can write workbook.xml + workbook.xml.rels into it before the
         // per-sheet phases run.
 
-        // Sheets that have either kind of patch.
-        let mut all_sheet_paths: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
-        all_sheet_paths.extend(sheet_cell_patches.keys().cloned());
-        all_sheet_paths.extend(local_blocks.keys().cloned());
-        // Sprint Ο Pod 1B: include sheets that only need a row-hidden
-        // marker pass (no other patches).
-        all_sheet_paths.extend(autofilter_hidden_rows.keys().cloned());
-
-        for sheet_path in &all_sheet_paths {
-            // RFC-035 composition (Pod-δ fix for KNOWN_GAPS bugs #1/#3):
-            // a Phase 2.7-cloned sheet's bytes live in `file_adds`,
-            // not in the source ZIP. If a user mutates the clone in
-            // the same save (cell value, format, table, DV, CF, etc.)
-            // we must read the clone's source XML from
-            // `file_adds`/`file_patches` first, falling back to the
-            // ZIP for genuine source-side sheets.
-            let xml = if let Some(bytes) = file_patches.get(sheet_path) {
-                String::from_utf8_lossy(bytes).into_owned()
-            } else if let Some(bytes) = self.file_adds.get(sheet_path) {
-                String::from_utf8_lossy(bytes).into_owned()
-            } else {
-                ooxml_util::zip_read_to_string(&mut zip, sheet_path)?
-            };
-
-            // Pass 1: cell-level patches.
-            let after_cells: Vec<u8> = if let Some(patches) = sheet_cell_patches.get(sheet_path) {
-                sheet_patcher::patch_worksheet(&xml, patches)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Patch failed: {e}")))?
-                    .into_bytes()
-            } else {
-                xml.into_bytes()
-            };
-
-            // Pass 2: sibling-block insertions.
-            let after_blocks = if let Some(blocks) = local_blocks.get(sheet_path) {
-                if blocks.is_empty() {
-                    after_cells
-                } else {
-                    wolfxl_merger::merge_blocks(&after_cells, blocks.clone())
-                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("Merge failed: {e}")))?
-                }
-            } else {
-                after_cells
-            };
-
-            // Pass 3 (Sprint Ο Pod 1B): apply `<row hidden="1">`
-            // markers from Phase 2.5o. Only runs for sheets touched
-            // by an autoFilter evaluation.
-            let after_blocks = if let Some(rows) = autofilter_hidden_rows.get(sheet_path) {
-                if rows.is_empty() {
-                    after_blocks
-                } else {
-                    autofilter_helpers::stamp_row_hidden(&after_blocks, rows)?
-                }
-            } else {
-                after_blocks
-            };
-
-            // Route the rewrite back to the right primitive: if this
-            // path is a Phase 2.7 cloned sheet (lives in file_adds),
-            // write the patched bytes back to file_adds so they're
-            // emitted by the new-entry pass in Phase 4 (Pod-δ fix
-            // for KNOWN_GAPS bugs #1/#3). For source-side sheets,
-            // file_patches replaces the source-entry bytes as before.
-            if self.file_adds.contains_key(sheet_path) {
-                self.file_adds.insert(sheet_path.clone(), after_blocks);
-            } else {
-                file_patches.insert(sheet_path.clone(), after_blocks);
-            }
-        }
+        self.apply_worksheet_xml_patch_phase(
+            &sheet_cell_patches,
+            &local_blocks,
+            &autofilter_hidden_rows,
+            &mut file_patches,
+            &mut zip,
+        )?;
 
         // Add styles.xml patch if modified
         if let Some(ref sxml) = styles_xml {
@@ -2985,6 +2921,24 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_structural::apply_range_moves_phase(self, file_patches, zip)
+    }
+
+    fn apply_worksheet_xml_patch_phase(
+        &mut self,
+        sheet_cell_patches: &HashMap<String, Vec<CellPatch>>,
+        local_blocks: &HashMap<String, Vec<SheetBlock>>,
+        autofilter_hidden_rows: &HashMap<String, Vec<u32>>,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_sheet_blocks::apply_worksheet_xml_patch_phase(
+            self,
+            sheet_cell_patches,
+            local_blocks,
+            autofilter_hidden_rows,
+            file_patches,
+            zip,
+        )
     }
 
     fn apply_workbook_xml_phases(
