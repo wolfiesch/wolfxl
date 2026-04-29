@@ -2604,96 +2604,7 @@ impl XlsxPatcher {
         //
         // Empty queue ⇒ identity: workbook.xml flows through
         // unchanged (no extra parse, no extra serialize).
-        let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
-        if let Some(ref sec) = self.queued_workbook_security {
-            if !sec.is_empty() {
-                let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
-                    Some(b) => b.clone(),
-                    None => {
-                        ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?.into_bytes()
-                    }
-                };
-                let updated = security::merge_workbook_security(&wb_bytes, sec).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("workbook-security merge: {e}"))
-                })?;
-                workbook_xml_in_progress = Some(updated);
-            }
-        }
-
-        // --- Phase 2.5h: Sheet reorder (RFC-036) ---
-        //
-        // Sequenced BEFORE Phase 2.5f because both phases mutate
-        // `xl/workbook.xml`. When `queued_sheet_moves` is non-empty
-        // we read workbook.xml ONCE here, apply the reorder + the
-        // `<definedName localSheetId>` integer remap, and stash the
-        // resulting bytes for Phase 2.5f to consume (so the defined-
-        // names merger doesn't re-read the source ZIP entry). We also
-        // update `self.sheet_order` so downstream phases (RFC-020
-        // `app.xml` regen, RFC-026 CF aggregation) iterate the
-        // post-move tab list.
-        //
-        // RFC-058 composition: `workbook_xml_in_progress` may already
-        // hold the post-Phase-2.5q (security splice) bytes; the read
-        // below honours that handoff before falling back to the
-        // file_patches / source-ZIP layers.
-        if !self.queued_sheet_moves.is_empty() {
-            // RFC-035 + RFC-036 composition (Pod-δ fix for KNOWN_GAPS
-            // bug #2): Phase 2.7 writes the cloned <sheet> entry into
-            // file_patches["xl/workbook.xml"]. If we re-read from the
-            // source ZIP here, the reorder would operate on the
-            // pre-clone bytes and the new <sheet> would be silently
-            // dropped from the saved workbook.xml. Prefer file_patches
-            // so 2.7 → 2.5h compose via the file_patches handoff that
-            // RFC-035 §5.4 specifies.
-            let wb_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
-                Some(b) => b,
-                None => match file_patches.get("xl/workbook.xml") {
-                    Some(b) => b.clone(),
-                    None => {
-                        ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?.into_bytes()
-                    }
-                },
-            };
-            let result = sheet_order::merge_sheet_moves(&wb_bytes, &self.queued_sheet_moves)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("sheet-reorder merge: {e}")))?;
-            workbook_xml_in_progress = Some(result.workbook_xml);
-            self.sheet_order = result.new_order;
-        }
-
-        // --- Phase 2.5f: Defined names (RFC-021) ---
-        //
-        // Workbook-level (single XML part), not per-sheet. When the
-        // queue is non-empty we read `xl/workbook.xml`, splice the
-        // `<definedNames>` block (or inject one after `</sheets>` if
-        // missing), and route the result through `file_patches`.
-        // Empty queue is the no-op identity path — workbook.xml is
-        // not touched. The merger preserves all unrelated children of
-        // `<workbook>` byte-for-byte.
-        //
-        // RFC-036 composition: if Phase 2.5h already produced an
-        // updated workbook.xml, feed the merger those bytes (rather
-        // than re-reading the source) so the move + defined-names
-        // mutations compose without two source-XML parses.
-        if !self.queued_defined_names.is_empty() {
-            let wb_xml_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
-                Some(bytes) => bytes,
-                None => match file_patches.get("xl/workbook.xml") {
-                    Some(bytes) => bytes.clone(),
-                    None => {
-                        let s = ooxml_util::zip_read_to_string(&mut zip, "xl/workbook.xml")?;
-                        s.into_bytes()
-                    }
-                },
-            };
-            let updated =
-                defined_names::merge_defined_names(&wb_xml_bytes, &self.queued_defined_names)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("defined-names merge: {e}")))?;
-            file_patches.insert("xl/workbook.xml".to_string(), updated);
-        } else if let Some(bytes) = workbook_xml_in_progress.take() {
-            // No defined-names work, but Phase 2.5h produced a workbook
-            // rewrite — route it through file_patches.
-            file_patches.insert("xl/workbook.xml".to_string(), bytes);
-        }
+        self.apply_workbook_xml_phases(&mut file_patches, &mut zip)?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
         // the path already exists in the source ZIP:
@@ -3074,6 +2985,14 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_structural::apply_range_moves_phase(self, file_patches, zip)
+    }
+
+    fn apply_workbook_xml_phases(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_workbook::apply_workbook_xml_phases(self, file_patches, zip)
     }
 
     fn apply_content_types_phase(

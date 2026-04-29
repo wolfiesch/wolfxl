@@ -11,7 +11,9 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 use wolfxl_rels::RelsGraph;
 
-use super::{calcchain, content_types, properties, XlsxPatcher};
+use super::{
+    calcchain, content_types, defined_names, properties, security, sheet_order, XlsxPatcher,
+};
 
 /// Maps a sheet XML path to its relationship sidecar path.
 pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
@@ -343,6 +345,60 @@ pub(super) fn apply_document_properties_phase(
                 .file_adds
                 .insert("docProps/app.xml".into(), app_bytes);
         }
+    }
+
+    Ok(())
+}
+
+// These phases all mutate xl/workbook.xml, so keep the in-progress bytes flowing
+// security -> sheet order -> defined names before publishing the final patch.
+pub(super) fn apply_workbook_xml_phases(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let mut workbook_xml_in_progress: Option<Vec<u8>> = None;
+
+    if let Some(ref sec) = patcher.queued_workbook_security {
+        if !sec.is_empty() {
+            let wb_bytes: Vec<u8> = match file_patches.get("xl/workbook.xml") {
+                Some(b) => b.clone(),
+                None => ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes(),
+            };
+            let updated = security::merge_workbook_security(&wb_bytes, sec)
+                .map_err(|e| PyIOError::new_err(format!("workbook-security merge: {e}")))?;
+            workbook_xml_in_progress = Some(updated);
+        }
+    }
+
+    if !patcher.queued_sheet_moves.is_empty() {
+        let wb_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+            Some(b) => b,
+            None => match file_patches.get("xl/workbook.xml") {
+                Some(b) => b.clone(),
+                None => ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes(),
+            },
+        };
+        let result = sheet_order::merge_sheet_moves(&wb_bytes, &patcher.queued_sheet_moves)
+            .map_err(|e| PyIOError::new_err(format!("sheet-reorder merge: {e}")))?;
+        workbook_xml_in_progress = Some(result.workbook_xml);
+        patcher.sheet_order = result.new_order;
+    }
+
+    if !patcher.queued_defined_names.is_empty() {
+        let wb_xml_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+            Some(bytes) => bytes,
+            None => match file_patches.get("xl/workbook.xml") {
+                Some(bytes) => bytes.clone(),
+                None => ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes(),
+            },
+        };
+        let updated =
+            defined_names::merge_defined_names(&wb_xml_bytes, &patcher.queued_defined_names)
+                .map_err(|e| PyIOError::new_err(format!("defined-names merge: {e}")))?;
+        file_patches.insert("xl/workbook.xml".to_string(), updated);
+    } else if let Some(bytes) = workbook_xml_in_progress.take() {
+        file_patches.insert("xl/workbook.xml".to_string(), bytes);
     }
 
     Ok(())
