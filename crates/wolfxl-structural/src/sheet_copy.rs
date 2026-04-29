@@ -51,7 +51,9 @@ use quick_xml::name::QName;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
-use wolfxl_rels::{rt, walk_sheet_subgraph_with_nested, PartIdAllocator, RelsGraph, TargetMode};
+use wolfxl_rels::{
+    rt, walk_sheet_subgraph_with_nested, PartIdAllocator, Relationship, RelsGraph, TargetMode,
+};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -308,12 +310,18 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 let new_n = inputs.allocator.alloc_comments();
                 let new_part_path = format!("xl/comments{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
-                content_type_overrides_to_add
-                    .push((format!("/{}", new_part_path), CT_COMMENTS.into()));
                 let new_target = format!("../comments{new_n}.xml");
-                let new_rid = dest_rels.add(rt::COMMENTS, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                add_internal_part_clone(
+                    source_rel,
+                    src_bytes,
+                    new_part_path,
+                    Some(CT_COMMENTS.to_string()),
+                    &new_target,
+                    &mut dest_rels,
+                    &mut rid_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
             }
             // ------ VML drawings ------
             t if t == rt::VML_DRAWING => {
@@ -322,13 +330,21 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 let new_n = inputs.allocator.alloc_vml_drawing();
                 let new_part_path = format!("xl/drawings/vmlDrawing{new_n}.vml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
                 // VML uses a Default content-type by extension; not an
                 // Override, but we still surface it so the caller can
                 // ensure_default("vml", ...) at the content-types layer.
                 let new_target = format!("../drawings/vmlDrawing{new_n}.vml");
-                let new_rid = dest_rels.add(rt::VML_DRAWING, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                add_internal_part_clone(
+                    source_rel,
+                    src_bytes,
+                    new_part_path,
+                    None,
+                    &new_target,
+                    &mut dest_rels,
+                    &mut rid_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
             }
             // ------ DrawingML drawings (own rels file → image alias OR deep-clone) ------
             t if t == rt::DRAWING => {
@@ -463,11 +479,18 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 } else {
                     Vec::new()
                 };
-                new_ancillary_parts.push((new_chart_path.clone(), cloned_bytes));
-                content_type_overrides_to_add.push((format!("/{new_chart_path}"), CT_CHART.into()));
                 let new_target = format!("../charts/chart{new_chart_n}.xml");
-                let new_rid = dest_rels.add(rt::CHART, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                add_internal_part_clone(
+                    source_rel,
+                    cloned_bytes,
+                    new_chart_path,
+                    Some(CT_CHART.to_string()),
+                    &new_target,
+                    &mut dest_rels,
+                    &mut rid_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
             }
             // ------ Pivot tables (Sprint Ν Pod-γ / RFC-035 §10) ------
             //
@@ -550,15 +573,18 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 let new_n = inputs.allocator.alloc_slicer();
                 let new_part_path = format!("xl/slicers/slicer{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
-                content_type_overrides_to_add.push((
-                    format!("/{new_part_path}"),
-                    wolfxl_pivot::ct::SLICER.to_string(),
-                ));
                 let new_target = format!("../slicers/slicer{new_n}.xml");
-                let new_rid =
-                    dest_rels.add(wolfxl_pivot::rt::SLICER, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                add_internal_part_clone(
+                    source_rel,
+                    src_bytes,
+                    new_part_path,
+                    Some(wolfxl_pivot::ct::SLICER.to_string()),
+                    &new_target,
+                    &mut dest_rels,
+                    &mut rid_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
             }
             // ------ Hyperlinks (External: alias by URL) ------
             t if t == rt::HYPERLINK => {
@@ -645,6 +671,25 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
         new_table_names,
         rid_remap,
     })
+}
+
+fn add_internal_part_clone(
+    source_rel: &Relationship,
+    cloned_bytes: Vec<u8>,
+    new_part_path: String,
+    content_type: Option<String>,
+    new_target: &str,
+    dest_rels: &mut RelsGraph,
+    rid_remap: &mut HashMap<String, String>,
+    new_ancillary_parts: &mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &mut Vec<(String, String)>,
+) {
+    new_ancillary_parts.push((new_part_path.clone(), cloned_bytes));
+    if let Some(content_type) = content_type {
+        content_type_overrides_to_add.push((format!("/{new_part_path}"), content_type));
+    }
+    let new_rid = dest_rels.add(&source_rel.rel_type, new_target, TargetMode::Internal);
+    rid_remap.insert(source_rel.id.0.clone(), new_rid.0);
 }
 
 // ---------------------------------------------------------------------------
