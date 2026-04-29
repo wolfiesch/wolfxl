@@ -666,7 +666,11 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_workbook_writer_flush.py` on 2026-04-29 so document
    properties, defined names, and workbook security keep explicit drains while
    preserving the facade call order.
-110. Next helper candidate: continue with another narrow Rust save phase only if
+110. Modify-mode workbook patcher payload construction was split in
+   `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so hyperlink,
+   table, comment, defined-name, and document-property payloads are built in
+   named helpers before queueing.
+111. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

@@ -18,17 +18,22 @@ def flush_pending_hyperlinks_to_patcher(wb: Any) -> None:
             if hl is None:
                 patcher.queue_hyperlink_delete(ws.title, coord)
                 continue
-            payload: dict[str, Any] = {}
-            if hl.target is not None:
-                payload["target"] = hl.target
-            if hl.location is not None:
-                payload["location"] = hl.location
-            if hl.tooltip is not None:
-                payload["tooltip"] = hl.tooltip
-            if hl.display is not None:
-                payload["display"] = hl.display
-            patcher.queue_hyperlink(ws.title, coord, payload)
+            patcher.queue_hyperlink(ws.title, coord, _hyperlink_payload(hl))
         pending.clear()
+
+
+def _hyperlink_payload(hyperlink: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for a worksheet hyperlink."""
+    payload: dict[str, Any] = {}
+    if hyperlink.target is not None:
+        payload["target"] = hyperlink.target
+    if hyperlink.location is not None:
+        payload["location"] = hyperlink.location
+    if hyperlink.tooltip is not None:
+        payload["tooltip"] = hyperlink.tooltip
+    if hyperlink.display is not None:
+        payload["display"] = hyperlink.display
+    return payload
 
 
 def flush_pending_tables_to_patcher(wb: Any) -> None:
@@ -41,32 +46,37 @@ def flush_pending_tables_to_patcher(wb: Any) -> None:
         if not pending:
             continue
         for table in pending:
-            payload: dict[str, Any] = {
-                "name": table.name,
-                "ref": table.ref,
-                "columns": (
-                    [column.name for column in table.tableColumns]
-                    if table.tableColumns
-                    else []
-                ),
-                "header_row_count": int(table.headerRowCount or 0),
-                "totals_row_shown": bool(
-                    table.totalsRowCount and table.totalsRowCount > 0
-                ),
-                "autofilter": True,
-            }
-            if table.displayName and table.displayName != table.name:
-                payload["display_name"] = table.displayName
-            if table.tableStyleInfo is not None and table.tableStyleInfo.name:
-                payload["style"] = {
-                    "name": table.tableStyleInfo.name,
-                    "show_first_column": bool(table.tableStyleInfo.showFirstColumn),
-                    "show_last_column": bool(table.tableStyleInfo.showLastColumn),
-                    "show_row_stripes": bool(table.tableStyleInfo.showRowStripes),
-                    "show_column_stripes": bool(table.tableStyleInfo.showColumnStripes),
-                }
-            patcher.queue_table(ws.title, payload)
+            patcher.queue_table(ws.title, _table_payload(table))
         pending.clear()
+
+
+def _table_payload(table: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for a worksheet table."""
+    payload: dict[str, Any] = {
+        "name": table.name,
+        "ref": table.ref,
+        "columns": (
+            [column.name for column in table.tableColumns]
+            if table.tableColumns
+            else []
+        ),
+        "header_row_count": int(table.headerRowCount or 0),
+        "totals_row_shown": bool(
+            table.totalsRowCount and table.totalsRowCount > 0
+        ),
+        "autofilter": True,
+    }
+    if table.displayName and table.displayName != table.name:
+        payload["display_name"] = table.displayName
+    if table.tableStyleInfo is not None and table.tableStyleInfo.name:
+        payload["style"] = {
+            "name": table.tableStyleInfo.name,
+            "show_first_column": bool(table.tableStyleInfo.showFirstColumn),
+            "show_last_column": bool(table.tableStyleInfo.showLastColumn),
+            "show_row_stripes": bool(table.tableStyleInfo.showRowStripes),
+            "show_column_stripes": bool(table.tableStyleInfo.showColumnStripes),
+        }
+    return payload
 
 
 def flush_pending_images_to_patcher(wb: Any) -> None:
@@ -98,16 +108,21 @@ def flush_pending_comments_to_patcher(wb: Any) -> None:
             if comment is None:
                 patcher.queue_comment_delete(ws.title, coord)
                 continue
-            payload: dict[str, Any] = {
-                "text": comment.text,
-                "author": comment.author or "wolfxl",
-            }
-            if getattr(comment, "width", None) is not None:
-                payload["width_pt"] = float(comment.width)
-            if getattr(comment, "height", None) is not None:
-                payload["height_pt"] = float(comment.height)
-            patcher.queue_comment(ws.title, coord, payload)
+            patcher.queue_comment(ws.title, coord, _comment_payload(comment))
         pending.clear()
+
+
+def _comment_payload(comment: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for a worksheet comment."""
+    payload: dict[str, Any] = {
+        "text": comment.text,
+        "author": comment.author or "wolfxl",
+    }
+    if getattr(comment, "width", None) is not None:
+        payload["width_pt"] = float(comment.width)
+    if getattr(comment, "height", None) is not None:
+        payload["height_pt"] = float(comment.height)
+    return payload
 
 
 def flush_pending_data_validations_to_patcher(wb: Any) -> None:
@@ -217,18 +232,23 @@ def flush_defined_names_to_patcher(wb: Any) -> None:
     if patcher is None or not wb._pending_defined_names:  # noqa: SLF001
         return
     for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
-        payload: dict[str, Any] = {
-            "name": defined_name.name,
-            "formula": defined_name.value,
-        }
-        if defined_name.localSheetId is not None:
-            payload["local_sheet_id"] = defined_name.localSheetId
-        if defined_name.hidden:
-            payload["hidden"] = True
-        if defined_name.comment is not None:
-            payload["comment"] = defined_name.comment
-        patcher.queue_defined_name(payload)
+        patcher.queue_defined_name(_defined_name_payload(defined_name))
     wb._pending_defined_names.clear()  # noqa: SLF001
+
+
+def _defined_name_payload(defined_name: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for a workbook defined name."""
+    payload: dict[str, Any] = {
+        "name": defined_name.name,
+        "formula": defined_name.value,
+    }
+    if defined_name.localSheetId is not None:
+        payload["local_sheet_id"] = defined_name.localSheetId
+    if defined_name.hidden:
+        payload["hidden"] = True
+    if defined_name.comment is not None:
+        payload["comment"] = defined_name.comment
+    return payload
 
 
 def build_security_dict(wb: Any) -> dict[str, Any]:
@@ -264,6 +284,12 @@ def flush_properties_to_patcher(wb: Any) -> None:
         wb._properties_dirty = False  # noqa: SLF001
         return
 
+    patcher.queue_properties(_properties_payload(wb, props))
+    wb._properties_dirty = False  # noqa: SLF001
+
+
+def _properties_payload(wb: Any, props: Any) -> dict[str, Any]:
+    """Build the Rust patcher payload for workbook document properties."""
     user_set: set[str] = getattr(props, "_user_set", set())
     modified_iso: str | None = None
     if "modified" in user_set and props.modified is not None:
@@ -281,9 +307,7 @@ def flush_properties_to_patcher(wb: Any) -> None:
         "modified_iso": modified_iso,
         "sheet_names": list(wb._sheet_names),  # noqa: SLF001
     }
-    payload = {key: value for key, value in payload.items() if value is not None}
-    patcher.queue_properties(payload)
-    wb._properties_dirty = False  # noqa: SLF001
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def flush_pending_sheet_setup_to_patcher(wb: Any) -> None:
