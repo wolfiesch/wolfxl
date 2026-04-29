@@ -102,4 +102,72 @@ mod tests {
             "<cols><col min=\"4\" max=\"4\" hidden=\"1\" outlineLevel=\"2\" style=\"7\" customFormat=\"1\"/></cols>"
         );
     }
+
+    #[test]
+    fn sheet_set_column_emits_single_min_max() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_column(
+            3,
+            Column {
+                width: Some(12.5),
+                ..Default::default()
+            },
+        );
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<cols><col min=\"3\" max=\"3\" width=\"12.5\" customWidth=\"1\"/></cols>"
+        );
+    }
+
+    #[test]
+    fn hidden_outline_without_width_omits_width_attrs() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_column(
+            3,
+            Column {
+                width: None,
+                hidden: true,
+                outline_level: 2,
+                style_id: None,
+            },
+        );
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<cols><col min=\"3\" max=\"3\" hidden=\"1\" outlineLevel=\"2\"/></cols>"
+        );
+        assert!(!out.contains("width="), "no width when none: {out}");
+        assert!(
+            !out.contains("customWidth="),
+            "no customWidth when none: {out}"
+        );
+    }
+
+    #[test]
+    fn column_style_id_emits_custom_format() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_column(
+            2,
+            Column {
+                width: Some(10.0),
+                style_id: Some(4),
+                ..Default::default()
+            },
+        );
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<cols><col min=\"2\" max=\"2\" width=\"10\" customWidth=\"1\" style=\"4\" customFormat=\"1\"/></cols>"
+        );
+    }
 }

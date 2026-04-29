@@ -117,6 +117,77 @@ mod tests {
     }
 
     #[test]
+    fn second_sheet_is_not_tab_selected() {
+        let sheet = Worksheet::new("S");
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 1);
+
+        assert!(out.contains("<sheetView workbookViewId=\"0\">"));
+        assert!(!out.contains("tabSelected"));
+    }
+
+    #[test]
+    fn freeze_rows_only_emits_bottom_left_pane() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 3,
+            freeze_col: 0,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(out.contains("ySplit=\"2\""), "ySplit: {out}");
+        assert!(out.contains("state=\"frozen\""), "state=frozen: {out}");
+        assert!(
+            out.contains("activePane=\"bottomLeft\""),
+            "activePane: {out}"
+        );
+        assert!(!out.contains("xSplit"), "no xSplit: {out}");
+    }
+
+    #[test]
+    fn freeze_cols_only_emits_top_right_pane() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 0,
+            freeze_col: 2,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(out.contains("xSplit=\"1\""), "xSplit: {out}");
+        assert!(out.contains("state=\"frozen\""), "state=frozen: {out}");
+        assert!(out.contains("activePane=\"topRight\""), "activePane: {out}");
+        assert!(!out.contains("ySplit"), "no ySplit: {out}");
+    }
+
+    #[test]
+    fn freeze_both_emits_bottom_right_pane() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 2,
+            freeze_col: 3,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(out.contains("xSplit=\"2\""), "xSplit: {out}");
+        assert!(out.contains("ySplit=\"1\""), "ySplit: {out}");
+        assert!(out.contains("state=\"frozen\""), "state=frozen: {out}");
+        assert!(
+            out.contains("activePane=\"bottomRight\""),
+            "activePane: {out}"
+        );
+    }
+
+    #[test]
     fn freeze_b2_emits_one_row_and_column_split() {
         let mut sheet = Worksheet::new("S");
         sheet.set_freeze(2, 2, None);
@@ -127,6 +198,40 @@ mod tests {
         assert!(out.contains(
             "<pane xSplit=\"1\" ySplit=\"1\" topLeftCell=\"B2\" activePane=\"bottomRight\" state=\"frozen\"/>"
         ));
+        assert!(!out.contains("xSplit=\"2\""), "xSplit must not be 2: {out}");
+        assert!(!out.contains("ySplit=\"2\""), "ySplit must not be 2: {out}");
+    }
+
+    #[test]
+    fn freeze_c5_emits_asymmetric_counts() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 5,
+            freeze_col: 3,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(out.contains("xSplit=\"2\""), "xSplit: {out}");
+        assert!(out.contains("ySplit=\"4\""), "ySplit: {out}");
+        assert!(out.contains("topLeftCell=\"C5\""), "topLeftCell: {out}");
+    }
+
+    #[test]
+    fn freeze_a1_is_no_op() {
+        let mut sheet = Worksheet::new("S");
+        sheet.freeze = Some(FreezePane {
+            freeze_row: 1,
+            freeze_col: 1,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(!out.contains("<pane"), "must not emit pane for A1: {out}");
     }
 
     #[test]
@@ -141,5 +246,28 @@ mod tests {
             "<pane xSplit=\"100.00\" ySplit=\"50.00\" topLeftCell=\"D3\" activePane=\"bottomRight\"/>"
         ));
         assert!(!out.contains("state=\"frozen\""));
+    }
+
+    #[test]
+    fn split_pane_without_top_left_emits_default_cell() {
+        let mut sheet = Worksheet::new("S");
+        sheet.split = Some(SplitPane {
+            x_split: 1200.0,
+            y_split: 600.0,
+            top_left: None,
+        });
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, 0);
+
+        assert!(out.contains("<pane"), "has pane: {out}");
+        assert!(
+            out.contains("topLeftCell=\"A1\""),
+            "default top-left: {out}"
+        );
+        assert!(
+            !out.contains("state=\"frozen\""),
+            "no frozen for split: {out}"
+        );
     }
 }
