@@ -20,6 +20,7 @@ pub mod patcher_drawing;
 pub mod patcher_models;
 pub mod patcher_payload;
 pub mod patcher_pivot;
+pub mod patcher_sheet_blocks;
 pub mod patcher_sheet_copy;
 pub mod patcher_structural;
 pub mod patcher_workbook;
@@ -2427,71 +2428,7 @@ impl XlsxPatcher {
         // coordinator on the Python side; the patcher just stashes
         // the strings on the queue for now.
         if !self.queued_sheet_setup.is_empty() {
-            let sheet_titles: Vec<String> = self.queued_sheet_setup.keys().cloned().collect();
-            for sheet_title in &sheet_titles {
-                let queued = match self.queued_sheet_setup.get(sheet_title) {
-                    Some(q) => q.clone(),
-                    None => continue,
-                };
-                let sheet_path = match self.sheet_paths.get(sheet_title) {
-                    Some(p) => p.clone(),
-                    None => continue,
-                };
-                let specs = &queued.specs;
-
-                // Emit each non-empty block into `local_blocks`. The
-                // merger's replace-on-match semantics handle the
-                // "existing element" case — we don't need to scan
-                // the source XML up-front.
-                if let Some(s) = &specs.sheet_view {
-                    let bytes = wolfxl_writer::parse::sheet_setup::emit_sheet_views(s);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::SheetViews(bytes));
-                    }
-                }
-                if let Some(s) = &specs.sheet_protection {
-                    let bytes = wolfxl_writer::parse::sheet_setup::emit_sheet_protection(s);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::SheetProtection(bytes));
-                    }
-                }
-                if let Some(s) = &specs.page_margins {
-                    let bytes = wolfxl_writer::parse::sheet_setup::emit_page_margins(s);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::PageMargins(bytes));
-                    }
-                }
-                if let Some(s) = &specs.page_setup {
-                    let bytes = wolfxl_writer::parse::sheet_setup::emit_page_setup(s);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::PageSetup(bytes));
-                    }
-                }
-                if let Some(s) = &specs.header_footer {
-                    let bytes = wolfxl_writer::parse::sheet_setup::emit_header_footer(s);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::HeaderFooter(bytes));
-                    }
-                }
-                // print_titles: routed through workbook definedNames
-                // by the Python coordinator. Nothing to do here —
-                // the queue entry is informational only.
-            }
+            patcher_sheet_blocks::apply_sheet_setup_phase(self, &mut local_blocks);
         }
 
         // --- Phase 2.5r: Page breaks + sheetFormatPr (Sprint Π Pod Π-α / RFC-062) ---
@@ -2507,45 +2444,7 @@ impl XlsxPatcher {
         // merger handles ECMA-376 §18.3.1.99 ordering (slots 4 /
         // 24 / 25).
         if !self.queued_page_breaks.is_empty() {
-            let sheet_titles: Vec<String> = self.queued_page_breaks.keys().cloned().collect();
-            for sheet_title in &sheet_titles {
-                let queued = match self.queued_page_breaks.get(sheet_title) {
-                    Some(q) => q.clone(),
-                    None => continue,
-                };
-                let sheet_path = match self.sheet_paths.get(sheet_title) {
-                    Some(p) => p.clone(),
-                    None => continue,
-                };
-
-                if let Some(spec) = &queued.sheet_format {
-                    let bytes = wolfxl_writer::parse::page_breaks::emit_sheet_format_pr(spec);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::SheetFormatPr(bytes));
-                    }
-                }
-                if let Some(spec) = &queued.row_breaks {
-                    let bytes = wolfxl_writer::parse::page_breaks::emit_row_breaks(spec);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::RowBreaks(bytes));
-                    }
-                }
-                if let Some(spec) = &queued.col_breaks {
-                    let bytes = wolfxl_writer::parse::page_breaks::emit_col_breaks(spec);
-                    if !bytes.is_empty() {
-                        local_blocks
-                            .entry(sheet_path.clone())
-                            .or_default()
-                            .push(SheetBlock::ColBreaks(bytes));
-                    }
-                }
-            }
+            patcher_sheet_blocks::apply_page_breaks_phase(self, &mut local_blocks);
         }
 
         // --- Phase 2.5p: Slicer caches + presentations (Sprint Ο Pod 3.5 / RFC-061 §3.1) ---
