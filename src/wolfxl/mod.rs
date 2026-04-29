@@ -1907,107 +1907,14 @@ impl XlsxPatcher {
         // sheet flushes still see each others' allocations and
         // collisions surface deterministically. (Same trick as the
         // CF cross-sheet dxfId counter in Phase 2.5b.)
-        let sheet_order_local: Vec<String> = self.sheet_order.clone();
-        if !self.queued_tables.is_empty() {
-            let mut tables_inventory = tables::scan_existing_tables(&mut zip)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("scan tables: {e}")))?;
-
-            // RFC-024 collision-scan extension (RFC-035 §8 risk #6):
-            // include cloned table names from in-flight Phase 2.7
-            // sheet copies so a user `add_table(name="Sales_2")` in
-            // the same save against an as-yet-unflushed clone surfaces
-            // a clean error rather than a silent duplicate.
-            for n in &cloned_table_names {
-                tables_inventory.names.insert(n.clone());
-            }
-
-            // Iterate sheets in source-document order so allocations
-            // are deterministic across runs.
-            for sheet_name in &sheet_order_local {
-                let patches = match self.queued_tables.get(sheet_name) {
-                    Some(p) if !p.is_empty() => p.clone(),
-                    _ => continue,
-                };
-                let sheet_path = match self.sheet_paths.get(sheet_name).cloned() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let rels_path = sheet_rels_path_for(&sheet_path);
-                if !self.rels_patches.contains_key(&rels_path) {
-                    // RFC-035 Pod-δ fix (KNOWN_GAPS bug #3): a Phase
-                    // 2.7-cloned sheet's rels live in file_adds, not
-                    // in the source ZIP. Prefer file_adds/file_patches
-                    // before falling back to the ZIP probe.
-                    let g = if let Some(bytes) = self.file_adds.get(&rels_path) {
-                        RelsGraph::parse(bytes).map_err(|e| {
-                            PyErr::new::<PyIOError, _>(format!(
-                                "rels parse for cloned '{rels_path}': {e}"
-                            ))
-                        })?
-                    } else if let Some(bytes) = file_patches.get(&rels_path) {
-                        RelsGraph::parse(bytes).map_err(|e| {
-                            PyErr::new::<PyIOError, _>(format!(
-                                "rels parse for patched '{rels_path}': {e}"
-                            ))
-                        })?
-                    } else {
-                        load_or_empty_rels(&mut zip, &rels_path)?
-                    };
-                    self.rels_patches.insert(rels_path.clone(), g);
-                }
-                let rels = self
-                    .rels_patches
-                    .get_mut(&rels_path)
-                    .expect("just inserted above");
-                let result = tables::build_tables(
-                    &patches,
-                    &tables_inventory,
-                    rels,
-                    Some(&mut part_id_allocator),
-                )
-                .map_err(|e| PyErr::new::<PyValueError, _>(e))?;
-
-                // Update the running inventory so subsequent sheets'
-                // build_tables calls see this sheet's allocations.
-                for (path, _bytes) in &result.table_parts {
-                    tables_inventory.count += 1;
-                    tables_inventory.paths.push(path.clone());
-                }
-                for patch in &patches {
-                    tables_inventory.names.insert(patch.name.clone());
-                }
-                for (path, bytes) in result.table_parts {
-                    self.file_adds.insert(path, bytes);
-                }
-                // Reflect the freshly-allocated ids in the inventory's
-                // `ids` set. We re-derive them by parsing the emitted
-                // XML's id attribute — cheaper than threading them out
-                // of build_tables and keeps that API surface narrow.
-                for path in &tables_inventory.paths {
-                    if let Some(bytes) = self.file_adds.get(path) {
-                        let (id_opt, _) = tables::parse_table_root_attrs(bytes);
-                        if let Some(id) = id_opt {
-                            tables_inventory.ids.insert(id);
-                        }
-                    }
-                }
-                // Content-type Override per new part — funnel through
-                // the existing Phase-2.5c aggregator.
-                let ct_ops_for_sheet = self
-                    .queued_content_type_ops
-                    .entry(sheet_name.clone())
-                    .or_default();
-                for (part_name, ct) in result.new_content_types {
-                    ct_ops_for_sheet.push(content_types::ContentTypeOp::AddOverride(part_name, ct));
-                }
-                if !result.table_parts_block.is_empty() {
-                    local_blocks
-                        .entry(sheet_path.clone())
-                        .or_default()
-                        .push(SheetBlock::TableParts(result.table_parts_block));
-                }
-            }
-        }
+        patcher_sheet_blocks::apply_tables_phase(
+            self,
+            &mut local_blocks,
+            &file_patches,
+            &mut zip,
+            &mut part_id_allocator,
+            &cloned_table_names,
+        )?;
 
         // --- Phase 2.5g: Comments + VML drawings (RFC-023) ---
         //
@@ -2037,6 +1944,7 @@ impl XlsxPatcher {
         // a single pass over the source ZIP listing earlier in
         // Phase 2.5, so this loop only needs to populate the
         // ancillary registry for path-lookup purposes.
+        let sheet_order_local: Vec<String> = self.sheet_order.clone();
         let mut comment_authors = comments::CommentAuthorTable::new();
         for sheet_name in &sheet_order_local {
             let sp = match self.sheet_paths.get(sheet_name).cloned() {

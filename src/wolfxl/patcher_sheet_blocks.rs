@@ -10,9 +10,12 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 
 use super::patcher_workbook::{load_or_empty_rels, minimal_styles_xml, sheet_rels_path_for};
-use super::{autofilter, autofilter_helpers, hyperlinks, sheet_patcher, XlsxPatcher};
+use super::{
+    autofilter, autofilter_helpers, content_types, hyperlinks, sheet_patcher, tables, XlsxPatcher,
+};
 use sheet_patcher::CellPatch;
 use wolfxl_merger::SheetBlock;
+use wolfxl_rels::{PartIdAllocator, RelsGraph};
 
 pub(super) fn apply_data_validations_phase(
     patcher: &XlsxPatcher,
@@ -139,6 +142,98 @@ pub(super) fn apply_hyperlinks_phase(
             .entry(sheet_path)
             .or_default()
             .push(SheetBlock::Hyperlinks(block_bytes));
+    }
+
+    Ok(())
+}
+
+pub(super) fn apply_tables_phase(
+    patcher: &mut XlsxPatcher,
+    local_blocks: &mut HashMap<String, Vec<SheetBlock>>,
+    file_patches: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    part_id_allocator: &mut PartIdAllocator,
+    cloned_table_names: &HashSet<String>,
+) -> PyResult<()> {
+    if patcher.queued_tables.is_empty() {
+        return Ok(());
+    }
+
+    let mut tables_inventory = tables::scan_existing_tables(zip)
+        .map_err(|e| PyIOError::new_err(format!("scan tables: {e}")))?;
+
+    for name in cloned_table_names {
+        tables_inventory.names.insert(name.clone());
+    }
+
+    let sheet_order_local: Vec<String> = patcher.sheet_order.clone();
+    for sheet_name in &sheet_order_local {
+        let patches = match patcher.queued_tables.get(sheet_name) {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => continue,
+        };
+        let sheet_path = match patcher.sheet_paths.get(sheet_name).cloned() {
+            Some(p) => p,
+            None => continue,
+        };
+        let rels_path = sheet_rels_path_for(&sheet_path);
+        if !patcher.rels_patches.contains_key(&rels_path) {
+            let graph = if let Some(bytes) = patcher.file_adds.get(&rels_path) {
+                RelsGraph::parse(bytes).map_err(|e| {
+                    PyIOError::new_err(format!("rels parse for cloned '{rels_path}': {e}"))
+                })?
+            } else if let Some(bytes) = file_patches.get(&rels_path) {
+                RelsGraph::parse(bytes).map_err(|e| {
+                    PyIOError::new_err(format!("rels parse for patched '{rels_path}': {e}"))
+                })?
+            } else {
+                load_or_empty_rels(zip, &rels_path)?
+            };
+            patcher.rels_patches.insert(rels_path.clone(), graph);
+        }
+        let rels = patcher
+            .rels_patches
+            .get_mut(&rels_path)
+            .expect("just inserted above");
+        let result =
+            tables::build_tables(&patches, &tables_inventory, rels, Some(part_id_allocator))
+                .map_err(PyValueError::new_err)?;
+
+        for (path, _bytes) in &result.table_parts {
+            tables_inventory.count += 1;
+            tables_inventory.paths.push(path.clone());
+        }
+        for patch in &patches {
+            tables_inventory.names.insert(patch.name.clone());
+        }
+        for (path, bytes) in result.table_parts {
+            patcher.file_adds.insert(path, bytes);
+        }
+        for path in &tables_inventory.paths {
+            if let Some(bytes) = patcher.file_adds.get(path) {
+                let (id_opt, _) = tables::parse_table_root_attrs(bytes);
+                if let Some(id) = id_opt {
+                    tables_inventory.ids.insert(id);
+                }
+            }
+        }
+
+        let content_type_ops = patcher
+            .queued_content_type_ops
+            .entry(sheet_name.clone())
+            .or_default();
+        for (part_name, content_type) in result.new_content_types {
+            content_type_ops.push(content_types::ContentTypeOp::AddOverride(
+                part_name,
+                content_type,
+            ));
+        }
+        if !result.table_parts_block.is_empty() {
+            local_blocks
+                .entry(sheet_path)
+                .or_default()
+                .push(SheetBlock::TableParts(result.table_parts_block));
+        }
     }
 
     Ok(())
