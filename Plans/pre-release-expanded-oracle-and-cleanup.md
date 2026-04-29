@@ -148,7 +148,7 @@ Current largest WolfXL hotspots:
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 529 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1513 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
-| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 1989 | Continue splitting sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
+| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 1702 | Continue splitting sheet emission into dimensions, merges, hyperlinks, validations, CF, drawings, tables, and remaining integration-only coverage. |
 | `python/wolfxl/_workbook.py` | 1321 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
 
 Suggested sprint sequence:
@@ -546,7 +546,13 @@ First no-behavior split target, completed 2026-04-28:
 75. Worksheet debug representation moved into
    `python/wolfxl/_worksheet_repr.py` on 2026-04-29 while preserving the
    openpyxl-shaped `repr(worksheet)` string.
-76. Next helper candidate: continue with another narrow Rust save phase only if
+76. Sheet data unit coverage moved from
+   `crates/wolfxl-writer/src/emit/sheet_xml.rs` into
+   `crates/wolfxl-writer/src/emit/sheet_data.rs` on 2026-04-29, keeping
+   `sheet_xml.rs` focused on integration ordering while preserving coverage for
+   blank cells, number formatting, SST insertion, booleans, formula result
+   variants, date serials, and style attributes.
+77. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

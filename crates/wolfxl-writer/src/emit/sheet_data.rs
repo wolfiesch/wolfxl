@@ -266,4 +266,152 @@ mod tests {
 
         assert!(out.contains("<c r=\"C2\" s=\"4\"/>"));
     }
+
+    #[test]
+    fn unstyled_blank_cells_are_skipped() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::Blank));
+        sheet.set_cell(1, 2, WriteCell::new(WriteCellValue::Number(5.0)));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(!out.contains("<c r=\"A1\""));
+        assert!(out.contains("<c r=\"B1\""));
+    }
+
+    #[test]
+    fn numeric_cells_use_integer_format_when_exact() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::Number(42.0)));
+        sheet.set_cell(1, 2, WriteCell::new(WriteCellValue::Number(1.5)));
+        sheet.set_cell(1, 3, WriteCell::new(WriteCellValue::Number(-17.5)));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(out.contains("<c r=\"A1\"><v>42</v></c>"));
+        assert!(!out.contains("<v>42.0</v>"));
+        assert!(out.contains("<c r=\"B1\"><v>1.5</v></c>"));
+        assert!(out.contains("<c r=\"C1\"><v>-17.5</v></c>"));
+    }
+
+    #[test]
+    fn strings_intern_in_insertion_order() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::String("beta".into())));
+        sheet.set_cell(2, 1, WriteCell::new(WriteCellValue::String("alpha".into())));
+        sheet.set_cell(3, 1, WriteCell::new(WriteCellValue::String("beta".into())));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert_eq!(sst.total_count(), 3);
+        assert_eq!(sst.unique_count(), 2);
+        let collected: Vec<(u32, &str)> = sst.iter().collect();
+        assert_eq!(collected[0], (0, "beta"));
+        assert_eq!(collected[1], (1, "alpha"));
+        assert!(out.contains("<c r=\"A1\" t=\"s\"><v>0</v></c>"));
+        assert!(out.contains("<c r=\"A2\" t=\"s\"><v>1</v></c>"));
+        assert!(out.contains("<c r=\"A3\" t=\"s\"><v>0</v></c>"));
+    }
+
+    #[test]
+    fn boolean_cells_emit_b_type() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::Boolean(true)));
+        sheet.set_cell(1, 2, WriteCell::new(WriteCellValue::Boolean(false)));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(out.contains("<c r=\"A1\" t=\"b\"><v>1</v></c>"));
+        assert!(out.contains("<c r=\"B1\" t=\"b\"><v>0</v></c>"));
+    }
+
+    #[test]
+    fn formula_result_variants_emit_expected_cell_types() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(
+            1,
+            1,
+            WriteCell::new(WriteCellValue::Formula {
+                expr: "SUM(A1:A10)".into(),
+                result: None,
+            }),
+        );
+        sheet.set_cell(
+            1,
+            2,
+            WriteCell::new(WriteCellValue::Formula {
+                expr: "1+6".into(),
+                result: Some(FormulaResult::Number(7.0)),
+            }),
+        );
+        sheet.set_cell(
+            1,
+            3,
+            WriteCell::new(WriteCellValue::Formula {
+                expr: "CONCAT(\"fo\",\"o\")".into(),
+                result: Some(FormulaResult::String("foo".into())),
+            }),
+        );
+        sheet.set_cell(
+            1,
+            4,
+            WriteCell::new(WriteCellValue::Formula {
+                expr: "TRUE()".into(),
+                result: Some(FormulaResult::Boolean(true)),
+            }),
+        );
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(out.contains("<f>SUM(A1:A10)</f><v>0</v>"));
+        assert!(out.contains("<f>1+6</f><v>7</v>"));
+        assert!(out.contains("t=\"str\""));
+        assert!(out.contains("<v>foo</v>"));
+        assert!(out.contains("<c r=\"D1\" t=\"b\"><f>TRUE()</f><v>1</v></c>"));
+    }
+
+    #[test]
+    fn date_serial_emits_as_number_without_type() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::DateSerial(44927.5)));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(out.contains("<c r=\"A1\"><v>44927.5</v></c>"));
+        assert!(!out.contains("t=\"s\""));
+        assert!(!out.contains("t=\"b\""));
+    }
+
+    #[test]
+    fn style_id_emits_s_attribute_only_when_present() {
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(
+            1,
+            1,
+            WriteCell::new(WriteCellValue::Number(1.0)).with_style(5),
+        );
+        sheet.set_cell(1, 2, WriteCell::new(WriteCellValue::Number(1.0)));
+        let mut sst = SstBuilder::default();
+        let mut out = String::new();
+
+        emit(&mut out, &sheet, &mut sst);
+
+        assert!(out.contains("<c r=\"A1\" s=\"5\"><v>1</v></c>"));
+        let b1_start = out.find("<c r=\"B1\"").expect("B1 cell");
+        let b1_end = out[b1_start..].find('>').expect(">") + b1_start;
+        let tag = &out[b1_start..=b1_end];
+        assert!(!tag.contains("s="), "no s attr when no style: {tag}");
+    }
 }
