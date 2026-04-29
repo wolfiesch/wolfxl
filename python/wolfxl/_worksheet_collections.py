@@ -118,3 +118,17 @@ class MergedCellsProxy:
 
     def __len__(self) -> int:
         return len(self.ranges)
+
+
+def merge_cells(ws: Worksheet, range_string: str) -> None:
+    """Merge a cell range through the write-mode Rust backend."""
+    wb = ws._workbook  # noqa: SLF001
+    if wb._rust_writer is None:  # noqa: SLF001
+        raise RuntimeError("merge_cells requires write mode")
+    wb._rust_writer.merge_cells(ws._title, range_string)  # noqa: SLF001
+    ws._merged_ranges.add(range_string)  # noqa: SLF001
+
+
+def unmerge_cells(ws: Worksheet, range_string: str) -> None:
+    """Forget a merged range from the worksheet's pending merge set."""
+    ws._merged_ranges.discard(range_string)  # noqa: SLF001

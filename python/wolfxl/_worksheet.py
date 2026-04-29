@@ -22,6 +22,8 @@ from wolfxl._worksheet_bounds import (
 )
 from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
 from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
+from wolfxl._worksheet_collections import merge_cells as _merge_cells
+from wolfxl._worksheet_collections import unmerge_cells as _unmerge_cells
 from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
 from wolfxl._worksheet_features import (
     add_data_validation as _add_data_validation,
@@ -1090,11 +1092,7 @@ class Worksheet:
 
     def merge_cells(self, range_string: str) -> None:
         """Merge cells (write mode only). Example: ``ws.merge_cells('A1:B2')``."""
-        wb = self._workbook
-        if wb._rust_writer is None:  # noqa: SLF001
-            raise RuntimeError("merge_cells requires write mode")
-        wb._rust_writer.merge_cells(self._title, range_string)  # noqa: SLF001
-        self._merged_ranges.add(range_string)
+        _merge_cells(self, range_string)
 
     def unmerge_cells(self, range_string: str) -> None:
         """Unmerge a previously merged range.
@@ -1102,7 +1100,7 @@ class Worksheet:
         If *range_string* was not previously merged, silently does nothing
         (matches openpyxl behaviour).
         """
-        self._merged_ranges.discard(range_string)
+        _unmerge_cells(self, range_string)
 
     # ------------------------------------------------------------------
     # Structural operations
