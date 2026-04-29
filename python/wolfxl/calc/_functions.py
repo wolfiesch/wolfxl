@@ -700,6 +700,67 @@ def _xlookup_wildcard_match(pattern: str, text: str) -> bool:
     return bool(_re.fullmatch(regex, text.lower()))
 
 
+def _lookup_values(seq: Any) -> list[Any] | None:
+    """Normalize a lookup vector to a Python list."""
+    if isinstance(seq, RangeValue):
+        return seq.values
+    if isinstance(seq, (list, tuple)):
+        return list(seq)
+    return None
+
+
+def _lookup_exact_index(
+    lookup_value: Any,
+    values: list[Any],
+    indexes: range | None = None,
+    *,
+    wildcard: bool = False,
+) -> int | None:
+    """Return the index of the first exact lookup match."""
+    for i in indexes if indexes is not None else range(len(values)):
+        value = values[i]
+        if value is None:
+            continue
+        if wildcard and isinstance(lookup_value, str) and isinstance(value, str):
+            if _xlookup_wildcard_match(lookup_value, value):
+                return i
+        elif isinstance(lookup_value, str) and isinstance(value, str):
+            if lookup_value.lower() == value.lower():
+                return i
+        elif isinstance(lookup_value, (int, float)) and isinstance(value, (int, float)):
+            if float(lookup_value) == float(value):
+                return i
+        elif lookup_value == value:
+            return i
+    return None
+
+
+def _lookup_last_sorted_lte_index(lookup_value: Any, values: list[Any]) -> int | None:
+    """Return the last sorted-lookup index whose value is <= lookup."""
+    best_idx = None
+    for i, value in enumerate(values):
+        if value is None:
+            continue
+        if isinstance(lookup_value, (int, float)) and isinstance(value, (int, float)):
+            if float(value) <= float(lookup_value):
+                best_idx = i
+        elif isinstance(lookup_value, str) and isinstance(value, str):
+            if value.lower() <= lookup_value.lower():
+                best_idx = i
+    return best_idx
+
+
+def _coerce_range_lookup(value: Any) -> bool:
+    """Normalize VLOOKUP/HLOOKUP's optional range_lookup argument."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.upper() != "FALSE"
+    return True
+
+
 def _builtin_xlookup(args: list[Any]) -> Any:
     """XLOOKUP(lookup_value, lookup_array, return_array, ...).
 
@@ -718,19 +779,12 @@ def _builtin_xlookup(args: list[Any]) -> Any:
     if match_mode not in (0, -1, 1, 2) or search_mode not in (1, -1):
         return None  # fall through to formulas lib for unsupported modes
 
-    # Flatten arrays
-    if isinstance(lookup_array, RangeValue):
-        lookup_vals = lookup_array.values
-    elif isinstance(lookup_array, (list, tuple)):
-        lookup_vals = list(lookup_array)
-    else:
+    lookup_vals = _lookup_values(lookup_array)
+    if lookup_vals is None:
         return if_not_found
 
-    if isinstance(return_array, RangeValue):
-        return_vals = return_array.values
-    elif isinstance(return_array, (list, tuple)):
-        return_vals = list(return_array)
-    else:
+    return_vals = _lookup_values(return_array)
+    if return_vals is None:
         return if_not_found
 
     if search_mode == 1:
@@ -743,21 +797,14 @@ def _builtin_xlookup(args: list[Any]) -> Any:
 
     # --- Exact match (0) or wildcard match (2) ---
     if match_mode in (0, 2):
-        for i in search_range:
-            v = lookup_vals[i]
-            if v is None:
-                continue
-            if match_mode == 2 and isinstance(lookup_value, str) and isinstance(v, str):
-                if _xlookup_wildcard_match(lookup_value, v):
-                    return _safe_return(i)
-            elif isinstance(lookup_value, str) and isinstance(v, str):
-                if lookup_value.lower() == v.lower():
-                    return _safe_return(i)
-            elif isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
-                if float(lookup_value) == float(v):
-                    return _safe_return(i)
-            elif lookup_value == v:
-                return _safe_return(i)
+        idx = _lookup_exact_index(
+            lookup_value,
+            lookup_vals,
+            search_range,
+            wildcard=match_mode == 2,
+        )
+        if idx is not None:
+            return _safe_return(idx)
         return if_not_found
 
     # --- Approximate match: -1 (next smaller) or 1 (next larger) ---
@@ -804,13 +851,7 @@ def _builtin_vlookup(args: list[Any]) -> Any:
     col_index_num = int(float(args[2]))
     range_lookup = True
     if len(args) > 3 and args[3] is not None:
-        rl = args[3]
-        if isinstance(rl, bool):
-            range_lookup = rl
-        elif isinstance(rl, (int, float)):
-            range_lookup = bool(rl)
-        elif isinstance(rl, str):
-            range_lookup = rl.upper() != "FALSE"
+        range_lookup = _coerce_range_lookup(args[3])
 
     if col_index_num < 1:
         return ExcelError.VALUE
@@ -831,32 +872,15 @@ def _builtin_vlookup(args: list[Any]) -> Any:
 
     if range_lookup:
         # Approximate match: largest value <= lookup_value (sorted ascending)
-        best_idx = None
-        for i, v in enumerate(first_col):
-            if v is None:
-                continue
-            if isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
-                if float(v) <= float(lookup_value):
-                    best_idx = i
-            elif isinstance(lookup_value, str) and isinstance(v, str):
-                if v.lower() <= lookup_value.lower():
-                    best_idx = i
+        best_idx = _lookup_last_sorted_lte_index(lookup_value, first_col)
         if best_idx is None:
             return ExcelError.NA
         return return_col[best_idx] if best_idx < len(return_col) else ExcelError.NA
     else:
         # Exact match (case-insensitive for strings)
-        for i, v in enumerate(first_col):
-            if v is None:
-                continue
-            if isinstance(lookup_value, str) and isinstance(v, str):
-                if lookup_value.lower() == v.lower():
-                    return return_col[i] if i < len(return_col) else ExcelError.NA
-            elif isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
-                if float(lookup_value) == float(v):
-                    return return_col[i] if i < len(return_col) else ExcelError.NA
-            elif lookup_value == v:
-                return return_col[i] if i < len(return_col) else ExcelError.NA
+        idx = _lookup_exact_index(lookup_value, first_col)
+        if idx is not None:
+            return return_col[idx] if idx < len(return_col) else ExcelError.NA
         return ExcelError.NA
 
 
@@ -873,13 +897,7 @@ def _builtin_hlookup(args: list[Any]) -> Any:
     row_index_num = int(float(args[2]))
     range_lookup = True
     if len(args) > 3 and args[3] is not None:
-        rl = args[3]
-        if isinstance(rl, bool):
-            range_lookup = rl
-        elif isinstance(rl, (int, float)):
-            range_lookup = bool(rl)
-        elif isinstance(rl, str):
-            range_lookup = rl.upper() != "FALSE"
+        range_lookup = _coerce_range_lookup(args[3])
 
     if row_index_num < 1:
         return ExcelError.VALUE
@@ -900,32 +918,15 @@ def _builtin_hlookup(args: list[Any]) -> Any:
 
     if range_lookup:
         # Approximate match: largest value <= lookup_value (sorted ascending)
-        best_idx = None
-        for i, v in enumerate(first_row):
-            if v is None:
-                continue
-            if isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
-                if float(v) <= float(lookup_value):
-                    best_idx = i
-            elif isinstance(lookup_value, str) and isinstance(v, str):
-                if v.lower() <= lookup_value.lower():
-                    best_idx = i
+        best_idx = _lookup_last_sorted_lte_index(lookup_value, first_row)
         if best_idx is None:
             return ExcelError.NA
         return return_row[best_idx] if best_idx < len(return_row) else ExcelError.NA
     else:
         # Exact match (case-insensitive for strings)
-        for i, v in enumerate(first_row):
-            if v is None:
-                continue
-            if isinstance(lookup_value, str) and isinstance(v, str):
-                if lookup_value.lower() == v.lower():
-                    return return_row[i] if i < len(return_row) else ExcelError.NA
-            elif isinstance(lookup_value, (int, float)) and isinstance(v, (int, float)):
-                if float(lookup_value) == float(v):
-                    return return_row[i] if i < len(return_row) else ExcelError.NA
-            elif lookup_value == v:
-                return return_row[i] if i < len(return_row) else ExcelError.NA
+        idx = _lookup_exact_index(lookup_value, first_row)
+        if idx is not None:
+            return return_row[idx] if idx < len(return_row) else ExcelError.NA
         return ExcelError.NA
 
 
