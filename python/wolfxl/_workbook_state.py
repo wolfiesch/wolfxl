@@ -65,6 +65,43 @@ def xlsb_xls_via_tempfile(
     return rust_book, tmp_path
 
 
+def build_xlsx_wb(
+    cls: type,
+    *,
+    rust_reader: Any,
+    rust_patcher: Any | None,
+    data_only: bool,
+    read_only: bool,
+    source_path: str | None,
+) -> Any:
+    """Wire up read/modify-mode workbook fields shared by xlsx inputs.
+
+    Args:
+        cls: Workbook class to instantiate without calling ``__init__``.
+        rust_reader: Open ``CalamineStyledBook``-compatible reader.
+        rust_patcher: Optional open ``XlsxPatcher`` for modify mode.
+        data_only: Whether formula cells should expose cached values.
+        read_only: Whether streaming read mode was explicitly requested.
+        source_path: Source path, or ``None`` for bytes-backed readers.
+
+    Returns:
+        A workbook instance with sheet proxies and pending queues initialized.
+    """
+    wb = object.__new__(cls)
+    wb._rust_writer = None
+    wb._rust_patcher = rust_patcher
+    wb._rust_reader = rust_reader
+    wb._data_only = data_only
+    wb._rich_text = False
+    wb._evaluator = None
+    wb._read_only = read_only
+    wb._source_path = source_path
+    wb._format = "xlsx"
+    _initialize_sheet_proxies(wb, rust_reader)
+    _initialize_pending_state(wb)
+    return wb
+
+
 def build_xlsb_xls_wb(
     cls: type,
     *,
@@ -84,10 +121,20 @@ def build_xlsb_xls_wb(
     wb._read_only = False
     wb._source_path = source_path
     wb._format = fmt
+    _initialize_sheet_proxies(wb, rust_book)
+    _initialize_pending_state(wb)
+    return wb
+
+
+def _initialize_sheet_proxies(wb: Any, rust_book: Any) -> None:
+    """Attach worksheet proxies from a Rust reader's tab list."""
     names = [str(n) for n in rust_book.sheet_names()]
     wb._sheet_names = names
     wb._sheets = {name: Worksheet(wb, name) for name in names}
-    # These caches and queues only carry meaning for xlsx write/modify mode.
+
+
+def _initialize_pending_state(wb: Any) -> None:
+    """Initialize workbook caches and pending mutation queues."""
     wb._properties_cache = None
     wb._properties_dirty = False
     wb._defined_names_cache = None
@@ -104,4 +151,3 @@ def build_xlsb_xls_wb(
     wb._pending_slicer_caches = []
     wb._next_slicer_cache_id = 0
     wb.copy_options = CopyOptions()
-    return wb

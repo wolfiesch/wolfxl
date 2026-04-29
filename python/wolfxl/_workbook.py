@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from wolfxl._workbook_state import (
     CopyOptions,
+    build_xlsx_wb,
     build_xlsb_xls_wb,
     same_existing_path,
     xlsb_xls_via_tempfile,
@@ -140,38 +141,14 @@ class Workbook:
         """
         from wolfxl import _rust
 
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._rust_patcher = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
-        wb._read_only = read_only
-        wb._source_path = path
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return build_xlsx_wb(
+            cls,
+            rust_reader=_rust.CalamineStyledBook.open(path, permissive),
+            rust_patcher=None,
+            data_only=data_only,
+            read_only=read_only,
+            source_path=path,
+        )
 
     @classmethod
     def _from_encrypted(
@@ -386,38 +363,14 @@ class Workbook:
             return wb
 
         # Bytes-direct reader path (Pod-α onwards): no tempfile needed.
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._rust_patcher = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = bytes_open(data_bytes, permissive)
-        wb._read_only = read_only
-        wb._source_path = None
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return build_xlsx_wb(
+            cls,
+            rust_reader=bytes_open(data_bytes, permissive),
+            rust_patcher=None,
+            data_only=data_only,
+            read_only=read_only,
+            source_path=None,
+        )
 
     @classmethod
     def _from_patcher(
@@ -435,38 +388,14 @@ class Workbook:
         """
         from wolfxl import _rust
 
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
-        wb._rust_patcher = _rust.XlsxPatcher.open(path, permissive)
-        wb._read_only = False
-        wb._source_path = path
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return build_xlsx_wb(
+            cls,
+            rust_reader=_rust.CalamineStyledBook.open(path, permissive),
+            rust_patcher=_rust.XlsxPatcher.open(path, permissive),
+            data_only=data_only,
+            read_only=False,
+            source_path=path,
+        )
 
     @classmethod
     def _from_xlsb(
