@@ -146,7 +146,7 @@ Current largest WolfXL hotspots:
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 2842 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
+| `src/native_writer_backend.rs` | 2466 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1489 | Separate workbook orchestration from feature registration and save pipeline helpers. |
@@ -471,7 +471,12 @@ First no-behavior split target, completed 2026-04-28:
    `src/native_writer_rich_text.rs` on 2026-04-29 while preserving inline
    rich-text tuple coercion, font-property parsing, and non-finite rich-text
    integer-field rejection.
-57. Next helper candidate: continue with another narrow Rust save phase only if
+57. Native writer sheet-feature payload parsing for hyperlinks, comments,
+   conditional formats, data validations, and tables moved into
+   `src/native_writer_sheet_features.rs` on 2026-04-29 while preserving
+   optional wrapper unwrapping, silent malformed-payload no-ops, dxf
+   interning, author interning, and table column/style payload conversion.
+58. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
