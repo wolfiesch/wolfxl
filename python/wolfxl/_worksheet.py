@@ -1150,58 +1150,65 @@ class Worksheet:
         self._merged_ranges.discard(range_string)
 
     # ------------------------------------------------------------------
-    # Structural ops — scheduled, not yet implemented
+    # Structural operations
     # ------------------------------------------------------------------
-    #
-    # Each stub raises NotImplementedError with an RFC pointer so users
-    # see a discoverable roadmap entry instead of an AttributeError. The
-    # workaround note targets the most common escape hatch: do the
-    # structural shuffle in openpyxl, then read the result with
-    # ``wolfxl.load_workbook`` for the heavy work.
 
     def insert_rows(self, idx: int, amount: int = 1) -> None:
         """Shift rows down to insert *amount* empty rows starting at *idx*.
 
-        Implements RFC-030. Validates ``idx >= 1`` and ``amount >= 1``;
-        raises ``ValueError`` otherwise. Queues a row-shift op on the
-        owning workbook's ``_pending_axis_shifts`` list. The op is
-        drained at ``Workbook.save()`` time and applied by the patcher
-        (Phase 2.5i in ``src/wolfxl/mod.rs``).
+        The operation follows openpyxl's 1-based row indexing and is
+        applied when the workbook is saved. In modify mode WolfXL preserves
+        the existing workbook package and rewrites the affected worksheet
+        parts in place.
 
-        See ``Plans/rfcs/030-insert-delete-rows.md`` for full semantics
-        (formula shift, hyperlink/table/DV/CF anchor shift, defined-name
-        shift, comment/VML drawing anchor shift).
+        Args:
+            idx: First row to insert before. Must be at least 1.
+            amount: Number of rows to insert. Must be at least 1.
+
+        Raises:
+            ValueError: If ``idx`` or ``amount`` is outside the supported
+                range.
         """
         _insert_rows(self, idx, amount)
 
     def delete_rows(self, idx: int, amount: int = 1) -> None:
         """Delete *amount* rows starting at *idx*, shifting subsequent rows up.
 
-        Implements RFC-030. Validates ``idx >= 1`` and ``amount >= 1``;
-        raises ``ValueError`` otherwise. Refs that point INTO the
-        deleted band become ``#REF!`` per OOXML semantics.
+        Args:
+            idx: First row to delete. Must be at least 1.
+            amount: Number of rows to delete. Must be at least 1.
+
+        Raises:
+            ValueError: If ``idx`` or ``amount`` is outside the supported
+                range.
         """
         _delete_rows(self, idx, amount)
 
     def insert_cols(self, idx: int | str, amount: int = 1) -> None:
         """Shift columns right to insert *amount* empty columns at *idx*.
 
-        Implements RFC-031. ``idx`` may be a 1-based int or an Excel
-        column letter (``"A"``, ``"AB"``, ...). Validates ``idx >= 1``
-        and ``amount >= 0``; ``amount == 0`` is a noop. Queues a
-        col-shift op on the owning workbook's ``_pending_axis_shifts``.
+        Args:
+            idx: First column to insert before, either as a 1-based integer
+                or an Excel column label such as ``"A"`` or ``"AB"``.
+            amount: Number of columns to insert. ``0`` is a no-op.
 
-        See ``Plans/rfcs/031-insert-delete-cols.md`` for full semantics
-        (formula shift, anchor shift, ``<col>`` span split).
+        Raises:
+            ValueError: If ``idx`` or ``amount`` is outside the supported
+                range.
         """
         _insert_cols(self, idx, amount)
 
     def delete_cols(self, idx: int | str, amount: int = 1) -> None:
         """Delete *amount* columns starting at *idx*, shifting subsequent columns left.
 
-        Implements RFC-031. ``idx`` may be a 1-based int or an Excel
-        column letter. Refs that point INTO the deleted band become
-        ``#REF!`` per OOXML semantics. ``amount == 0`` is a noop.
+        Args:
+            idx: First column to delete, either as a 1-based integer or an
+                Excel column label.
+            amount: Number of columns to delete. ``0`` is a no-op.
+
+        Raises:
+            ValueError: If ``idx`` or ``amount`` is outside the supported
+                range.
         """
         _delete_cols(self, idx, amount)
 
@@ -1214,10 +1221,9 @@ class Worksheet:
     ) -> None:
         """Move a rectangular block of cells by *rows* / *cols*.
 
-        Implements RFC-034. Paste-style relocation: every cell whose
-        A1 coordinate falls inside *cell_range* is physically moved
-        to ``(row + rows, col + cols)``. Existing cells at the
-        destination are silently overwritten (matches openpyxl).
+        This is a paste-style relocation: every cell inside ``cell_range``
+        is moved to ``(row + rows, col + cols)``. Existing destination
+        cells are overwritten, matching openpyxl.
 
         Formulas inside the moved block are paste-translated:
         relative refs shift by ``(rows, cols)``; absolute refs (``$A$1``)
@@ -1225,14 +1231,18 @@ class Worksheet:
         outside the moved block that reference cells inside the source
         rectangle are also re-anchored to the new location.
 
-        ``cell_range`` accepts an A1 range string (``"C3:E10"``) or a
-        single-cell string (``"A1"``). Validates ``rows`` and
-        ``cols`` are ints (signed). Raises ``ValueError`` if the
-        destination would land outside Excel's coordinate space
-        (rows ``1..1_048_576``, cols ``1..16_384``).
+        Args:
+            cell_range: A1 range string such as ``"C3:E10"`` or a single
+                cell reference such as ``"A1"``.
+            rows: Signed row offset.
+            cols: Signed column offset.
+            translate: Whether formulas outside the moved block that point
+                into the source range should be re-anchored.
 
-        ``rows == 0 and cols == 0`` is a no-op (matches openpyxl).
-        Empty queue → byte-identical save.
+        Raises:
+            TypeError: If ``rows`` or ``cols`` is not an integer.
+            ValueError: If the destination would fall outside Excel's
+                coordinate limits.
         """
         _move_range(self, cell_range, rows=rows, cols=cols, translate=translate)
 
@@ -1273,16 +1283,13 @@ class Worksheet:
     def add_table(self, table: Any) -> None:
         """Attach a table to this worksheet.
 
-        Both write mode (``Workbook()``) and modify mode
-        (``load_workbook(path, modify=True)``) queue the table on
-        ``self._pending_tables``; the ``Workbook.save`` coordinator
-        routes the queue to the right backend. RFC-024 (modify mode)
-        flushes through the patcher's ``queue_table`` PyO3 setter,
-        which in turn allocates a workbook-unique ``id`` at save time
-        — any explicit ``id`` set by the user on the ``Table`` dataclass
-        is ignored to avoid cross-sheet collisions in the rare case
-        where the user opens a multi-table file and re-uses a numeric
-        id by accident.
+        Tables are supported for both new workbooks and workbooks opened
+        with ``load_workbook(..., modify=True)``. WolfXL assigns a
+        workbook-unique table id during save, so any explicit id on the
+        supplied table object is ignored.
+
+        Args:
+            table: Table object to attach to this worksheet.
         """
         _add_table(self, table)
 

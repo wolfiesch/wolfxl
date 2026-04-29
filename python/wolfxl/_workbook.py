@@ -729,26 +729,28 @@ class Workbook:
     def copy_worksheet(
         self, source: Worksheet, *, name: str | None = None
     ) -> Worksheet:
-        """Duplicate *source* into a new sheet within this workbook (RFC-035).
+        """Duplicate *source* into a new sheet within this workbook.
 
-        Supported in BOTH modify mode and write mode (Sprint Θ Pod-C1).
-        Read-only mode raises ``RuntimeError``.
+        Supported for both new workbooks and workbooks opened with
+        ``load_workbook(..., modify=True)``. Read-only workbooks raise
+        ``RuntimeError``.
 
         The new sheet appends at the end of the tab list. The default
         title is ``f"{source.title} Copy"``; on collision an incrementing
-        suffix (`Copy 2`, `Copy 3`, …) is appended until unique. An
+        suffix (``Copy 2``, ``Copy 3``, ...) is appended until unique. An
         explicit ``name`` keyword argument overrides the default and
         must not collide with any existing sheet name.
 
-        Modify mode: the returned ``Worksheet`` is a fresh proxy bound
-        to the cloned title. The actual ZIP-level clone runs at
-        ``save()`` time via Phase 2.7 of the patcher.
+        Args:
+            source: Worksheet to duplicate.
+            name: Optional explicit title for the copy.
 
-        Write mode: the source's pending writes are materialized
-        immediately and replayed onto a freshly-created destination
-        sheet (cell values, formats, row heights, column widths, merged
-        ranges, freeze pane). Native-writer-tracked features added by
-        the API after `copy_worksheet` returns flow through normally.
+        Returns:
+            The newly created worksheet.
+
+        Raises:
+            RuntimeError: If the workbook is read-only.
+            ValueError: If ``name`` collides with an existing sheet title.
         """
         return _workbook_sheets.copy_worksheet(self, source, name=name)
 
@@ -771,19 +773,11 @@ class Workbook:
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
         """Move *sheet* by *offset* positions within the workbook tab list.
 
-        Mirrors openpyxl's ``Workbook.move_sheet`` (RFC-036). The new
-        position is ``current_index + offset``, clamped to ``[0, n-1]``
-        where ``n`` is the current sheet count. The in-memory tab list
-        (``self._sheet_names``) is updated immediately so subsequent
-        reads of ``wb.sheetnames`` / ``wb.worksheets`` see the post-move
-        order, regardless of whether the workbook is in write or modify
-        mode.
-
-        In modify mode, the move is queued on the patcher (along with
-        any previous moves in this save() session); on save the patcher
-        rewrites ``xl/workbook.xml``'s ``<sheets>`` order and re-points
-        every sheet-scoped ``<definedName localSheetId>`` accordingly
-        (RFC-036 §5).
+        Mirrors openpyxl's ``Workbook.move_sheet``. The new position is
+        ``current_index + offset`` and is clamped to the workbook's sheet
+        bounds. The in-memory tab list is updated immediately, so
+        subsequent reads of ``wb.sheetnames`` and ``wb.worksheets`` see
+        the post-move order before save.
 
         Args:
             sheet: A ``Worksheet`` instance or sheet name string.
