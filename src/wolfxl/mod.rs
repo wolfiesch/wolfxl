@@ -60,14 +60,12 @@ pub mod page_breaks;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
-use std::io::{Read, Write};
 
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use zip::write::SimpleFileOptions;
-use zip::{ZipArchive, ZipWriter};
+use zip::ZipArchive;
 
 use crate::ooxml_util;
 use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
@@ -78,8 +76,7 @@ use patcher_payload::{
     extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
 };
 use patcher_workbook::{
-    epoch_or_now, load_or_empty_rels, replace_first_occurrence, sheet_rels_path_for,
-    xml_escape_attr,
+    load_or_empty_rels, replace_first_occurrence, sheet_rels_path_for, xml_escape_attr,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -1944,7 +1941,7 @@ impl XlsxPatcher {
         // a single pass over the source ZIP listing earlier in
         // Phase 2.5, so this loop only needs to populate the
         // ancillary registry for path-lookup purposes.
-        let (mut comments_file_writes, mut comments_file_deletes) =
+        let (comments_file_writes, comments_file_deletes) =
             patcher_sheet_blocks::apply_comments_phase(
                 self,
                 &mut local_blocks,
@@ -2160,14 +2157,7 @@ impl XlsxPatcher {
         //   - absent  → `file_adds` appends a brand-new entry (RFC-013)
         // The "absent" branch is the common case for RFC-022 on a clean
         // file that had zero hyperlinks before.
-        for (path, graph) in &self.rels_patches {
-            let bytes = graph.serialize();
-            if zip.by_name(path).is_ok() {
-                file_patches.insert(path.clone(), bytes);
-            } else {
-                self.file_adds.insert(path.clone(), bytes);
-            }
-        }
+        self.serialize_rels_patches_phase(&mut file_patches, &mut zip)?;
 
         // --- Phase 2.5c: Content-types aggregation (RFC-013) ---
         //
@@ -2207,16 +2197,12 @@ impl XlsxPatcher {
         // primitive (in-place patch vs. new add) and delete dropped
         // parts. Done after Phase 2.5d so we already know which paths
         // exist in the source ZIP.
-        for (path, bytes) in comments_file_writes.drain() {
-            if zip.by_name(&path).is_ok() {
-                file_patches.insert(path, bytes);
-            } else {
-                self.file_adds.insert(path, bytes);
-            }
-        }
-        for path in comments_file_deletes.drain() {
-            self.file_deletes.insert(path);
-        }
+        self.route_part_writes_and_deletes_phase(
+            &mut file_patches,
+            &mut zip,
+            comments_file_writes,
+            comments_file_deletes,
+        );
 
         // --- Phase 2.5i: Structural axis shifts (RFC-030 / RFC-031) ---
         //
@@ -2275,99 +2261,7 @@ impl XlsxPatcher {
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
-        let src = File::open(&self.file_path).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
-        })?;
-        let mut zip = ZipArchive::new(src)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
-
-        let dst = File::create(output_path).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Cannot create '{output_path}': {e}"))
-        })?;
-        let mut out = ZipWriter::new(dst);
-
-        // RFC-013: collect the source-entry names so we can sanity-check
-        // that no file_adds collides with one (caller bug per §8 risk #2).
-        let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());
-        for i in 0..zip.len() {
-            let mut file = zip
-                .by_index(i)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP entry read error: {e}")))?;
-            let name = file.name().to_string();
-            source_names.insert(name.clone());
-
-            // RFC-013: skip source entries explicitly marked for deletion
-            // (reserved for future RFC-035; v1 callers leave file_deletes
-            // empty so this branch is dead in the current slice).
-            if self.file_deletes.contains(&name) {
-                continue;
-            }
-
-            let mut opts = SimpleFileOptions::default().compression_method(file.compression());
-            if let Some(dt) = file.last_modified() {
-                opts = opts.last_modified_time(dt);
-            }
-            if let Some(mode) = file.unix_mode() {
-                opts = opts.unix_permissions(mode);
-            }
-
-            if file.is_dir() {
-                out.add_directory(&name, opts)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
-                continue;
-            }
-
-            let data = if let Some(patched) = file_patches.get(&name) {
-                patched.clone()
-            } else {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
-                buf
-            };
-
-            out.start_file(&name, opts)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
-            out.write_all(&data)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
-        }
-
-        // RFC-013: emit file_adds entries after the source-entry pass.
-        // Collisions with source entries are a hard panic — callers
-        // should be using `file_patches` (REPLACE) when the entry
-        // already exists. The mtime stamp honors WOLFXL_TEST_EPOCH so
-        // golden-file tests stay deterministic.
-        if !self.file_adds.is_empty() {
-            for new_path in self.file_adds.keys() {
-                assert!(
-                    !source_names.contains(new_path),
-                    "file_adds collision with source entry: {new_path} — \
-                     caller bug; use file_patches to REPLACE existing entries"
-                );
-            }
-            // Iterate in sorted order so a single save with multiple new
-            // entries produces deterministic ZIP output (the ZIP spec does
-            // not require a particular entry order, but byte-identical
-            // re-runs do).
-            let mut new_paths: Vec<&String> = self.file_adds.keys().collect();
-            new_paths.sort();
-            let dt = epoch_or_now();
-            for new_path in new_paths {
-                let bytes = &self.file_adds[new_path];
-                let opts = SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Deflated)
-                    .last_modified_time(dt);
-                out.start_file(new_path, opts)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
-                out.write_all(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP write error: {e}")))?;
-            }
-        }
-
-        out.finish()
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP finalize error: {e}")))?;
-
-        Ok(())
+        self.rewrite_zip_phase(&file_patches, output_path)
     }
 
     /// Sprint Λ Pod-β (RFC-045) — drain `self.queued_images`.
@@ -2561,6 +2455,30 @@ impl XlsxPatcher {
         patcher_workbook::apply_workbook_xml_phases(self, file_patches, zip)
     }
 
+    fn serialize_rels_patches_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_workbook::serialize_rels_patches_phase(self, file_patches, zip)
+    }
+
+    fn route_part_writes_and_deletes_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+        file_writes: HashMap<String, Vec<u8>>,
+        file_deletes: HashSet<String>,
+    ) {
+        patcher_workbook::route_part_writes_and_deletes_phase(
+            self,
+            file_patches,
+            zip,
+            file_writes,
+            file_deletes,
+        )
+    }
+
     fn apply_content_types_phase(
         &mut self,
         file_patches: &mut HashMap<String, Vec<u8>>,
@@ -2602,5 +2520,13 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_workbook::rebuild_calc_chain_phase(self, file_patches, zip)
+    }
+
+    fn rewrite_zip_phase(
+        &self,
+        file_patches: &HashMap<String, Vec<u8>>,
+        output_path: &str,
+    ) -> PyResult<()> {
+        patcher_workbook::rewrite_zip_phase(self, file_patches, output_path)
     }
 }

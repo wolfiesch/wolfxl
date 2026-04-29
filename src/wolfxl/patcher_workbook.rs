@@ -1,12 +1,13 @@
 //! Workbook-level helpers used by the surgical xlsx patcher.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
-use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
+use zip::{ZipArchive, ZipWriter};
 
 use crate::ooxml_util;
 use wolfxl_rels::RelsGraph;
@@ -404,6 +405,42 @@ pub(super) fn apply_workbook_xml_phases(
     Ok(())
 }
 
+pub(super) fn serialize_rels_patches_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    for (path, graph) in &patcher.rels_patches {
+        let bytes = graph.serialize();
+        if zip.by_name(path).is_ok() {
+            file_patches.insert(path.clone(), bytes);
+        } else {
+            patcher.file_adds.insert(path.clone(), bytes);
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn route_part_writes_and_deletes_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    file_writes: HashMap<String, Vec<u8>>,
+    file_deletes: HashSet<String>,
+) {
+    for (path, bytes) in file_writes {
+        if zip.by_name(&path).is_ok() {
+            file_patches.insert(path, bytes);
+        } else {
+            patcher.file_adds.insert(path, bytes);
+        }
+    }
+    for path in file_deletes {
+        patcher.file_deletes.insert(path);
+    }
+}
+
 pub(super) fn rebuild_calc_chain_phase(
     patcher: &mut XlsxPatcher,
     file_patches: &mut HashMap<String, Vec<u8>>,
@@ -477,6 +514,90 @@ pub(super) fn rebuild_calc_chain_phase(
             // (we only remove our own rebuild output).
         }
     }
+    Ok(())
+}
+
+pub(super) fn rewrite_zip_phase(
+    patcher: &XlsxPatcher,
+    file_patches: &HashMap<String, Vec<u8>>,
+    output_path: &str,
+) -> PyResult<()> {
+    let src = File::open(&patcher.file_path)
+        .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
+    let mut zip =
+        ZipArchive::new(src).map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+
+    let dst = File::create(output_path)
+        .map_err(|e| PyIOError::new_err(format!("Cannot create '{output_path}': {e}")))?;
+    let mut out = ZipWriter::new(dst);
+
+    let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());
+    for i in 0..zip.len() {
+        let mut file = zip
+            .by_index(i)
+            .map_err(|e| PyIOError::new_err(format!("ZIP entry read error: {e}")))?;
+        let name = file.name().to_string();
+        source_names.insert(name.clone());
+
+        if patcher.file_deletes.contains(&name) {
+            continue;
+        }
+
+        let mut opts = SimpleFileOptions::default().compression_method(file.compression());
+        if let Some(dt) = file.last_modified() {
+            opts = opts.last_modified_time(dt);
+        }
+        if let Some(mode) = file.unix_mode() {
+            opts = opts.unix_permissions(mode);
+        }
+
+        if file.is_dir() {
+            out.add_directory(&name, opts)
+                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+            continue;
+        }
+
+        let data = if let Some(patched) = file_patches.get(&name) {
+            patched.clone()
+        } else {
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+            buf
+        };
+
+        out.start_file(&name, opts)
+            .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+        out.write_all(&data)
+            .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+    }
+
+    if !patcher.file_adds.is_empty() {
+        for new_path in patcher.file_adds.keys() {
+            assert!(
+                !source_names.contains(new_path),
+                "file_adds collision with source entry: {new_path}; \
+                 caller bug; use file_patches to REPLACE existing entries"
+            );
+        }
+        let mut new_paths: Vec<&String> = patcher.file_adds.keys().collect();
+        new_paths.sort();
+        let dt = epoch_or_now();
+        for new_path in new_paths {
+            let bytes = &patcher.file_adds[new_path];
+            let opts = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated)
+                .last_modified_time(dt);
+            out.start_file(new_path, opts)
+                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+            out.write_all(bytes)
+                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+        }
+    }
+
+    out.finish()
+        .map_err(|e| PyIOError::new_err(format!("ZIP finalize error: {e}")))?;
+
     Ok(())
 }
 
