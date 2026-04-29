@@ -136,7 +136,7 @@ pub fn emit(
 
     // Slot 19: <hyperlinks> (only if any exist)
     if !sheet.hyperlinks.is_empty() {
-        emit_hyperlinks(&mut out, sheet);
+        super::hyperlinks::emit(&mut out, sheet);
     }
 
     // Slot 21: <pageMargins> — RFC-055 typed override or default.
@@ -642,48 +642,6 @@ fn emit_merges(out: &mut String, sheet: &Worksheet) {
     }
 
     out.push_str("</mergeCells>");
-}
-
-/// Emit `<hyperlinks>…</hyperlinks>`.
-fn emit_hyperlinks(out: &mut String, sheet: &Worksheet) {
-    // Calculate the starting rId for external hyperlinks
-    // Convention: comments get rId1+rId2, then tables, then external hyperlinks
-    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
-    let tables_offset: u32 = sheet.tables.len() as u32;
-    let mut rid = comments_offset + tables_offset + 1; // first ext hyperlink rId
-
-    out.push_str("<hyperlinks>");
-
-    for (cell_ref, hyperlink) in &sheet.hyperlinks {
-        if hyperlink.is_internal {
-            // Internal target: ``location`` is the bare ``Sheet2!A1`` form
-            // (no leading ``#``). Source of truth is the field, NOT a string
-            // prefix on ``target`` — see model::worksheet::Hyperlink docs.
-            out.push_str(&format!(
-                "<hyperlink ref=\"{}\" location=\"{}\"",
-                xml_escape::attr(cell_ref),
-                xml_escape::attr(&hyperlink.target)
-            ));
-        } else {
-            out.push_str(&format!(
-                "<hyperlink ref=\"{}\" r:id=\"rId{}\"",
-                xml_escape::attr(cell_ref),
-                rid
-            ));
-            rid += 1;
-        }
-
-        if let Some(display) = &hyperlink.display {
-            out.push_str(&format!(" display=\"{}\"", xml_escape::attr(display)));
-        }
-        if let Some(tooltip) = &hyperlink.tooltip {
-            out.push_str(&format!(" tooltip=\"{}\"", xml_escape::attr(tooltip)));
-        }
-
-        out.push_str("/>");
-    }
-
-    out.push_str("</hyperlinks>");
 }
 
 /// Format an f64 for emission in a `<v>` element.

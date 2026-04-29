@@ -148,7 +148,7 @@ Current largest WolfXL hotspots:
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
-| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2805 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
+| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2763 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1489 | Separate workbook orchestration from feature registration and save pipeline helpers. |
 
 Suggested sprint sequence:
@@ -430,7 +430,11 @@ First no-behavior split target, completed 2026-04-28:
    `crates/wolfxl-writer/src/emit/data_validations.rs` on 2026-04-29 while
    preserving CT_Worksheet slot ordering between conditional formatting and
    hyperlinks plus formula/operator/error-style serialization.
-45. Next helper candidate: continue with another narrow Rust save phase only if
+45. Writer worksheet hyperlink XML emission moved into
+   `crates/wolfxl-writer/src/emit/hyperlinks.rs` on 2026-04-29 while
+   preserving internal/external target routing, optional display/tooltip
+   attributes, and the comments/tables/external-hyperlink rId convention.
+46. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
