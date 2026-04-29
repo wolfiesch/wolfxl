@@ -588,7 +588,10 @@ First no-behavior split target, completed 2026-04-28:
 86. Workbook, Worksheet, and AutoFilter class/API docs were cleaned on
    2026-04-29 to remove backend/RFC wording from public help output without
    behavior changes.
-87. Next helper candidate: continue with another narrow Rust save phase only if
+87. Workbook, Worksheet, and Cell slot/init source comments were cleaned on
+   2026-04-29 to remove stale sprint/RFC labels from the most visible core
+   object setup blocks without behavior changes.
+88. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

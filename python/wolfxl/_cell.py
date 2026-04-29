@@ -43,8 +43,8 @@ class Cell:
         "_number_format",
         "_value_dirty",
         "_format_dirty",
-        # RFC-057 (Sprint Ο Pod 1C) — array / data-table formula
-        # metadata.  Populated when ``cell.value`` is assigned an
+        # Array / data-table formula metadata. Populated when ``cell.value`` is
+        # assigned an
         # :class:`ArrayFormula` / :class:`DataTableFormula` instance,
         # or when an existing cell parses back as one of those types.
         # ``_formula_type`` is one of: ``None`` (plain), ``"array"``,
@@ -72,8 +72,8 @@ class Cell:
         self._number_format: str | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
-        # RFC-057 metadata — None until the cell is identified as
-        # array / data-table either via setter or on read-back.
+        # None until the cell is identified as array / data-table either via
+        # setter or on read-back.
         self._formula_type: str | None = None
         self._array_ref: str | None = None
         self._formula_text: str | None = None

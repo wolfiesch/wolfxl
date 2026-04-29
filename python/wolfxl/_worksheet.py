@@ -115,37 +115,35 @@ class Worksheet:
         "_freeze_panes", "_auto_filter",
         "_row_heights", "_col_widths",
         "_merged_ranges", "_print_area", "_sheet_visibility_cache",
-        # T1 read caches — populated lazily on first access.
+        # Read caches populated lazily on first access.
         "_comments_cache", "_hyperlinks_cache",
         "_tables_cache", "_data_validations_cache",
         "_conditional_formatting_cache",
-        # T1 write-mode pending queues — flushed in _flush() on save().
+        # Write-mode pending queues flushed in _flush() on save().
         "_pending_comments", "_pending_hyperlinks",
         "_pending_tables", "_pending_data_validations",
         "_pending_conditional_formats",
-        # Sprint Ι Pod-α — pending rich-text values keyed by
-        # (row, col).  Both write-mode (NativeWorkbook flush) and
-        # modify-mode (XlsxPatcher flush) consume this map.
+        # Pending rich-text values keyed by sparse (row, col) coordinate.
         "_pending_rich_text",
-        # Sprint Ο Pod 1C (RFC-057) — pending array / data-table
+        # Pending array / data-table
         # formulas keyed by ``(row, col)``.  Each entry is a
         # ``(kind, payload)`` tuple where ``kind`` is one of
         # ``"array"``, ``"data_table"``, ``"spill_child"``.  Drained
         # at save time alongside the regular cell flush.
         "_pending_array_formulas",
-        # Sprint Λ Pod-β (RFC-045) — pending image queue.
+        # Pending image queue.
         "_pending_images",
-        # Sprint Μ Pod-β (RFC-046) — pending chart queue.
+        # Pending chart queue.
         "_pending_charts",
-        # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue.
+        # Pending pivot table queue.
         "_pending_pivot_tables",
-        # Sprint Ο Pod 1A (RFC-055) — print/view/protection lazy slots.
+        # Print/view/protection lazy slots.
         "_page_setup", "_page_margins", "_header_footer",
         "_sheet_view", "_protection",
         "_print_title_rows", "_print_title_cols",
-        # RFC-061 Sub-feature 3.1 — pending slicer presentations.
+        # Pending slicer presentations.
         "_pending_slicers",
-        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
+        # Page breaks and sheetFormatPr lazy slots.
         "_row_breaks", "_col_breaks", "_sheet_format",
     )
 
@@ -170,19 +168,19 @@ class Worksheet:
         self._merged_ranges: set[str] = set()
         self._print_area: str | None = None
         self._sheet_visibility_cache: dict[str, Any] | None = None
-        # T1 read caches (None = not loaded yet; dict/list = loaded, possibly empty).
+        # Read caches (None = not loaded yet; dict/list = loaded, possibly empty).
         self._comments_cache: dict[str, Any] | None = None
         self._hyperlinks_cache: dict[str, Any] | None = None
         self._tables_cache: dict[str, Any] | None = None
         self._data_validations_cache: Any | None = None
         self._conditional_formatting_cache: Any | None = None
-        # T1 write-mode pending queues (flushed in _flush() on save()).
+        # Write-mode pending queues (flushed in _flush() on save()).
         self._pending_comments: dict[str, Any] = {}
         self._pending_hyperlinks: dict[str, Any] = {}
-        # Sprint Ι Pod-α — keyed by (row, col) so the flush layer can
-        # look it up by sparse coordinate without coordinate-string round-trip.
+        # Keyed by (row, col) so the flush layer can look values up without
+        # a coordinate-string round-trip.
         self._pending_rich_text: dict[tuple[int, int], Any] = {}
-        # Sprint Ο Pod 1C (RFC-057) — pending array / data-table
+        # Pending array / data-table
         # formulas keyed by ``(row, col)``.  Each entry is a
         # ``(kind, payload)`` tuple.  Master cells get
         # ``("array", {"ref": ..., "text": ...})`` or
@@ -192,24 +190,15 @@ class Worksheet:
         self._pending_tables: list[Any] = []
         self._pending_data_validations: list[Any] = []
         self._pending_conditional_formats: list[tuple[str, Any]] = []
-        # Sprint Λ Pod-β (RFC-045) — pending images attached to this
-        # sheet via ``add_image``. Drained at save time into the Rust
-        # writer (write mode) or the patcher (modify mode).
+        # Pending images attached to this sheet via ``add_image``.
         self._pending_images: list[Any] = []
-        # Sprint Μ Pod-β (RFC-046) — pending charts queued via ``add_chart``.
-        # Drained at save time into ``_rust_writer.add_chart_native`` (write
-        # mode) or the patcher (modify mode, queued by Pod-γ's plumbing).
+        # Pending charts queued via ``add_chart``.
         self._pending_charts: list[Any] = []
-        # Sprint Ν Pod-γ (RFC-048) — pending pivot table queue. Drained
-        # at save time into the patcher via
-        # ``_workbook._flush_pending_pivots_to_patcher`` (modify mode
-        # only — write-mode pivot tables are not yet supported and
-        # should fail loud at ``add_pivot_table`` call site).
+        # Pending pivot table queue. Modify-mode pivots drain through the
+        # workbook save pipeline; write-mode pivot tables fail at add time.
         self._pending_pivot_tables: list[Any] = []
-        # Sprint Ο Pod 1A (RFC-055) — print/view/protection. All lazy:
-        # we instantiate the openpyxl-shaped wrappers only on first
-        # attribute access so a workbook that never touches these
-        # surfaces pays zero overhead.
+        # Print/view/protection wrappers are instantiated only on first
+        # access so untouched surfaces pay no construction overhead.
         self._page_setup: Any = None
         self._page_margins: Any = None
         self._header_footer: Any = None
@@ -217,12 +206,10 @@ class Worksheet:
         self._protection: Any = None
         self._print_title_rows: str | None = None
         self._print_title_cols: str | None = None
-        # RFC-061 Sub-feature 3.1 — pending slicer presentations.
+        # Pending slicer presentations.
         self._pending_slicers: list[Any] = []
-        # Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format
-        # defaults. All lazy: instantiate the wrappers only on first
-        # attribute access so a workbook that never touches these
-        # surfaces pays zero overhead.
+        # Page breaks + sheet format defaults. Instantiate wrappers only on
+        # first access so untouched surfaces pay no construction overhead.
         self._row_breaks: Any = None
         self._col_breaks: Any = None
         self._sheet_format: Any = None

@@ -52,72 +52,71 @@ class Workbook:
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
         self._data_only = False
-        # Sprint Ι Pod-α — flipped to True via load_workbook(rich_text=True).
+        # Flipped to True via load_workbook(rich_text=True).
         self._rich_text: bool = False
         self._evaluator: Any = None
         self._sheet_names: list[str] = ["Sheet"]
         self._sheets: dict[str, Worksheet] = {}
         self._sheets["Sheet"] = Worksheet(self, "Sheet")
         self._rust_writer.add_sheet("Sheet")
-        # T1 PR3 — workbook-level metadata + defined names.
+        # Workbook-level metadata + defined names.
         self._properties_cache: Any | None = None
         self._properties_dirty: bool = False
         self._defined_names_cache: Any | None = None
         self._pending_defined_names: dict[str, Any] = {}
-        # RFC-058 — workbook-level security (workbookProtection + fileSharing).
+        # Workbook-level security (workbookProtection + fileSharing).
         # ``_security`` and ``_file_sharing`` hold user-supplied
         # WorkbookProtection / FileSharing instances. ``_pending_security_update``
         # is a sentinel: True once a setter touched either slot, drained at
-        # save() time so the writer / patcher emit the corresponding XML
+        # save() time so the active save backend emits the corresponding XML
         # blocks. None ⇒ no security configured (default).
         self._security: Any | None = None
         self._file_sharing: Any | None = None
         self._pending_security_update: bool = False
-        # RFC-030 / RFC-031 — append-order list of structural shift ops.
+        # Append-order list of structural shift ops.
         # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
         self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
-        # RFC-034 — append-order list of range-move ops.
+        # Append-order list of range-move ops.
         # Tuple shape: ``(sheet_title, src_min_col, src_min_row,
         # src_max_col, src_max_row, d_row, d_col, translate)``.
         self._pending_range_moves: list[
             tuple[str, int, int, int, int, int, int, bool]
         ] = []
-        # RFC-035 — append-order list of sheet-copy ops.
+        # Append-order list of sheet-copy ops.
         # Tuple shape: ``(src_title, dst_title, deep_copy_images)``.
         # The deep_copy_images flag is snapshot at copy_worksheet()
         # call time so a later toggle of wb.copy_options doesn't
         # retroactively affect already-queued copies.
         self._pending_sheet_copies: list[tuple[str, str, bool]] = []
-        # Sprint Μ Pod-γ (RFC-046 §6) — pending modify-mode chart adds.
+        # Pending modify-mode chart adds.
         # Per-sheet list of ``(chart_xml: bytes, anchor_a1: str,
-        # width_emu: int, height_emu: int)`` tuples. Pod-β's
+        # width_emu: int, height_emu: int)`` tuples.
         # ``Worksheet.add_chart`` populates this in modify mode (the
-        # writer-mode path stays on Pod-α's NativeWorkbook bindings).
+        # writer-mode path stays on NativeWorkbook bindings).
         # Drained by ``_flush_pending_charts_to_patcher`` in save().
         self._pending_chart_adds: dict[
             str, list[tuple[bytes, str, int, int]]
         ] = {}
-        # Sprint Ν Pod-γ (RFC-047 / RFC-048) — pending pivot caches +
-        # pivot table adds. Caches are workbook-scope (one cache → N
+        # Pending pivot caches + pivot table adds.
+        # Caches are workbook-scope (one cache -> N
         # tables); tables live on the owner Worksheet's
         # ``_pending_pivot_tables``. Drained by
         # ``_flush_pending_pivots_to_patcher`` at save() time AFTER
-        # charts (Phase 2.5l) so the matching patcher Phase 2.5m runs
-        # against an already-stable rels graph.
+        # charts so the save backend sees an already-stable rels graph.
         self._pending_pivot_caches: list[Any] = []
         # 0-based cache id allocator. Bumps when add_pivot_cache() is
         # called so the first cache is `cache_id=0` (matches OOXML
         # convention of 0-based cacheId in <pivotCache>).
         self._next_pivot_cache_id: int = 0
-        # RFC-061 Sub-feature 3.1 — slicer caches (workbook-scoped).
+        # Slicer caches are workbook-scoped.
         self._pending_slicer_caches: list[Any] = []
         self._next_slicer_cache_id: int = 0
-        # Sprint Θ Pod-C2 — workbook-level copy options.
+        # Workbook-level copy options.
         self.copy_options: CopyOptions = CopyOptions()
-        # Sprint Ι Pod-β — streaming read flag (write mode never streams).
+        # Streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
-        # Sprint Κ Pod-β — file format the workbook came from.  Write
+        # File format the workbook came from. Write
         # mode is xlsx by definition; the read/modify constructors set
         # this to "xlsx" / "xlsb" / "xls" as appropriate.
         self._format: str = "xlsx"
