@@ -1,15 +1,120 @@
-//! Python cell-value coercion helpers for the native writer backend.
+//! Cell-value write helpers for the native writer backend.
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 use wolfxl_writer::model::date::{date_to_excel_serial, datetime_to_excel_serial};
-use wolfxl_writer::model::WriteCellValue;
+use wolfxl_writer::model::{FormatSpec, Worksheet, WriteCellValue};
+use wolfxl_writer::refs;
+use wolfxl_writer::Workbook;
 
+use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::util::{parse_iso_date, parse_iso_datetime};
 
+pub(crate) fn parse_a1_to_row_col(a1: &str) -> PyResult<(u32, u32)> {
+    let cleaned = a1.replace('$', "");
+    refs::parse_a1(&cleaned)
+        .ok_or_else(|| PyValueError::new_err(format!("Invalid A1 reference: {a1}")))
+}
+
+pub(crate) fn write_cell_payload(
+    wb: &mut Workbook,
+    sheet: &str,
+    a1: &str,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let (row, col) = parse_a1_to_row_col(a1)?;
+    let value = payload_to_write_cell_value(payload)?;
+
+    // If the value is a date/datetime and no number_format has been
+    // attached yet, apply the oracle's defaults on the cell's style.
+    let default_nf = match (
+        payload
+            .cast::<PyDict>()
+            .ok()
+            .and_then(|d| d.get_item("type").ok().flatten())
+            .and_then(|v| v.extract::<String>().ok())
+            .as_deref(),
+        &value,
+    ) {
+        (Some("date"), WriteCellValue::DateSerial(_)) => Some("yyyy-mm-dd"),
+        (Some("datetime"), WriteCellValue::DateSerial(_)) => Some("yyyy-mm-dd hh:mm:ss"),
+        _ => None,
+    };
+
+    let style_id = if let Some(nf) = default_nf {
+        let spec = FormatSpec {
+            number_format: Some(nf.to_string()),
+            ..Default::default()
+        };
+        Some(wb.styles.intern_format(&spec))
+    } else {
+        None
+    };
+
+    let ws = require_sheet(wb, sheet)?;
+    ws.write_cell(row, col, value, style_id);
+    Ok(())
+}
+
+/// Write a rich-text inline-string cell from Python ``(text, font)`` runs.
+pub(crate) fn write_rich_text_cell(
+    wb: &mut Workbook,
+    sheet: &str,
+    a1: &str,
+    runs: &Bound<'_, PyList>,
+) -> PyResult<()> {
+    let (row, col) = parse_a1_to_row_col(a1)?;
+    let parsed = py_runs_to_rust_writer(runs)?;
+    let ws = require_sheet(wb, sheet)?;
+    ws.write_cell(row, col, WriteCellValue::InlineRichText(parsed), None);
+    Ok(())
+}
+
+pub(crate) fn write_array_formula_cell(
+    wb: &mut Workbook,
+    sheet: &str,
+    a1: &str,
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<()> {
+    let (row, col) = parse_a1_to_row_col(a1)?;
+    let value = array_formula_payload_to_write_cell_value(payload)?;
+    let ws = require_sheet(wb, sheet)?;
+    ws.write_cell(row, col, value, None);
+    Ok(())
+}
+
+/// Bulk-write a rectangular grid of raw Python values starting at `start_a1`.
+pub(crate) fn write_value_grid(
+    wb: &mut Workbook,
+    sheet: &str,
+    start_a1: &str,
+    values: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let (base_row, base_col) = parse_a1_to_row_col(start_a1)?;
+    let ws = require_sheet(wb, sheet)?;
+    let rows: Vec<Bound<'_, PyAny>> = values.extract()?;
+
+    for (ri, row_obj) in rows.iter().enumerate() {
+        let cols: Vec<Bound<'_, PyAny>> = row_obj.extract()?;
+        for (ci, val) in cols.iter().enumerate() {
+            if val.is_none() {
+                continue;
+            }
+            let row = base_row + ri as u32;
+            let col = base_col + ci as u32;
+            if let Some(value) = raw_python_to_write_cell_value(val)? {
+                ws.write_cell(row, col, value, None);
+            }
+            // else: skip silently like the oracle does.
+        }
+    }
+
+    Ok(())
+}
+
 /// Convert oracle-shape cell payload dict into a `WriteCellValue`.
-pub(crate) fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
+fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
     let dict = payload
         .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("payload must be a dict"))?;
@@ -96,9 +201,7 @@ fn require_finite_f64(f: f64, context: &str) -> PyResult<f64> {
 }
 
 /// Coerce a raw Python value from `write_sheet_values` to a writer cell value.
-pub(crate) fn raw_python_to_write_cell_value(
-    value: &Bound<'_, PyAny>,
-) -> PyResult<Option<WriteCellValue>> {
+fn raw_python_to_write_cell_value(value: &Bound<'_, PyAny>) -> PyResult<Option<WriteCellValue>> {
     if value.is_none() {
         return Ok(None);
     }
@@ -145,7 +248,7 @@ pub(crate) fn raw_python_to_write_cell_value(
     Ok(None)
 }
 
-pub(crate) fn array_formula_payload_to_write_cell_value(
+fn array_formula_payload_to_write_cell_value(
     payload: &Bound<'_, PyDict>,
 ) -> PyResult<WriteCellValue> {
     let kind: String = payload
@@ -208,6 +311,11 @@ pub(crate) fn array_formula_payload_to_write_cell_value(
     };
 
     Ok(value)
+}
+
+fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {
+    wb.sheet_mut_by_name(name)
+        .ok_or_else(|| PyValueError::new_err(format!("Unknown sheet: {name}")))
 }
 
 #[cfg(test)]

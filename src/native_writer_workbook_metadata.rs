@@ -5,7 +5,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use wolfxl_writer::model::{DefinedName, DocProperties};
 use wolfxl_writer::parse::workbook_security::{
-    FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
+    emit_file_sharing, emit_workbook_protection, FileSharingSpec, WorkbookProtectionSpec,
+    WorkbookSecurity,
 };
 use wolfxl_writer::Workbook;
 
@@ -146,4 +147,23 @@ pub(crate) fn dict_to_workbook_security(payload: &Bound<'_, PyDict>) -> PyResult
         workbook_protection,
         file_sharing,
     })
+}
+
+/// Render workbook security payloads to `workbookProtection` and `fileSharing`.
+#[pyfunction]
+pub fn serialize_workbook_security_dict(
+    payload: &Bound<'_, PyDict>,
+) -> PyResult<(Vec<u8>, Vec<u8>)> {
+    let security = dict_to_workbook_security(payload)?;
+    let prot_bytes = security
+        .workbook_protection
+        .as_ref()
+        .map(emit_workbook_protection)
+        .unwrap_or_default();
+    let share_bytes = security
+        .file_sharing
+        .as_ref()
+        .map(emit_file_sharing)
+        .unwrap_or_default();
+    Ok((prot_bytes, share_bytes))
 }

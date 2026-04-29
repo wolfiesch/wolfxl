@@ -34,21 +34,19 @@ use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use wolfxl_writer::model::{FormatSpec, Worksheet, WriteCellValue};
-use wolfxl_writer::refs;
+use wolfxl_writer::model::Worksheet;
 use wolfxl_writer::Workbook;
 
 use crate::native_writer_autofilter::install_autofilter;
 use crate::native_writer_cells::{
-    array_formula_payload_to_write_cell_value, payload_to_write_cell_value,
-    raw_python_to_write_cell_value,
+    parse_a1_to_row_col, write_array_formula_cell, write_cell_payload, write_rich_text_cell,
+    write_value_grid,
 };
 use crate::native_writer_charts::parse_chart_dict;
 use crate::native_writer_formats::{
     apply_border_grid, apply_cell_border, apply_cell_format, apply_format_grid,
 };
 use crate::native_writer_images::dict_to_sheet_image;
-use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
     dict_to_table, unwrap_optional_wrapper,
@@ -69,12 +67,6 @@ use crate::native_writer_workbook_metadata::{
 pub struct NativeWorkbook {
     inner: Workbook,
     saved: bool,
-}
-
-fn parse_a1_to_row_col(a1: &str) -> PyResult<(u32, u32)> {
-    let cleaned = a1.replace('$', "");
-    refs::parse_a1(&cleaned)
-        .ok_or_else(|| PyValueError::new_err(format!("Invalid A1 reference: {a1}")))
 }
 
 fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {
@@ -123,38 +115,7 @@ impl NativeWorkbook {
         a1: &str,
         payload: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let (row, col) = parse_a1_to_row_col(a1)?;
-        let value = payload_to_write_cell_value(payload)?;
-
-        // If the value is a date/datetime and no number_format has been
-        // attached yet, apply the oracle's defaults on the cell's style.
-        let default_nf = match (
-            payload
-                .cast::<PyDict>()
-                .ok()
-                .and_then(|d| d.get_item("type").ok().flatten())
-                .and_then(|v| v.extract::<String>().ok())
-                .as_deref(),
-            &value,
-        ) {
-            (Some("date"), WriteCellValue::DateSerial(_)) => Some("yyyy-mm-dd"),
-            (Some("datetime"), WriteCellValue::DateSerial(_)) => Some("yyyy-mm-dd hh:mm:ss"),
-            _ => None,
-        };
-
-        let style_id = if let Some(nf) = default_nf {
-            let spec = FormatSpec {
-                number_format: Some(nf.to_string()),
-                ..Default::default()
-            };
-            Some(self.inner.styles.intern_format(&spec))
-        } else {
-            None
-        };
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.write_cell(row, col, value, style_id);
-        Ok(())
+        write_cell_payload(&mut self.inner, sheet, a1, payload)
     }
 
     /// Sprint Ι Pod-α: write a rich-text inline-string cell.
@@ -170,12 +131,7 @@ impl NativeWorkbook {
         a1: &str,
         runs: &Bound<'_, pyo3::types::PyList>,
     ) -> PyResult<()> {
-        use wolfxl_writer::model::cell::WriteCellValue;
-        let (row, col) = parse_a1_to_row_col(a1)?;
-        let parsed = py_runs_to_rust_writer(runs)?;
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.write_cell(row, col, WriteCellValue::InlineRichText(parsed), None);
-        Ok(())
+        write_rich_text_cell(&mut self.inner, sheet, a1, runs)
     }
 
     /// RFC-057 (Sprint Ο Pod 1C): write an array-formula / data-table
@@ -192,11 +148,7 @@ impl NativeWorkbook {
         a1: &str,
         payload: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
-        let (row, col) = parse_a1_to_row_col(a1)?;
-        let value = array_formula_payload_to_write_cell_value(payload)?;
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        ws.write_cell(row, col, value, None);
-        Ok(())
+        write_array_formula_cell(&mut self.inner, sheet, a1, payload)
     }
 
     /// Bulk-write a rectangular grid of values starting at `start_a1`.
@@ -206,25 +158,7 @@ impl NativeWorkbook {
         start_a1: &str,
         values: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
-        let (base_row, base_col) = parse_a1_to_row_col(start_a1)?;
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        let rows: Vec<Bound<'_, PyAny>> = values.extract()?;
-        for (ri, row_obj) in rows.iter().enumerate() {
-            let cols: Vec<Bound<'_, PyAny>> = row_obj.extract()?;
-            for (ci, val) in cols.iter().enumerate() {
-                if val.is_none() {
-                    continue;
-                }
-                let row = base_row + ri as u32;
-                let col = base_col + ci as u32;
-                if let Some(value) = raw_python_to_write_cell_value(val)? {
-                    ws.write_cell(row, col, value, None);
-                }
-                // else: skip silently like the oracle does.
-            }
-        }
-        Ok(())
+        write_value_grid(&mut self.inner, sheet, start_a1, values)
     }
 
     pub fn write_cell_format(
@@ -609,30 +543,4 @@ impl NativeWorkbook {
         ws.charts.push(chart);
         Ok(())
     }
-}
-
-/// Sprint Ο Pod 1D (RFC-058 §10) — render the workbook security dict to
-/// the two XML fragments (`workbookProtection`, `fileSharing`).
-///
-/// Returns `(workbook_protection_bytes, file_sharing_bytes)`. Either
-/// element may be empty bytes when the corresponding source dict is
-/// `None` or all-default. Callers splice each fragment at the matching
-/// canonical position in `xl/workbook.xml`.
-#[pyfunction]
-pub fn serialize_workbook_security_dict(
-    payload: &Bound<'_, PyDict>,
-) -> PyResult<(Vec<u8>, Vec<u8>)> {
-    use wolfxl_writer::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
-    let security = dict_to_workbook_security(payload)?;
-    let prot_bytes = security
-        .workbook_protection
-        .as_ref()
-        .map(emit_workbook_protection)
-        .unwrap_or_default();
-    let share_bytes = security
-        .file_sharing
-        .as_ref()
-        .map(emit_file_sharing)
-        .unwrap_or_default();
-    Ok((prot_bytes, share_bytes))
 }
