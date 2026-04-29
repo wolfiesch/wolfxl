@@ -6,9 +6,16 @@ import re
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
+from wolfxl._cell_annotations import (
+    get_comment,
+    get_hyperlink,
+    set_comment,
+    set_hyperlink,
+)
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl._worksheet_rich_text import runs_payload_to_cellrichtext
 from wolfxl.utils.exceptions import IllegalCharacterError
 from wolfxl.utils.numbers import is_date_format
 
@@ -223,16 +230,7 @@ class Cell:
     @property
     def hyperlink(self) -> Any:
         """Return the cell hyperlink, including pending unsaved edits."""
-        # Pre-save visibility: a queued hyperlink shows up immediately
-        # without waiting for ``save()`` to flush to the writer.
-        ws = self._ws
-        coord = self.coordinate
-        pending = ws._pending_hyperlinks.get(coord, _UNSET)  # noqa: SLF001
-        if pending is None:
-            return None  # explicit-delete sentinel
-        if pending is not _UNSET:
-            return pending
-        return ws._get_hyperlinks_map().get(coord)  # noqa: SLF001
+        return get_hyperlink(self, _UNSET)
 
     @hyperlink.setter
     def hyperlink(self, value: Any) -> None:
@@ -242,47 +240,12 @@ class Cell:
             value: ``Hyperlink`` instance, URL string, or ``None`` to delete
                 the hyperlink on the next save.
         """
-        from wolfxl.worksheet.hyperlink import Hyperlink
-
-        ws = self._ws
-        wb = ws._workbook  # noqa: SLF001
-        # RFC-022: cell.hyperlink rounds-trips in BOTH write and modify
-        # mode. Both backends consume the same _pending_hyperlinks dict;
-        # the workbook flush dispatches to writer.add_hyperlink (write)
-        # or patcher.queue_hyperlink (modify). None is the explicit-delete
-        # sentinel per INDEX decision #5 — never use pop().
-        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError("cell.hyperlink requires write or modify mode")
-        coord = self.coordinate
-        if value is None:
-            ws._pending_hyperlinks[coord] = None  # noqa: SLF001
-            return
-        if isinstance(value, str):
-            value = Hyperlink(target=value)
-        if not isinstance(value, Hyperlink):
-            raise TypeError(
-                f"hyperlink must be a Hyperlink or str, got {type(value).__name__}"
-            )
-        ws._pending_hyperlinks[coord] = value  # noqa: SLF001
-        # openpyxl parity: if the cell has no value yet, surface the
-        # target/location as the visible cell value so a freshly-set
-        # hyperlink is also visibly clickable text.
-        if self.value is None:
-            display_value = value.display or value.target or value.location
-            if display_value is not None:
-                self.value = display_value
+        set_hyperlink(self, value)
 
     @property
     def comment(self) -> Any:
         """Return the cell comment, including pending unsaved edits."""
-        ws = self._ws
-        coord = self.coordinate
-        pending = ws._pending_comments.get(coord, _UNSET)  # noqa: SLF001
-        if pending is None:
-            return None
-        if pending is not _UNSET:
-            return pending
-        return ws._get_comments_map().get(coord)  # noqa: SLF001
+        return get_comment(self, _UNSET)
 
     @comment.setter
     def comment(self, value: Any) -> None:
@@ -292,26 +255,7 @@ class Cell:
             value: ``Comment`` instance, or ``None`` to delete the comment on
                 the next save.
         """
-        from wolfxl.comments import Comment
-
-        ws = self._ws
-        wb = ws._workbook  # noqa: SLF001
-        # RFC-023: cell.comment round-trips in both write and modify
-        # mode. Both backends consume the same _pending_comments dict;
-        # the workbook flush dispatches to writer.add_comment (write)
-        # or patcher.queue_comment (modify). None is the explicit-
-        # delete sentinel.
-        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError("cell.comment requires write or modify mode")
-        coord = self.coordinate
-        if value is None:
-            ws._pending_comments[coord] = None  # noqa: SLF001
-            return
-        if not isinstance(value, Comment):
-            raise TypeError(
-                f"comment must be a Comment, got {type(value).__name__}"
-            )
-        ws._pending_comments[coord] = value  # noqa: SLF001
+        set_comment(self, value)
 
     @property
     def protection(self) -> None:
@@ -548,8 +492,6 @@ class Cell:
         channel — defaulting ``Cell.value`` to flattened ``str`` so
         existing user code keeps working unchanged.
         """
-        from wolfxl.cell.rich_text import CellRichText, InlineFont, TextBlock
-
         ws = self._ws
         # Pre-save visibility for write/modify-mode setters.
         pending = ws._pending_rich_text.get((self._row, self._col))  # noqa: SLF001
@@ -561,33 +503,7 @@ class Cell:
         if reader is None:
             return None
         payload = reader.read_cell_rich_text(ws.title, self.coordinate)
-        if payload is None:
-            return None
-        out = CellRichText()
-        for entry in payload:
-            text, font_dict = entry[0], entry[1]
-            if font_dict is None:
-                out.append(text)
-            else:
-                out.append(
-                    TextBlock(
-                        InlineFont(
-                            rFont=font_dict.get("rFont"),
-                            charset=font_dict.get("charset"),
-                            family=font_dict.get("family"),
-                            b=font_dict.get("b"),
-                            i=font_dict.get("i"),
-                            strike=font_dict.get("strike"),
-                            color=font_dict.get("color"),
-                            sz=font_dict.get("sz"),
-                            u=font_dict.get("u"),
-                            vertAlign=font_dict.get("vertAlign"),
-                            scheme=font_dict.get("scheme"),
-                        ),
-                        text,
-                    )
-                )
-        return out
+        return runs_payload_to_cellrichtext(payload)
 
     @rich_text.setter
     def rich_text(self, val: Any) -> None:
