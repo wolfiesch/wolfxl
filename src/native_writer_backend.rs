@@ -28,9 +28,7 @@
 //! does not hit the merge path. Documented gap; fix in 4B by exposing
 //! a `StylesBuilder::lookup_format(style_id)` reverse query.
 
-use std::fs;
-
-use pyo3::exceptions::{PyIOError, PyValueError};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -55,6 +53,7 @@ use crate::native_writer_sheet_state::{
     apply_column_width, apply_freeze_panes, apply_merged_range, apply_page_breaks,
     apply_print_area, apply_row_height, apply_sheet_setup,
 };
+use crate::native_writer_workbook::{add_sheet_if_missing, move_sheet, rename_sheet, save_once};
 use crate::native_writer_workbook_metadata::{
     dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
 };
@@ -90,23 +89,16 @@ impl NativeWorkbook {
 
     pub fn add_sheet(&mut self, name: &str) -> PyResult<()> {
         // Mirror oracle's idempotent semantic: re-adding an existing sheet is a no-op.
-        if self.inner.sheet_by_name(name).is_some() {
-            return Ok(());
-        }
-        self.inner.add_sheet(Worksheet::new(name));
+        add_sheet_if_missing(&mut self.inner, name);
         Ok(())
     }
 
     pub fn rename_sheet(&mut self, old_name: &str, new_name: &str) -> PyResult<()> {
-        self.inner
-            .rename_sheet(old_name, new_name.to_string())
-            .map_err(PyValueError::new_err)
+        rename_sheet(&mut self.inner, old_name, new_name)
     }
 
     pub fn move_sheet(&mut self, name: &str, offset: isize) -> PyResult<()> {
-        self.inner
-            .move_sheet(name, offset)
-            .map_err(PyValueError::new_err)
+        move_sheet(&mut self.inner, name, offset)
     }
 
     pub fn write_cell_value(
@@ -234,18 +226,7 @@ impl NativeWorkbook {
     }
 
     pub fn save(&mut self, path: &str) -> PyResult<()> {
-        if self.saved {
-            return Err(PyValueError::new_err(
-                "Workbook already saved (NativeWorkbook is consumed-on-save)",
-            ));
-        }
-        // Mark consumed BEFORE emit/write so a panic in emit_xlsx or fs::write
-        // leaves the workbook un-retryable on partially-mutated state.
-        self.saved = true;
-        let bytes = wolfxl_writer::emit_xlsx(&mut self.inner);
-        fs::write(path, bytes)
-            .map_err(|e| PyIOError::new_err(format!("failed to write {path}: {e}")))?;
-        Ok(())
+        save_once(&mut self.inner, &mut self.saved, path)
     }
 
     // =========================================================================
