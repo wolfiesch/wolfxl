@@ -24,6 +24,7 @@ from wolfxl._worksheet_flush import (
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl._worksheet_patcher_flush import flush_to_patcher
+from wolfxl._worksheet_writer_flush import flush_to_writer
 from wolfxl._worksheet_write_buffers import (
     batch_write_dicts,
     extract_non_batchable,
@@ -2164,223 +2165,16 @@ class Worksheet:
         Booleans, dates, datetimes, and formulas fall through to per-cell
         ``write_cell_value()`` with type-preserving payload dicts.
         """
-        from wolfxl._cell import _UNSET
-
-        # -- Fast path: flush the append buffer directly ----------------------
-        # Rows added via append() are stored as raw Python lists — no Cell
-        # objects.  We write them in one shot via write_sheet_values(), then
-        # handle any non-batchable values (bool/date/formula) per-cell.
-        if self._append_buffer:
-            buf = self._append_buffer
-            start_row = self._append_buffer_start
-            start_a1 = rowcol_to_a1(start_row, 1)
-
-            indiv_from_buf = self._extract_non_batchable(buf, start_row, 1)
-
-            writer.write_sheet_values(self._title, start_a1, buf)
-
-            for r, c, val in indiv_from_buf:
-                coord = rowcol_to_a1(r, c)
-                payload = python_value_to_payload(val)
-                writer.write_cell_value(self._title, coord, payload)
-
-            self._append_buffer = []
-
-        # -- Flush bulk writes (write_rows) -----------------------------------
-        for grid, sr, sc in self._bulk_writes:
-            start_a1 = rowcol_to_a1(sr, sc)
-            indiv_from_bulk = self._extract_non_batchable(grid, sr, sc)
-            writer.write_sheet_values(self._title, start_a1, grid)
-            for r, c, val in indiv_from_bulk:
-                coord = rowcol_to_a1(r, c)
-                payload = python_value_to_payload(val)
-                writer.write_cell_value(self._title, coord, payload)
-        self._bulk_writes = []
-
-        # -- Partition dirty cells into batch-eligible values vs individual ----
-        #
-        # "batchable" = value is int | float | str | None (not bool, not
-        #               formula strings starting with "=").  These go into a 2-D
-        #               grid for a single write_sheet_values() call.
-        #
-        # Everything else (booleans, dates, formulas, format-dirty cells) is
-        # handled per-cell so that type semantics and formatting are preserved.
-
-        batch_vals: list[tuple[int, int, Any]] = []   # (row, col, raw_value)
-        indiv_vals: list[tuple[int, int, Any]] = []   # (row, col, cell)
-        format_cells: list[tuple[int, int, Any]] = [] # (row, col, cell)
-
-        for row, col in self._dirty:
-            cell = self._cells.get((row, col))
-            if cell is None:
-                continue
-
-            if cell._value_dirty:  # noqa: SLF001
-                val = cell._value  # noqa: SLF001
-                if val is None or (
-                    isinstance(val, (int, float, str))
-                    and not isinstance(val, bool)
-                    and not (isinstance(val, str) and val.startswith("="))
-                ):
-                    batch_vals.append((row, col, val))
-                else:
-                    indiv_vals.append((row, col, cell))
-
-            if cell._format_dirty:  # noqa: SLF001
-                format_cells.append((row, col, cell))
-
-        # -- Batch write values -----------------------------------------------
-        if batch_vals:
-            min_r = batch_vals[0][0]
-            min_c = batch_vals[0][1]
-            max_r = min_r
-            max_c = min_c
-            for r, c, _ in batch_vals:
-                if r < min_r:
-                    min_r = r
-                if r > max_r:
-                    max_r = r
-                if c < min_c:
-                    min_c = c
-                if c > max_c:
-                    max_c = c
-
-            num_rows = max_r - min_r + 1
-            num_cols = max_c - min_c + 1
-
-            grid: list[list[Any]] = [
-                [None] * num_cols for _ in range(num_rows)
-            ]
-            for r, c, v in batch_vals:
-                grid[r - min_r][c - min_c] = v
-
-            start = rowcol_to_a1(min_r, min_c)
-            writer.write_sheet_values(self._title, start, grid)
-
-        # -- Per-cell value writes for non-batchable types --------------------
-        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
-        from wolfxl.cell.rich_text import CellRichText
-
-        for _row, _col, cell in indiv_vals:
-            coord = rowcol_to_a1(cell._row, cell._col)  # noqa: SLF001
-            val = cell._value  # noqa: SLF001
-            if isinstance(val, ArrayFormula):
-                # RFC-057: write-mode array-formula — the native writer
-                # exposes ``write_cell_array_formula`` that emits
-                # ``<f t="array" ref="..."/>`` directly.
-                if hasattr(writer, "write_cell_array_formula"):
-                    writer.write_cell_array_formula(
-                        self._title,
-                        coord,
-                        {
-                            "kind": "array",
-                            "ref": val.ref,
-                            "text": val.text,
-                        },
-                    )
-                else:
-                    # Fallback: emit as a regular formula — Excel will
-                    # treat it as a single-cell formula (still computes
-                    # correctly for spilling 365 functions).
-                    payload = python_value_to_payload(f"={val.text}")
-                    writer.write_cell_value(self._title, coord, payload)
-                continue
-            if isinstance(val, DataTableFormula):
-                if hasattr(writer, "write_cell_array_formula"):
-                    writer.write_cell_array_formula(
-                        self._title,
-                        coord,
-                        {
-                            "kind": "data_table",
-                            "ref": val.ref,
-                            "ca": val.ca,
-                            "dt2D": val.dt2D,
-                            "dtr": val.dtr,
-                            "r1": val.r1,
-                            "r2": val.r2,
-                        },
-                    )
-                continue
-            if isinstance(val, CellRichText):
-                # Sprint Ι Pod-α: write-mode rich-text.  The native
-                # writer doesn't expose a structured rich-text API yet,
-                # so we flatten to plain text here and surface the
-                # structured form via a separate `add_rich_text_cell`
-                # call once the writer's model gains a RichText cell
-                # type.  Until then, write-mode rich-text round-trips
-                # only via modify mode.
-                if hasattr(writer, "write_cell_rich_text"):
-                    runs_payload = _cellrichtext_to_runs_payload(val)
-                    writer.write_cell_rich_text(self._title, coord, runs_payload)
-                else:
-                    payload = python_value_to_payload(str(val))
-                    writer.write_cell_value(self._title, coord, payload)
-                continue
-            payload = python_value_to_payload(val)
-            writer.write_cell_value(self._title, coord, payload)
-
-        # -- Spill-child placeholders ---------------------------------
-        # RFC-057: cells inside an array's spill range that aren't the
-        # master need a placeholder ``<c r="..."/>`` so Excel sees the
-        # spill area pre-populated.  These are not in ``self._dirty``
-        # because no Cell object was ever instantiated.
-        for (sr, sc), (kind, _payload) in self._pending_array_formulas.items():
-            if kind != "spill_child":
-                continue
-            if (sr, sc) in self._dirty:
-                # The user explicitly assigned a value to this child;
-                # skip the placeholder.
-                continue
-            coord = rowcol_to_a1(sr, sc)
-            if hasattr(writer, "write_cell_array_formula"):
-                writer.write_cell_array_formula(
-                    self._title,
-                    coord,
-                    {"kind": "spill_child"},
-                )
-
-        # -- Batch format / border writes -----------------------------------------
-        if format_cells:
-            # Build format and border dicts for each cell, then figure out if
-            # we can batch them into write_sheet_formats / write_sheet_borders.
-            fmt_entries: list[tuple[int, int, dict[str, Any]]] = []
-            bdr_entries: list[tuple[int, int, dict[str, Any]]] = []
-
-            for _r, _c, cell in format_cells:
-                r = cell._row  # noqa: SLF001
-                c = cell._col  # noqa: SLF001
-                fmt: dict[str, Any] = {}
-
-                if cell._font is not _UNSET and cell._font is not None:  # noqa: SLF001
-                    fmt.update(font_to_format_dict(cell._font))  # noqa: SLF001
-                if cell._fill is not _UNSET and cell._fill is not None:  # noqa: SLF001
-                    fmt.update(fill_to_format_dict(cell._fill))  # noqa: SLF001
-                if cell._alignment is not _UNSET and cell._alignment is not None:  # noqa: SLF001
-                    fmt.update(alignment_to_format_dict(cell._alignment))  # noqa: SLF001
-                if cell._number_format is not _UNSET and cell._number_format is not None:  # noqa: SLF001
-                    fmt["number_format"] = cell._number_format  # noqa: SLF001
-
-                if fmt:
-                    fmt_entries.append((r, c, fmt))
-
-                if cell._border is not _UNSET and cell._border is not None:  # noqa: SLF001
-                    bdict = border_to_rust_dict(cell._border)  # noqa: SLF001
-                    if bdict:
-                        bdr_entries.append((r, c, bdict))
-
-            # Use batch API if there are enough entries to justify grid
-            # construction overhead; otherwise per-cell is fine.
-            if len(fmt_entries) > 1:
-                self._batch_write_dicts(writer.write_sheet_formats, fmt_entries)
-            else:
-                for r, c, fmt in fmt_entries:
-                    writer.write_cell_format(self._title, rowcol_to_a1(r, c), fmt)
-
-            if len(bdr_entries) > 1:
-                self._batch_write_dicts(writer.write_sheet_borders, bdr_entries)
-            else:
-                for r, c, bdict in bdr_entries:
-                    writer.write_cell_border(self._title, rowcol_to_a1(r, c), bdict)
+        flush_to_writer(
+            self,
+            writer,
+            python_value_to_payload,
+            font_to_format_dict,
+            fill_to_format_dict,
+            alignment_to_format_dict,
+            border_to_rust_dict,
+            _cellrichtext_to_runs_payload,
+        )
 
     def _batch_write_dicts(
         self,
