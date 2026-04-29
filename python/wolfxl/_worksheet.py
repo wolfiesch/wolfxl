@@ -6,13 +6,19 @@ from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
-from wolfxl._utils import rowcol_to_a1
 from wolfxl._worksheet_access import (
     get_col_tuple,
     get_item,
     get_rect,
     get_row_tuple,
     resolve_string_key,
+)
+from wolfxl._worksheet_bounds import (
+    calculate_dimension as _calculate_dimension,
+    max_col as _worksheet_max_col,
+    max_row as _worksheet_max_row,
+    read_dimension_bounds as _read_dimension_bounds,
+    read_dimensions as _read_dimensions,
 )
 from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
 from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
@@ -937,11 +943,7 @@ class Worksheet:
 
     def calculate_dimension(self) -> str:
         """Return the used worksheet range in openpyxl's ``A1:C10`` form."""
-        bounds = self._read_dimension_bounds()
-        if bounds is None:
-            return "A1:A1"
-        min_row, min_col, max_row, max_col = bounds
-        return f"{rowcol_to_a1(min_row, min_col)}:{rowcol_to_a1(max_row, max_col)}"
+        return _calculate_dimension(self)
 
     def _read_dimension_bounds(self) -> tuple[int, int, int, int] | None:
         """Return 1-based ``(min_row, min_col, max_row, max_col)`` bounds.
@@ -951,26 +953,7 @@ class Worksheet:
         reported bounds must be the union, otherwise callers that derive
         ranges from ``calculate_dimension()`` miss unsaved edits.
         """
-        wb = self._workbook
-        rust_bounds: tuple[int, int, int, int] | None = None
-        if wb._rust_reader is not None:  # noqa: SLF001
-            raw = wb._rust_reader.read_sheet_bounds(self._title)  # noqa: SLF001
-            if isinstance(raw, tuple) and len(raw) == 4:
-                rust_bounds = tuple(int(value) for value in raw)  # type: ignore[assignment]
-
-        pending = self._pending_writes_bounds()
-        if rust_bounds is None and pending is None:
-            return None
-        if pending is None:
-            return rust_bounds
-        if rust_bounds is None:
-            return pending
-        return (
-            min(rust_bounds[0], pending[0]),
-            min(rust_bounds[1], pending[1]),
-            max(rust_bounds[2], pending[2]),
-            max(rust_bounds[3], pending[3]),
-        )
+        return _read_dimension_bounds(self)
 
     def _pending_writes_bounds(self) -> tuple[int, int, int, int] | None:
         """Bounds of unsaved Python-side writes: ``(min_row, min_col, max_row, max_col)``.
@@ -990,49 +973,13 @@ class Worksheet:
 
     def _read_dimensions(self) -> tuple[int, int]:
         """Discover sheet dimensions from the Rust backend (read mode only)."""
-        if self._dimensions is not None:
-            return self._dimensions
-        wb = self._workbook
-        if wb._rust_reader is None:  # noqa: SLF001
-            self._dimensions = (1, 1)
-            return self._dimensions
-        xml_dims = wb._rust_reader.read_sheet_dimensions(self._title)  # noqa: SLF001
-        if isinstance(xml_dims, tuple) and len(xml_dims) == 2:
-            self._dimensions = (int(xml_dims[0]), int(xml_dims[1]))
-            return self._dimensions
-        rows = wb._rust_reader.read_sheet_values(self._title, None, False)  # noqa: SLF001
-        if not rows or not isinstance(rows, list):
-            self._dimensions = (1, 1)
-            return self._dimensions
-        max_r = len(rows)
-        max_c = max((len(row) for row in rows), default=1)
-        self._dimensions = (max_r, max_c)
-        return self._dimensions
+        return _read_dimensions(self)
 
     def _max_row(self) -> int:
-        # Read mode honors the on-disk ``<dimension>`` tag (parity with
-        # openpyxl, which trusts the tag even when trailing rows are empty).
-        # Modify/write modes additionally union with Python-side pending
-        # writes so ``ws.max_row`` reflects ``append()`` / ``write_rows()`` /
-        # cell edits before save.
-        if self._workbook._rust_reader is not None:  # noqa: SLF001
-            disk_max_r = self._read_dimensions()[0]
-        else:
-            disk_max_r = max((k[0] for k in self._cells), default=0)
-        pending = self._pending_writes_bounds()
-        if pending is None:
-            return disk_max_r if disk_max_r else 1
-        return max(disk_max_r, pending[2])
+        return _worksheet_max_row(self)
 
     def _max_col(self) -> int:
-        if self._workbook._rust_reader is not None:  # noqa: SLF001
-            disk_max_c = self._read_dimensions()[1]
-        else:
-            disk_max_c = max((k[1] for k in self._cells), default=0)
-        pending = self._pending_writes_bounds()
-        if pending is None:
-            return disk_max_c if disk_max_c else 1
-        return max(disk_max_c, pending[3])
+        return _worksheet_max_col(self)
 
     # openpyxl exposes these as properties, not methods. Mirror that contract
     # so ``ws.max_row`` (no parens) works as a drop-in for openpyxl callers.
