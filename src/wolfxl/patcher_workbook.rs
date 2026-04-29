@@ -11,7 +11,7 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 use wolfxl_rels::RelsGraph;
 
-use super::{calcchain, content_types, XlsxPatcher};
+use super::{calcchain, content_types, properties, XlsxPatcher};
 
 /// Maps a sheet XML path to its relationship sidecar path.
 pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
@@ -271,6 +271,81 @@ pub(crate) fn minimal_styles_xml() -> String {
 <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs>
 </styleSheet>"#
         .to_string()
+}
+
+pub(super) fn apply_content_types_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let mut content_type_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+    for sheet_name in &patcher.sheet_order {
+        if let Some(ops) = patcher.queued_content_type_ops.get(sheet_name) {
+            content_type_ops.extend(ops.iter().cloned());
+        }
+    }
+    // Also pick up synthetic per-workbook keys (e.g. RFC-023
+    // ``__rfc023_comments__`` and RFC-045
+    // ``__rfc045_drawing_N__``) that aren't tied to a single
+    // sheet name in `sheet_order`. Iterate in sorted order so the
+    // emitted Override sequence is deterministic.
+    let mut synth_keys: Vec<&String> = patcher
+        .queued_content_type_ops
+        .keys()
+        .filter(|k| !patcher.sheet_order.contains(k))
+        .collect();
+    synth_keys.sort();
+    for k in synth_keys {
+        if let Some(ops) = patcher.queued_content_type_ops.get(k) {
+            content_type_ops.extend(ops.iter().cloned());
+        }
+    }
+    if !content_type_ops.is_empty() {
+        let ct_xml = ooxml_util::zip_read_to_string(zip, "[Content_Types].xml")?;
+        let mut graph = content_types::ContentTypesGraph::parse(ct_xml.as_bytes())
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}")))?;
+        for op in &content_type_ops {
+            graph.apply_op(op);
+        }
+        file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
+    }
+
+    Ok(())
+}
+
+pub(super) fn apply_document_properties_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    if let Some(ref payload) = patcher.queued_props {
+        let mut effective = payload.clone();
+        if effective.sheet_names.is_empty() {
+            effective.sheet_names = patcher.sheet_order.clone();
+        }
+        let core_bytes = properties::rewrite_core_props(&effective);
+        let app_bytes = properties::rewrite_app_props(&effective);
+
+        let core_in_source = source_zip_has_entry(zip, "docProps/core.xml");
+        let app_in_source = source_zip_has_entry(zip, "docProps/app.xml");
+
+        if core_in_source {
+            file_patches.insert("docProps/core.xml".into(), core_bytes);
+        } else {
+            patcher
+                .file_adds
+                .insert("docProps/core.xml".into(), core_bytes);
+        }
+        if app_in_source {
+            file_patches.insert("docProps/app.xml".into(), app_bytes);
+        } else {
+            patcher
+                .file_adds
+                .insert("docProps/app.xml".into(), app_bytes);
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn rebuild_calc_chain_phase(

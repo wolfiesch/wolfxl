@@ -77,7 +77,7 @@ use patcher_payload::{
 };
 use patcher_workbook::{
     epoch_or_now, load_or_empty_rels, minimal_styles_xml, parse_n_from_part_path,
-    replace_first_occurrence, sheet_rels_path_for, source_zip_has_entry, xml_escape_attr,
+    replace_first_occurrence, sheet_rels_path_for, xml_escape_attr,
 };
 use sheet_patcher::{CellPatch, CellValue};
 use styles::FormatSpec;
@@ -2890,39 +2890,7 @@ impl XlsxPatcher {
         // via new `xl/comments<N>.xml` Overrides + a vml `Default`),
         // and RFC-024 (Tables via new `xl/tables/tableN.xml` Overrides)
         // will be the first volume producers.
-        let mut content_type_ops: Vec<content_types::ContentTypeOp> = Vec::new();
-        for sheet_name in &self.sheet_order {
-            if let Some(ops) = self.queued_content_type_ops.get(sheet_name) {
-                content_type_ops.extend(ops.iter().cloned());
-            }
-        }
-        // Also pick up synthetic per-workbook keys (e.g. RFC-023
-        // ``__rfc023_comments__`` and RFC-045
-        // ``__rfc045_drawing_N__``) that aren't tied to a single
-        // sheet name in `sheet_order`. Iterate in sorted order so the
-        // emitted Override sequence is deterministic.
-        let mut synth_keys: Vec<&String> = self
-            .queued_content_type_ops
-            .keys()
-            .filter(|k| !self.sheet_order.contains(k))
-            .collect();
-        synth_keys.sort();
-        for k in synth_keys {
-            if let Some(ops) = self.queued_content_type_ops.get(k) {
-                content_type_ops.extend(ops.iter().cloned());
-            }
-        }
-        if !content_type_ops.is_empty() {
-            let ct_xml = ooxml_util::zip_read_to_string(&mut zip, "[Content_Types].xml")?;
-            let mut graph =
-                content_types::ContentTypesGraph::parse(ct_xml.as_bytes()).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}"))
-                })?;
-            for op in &content_type_ops {
-                graph.apply_op(op);
-            }
-            file_patches.insert("[Content_Types].xml".to_string(), graph.serialize());
-        }
+        self.apply_content_types_phase(&mut file_patches, &mut zip)?;
 
         // --- Phase 2.5d: Document properties (RFC-020) ---
         //
@@ -2939,29 +2907,7 @@ impl XlsxPatcher {
         // If the caller didn't supply `sheet_names`, we thread the
         // patcher's `sheet_order` in so app.xml's `<TitlesOfParts>`
         // matches the workbook's tab order.
-        if let Some(ref payload) = self.queued_props {
-            let mut effective = payload.clone();
-            if effective.sheet_names.is_empty() {
-                effective.sheet_names = self.sheet_order.clone();
-            }
-            let core_bytes = properties::rewrite_core_props(&effective);
-            let app_bytes = properties::rewrite_app_props(&effective);
-
-            let core_in_source = source_zip_has_entry(&mut zip, "docProps/core.xml");
-            let app_in_source = source_zip_has_entry(&mut zip, "docProps/app.xml");
-
-            if core_in_source {
-                file_patches.insert("docProps/core.xml".into(), core_bytes);
-            } else {
-                self.file_adds
-                    .insert("docProps/core.xml".into(), core_bytes);
-            }
-            if app_in_source {
-                file_patches.insert("docProps/app.xml".into(), app_bytes);
-            } else {
-                self.file_adds.insert("docProps/app.xml".into(), app_bytes);
-            }
-        }
+        self.apply_document_properties_phase(&mut file_patches, &mut zip)?;
 
         // Route RFC-023 comments/vml part bytes into the right
         // primitive (in-place patch vs. new add) and delete dropped
@@ -3293,6 +3239,22 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_structural::apply_range_moves_phase(self, file_patches, zip)
+    }
+
+    fn apply_content_types_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_workbook::apply_content_types_phase(self, file_patches, zip)
+    }
+
+    fn apply_document_properties_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_workbook::apply_document_properties_phase(self, file_patches, zip)
     }
 
     /// Phase 2.8 — rebuild `xl/calcChain.xml` (Sprint Θ Pod-C3).
