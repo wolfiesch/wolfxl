@@ -6,7 +6,14 @@ from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._cell import Cell
-from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl._utils import rowcol_to_a1
+from wolfxl._worksheet_access import (
+    get_col_tuple,
+    get_item,
+    get_rect,
+    get_row_tuple,
+    resolve_string_key,
+)
 from wolfxl._worksheet_collections import AutoFilter as _AutoFilter
 from wolfxl._worksheet_collections import MergedCellsProxy as _MergedCellsProxy
 from wolfxl._worksheet_dimensions import ColumnDimensionProxy, RowDimensionProxy
@@ -38,7 +45,7 @@ from wolfxl._worksheet_write_buffers import (
     materialize_append_buffer,
     materialize_bulk_writes,
 )
-from wolfxl.utils.cell import column_index_from_string, range_boundaries
+from wolfxl.utils.cell import column_index_from_string
 
 
 def _coerce_col_idx(idx: int | str, op: str) -> int:
@@ -666,90 +673,23 @@ class Worksheet:
         - ``ws[1]`` -> single row (int key; tuple of Cell)
         - ``ws[1:3]`` -> row slice (tuple of tuples of Cell)
         """
-        # Integer row access: ws[1] -> row 1 cells
-        if isinstance(key, int):
-            return self._get_row_tuple(key, key)[0]
-
-        # Integer slice: ws[1:3] -> rows 1..3 INCLUSIVE (openpyxl contract).
-        if isinstance(key, slice):
-            if key.start is None or key.stop is None:
-                raise ValueError("Row slice bounds must be specified")
-            return self._get_row_tuple(key.start, key.stop)
-
-        if isinstance(key, str):
-            return self._resolve_string_key(key)
-
-        raise TypeError(f"Worksheet indices must be str, int, or slice, not {type(key).__name__}")
+        return get_item(self, key)
 
     def _resolve_string_key(self, key: str) -> Any:
         """Resolve a string key to Cell / tuple / tuple-of-tuples."""
-        # Single A1 coord like "A1" — keep the fast path.
-        try:
-            row, col = a1_to_rowcol(key)
-        except ValueError:
-            pass
-        else:
-            return self._get_or_create_cell(row, col)
-
-        # Pure digits "3" -> single row.
-        if key.isdigit():
-            n = int(key)
-            return self._get_row_tuple(n, n)[0]
-
-        # Pure letters "A" -> single column.
-        try:
-            col_idx = column_index_from_string(key)
-        except ValueError:
-            col_idx = None
-        if col_idx is not None and not any(ch.isdigit() for ch in key):
-            return tuple(row for row in self._get_col_tuple(col_idx, col_idx))[0]
-
-        # Otherwise: range form ("A1:B2", "A:B", "1:3").
-        min_col, min_row, max_col, max_row = range_boundaries(key)
-
-        if min_row is None and max_row is None:
-            # Whole-column range like "A:B" -> openpyxl returns column-major
-            # (one tuple of cells per column). Bounded by the sheet's used rows.
-            bounded_max_row = self._max_row()
-            if min_col is None or max_col is None:
-                raise ValueError(f"Invalid range: {key!r}")
-            return self._get_col_tuple(min_col, max_col, 1, bounded_max_row)
-
-        if min_col is None and max_col is None:
-            # Whole-row range like "1:3" -> row-major
-            bounded_max_col = self._max_col()
-            if min_row is None or max_row is None:
-                raise ValueError(f"Invalid range: {key!r}")
-            return self._get_rect(min_row, 1, max_row, bounded_max_col)
-
-        if min_row is None or max_row is None or min_col is None or max_col is None:
-            raise ValueError(f"Invalid range: {key!r}")
-
-        # Degenerate single-cell range like "A1:A1" -> still return single Cell
-        # per openpyxl's contract for non-range strings — but a colon in the
-        # key means the user asked for a range, so return a 2D tuple.
-        return self._get_rect(min_row, min_col, max_row, max_col)
+        return resolve_string_key(self, key)
 
     def _get_rect(
         self, min_row: int, min_col: int, max_row: int, max_col: int,
     ) -> tuple[tuple[Cell, ...], ...]:
         """Return a 2D tuple of Cells for the inclusive rectangle."""
-        return tuple(
-            tuple(
-                self._get_or_create_cell(r, c) for c in range(min_col, max_col + 1)
-            )
-            for r in range(min_row, max_row + 1)
-        )
+        return get_rect(self, min_row, min_col, max_row, max_col)
 
     def _get_row_tuple(
         self, min_row: int, max_row: int,
     ) -> tuple[tuple[Cell, ...], ...]:
         """Return a tuple of row-tuples for rows min_row..max_row inclusive."""
-        max_c = self._max_col()
-        return tuple(
-            tuple(self._get_or_create_cell(r, c) for c in range(1, max_c + 1))
-            for r in range(min_row, max_row + 1)
-        )
+        return get_row_tuple(self, min_row, max_row)
 
     def _get_col_tuple(
         self,
@@ -759,12 +699,7 @@ class Worksheet:
         max_row: int | None = None,
     ) -> tuple[tuple[Cell, ...], ...]:
         """Return a tuple of column-tuples for cols min_col..max_col inclusive."""
-        r_min = min_row if min_row is not None else 1
-        r_max = max_row if max_row is not None else self._max_row()
-        return tuple(
-            tuple(self._get_or_create_cell(r, c) for r in range(r_min, r_max + 1))
-            for c in range(min_col, max_col + 1)
-        )
+        return get_col_tuple(self, min_col, max_col, min_row, max_row)
 
     def __setitem__(self, key: str, value: Any) -> None:
         """``ws['A1'] = 42`` — shorthand for setting a cell's value."""
