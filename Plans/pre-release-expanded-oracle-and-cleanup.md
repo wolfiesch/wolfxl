@@ -662,7 +662,11 @@ First no-behavior split target, completed 2026-04-28:
    `crates/wolfxl-writer/src/emit/workbook_xml.rs` on 2026-04-29 so
    user-defined names and auto-injected print areas share one explicit block
    emitter.
-109. Next helper candidate: continue with another narrow Rust save phase only if
+109. Write-mode workbook metadata flushing was split in
+   `python/wolfxl/_workbook_writer_flush.py` on 2026-04-29 so document
+   properties, defined names, and workbook security keep explicit drains while
+   preserving the facade call order.
+110. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

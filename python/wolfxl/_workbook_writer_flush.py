@@ -11,6 +11,13 @@ def flush_workbook_writes(wb: Any) -> None:
     if writer is None:
         return
 
+    _flush_properties(wb, writer)
+    _flush_defined_names(wb, writer)
+    _flush_security(wb, writer)
+
+
+def _flush_properties(wb: Any, writer: Any) -> None:
+    """Push dirty document properties to the native writer."""
     if wb._properties_dirty and wb._properties_cache is not None:  # noqa: SLF001
         props = wb._properties_cache  # noqa: SLF001
         payload = {
@@ -32,6 +39,9 @@ def flush_workbook_writes(wb: Any) -> None:
         writer.set_properties(payload)
         wb._properties_dirty = False  # noqa: SLF001
 
+
+def _flush_defined_names(wb: Any, writer: Any) -> None:
+    """Push pending defined names to the native writer."""
     if wb._pending_defined_names:  # noqa: SLF001
         primary_sheet = wb._sheet_names[0] if wb._sheet_names else "Sheet"  # noqa: SLF001
         for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
@@ -57,6 +67,9 @@ def flush_workbook_writes(wb: Any) -> None:
             )
         wb._pending_defined_names.clear()  # noqa: SLF001
 
+
+def _flush_security(wb: Any, writer: Any) -> None:
+    """Push pending workbook security metadata to the native writer."""
     if wb._pending_security_update:  # noqa: SLF001
         payload = wb._build_security_dict()  # noqa: SLF001
         if hasattr(writer, "set_workbook_security"):
