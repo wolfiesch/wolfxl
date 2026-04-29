@@ -19,6 +19,7 @@ from wolfxl._workbook_state import (
 from wolfxl import _workbook_features
 from wolfxl import _workbook_calc
 from wolfxl import _workbook_metadata
+from wolfxl import _workbook_lifecycle
 from wolfxl import _workbook_patcher_flush
 from wolfxl import _workbook_save
 from wolfxl import _workbook_sheets
@@ -1302,27 +1303,15 @@ class Workbook:
 
     def close(self) -> None:
         """Release native handles and delete any temporary decrypted input."""
-        self._rust_reader = None
-        self._rust_writer = None
-        self._rust_patcher = None
-        # Sprint Ι Pod-γ: clean up the decryption tempfile, if any.
-        tmp_path = getattr(self, "_tempfile_path", None)
-        if tmp_path is not None:
-            import os
-
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            self._tempfile_path = None
+        _workbook_lifecycle.close_workbook(self)
 
     def __enter__(self) -> Workbook:
         """Return this workbook for ``with`` statement use."""
-        return self
+        return _workbook_lifecycle.enter_workbook(self)
 
     def __exit__(self, *args: object) -> None:
         """Close this workbook at the end of a ``with`` block."""
-        self.close()
+        _workbook_lifecycle.exit_workbook(self, *args)
 
     def __repr__(self) -> str:
         """Return a compact debug representation for this workbook.
@@ -1330,10 +1319,4 @@ class Workbook:
         Returns:
             A string containing the workbook mode and sheet names.
         """
-        if self._rust_patcher is not None:
-            mode = "modify"
-        elif self._rust_reader is not None:
-            mode = "read"
-        else:
-            mode = "write"
-        return f"<Workbook [{mode}] sheets={self._sheet_names}>"
+        return _workbook_lifecycle.repr_workbook(self)
