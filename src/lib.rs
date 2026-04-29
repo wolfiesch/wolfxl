@@ -9,6 +9,7 @@ mod native_writer_anchors;
 mod native_writer_autofilter;
 mod native_writer_backend;
 mod native_writer_cells;
+mod native_writer_charts;
 mod native_writer_formats;
 mod native_writer_images;
 mod native_writer_rich_text;
@@ -58,7 +59,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_class::<native_writer_backend::NativeWorkbook>()?;
     m.add_function(wrap_pyfunction!(
-        native_writer_backend::serialize_chart_dict,
+        native_writer_charts::serialize_chart_dict,
         m
     )?)?;
     // Sprint Ο Pod 1D (RFC-058 §10) — workbook security serializer.
