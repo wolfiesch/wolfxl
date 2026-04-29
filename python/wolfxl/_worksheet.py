@@ -28,6 +28,12 @@ from wolfxl._worksheet_flush import (
     flush_autofilter_post_cells,
     flush_compat_properties,
 )
+from wolfxl._worksheet_iteration import (
+    iter_cols as _iter_cols,
+    iter_cols_bulk as _iter_cols_bulk,
+    iter_rows as _iter_rows,
+    iter_rows_bulk as _iter_rows_bulk,
+)
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
 from wolfxl._worksheet_patcher_flush import flush_to_patcher
 from wolfxl._worksheet_records import (
@@ -825,37 +831,14 @@ class Worksheet:
         delegate to the existing eager style table. ``values_only=True``
         yields plain value tuples and never instantiates a cell object.
         """
-        wb = self._workbook  # noqa: SLF001
-        # Sprint Ι Pod-β — streaming fast path (read_only=True OR auto-trigger).
-        if wb._rust_reader is not None and getattr(wb, "_source_path", None):  # noqa: SLF001
-            from wolfxl._streaming import should_auto_stream, stream_iter_rows
-
-            stream_now = bool(getattr(wb, "_read_only", False)) or should_auto_stream(self)
-            if stream_now:
-                yield from stream_iter_rows(
-                    self, min_row, max_row, min_col, max_col, values_only=values_only
-                )
-                return
-
-        # Fast bulk path: read-mode + values_only -> single Rust FFI call.
-        if values_only and self._workbook._rust_reader is not None:  # noqa: SLF001
-            yield from self._iter_rows_bulk(min_row, max_row, min_col, max_col)
-            return
-
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-
-        for r in range(r_min, r_max + 1):
-            if values_only:
-                yield tuple(
-                    self._get_or_create_cell(r, c).value for c in range(c_min, c_max + 1)
-                )
-            else:
-                yield tuple(
-                    self._get_or_create_cell(r, c) for c in range(c_min, c_max + 1)
-                )
+        yield from _iter_rows(
+            self,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            values_only=values_only,
+        )
 
     def iter_cols(
         self,
@@ -871,25 +854,14 @@ class Worksheet:
         Yields one tuple per column, each containing values (or Cells) for
         every row in range.
         """
-        # Fast bulk path: read-mode + values_only -> single Rust FFI call.
-        if values_only and self._workbook._rust_reader is not None:  # noqa: SLF001
-            yield from self._iter_cols_bulk(min_col, max_col, min_row, max_row)
-            return
-
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-
-        for c in range(c_min, c_max + 1):
-            if values_only:
-                yield tuple(
-                    self._get_or_create_cell(r, c).value for r in range(r_min, r_max + 1)
-                )
-            else:
-                yield tuple(
-                    self._get_or_create_cell(r, c) for r in range(r_min, r_max + 1)
-                )
+        yield from _iter_cols(
+            self,
+            min_col=min_col,
+            max_col=max_col,
+            min_row=min_row,
+            max_row=max_row,
+            values_only=values_only,
+        )
 
     def _iter_cols_bulk(
         self,
@@ -905,49 +877,7 @@ class Worksheet:
         happens in Python. This avoids per-cell Rust calls in the values_only
         fast path and keeps parity with ``iter_rows`` performance characteristics.
         """
-        from wolfxl._cell import _payload_to_python
-
-        reader = self._workbook._rust_reader  # noqa: SLF001
-        sheet = self._title
-        data_only = getattr(self._workbook, "_data_only", False)
-
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
-
-        use_plain = hasattr(reader, "read_sheet_values_plain")
-        if use_plain:
-            rows = reader.read_sheet_values_plain(sheet, range_str, data_only)
-        else:
-            rows = reader.read_sheet_values(sheet, range_str, data_only)
-
-        if not rows:
-            return
-
-        expected_cols = c_max - c_min + 1
-        expected_rows = r_max - r_min + 1
-
-        # Normalize every row to expected_cols width so transposition is safe.
-        normalized: list[list[Any]] = []
-        for row in rows:
-            if use_plain:
-                vals = list(row)
-            else:
-                vals = [_payload_to_python(cell) for cell in row]
-            n = len(vals)
-            if n >= expected_cols:
-                normalized.append(vals[:expected_cols])
-            else:
-                normalized.append(vals + [None] * (expected_cols - n))
-
-        # Pad rows if Rust returned fewer rows than requested.
-        while len(normalized) < expected_rows:
-            normalized.append([None] * expected_cols)
-
-        for c_offset in range(expected_cols):
-            yield tuple(normalized[r_offset][c_offset] for r_offset in range(expected_rows))
+        yield from _iter_cols_bulk(self, min_col, max_col, min_row, max_row)
 
     @property
     def rows(self) -> Iterator[tuple[Any, ...]]:
@@ -977,48 +907,7 @@ class Worksheet:
         Python objects), falling back to ``read_sheet_values()`` + per-cell
         ``_payload_to_python()`` conversion otherwise.
         """
-        from wolfxl._cell import _payload_to_python
-
-        reader = self._workbook._rust_reader  # noqa: SLF001
-        sheet = self._title
-        data_only = getattr(self._workbook, "_data_only", False)
-
-        # Build an A1:B2-style range string for Rust.
-        r_min = min_row or 1
-        r_max = max_row or self._max_row()
-        c_min = min_col or 1
-        c_max = max_col or self._max_col()
-        range_str = f"{rowcol_to_a1(r_min, c_min)}:{rowcol_to_a1(r_max, c_max)}"
-
-        # Prefer plain-value read (no dict overhead) if available.
-        use_plain = hasattr(reader, "read_sheet_values_plain")
-        if use_plain:
-            rows = reader.read_sheet_values_plain(sheet, range_str, data_only)
-        else:
-            rows = reader.read_sheet_values(sheet, range_str, data_only)
-
-        if not rows:
-            return
-
-        # The Rust range returns exactly the rows/cols we asked for,
-        # so no Python-side slicing is needed.
-        expected_cols = c_max - c_min + 1
-        for row in rows:
-            if use_plain:
-                # Already native Python values; pad/trim to expected width.
-                n = len(row)
-                if n >= expected_cols:
-                    yield tuple(row[:expected_cols])
-                else:
-                    yield tuple(row) + (None,) * (expected_cols - n)
-            else:
-                # Dict payloads need conversion.
-                vals = [_payload_to_python(cell) for cell in row]
-                n = len(vals)
-                if n >= expected_cols:
-                    yield tuple(vals[:expected_cols])
-                else:
-                    yield tuple(vals) + (None,) * (expected_cols - n)
+        yield from _iter_rows_bulk(self, min_row, max_row, min_col, max_col)
 
     def iter_cell_records(
         self,
