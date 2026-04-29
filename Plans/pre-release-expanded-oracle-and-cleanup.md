@@ -146,7 +146,7 @@ Current largest WolfXL hotspots:
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 2319 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
+| `src/native_writer_backend.rs` | 2262 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1489 | Separate workbook orchestration from feature registration and save pipeline helpers. |
@@ -480,7 +480,11 @@ First no-behavior split target, completed 2026-04-28:
    `src/native_writer_workbook_metadata.rs` on 2026-04-29 while preserving
    defined-name scoping, document-property field mapping, created-date parsing,
    and workbookProtection/fileSharing dict conversion.
-59. Next helper candidate: continue with another narrow Rust save phase only if
+59. Native writer array/data-table formula payload parsing moved into
+   `src/native_writer_cells.rs` on 2026-04-29 while preserving payload
+   validation errors, leading-equals stripping, data-table flags, references,
+   and spill-child placeholder handling.
+60. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

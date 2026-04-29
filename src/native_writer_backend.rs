@@ -47,7 +47,10 @@ use wolfxl_writer::model::{FormatSpec, Worksheet, WriteCellValue};
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
 
-use crate::native_writer_cells::{payload_to_write_cell_value, raw_python_to_write_cell_value};
+use crate::native_writer_cells::{
+    array_formula_payload_to_write_cell_value, payload_to_write_cell_value,
+    raw_python_to_write_cell_value,
+};
 use crate::native_writer_formats::{intern_border_only, intern_format_from_dict};
 use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::native_writer_sheet_features::{
@@ -189,68 +192,8 @@ impl NativeWorkbook {
         a1: &str,
         payload: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
-        use wolfxl_writer::model::cell::WriteCellValue;
         let (row, col) = parse_a1_to_row_col(a1)?;
-
-        let kind: String = payload
-            .get_item("kind")?
-            .ok_or_else(|| PyValueError::new_err("payload missing 'kind'"))?
-            .extract()?;
-
-        let value = match kind.as_str() {
-            "array" => {
-                let ref_range: String = payload
-                    .get_item("ref")?
-                    .ok_or_else(|| PyValueError::new_err("array kind needs 'ref'"))?
-                    .extract()?;
-                let mut text: String = payload
-                    .get_item("text")?
-                    .ok_or_else(|| PyValueError::new_err("array kind needs 'text'"))?
-                    .extract()?;
-                if let Some(stripped) = text.strip_prefix('=') {
-                    text = stripped.to_string();
-                }
-                WriteCellValue::ArrayFormula { ref_range, text }
-            }
-            "data_table" => {
-                let ref_range: String = payload
-                    .get_item("ref")?
-                    .ok_or_else(|| PyValueError::new_err("data_table kind needs 'ref'"))?
-                    .extract()?;
-                let ca: bool = payload
-                    .get_item("ca")?
-                    .map(|v| v.extract::<bool>())
-                    .transpose()?
-                    .unwrap_or(false);
-                let dt2_d: bool = payload
-                    .get_item("dt2D")?
-                    .map(|v| v.extract::<bool>())
-                    .transpose()?
-                    .unwrap_or(false);
-                let dtr: bool = payload
-                    .get_item("dtr")?
-                    .map(|v| v.extract::<bool>())
-                    .transpose()?
-                    .unwrap_or(false);
-                let r1: Option<String> = payload.get_item("r1")?.and_then(|v| v.extract().ok());
-                let r2: Option<String> = payload.get_item("r2")?.and_then(|v| v.extract().ok());
-                WriteCellValue::DataTableFormula {
-                    ref_range,
-                    ca,
-                    dt2_d,
-                    dtr,
-                    r1,
-                    r2,
-                }
-            }
-            "spill_child" => WriteCellValue::SpillChild,
-            other => {
-                return Err(PyValueError::new_err(format!(
-                    "Unknown array-formula kind: '{other}'"
-                )))
-            }
-        };
-
+        let value = array_formula_payload_to_write_cell_value(payload)?;
         let ws = require_sheet(&mut self.inner, sheet)?;
         ws.write_cell(row, col, value, None);
         Ok(())
