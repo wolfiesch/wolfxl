@@ -43,3 +43,84 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
 
     out.push_str("</hyperlinks>");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::comment::Comment;
+    use crate::model::worksheet::Hyperlink;
+
+    fn external(target: &str) -> Hyperlink {
+        Hyperlink {
+            target: target.into(),
+            is_internal: false,
+            display: None,
+            tooltip: None,
+        }
+    }
+
+    #[test]
+    fn external_hyperlink_starts_at_rid1_without_comments_or_tables() {
+        let mut sheet = Worksheet::new("S");
+        sheet
+            .hyperlinks
+            .insert("A1".to_string(), external("https://example.com"));
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<hyperlinks><hyperlink ref=\"A1\" r:id=\"rId1\"/></hyperlinks>"
+        );
+    }
+
+    #[test]
+    fn external_hyperlink_starts_at_rid3_when_comments_reserve_two_rids() {
+        let mut sheet = Worksheet::new("S");
+        sheet.comments.insert(
+            "A1".to_string(),
+            Comment {
+                author_id: 0,
+                text: "Note".into(),
+                width_pt: None,
+                height_pt: None,
+                visible: false,
+            },
+        );
+        sheet
+            .hyperlinks
+            .insert("B1".to_string(), external("https://example.com"));
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<hyperlinks><hyperlink ref=\"B1\" r:id=\"rId3\"/></hyperlinks>"
+        );
+    }
+
+    #[test]
+    fn internal_hyperlink_uses_location_without_relationship_id() {
+        let mut sheet = Worksheet::new("S");
+        sheet.hyperlinks.insert(
+            "A1".to_string(),
+            Hyperlink {
+                target: "Sheet2!A1".into(),
+                is_internal: true,
+                display: None,
+                tooltip: None,
+            },
+        );
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(
+            out,
+            "<hyperlinks><hyperlink ref=\"A1\" location=\"Sheet2!A1\"/></hyperlinks>"
+        );
+        assert!(!out.contains("r:id="), "internal link has no r:id: {out}");
+    }
+}

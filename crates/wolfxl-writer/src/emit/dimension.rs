@@ -64,6 +64,18 @@ mod tests {
     }
 
     #[test]
+    fn populated_cells_expand_dimension_to_bounding_range() {
+        let mut sheet = Worksheet::new("S");
+        sheet.write_cell(1, 1, WriteCellValue::Number(1.0), None);
+        sheet.write_cell(10, 4, WriteCellValue::Number(2.0), None);
+        let mut out = String::new();
+
+        emit(&mut out, &sheet);
+
+        assert_eq!(out, "<dimension ref=\"A1:D10\"/>");
+    }
+
+    #[test]
     fn styled_blank_cells_expand_dimension() {
         let mut sheet = Worksheet::new("S");
         sheet.write_cell(10, 5, WriteCellValue::Blank, Some(3));
