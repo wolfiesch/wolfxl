@@ -1657,28 +1657,7 @@ class Workbook:
         defined-names queue. The dict still includes a
         ``print_titles`` slot for the writer-mode path.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            # Cheap probe: skip sheets whose 6 setup slots are all
-            # None / un-touched. The accessors lazy-init, so reading
-            # ws.page_setup would defeat the optimisation.
-            if (
-                ws._page_setup is None  # noqa: SLF001
-                and ws._page_margins is None  # noqa: SLF001
-                and ws._header_footer is None  # noqa: SLF001
-                and ws._sheet_view is None  # noqa: SLF001
-                and ws._protection is None  # noqa: SLF001
-                and getattr(ws, "_print_title_rows", None) is None
-                and getattr(ws, "_print_title_cols", None) is None
-            ):
-                continue
-            d = ws.to_rust_setup_dict()
-            # Skip queues whose slots are all None — there's nothing
-            # to splice and the patcher's parser would just no-op.
-            if all(v is None for v in d.values()):
-                continue
-            self._rust_patcher.queue_sheet_setup_update(ws.title, d)
+        _workbook_patcher_flush.flush_pending_sheet_setup_to_patcher(self)
 
     def _flush_pending_page_breaks_to_patcher(self) -> None:
         """Sprint Π Pod Π-α (RFC-062) — drain each sheet's queued
@@ -1696,40 +1675,7 @@ class Workbook:
         (e.g. zero breaks AND default sheet-format) are skipped to
         keep the no-op save path byte-identical.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            row_breaks = getattr(ws, "_row_breaks", None)
-            col_breaks = getattr(ws, "_col_breaks", None)
-            sheet_format = getattr(ws, "_sheet_format", None)
-            # Cheap probe: skip sheets whose 3 slots are all None /
-            # un-touched. The accessors lazy-init, so reading
-            # ws.row_breaks would defeat the optimisation.
-            if row_breaks is None and col_breaks is None and sheet_format is None:
-                continue
-            try:
-                breaks_dict = ws.to_rust_page_breaks_dict()
-                fmt_dict = ws.to_rust_sheet_format_dict()
-            except Exception:
-                # Defensive: skip malformed wrappers rather than
-                # poison the save path.
-                continue
-            payload = {
-                "row_breaks": breaks_dict.get("row_breaks"),
-                "col_breaks": breaks_dict.get("col_breaks"),
-                "sheet_format": fmt_dict,
-            }
-            # Skip when every slot is None — the patcher's parser
-            # would just no-op anyway, but we match the existing
-            # sheet-setup flush's defensive shape.
-            if all(v is None for v in payload.values()):
-                continue
-            try:
-                self._rust_patcher.queue_page_breaks_update(ws.title, payload)
-            except Exception:
-                # If patcher rejects (e.g. sheet not present in source
-                # because it's a write-mode sheet), silently skip.
-                continue
+        _workbook_patcher_flush.flush_pending_page_breaks_to_patcher(self)
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
         """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
@@ -1740,30 +1686,7 @@ class Workbook:
         patcher Phase 2.5o then re-emits the ``<autoFilter>`` block
         and computes the ``<row hidden="1">`` markers.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            af = ws._auto_filter  # noqa: SLF001
-            has_state = (
-                af.ref is not None
-                or bool(af.filter_columns)
-                or af.sort_state is not None
-            )
-            if not has_state:
-                continue
-            try:
-                d = af.to_rust_dict()
-            except Exception:
-                # Defensive: skip malformed autofilter rather than
-                # poison the save path.
-                continue
-            try:
-                self._rust_patcher.queue_autofilter(ws.title, d)
-            except Exception:
-                # If patcher rejects (e.g. sheet not present in source
-                # because it's a write-mode sheet), silently skip — the
-                # native writer path will handle it on its own.
-                continue
+        _workbook_patcher_flush.flush_pending_autofilters_to_patcher(self)
 
     def _flush_pending_pivots_to_patcher(self) -> None:
         """Sprint Ν Pod-γ (RFC-047 / RFC-048) — drain pending pivot

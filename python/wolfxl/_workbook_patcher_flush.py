@@ -276,3 +276,78 @@ def flush_properties_to_patcher(wb: Any) -> None:
     payload = {key: value for key, value in payload.items() if value is not None}
     patcher.queue_properties(payload)
     wb._properties_dirty = False  # noqa: SLF001
+
+
+def flush_pending_sheet_setup_to_patcher(wb: Any) -> None:
+    """Drain pending worksheet setup metadata into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        if (
+            ws._page_setup is None  # noqa: SLF001
+            and ws._page_margins is None  # noqa: SLF001
+            and ws._header_footer is None  # noqa: SLF001
+            and ws._sheet_view is None  # noqa: SLF001
+            and ws._protection is None  # noqa: SLF001
+            and getattr(ws, "_print_title_rows", None) is None
+            and getattr(ws, "_print_title_cols", None) is None
+        ):
+            continue
+        payload = ws.to_rust_setup_dict()
+        if all(value is None for value in payload.values()):
+            continue
+        patcher.queue_sheet_setup_update(ws.title, payload)
+
+
+def flush_pending_page_breaks_to_patcher(wb: Any) -> None:
+    """Drain pending page-break and sheet-format metadata into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        row_breaks = getattr(ws, "_row_breaks", None)
+        col_breaks = getattr(ws, "_col_breaks", None)
+        sheet_format = getattr(ws, "_sheet_format", None)
+        if row_breaks is None and col_breaks is None and sheet_format is None:
+            continue
+        try:
+            breaks_dict = ws.to_rust_page_breaks_dict()
+            fmt_dict = ws.to_rust_sheet_format_dict()
+        except Exception:
+            continue
+        payload = {
+            "row_breaks": breaks_dict.get("row_breaks"),
+            "col_breaks": breaks_dict.get("col_breaks"),
+            "sheet_format": fmt_dict,
+        }
+        if all(value is None for value in payload.values()):
+            continue
+        try:
+            patcher.queue_page_breaks_update(ws.title, payload)
+        except Exception:
+            continue
+
+
+def flush_pending_autofilters_to_patcher(wb: Any) -> None:
+    """Drain pending worksheet autofilter state into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        autofilter = ws._auto_filter  # noqa: SLF001
+        has_state = (
+            autofilter.ref is not None
+            or bool(autofilter.filter_columns)
+            or autofilter.sort_state is not None
+        )
+        if not has_state:
+            continue
+        try:
+            payload = autofilter.to_rust_dict()
+        except Exception:
+            continue
+        try:
+            patcher.queue_autofilter(ws.title, payload)
+        except Exception:
+            continue
