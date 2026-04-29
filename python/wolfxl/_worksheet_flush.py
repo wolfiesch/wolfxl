@@ -56,17 +56,26 @@ def flush_autofilter_post_cells(ws: Worksheet, writer: Any) -> None:
     """Flush the auto-filter after cell values have reached the writer."""
     sheet = ws._title  # noqa: SLF001
     af = ws._auto_filter  # noqa: SLF001
-    af_has_state = (
-        af.ref is not None
-        or bool(af.filter_columns)
-        or af.sort_state is not None
+    if _autofilter_has_state(af) and hasattr(writer, "set_autofilter_native"):
+        _set_autofilter_native(writer, sheet, af)
+
+
+def _autofilter_has_state(autofilter: Any) -> bool:
+    """Return whether an autofilter contains state worth writing."""
+    return (
+        autofilter.ref is not None
+        or bool(autofilter.filter_columns)
+        or autofilter.sort_state is not None
     )
-    if af_has_state and hasattr(writer, "set_autofilter_native"):
-        try:
-            writer.set_autofilter_native(sheet, af.to_rust_dict())
-        except Exception:
-            # Defensive: do not poison the save path on a malformed filter spec.
-            pass
+
+
+def _set_autofilter_native(writer: Any, sheet: str, autofilter: Any) -> None:
+    """Set one native autofilter, preserving the defensive save path."""
+    try:
+        writer.set_autofilter_native(sheet, autofilter.to_rust_dict())
+    except Exception:
+        # Defensive: do not poison the save path on a malformed filter spec.
+        pass
 
 
 def flush_compat_properties(ws: Worksheet, writer: Any) -> None:
@@ -108,7 +117,14 @@ def _flush_sheet_setup(ws: Worksheet, writer: Any, sheet: str) -> None:
     """Flush page setup, margins, headers, views, protection, and titles."""
     if not hasattr(writer, "set_sheet_setup_native"):
         return
-    has_setup = (
+    if not _has_sheet_setup(ws):
+        return
+    _set_sheet_setup_native(writer, sheet, ws)
+
+
+def _has_sheet_setup(ws: Worksheet) -> bool:
+    """Return whether a worksheet has pending sheet setup state."""
+    return (
         ws._page_setup is not None  # noqa: SLF001
         or ws._page_margins is not None  # noqa: SLF001
         or ws._header_footer is not None  # noqa: SLF001
@@ -117,11 +133,21 @@ def _flush_sheet_setup(ws: Worksheet, writer: Any, sheet: str) -> None:
         or getattr(ws, "_print_title_rows", None) is not None
         or getattr(ws, "_print_title_cols", None) is not None
     )
-    if not has_setup:
-        return
+
+
+def _sheet_setup_payload(ws: Worksheet) -> dict[str, Any] | None:
+    """Build the native writer payload for worksheet setup metadata."""
+    payload = ws.to_rust_setup_dict()
+    if any(value is not None for value in payload.values()):
+        return payload
+    return None
+
+
+def _set_sheet_setup_native(writer: Any, sheet: str, ws: Worksheet) -> None:
+    """Set one native sheet setup payload, preserving the defensive save path."""
     try:
-        payload = ws.to_rust_setup_dict()
-        if any(v is not None for v in payload.values()):
+        payload = _sheet_setup_payload(ws)
+        if payload is not None:
             writer.set_sheet_setup_native(sheet, payload)
     except Exception:
         # Defensive: Python wrapper validators should already reject bad specs.
@@ -132,21 +158,38 @@ def _flush_page_breaks(ws: Worksheet, writer: Any, sheet: str) -> None:
     """Flush page breaks and sheet format metadata."""
     if not hasattr(writer, "set_page_breaks_native"):
         return
-    has_breaks = (
+    if not _has_page_breaks(ws):
+        return
+    _set_page_breaks_native(writer, sheet, ws)
+
+
+def _has_page_breaks(ws: Worksheet) -> bool:
+    """Return whether a worksheet has pending page-break or sheet-format state."""
+    return (
         ws._row_breaks is not None  # noqa: SLF001
         or ws._col_breaks is not None  # noqa: SLF001
         or ws._sheet_format is not None  # noqa: SLF001
     )
-    if not has_breaks:
-        return
+
+
+def _page_breaks_payload(ws: Worksheet) -> dict[str, Any] | None:
+    """Build the native writer payload for page breaks and sheet format."""
+    breaks_dict = ws.to_rust_page_breaks_dict()
+    payload = {
+        "row_breaks": breaks_dict.get("row_breaks"),
+        "col_breaks": breaks_dict.get("col_breaks"),
+        "sheet_format": ws.to_rust_sheet_format_dict(),
+    }
+    if any(value is not None for value in payload.values()):
+        return payload
+    return None
+
+
+def _set_page_breaks_native(writer: Any, sheet: str, ws: Worksheet) -> None:
+    """Set one native page-break payload, preserving the defensive save path."""
     try:
-        breaks_dict = ws.to_rust_page_breaks_dict()
-        payload = {
-            "row_breaks": breaks_dict.get("row_breaks"),
-            "col_breaks": breaks_dict.get("col_breaks"),
-            "sheet_format": ws.to_rust_sheet_format_dict(),
-        }
-        if any(v is not None for v in payload.values()):
+        payload = _page_breaks_payload(ws)
+        if payload is not None:
             writer.set_page_breaks_native(sheet, payload)
     except Exception:
         # Defensive: do not poison the save path.
