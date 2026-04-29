@@ -690,7 +690,10 @@ First no-behavior split target, completed 2026-04-28:
 116. Modify-mode page-break and autofilter queueing was split in
    `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so pending-state
    checks, payload construction, and skip-on-error queueing are named helpers.
-117. Next helper candidate: continue with another narrow Rust save phase only if
+117. Modify-mode sheet-setup queueing was split in
+   `python/wolfxl/_workbook_patcher_flush.py` on 2026-04-29 so pending-state
+   checks, setup payload construction, and patcher queueing are named helpers.
+118. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

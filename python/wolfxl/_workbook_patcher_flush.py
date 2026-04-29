@@ -316,20 +316,38 @@ def flush_pending_sheet_setup_to_patcher(wb: Any) -> None:
     if patcher is None:
         return
     for ws in wb._sheets.values():  # noqa: SLF001
-        if (
-            ws._page_setup is None  # noqa: SLF001
-            and ws._page_margins is None  # noqa: SLF001
-            and ws._header_footer is None  # noqa: SLF001
-            and ws._sheet_view is None  # noqa: SLF001
-            and ws._protection is None  # noqa: SLF001
-            and getattr(ws, "_print_title_rows", None) is None
-            and getattr(ws, "_print_title_cols", None) is None
-        ):
+        if not _has_sheet_setup_updates(ws):
             continue
-        payload = ws.to_rust_setup_dict()
-        if all(value is None for value in payload.values()):
-            continue
-        patcher.queue_sheet_setup_update(ws.title, payload)
+        _queue_sheet_setup_update(patcher, ws)
+
+
+def _has_sheet_setup_updates(ws: Any) -> bool:
+    """Return whether a worksheet has pending sheet setup state."""
+    return not (
+        ws._page_setup is None  # noqa: SLF001
+        and ws._page_margins is None  # noqa: SLF001
+        and ws._header_footer is None  # noqa: SLF001
+        and ws._sheet_view is None  # noqa: SLF001
+        and ws._protection is None  # noqa: SLF001
+        and getattr(ws, "_print_title_rows", None) is None
+        and getattr(ws, "_print_title_cols", None) is None
+    )
+
+
+def _sheet_setup_payload(ws: Any) -> dict[str, Any] | None:
+    """Build the Rust patcher payload for worksheet setup metadata."""
+    payload = ws.to_rust_setup_dict()
+    if all(value is None for value in payload.values()):
+        return None
+    return payload
+
+
+def _queue_sheet_setup_update(patcher: Any, ws: Any) -> None:
+    """Queue one sheet-setup update into the Rust patcher."""
+    payload = _sheet_setup_payload(ws)
+    if payload is None:
+        return
+    patcher.queue_sheet_setup_update(ws.title, payload)
 
 
 def flush_pending_page_breaks_to_patcher(wb: Any) -> None:
