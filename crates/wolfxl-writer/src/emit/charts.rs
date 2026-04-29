@@ -44,18 +44,19 @@
 mod layout;
 mod pivot;
 mod primitives;
+mod text;
 
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
     DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Marker, RadarStyle,
-    Reference, Series, SeriesAxis, SeriesTitle, Title, TitleRun, Trendline, TrendlineKind,
-    ValueAxis,
+    Reference, Series, SeriesAxis, Trendline, TrendlineKind, ValueAxis,
 };
 use crate::xml_escape;
 
 use layout::{emit_layout, emit_legend, emit_view_3d};
 use pivot::emit_pivot_source;
 use primitives::{bool_str, fmt_f64, strip_alpha};
+use text::{emit_series_title, emit_title};
 
 const C_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const A_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -399,26 +400,6 @@ fn emit_series(out: &mut String, ser: &Series, kind: ChartKind, pivot_fmt_id: Op
     out.push_str("</c:ser>");
 }
 
-fn emit_series_title(out: &mut String, title: &SeriesTitle) {
-    out.push_str("<c:tx>");
-    match title {
-        SeriesTitle::StrRef(r) => {
-            out.push_str("<c:strRef>");
-            out.push_str(&format!(
-                "<c:f>{}</c:f>",
-                xml_escape::text(&r.to_series_title_formula_string())
-            ));
-            out.push_str("</c:strRef>");
-        }
-        SeriesTitle::Literal(s) => {
-            out.push_str("<c:v>");
-            out.push_str(&xml_escape::text(s));
-            out.push_str("</c:v>");
-        }
-    }
-    out.push_str("</c:tx>");
-}
-
 fn emit_num_ref(out: &mut String, r: &Reference) {
     out.push_str("<c:numRef>");
     out.push_str(&format!(
@@ -426,64 +407,6 @@ fn emit_num_ref(out: &mut String, r: &Reference) {
         xml_escape::text(&r.to_formula_string())
     ));
     out.push_str("</c:numRef>");
-}
-
-fn emit_title(out: &mut String, t: &Title) {
-    out.push_str("<c:title>");
-    out.push_str("<c:tx>");
-    out.push_str("<c:rich>");
-    out.push_str("<a:bodyPr/>");
-    out.push_str("<a:p>");
-    out.push_str("<a:pPr><a:defRPr/></a:pPr>");
-    for run in &t.runs {
-        emit_run(out, run);
-    }
-    out.push_str("</a:p>");
-    out.push_str("</c:rich>");
-    out.push_str("</c:tx>");
-    if let Some(layout) = &t.layout {
-        emit_layout(out, layout);
-    }
-    if let Some(o) = t.overlay {
-        out.push_str(&format!("<c:overlay val=\"{}\"/>", bool_str(o)));
-    }
-    out.push_str("</c:title>");
-}
-
-fn emit_run(out: &mut String, run: &TitleRun) {
-    out.push_str("<a:r>");
-    let mut rpr = String::new();
-    if let Some(sz) = run.size_pt {
-        // Excel encodes pt as 100 * pt.
-        rpr.push_str(&format!(" sz=\"{}\"", sz * 100));
-    }
-    if let Some(b) = run.bold {
-        rpr.push_str(&format!(" b=\"{}\"", bool_str(b)));
-    }
-    if let Some(i) = run.italic {
-        rpr.push_str(&format!(" i=\"{}\"", bool_str(i)));
-    }
-    if let Some(u) = run.underline {
-        rpr.push_str(if u { " u=\"sng\"" } else { " u=\"none\"" });
-    }
-    let has_rpr = !rpr.is_empty() || run.color.is_some() || run.font_name.is_some();
-    if has_rpr {
-        out.push_str(&format!("<a:rPr lang=\"en-US\"{rpr}>"));
-        if let Some(c) = &run.color {
-            out.push_str(&format!(
-                "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
-                strip_alpha(c)
-            ));
-        }
-        if let Some(f) = &run.font_name {
-            out.push_str(&format!("<a:latin typeface=\"{}\"/>", xml_escape::attr(f)));
-        }
-        out.push_str("</a:rPr>");
-    }
-    out.push_str("<a:t>");
-    out.push_str(&xml_escape::text(&run.text));
-    out.push_str("</a:t>");
-    out.push_str("</a:r>");
 }
 
 /// Emit a `<c:majorGridlines/>` or `<c:minorGridlines/>` element.
