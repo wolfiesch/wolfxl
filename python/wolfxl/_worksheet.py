@@ -53,6 +53,24 @@ from wolfxl._worksheet_records import (
     schema as _infer_worksheet_schema,
     sheet_visibility as _sheet_visibility,
 )
+from wolfxl._worksheet_setup import (
+    get_col_breaks,
+    get_dimension_holder,
+    get_freeze_panes,
+    get_header_footer,
+    get_page_margins,
+    get_page_setup,
+    get_protection,
+    get_row_breaks,
+    get_sheet_format,
+    get_sheet_view,
+    set_freeze_panes,
+    set_print_title_cols,
+    set_print_title_rows,
+    to_rust_page_breaks_dict as _to_rust_page_breaks_dict,
+    to_rust_setup_dict as _to_rust_setup_dict,
+    to_rust_sheet_format_dict as _to_rust_sheet_format_dict,
+)
 from wolfxl._worksheet_structural import (
     delete_cols as _delete_cols,
     delete_rows as _delete_rows,
@@ -275,13 +293,7 @@ class Worksheet:
         In read mode, reads from the Rust backend.  In write mode,
         the value is stored and flushed to Rust on ``save()``.
         """
-        wb = self._workbook
-        if wb._rust_reader is not None and self._freeze_panes is None:  # noqa: SLF001
-            info = wb._rust_reader.read_freeze_panes(self._title)  # noqa: SLF001
-            if info and info.get("mode"):
-                return info.get("top_left_cell")
-            return None
-        return self._freeze_panes
+        return get_freeze_panes(self)
 
     @freeze_panes.setter
     def freeze_panes(self, value: str | None) -> None:
@@ -291,27 +303,7 @@ class Worksheet:
             value: The top-left scrollable cell, such as ``"B2"``, or
                 ``None`` to clear frozen panes.
         """
-        self._freeze_panes = value
-        # Mirror the mutation onto sheet_view.pane so callers reading
-        # ``ws.sheet_view.pane`` after a ``ws.freeze_panes = "B2"``
-        # observe a consistent snapshot. RFC-055 §2.5.
-        if self._sheet_view is not None:
-            from wolfxl.worksheet.views import Pane
-            if value is None:
-                self._sheet_view.pane = None
-            else:
-                from wolfxl._utils import a1_to_rowcol
-                try:
-                    r, c = a1_to_rowcol(value)
-                except Exception:
-                    return
-                self._sheet_view.pane = Pane(
-                    xSplit=float(c - 1),
-                    ySplit=float(r - 1),
-                    topLeftCell=value,
-                    activePane="bottomRight",
-                    state="frozen",
-                )
+        set_freeze_panes(self, value)
 
     # ------------------------------------------------------------------
     # Sprint Ο Pod 1A (RFC-055) — print / view / protection accessors
@@ -320,10 +312,7 @@ class Worksheet:
     @property
     def page_setup(self) -> Any:
         """Lazy ``PageSetup`` accessor (RFC-055 §2.1)."""
-        if self._page_setup is None:
-            from wolfxl.worksheet.page_setup import PageSetup
-            self._page_setup = PageSetup()
-        return self._page_setup
+        return get_page_setup(self)
 
     @page_setup.setter
     def page_setup(self, value: Any) -> None:
@@ -338,10 +327,7 @@ class Worksheet:
     @property
     def page_margins(self) -> Any:
         """Lazy ``PageMargins`` accessor (RFC-055 §2.2)."""
-        if self._page_margins is None:
-            from wolfxl.worksheet.page_setup import PageMargins
-            self._page_margins = PageMargins()
-        return self._page_margins
+        return get_page_margins(self)
 
     @page_margins.setter
     def page_margins(self, value: Any) -> None:
@@ -361,10 +347,7 @@ class Worksheet:
     @property
     def header_footer(self) -> Any:
         """Lazy ``HeaderFooter`` accessor (RFC-055 §2.3)."""
-        if self._header_footer is None:
-            from wolfxl.worksheet.header_footer import HeaderFooter
-            self._header_footer = HeaderFooter()
-        return self._header_footer
+        return get_header_footer(self)
 
     @header_footer.setter
     def header_footer(self, value: Any) -> None:
@@ -384,26 +367,7 @@ class Worksheet:
         on the setter side; on the getter side, if a sheet view has a
         non-None pane we surface that as ``freeze_panes`` for parity.
         """
-        if self._sheet_view is None:
-            from wolfxl.worksheet.views import Pane, SheetView
-            sv = SheetView()
-            # If freeze_panes was set before the lazy view materialized,
-            # carry the state across so the view is consistent.
-            if self._freeze_panes is not None:
-                from wolfxl._utils import a1_to_rowcol
-                try:
-                    r, c = a1_to_rowcol(self._freeze_panes)
-                    sv.pane = Pane(
-                        xSplit=float(c - 1),
-                        ySplit=float(r - 1),
-                        topLeftCell=self._freeze_panes,
-                        activePane="bottomRight",
-                        state="frozen",
-                    )
-                except Exception:
-                    pass
-            self._sheet_view = sv
-        return self._sheet_view
+        return get_sheet_view(self)
 
     @sheet_view.setter
     def sheet_view(self, value: Any) -> None:
@@ -418,10 +382,7 @@ class Worksheet:
     @property
     def protection(self) -> Any:
         """Lazy ``SheetProtection`` accessor (RFC-055 §2.6)."""
-        if self._protection is None:
-            from wolfxl.worksheet.protection import SheetProtection
-            self._protection = SheetProtection()
-        return self._protection
+        return get_protection(self)
 
     @protection.setter
     def protection(self, value: Any) -> None:
@@ -440,10 +401,7 @@ class Worksheet:
     @property
     def row_breaks(self) -> Any:
         """Lazy ``PageBreakList`` of horizontal page breaks (RFC-062 §3)."""
-        if self._row_breaks is None:
-            from wolfxl.worksheet.pagebreak import PageBreakList
-            self._row_breaks = PageBreakList()
-        return self._row_breaks
+        return get_row_breaks(self)
 
     @row_breaks.setter
     def row_breaks(self, value: Any) -> None:
@@ -457,10 +415,7 @@ class Worksheet:
     @property
     def col_breaks(self) -> Any:
         """Lazy ``PageBreakList`` of vertical page breaks (RFC-062 §3)."""
-        if self._col_breaks is None:
-            from wolfxl.worksheet.pagebreak import PageBreakList
-            self._col_breaks = PageBreakList()
-        return self._col_breaks
+        return get_col_breaks(self)
 
     @col_breaks.setter
     def col_breaks(self, value: Any) -> None:
@@ -488,10 +443,7 @@ class Worksheet:
     @property
     def sheet_format(self) -> Any:
         """Lazy ``SheetFormatProperties`` accessor (RFC-062 §3)."""
-        if self._sheet_format is None:
-            from wolfxl.worksheet.dimensions import SheetFormatProperties
-            self._sheet_format = SheetFormatProperties()
-        return self._sheet_format
+        return get_sheet_format(self)
 
     @sheet_format.setter
     def sheet_format(self, value: Any) -> None:
@@ -506,8 +458,7 @@ class Worksheet:
     @property
     def dimension_holder(self) -> Any:
         """Return a fresh ``DimensionHolder`` view bound to this worksheet."""
-        from wolfxl.worksheet.dimensions import DimensionHolder
-        return DimensionHolder(self)
+        return get_dimension_holder(self)
 
     def to_rust_page_breaks_dict(self) -> dict[str, Any]:
         """Return the §10 dict shape for ``<rowBreaks>`` / ``<colBreaks>``.
@@ -516,18 +467,7 @@ class Worksheet:
         is un-touched OR carries zero breaks — the patcher / writer
         then knows to skip emitting the corresponding XML block.
         """
-        d: dict[str, Any] = {}
-        d["row_breaks"] = (
-            self._row_breaks.to_rust_dict()
-            if self._row_breaks is not None and len(self._row_breaks) > 0
-            else None
-        )
-        d["col_breaks"] = (
-            self._col_breaks.to_rust_dict()
-            if self._col_breaks is not None and len(self._col_breaks) > 0
-            else None
-        )
-        return d
+        return _to_rust_page_breaks_dict(self)
 
     def to_rust_sheet_format_dict(self) -> dict[str, Any] | None:
         """Return the §10 dict for ``<sheetFormatPr>`` or ``None``.
@@ -536,9 +476,7 @@ class Worksheet:
         values — the writer then keeps the legacy hardcoded
         ``<sheetFormatPr defaultRowHeight="15"/>`` emit path.
         """
-        if self._sheet_format is None or self._sheet_format.is_default():
-            return None
-        return self._sheet_format.to_rust_dict()
+        return _to_rust_sheet_format_dict(self)
 
     @property
     def print_title_rows(self) -> str | None:
@@ -553,12 +491,7 @@ class Worksheet:
             value: Row range string such as ``"1:3"``, or ``None`` to clear
                 repeat rows.
         """
-        if value is not None:
-            from wolfxl.worksheet.print_settings import RowRange
-            # Validate and normalize.
-            self._print_title_rows = str(RowRange.from_string(value))
-        else:
-            self._print_title_rows = None
+        set_print_title_rows(self, value)
 
     @property
     def print_title_cols(self) -> str | None:
@@ -573,11 +506,7 @@ class Worksheet:
             value: Column range string such as ``"A:C"``, or ``None`` to clear
                 repeat columns.
         """
-        if value is not None:
-            from wolfxl.worksheet.print_settings import ColRange
-            self._print_title_cols = str(ColRange.from_string(value))
-        else:
-            self._print_title_cols = None
+        set_print_title_cols(self, value)
 
     def to_rust_setup_dict(self) -> dict[str, Any]:
         """Return the §10 dict contract for the Rust patcher / writer.
@@ -586,40 +515,7 @@ class Worksheet:
         its construction defaults — the Rust side then knows to skip
         emitting the corresponding XML.
         """
-        d: dict[str, Any] = {}
-        d["page_setup"] = (
-            self._page_setup.to_rust_dict()
-            if self._page_setup is not None and not self._page_setup.is_default()
-            else None
-        )
-        d["page_margins"] = (
-            self._page_margins.to_rust_dict()
-            if self._page_margins is not None and not self._page_margins.is_default()
-            else None
-        )
-        d["header_footer"] = (
-            self._header_footer.to_rust_dict()
-            if self._header_footer is not None and not self._header_footer.is_default()
-            else None
-        )
-        d["sheet_view"] = (
-            self._sheet_view.to_rust_dict()
-            if self._sheet_view is not None and not self._sheet_view.is_default()
-            else None
-        )
-        d["sheet_protection"] = (
-            self._protection.to_rust_dict()
-            if self._protection is not None and not self._protection.is_default()
-            else None
-        )
-        if self._print_title_rows is not None or self._print_title_cols is not None:
-            d["print_titles"] = {
-                "rows": self._print_title_rows,
-                "cols": self._print_title_cols,
-            }
-        else:
-            d["print_titles"] = None
-        return d
+        return _to_rust_setup_dict(self)
 
     @property
     def auto_filter(self) -> _AutoFilter:

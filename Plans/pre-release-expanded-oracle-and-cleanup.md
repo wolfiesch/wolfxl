@@ -147,7 +147,7 @@ Current largest WolfXL hotspots:
 | `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
-| `python/wolfxl/_worksheet.py` | 1718 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
+| `python/wolfxl/_worksheet.py` | 1614 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2915 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1940 | Separate workbook orchestration from feature registration and save pipeline helpers. |
 
@@ -397,7 +397,12 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_worksheet_media.py` on 2026-04-28 while preserving the
    public worksheet method docstrings and pending writer/patcher payload
    queues.
-37. Next helper candidate: continue with another narrow Rust save phase only if
+37. Worksheet freeze panes, page setup/margins, header/footer, sheet view,
+   protection, page breaks, sheet format, print titles, dimension holder, and
+   setup/page-break Rust payload helpers moved into
+   `python/wolfxl/_worksheet_setup.py` on 2026-04-29 while preserving the
+   public worksheet property/method docstrings and serializer payload shapes.
+38. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
