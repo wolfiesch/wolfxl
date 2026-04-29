@@ -604,7 +604,10 @@ First no-behavior split target, completed 2026-04-28:
 91. Chart title, title-run, and series-title emission were extracted into
    `crates/wolfxl-writer/src/emit/charts/text.rs` on 2026-04-29 without
    changing chart XML output.
-92. Next helper candidate: continue with another narrow Rust save phase only if
+92. Chart graphical property emission (`<c:spPr>`) was extracted into
+   `crates/wolfxl-writer/src/emit/charts/style.rs` on 2026-04-29 while
+   preserving series, marker, data-point, and gridline styling output.
+93. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

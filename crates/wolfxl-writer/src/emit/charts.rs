@@ -44,18 +44,20 @@
 mod layout;
 mod pivot;
 mod primitives;
+mod style;
 mod text;
 
 use crate::model::chart::{
     Axis, AxisCommon, BarDir, BarGrouping, CategoryAxis, Chart, ChartKind, DataLabels, DataPoint,
-    DateAxis, DisplayUnits, ErrorBars, GraphicalProperties, Gridlines, Marker, RadarStyle,
-    Reference, Series, SeriesAxis, Trendline, TrendlineKind, ValueAxis,
+    DateAxis, DisplayUnits, ErrorBars, Gridlines, Marker, RadarStyle, Reference, Series,
+    SeriesAxis, Trendline, TrendlineKind, ValueAxis,
 };
 use crate::xml_escape;
 
 use layout::{emit_layout, emit_legend, emit_view_3d};
 use pivot::emit_pivot_source;
-use primitives::{bool_str, fmt_f64, strip_alpha};
+use primitives::{bool_str, fmt_f64};
+use style::emit_graphical_props;
 use text::{emit_series_title, emit_title};
 
 const C_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -544,42 +546,6 @@ fn emit_data_point(out: &mut String, d: &DataPoint) {
         emit_graphical_props(out, g);
     }
     out.push_str("</c:dPt>");
-}
-
-fn emit_graphical_props(out: &mut String, g: &GraphicalProperties) {
-    out.push_str("<c:spPr>");
-    // Fill.
-    if g.no_fill {
-        out.push_str("<a:noFill/>");
-    } else if let Some(c) = &g.fill_color {
-        out.push_str(&format!(
-            "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
-            strip_alpha(c)
-        ));
-    }
-    // Line.
-    let has_line_attrs =
-        g.line_color.is_some() || g.line_width_emu.is_some() || g.line_dash.is_some() || g.no_line;
-    if has_line_attrs {
-        if let Some(w) = g.line_width_emu {
-            out.push_str(&format!("<a:ln w=\"{w}\">"));
-        } else {
-            out.push_str("<a:ln>");
-        }
-        if g.no_line {
-            out.push_str("<a:noFill/>");
-        } else if let Some(c) = &g.line_color {
-            out.push_str(&format!(
-                "<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>",
-                strip_alpha(c)
-            ));
-        }
-        if let Some(d) = &g.line_dash {
-            out.push_str(&format!("<a:prstDash val=\"{}\"/>", xml_escape::attr(d)));
-        }
-        out.push_str("</a:ln>");
-    }
-    out.push_str("</c:spPr>");
 }
 
 fn emit_axis(out: &mut String, axis: &Axis) {
