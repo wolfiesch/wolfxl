@@ -136,11 +136,11 @@ class Workbook:
         rels-graph fallback when ``<sheets>`` is empty/self-closing.
 
         ``read_only`` activates the SAX streaming fast path on
-        ``iter_rows`` (Sprint Ι Pod-β). The CalamineStyledBook reader
-        is still constructed for style/format lookups (used by the
-        non-streaming Cell properties), but the streaming reader
-        bypasses calamine's eager materialization for the large-sheet
-        scan path. See :func:`wolfxl.load_workbook` for details.
+        ``iter_rows``. The CalamineStyledBook reader is still
+        constructed for style/format lookups used by non-streaming Cell
+        properties, but the streaming reader bypasses calamine's eager
+        materialization for the large-sheet scan path. See
+        :func:`wolfxl.load_workbook` for details.
         """
         from wolfxl import _rust
 
@@ -165,13 +165,12 @@ class Workbook:
         modify: bool = False,
         read_only: bool = False,
     ) -> Workbook:
-        """Open an OOXML-encrypted .xlsx via msoffcrypto-tool (Sprint Ι Pod-γ).
+        """Open an OOXML-encrypted .xlsx via msoffcrypto-tool.
 
         Decrypts the source (path or in-memory blob) into an in-memory
-        buffer, then dispatches through the bytes-aware reader path
-        (Sprint Κ Pod-β unified entry point). On a non-encrypted file
-        the password is silently ignored and the normal path is used
-        (matches openpyxl).
+        buffer, then dispatches through the bytes-aware reader path. On a
+        non-encrypted file the password is silently ignored and the normal
+        path is used (matches openpyxl).
 
         Wrong / missing passwords raise ``ValueError`` with a clear
         message; ``ImportError`` (with install hint) surfaces when
@@ -183,8 +182,7 @@ class Workbook:
         out-of-scope).
 
         Exactly one of ``path`` / ``data`` must be supplied — the
-        ``load_workbook`` dispatcher (Sprint Κ Pod-β) threads whichever
-        the caller passed in.
+        ``load_workbook`` dispatcher threads whichever the caller passed in.
         """
         if (path is None) == (data is None):
             raise TypeError(
@@ -314,28 +312,26 @@ class Workbook:
         modify: bool = False,
         read_only: bool = False,
     ) -> Workbook:
-        """Open an .xlsx blob from memory (Sprint Ι Pod-γ, Sprint Κ Pod-β).
+        """Open an .xlsx blob from memory.
 
         When the underlying Rust reader exposes ``open_from_bytes``
-        (Pod-α), the blob is handed to the reader directly with no
-        intermediate tempfile.  Otherwise the bytes are materialised to
-        a tempfile and the path-based reader / patcher is used; the
-        tempfile is tracked on the workbook so :meth:`close` can clean
-        it up.  Either way the public surface (``Workbook._format``,
-        ``Workbook._source_path``, etc.) is identical.
+        the blob is handed to the reader directly with no intermediate
+        tempfile. Otherwise the bytes are materialised to a tempfile and
+        the path-based reader / patcher is used; the tempfile is tracked on
+        the workbook so :meth:`close` can clean it up. Either way the
+        public surface (``Workbook._format``, ``Workbook._source_path``,
+        etc.) is identical.
 
-        ``read_only`` plumbs through to the streaming SAX path (Sprint
-        Ι Pod-β); ``modify=True`` always uses a tempfile because the
-        XlsxPatcher is path-only by design (it reopens the source zip
-        on save).
+        ``read_only`` plumbs through to the streaming SAX path;
+        ``modify=True`` always uses a tempfile because the XlsxPatcher is
+        path-only by design (it reopens the source zip on save).
         """
         from wolfxl import _rust
 
         data_bytes = bytes(data)
 
-        # Modify mode requires the patcher, which is path-only.  Same
-        # for the no-bytes-direct fallback when the Rust reader hasn't
-        # been taught about bytes inputs yet (Pod-α dependency).
+        # Modify mode requires the path-only patcher. The same tempfile
+        # path is used when the Rust reader does not expose a bytes opener.
         bytes_open = getattr(_rust.CalamineStyledBook, "open_from_bytes", None)
         needs_tempfile = modify or bytes_open is None
 
@@ -365,7 +361,7 @@ class Workbook:
             wb._tempfile_path = tmp_path
             return wb
 
-        # Bytes-direct reader path (Pod-α onwards): no tempfile needed.
+        # Bytes-direct reader path: no tempfile needed.
         return build_xlsx_wb(
             cls,
             rust_reader=bytes_open(data_bytes, permissive),
@@ -409,7 +405,7 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
     ) -> Workbook:
-        """Open an .xlsb workbook via Pod-α's ``CalamineXlsbBook``.
+        """Open an .xlsb workbook via ``CalamineXlsbBook``.
 
         xlsb is a binary OOXML container; we surface values + cached
         formula results only (no per-cell styles, no rich text, no
@@ -423,15 +419,13 @@ class Workbook:
         if rust_cls is None:
             raise NotImplementedError(
                 ".xlsb reads require the CalamineXlsbBook backend "
-                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
-                "Pod-α merges, or use openpyxl/xlrd as an interim."
+                "from the wolfxl Rust extension."
             )
 
         if data is not None:
             bytes_open = getattr(rust_cls, "open_from_bytes", None)
             if bytes_open is None:
-                # Fall back to a tempfile so we can still hand the
-                # backend a path while Pod-α plumbs the bytes overload.
+                # Fall back to a tempfile when only a path opener exists.
                 rust_book, tmp_path = xlsb_xls_via_tempfile(
                     rust_cls, data, suffix=".xlsb", permissive=permissive
                 )
@@ -454,12 +448,12 @@ class Workbook:
             if opener is None:
                 raise NotImplementedError(
                     "CalamineXlsbBook.open is not yet exposed by the "
-                    "Rust extension; rebuild after Sprint Κ Pod-α."
+                    "Rust extension."
                 )
             try:
                 rust_book = opener(path, permissive)
             except TypeError:
-                # Pod-α may not yet thread `permissive` through.
+                # Some binary backends do not thread `permissive` through.
                 rust_book = opener(path)
 
         return build_xlsb_xls_wb(
@@ -479,7 +473,7 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
     ) -> Workbook:
-        """Open a legacy .xls workbook via Pod-α's ``CalamineXlsBook``.
+        """Open a legacy .xls workbook via ``CalamineXlsBook``.
 
         Same shape as :meth:`_from_xlsb` — values + cached formula
         results only.
@@ -490,8 +484,7 @@ class Workbook:
         if rust_cls is None:
             raise NotImplementedError(
                 ".xls reads require the CalamineXlsBook backend "
-                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
-                "Pod-α merges, or use xlrd as an interim."
+                "from the wolfxl Rust extension."
             )
 
         if data is not None:
@@ -519,7 +512,7 @@ class Workbook:
             if opener is None:
                 raise NotImplementedError(
                     "CalamineXlsBook.open is not yet exposed by the "
-                    "Rust extension; rebuild after Sprint Κ Pod-α."
+                    "Rust extension."
                 )
             try:
                 rust_book = opener(path, permissive)
@@ -626,7 +619,7 @@ class Workbook:
         self.remove(worksheet)
 
     # ------------------------------------------------------------------
-    # Workbook-level metadata (T1 PR3)
+    # Workbook-level metadata queues.
     # ------------------------------------------------------------------
 
     @property
@@ -828,9 +821,8 @@ class Workbook:
     ) -> None:
         """Save plaintext to a tempfile then re-route through encryption.
 
-        Sprint Λ Pod-α: write-side encryption stays Python-side (same
-        as Sprint Ι Pod-γ's read path); the Rust writer/patcher is
-        unchanged. We materialise the unencrypted xlsx via the normal
+        Write-side encryption stays Python-side; the Rust writer/patcher
+        is unchanged. We materialise the unencrypted xlsx via the normal
         save path, slurp it back as bytes, hand it to
         :func:`wolfxl._encryption.encrypt_xlsx_to_path` for the
         in-place encryption + atomic rename onto ``filename``.
@@ -843,11 +835,10 @@ class Workbook:
     def _flush_pending_hyperlinks_to_patcher(self) -> None:
         """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
 
-        Modify-mode counterpart to the writer-side flush at
-        ``_worksheet.py:1911``. Each ``Hyperlink`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_hyperlink``;
-        the ``None`` sentinel routes to ``queue_hyperlink_delete``
-        (INDEX decision #5 — never use ``pop()``).
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Hyperlink`` is converted to the patcher's flat-dict shape
+        and routed to ``queue_hyperlink``; the ``None`` sentinel routes
+        to ``queue_hyperlink_delete``.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
@@ -857,14 +848,14 @@ class Workbook:
     def _flush_pending_tables_to_patcher(self) -> None:
         """Drain ``_pending_tables`` on every sheet into the patcher (RFC-024).
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1946``. Each ``Table`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_table``. The
-        patcher allocates a workbook-unique table ``id`` at save time
-        (any explicit ``id`` on the Python ``Table`` object is
-        ignored), serializes ``xl/tables/tableN.xml``, splices a
-        ``<tableParts>`` block into the sheet XML, mutates the sheet
-        rels, and adds a ``[Content_Types].xml`` Override.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Table`` is converted to the patcher's flat-dict shape and
+        routed to ``queue_table``. The patcher allocates a
+        workbook-unique table ``id`` at save time (any explicit ``id`` on
+        the Python ``Table`` object is ignored), serializes
+        ``xl/tables/tableN.xml``, splices a ``<tableParts>`` block into
+        the sheet XML, mutates the sheet rels, and adds a
+        ``[Content_Types].xml`` Override.
 
         Per-sheet drain happens in workbook tab order; within a sheet,
         append order wins (which matches openpyxl's first-add → first-
@@ -876,7 +867,7 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_tables_to_patcher(self)
 
     def _flush_pending_images_to_patcher(self) -> None:
-        """Sprint Λ Pod-β (RFC-045) — drain pending images into the patcher.
+        """Drain pending images into the patcher.
 
         Modify-mode counterpart to the writer-side flush in
         ``Worksheet._flush_compat_properties``. Each queued
@@ -890,27 +881,25 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_images_to_patcher(self)
 
     def _flush_pending_charts_to_patcher(self) -> None:
-        """Sprint Μ-prime Pod-γ′ (RFC-046 §6, §10.12) — drain pending
-        chart adds in modify mode.
+        """Drain pending chart adds in modify mode.
 
         Two queues are drained here:
 
-        1. Workbook-level ``_pending_chart_adds`` (Pod-γ): a dict keyed
-           by sheet title with values of ``(chart_xml: bytes, anchor_a1,
+        1. Workbook-level ``_pending_chart_adds``: a dict keyed by sheet
+           title with values of ``(chart_xml: bytes, anchor_a1,
            width_emu, height_emu)`` tuples populated via
            :meth:`add_chart_modify_mode`. These are routed straight to
-           ``XlsxPatcher.queue_chart_add``. This is the bytes-level
-           escape hatch (v1.6.0) — preserved for callers that want to
-           pass pre-serialised chart XML directly.
-        2. Per-sheet ``Worksheet._pending_charts`` (Pod-β): a list of
+           ``XlsxPatcher.queue_chart_add`` and preserve the bytes-level
+           escape hatch for callers that want to pass pre-serialised
+           chart XML directly.
+        2. Per-sheet ``Worksheet._pending_charts``: a list of
            high-level :class:`~wolfxl.chart._chart.ChartBase` instances
            queued via :meth:`Worksheet.add_chart`. In **write** mode
            these are drained inside
            ``_worksheet._flush_compat_properties`` via
-           ``writer.add_chart_native``. In **modify** mode (v1.6.1+,
-           Sprint Μ-prime) we now bridge each chart through Pod-α′'s
-           ``serialize_chart_dict`` PyO3 export, producing chart XML
-           bytes that are routed through the same
+           ``writer.add_chart_native``. In **modify** mode we bridge each
+           chart through the ``serialize_chart_dict`` PyO3 export,
+           producing chart XML bytes that are routed through the same
            ``patcher.queue_chart_add`` path as the bytes escape hatch.
 
         Sequenced AFTER images / axis shifts but BEFORE the final
@@ -940,8 +929,7 @@ class Workbook:
         return _workbook_features.add_pivot_cache(self, cache)
 
     def _flush_pending_slicers_to_patcher(self) -> None:
-        """Sprint Ο Pod 3.5 (RFC-061 §3.1) — drain queued slicers
-        into the patcher's Phase 2.5p queue.
+        """Drain queued slicers into the patcher's slicer queue.
 
         For each worksheet, iterate over ``ws._pending_slicers`` and
         bridge the (cache, slicer) pair to the Rust patcher via
@@ -973,34 +961,30 @@ class Workbook:
         return _workbook_features.add_slicer_cache(self, cache)
 
     def _flush_pending_sheet_setup_to_patcher(self) -> None:
-        """Sprint Ο Pod 1A.5 (RFC-055) — drain each sheet's queued
-        sheet-setup mutations into the patcher's Phase 2.5n queue.
+        """Drain each sheet's queued sheet-setup mutations into the patcher.
 
         Sheets whose Worksheet has any of ``_page_setup``,
         ``_page_margins``, ``_header_footer``, ``_sheet_view``,
         ``_protection``, ``_print_title_rows``, ``_print_title_cols``
         non-default get their ``to_rust_setup_dict()`` queued. The
-        Rust patcher Phase 2.5n then re-emits the 5 sheet-scope
-        XML blocks and splices them into the sheet via
-        wolfxl_merger::merge_blocks.
+        Rust patcher then re-emits the sheet-scope XML blocks and splices
+        them into the sheet via wolfxl_merger::merge_blocks.
 
         ``print_titles`` (workbook-scope ``_xlnm.Print_Titles``
         definedName) does NOT route through Phase 2.5n on the
-        patcher side; it composes through the existing RFC-021
-        defined-names queue. The dict still includes a
-        ``print_titles`` slot for the writer-mode path.
+        patcher side; it composes through the existing defined-names queue.
+        The dict still includes a ``print_titles`` slot for the writer-mode
+        path.
         """
         _workbook_patcher_flush.flush_pending_sheet_setup_to_patcher(self)
 
     def _flush_pending_page_breaks_to_patcher(self) -> None:
-        """Sprint Π Pod Π-α (RFC-062) — drain each sheet's queued
-        page-breaks + sheet-format-pr mutations into the patcher's
-        Phase 2.5r queue.
+        """Drain each sheet's queued page-break and sheet-format mutations.
 
         Sheets whose Worksheet has any of ``_row_breaks``,
         ``_col_breaks``, or ``_sheet_format`` non-default get their
-        merged §10 dict queued. The Rust patcher Phase 2.5r then
-        re-emits the 3 sheet-scope XML blocks
+        merged patch dict queued. The Rust patcher then re-emits the
+        sheet-scope XML blocks
         (``<rowBreaks>`` / ``<colBreaks>`` / ``<sheetFormatPr>``) and
         splices them into the sheet via wolfxl_merger::merge_blocks.
 
@@ -1011,19 +995,17 @@ class Workbook:
         _workbook_patcher_flush.flush_pending_page_breaks_to_patcher(self)
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
-        """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
-        ``ws.auto_filter`` into the patcher's Phase 2.5o queue.
+        """Drain each sheet's ``ws.auto_filter`` into the patcher.
 
         Only sheets where the user actually configured filter columns
         OR a sort state OR (legacy) just a ref are queued. The Rust
-        patcher Phase 2.5o then re-emits the ``<autoFilter>`` block
-        and computes the ``<row hidden="1">`` markers.
+        patcher then re-emits the ``<autoFilter>`` block and computes the
+        ``<row hidden="1">`` markers.
         """
         _workbook_patcher_flush.flush_pending_autofilters_to_patcher(self)
 
     def _flush_pending_pivots_to_patcher(self) -> None:
-        """Sprint Ν Pod-γ (RFC-047 / RFC-048) — drain pending pivot
-        caches and tables in modify mode.
+        """Drain pending pivot caches and tables in modify mode.
 
         Two queues are drained here:
 
@@ -1082,23 +1064,22 @@ class Workbook:
     def _flush_pending_comments_to_patcher(self) -> None:
         """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
 
-        Modify-mode counterpart to the writer-side flush at
-        ``_worksheet.py:1934``. Each ``Comment`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_comment``;
-        the ``None`` sentinel routes to ``queue_comment_delete``.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Comment`` is converted to the patcher's flat-dict shape and
+        routed to ``queue_comment``; the ``None`` sentinel routes to
+        ``queue_comment_delete``.
         """
         _workbook_patcher_flush.flush_pending_comments_to_patcher(self)
 
     def _flush_pending_data_validations_to_patcher(self) -> None:
         """Drain ``_pending_data_validations`` on every sheet into the patcher.
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1960`` — same drain semantics, different
-        backend. Each DV is converted to the patcher's flat-dict
-        payload via ``_dv_to_patcher_dict``. Per-sheet drain happens
-        in ``ws.title`` order; within a sheet, append order wins so
-        the final ``<dataValidations>`` block reflects the order the
-        user appended them.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each DV is converted to the patcher's flat-dict payload via
+        ``_dv_to_patcher_dict``. Per-sheet drain happens in ``ws.title``
+        order; within a sheet, append order wins so the final
+        ``<dataValidations>`` block reflects the order the user appended
+        them.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
@@ -1108,8 +1089,7 @@ class Workbook:
     def _flush_pending_conditional_formats_to_patcher(self) -> None:
         """Drain ``_pending_conditional_formats`` on every sheet into the patcher.
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1974`` — same drain semantics, different backend.
+        Modify-mode counterpart to the writer-side compatibility flush.
         Rules sharing a sqref are coalesced into a single
         ``ConditionalFormattingPatch`` (one wrapper per range) so
         priority ordering within a wrapper reflects insertion order.

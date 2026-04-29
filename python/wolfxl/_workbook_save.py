@@ -39,59 +39,53 @@ def save_workbook(
 
 def save_modify_mode(wb: Any, filename: str) -> None:
     """Flush pending modify-mode queues and write through ``XlsxPatcher``."""
-    # Modify mode: workbook-level metadata writes don't have a patcher path
-    # yet (T1.5 follow-up). Surface the limitation before mutating the file
-    # rather than silently dropping the user's edits.
-    # RFC-020: properties round-trip (Phase 2.5d in the patcher).
-    # Workbook-level, so it flushes before the per-sheet drains.
+    # Workbook-level metadata flushes before per-sheet drains so the patcher
+    # composes workbook.xml once, with all pending workbook-scoped edits.
     if wb._properties_dirty:  # noqa: SLF001
         wb._flush_properties_to_patcher()  # noqa: SLF001
     if wb._pending_defined_names:  # noqa: SLF001
         wb._flush_defined_names_to_patcher()  # noqa: SLF001
-    # RFC-058: workbook-level security (workbookProtection + fileSharing).
-    # Drained BEFORE sheet flushes so the patcher's Phase 2.5q composes
-    # against the source workbook.xml.
+    # Workbook-level security also targets workbook.xml and must precede
+    # sheet-scoped patch queues.
     if wb._pending_security_update:  # noqa: SLF001
         wb._flush_security_to_patcher()  # noqa: SLF001
     for ws in wb._sheets.values():  # noqa: SLF001
         ws._flush()  # noqa: SLF001
-    # RFC-035: sheet copies must flush BEFORE every per-sheet phase so cloned
-    # sheets are visible to downstream drains as if they had always been part
-    # of the source workbook.
+    # Sheet copies must flush before every per-sheet phase so cloned sheets are
+    # visible to downstream drains as if they had always been part of the
+    # source workbook.
     wb._flush_pending_sheet_copies_to_patcher()  # noqa: SLF001
-    # RFC-022: hyperlinks share the sheet rels graph with future rels-touching
-    # writers (RFC-024 tables, RFC-023 comments). Flush them first so DV/CF run
-    # afterward against an already-stable rels graph.
+    # Hyperlinks share the sheet rels graph with tables and comments. Flush
+    # them first so validations/conditional formats run afterward against an
+    # already-stable rels graph.
     wb._flush_pending_hyperlinks_to_patcher()  # noqa: SLF001
-    # RFC-024: tables also touch the rels graph + add new ZIP parts +
-    # content-type Overrides. Flush after hyperlinks so the rels graph already
-    # carries any external-hyperlink rIds.
+    # Tables also touch the rels graph, add ZIP parts, and add content-type
+    # overrides. Flush after hyperlinks so external-hyperlink rIds are stable.
     wb._flush_pending_tables_to_patcher()  # noqa: SLF001
-    # RFC-023: comments + VML drawings.
+    # Comments and VML drawings.
     wb._flush_pending_comments_to_patcher()  # noqa: SLF001
-    # RFC-025: worksheet-level setters that the patcher accepts.
+    # Worksheet-level data validation setters.
     wb._flush_pending_data_validations_to_patcher()  # noqa: SLF001
-    # RFC-026: conditional formatting sibling blocks.
+    # Conditional formatting sibling blocks.
     wb._flush_pending_conditional_formats_to_patcher()  # noqa: SLF001
-    # RFC-030 / RFC-031: structural axis shifts. Drained LAST among core
-    # sheet-data phases so it sees earlier per-cell + per-block rewrites.
+    # Structural axis shifts. Drained last among core sheet-data phases so they
+    # see earlier per-cell and per-block rewrites.
     wb._flush_pending_axis_shifts_to_patcher()  # noqa: SLF001
-    # RFC-034: range moves. Drained after axis shifts so coordinate space is
-    # post-shift.
+    # Range moves. Drained after axis shifts so coordinate space is post-shift.
     wb._flush_pending_range_moves_to_patcher()  # noqa: SLF001
-    # Sprint Lambda Pod-beta (RFC-045): drain pending images.
+    # Images.
     wb._flush_pending_images_to_patcher()  # noqa: SLF001
-    # Sprint Mu Pod-gamma (RFC-046): drain pending chart adds.
+    # Chart additions.
     wb._flush_pending_charts_to_patcher()  # noqa: SLF001
-    # Sprint Nu Pod-gamma (RFC-047 / RFC-048): drain pivot caches/tables.
+    # Pivot caches and tables.
     wb._flush_pending_pivots_to_patcher()  # noqa: SLF001
-    # Sprint Omicron Pod 1A.5 (RFC-055): sheet-setup blocks.
+    # Sheet-setup blocks.
     wb._flush_pending_sheet_setup_to_patcher()  # noqa: SLF001
-    # Sprint Pi Pod Pi-alpha (RFC-062): page breaks + sheetFormatPr.
+    # Page breaks and sheetFormatPr.
     wb._flush_pending_page_breaks_to_patcher()  # noqa: SLF001
-    # Sprint Omicron Pod 3.5 (RFC-061 section 3.1): slicers.
+    # Slicers.
     wb._flush_pending_slicers_to_patcher()  # noqa: SLF001
-    # Sprint Omicron Pod 1B (RFC-056): autoFilter dicts.
+    # AutoFilter dicts.
     wb._flush_pending_autofilters_to_patcher()  # noqa: SLF001
 
     if same_existing_path(filename, wb._source_path):  # noqa: SLF001

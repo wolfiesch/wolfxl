@@ -620,7 +620,10 @@ First no-behavior split target, completed 2026-04-28:
 96. Chart emitter and chart model comments were cleaned on 2026-04-29 to remove
    stale sprint/RFC phrasing and current-state drift, and model-level
    chart-kind assertions now cover every supported chart family.
-97. Next helper candidate: continue with another narrow Rust save phase only if
+97. Python workbook/worksheet facade comments were cleaned on 2026-04-29 to
+   remove stale sprint labels and dead line-number references from load,
+   save, and patcher-drain paths without changing behavior.
+98. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

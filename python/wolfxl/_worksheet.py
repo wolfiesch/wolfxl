@@ -1234,7 +1234,7 @@ class Worksheet:
         _move_range(self, cell_range, rows=rows, cols=cols, translate=translate)
 
     # ------------------------------------------------------------------
-    # T1 PR1 read maps — lazy + per-sheet cached
+    # Lazy per-sheet read maps.
     # ------------------------------------------------------------------
     #
     # Each method caches the fully-materialized result in a per-worksheet
@@ -1253,9 +1253,9 @@ class Worksheet:
         return get_hyperlinks_map(self)
 
     # ------------------------------------------------------------------
-    # T1 PR2 — Worksheet collections (tables, DVs, conditional formats).
-    # Same lazy-cache contract as comments/hyperlinks: one Rust call per
-    # sheet, dict/list-shaped cache for subsequent reads.
+    # Worksheet collections share the same lazy-cache contract as
+    # comments/hyperlinks: one Rust call per sheet, then dict/list-shaped
+    # caches for subsequent reads.
     # ------------------------------------------------------------------
 
     @property
@@ -1330,8 +1330,8 @@ class Worksheet:
             self._flush_to_writer(writer, python_value_to_payload,
                                   font_to_format_dict, fill_to_format_dict,
                                   alignment_to_format_dict, border_to_rust_dict)
-            # Sprint Ο Pod 1B (RFC-056) — autoFilter must be flushed
-            # AFTER cells so the evaluator sees the populated grid.
+            # AutoFilter must be flushed after cells so the evaluator sees the
+            # populated grid.
             self._flush_autofilter_post_cells(writer)
 
         self._dirty.clear()
