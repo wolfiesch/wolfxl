@@ -101,7 +101,7 @@ pub fn emit(
 
     // Slot 5: <cols> (only if non-empty)
     if !sheet.columns.is_empty() {
-        emit_cols(&mut out, sheet);
+        super::columns::emit(&mut out, sheet);
     }
 
     // Slot 6: <sheetData>
@@ -218,37 +218,6 @@ const _PIN_SLOT_NUMBERS: () = {
     assert!(order[30].1 == 31); // legacyDrawing
     assert!(order[36].1 == 37); // tableParts
 };
-
-/// Emit `<cols>…</cols>`.
-fn emit_cols(out: &mut String, sheet: &Worksheet) {
-    out.push_str("<cols>");
-
-    for (&col_idx, col) in &sheet.columns {
-        // Skip completely-default columns
-        if col.width.is_none() && !col.hidden && col.outline_level == 0 && col.style_id.is_none() {
-            continue;
-        }
-
-        out.push_str(&format!("<col min=\"{}\" max=\"{}\"", col_idx, col_idx));
-
-        if let Some(w) = col.width {
-            out.push_str(&format!(" width=\"{}\" customWidth=\"1\"", format_f64(w)));
-        }
-        if col.hidden {
-            out.push_str(" hidden=\"1\"");
-        }
-        if col.outline_level > 0 {
-            out.push_str(&format!(" outlineLevel=\"{}\"", col.outline_level));
-        }
-        if let Some(s) = col.style_id {
-            out.push_str(&format!(" style=\"{}\" customFormat=\"1\"", s));
-        }
-
-        out.push_str("/>");
-    }
-
-    out.push_str("</cols>");
-}
 
 /// Emit `<sheetData>…</sheetData>`.
 fn emit_sheet_data(out: &mut String, sheet: &Worksheet, sst: &mut SstBuilder) {

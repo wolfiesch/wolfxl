@@ -18,6 +18,7 @@
 
 pub mod calc_chain_xml;
 pub mod charts;
+pub mod columns;
 pub mod comments_xml;
 pub mod content_types;
 pub mod data_validations;
