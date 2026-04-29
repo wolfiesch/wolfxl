@@ -146,7 +146,7 @@ Current largest WolfXL hotspots:
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2503 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 739 | Split the remaining Python-to-writer bridge into style application and workbook-save helpers while keeping the PyO3 surface stable. |
+| `src/native_writer_backend.rs` | 638 | Split the remaining Python-to-writer bridge into cell value and workbook-save helpers while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1553 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 2039 | Split sheet emission into cells, dimensions, merges, hyperlinks, validations, CF, drawings, tables, and page setup. |
 | `python/wolfxl/_workbook.py` | 1489 | Separate workbook orchestration from feature registration and save pipeline helpers. |
@@ -508,7 +508,11 @@ First no-behavior split target, completed 2026-04-28:
    column dimensions, merged ranges, print areas, sheet setup blocks, page
    breaks, and sheet format blocks while preserving existing PyO3 method
    names.
-66. Next helper candidate: continue with another narrow Rust save phase only if
+66. Native writer style application moved into `src/native_writer_formats.rs`
+   on 2026-04-29 while preserving cell and grid format/border style-id
+   interning, blank-cell creation for styled empty cells, and save-path style
+   output.
+67. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

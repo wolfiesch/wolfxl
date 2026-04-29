@@ -1,9 +1,11 @@
 //! Format and border payload parsing for the native writer backend.
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyAny, PyDict};
 use wolfxl_writer::model::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec,
+    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, Worksheet,
+    WriteCell, WriteCellValue,
 };
 use wolfxl_writer::Workbook;
 
@@ -242,6 +244,113 @@ pub(crate) fn intern_border_only(wb: &mut Workbook, dict: &Bound<'_, PyDict>) ->
         ..Default::default()
     };
     Ok(wb.styles.intern_format(&spec))
+}
+
+pub(crate) fn apply_cell_format(
+    wb: &mut Workbook,
+    sheet: &str,
+    row: u32,
+    col: u32,
+    dict: &Bound<'_, PyDict>,
+) -> PyResult<()> {
+    let style_id = intern_format_from_dict(wb, dict)?;
+    let ws = require_sheet(wb, sheet)?;
+    set_cell_style_id(ws, row, col, style_id);
+    Ok(())
+}
+
+pub(crate) fn apply_cell_border(
+    wb: &mut Workbook,
+    sheet: &str,
+    row: u32,
+    col: u32,
+    dict: &Bound<'_, PyDict>,
+) -> PyResult<()> {
+    let style_id = intern_border_only(wb, dict)?;
+    let ws = require_sheet(wb, sheet)?;
+    set_cell_style_id(ws, row, col, style_id);
+    Ok(())
+}
+
+pub(crate) fn apply_format_grid(
+    wb: &mut Workbook,
+    sheet: &str,
+    base_row: u32,
+    base_col: u32,
+    grid: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let to_apply = collect_style_grid(wb, base_row, base_col, grid, intern_format_from_dict)?;
+    let ws = require_sheet(wb, sheet)?;
+    for (row, col, style_id) in to_apply {
+        set_cell_style_id(ws, row, col, style_id);
+    }
+    Ok(())
+}
+
+pub(crate) fn apply_border_grid(
+    wb: &mut Workbook,
+    sheet: &str,
+    base_row: u32,
+    base_col: u32,
+    grid: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let to_apply = collect_style_grid(wb, base_row, base_col, grid, intern_border_only)?;
+    let ws = require_sheet(wb, sheet)?;
+    for (row, col, style_id) in to_apply {
+        set_cell_style_id(ws, row, col, style_id);
+    }
+    Ok(())
+}
+
+fn collect_style_grid(
+    wb: &mut Workbook,
+    base_row: u32,
+    base_col: u32,
+    grid: &Bound<'_, PyAny>,
+    intern: fn(&mut Workbook, &Bound<'_, PyDict>) -> PyResult<u32>,
+) -> PyResult<Vec<(u32, u32, u32)>> {
+    let rows: Vec<Bound<'_, PyAny>> = grid.extract()?;
+    let mut to_apply: Vec<(u32, u32, u32)> = Vec::new();
+
+    for (ri, row_obj) in rows.iter().enumerate() {
+        let cols: Vec<Bound<'_, PyAny>> = row_obj.extract()?;
+        for (ci, val) in cols.iter().enumerate() {
+            if val.is_none() {
+                continue;
+            }
+            let dict = val
+                .cast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("style grid element must be dict or None"))?;
+            if dict.is_empty() {
+                continue;
+            }
+            let row = base_row + ri as u32;
+            let col = base_col + ci as u32;
+            let style_id = intern(wb, dict)?;
+            to_apply.push((row, col, style_id));
+        }
+    }
+
+    Ok(to_apply)
+}
+
+fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {
+    wb.sheet_mut_by_name(name)
+        .ok_or_else(|| PyValueError::new_err(format!("Unknown sheet: {name}")))
+}
+
+fn set_cell_style_id(ws: &mut Worksheet, row: u32, col: u32, style_id: u32) {
+    let cell = ws
+        .rows
+        .entry(row)
+        .or_default()
+        .cells
+        .entry(col)
+        .or_insert_with(|| WriteCell {
+            value: WriteCellValue::Blank,
+            style_id: None,
+        });
+    cell.style_id = Some(style_id);
 }
 
 #[cfg(test)]

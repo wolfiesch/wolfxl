@@ -44,7 +44,9 @@ use crate::native_writer_cells::{
     raw_python_to_write_cell_value,
 };
 use crate::native_writer_charts::parse_chart_dict;
-use crate::native_writer_formats::{intern_border_only, intern_format_from_dict};
+use crate::native_writer_formats::{
+    apply_border_grid, apply_cell_border, apply_cell_format, apply_format_grid,
+};
 use crate::native_writer_images::dict_to_sheet_image;
 use crate::native_writer_rich_text::py_runs_to_rust_writer;
 use crate::native_writer_sheet_features::{
@@ -235,22 +237,7 @@ impl NativeWorkbook {
         let dict = format_dict
             .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("format_dict must be a dict"))?;
-
-        let style_id = intern_format_from_dict(&mut self.inner, dict)?;
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        let cell = ws
-            .rows
-            .entry(row)
-            .or_default()
-            .cells
-            .entry(col)
-            .or_insert_with(|| wolfxl_writer::model::WriteCell {
-                value: WriteCellValue::Blank,
-                style_id: None,
-            });
-        cell.style_id = Some(style_id);
-        Ok(())
+        apply_cell_format(&mut self.inner, sheet, row, col, dict)
     }
 
     pub fn write_cell_border(
@@ -263,22 +250,7 @@ impl NativeWorkbook {
         let dict = border_dict
             .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("border_dict must be a dict"))?;
-
-        let style_id = intern_border_only(&mut self.inner, dict)?;
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        let cell = ws
-            .rows
-            .entry(row)
-            .or_default()
-            .cells
-            .entry(col)
-            .or_insert_with(|| wolfxl_writer::model::WriteCell {
-                value: WriteCellValue::Blank,
-                style_id: None,
-            });
-        cell.style_id = Some(style_id);
-        Ok(())
+        apply_cell_border(&mut self.inner, sheet, row, col, dict)
     }
 
     pub fn write_sheet_formats(
@@ -288,44 +260,7 @@ impl NativeWorkbook {
         formats: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let (base_row, base_col) = parse_a1_to_row_col(start_a1)?;
-        let rows: Vec<Bound<'_, PyAny>> = formats.extract()?;
-
-        // Intern style ids first (need &mut self.inner), then write to sheet.
-        let mut to_apply: Vec<(u32, u32, u32)> = Vec::new();
-        for (ri, row_obj) in rows.iter().enumerate() {
-            let cols: Vec<Bound<'_, PyAny>> = row_obj.extract()?;
-            for (ci, val) in cols.iter().enumerate() {
-                if val.is_none() {
-                    continue;
-                }
-                let dict = val
-                    .cast::<PyDict>()
-                    .map_err(|_| PyValueError::new_err("format element must be dict or None"))?;
-                if dict.is_empty() {
-                    continue;
-                }
-                let row = base_row + ri as u32;
-                let col = base_col + ci as u32;
-                let style_id = intern_format_from_dict(&mut self.inner, dict)?;
-                to_apply.push((row, col, style_id));
-            }
-        }
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        for (row, col, style_id) in to_apply {
-            let cell = ws
-                .rows
-                .entry(row)
-                .or_default()
-                .cells
-                .entry(col)
-                .or_insert_with(|| wolfxl_writer::model::WriteCell {
-                    value: WriteCellValue::Blank,
-                    style_id: None,
-                });
-            cell.style_id = Some(style_id);
-        }
-        Ok(())
+        apply_format_grid(&mut self.inner, sheet, base_row, base_col, formats)
     }
 
     pub fn write_sheet_borders(
@@ -335,43 +270,7 @@ impl NativeWorkbook {
         borders: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let (base_row, base_col) = parse_a1_to_row_col(start_a1)?;
-        let rows: Vec<Bound<'_, PyAny>> = borders.extract()?;
-
-        let mut to_apply: Vec<(u32, u32, u32)> = Vec::new();
-        for (ri, row_obj) in rows.iter().enumerate() {
-            let cols: Vec<Bound<'_, PyAny>> = row_obj.extract()?;
-            for (ci, val) in cols.iter().enumerate() {
-                if val.is_none() {
-                    continue;
-                }
-                let dict = val
-                    .cast::<PyDict>()
-                    .map_err(|_| PyValueError::new_err("border element must be dict or None"))?;
-                if dict.is_empty() {
-                    continue;
-                }
-                let row = base_row + ri as u32;
-                let col = base_col + ci as u32;
-                let style_id = intern_border_only(&mut self.inner, dict)?;
-                to_apply.push((row, col, style_id));
-            }
-        }
-
-        let ws = require_sheet(&mut self.inner, sheet)?;
-        for (row, col, style_id) in to_apply {
-            let cell = ws
-                .rows
-                .entry(row)
-                .or_default()
-                .cells
-                .entry(col)
-                .or_insert_with(|| wolfxl_writer::model::WriteCell {
-                    value: WriteCellValue::Blank,
-                    style_id: None,
-                });
-            cell.style_id = Some(style_id);
-        }
-        Ok(())
+        apply_border_grid(&mut self.inner, sheet, base_row, base_col, borders)
     }
 
     pub fn set_row_height(&mut self, sheet: &str, row: u32, height: f64) -> PyResult<()> {
