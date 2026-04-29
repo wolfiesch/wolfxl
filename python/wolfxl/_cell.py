@@ -188,24 +188,26 @@ class Cell:
 
     @property
     def style(self) -> None:
-        """Named style name. Not yet supported; always returns None.
+        """Return the named style assigned to this cell, if any.
 
-        openpyxl uses this to look up ``NamedStyle`` objects in
-        ``wb.named_styles``. wolfxl hasn't implemented named styles yet
-        (tracked for T2). Setting it raises ``NotImplementedError``.
+        WolfXL currently preserves many style attributes through the
+        explicit ``font``, ``fill``, ``border``, ``alignment``, and
+        ``number_format`` accessors. Named-style objects are not exposed
+        through this compatibility property, so the getter returns ``None``.
         """
         return None
 
     @style.setter
     def style(self, value: Any) -> None:  # noqa: ARG002
-        """Reject named style assignment until WolfXL supports named styles.
+        """Reject named-style assignment.
 
         Args:
-            value: Ignored pending future named-style support.
+            value: Named style requested by the caller.
         """
         raise NotImplementedError(
             "Named styles are not yet supported by wolfxl. "
-            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
+            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility "
+            "for compatibility notes."
         )
 
     # ------------------------------------------------------------------

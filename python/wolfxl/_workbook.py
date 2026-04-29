@@ -560,25 +560,30 @@ class Workbook:
     def read_only(self) -> bool:
         """True if this workbook was opened with ``read_only=True``.
 
-        Sprint Ι Pod-β changes the semantics of this flag: it now
-        reflects the *explicit* ``read_only=True`` opt-in passed to
-        :func:`wolfxl.load_workbook`, not the historic
-        "no-writer-no-patcher" inference. The streaming
-        ``iter_rows`` fast path keys off the explicit flag (or the
-        > 50k row auto-trigger). Workbooks opened in plain read mode
-        (``read_only=False``, the default) retain the historic
-        in-memory behaviour for ``__getitem__`` / mutation paths.
+        The flag reflects the explicit ``read_only=True`` argument passed
+        to :func:`wolfxl.load_workbook`. Workbooks opened with the default
+        ``read_only=False`` keep the normal in-memory read behavior, while
+        streaming row iteration is used for explicit read-only workbooks
+        and very large sheets.
         """
         return bool(getattr(self, "_read_only", False))
 
     @property
     def chartsheets(self) -> list[Any]:
-        """Chart sheets - always empty in T0 (wolfxl treats charts as preserved-only)."""
+        """Return chart sheets in this workbook.
+
+        WolfXL preserves chart sheets when possible, but does not expose
+        Python chart-sheet objects through this compatibility property yet.
+        """
         return []
 
     @property
     def named_styles(self) -> list[Any]:
-        """Named styles - always empty in T0 (construction lands in T2)."""
+        """Return workbook named styles.
+
+        Named-style objects are not exposed through this compatibility
+        property yet, so this returns an empty list.
+        """
         return []
 
     def __getitem__(self, name: str) -> Worksheet:
@@ -606,10 +611,14 @@ class Workbook:
     def remove(self, worksheet: Worksheet) -> None:
         """Remove a worksheet from the workbook (write mode only).
 
-        In read mode, the on-disk sheet is untouched — raise instead so
-        callers don't assume a destructive edit succeeded. Modify mode does
-        not yet support sheet removal (the patcher has no ``remove_sheet``
-        API surface), so it also raises.
+        In read and modify modes, WolfXL raises instead of pretending a
+        destructive edit succeeded against the source workbook.
+
+        Args:
+            worksheet: Worksheet to remove.
+
+        Raises:
+            RuntimeError: If the workbook mode cannot remove sheets.
         """
         _workbook_sheets.remove_sheet(self, worksheet)
 
@@ -801,8 +810,8 @@ class Workbook:
 
         Args:
             filename: Destination path. In modify mode this may be the original
-                source path; WolfXL uses the patcher's atomic in-place save path
-                for that case.
+                source path; WolfXL writes that case through its safe in-place
+                save path.
             password: Optional encryption password for the final ``.xlsx``
                 payload. Install ``wolfxl[encrypted]`` to enable encryption.
 

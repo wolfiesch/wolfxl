@@ -582,7 +582,10 @@ First no-behavior split target, completed 2026-04-28:
 84. Streaming iteration docs, compatibility shim wording, and the public
    file-format detector re-export comment were cleaned on 2026-04-29 to remove
    stale sprint/roadmap phrasing without behavior changes.
-85. Next helper candidate: continue with another narrow Rust save phase only if
+85. Cell named-style compatibility docs plus workbook read-only, chartsheets,
+   named_styles, remove, save, and load_workbook docs were rewritten on
+   2026-04-29 to remove roadmap/backend wording without behavior changes.
+86. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

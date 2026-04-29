@@ -83,8 +83,8 @@ def load_workbook(
         data_only: Return cached formula results when present.
         keep_links: Compatibility shim accepted for openpyxl-shaped call sites.
         modify: Enable read-modify-write mode for ``.xlsx`` files. Modified
-            cells and supported metadata are saved through WolfXL's surgical
-            ZIP patcher rather than a full workbook rewrite.
+            cells and supported metadata are saved while preserving unchanged
+            workbook parts where possible.
         permissive: Fall back to worksheet relationships when workbook sheet
             metadata is malformed but recoverable.
         rich_text: Return structured rich-text values for cells that carry
