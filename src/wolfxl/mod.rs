@@ -16,6 +16,7 @@ pub mod content_types;
 pub mod defined_names;
 #[allow(dead_code)] // RFC-022: live caller wires up in commit 3 (queue_hyperlink + Phase 2.5e)
 pub mod hyperlinks;
+pub mod patcher_cells;
 pub mod patcher_drawing;
 pub mod patcher_models;
 pub mod patcher_payload;
@@ -1799,70 +1800,9 @@ impl XlsxPatcher {
             )?;
         }
 
-        // --- Phase 1: Parse styles.xml if we have format patches ---
-        let mut styles_xml: Option<String> = None;
-        let mut style_assignments: HashMap<String, u32> = HashMap::new(); // "sheet:cell" → xf_index
-
-        if !self.format_patches.is_empty() {
-            let raw = ooxml_util::zip_read_to_string_opt(&mut zip, "xl/styles.xml")?
-                .unwrap_or_else(|| minimal_styles_xml());
-            let mut xml = raw;
-
-            for ((sheet, cell), spec) in &self.format_patches {
-                let (updated, xf_idx) = styles::apply_format_spec(&xml, spec);
-                xml = updated;
-                style_assignments.insert(format!("{sheet}:{cell}"), xf_idx);
-            }
-            styles_xml = Some(xml);
-        }
-
-        // --- Phase 2: Build cell patches per sheet ---
-        let mut sheet_cell_patches: HashMap<String, Vec<CellPatch>> = HashMap::new();
-
-        // Value patches
-        for ((sheet, cell), patch) in &self.value_patches {
-            let sheet_path = self.sheet_paths.get(sheet);
-            if sheet_path.is_none() {
-                continue;
-            }
-            let mut p = patch.clone();
-            // Check if there's also a style assignment for this cell
-            let key = format!("{sheet}:{cell}");
-            if let Some(&xf_idx) = style_assignments.get(&key) {
-                p.style_index = Some(xf_idx);
-            }
-            sheet_cell_patches
-                .entry(sheet_path.unwrap().clone())
-                .or_default()
-                .push(p);
-        }
-
-        // Format-only patches (no value change)
-        for ((sheet, cell), _) in &self.format_patches {
-            let val_key = (sheet.clone(), cell.clone());
-            if self.value_patches.contains_key(&val_key) {
-                continue; // already handled above
-            }
-            let sheet_path = self.sheet_paths.get(sheet);
-            if sheet_path.is_none() {
-                continue;
-            }
-            let key = format!("{sheet}:{cell}");
-            if let Some(&xf_idx) = style_assignments.get(&key) {
-                let (row, col) = crate::util::a1_to_row_col(cell)
-                    .map_err(|e| PyErr::new::<PyValueError, _>(e))?;
-                let patch = CellPatch {
-                    row: row + 1,
-                    col: col + 1,
-                    value: None, // no value change
-                    style_index: Some(xf_idx),
-                };
-                sheet_cell_patches
-                    .entry(sheet_path.unwrap().clone())
-                    .or_default()
-                    .push(patch);
-            }
-        }
+        // --- Phase 1 / 2: Styles + cell patches ---
+        let (mut styles_xml, sheet_cell_patches) =
+            patcher_cells::build_sheet_cell_patches_phase(self, &mut zip)?;
 
         // --- Phase 2.5: Build <dataValidations> blocks from queued DV
         // patches (RFC-025).  Each queued sheet gets exactly one

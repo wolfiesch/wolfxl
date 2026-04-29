@@ -144,7 +144,7 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 2994 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
+| `src/wolfxl/mod.rs` | 2934 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
 | `src/calamine_styled_backend.rs` | 4967 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 3396 | Split Python-to-writer parsing into cells, formats, tables, charts, drawings, pivots, and sheet setup modules. |
 | `python/wolfxl/_worksheet.py` | 2537 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
@@ -310,7 +310,10 @@ First no-behavior split target, completed 2026-04-28:
    `src/wolfxl/patcher_sheet_blocks.rs` on 2026-04-28 while preserving the
    cell-patch, sibling-block, autoFilter hidden-row, and cloned-sheet
    `file_adds` routing sequence.
-16. Next helper candidate: continue with another narrow Rust save phase only if
+16. Cell style preparation and sheet cell-patch construction moved into
+   `src/wolfxl/patcher_cells.rs` on 2026-04-28 while preserving the shared
+   `styles_xml` handoff to conditional-formatting dxf aggregation.
+17. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.
