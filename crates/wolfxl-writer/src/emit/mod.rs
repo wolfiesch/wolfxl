@@ -25,6 +25,7 @@ pub mod doc_props;
 pub mod drawings;
 pub mod drawings_vml;
 pub mod hyperlinks;
+pub mod merges;
 pub mod page_breaks;
 pub mod rels;
 pub mod shared_strings_xml;

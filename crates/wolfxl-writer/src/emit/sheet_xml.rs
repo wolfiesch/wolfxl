@@ -125,7 +125,7 @@ pub fn emit(
 
     // Slot 15: <mergeCells> (only if non-empty)
     if !sheet.merges.is_empty() {
-        emit_merges(&mut out, sheet);
+        super::merges::emit(&mut out, sheet);
     }
 
     // Slot 17: <conditionalFormatting> — EXT-W3C; 0..N elements per spec
@@ -623,25 +623,6 @@ fn emit_cell(
             out.push_str("/>");
         }
     }
-}
-
-/// Emit `<mergeCells count="N">…</mergeCells>`.
-fn emit_merges(out: &mut String, sheet: &Worksheet) {
-    // Sort by (top_row, left_col) ascending
-    let mut merges = sheet.merges.clone();
-    merges.sort_by(|a, b| a.top_row.cmp(&b.top_row).then(a.left_col.cmp(&b.left_col)));
-
-    out.push_str(&format!("<mergeCells count=\"{}\">", merges.len()));
-
-    for merge in &merges {
-        let range = refs::format_range(
-            (merge.top_row, merge.left_col),
-            (merge.bottom_row, merge.right_col),
-        );
-        out.push_str(&format!("<mergeCell ref=\"{}\"/>", range));
-    }
-
-    out.push_str("</mergeCells>");
 }
 
 /// Format an f64 for emission in a `<v>` element.
