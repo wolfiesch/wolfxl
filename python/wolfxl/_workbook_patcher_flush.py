@@ -391,6 +391,12 @@ def flush_pending_charts_to_patcher(wb: Any) -> None:
     if patcher is None:
         return
 
+    _flush_pending_chart_bytes(wb, patcher)
+    _flush_pending_chart_objects(wb, patcher)
+
+
+def _flush_pending_chart_bytes(wb: Any, patcher: Any) -> None:
+    """Drain pre-serialized chart XML payloads into the Rust patcher."""
     pending_bytes = getattr(wb, "_pending_chart_adds", None)
     if pending_bytes:
         for sheet_title, items in pending_bytes.items():
@@ -406,6 +412,9 @@ def flush_pending_charts_to_patcher(wb: Any) -> None:
                 )
         pending_bytes.clear()
 
+
+def _flush_pending_chart_objects(wb: Any, patcher: Any) -> None:
+    """Serialize queued chart objects and drain them into the Rust patcher."""
     any_pending = any(ws._pending_charts for ws in wb._sheets.values())  # noqa: SLF001
     if not any_pending:
         return
@@ -430,8 +439,7 @@ def flush_pending_charts_to_patcher(wb: Any) -> None:
             chart_dict = chart.to_rust_dict()
             anchor = chart._anchor or "E15"  # noqa: SLF001
             chart_xml = serialize_chart_dict(chart_dict, anchor)
-            width_emu = int(chart.width * cm_to_emu)
-            height_emu = int(chart.height * cm_to_emu)
+            width_emu, height_emu = _chart_size_emu(chart, cm_to_emu)
             patcher.queue_chart_add(
                 ws.title,
                 chart_xml,
@@ -440,6 +448,11 @@ def flush_pending_charts_to_patcher(wb: Any) -> None:
                 height_emu,
             )
         pending_objs.clear()
+
+
+def _chart_size_emu(chart: Any, cm_to_emu: int) -> tuple[int, int]:
+    """Return chart width and height in EMUs for patcher queueing."""
+    return int(chart.width * cm_to_emu), int(chart.height * cm_to_emu)
 
 
 def flush_pending_slicers_to_patcher(wb: Any) -> None:
