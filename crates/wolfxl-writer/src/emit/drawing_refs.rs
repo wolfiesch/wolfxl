@@ -1,5 +1,6 @@
 //! Worksheet-level drawing relationship refs for `sheetN.xml`.
 
+use super::sheet_rel_ids::SheetRelIdPlan;
 use crate::model::worksheet::Worksheet;
 
 /// Emit `<drawing r:id="rIdN"/>` when the sheet has images or charts.
@@ -12,11 +13,10 @@ pub fn emit_drawing(out: &mut String, sheet: &Worksheet) {
         return;
     }
 
-    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
-    let table_count = sheet.tables.len() as u32;
-    let external_hyperlinks = sheet.hyperlinks.values().filter(|h| !h.is_internal).count() as u32;
-    let rid = comments_offset + table_count + external_hyperlinks + 1;
-    out.push_str(&format!("<drawing r:id=\"rId{rid}\"/>"));
+    let rid = SheetRelIdPlan::new(sheet)
+        .drawing()
+        .expect("drawing relationship id");
+    out.push_str(&format!("<drawing r:id=\"{rid}\"/>"));
 }
 
 /// Emit `<legacyDrawing r:id="rId2"/>` when comments exist.

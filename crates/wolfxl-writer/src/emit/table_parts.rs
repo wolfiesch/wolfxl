@@ -1,5 +1,6 @@
 //! `<tableParts>` emitter for worksheet XML.
 
+use super::sheet_rel_ids::SheetRelIdPlan;
 use crate::model::worksheet::Worksheet;
 
 /// Emit `<tableParts count="N">...<tablePart r:id="rIdX"/>...</tableParts>`.
@@ -12,11 +13,11 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
         return;
     }
 
-    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
+    let rel_ids = SheetRelIdPlan::new(sheet);
     out.push_str(&format!("<tableParts count=\"{}\">", sheet.tables.len()));
     for (local_idx, _) in sheet.tables.iter().enumerate() {
-        let rid = comments_offset + local_idx as u32 + 1;
-        out.push_str(&format!("<tablePart r:id=\"rId{}\"/>", rid));
+        let rid = rel_ids.table(local_idx as u32);
+        out.push_str(&format!("<tablePart r:id=\"{}\"/>", rid));
     }
     out.push_str("</tableParts>");
 }

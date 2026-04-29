@@ -19,6 +19,7 @@
 //! Relationship-type URIs and the `Relationship` model live in the shared
 //! `wolfxl-rels` crate so the writer and the patcher stay in lock-step.
 
+use super::sheet_rel_ids::SheetRelIdPlan;
 use crate::model::workbook::Workbook;
 use wolfxl_rels::{rt, RelId, RelsGraph, TargetMode};
 
@@ -110,19 +111,19 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         return Vec::new();
     };
 
+    let rel_ids = SheetRelIdPlan::new(sheet);
     let has_comments = !sheet.comments.is_empty();
     let external_hyperlinks: Vec<(&String, &crate::model::worksheet::Hyperlink)> = sheet
         .hyperlinks
         .iter()
         .filter(|(_, h)| !h.is_internal)
         .collect();
-    let has_tables = !sheet.tables.is_empty();
     let has_images = !sheet.images.is_empty();
     let has_charts = !sheet.charts.is_empty();
     // A sheet needs a drawing part if it has at least one image OR chart.
     let has_drawing = has_images || has_charts;
 
-    if !has_comments && external_hyperlinks.is_empty() && !has_tables && !has_drawing {
+    if !rel_ids.has_relationships() {
         return Vec::new();
     }
 
@@ -131,23 +132,18 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     let tables_before: usize = wb.sheets[..sheet_idx].iter().map(|s| s.tables.len()).sum();
 
     let mut g = RelsGraph::new();
-    let mut rid_counter: u32 = 0;
-    let mut next_rid = || -> RelId {
-        rid_counter += 1;
-        RelId(format!("rId{rid_counter}"))
-    };
 
     // Comments + VML.
     if has_comments {
         let n = sheet_idx + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.comments().expect("comments relationship id")),
             rt::COMMENTS,
             &format!("../comments/comments{n}.xml"),
             TargetMode::Internal,
         );
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.vml_drawing().expect("VML relationship id")),
             rt::VML_DRAWING,
             &format!("../drawings/vmlDrawing{n}.vml"),
             TargetMode::Internal,
@@ -158,7 +154,7 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     for (local_idx, _table) in sheet.tables.iter().enumerate() {
         let global_id = tables_before + local_idx + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.table(local_idx as u32)),
             rt::TABLE,
             &format!("../tables/table{global_id}.xml"),
             TargetMode::Internal,
@@ -166,20 +162,15 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     }
 
     // External hyperlinks (URLs, not internal `#Sheet!A1` references).
-    for (_cell_ref, hyperlink) in &external_hyperlinks {
+    for (external_idx, (_cell_ref, hyperlink)) in external_hyperlinks.iter().enumerate() {
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.external_hyperlink(external_idx as u32)),
             rt::HYPERLINK,
             &hyperlink.target,
             TargetMode::External,
         );
     }
 
-    // Sprint Λ Pod-β + Sprint Μ Pod-α — drawing rel for images and/or
-    // charts. The drawing part is allocated globally per sheet (one
-    // drawing per sheet that has at least one image or chart). The
-    // rId is allocated last so existing numbering for
-    // comments/tables/hyperlinks is preserved.
     if has_drawing {
         // drawingN.xml is numbered globally — count how many earlier
         // sheets had a drawing (image or chart) to compute this
@@ -190,7 +181,7 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
             .count();
         let drawing_n = drawings_before + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.drawing().expect("drawing relationship id")),
             rt::DRAWING,
             &format!("../drawings/drawing{drawing_n}.xml"),
             TargetMode::Internal,

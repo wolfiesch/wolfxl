@@ -1,5 +1,6 @@
 //! `<hyperlinks>` emitter for worksheet XML.
 
+use super::sheet_rel_ids::SheetRelIdPlan;
 use crate::model::worksheet::Worksheet;
 use crate::xml_escape;
 
@@ -9,9 +10,8 @@ use crate::xml_escape;
 /// comments reserve `rId1` and `rId2`, table parts follow, then external
 /// hyperlinks consume the remaining contiguous ids.
 pub fn emit(out: &mut String, sheet: &Worksheet) {
-    let comments_offset: u32 = if !sheet.comments.is_empty() { 2 } else { 0 };
-    let tables_offset: u32 = sheet.tables.len() as u32;
-    let mut rid = comments_offset + tables_offset + 1;
+    let rel_ids = SheetRelIdPlan::new(sheet);
+    let mut external_idx = 0;
 
     out.push_str("<hyperlinks>");
 
@@ -23,12 +23,13 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                 xml_escape::attr(&hyperlink.target)
             ));
         } else {
+            let rid = rel_ids.external_hyperlink(external_idx);
+            external_idx += 1;
             out.push_str(&format!(
-                "<hyperlink ref=\"{}\" r:id=\"rId{}\"",
+                "<hyperlink ref=\"{}\" r:id=\"{}\"",
                 xml_escape::attr(cell_ref),
                 rid
             ));
-            rid += 1;
         }
 
         if let Some(display) = &hyperlink.display {
