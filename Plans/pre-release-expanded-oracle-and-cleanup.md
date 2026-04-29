@@ -640,7 +640,10 @@ First no-behavior split target, completed 2026-04-28:
    `python/wolfxl/_worksheet_flush.py` on 2026-04-29 while leaving
    `Worksheet._flush` as the compatibility entrypoint and keeping
    writer/patcher cell-drain wrappers unchanged.
-102. Next helper candidate: continue with another narrow Rust save phase only if
+102. Workbook pending-state initialization was centralized through
+   `python/wolfxl/_workbook_state.py` on 2026-04-29 so write, read, modify,
+   xlsb, and xls workbook constructors share one cache/queue default source.
+103. Next helper candidate: continue with another narrow Rust save phase only if
    the state boundary is clean, or switch to Python public API docstrings and
    `_worksheet.py` / `_workbook.py` cleanup if the remaining phases look too
    coupled for another safe extraction.

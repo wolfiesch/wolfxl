@@ -98,7 +98,7 @@ def build_xlsx_wb(
     wb._source_path = source_path
     wb._format = "xlsx"
     _initialize_sheet_proxies(wb, rust_reader)
-    _initialize_pending_state(wb)
+    initialize_pending_state(wb)
     return wb
 
 
@@ -122,7 +122,7 @@ def build_xlsb_xls_wb(
     wb._source_path = source_path
     wb._format = fmt
     _initialize_sheet_proxies(wb, rust_book)
-    _initialize_pending_state(wb)
+    initialize_pending_state(wb)
     return wb
 
 
@@ -133,7 +133,7 @@ def _initialize_sheet_proxies(wb: Any, rust_book: Any) -> None:
     wb._sheets = {name: Worksheet(wb, name) for name in names}
 
 
-def _initialize_pending_state(wb: Any) -> None:
+def initialize_pending_state(wb: Any) -> None:
     """Initialize workbook caches and pending mutation queues."""
     wb._properties_cache = None
     wb._properties_dirty = False

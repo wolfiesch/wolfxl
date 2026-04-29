@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from wolfxl._workbook_state import CopyOptions
+from wolfxl._workbook_state import CopyOptions as CopyOptions
+from wolfxl._workbook_state import initialize_pending_state
 from wolfxl import _workbook_features
 from wolfxl import _workbook_calc
 from wolfxl import _workbook_metadata
@@ -55,60 +56,7 @@ class Workbook:
         self._sheets: dict[str, Worksheet] = {}
         self._sheets["Sheet"] = Worksheet(self, "Sheet")
         self._rust_writer.add_sheet("Sheet")
-        # Workbook-level metadata + defined names.
-        self._properties_cache: Any | None = None
-        self._properties_dirty: bool = False
-        self._defined_names_cache: Any | None = None
-        self._pending_defined_names: dict[str, Any] = {}
-        # Workbook-level security (workbookProtection + fileSharing).
-        # ``_security`` and ``_file_sharing`` hold user-supplied
-        # WorkbookProtection / FileSharing instances. ``_pending_security_update``
-        # is a sentinel: True once a setter touched either slot, drained at
-        # save() time so the active save backend emits the corresponding XML
-        # blocks. None ⇒ no security configured (default).
-        self._security: Any | None = None
-        self._file_sharing: Any | None = None
-        self._pending_security_update: bool = False
-        # Append-order list of structural shift ops.
-        # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
-        self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
-        # Append-order list of range-move ops.
-        # Tuple shape: ``(sheet_title, src_min_col, src_min_row,
-        # src_max_col, src_max_row, d_row, d_col, translate)``.
-        self._pending_range_moves: list[
-            tuple[str, int, int, int, int, int, int, bool]
-        ] = []
-        # Append-order list of sheet-copy ops.
-        # Tuple shape: ``(src_title, dst_title, deep_copy_images)``.
-        # The deep_copy_images flag is snapshot at copy_worksheet()
-        # call time so a later toggle of wb.copy_options doesn't
-        # retroactively affect already-queued copies.
-        self._pending_sheet_copies: list[tuple[str, str, bool]] = []
-        # Pending modify-mode chart adds.
-        # Per-sheet list of ``(chart_xml: bytes, anchor_a1: str,
-        # width_emu: int, height_emu: int)`` tuples.
-        # ``Worksheet.add_chart`` populates this in modify mode (the
-        # writer-mode path stays on NativeWorkbook bindings).
-        # Drained by ``_flush_pending_charts_to_patcher`` in save().
-        self._pending_chart_adds: dict[
-            str, list[tuple[bytes, str, int, int]]
-        ] = {}
-        # Pending pivot caches + pivot table adds.
-        # Caches are workbook-scope (one cache -> N
-        # tables); tables live on the owner Worksheet's
-        # ``_pending_pivot_tables``. Drained by
-        # ``_flush_pending_pivots_to_patcher`` at save() time AFTER
-        # charts so the save backend sees an already-stable rels graph.
-        self._pending_pivot_caches: list[Any] = []
-        # 0-based cache id allocator. Bumps when add_pivot_cache() is
-        # called so the first cache is `cache_id=0` (matches OOXML
-        # convention of 0-based cacheId in <pivotCache>).
-        self._next_pivot_cache_id: int = 0
-        # Slicer caches are workbook-scoped.
-        self._pending_slicer_caches: list[Any] = []
-        self._next_slicer_cache_id: int = 0
-        # Workbook-level copy options.
-        self.copy_options: CopyOptions = CopyOptions()
+        initialize_pending_state(self)
         # Streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
