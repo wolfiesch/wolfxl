@@ -43,7 +43,7 @@ use wolfxl_writer::model::chart::{
     Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use wolfxl_writer::model::image::{ImageAnchor, SheetImage};
-use wolfxl_writer::model::{DefinedName, DocProperties, FormatSpec, Worksheet, WriteCellValue};
+use wolfxl_writer::model::{FormatSpec, Worksheet, WriteCellValue};
 use wolfxl_writer::refs;
 use wolfxl_writer::Workbook;
 
@@ -54,7 +54,9 @@ use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
     dict_to_table, unwrap_optional_wrapper,
 };
-use crate::util::{parse_iso_date, parse_iso_datetime};
+use crate::native_writer_workbook_metadata::{
+    dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
+};
 
 // ---------------------------------------------------------------------------
 // PyClass
@@ -75,84 +77,6 @@ fn parse_a1_to_row_col(a1: &str) -> PyResult<(u32, u32)> {
 fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {
     wb.sheet_mut_by_name(name)
         .ok_or_else(|| PyValueError::new_err(format!("Unknown sheet: {name}")))
-}
-
-/// Build a `DefinedName` from a cfg dict. Returns `None` for silent no-op when
-/// required fields are missing. Returns `Err` when scope="sheet" but the sheet
-/// doesn't exist (that's a bug, not user input error).
-fn dict_to_defined_name(
-    wb: &Workbook,
-    sheet_name: &str,
-    cfg: &Bound<'_, PyDict>,
-) -> PyResult<Option<DefinedName>> {
-    let name: Option<String> = cfg.get_item("name")?.and_then(|v| v.extract().ok());
-    let refers_to: Option<String> = cfg.get_item("refers_to")?.and_then(|v| v.extract().ok());
-
-    let (Some(name), Some(refers_to)) = (name, refers_to) else {
-        return Ok(None); // silent no-op — match oracle
-    };
-
-    let scope: String = cfg
-        .get_item("scope")?
-        .and_then(|v| v.extract::<String>().ok())
-        .unwrap_or_else(|| "workbook".to_string());
-
-    let scope_sheet_index: Option<usize> = if scope == "sheet" {
-        let idx = wb.sheet_index_by_name(sheet_name).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "add_named_range: sheet {sheet_name:?} not found (scope=sheet requires the sheet to exist)"
-            ))
-        })?;
-        Some(idx)
-    } else {
-        None
-    };
-
-    Ok(Some(DefinedName {
-        name,
-        formula: refers_to,
-        scope_sheet_index,
-        builtin: None,
-        hidden: false,
-    }))
-}
-
-/// Build a `DocProperties` from a flat props dict.
-fn dict_to_doc_properties(props: &Bound<'_, PyDict>) -> PyResult<DocProperties> {
-    let title: Option<String> = props.get_item("title")?.and_then(|v| v.extract().ok());
-    let subject: Option<String> = props.get_item("subject")?.and_then(|v| v.extract().ok());
-    let creator: Option<String> = props.get_item("creator")?.and_then(|v| v.extract().ok());
-    let keywords: Option<String> = props.get_item("keywords")?.and_then(|v| v.extract().ok());
-    let description: Option<String> = props
-        .get_item("description")?
-        .and_then(|v| v.extract().ok());
-    let category: Option<String> = props.get_item("category")?.and_then(|v| v.extract().ok());
-    // Python passes the OOXML-canonical camelCase key. The Python ->
-    // emitter -> <cp:contentStatus> path is preserved verbatim from the
-    // W5-removed legacy backend.
-    let content_status: Option<String> = props
-        .get_item("contentStatus")?
-        .and_then(|v| v.extract().ok());
-
-    let created: Option<chrono::NaiveDateTime> = props.get_item("created")?.and_then(|v| {
-        v.extract::<String>().ok().and_then(|s| {
-            // Try datetime first, then date-only (with midnight time).
-            parse_iso_datetime(&s)
-                .or_else(|| parse_iso_date(&s).and_then(|d| d.and_hms_opt(0, 0, 0)))
-        })
-    });
-
-    Ok(DocProperties {
-        title,
-        subject,
-        creator,
-        keywords,
-        description,
-        category,
-        content_status,
-        created,
-        ..Default::default()
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,77 +983,6 @@ pub fn serialize_workbook_security_dict(
         .map(emit_file_sharing)
         .unwrap_or_default();
     Ok((prot_bytes, share_bytes))
-}
-
-fn dict_to_workbook_security(
-    payload: &Bound<'_, PyDict>,
-) -> PyResult<wolfxl_writer::parse::workbook_security::WorkbookSecurity> {
-    use wolfxl_writer::parse::workbook_security::{
-        FileSharingSpec, WorkbookProtectionSpec, WorkbookSecurity,
-    };
-
-    fn extract_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
-        match d.get_item(key)? {
-            Some(v) if !v.is_none() => v.extract::<String>().map(Some),
-            _ => Ok(None),
-        }
-    }
-    fn extract_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
-        match d.get_item(key)? {
-            Some(v) if !v.is_none() => v.extract::<bool>().map(Some),
-            _ => Ok(None),
-        }
-    }
-    fn extract_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
-        match d.get_item(key)? {
-            Some(v) if !v.is_none() => v.extract::<u32>().map(Some),
-            _ => Ok(None),
-        }
-    }
-
-    let workbook_protection = match payload.get_item("workbook_protection")? {
-        Some(v) if !v.is_none() => {
-            let d = v
-                .cast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("workbook_protection must be a dict or None"))?;
-            Some(WorkbookProtectionSpec {
-                lock_structure: extract_bool(d, "lock_structure")?.unwrap_or(false),
-                lock_windows: extract_bool(d, "lock_windows")?.unwrap_or(false),
-                lock_revision: extract_bool(d, "lock_revision")?.unwrap_or(false),
-                workbook_algorithm_name: extract_str(d, "workbook_algorithm_name")?,
-                workbook_hash_value: extract_str(d, "workbook_hash_value")?,
-                workbook_salt_value: extract_str(d, "workbook_salt_value")?,
-                workbook_spin_count: extract_u32(d, "workbook_spin_count")?,
-                revisions_algorithm_name: extract_str(d, "revisions_algorithm_name")?,
-                revisions_hash_value: extract_str(d, "revisions_hash_value")?,
-                revisions_salt_value: extract_str(d, "revisions_salt_value")?,
-                revisions_spin_count: extract_u32(d, "revisions_spin_count")?,
-            })
-        }
-        _ => None,
-    };
-
-    let file_sharing = match payload.get_item("file_sharing")? {
-        Some(v) if !v.is_none() => {
-            let d = v
-                .cast::<PyDict>()
-                .map_err(|_| PyValueError::new_err("file_sharing must be a dict or None"))?;
-            Some(FileSharingSpec {
-                read_only_recommended: extract_bool(d, "read_only_recommended")?.unwrap_or(false),
-                user_name: extract_str(d, "user_name")?,
-                algorithm_name: extract_str(d, "algorithm_name")?,
-                hash_value: extract_str(d, "hash_value")?,
-                salt_value: extract_str(d, "salt_value")?,
-                spin_count: extract_u32(d, "spin_count")?,
-            })
-        }
-        _ => None,
-    };
-
-    Ok(WorkbookSecurity {
-        workbook_protection,
-        file_sharing,
-    })
 }
 
 fn parse_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<ImageAnchor> {

@@ -10,6 +10,7 @@ mod native_writer_cells;
 mod native_writer_formats;
 mod native_writer_rich_text;
 mod native_writer_sheet_features;
+mod native_writer_workbook_metadata;
 mod ooxml_util;
 mod streaming;
 mod util;
