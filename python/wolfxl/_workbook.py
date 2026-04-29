@@ -1433,71 +1433,7 @@ class Workbook:
         with cell rewrites in the same save (the patcher's Phase 2.5l
         runs before Phase 3 cell patches).
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        # (1) Pod-γ workbook-level bytes queue (escape hatch / RFC-046 §6).
-        pending_bytes = getattr(self, "_pending_chart_adds", None)
-        if pending_bytes:
-            for sheet_title, items in pending_bytes.items():
-                if not items:
-                    continue
-                for chart_xml, anchor_a1, width_emu, height_emu in items:
-                    patcher.queue_chart_add(
-                        sheet_title,
-                        chart_xml,
-                        anchor_a1,
-                        int(width_emu),
-                        int(height_emu),
-                    )
-            pending_bytes.clear()
-        # (2) Sprint Μ-prime Pod-γ′ — modify-mode high-level chart
-        # bridge (RFC-046 §10.12). ``ws._pending_charts`` holds
-        # :class:`ChartBase` instances queued via
-        # ``Worksheet.add_chart(chart)``. Each chart is serialised to
-        # XML bytes via Pod-α′'s ``serialize_chart_dict`` and routed
-        # to the patcher exactly like the bytes-level escape hatch.
-        #
-        # If Pod-α′'s helper isn't yet exported on the bound wheel we
-        # raise :class:`NotImplementedError` rather than silently
-        # dropping the queue — surfacing the missing dependency
-        # synchronously so callers see the gap.
-        any_pending = any(ws._pending_charts for ws in self._sheets.values())  # noqa: SLF001
-        if not any_pending:
-            return
-        try:
-            from wolfxl._rust import serialize_chart_dict  # type: ignore[attr-defined]
-        except ImportError as exc:  # pragma: no cover — defensive
-            raise NotImplementedError(
-                "Modify-mode high-level Worksheet.add_chart() requires "
-                "Sprint Μ-prime Pod-α′'s serialize_chart_dict PyO3 "
-                "export. Build the wolfxl wheel from a branch that "
-                "includes the Pod-α′ commits, or fall back to "
-                "Workbook.add_chart_modify_mode(sheet, chart_xml_bytes, "
-                "anchor) with pre-serialised XML."
-            ) from exc
-
-        # 1 cm = 360_000 EMU. ``ChartBase.width`` / ``.height`` are in
-        # cm to match openpyxl semantics.
-        _CM_TO_EMU = 360_000
-        for ws in self._sheets.values():
-            pending_objs = ws._pending_charts  # noqa: SLF001
-            if not pending_objs:
-                continue
-            for chart in pending_objs:
-                dict_ = chart.to_rust_dict()
-                anchor = chart._anchor or "E15"  # noqa: SLF001
-                chart_xml = serialize_chart_dict(dict_, anchor)
-                width_emu = int(chart.width * _CM_TO_EMU)
-                height_emu = int(chart.height * _CM_TO_EMU)
-                patcher.queue_chart_add(
-                    ws.title,
-                    chart_xml,
-                    anchor,
-                    width_emu,
-                    height_emu,
-                )
-            pending_objs.clear()
+        _workbook_patcher_flush.flush_pending_charts_to_patcher(self)
 
     def add_pivot_cache(self, cache: Any) -> Any:
         """Sprint Ν Pod-γ (RFC-047) — register a pivot cache against
@@ -1556,39 +1492,7 @@ class Workbook:
         Sequenced AFTER pivots (Phase 2.5m) + sheet-setup (Phase 2.5n)
         and BEFORE autofilters (Phase 2.5o).
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = getattr(ws, "_pending_slicers", None)
-            if not pending:
-                continue
-            for slicer in pending:
-                cache = slicer.cache
-                try:
-                    cache_dict = cache.to_rust_dict()
-                except Exception:
-                    # Defensive: skip malformed slicer cache rather
-                    # than poison the save path.
-                    continue
-                try:
-                    slicer_dict = slicer.to_rust_dict()
-                except Exception:
-                    continue
-                try:
-                    self._rust_patcher.queue_slicer_add(
-                        ws.title, cache_dict, slicer_dict
-                    )
-                except Exception:
-                    # If the patcher rejects (e.g. sheet not present
-                    # in source ZIP for write-mode), silently skip.
-                    continue
-            # Drain — calling save() twice should not double-emit.
-            ws._pending_slicers = []
-        # Also drain workbook-level pending slicer caches list so a
-        # second save() is idempotent. The cache itself is bridged
-        # via `cache.to_rust_dict()` inside the slicer loop above
-        # since each slicer references its cache directly.
-        self._pending_slicer_caches = []
+        _workbook_patcher_flush.flush_pending_slicers_to_patcher(self)
 
     def add_slicer_cache(self, cache: Any) -> Any:
         """RFC-061 §2.1 — register a slicer cache against this workbook.
@@ -1710,95 +1614,7 @@ class Workbook:
         ``patcher.save()`` so the patcher's Phase 2.5m runs against
         an already-stable rels graph.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        # Early exit if there's nothing to do.
-        any_caches = bool(self._pending_pivot_caches)
-        any_tables = any(
-            getattr(ws, "_pending_pivot_tables", None)
-            for ws in self._sheets.values()
-        )
-        if not any_caches and not any_tables:
-            return
-
-        try:
-            from wolfxl._rust import (  # type: ignore[attr-defined]
-                serialize_pivot_cache_dict,
-                serialize_pivot_records_dict,
-                serialize_pivot_table_dict,
-            )
-        except ImportError as exc:  # pragma: no cover — defensive
-            raise NotImplementedError(
-                "Modify-mode Workbook.add_pivot_cache() / "
-                "Worksheet.add_pivot_table() require Sprint Ν "
-                "Pod-γ's serialize_pivot_*_dict PyO3 exports. "
-                "Build the wolfxl wheel from a branch that includes "
-                "the Pod-γ commits."
-            ) from exc
-
-        # ---- Pass 1: caches ----
-        # Map: cache_id → cache.to_rust_dict() so Pass 2 can pass
-        # the cache dict to serialize_pivot_table_dict (the table
-        # serializer needs cache schema for field index resolution).
-        cache_dicts: dict[int, dict[str, Any]] = {}
-        for cache in self._pending_pivot_caches:
-            def_dict = cache.to_rust_dict()
-            rec_dict = cache.to_rust_records_dict()
-            def_xml = serialize_pivot_cache_dict(def_dict)
-            # records serializer takes (cache_dict, records_dict)
-            # so it can resolve field types when emitting <r>/<x>.
-            rec_xml = serialize_pivot_records_dict(def_dict, rec_dict)
-            cache_dicts[int(cache._cache_id)] = def_dict
-            allocated = patcher.queue_pivot_cache_add(def_xml, rec_xml)
-            # Sanity — patcher allocates monotonically; the python-side
-            # cache_id we eagerly stamped earlier MUST match.
-            if allocated != cache._cache_id:
-                raise RuntimeError(
-                    f"Pivot cache id mismatch: python={cache._cache_id} "
-                    f"vs patcher={allocated}. This indicates a queue-"
-                    f"ordering bug in _flush_pending_pivots_to_patcher."
-                )
-        self._pending_pivot_caches.clear()
-
-        # ---- Pass 2: tables ----
-        for ws in self._sheets.values():
-            pending = getattr(ws, "_pending_pivot_tables", None)
-            if not pending:
-                continue
-            for pt in pending:
-                if pt.cache._cache_id is None:
-                    raise ValueError(
-                        f"PivotTable on sheet {ws.title!r} references a "
-                        f"PivotCache that was not registered via "
-                        f"Workbook.add_pivot_cache() — register the "
-                        f"cache before calling save()."
-                    )
-                # Compute layout (collapses field axis assignments
-                # into row/col/page/data fields). Idempotent.
-                if hasattr(pt, "_compute_layout"):
-                    pt._compute_layout()
-                table_dict = pt.to_rust_dict()
-                cache_id = int(pt.cache._cache_id)
-                # serialize_pivot_table_dict needs the cache schema
-                # for field-index resolution (rows/cols/data field
-                # indices map to cache fields by position).
-                cache_dict = cache_dicts.get(cache_id)
-                if cache_dict is None:
-                    # Pre-existing cache from disk (not in this save).
-                    # Pull schema directly from pt.cache (Pod-β
-                    # always exposes the typed model, even after
-                    # registration).
-                    cache_dict = pt.cache.to_rust_dict()
-                table_xml = serialize_pivot_table_dict(
-                    cache_dict, table_dict
-                )
-                patcher.queue_pivot_table_add(
-                    ws.title,
-                    table_xml,
-                    cache_id,
-                )
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_pivots_to_patcher(self)
 
     def add_chart_modify_mode(
         self,

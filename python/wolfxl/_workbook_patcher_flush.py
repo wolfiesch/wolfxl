@@ -351,3 +351,158 @@ def flush_pending_autofilters_to_patcher(wb: Any) -> None:
             patcher.queue_autofilter(ws.title, payload)
         except Exception:
             continue
+
+
+def flush_pending_charts_to_patcher(wb: Any) -> None:
+    """Drain pending chart additions into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+
+    pending_bytes = getattr(wb, "_pending_chart_adds", None)
+    if pending_bytes:
+        for sheet_title, items in pending_bytes.items():
+            if not items:
+                continue
+            for chart_xml, anchor_a1, width_emu, height_emu in items:
+                patcher.queue_chart_add(
+                    sheet_title,
+                    chart_xml,
+                    anchor_a1,
+                    int(width_emu),
+                    int(height_emu),
+                )
+        pending_bytes.clear()
+
+    any_pending = any(ws._pending_charts for ws in wb._sheets.values())  # noqa: SLF001
+    if not any_pending:
+        return
+    try:
+        from wolfxl._rust import serialize_chart_dict  # type: ignore[attr-defined]
+    except ImportError as exc:  # pragma: no cover - defensive
+        raise NotImplementedError(
+            "Modify-mode high-level Worksheet.add_chart() requires "
+            "Sprint Μ-prime Pod-α′'s serialize_chart_dict PyO3 export. "
+            "Build the wolfxl wheel from a branch that includes the "
+            "Pod-α′ commits, or fall back to "
+            "Workbook.add_chart_modify_mode(sheet, chart_xml_bytes, anchor) "
+            "with pre-serialised XML."
+        ) from exc
+
+    cm_to_emu = 360_000
+    for ws in wb._sheets.values():  # noqa: SLF001
+        pending_objs = ws._pending_charts  # noqa: SLF001
+        if not pending_objs:
+            continue
+        for chart in pending_objs:
+            chart_dict = chart.to_rust_dict()
+            anchor = chart._anchor or "E15"  # noqa: SLF001
+            chart_xml = serialize_chart_dict(chart_dict, anchor)
+            width_emu = int(chart.width * cm_to_emu)
+            height_emu = int(chart.height * cm_to_emu)
+            patcher.queue_chart_add(
+                ws.title,
+                chart_xml,
+                anchor,
+                width_emu,
+                height_emu,
+            )
+        pending_objs.clear()
+
+
+def flush_pending_slicers_to_patcher(wb: Any) -> None:
+    """Drain pending slicer additions into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        pending = getattr(ws, "_pending_slicers", None)
+        if not pending:
+            continue
+        for slicer in pending:
+            cache = slicer.cache
+            try:
+                cache_dict = cache.to_rust_dict()
+            except Exception:
+                continue
+            try:
+                slicer_dict = slicer.to_rust_dict()
+            except Exception:
+                continue
+            try:
+                patcher.queue_slicer_add(ws.title, cache_dict, slicer_dict)
+            except Exception:
+                continue
+        ws._pending_slicers = []  # noqa: SLF001
+    wb._pending_slicer_caches = []  # noqa: SLF001
+
+
+def flush_pending_pivots_to_patcher(wb: Any) -> None:
+    """Drain pending pivot caches and tables into the Rust patcher."""
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+
+    any_caches = bool(wb._pending_pivot_caches)  # noqa: SLF001
+    any_tables = any(
+        getattr(ws, "_pending_pivot_tables", None)
+        for ws in wb._sheets.values()  # noqa: SLF001
+    )
+    if not any_caches and not any_tables:
+        return
+
+    try:
+        from wolfxl._rust import (  # type: ignore[attr-defined]
+            serialize_pivot_cache_dict,
+            serialize_pivot_records_dict,
+            serialize_pivot_table_dict,
+        )
+    except ImportError as exc:  # pragma: no cover - defensive
+        raise NotImplementedError(
+            "Modify-mode Workbook.add_pivot_cache() / "
+            "Worksheet.add_pivot_table() require Sprint Ν Pod-γ's "
+            "serialize_pivot_*_dict PyO3 exports. Build the wolfxl wheel "
+            "from a branch that includes the Pod-γ commits."
+        ) from exc
+
+    cache_dicts: dict[int, dict[str, Any]] = {}
+    for cache in wb._pending_pivot_caches:  # noqa: SLF001
+        definition_dict = cache.to_rust_dict()
+        records_dict = cache.to_rust_records_dict()
+        definition_xml = serialize_pivot_cache_dict(definition_dict)
+        records_xml = serialize_pivot_records_dict(definition_dict, records_dict)
+        cache_dicts[int(cache._cache_id)] = definition_dict
+        allocated = patcher.queue_pivot_cache_add(definition_xml, records_xml)
+        if allocated != cache._cache_id:
+            raise RuntimeError(
+                f"Pivot cache id mismatch: python={cache._cache_id} "
+                f"vs patcher={allocated}. This indicates a queue-ordering "
+                f"bug in _flush_pending_pivots_to_patcher."
+            )
+    wb._pending_pivot_caches.clear()  # noqa: SLF001
+
+    for ws in wb._sheets.values():  # noqa: SLF001
+        pending = getattr(ws, "_pending_pivot_tables", None)
+        if not pending:
+            continue
+        for pivot_table in pending:
+            if pivot_table.cache._cache_id is None:
+                raise ValueError(
+                    f"PivotTable on sheet {ws.title!r} references a PivotCache "
+                    f"that was not registered via Workbook.add_pivot_cache() - "
+                    f"register the cache before calling save()."
+                )
+            if hasattr(pivot_table, "_compute_layout"):
+                pivot_table._compute_layout()
+            table_dict = pivot_table.to_rust_dict()
+            cache_id = int(pivot_table.cache._cache_id)
+            cache_dict = cache_dicts.get(cache_id)
+            if cache_dict is None:
+                cache_dict = pivot_table.cache.to_rust_dict()
+            table_xml = serialize_pivot_table_dict(cache_dict, table_dict)
+            patcher.queue_pivot_table_add(
+                ws.title,
+                table_xml,
+                cache_id,
+            )
+        pending.clear()
