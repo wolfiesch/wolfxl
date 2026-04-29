@@ -2489,80 +2489,16 @@ impl XlsxPatcher {
         //
         // Sort permutation is computed but **not applied** in v2.0:
         // physical row reorder is deferred to v2.1 per RFC-056 §8.
-        let mut autofilter_hidden_rows: HashMap<String, Vec<u32>> = HashMap::new();
-        if !self.queued_autofilters.is_empty() {
-            // Clone the queue keys to avoid borrowing self twice.
-            let sheet_titles: Vec<String> = self.queued_autofilters.keys().cloned().collect();
-            for sheet_title in &sheet_titles {
-                let queued = self.queued_autofilters.get(sheet_title).cloned().unwrap();
-                let sheet_path = match self.sheet_paths.get(sheet_title) {
-                    Some(p) => p.clone(),
-                    None => continue,
-                };
-                // Read current sheet XML (file_adds for clones, file_patches for
-                // already-mutated, otherwise from the source ZIP).
-                let xml_bytes: Vec<u8> = if let Some(b) = file_patches.get(&sheet_path) {
-                    b.clone()
-                } else if let Some(b) = self.file_adds.get(&sheet_path) {
-                    b.clone()
-                } else {
-                    ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?.into_bytes()
-                };
-
-                // Parse the dict to learn the ref + extract the col span.
-                let af_model = wolfxl_autofilter::parse::parse_autofilter(&queued.dict)
-                    .map_err(|e| PyErr::new::<PyValueError, _>(format!("Phase 2.5o: {e}")))?;
-                let (start_row, end_row, start_col, end_col) = match af_model
-                    .ref_
-                    .as_deref()
-                    .and_then(autofilter_helpers::parse_a1_range)
-                {
-                    Some(t) => t,
-                    None => {
-                        // No ref → just splice the (probably empty) block.
-                        // Skip evaluation.
-                        let block = wolfxl_autofilter::emit::emit(&af_model);
-                        if !block.is_empty() {
-                            local_blocks
-                                .entry(sheet_path.clone())
-                                .or_default()
-                                .push(SheetBlock::AutoFilter(block));
-                        }
-                        continue;
-                    }
-                };
-
-                // Read rows of cells in [start_row+1..=end_row][start_col..=end_col].
-                // The header row (start_row) is skipped — autoFilter applies
-                // to the data rows only.
-                let data_start = start_row + 1;
-                let rows_data = autofilter_helpers::extract_cell_grid(
-                    &xml_bytes, data_start, end_row, start_col, end_col,
-                )?;
-
-                // Drain.
-                let drain = autofilter::drain_autofilter(&queued, &rows_data, None)
-                    .map_err(|e| PyErr::new::<PyValueError, _>(format!("Phase 2.5o: {e}")))?;
-
-                // Convert offsets back to absolute row numbers.
-                let abs_hidden: Vec<u32> = drain
-                    .hidden_offsets
-                    .iter()
-                    .map(|off| data_start + off)
-                    .collect();
-                if !abs_hidden.is_empty() {
-                    autofilter_hidden_rows.insert(sheet_path.clone(), abs_hidden);
-                }
-
-                // Splice the block (replace any existing).
-                if !drain.block_bytes.is_empty() {
-                    local_blocks
-                        .entry(sheet_path.clone())
-                        .or_default()
-                        .push(SheetBlock::AutoFilter(drain.block_bytes));
-                }
-            }
-        }
+        let autofilter_hidden_rows = if self.queued_autofilters.is_empty() {
+            HashMap::new()
+        } else {
+            patcher_sheet_blocks::apply_autofilter_phase(
+                self,
+                &mut local_blocks,
+                &file_patches,
+                &mut zip,
+            )?
+        };
 
         // --- Phase 3: Patch worksheet XMLs ---
         //
