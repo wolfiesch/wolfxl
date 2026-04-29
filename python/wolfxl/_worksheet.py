@@ -104,8 +104,8 @@ class Worksheet:
     """Openpyxl-shaped proxy for a worksheet in a :class:`Workbook`.
 
     The proxy presents cell access, sheet metadata, and feature collections
-    while deferring reads and writes to the workbook's active backend. In
-    modify mode, mutations are queued and flushed through the patcher on save.
+    while keeping read, write, and modify-mode behavior aligned with the
+    workbook that owns it.
     """
 
     __slots__ = (

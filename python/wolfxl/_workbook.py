@@ -40,8 +40,8 @@ class Workbook:
     * read mode, created with ``load_workbook(path)``;
     * modify mode, created with ``load_workbook(path, modify=True)``.
 
-    Public methods mirror openpyxl where practical while routing heavy I/O
-    through WolfXL's native reader, writer, and patcher backends.
+    Public methods mirror openpyxl where practical while using WolfXL's native
+    Excel I/O engine for fast reads, writes, and preserving modify-mode saves.
     """
 
     def __init__(self) -> None:

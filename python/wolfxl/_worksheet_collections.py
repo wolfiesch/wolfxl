@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 class AutoFilter:
     """Proxy for ``ws.auto_filter``.
 
-    The object mirrors the openpyxl-shaped filter surface while keeping
-    serialization to the Rust patcher/native-writer boundary in one place.
+    The object mirrors openpyxl's worksheet filter surface and keeps filter
+    column plus sort-state serialization in one place.
     """
 
     __slots__ = ("_ref", "filter_columns", "sort_state")
@@ -83,7 +83,7 @@ class AutoFilter:
         return sc
 
     def to_rust_dict(self) -> dict[str, Any]:
-        """Serialize to the RFC-056 dict shape."""
+        """Serialize the filter state for the native save pipeline."""
         from wolfxl.worksheet.filters import AutoFilter as _AF
 
         af = _AF(
