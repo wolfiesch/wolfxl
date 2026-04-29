@@ -44,6 +44,13 @@ from wolfxl._worksheet_records import (
     schema as _infer_worksheet_schema,
     sheet_visibility as _sheet_visibility,
 )
+from wolfxl._worksheet_structural import (
+    delete_cols as _delete_cols,
+    delete_rows as _delete_rows,
+    insert_cols as _insert_cols,
+    insert_rows as _insert_rows,
+    move_range as _move_range,
+)
 from wolfxl._worksheet_writer_flush import flush_to_writer
 from wolfxl._worksheet_write_buffers import (
     batch_write_dicts,
@@ -51,29 +58,6 @@ from wolfxl._worksheet_write_buffers import (
     materialize_append_buffer,
     materialize_bulk_writes,
 )
-from wolfxl.utils.cell import column_index_from_string
-
-
-def _coerce_col_idx(idx: int | str, op: str) -> int:
-    """Accept either a 1-based int or an Excel column letter for col ops.
-
-    Used by RFC-031 ``insert_cols`` / ``delete_cols``.
-    """
-    if isinstance(idx, str):
-        try:
-            i = column_index_from_string(idx)
-        except Exception as exc:
-            raise ValueError(
-                f"{op}: idx {idx!r} is not a valid column letter"
-            ) from exc
-    elif isinstance(idx, int) and not isinstance(idx, bool):
-        i = idx
-    else:
-        raise ValueError(f"{op}: idx must be int or str, got {idx!r}")
-    if i < 1:
-        raise ValueError(f"{op}: idx must be >= 1, got {idx!r}")
-    return i
-
 
 def _cellrichtext_to_runs_payload(crt: Any) -> list[tuple[str, dict[str, Any] | None]]:
     """Sprint Ι Pod-α: convert a ``CellRichText`` into the Rust-side
@@ -1556,17 +1540,7 @@ class Worksheet:
         (formula shift, hyperlink/table/DV/CF anchor shift, defined-name
         shift, comment/VML drawing anchor shift).
         """
-        if not isinstance(idx, int) or idx < 1:
-            raise ValueError(
-                f"insert_rows: idx must be a positive integer (>=1), got {idx!r}"
-            )
-        if not isinstance(amount, int) or amount < 1:
-            raise ValueError(
-                f"insert_rows: amount must be a positive integer (>=1), got {amount!r}"
-            )
-        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
-            (self.title, "row", idx, amount)
-        )
+        _insert_rows(self, idx, amount)
 
     def delete_rows(self, idx: int, amount: int = 1) -> None:
         """Delete *amount* rows starting at *idx*, shifting subsequent rows up.
@@ -1575,17 +1549,7 @@ class Worksheet:
         raises ``ValueError`` otherwise. Refs that point INTO the
         deleted band become ``#REF!`` per OOXML semantics.
         """
-        if not isinstance(idx, int) or idx < 1:
-            raise ValueError(
-                f"delete_rows: idx must be a positive integer (>=1), got {idx!r}"
-            )
-        if not isinstance(amount, int) or amount < 1:
-            raise ValueError(
-                f"delete_rows: amount must be a positive integer (>=1), got {amount!r}"
-            )
-        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
-            (self.title, "row", idx, -amount)
-        )
+        _delete_rows(self, idx, amount)
 
     def insert_cols(self, idx: int | str, amount: int = 1) -> None:
         """Shift columns right to insert *amount* empty columns at *idx*.
@@ -1598,16 +1562,7 @@ class Worksheet:
         See ``Plans/rfcs/031-insert-delete-cols.md`` for full semantics
         (formula shift, anchor shift, ``<col>`` span split).
         """
-        idx_i = _coerce_col_idx(idx, "insert_cols")
-        if not isinstance(amount, int) or amount < 0:
-            raise ValueError(
-                f"insert_cols: amount must be an integer >= 0, got {amount!r}"
-            )
-        if amount == 0:
-            return
-        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
-            (self.title, "col", idx_i, amount)
-        )
+        _insert_cols(self, idx, amount)
 
     def delete_cols(self, idx: int | str, amount: int = 1) -> None:
         """Delete *amount* columns starting at *idx*, shifting subsequent columns left.
@@ -1616,16 +1571,7 @@ class Worksheet:
         column letter. Refs that point INTO the deleted band become
         ``#REF!`` per OOXML semantics. ``amount == 0`` is a noop.
         """
-        idx_i = _coerce_col_idx(idx, "delete_cols")
-        if not isinstance(amount, int) or amount < 0:
-            raise ValueError(
-                f"delete_cols: amount must be an integer >= 0, got {amount!r}"
-            )
-        if amount == 0:
-            return
-        self._workbook._pending_axis_shifts.append(  # noqa: SLF001
-            (self.title, "col", idx_i, -amount)
-        )
+        _delete_cols(self, idx, amount)
 
     def move_range(
         self,
@@ -1656,63 +1602,7 @@ class Worksheet:
         ``rows == 0 and cols == 0`` is a no-op (matches openpyxl).
         Empty queue → byte-identical save.
         """
-        from wolfxl.utils.cell import range_boundaries
-
-        if not isinstance(rows, int) or isinstance(rows, bool):
-            raise TypeError(
-                f"move_range: rows must be an int, got {type(rows).__name__}"
-            )
-        if not isinstance(cols, int) or isinstance(cols, bool):
-            raise TypeError(
-                f"move_range: cols must be an int, got {type(cols).__name__}"
-            )
-        if not isinstance(cell_range, str):
-            # Best-effort coercion for openpyxl `CellRange`-style objects.
-            cell_range = str(cell_range)
-        try:
-            min_col, min_row, max_col, max_row = range_boundaries(cell_range)
-        except Exception as exc:
-            raise ValueError(
-                f"move_range: cell_range must be a valid A1 range string, "
-                f"got {cell_range!r}: {exc}"
-            ) from exc
-        if min_col is None or min_row is None or max_col is None or max_row is None:
-            raise ValueError(
-                f"move_range: cell_range must have all four corners "
-                f"(rows + cols), got {cell_range!r}"
-            )
-        if rows == 0 and cols == 0:
-            return
-        # Validate destination bounds. Excel: rows 1..1_048_576,
-        # cols 1..16_384 (1-based, inclusive).
-        dst_min_row = min_row + rows
-        dst_max_row = max_row + rows
-        dst_min_col = min_col + cols
-        dst_max_col = max_col + cols
-        if dst_min_row < 1 or dst_max_row > 1_048_576:
-            raise ValueError(
-                f"move_range: destination row range "
-                f"[{dst_min_row}, {dst_max_row}] is out of bounds "
-                f"(must be in [1, 1048576])"
-            )
-        if dst_min_col < 1 or dst_max_col > 16_384:
-            raise ValueError(
-                f"move_range: destination column range "
-                f"[{dst_min_col}, {dst_max_col}] is out of bounds "
-                f"(must be in [1, 16384])"
-            )
-        self._workbook._pending_range_moves.append(  # noqa: SLF001
-            (
-                self.title,
-                int(min_col),
-                int(min_row),
-                int(max_col),
-                int(max_row),
-                int(rows),
-                int(cols),
-                bool(translate),
-            )
-        )
+        _move_range(self, cell_range, rows=rows, cols=cols, translate=translate)
 
     # ------------------------------------------------------------------
     # T1 PR1 read maps — lazy + per-sheet cached
