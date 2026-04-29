@@ -132,7 +132,7 @@ pub fn emit(
     emit_conditional_formats(&mut out, sheet);
 
     // Slot 18: <dataValidations> — EXT-W3C
-    emit_data_validations(&mut out, sheet);
+    super::data_validations::emit(&mut out, sheet);
 
     // Slot 19: <hyperlinks> (only if any exist)
     if !sheet.hyperlinks.is_empty() {
@@ -906,116 +906,6 @@ fn emit_conditional_formats(out: &mut String, sheet: &Worksheet) {
                 names.join(", "),
             );
         }
-    }
-}
-
-/// Emit `<dataValidations count="N">…</dataValidations>` between the CF
-/// block and `<hyperlinks>`. Filled by W3C.
-fn emit_data_validations(out: &mut String, sheet: &Worksheet) {
-    use crate::model::validation::{ErrorStyle, ValidationOperator, ValidationType};
-
-    if !sheet.validations.is_empty() {
-        out.push_str(&format!(
-            "<dataValidations count=\"{}\">",
-            sheet.validations.len()
-        ));
-
-        for dv in &sheet.validations {
-            let type_str = match dv.validation_type {
-                ValidationType::Any => "any",
-                ValidationType::Whole => "whole",
-                ValidationType::Decimal => "decimal",
-                ValidationType::List => "list",
-                ValidationType::Date => "date",
-                ValidationType::Time => "time",
-                ValidationType::TextLength => "textLength",
-                ValidationType::Custom => "custom",
-            };
-
-            out.push_str(&format!("<dataValidation type=\"{}\"", type_str));
-
-            // operator — omit for List and Custom
-            let needs_operator = !matches!(
-                dv.validation_type,
-                ValidationType::List | ValidationType::Custom
-            );
-            if needs_operator {
-                let op_str = match dv.operator {
-                    ValidationOperator::Between => "between",
-                    ValidationOperator::NotBetween => "notBetween",
-                    ValidationOperator::Equal => "equal",
-                    ValidationOperator::NotEqual => "notEqual",
-                    ValidationOperator::GreaterThan => "greaterThan",
-                    ValidationOperator::LessThan => "lessThan",
-                    ValidationOperator::GreaterThanOrEqual => "greaterThanOrEqual",
-                    ValidationOperator::LessThanOrEqual => "lessThanOrEqual",
-                };
-                out.push_str(&format!(" operator=\"{}\"", op_str));
-            }
-
-            if dv.allow_blank {
-                out.push_str(" allowBlank=\"1\"");
-            }
-
-            // showDropDown — note: capital D in OOXML attribute name
-            if dv.show_dropdown {
-                out.push_str(" showDropDown=\"1\"");
-            }
-
-            if dv.show_input_message {
-                out.push_str(" showInputMessage=\"1\"");
-            }
-
-            if dv.show_error_message {
-                out.push_str(" showErrorMessage=\"1\"");
-            }
-
-            // errorStyle — only emit when not default (Stop)
-            match dv.error_style {
-                ErrorStyle::Stop => {}
-                ErrorStyle::Warning => {
-                    out.push_str(" errorStyle=\"warning\"");
-                }
-                ErrorStyle::Information => {
-                    out.push_str(" errorStyle=\"information\"");
-                }
-            }
-
-            if let Some(ref title) = dv.error_title {
-                out.push_str(&format!(" errorTitle=\"{}\"", xml_escape::attr(title)));
-            }
-            if let Some(ref msg) = dv.error_message {
-                out.push_str(&format!(" error=\"{}\"", xml_escape::attr(msg)));
-            }
-            if let Some(ref title) = dv.input_title {
-                out.push_str(&format!(" promptTitle=\"{}\"", xml_escape::attr(title)));
-            }
-            if let Some(ref msg) = dv.input_message {
-                out.push_str(&format!(" prompt=\"{}\"", xml_escape::attr(msg)));
-            }
-
-            out.push_str(&format!(" sqref=\"{}\">", xml_escape::attr(&dv.sqref)));
-
-            // formula1 — only when formula_a is Some
-            if let Some(ref fa) = dv.formula_a {
-                out.push_str(&format!("<formula1>{}</formula1>", xml_escape::text(fa)));
-            }
-
-            // formula2 — only when formula_b is Some AND operator is Between or NotBetween
-            let is_between = matches!(
-                dv.operator,
-                ValidationOperator::Between | ValidationOperator::NotBetween
-            );
-            if is_between {
-                if let Some(ref fb) = dv.formula_b {
-                    out.push_str(&format!("<formula2>{}</formula2>", xml_escape::text(fb)));
-                }
-            }
-
-            out.push_str("</dataValidation>");
-        }
-
-        out.push_str("</dataValidations>");
     }
 }
 
