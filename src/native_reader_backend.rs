@@ -471,6 +471,18 @@ impl NativeXlsxBook {
         }
     }
 
+    pub fn read_auto_filter(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let auto_filter = self.ensure_sheet(sheet)?.auto_filter.clone();
+        match auto_filter {
+            Some(auto_filter) => {
+                let d = PyDict::new(py);
+                d.set_item("ref", auto_filter.ref_range)?;
+                Ok(d.into())
+            }
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_named_ranges(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         if !self.sheet_names.iter().any(|name| name == sheet) {
             return Err(PyErr::new::<PyValueError, _>(format!(

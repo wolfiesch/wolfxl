@@ -46,6 +46,23 @@ def set_freeze_panes(ws: Worksheet, value: str | None) -> None:
     )
 
 
+def get_auto_filter(ws: Worksheet) -> Any:
+    """Return the worksheet auto-filter proxy, loading reader metadata once."""
+    workbook = ws._workbook  # noqa: SLF001
+    auto_filter = ws._auto_filter  # noqa: SLF001
+    if (
+        auto_filter.ref is None
+        and not auto_filter.filter_columns
+        and auto_filter.sort_state is None
+        and workbook._rust_reader is not None  # noqa: SLF001
+        and hasattr(workbook._rust_reader, "read_auto_filter")  # noqa: SLF001
+    ):
+        payload = workbook._rust_reader.read_auto_filter(ws._title)  # noqa: SLF001
+        if isinstance(payload, dict):
+            auto_filter.ref = payload.get("ref")
+    return auto_filter
+
+
 def get_page_setup(ws: Worksheet) -> Any:
     """Return the lazy page setup object."""
     if ws._page_setup is None:  # noqa: SLF001

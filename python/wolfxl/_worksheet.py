@@ -68,6 +68,7 @@ from wolfxl._worksheet_records import (
 from wolfxl._worksheet_repr import worksheet_repr as _worksheet_repr
 from wolfxl._worksheet_rich_text import cellrichtext_to_runs_payload
 from wolfxl._worksheet_setup import (
+    get_auto_filter,
     get_col_breaks,
     get_dimension_holder,
     get_freeze_panes,
@@ -418,7 +419,7 @@ class Worksheet:
     @property
     def auto_filter(self) -> _AutoFilter:
         """Worksheet auto-filter proxy."""
-        return self._auto_filter
+        return get_auto_filter(self)
 
     @property
     def row_dimensions(self) -> RowDimensionProxy:

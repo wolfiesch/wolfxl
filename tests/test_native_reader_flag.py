@@ -82,6 +82,7 @@ def _make_basic_xlsx(path: Path) -> None:
     dv.add("C2:C6")
     ws.add_data_validation(dv)
     ws.freeze_panes = "B2"
+    ws.auto_filter.ref = "A1:D6"
     ws.protection.sheet = True
     ws.protection.objects = True
     ws.protection.formatCells = False
@@ -229,6 +230,9 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert validations[0].allowBlank is True
         assert validations[0].sqref == "C2:C6"
         assert ws.freeze_panes == "B2"
+        assert ws.auto_filter.ref == "A1:D6"
+        assert ws.auto_filter.filter_columns == []
+        assert ws.auto_filter.sort_state is None
         assert ws.protection.sheet is True
         assert ws.protection.objects is True
         assert ws.protection.formatCells is False

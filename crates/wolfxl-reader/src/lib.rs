@@ -142,6 +142,7 @@ pub struct WorksheetData {
     pub column_widths: Vec<ColumnWidth>,
     pub data_validations: Vec<DataValidation>,
     pub sheet_protection: Option<SheetProtection>,
+    pub auto_filter: Option<AutoFilterInfo>,
     pub tables: Vec<Table>,
     pub conditional_formats: Vec<ConditionalFormatRule>,
     pub hidden_rows: Vec<u32>,
@@ -237,6 +238,12 @@ pub struct SheetProtection {
     pub pivot_tables: bool,
     pub select_unlocked_cells: bool,
     pub password_hash: Option<String>,
+}
+
+/// Parsed worksheet-level auto-filter metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoFilterInfo {
+    pub ref_range: String,
 }
 
 /// Parsed worksheet table metadata.
@@ -1427,6 +1434,7 @@ fn parse_worksheet(
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
     let mut sheet_protection = None;
+    let mut auto_filter = None;
     let mut conditional_formats = Vec::new();
     let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
     let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
@@ -1476,6 +1484,9 @@ fn parse_worksheet(
                 }
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
+                }
+                b"autoFilter" => {
+                    auto_filter = AutoFilterInfo::from_start(&e);
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1588,6 +1599,9 @@ fn parse_worksheet(
                 }
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
+                }
+                b"autoFilter" => {
+                    auto_filter = AutoFilterInfo::from_start(&e);
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1744,6 +1758,7 @@ fn parse_worksheet(
         column_widths,
         data_validations,
         sheet_protection,
+        auto_filter,
         tables,
         conditional_formats,
         hidden_rows,
@@ -1965,6 +1980,14 @@ impl SheetProtection {
             select_unlocked_cells: attr_bool_default(e, b"selectUnlockedCells", false),
             password_hash: attr_value(e, b"password"),
         }
+    }
+}
+
+impl AutoFilterInfo {
+    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
+        attr_value(e, b"ref")
+            .filter(|value| !value.trim().is_empty())
+            .map(|ref_range| Self { ref_range })
     }
 }
 
@@ -2978,6 +3001,7 @@ mod tests {
             <cfRule type="cellIs" operator="greaterThan" priority="1" stopIfTrue="1"><formula>50</formula></cfRule>
         </conditionalFormatting>
         <sheetProtection sheet="1" objects="1" formatCells="0" sort="0" password="C258"/>
+        <autoFilter ref="A1:D10"/>
         </worksheet>"#;
         let shared_strings = SharedStrings {
             values: vec!["Shared".to_string()],
@@ -3061,6 +3085,12 @@ mod tests {
                 pivot_tables: true,
                 select_unlocked_cells: false,
                 password_hash: Some("C258".to_string()),
+            })
+        );
+        assert_eq!(
+            sheet.auto_filter,
+            Some(AutoFilterInfo {
+                ref_range: "A1:D10".to_string(),
             })
         );
         assert_eq!(
