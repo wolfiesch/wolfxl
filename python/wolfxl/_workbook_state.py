@@ -142,6 +142,7 @@ def _initialize_sheet_proxies(wb: Any, rust_book: Any) -> None:
 def initialize_pending_state(wb: Any) -> None:
     """Initialize workbook caches and pending mutation queues."""
     wb._properties_cache = None
+    wb._custom_doc_props_cache = None
     wb._properties_dirty = False
     wb._defined_names_cache = None
     wb._pending_defined_names = {}

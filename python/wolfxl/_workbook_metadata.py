@@ -53,6 +53,27 @@ def set_properties(wb: Any, value: Any) -> None:
     wb._properties_dirty = True  # noqa: SLF001
 
 
+def get_custom_doc_props(wb: Any) -> Any:
+    """Return workbook custom document properties, lazily loaded."""
+    if wb._custom_doc_props_cache is not None:  # noqa: SLF001
+        return wb._custom_doc_props_cache  # noqa: SLF001
+    payload = _reader_workbook_payload(wb, "read_custom_doc_properties")
+    wb._custom_doc_props_cache = _custom_doc_props_from_payload(payload)  # noqa: SLF001
+    return wb._custom_doc_props_cache  # noqa: SLF001
+
+
+def set_custom_doc_props(wb: Any, value: Any) -> None:
+    """Replace workbook custom document properties."""
+    from wolfxl.packaging.custom import CustomPropertyList
+
+    if not isinstance(value, CustomPropertyList):
+        raise TypeError(
+            "custom_doc_props must be a CustomPropertyList, "
+            f"got {type(value).__name__}"
+        )
+    wb._custom_doc_props_cache = value  # noqa: SLF001
+
+
 def get_defined_names(wb: Any) -> Any:
     """Return a lazy-loaded workbook ``DefinedNameDict``.
 
@@ -216,6 +237,57 @@ def _reader_workbook_payload(wb: Any, method_name: str) -> Any:
         return getattr(reader, method_name)()
     except Exception:
         return None
+
+
+def _custom_doc_props_from_payload(payload: Any) -> Any:
+    from wolfxl.packaging.custom import CustomPropertyList
+
+    props = CustomPropertyList()
+    if not isinstance(payload, list):
+        return props
+    for item in payload:
+        if isinstance(item, dict):
+            prop = _custom_doc_prop_from_payload(item)
+            if prop is not None:
+                props.append(prop)
+    return props
+
+
+def _custom_doc_prop_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.packaging.custom import (
+        BoolProperty,
+        DateTimeProperty,
+        FloatProperty,
+        IntProperty,
+        LinkProperty,
+        StringProperty,
+    )
+
+    name = str(payload.get("name") or "")
+    if not name:
+        return None
+    kind = str(payload.get("kind") or "string")
+    value = str(payload.get("value") or "")
+    if kind == "int":
+        return IntProperty(name=name, value=int(value))
+    if kind == "float":
+        return FloatProperty(name=name, value=float(value))
+    if kind == "bool":
+        return BoolProperty(name=name, value=value not in {"0", "false", "False"})
+    if kind == "datetime":
+        return DateTimeProperty(name=name, value=_parse_custom_datetime(value))
+    if kind == "link":
+        return LinkProperty(name=name, value=value)
+    return StringProperty(name=name, value=value)
+
+
+def _parse_custom_datetime(value: str) -> Any:
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return datetime.fromisoformat(value.removesuffix("Z"))
 
 
 def _workbook_properties_from_payload(payload: Any) -> Any:

@@ -8,5 +8,23 @@ Re-exports :class:`DocumentProperties` from ``core`` so users can write
 from __future__ import annotations
 
 from wolfxl.packaging.core import DocumentProperties
+from wolfxl.packaging.custom import (
+    BoolProperty,
+    CustomPropertyList,
+    DateTimeProperty,
+    FloatProperty,
+    IntProperty,
+    LinkProperty,
+    StringProperty,
+)
 
-__all__ = ["DocumentProperties"]
+__all__ = [
+    "BoolProperty",
+    "CustomPropertyList",
+    "DateTimeProperty",
+    "DocumentProperties",
+    "FloatProperty",
+    "IntProperty",
+    "LinkProperty",
+    "StringProperty",
+]

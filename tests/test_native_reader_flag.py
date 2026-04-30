@@ -337,10 +337,27 @@ def _make_sheet_state_xlsx(path: Path) -> None:
 
 
 def _make_workbook_calc_properties_xlsx(path: Path) -> None:
+    from openpyxl.packaging.custom import (
+        BoolProperty,
+        DateTimeProperty,
+        FloatProperty,
+        IntProperty,
+        LinkProperty,
+        StringProperty,
+    )
+
     wb = openpyxl.Workbook()
     wb.active.title = "Visible"
     wb.create_sheet("Second")
     wb.create_sheet("Third")
+    wb.custom_doc_props.append(StringProperty(name="Client", value="ACME"))
+    wb.custom_doc_props.append(IntProperty(name="Count", value=42))
+    wb.custom_doc_props.append(FloatProperty(name="Ratio", value=2.5))
+    wb.custom_doc_props.append(BoolProperty(name="Reviewed", value=True))
+    wb.custom_doc_props.append(
+        DateTimeProperty(name="AsOf", value=dt.datetime(2024, 1, 2, 3, 4, 5))
+    )
+    wb.custom_doc_props.append(LinkProperty(name="LinkedCell", value="Visible!A1"))
     wb.save(path)
     wb.close()
     _inject_workbook_calc_properties(path)
@@ -696,6 +713,20 @@ def test_native_reader_loads_workbook_calc_properties(
         assert wb.loaded_theme is None
         assert wb.vba_archive is None
         assert wb.style_names == ["Normal"]
+        assert wb.custom_doc_props.names == [
+            "Client",
+            "Count",
+            "Ratio",
+            "Reviewed",
+            "AsOf",
+            "LinkedCell",
+        ]
+        assert wb.custom_doc_props["Client"].value == "ACME"
+        assert wb.custom_doc_props["Count"].value == 42
+        assert wb.custom_doc_props["Ratio"].value == 2.5
+        assert wb.custom_doc_props["Reviewed"].value is True
+        assert wb.custom_doc_props["AsOf"].value == dt.datetime(2024, 1, 2, 3, 4, 5)
+        assert wb.custom_doc_props["LinkedCell"].value == "Visible!A1"
         assert (
             wb.mime_type
             == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"

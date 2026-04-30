@@ -138,6 +138,13 @@ PATHS: list[tuple[str, str]] = [
     ("openpyxl.workbook.properties", "WorkbookProperties"),
     ("openpyxl.workbook.views", "BookView"),
     ("openpyxl.workbook.child", "_WorkbookChild"),
+    ("openpyxl.packaging.custom", "CustomPropertyList"),
+    ("openpyxl.packaging.custom", "StringProperty"),
+    ("openpyxl.packaging.custom", "IntProperty"),
+    ("openpyxl.packaging.custom", "FloatProperty"),
+    ("openpyxl.packaging.custom", "BoolProperty"),
+    ("openpyxl.packaging.custom", "DateTimeProperty"),
+    ("openpyxl.packaging.custom", "LinkProperty"),
 
     # ---- utils -----------------------------------------------------------
     ("openpyxl.utils.cell", "column_index_from_string"),

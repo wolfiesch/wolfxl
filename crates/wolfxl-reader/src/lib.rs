@@ -830,6 +830,14 @@ pub struct BookViewInfo {
     pub auto_filter_date_grouping: bool,
 }
 
+/// Parsed custom document property from `docProps/custom.xml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomPropertyInfo {
+    pub name: String,
+    pub kind: String,
+    pub value: String,
+}
+
 /// Parsed `<workbookProtection>` metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbookProtection {
@@ -921,6 +929,7 @@ pub struct NativeXlsxBook {
     workbook_properties: Option<WorkbookPropertiesInfo>,
     calc_properties: Option<CalcPropertiesInfo>,
     workbook_views: Vec<BookViewInfo>,
+    custom_doc_properties: Vec<CustomPropertyInfo>,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
     styles: StyleTables,
@@ -968,6 +977,10 @@ impl NativeXlsxBook {
         if let Some(xml) = read_part_optional(&mut zip, "docProps/app.xml")? {
             parse_doc_properties_into(&xml, &mut doc_properties, doc_property_app_key);
         }
+        let custom_doc_properties = match read_part_optional(&mut zip, "docProps/custom.xml")? {
+            Some(xml) => parse_custom_doc_properties(&xml)?,
+            None => Vec::new(),
+        };
 
         Ok(Self {
             bytes,
@@ -979,6 +992,7 @@ impl NativeXlsxBook {
             workbook_properties,
             calc_properties,
             workbook_views,
+            custom_doc_properties,
             doc_properties,
             shared_strings,
             styles,
@@ -1038,6 +1052,11 @@ impl NativeXlsxBook {
     /// Workbook window views parsed from `<bookViews>`.
     pub fn workbook_views(&self) -> &[BookViewInfo] {
         &self.workbook_views
+    }
+
+    /// Custom document properties parsed from `docProps/custom.xml`.
+    pub fn custom_doc_properties(&self) -> &[CustomPropertyInfo] {
+        &self.custom_doc_properties
     }
 
     /// Workbook document properties parsed from `docProps/core.xml` and app.xml.
@@ -3667,6 +3686,112 @@ fn doc_property_app_key(name: &[u8]) -> Option<&'static str> {
         b"Manager" => Some("manager"),
         b"Application" => Some("application"),
         _ => None,
+    }
+}
+
+fn parse_custom_doc_properties(xml: &str) -> Result<Vec<CustomPropertyInfo>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut properties = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_link_target: Option<String> = None;
+    let mut current_kind: Option<String> = None;
+    let mut current_value = String::new();
+    let mut active_value_tag: Option<Vec<u8>> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"property" => {
+                    current_name = attr_value(&e, b"name");
+                    current_link_target = attr_value(&e, b"linkTarget");
+                    current_kind = current_link_target.as_ref().map(|_| "link".to_string());
+                    current_value.clear();
+                }
+                tag if current_name.is_some() => {
+                    active_value_tag = Some(tag.to_vec());
+                    if current_kind.is_none() {
+                        current_kind = Some(custom_property_kind(tag).to_string());
+                    }
+                    current_value.clear();
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"property" => {
+                    if let Some(name) = attr_value(&e, b"name") {
+                        if let Some(link) = attr_value(&e, b"linkTarget") {
+                            properties.push(CustomPropertyInfo {
+                                name,
+                                kind: "link".to_string(),
+                                value: link,
+                            });
+                        }
+                    }
+                }
+                tag if current_name.is_some() => {
+                    if current_kind.is_none() {
+                        current_kind = Some(custom_property_kind(tag).to_string());
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                if active_value_tag.is_some() {
+                    current_value.push_str(
+                        &e.unescape().map_err(|err| {
+                            ReaderError::Xml(format!("custom property text: {err}"))
+                        })?,
+                    );
+                }
+            }
+            Ok(Event::CData(e)) => {
+                if active_value_tag.is_some() {
+                    current_value.push_str(&String::from_utf8_lossy(e.as_ref()));
+                }
+            }
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"property" => {
+                    if let Some(name) = current_name.take() {
+                        let kind = current_kind.take().unwrap_or_else(|| "string".to_string());
+                        let value = current_link_target
+                            .take()
+                            .unwrap_or_else(|| current_value.clone());
+                        properties.push(CustomPropertyInfo { name, kind, value });
+                    }
+                    active_value_tag = None;
+                    current_value.clear();
+                }
+                tag => {
+                    if active_value_tag.as_deref() == Some(tag) {
+                        active_value_tag = None;
+                    }
+                }
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse docProps/custom.xml: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(properties)
+}
+
+fn custom_property_kind(tag: &[u8]) -> &'static str {
+    match tag {
+        b"i1" | b"i2" | b"i4" | b"i8" | b"int" | b"uint" | b"ui1" | b"ui2" | b"ui4" | b"ui8" => {
+            "int"
+        }
+        b"r4" | b"r8" | b"decimal" => "float",
+        b"bool" => "bool",
+        b"filetime" | b"date" => "datetime",
+        _ => "string",
     }
 }
 

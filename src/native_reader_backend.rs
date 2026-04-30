@@ -18,12 +18,12 @@ use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
-    ChartInfo, ChartSeriesInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo,
-    FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
-    NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity,
-    WorksheetData,
+    ChartInfo, ChartSeriesInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo,
+    FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo,
+    InlineFontProps, NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo,
+    PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection,
+    SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo,
+    WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -665,6 +665,14 @@ impl NativeXlsxBook {
             d.set_item(key, value)?;
         }
         Ok(d.into())
+    }
+
+    pub fn read_custom_doc_properties(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let result = PyList::empty(py);
+        for property in self.book.custom_doc_properties() {
+            result.append(custom_property_to_py(py, property)?)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_workbook_security(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -1388,6 +1396,14 @@ fn book_view_to_py(py: Python<'_>, view: &BookViewInfo) -> PyResult<PyObject> {
     d.set_item("first_sheet", view.first_sheet)?;
     d.set_item("active_tab", view.active_tab)?;
     d.set_item("auto_filter_date_grouping", view.auto_filter_date_grouping)?;
+    Ok(d.into())
+}
+
+fn custom_property_to_py(py: Python<'_>, property: &CustomPropertyInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("name", &property.name)?;
+    d.set_item("kind", &property.kind)?;
+    d.set_item("value", &property.value)?;
     Ok(d.into())
 }
 

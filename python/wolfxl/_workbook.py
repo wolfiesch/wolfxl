@@ -463,6 +463,16 @@ class Workbook:
         """
         _workbook_metadata.set_properties(self, value)
 
+    @property
+    def custom_doc_props(self) -> Any:
+        """Return workbook custom document properties."""
+        return _workbook_metadata.get_custom_doc_props(self)
+
+    @custom_doc_props.setter
+    def custom_doc_props(self, value: Any) -> None:
+        """Replace workbook custom document properties."""
+        _workbook_metadata.set_custom_doc_props(self, value)
+
     # ------------------------------------------------------------------
     # Named ranges
     # ------------------------------------------------------------------
