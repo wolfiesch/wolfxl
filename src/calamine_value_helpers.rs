@@ -3,6 +3,131 @@
 use std::collections::HashMap;
 
 use calamine_styles::Data;
+use chrono::{Datelike, NaiveTime, Timelike};
+use pyo3::prelude::*;
+use pyo3::types::{PyDateTime, PyDict};
+use pyo3::IntoPyObjectExt;
+
+use crate::util::{cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
+
+type PyObject = Py<PyAny>;
+
+pub(crate) fn data_to_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
+    match value {
+        Data::Empty => cell_blank(py),
+        Data::String(s) => cell_with_value(py, "string", s.clone()),
+        Data::Float(f) => cell_with_value(py, "number", *f),
+        Data::Int(i) => cell_with_value(py, "number", *i as f64),
+        Data::Bool(b) => cell_with_value(py, "boolean", *b),
+        Data::DateTime(dt) => {
+            if let Some(ndt) = dt.as_datetime() {
+                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                if ndt.time() == midnight {
+                    let s = ndt.date().format("%Y-%m-%d").to_string();
+                    cell_with_value(py, "date", s)
+                } else {
+                    let s = ndt.format("%Y-%m-%dT%H:%M:%S").to_string();
+                    cell_with_value(py, "datetime", s)
+                }
+            } else {
+                cell_with_value(py, "number", dt.as_f64())
+            }
+        }
+        Data::DateTimeIso(s) => {
+            let raw = s.trim_end_matches('Z');
+            if let Some(d) = parse_iso_date(raw) {
+                cell_with_value(py, "date", d.format("%Y-%m-%d").to_string())
+            } else if let Some(ndt) = parse_iso_datetime(raw) {
+                let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+                if ndt.time() == midnight {
+                    cell_with_value(py, "date", ndt.date().format("%Y-%m-%d").to_string())
+                } else {
+                    cell_with_value(py, "datetime", ndt.format("%Y-%m-%dT%H:%M:%S").to_string())
+                }
+            } else {
+                cell_with_value(py, "datetime", s.clone())
+            }
+        }
+        Data::DurationIso(s) => cell_with_value(py, "string", s.clone()),
+        Data::RichText(rt) => cell_with_value(py, "string", rt.plain_text()),
+        Data::Error(e) => {
+            let normalized = map_error_value(&format!("{e:?}"));
+            let d = PyDict::new(py);
+            d.set_item("type", "error")?;
+            d.set_item("value", normalized)?;
+            Ok(d.into())
+        }
+    }
+}
+
+/// Convert a calamine Data value to a plain Python object (no dict wrapper).
+///
+/// Returns str, float, int, bool, None, datetime.date, or datetime.datetime.
+pub(crate) fn data_to_plain_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
+    match value {
+        Data::Empty => Ok(py.None()),
+        Data::String(s) => s.into_py_any(py),
+        Data::Float(f) => f.into_py_any(py),
+        Data::Int(i) => i.into_py_any(py),
+        Data::Bool(b) => b.into_py_any(py),
+        Data::DateTime(dt) => {
+            if let Some(ndt) = dt.as_datetime() {
+                let d = PyDateTime::new(
+                    py,
+                    ndt.year(),
+                    ndt.month() as u8,
+                    ndt.day() as u8,
+                    ndt.hour() as u8,
+                    ndt.minute() as u8,
+                    ndt.second() as u8,
+                    0,
+                    None,
+                )?;
+                Ok(d.into_any().unbind())
+            } else {
+                dt.as_f64().into_py_any(py)
+            }
+        }
+        Data::DateTimeIso(s) => {
+            let raw = s.trim_end_matches('Z');
+            if let Some(d) = parse_iso_date(raw) {
+                let pydt = PyDateTime::new(
+                    py,
+                    d.year(),
+                    d.month() as u8,
+                    d.day() as u8,
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                )?;
+                Ok(pydt.into_any().unbind())
+            } else if let Some(ndt) = parse_iso_datetime(raw) {
+                let pydt = PyDateTime::new(
+                    py,
+                    ndt.year(),
+                    ndt.month() as u8,
+                    ndt.day() as u8,
+                    ndt.hour() as u8,
+                    ndt.minute() as u8,
+                    ndt.second() as u8,
+                    0,
+                    None,
+                )?;
+                Ok(pydt.into_any().unbind())
+            } else {
+                s.into_py_any(py)
+            }
+        }
+        Data::DurationIso(s) => s.into_py_any(py),
+        Data::RichText(rt) => rt.plain_text().into_py_any(py),
+        Data::Error(e) => {
+            let normalized = map_error_value(&format!("{e:?}"));
+            normalized.into_py_any(py)
+        }
+    }
+}
 
 pub(crate) fn map_error_value(err_str: &str) -> &'static str {
     let e = err_str.to_ascii_uppercase();

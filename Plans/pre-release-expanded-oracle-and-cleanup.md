@@ -162,7 +162,7 @@ Current largest WolfXL hotspots:
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2491 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
-| `src/calamine_styled_backend.rs` | 4547 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
+| `src/calamine_styled_backend.rs` | 4425 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 527 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1395 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 386 | Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage. |
@@ -740,10 +740,9 @@ First no-behavior split target, completed 2026-04-28:
    2026-04-29 so test hooks and save orchestration share one PyO3 error path
    before deeper phase extraction.
 126. Calamine styled-reader value and coordinate helpers moved to
-   `src/calamine_value_helpers.rs` on 2026-04-29: error normalization,
-   formula-placeholder detection, A1 coordinate rendering, and dimension/bounds
-   accumulation now live outside the large backend without changing the
-   Python-facing conversion helpers.
+   `src/calamine_value_helpers.rs` on 2026-04-29: Python value conversion,
+   error normalization, formula-placeholder detection, A1 coordinate rendering,
+   and dimension/bounds accumulation now live outside the large backend.
 127. Next helper candidate: continue splitting Rust save orchestration only
    where the state boundary is clean. The next high-value but higher-risk
    targets are `XlsxPatcher::do_save` phase extraction, then
