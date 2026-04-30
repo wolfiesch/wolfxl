@@ -32,6 +32,8 @@ pub struct NativeXlsxBook {
     book: NativeReaderBook,
     sheet_names: Vec<String>,
     sheet_cache: HashMap<String, WorksheetData>,
+    sheet_cell_indexes: HashMap<String, HashMap<(u32, u32), usize>>,
+    sheet_merged_bounds: HashMap<String, Vec<(u32, u32, u32, u32)>>,
     opened_from_bytes: bool,
     source_path: Option<String>,
 }
@@ -49,6 +51,8 @@ impl NativeXlsxBook {
             book,
             sheet_names,
             sheet_cache: HashMap::new(),
+            sheet_cell_indexes: HashMap::new(),
+            sheet_merged_bounds: HashMap::new(),
             opened_from_bytes: false,
             source_path: Some(path.to_string()),
         })
@@ -65,6 +69,8 @@ impl NativeXlsxBook {
             book,
             sheet_names,
             sheet_cache: HashMap::new(),
+            sheet_cell_indexes: HashMap::new(),
+            sheet_merged_bounds: HashMap::new(),
             opened_from_bytes: true,
             source_path: None,
         })
@@ -145,11 +151,14 @@ impl NativeXlsxBook {
         let row = row0 + 1;
         let col = col0 + 1;
         let cell = {
+            self.ensure_sheet_indexes(sheet)?;
+            let index = self
+                .sheet_cell_indexes
+                .get(sheet)
+                .and_then(|cells| cells.get(&(row, col)))
+                .copied();
             let data = self.ensure_sheet(sheet)?;
-            data.cells
-                .iter()
-                .find(|c| c.row == row && c.col == col)
-                .cloned()
+            index.map(|idx| data.cells[idx].clone())
         };
         let Some(cell) = cell else {
             return cell_blank(py);
@@ -170,12 +179,18 @@ impl NativeXlsxBook {
             Some(bounds) => bounds,
             None => return Ok(PyList::empty(py).into()),
         };
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
         let cells = self.ensure_sheet(sheet)?.cells.clone();
         let outer = PyList::empty(py);
         for row in min_row..=max_row {
             let inner = PyList::empty(py);
             for col in min_col..=max_col {
-                if let Some(cell) = cells.iter().find(|c| c.row == row && c.col == col) {
+                if let Some(cell) = cell_index.get(&(row, col)).map(|idx| &cells[*idx]) {
                     let number_format = self.number_format_for_cell(cell);
                     inner.append(cell_to_dict(
                         py,
@@ -205,12 +220,18 @@ impl NativeXlsxBook {
             Some(bounds) => bounds,
             None => return Ok(PyList::empty(py).into()),
         };
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
         let cells = self.ensure_sheet(sheet)?.cells.clone();
         let outer = PyList::empty(py);
         for row in min_row..=max_row {
             let inner = PyList::empty(py);
             for col in min_col..=max_col {
-                if let Some(cell) = cells.iter().find(|c| c.row == row && c.col == col) {
+                if let Some(cell) = cell_index.get(&(row, col)).map(|idx| &cells[*idx]) {
                     let number_format = self.number_format_for_cell(cell);
                     inner.append(cell_to_plain(
                         py,
@@ -256,13 +277,18 @@ impl NativeXlsxBook {
         include_cached_formula_value: bool,
     ) -> PyResult<PyObject> {
         let window = self.resolve_window(sheet, cell_range)?;
-        let data = self.ensure_sheet(sheet)?.clone();
-        let cells_by_coord: HashMap<(u32, u32), Cell> = data
-            .cells
-            .iter()
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
             .cloned()
-            .map(|cell| ((cell.row, cell.col), cell))
-            .collect();
+            .unwrap_or_default();
+        let merged_bounds = self
+            .sheet_merged_bounds
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
+        let data = self.ensure_sheet(sheet)?.clone();
         let options = NativeRecordOptions {
             data_only,
             include_format,
@@ -283,8 +309,8 @@ impl NativeXlsxBook {
                             py,
                             &out,
                             &self.book,
-                            &data.merged_ranges,
-                            cells_by_coord.get(&(row, col)),
+                            &merged_bounds,
+                            cell_index.get(&(row, col)).map(|idx| &data.cells[*idx]),
                             row,
                             col,
                             options,
@@ -312,7 +338,7 @@ impl NativeXlsxBook {
                 py,
                 &out,
                 &self.book,
-                &data.merged_ranges,
+                &merged_bounds,
                 Some(cell),
                 cell.row,
                 cell.col,
@@ -820,14 +846,24 @@ impl NativeXlsxBook {
         let row = row0 + 1;
         let col = col0 + 1;
         let style_id = {
-            let data = self.ensure_sheet(sheet)?;
-            if is_merged_subordinate(&data.merged_ranges, row, col) {
+            self.ensure_sheet_indexes(sheet)?;
+            if is_merged_subordinate(
+                self.sheet_merged_bounds
+                    .get(sheet)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                row,
+                col,
+            ) {
                 return Ok(PyDict::new(py).into());
             }
-            data.cells
-                .iter()
-                .find(|c| c.row == row && c.col == col)
-                .and_then(|cell| cell.style_id)
+            let index = self
+                .sheet_cell_indexes
+                .get(sheet)
+                .and_then(|cells| cells.get(&(row, col)))
+                .copied();
+            let data = self.ensure_sheet(sheet)?;
+            index.and_then(|idx| data.cells[idx].style_id)
         };
         let d = PyDict::new(py);
         if let Some(style_id) = style_id {
@@ -860,14 +896,24 @@ impl NativeXlsxBook {
         let row = row0 + 1;
         let col = col0 + 1;
         let style_id = {
-            let data = self.ensure_sheet(sheet)?;
-            if is_merged_subordinate(&data.merged_ranges, row, col) {
+            self.ensure_sheet_indexes(sheet)?;
+            if is_merged_subordinate(
+                self.sheet_merged_bounds
+                    .get(sheet)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                row,
+                col,
+            ) {
                 return Ok(PyDict::new(py).into());
             }
-            data.cells
-                .iter()
-                .find(|c| c.row == row && c.col == col)
-                .and_then(|cell| cell.style_id)
+            let index = self
+                .sheet_cell_indexes
+                .get(sheet)
+                .and_then(|cells| cells.get(&(row, col)))
+                .copied();
+            let data = self.ensure_sheet(sheet)?;
+            index.and_then(|idx| data.cells[idx].style_id)
         };
         let d = PyDict::new(py);
         if let Some(border) = style_id.and_then(|id| self.book.border_for_style_id(id)) {
@@ -891,6 +937,34 @@ impl NativeXlsxBook {
             self.sheet_cache.insert(sheet.to_string(), data);
         }
         Ok(self.sheet_cache.get(sheet).unwrap())
+    }
+
+    fn ensure_sheet_indexes(&mut self, sheet: &str) -> PyResult<()> {
+        if self.sheet_cell_indexes.contains_key(sheet)
+            && self.sheet_merged_bounds.contains_key(sheet)
+        {
+            return Ok(());
+        }
+        let (cell_index, merged_bounds) = {
+            let data = self.ensure_sheet(sheet)?;
+            let cell_index = data
+                .cells
+                .iter()
+                .enumerate()
+                .map(|(idx, cell)| ((cell.row, cell.col), idx))
+                .collect();
+            let merged_bounds = data
+                .merged_ranges
+                .iter()
+                .filter_map(|range| parse_range_1based(range))
+                .collect();
+            (cell_index, merged_bounds)
+        };
+        self.sheet_cell_indexes
+            .insert(sheet.to_string(), cell_index);
+        self.sheet_merged_bounds
+            .insert(sheet.to_string(), merged_bounds);
+        Ok(())
     }
 
     fn read_bounds_1based(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
@@ -956,7 +1030,7 @@ fn append_native_record(
     py: Python<'_>,
     out: &Bound<'_, PyList>,
     book: &NativeReaderBook,
-    merged_ranges: &[String],
+    merged_bounds: &[(u32, u32, u32, u32)],
     cell: Option<&Cell>,
     row: u32,
     col: u32,
@@ -982,7 +1056,7 @@ fn append_native_record(
         return Ok(());
     }
 
-    let is_merged_subordinate = is_merged_subordinate(merged_ranges, cell.row, cell.col);
+    let is_merged_subordinate = is_merged_subordinate(merged_bounds, cell.row, cell.col);
     let number_format = if is_merged_subordinate {
         None
     } else {
@@ -2059,16 +2133,16 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
     }
 }
 
-fn is_merged_subordinate(merged_ranges: &[String], row: u32, col: u32) -> bool {
-    merged_ranges.iter().any(|range| {
-        parse_range_1based(range).is_some_and(|(min_row, min_col, max_row, max_col)| {
-            row >= min_row
-                && row <= max_row
-                && col >= min_col
-                && col <= max_col
-                && !(row == min_row && col == min_col)
+fn is_merged_subordinate(merged_bounds: &[(u32, u32, u32, u32)], row: u32, col: u32) -> bool {
+    merged_bounds
+        .iter()
+        .any(|(min_row, min_col, max_row, max_col)| {
+            row >= *min_row
+                && row <= *max_row
+                && col >= *min_col
+                && col <= *max_col
+                && !(row == *min_row && col == *min_col)
         })
-    })
 }
 
 fn row_col_to_a1_1based(row: u32, col: u32) -> String {
