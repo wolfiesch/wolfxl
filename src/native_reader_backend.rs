@@ -17,12 +17,13 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
-    BorderInfo, BreakInfo, Cell, CellDataType, CellValue, ChartInfo, ChartSeriesInfo,
-    DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo,
-    HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
+    BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue, ChartInfo,
+    ChartSeriesInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo,
+    HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
     PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookSecurity, WorksheetData,
+    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity,
+    WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -670,6 +671,20 @@ impl NativeXlsxBook {
         workbook_security_to_py(py, self.book.workbook_security())
     }
 
+    pub fn read_workbook_properties(&self, py: Python<'_>) -> PyResult<PyObject> {
+        match self.book.workbook_properties() {
+            Some(properties) => workbook_properties_to_py(py, properties),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_calc_properties(&self, py: Python<'_>) -> PyResult<PyObject> {
+        match self.book.calc_properties() {
+            Some(properties) => calc_properties_to_py(py, properties),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
         if row < 1 {
             return Ok(None);
@@ -1287,6 +1302,66 @@ fn workbook_security_to_py(py: Python<'_>, security: &WorkbookSecurity) -> PyRes
         }
         None => d.set_item("file_sharing", py.None())?,
     }
+    Ok(d.into())
+}
+
+fn workbook_properties_to_py(
+    py: Python<'_>,
+    properties: &WorkbookPropertiesInfo,
+) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("date1904", properties.date1904)?;
+    d.set_item("date_compatibility", properties.date_compatibility)?;
+    d.set_item("show_objects", properties.show_objects.as_deref())?;
+    d.set_item(
+        "show_border_unselected_tables",
+        properties.show_border_unselected_tables,
+    )?;
+    d.set_item("filter_privacy", properties.filter_privacy)?;
+    d.set_item("prompted_solutions", properties.prompted_solutions)?;
+    d.set_item("show_ink_annotation", properties.show_ink_annotation)?;
+    d.set_item("backup_file", properties.backup_file)?;
+    d.set_item(
+        "save_external_link_values",
+        properties.save_external_link_values,
+    )?;
+    d.set_item("update_links", properties.update_links.as_deref())?;
+    d.set_item("code_name", properties.code_name.as_deref())?;
+    d.set_item("hide_pivot_field_list", properties.hide_pivot_field_list)?;
+    d.set_item(
+        "show_pivot_chart_filter",
+        properties.show_pivot_chart_filter,
+    )?;
+    d.set_item("allow_refresh_query", properties.allow_refresh_query)?;
+    d.set_item("publish_items", properties.publish_items)?;
+    d.set_item("check_compatibility", properties.check_compatibility)?;
+    d.set_item("auto_compress_pictures", properties.auto_compress_pictures)?;
+    d.set_item(
+        "refresh_all_connections",
+        properties.refresh_all_connections,
+    )?;
+    d.set_item("default_theme_version", properties.default_theme_version)?;
+    Ok(d.into())
+}
+
+fn calc_properties_to_py(py: Python<'_>, properties: &CalcPropertiesInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("calc_id", properties.calc_id)?;
+    d.set_item("calc_mode", properties.calc_mode.as_deref())?;
+    d.set_item("full_calc_on_load", properties.full_calc_on_load)?;
+    d.set_item("ref_mode", properties.ref_mode.as_deref())?;
+    d.set_item("iterate", properties.iterate)?;
+    d.set_item("iterate_count", properties.iterate_count)?;
+    d.set_item("iterate_delta", properties.iterate_delta)?;
+    d.set_item("full_precision", properties.full_precision)?;
+    d.set_item("calc_completed", properties.calc_completed)?;
+    d.set_item("calc_on_save", properties.calc_on_save)?;
+    d.set_item("concurrent_calc", properties.concurrent_calc)?;
+    d.set_item(
+        "concurrent_manual_count",
+        properties.concurrent_manual_count,
+    )?;
+    d.set_item("force_full_calc", properties.force_full_calc)?;
     Ok(d.into())
 }
 

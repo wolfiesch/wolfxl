@@ -143,6 +143,8 @@ def initialize_pending_state(wb: Any) -> None:
     wb._file_sharing = None
     wb._security_loaded = False
     wb._pending_security_update = False
+    wb._workbook_properties_cache = None
+    wb._calc_properties_cache = None
     wb._pending_axis_shifts = []
     wb._pending_range_moves = []
     wb._pending_sheet_copies = []

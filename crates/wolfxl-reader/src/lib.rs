@@ -770,6 +770,48 @@ pub struct WorkbookSecurity {
     pub file_sharing: Option<FileSharing>,
 }
 
+/// Parsed `<workbookPr>` metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkbookPropertiesInfo {
+    pub date1904: bool,
+    pub date_compatibility: Option<bool>,
+    pub show_objects: Option<String>,
+    pub show_border_unselected_tables: Option<bool>,
+    pub filter_privacy: Option<bool>,
+    pub prompted_solutions: Option<bool>,
+    pub show_ink_annotation: Option<bool>,
+    pub backup_file: Option<bool>,
+    pub save_external_link_values: Option<bool>,
+    pub update_links: Option<String>,
+    pub code_name: Option<String>,
+    pub hide_pivot_field_list: Option<bool>,
+    pub show_pivot_chart_filter: Option<bool>,
+    pub allow_refresh_query: Option<bool>,
+    pub publish_items: Option<bool>,
+    pub check_compatibility: Option<bool>,
+    pub auto_compress_pictures: Option<bool>,
+    pub refresh_all_connections: Option<bool>,
+    pub default_theme_version: Option<u32>,
+}
+
+/// Parsed `<calcPr>` metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CalcPropertiesInfo {
+    pub calc_id: Option<u32>,
+    pub calc_mode: Option<String>,
+    pub full_calc_on_load: Option<bool>,
+    pub ref_mode: Option<String>,
+    pub iterate: Option<bool>,
+    pub iterate_count: Option<u32>,
+    pub iterate_delta: Option<f64>,
+    pub full_precision: Option<bool>,
+    pub calc_completed: Option<bool>,
+    pub calc_on_save: Option<bool>,
+    pub concurrent_calc: Option<bool>,
+    pub concurrent_manual_count: Option<u32>,
+    pub force_full_calc: Option<bool>,
+}
+
 /// Parsed `<workbookProtection>` metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbookProtection {
@@ -858,6 +900,8 @@ pub struct NativeXlsxBook {
     print_areas: HashMap<String, String>,
     print_titles: HashMap<String, PrintTitlesInfo>,
     workbook_security: WorkbookSecurity,
+    workbook_properties: Option<WorkbookPropertiesInfo>,
+    calc_properties: Option<CalcPropertiesInfo>,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
     styles: StyleTables,
@@ -878,8 +922,16 @@ impl NativeXlsxBook {
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
             .map_err(|e| ReaderError::Xml(format!("failed to parse workbook rels: {e}")))?;
-        let (sheet_refs, date1904, named_ranges, print_areas, print_titles, workbook_security) =
-            parse_workbook(&workbook_xml)?;
+        let (
+            sheet_refs,
+            date1904,
+            named_ranges,
+            print_areas,
+            print_titles,
+            workbook_security,
+            workbook_properties,
+            calc_properties,
+        ) = parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
             Some(xml) => parse_shared_strings(&xml)?,
@@ -904,6 +956,8 @@ impl NativeXlsxBook {
             print_areas,
             print_titles,
             workbook_security,
+            workbook_properties,
+            calc_properties,
             doc_properties,
             shared_strings,
             styles,
@@ -948,6 +1002,16 @@ impl NativeXlsxBook {
     /// Workbook protection and file-sharing blocks.
     pub fn workbook_security(&self) -> &WorkbookSecurity {
         &self.workbook_security
+    }
+
+    /// Workbook-level properties parsed from `<workbookPr>`.
+    pub fn workbook_properties(&self) -> Option<&WorkbookPropertiesInfo> {
+        self.workbook_properties.as_ref()
+    }
+
+    /// Workbook calculation properties parsed from `<calcPr>`.
+    pub fn calc_properties(&self) -> Option<&CalcPropertiesInfo> {
+        self.calc_properties.as_ref()
     }
 
     /// Workbook document properties parsed from `docProps/core.xml` and app.xml.
@@ -1143,6 +1207,8 @@ fn parse_workbook(
     HashMap<String, String>,
     HashMap<String, PrintTitlesInfo>,
     WorkbookSecurity,
+    Option<WorkbookPropertiesInfo>,
+    Option<CalcPropertiesInfo>,
 )> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1154,6 +1220,8 @@ fn parse_workbook(
     let mut date1904 = false;
     let mut workbook_protection = None;
     let mut file_sharing = None;
+    let mut workbook_properties = None;
+    let mut calc_properties = None;
     let mut in_defined_name = false;
     let mut current_name: Option<String> = None;
     let mut current_local_id: Option<usize> = None;
@@ -1164,6 +1232,10 @@ fn parse_workbook(
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"workbookPr" => {
                     date1904 = attr_truthy(attr_value(&e, b"date1904").as_deref());
+                    workbook_properties = Some(WorkbookPropertiesInfo::from_start(&e));
+                }
+                b"calcPr" => {
+                    calc_properties = Some(CalcPropertiesInfo::from_start(&e));
                 }
                 b"workbookProtection" => {
                     workbook_protection = Some(WorkbookProtection::from_start(&e));
@@ -1251,6 +1323,8 @@ fn parse_workbook(
             workbook_protection,
             file_sharing,
         },
+        workbook_properties,
+        calc_properties,
     ))
 }
 
@@ -1277,6 +1351,52 @@ impl WorkbookProtection {
             revisions_salt_value: attr_value(e, b"revisionsSaltValue"),
             revisions_spin_count: attr_value(e, b"revisionsSpinCount")
                 .and_then(|value| value.parse::<u32>().ok()),
+        }
+    }
+}
+
+impl WorkbookPropertiesInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            date1904: attr_bool_default(e, b"date1904", false),
+            date_compatibility: attr_bool(e, b"dateCompatibility"),
+            show_objects: attr_value(e, b"showObjects"),
+            show_border_unselected_tables: attr_bool(e, b"showBorderUnselectedTables"),
+            filter_privacy: attr_bool(e, b"filterPrivacy"),
+            prompted_solutions: attr_bool(e, b"promptedSolutions"),
+            show_ink_annotation: attr_bool(e, b"showInkAnnotation"),
+            backup_file: attr_bool(e, b"backupFile"),
+            save_external_link_values: attr_bool(e, b"saveExternalLinkValues"),
+            update_links: attr_value(e, b"updateLinks"),
+            code_name: attr_value(e, b"codeName"),
+            hide_pivot_field_list: attr_bool(e, b"hidePivotFieldList"),
+            show_pivot_chart_filter: attr_bool(e, b"showPivotChartFilter"),
+            allow_refresh_query: attr_bool(e, b"allowRefreshQuery"),
+            publish_items: attr_bool(e, b"publishItems"),
+            check_compatibility: attr_bool(e, b"checkCompatibility"),
+            auto_compress_pictures: attr_bool(e, b"autoCompressPictures"),
+            refresh_all_connections: attr_bool(e, b"refreshAllConnections"),
+            default_theme_version: attr_u32(e, b"defaultThemeVersion"),
+        }
+    }
+}
+
+impl CalcPropertiesInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            calc_id: attr_u32(e, b"calcId"),
+            calc_mode: attr_value(e, b"calcMode"),
+            full_calc_on_load: attr_bool(e, b"fullCalcOnLoad"),
+            ref_mode: attr_value(e, b"refMode"),
+            iterate: attr_bool(e, b"iterate"),
+            iterate_count: attr_u32(e, b"iterateCount"),
+            iterate_delta: attr_f64(e, b"iterateDelta"),
+            full_precision: attr_bool(e, b"fullPrecision"),
+            calc_completed: attr_bool(e, b"calcCompleted"),
+            calc_on_save: attr_bool(e, b"calcOnSave"),
+            concurrent_calc: attr_bool(e, b"concurrentCalc"),
+            concurrent_manual_count: attr_u32(e, b"concurrentManualCount"),
+            force_full_calc: attr_bool(e, b"forceFullCalc"),
         }
     }
 }
@@ -4680,8 +4800,9 @@ mod tests {
     fn parses_workbook_sheet_order_and_state() {
         let xml = r#"<workbook xmlns:r="r">
         <fileSharing readOnlyRecommended="1" userName="Wolf" algorithmName="SHA-512" hashValue="FILEHASH" saltValue="FILESALT" spinCount="100000"/>
-        <workbookPr date1904="1"/>
+        <workbookPr date1904="1" codeName="ThisWorkbook" defaultThemeVersion="164011"/>
         <workbookProtection lockStructure="1" workbookAlgorithmName="SHA-512" workbookHashValue="HASH" workbookSaltValue="SALT" workbookSpinCount="100000"/>
+        <calcPr calcId="191029" calcMode="manual" fullCalcOnLoad="1" iterate="1" iterateCount="25" iterateDelta="0.01" forceFullCalc="1"/>
         <sheets>
             <sheet name="Visible" sheetId="1" r:id="rId1"/>
             <sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>
@@ -4692,9 +4813,31 @@ mod tests {
             <definedName name="_xlnm.Print_Area">Visible!$A$1:$B$2</definedName>
             <definedName name="_xlnm.Print_Titles" localSheetId="0">Visible!$1:$2,Visible!$A:$B</definedName>
         </definedNames></workbook>"#;
-        let (sheets, date1904, named_ranges, print_areas, print_titles, security) =
-            parse_workbook(xml).expect("parse workbook");
+        let (
+            sheets,
+            date1904,
+            named_ranges,
+            print_areas,
+            print_titles,
+            security,
+            workbook_properties,
+            calc_properties,
+        ) = parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
+        let workbook_properties = workbook_properties.expect("workbookPr");
+        assert!(workbook_properties.date1904);
+        assert_eq!(
+            workbook_properties.code_name.as_deref(),
+            Some("ThisWorkbook")
+        );
+        assert_eq!(workbook_properties.default_theme_version, Some(164011));
+        let calc_properties = calc_properties.expect("calcPr");
+        assert_eq!(calc_properties.calc_id, Some(191029));
+        assert_eq!(calc_properties.calc_mode.as_deref(), Some("manual"));
+        assert_eq!(calc_properties.full_calc_on_load, Some(true));
+        assert_eq!(calc_properties.iterate_count, Some(25));
+        assert_eq!(calc_properties.iterate_delta, Some(0.01));
+        assert_eq!(calc_properties.force_full_calc, Some(true));
         assert_eq!(sheets[0].name, "Visible");
         assert_eq!(sheets[1].state, SheetState::Hidden);
         assert_eq!(sheets[2].state, SheetState::VeryHidden);

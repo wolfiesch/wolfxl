@@ -121,6 +121,42 @@ def _inject_workbook_security(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _inject_workbook_calc_properties(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    workbook_name = "xl/workbook.xml"
+    workbook_xml = entries[workbook_name].decode()
+    workbook_xml = re.sub(r"<calcPr\b[^>]*/>", "", workbook_xml)
+    workbook_xml = re.sub(
+        r"<workbookPr\b[^>]*/>",
+        (
+            '<workbookPr date1904="1" dateCompatibility="0" showObjects="none" '
+            'filterPrivacy="1" backupFile="1" updateLinks="never" '
+            'codeName="NativeWorkbook" refreshAllConnections="1" '
+            'defaultThemeVersion="164011"/>'
+        ),
+        workbook_xml,
+        count=1,
+    )
+    calc_xml = (
+        '<calcPr calcId="191029" calcMode="manual" fullCalcOnLoad="1" '
+        'refMode="R1C1" iterate="1" iterateCount="25" iterateDelta="0.01" '
+        'fullPrecision="0" calcCompleted="0" calcOnSave="0" '
+        'concurrentCalc="0" concurrentManualCount="4" forceFullCalc="1"/>'
+    )
+    workbook_xml, count = re.subn(
+        r"(</workbook>)",
+        calc_xml + r"\1",
+        workbook_xml,
+        count=1,
+    )
+    assert count == 1
+    entries[workbook_name] = workbook_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def _inject_merged_subordinate_style(path: Path) -> None:
     """Add a styled blank subordinate cell to the merged D1:E1 range."""
     with zipfile.ZipFile(path, "r") as zin:
@@ -272,6 +308,14 @@ def _make_sheet_state_xlsx(path: Path) -> None:
     very_hidden.sheet_state = "veryHidden"
     wb.save(path)
     wb.close()
+
+
+def _make_workbook_calc_properties_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    wb.active.title = "Props"
+    wb.save(path)
+    wb.close()
+    _inject_workbook_calc_properties(path)
 
 
 def _make_print_area_xlsx(path: Path) -> None:
@@ -591,6 +635,45 @@ def test_native_reader_loads_workbook_sheet_states(
         assert wb["Visible"].sheet_state == "visible"
         assert wb["Hidden"].sheet_state == "hidden"
         assert wb["VeryHidden"].sheet_state == "veryHidden"
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_workbook_calc_properties(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-workbook-properties.xlsx"
+    _make_workbook_calc_properties_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        properties = wb.workbook_properties
+        assert properties.date1904 is True
+        assert properties.dateCompatibility is False
+        assert properties.showObjects == "none"
+        assert properties.filterPrivacy is True
+        assert properties.backupFile is True
+        assert properties.updateLinks == "never"
+        assert properties.codeName == "NativeWorkbook"
+        assert properties.refreshAllConnections is True
+        assert properties.defaultThemeVersion == 164011
+
+        calculation = wb.calculation
+        assert wb.calc_properties is calculation
+        assert calculation.calcId == 191029
+        assert calculation.calcMode == "manual"
+        assert calculation.fullCalcOnLoad is True
+        assert calculation.refMode == "R1C1"
+        assert calculation.iterate is True
+        assert calculation.iterateCount == 25
+        assert calculation.iterateDelta == 0.01
+        assert calculation.fullPrecision is False
+        assert calculation.calcCompleted is False
+        assert calculation.calcOnSave is False
+        assert calculation.concurrentCalc is False
+        assert calculation.concurrentManualCount == 4
+        assert calculation.forceFullCalc is True
     finally:
         wb.close()
 

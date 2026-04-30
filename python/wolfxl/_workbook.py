@@ -371,6 +371,36 @@ class Workbook:
         """
         return _workbook_metadata.get_defined_names(self)
 
+    @property
+    def workbook_properties(self) -> Any:
+        """Return workbook-wide `<workbookPr>` properties."""
+        return _workbook_metadata.get_workbook_properties(self)
+
+    @workbook_properties.setter
+    def workbook_properties(self, value: Any) -> None:
+        """Replace workbook-wide properties."""
+        _workbook_metadata.set_workbook_properties(self, value)
+
+    @property
+    def calculation(self) -> Any:
+        """Return workbook calculation properties (`<calcPr>`)."""
+        return _workbook_metadata.get_calc_properties(self)
+
+    @calculation.setter
+    def calculation(self, value: Any) -> None:
+        """Replace workbook calculation properties."""
+        _workbook_metadata.set_calc_properties(self, value)
+
+    @property
+    def calc_properties(self) -> Any:
+        """Compatibility alias for :attr:`calculation`."""
+        return self.calculation
+
+    @calc_properties.setter
+    def calc_properties(self, value: Any) -> None:
+        """Compatibility alias for :attr:`calculation`."""
+        self.calculation = value
+
     # ------------------------------------------------------------------
     # Workbook-level security
     # ------------------------------------------------------------------

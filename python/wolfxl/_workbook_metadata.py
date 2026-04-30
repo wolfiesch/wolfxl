@@ -97,6 +97,47 @@ def get_defined_names(wb: Any) -> Any:
     return dnd
 
 
+def get_workbook_properties(wb: Any) -> Any:
+    """Return workbook-level properties, lazily loaded from the reader."""
+    if wb._workbook_properties_cache is not None:  # noqa: SLF001
+        return wb._workbook_properties_cache  # noqa: SLF001
+    payload = _reader_workbook_payload(wb, "read_workbook_properties")
+    wb._workbook_properties_cache = _workbook_properties_from_payload(payload)  # noqa: SLF001
+    return wb._workbook_properties_cache  # noqa: SLF001
+
+
+def set_workbook_properties(wb: Any, value: Any) -> None:
+    """Replace workbook-level properties."""
+    from wolfxl.workbook.properties import WorkbookProperties
+
+    if not isinstance(value, WorkbookProperties):
+        raise TypeError(
+            "workbook_properties must be a WorkbookProperties, "
+            f"got {type(value).__name__}"
+        )
+    wb._workbook_properties_cache = value  # noqa: SLF001
+
+
+def get_calc_properties(wb: Any) -> Any:
+    """Return workbook calculation properties, lazily loaded from the reader."""
+    if wb._calc_properties_cache is not None:  # noqa: SLF001
+        return wb._calc_properties_cache  # noqa: SLF001
+    payload = _reader_workbook_payload(wb, "read_calc_properties")
+    wb._calc_properties_cache = _calc_properties_from_payload(payload)  # noqa: SLF001
+    return wb._calc_properties_cache  # noqa: SLF001
+
+
+def set_calc_properties(wb: Any, value: Any) -> None:
+    """Replace workbook calculation properties."""
+    from wolfxl.workbook.properties import CalcProperties
+
+    if not isinstance(value, CalcProperties):
+        raise TypeError(
+            f"calculation must be a CalcProperties, got {type(value).__name__}"
+        )
+    wb._calc_properties_cache = value  # noqa: SLF001
+
+
 def set_security(wb: Any, value: Any) -> None:
     """Set workbook protection metadata.
 
@@ -151,6 +192,73 @@ def get_file_sharing(wb: Any) -> Any:
     """Return workbook file-sharing metadata, lazily loaded from the reader."""
     _ensure_security_loaded(wb)
     return wb._file_sharing  # noqa: SLF001
+
+
+def _reader_workbook_payload(wb: Any, method_name: str) -> Any:
+    reader = getattr(wb, "_rust_reader", None)
+    if reader is None or not hasattr(reader, method_name):
+        return None
+    try:
+        return getattr(reader, method_name)()
+    except Exception:
+        return None
+
+
+def _workbook_properties_from_payload(payload: Any) -> Any:
+    from wolfxl.workbook.properties import WorkbookProperties
+
+    if not isinstance(payload, dict):
+        return WorkbookProperties()
+    return WorkbookProperties(
+        date1904=bool(payload.get("date1904", False)),
+        dateCompatibility=_payload_value(payload, "date_compatibility", True),
+        showObjects=_payload_value(payload, "show_objects", "all"),
+        showBorderUnselectedTables=_payload_value(
+            payload, "show_border_unselected_tables", True
+        ),
+        filterPrivacy=_payload_value(payload, "filter_privacy", False),
+        promptedSolutions=_payload_value(payload, "prompted_solutions", False),
+        showInkAnnotation=_payload_value(payload, "show_ink_annotation", True),
+        backupFile=_payload_value(payload, "backup_file", False),
+        saveExternalLinkValues=_payload_value(payload, "save_external_link_values", True),
+        updateLinks=_payload_value(payload, "update_links", "userSet"),
+        codeName=payload.get("code_name"),
+        hidePivotFieldList=_payload_value(payload, "hide_pivot_field_list", False),
+        showPivotChartFilter=_payload_value(payload, "show_pivot_chart_filter", False),
+        allowRefreshQuery=_payload_value(payload, "allow_refresh_query", False),
+        publishItems=_payload_value(payload, "publish_items", False),
+        checkCompatibility=_payload_value(payload, "check_compatibility", False),
+        autoCompressPictures=_payload_value(payload, "auto_compress_pictures", True),
+        refreshAllConnections=_payload_value(payload, "refresh_all_connections", False),
+        defaultThemeVersion=_payload_value(payload, "default_theme_version", 124226),
+    )
+
+
+def _calc_properties_from_payload(payload: Any) -> Any:
+    from wolfxl.workbook.properties import CalcProperties
+
+    if not isinstance(payload, dict):
+        return CalcProperties()
+    return CalcProperties(
+        calcId=_payload_value(payload, "calc_id", 124519),
+        calcMode=_payload_value(payload, "calc_mode", "auto"),
+        fullCalcOnLoad=_payload_value(payload, "full_calc_on_load", False),
+        refMode=_payload_value(payload, "ref_mode", "A1"),
+        iterate=_payload_value(payload, "iterate", False),
+        iterateCount=_payload_value(payload, "iterate_count", 100),
+        iterateDelta=_payload_value(payload, "iterate_delta", 0.001),
+        fullPrecision=_payload_value(payload, "full_precision", True),
+        calcCompleted=_payload_value(payload, "calc_completed", True),
+        calcOnSave=_payload_value(payload, "calc_on_save", True),
+        concurrentCalc=_payload_value(payload, "concurrent_calc", True),
+        concurrentManualCount=payload.get("concurrent_manual_count"),
+        forceFullCalc=_payload_value(payload, "force_full_calc", False),
+    )
+
+
+def _payload_value(payload: dict[str, Any], key: str, default: Any) -> Any:
+    value = payload.get(key)
+    return default if value is None else value
 
 
 def _ensure_security_loaded(wb: Any) -> None:
