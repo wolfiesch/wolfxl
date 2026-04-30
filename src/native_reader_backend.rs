@@ -298,8 +298,22 @@ impl NativeXlsxBook {
         Ok(d.into())
     }
 
-    pub fn read_hyperlinks(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_hyperlinks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let links = self.ensure_sheet(sheet)?.hyperlinks.clone();
+        let result = PyList::empty(py);
+        for link in &links {
+            let d = PyDict::new(py);
+            d.set_item("cell", &link.cell)?;
+            d.set_item("target", &link.target)?;
+            d.set_item("display", &link.display)?;
+            match &link.tooltip {
+                Some(tooltip) => d.set_item("tooltip", tooltip)?,
+                None => d.set_item("tooltip", py.None())?,
+            }
+            d.set_item("internal", link.internal)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_comments(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {

@@ -125,7 +125,18 @@ pub enum CellDataType {
 pub struct WorksheetData {
     pub dimension: Option<String>,
     pub merged_ranges: Vec<String>,
+    pub hyperlinks: Vec<Hyperlink>,
     pub cells: Vec<Cell>,
+}
+
+/// Parsed worksheet hyperlink metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hyperlink {
+    pub cell: String,
+    pub target: String,
+    pub display: String,
+    pub tooltip: Option<String>,
+    pub internal: bool,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -204,7 +215,13 @@ impl NativeXlsxBook {
         };
         let mut zip = zip_from_bytes(&self.bytes)?;
         let xml = read_part_required(&mut zip, &info.path)?;
-        parse_worksheet(&xml, &self.shared_strings)
+        let rels = read_part_optional(&mut zip, &sheet_rels_path(&info.path))?
+            .map(|xml| {
+                RelsGraph::parse(xml.as_bytes())
+                    .map_err(|e| ReaderError::Xml(format!("failed to parse sheet rels: {e}")))
+            })
+            .transpose()?;
+        parse_worksheet(&xml, &self.shared_strings, rels.as_ref())
     }
 }
 
@@ -465,12 +482,17 @@ fn builtin_num_fmt(format_id: u32) -> Option<&'static str> {
     }
 }
 
-fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData> {
+fn parse_worksheet(
+    xml: &str,
+    shared_strings: &[String],
+    rels: Option<&RelsGraph>,
+) -> Result<WorksheetData> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut dimension = None;
     let mut merged_ranges = Vec::new();
+    let mut hyperlink_nodes = Vec::new();
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
@@ -485,6 +507,11 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
                 b"mergeCell" => {
                     if let Some(range) = attr_value(&e, b"ref") {
                         merged_ranges.push(range);
+                    }
+                }
+                b"hyperlink" => {
+                    if let Some(node) = HyperlinkNode::from_start(&e) {
+                        hyperlink_nodes.push(node);
                     }
                 }
                 b"row" => {
@@ -512,6 +539,11 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
                 b"mergeCell" => {
                     if let Some(range) = attr_value(&e, b"ref") {
                         merged_ranges.push(range);
+                    }
+                }
+                b"hyperlink" => {
+                    if let Some(node) = HyperlinkNode::from_start(&e) {
+                        hyperlink_nodes.push(node);
                     }
                 }
                 b"c" => {
@@ -553,8 +585,79 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
     Ok(WorksheetData {
         dimension,
         merged_ranges,
+        hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         cells,
     })
+}
+
+#[derive(Debug)]
+struct HyperlinkNode {
+    cell: String,
+    rid: Option<String>,
+    location: Option<String>,
+    display: Option<String>,
+    tooltip: Option<String>,
+}
+
+impl HyperlinkNode {
+    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
+        let cell = attr_value(e, b"ref").filter(|value| !value.is_empty())?;
+        Some(Self {
+            cell,
+            rid: attr_value(e, b"r:id"),
+            location: attr_value(e, b"location"),
+            display: attr_value(e, b"display"),
+            tooltip: attr_value(e, b"tooltip"),
+        })
+    }
+}
+
+fn resolve_hyperlinks(
+    nodes: Vec<HyperlinkNode>,
+    rels: Option<&RelsGraph>,
+    cells: &[Cell],
+) -> Vec<Hyperlink> {
+    let mut out = Vec::new();
+    for node in nodes {
+        let internal = node.location.is_some() && node.rid.is_none();
+        let target = if let Some(rid) = &node.rid {
+            rels.and_then(|rels| rels.get(&RelId(rid.clone())))
+                .map(|rel| rel.target.clone())
+                .unwrap_or_default()
+        } else {
+            node.location.clone().unwrap_or_default()
+        };
+        if target.is_empty() {
+            continue;
+        }
+        let display = match node.display {
+            Some(display) if !display.is_empty() => display,
+            _ => cell_display_text(cells, &node.cell),
+        };
+        let tooltip = node
+            .tooltip
+            .and_then(|t| if t.is_empty() { None } else { Some(t) });
+        out.push(Hyperlink {
+            cell: node.cell,
+            target,
+            display,
+            tooltip,
+            internal,
+        });
+    }
+    out
+}
+
+fn cell_display_text(cells: &[Cell], coordinate: &str) -> String {
+    let Some(cell) = cells.iter().find(|cell| cell.coordinate == coordinate) else {
+        return String::new();
+    };
+    match &cell.value {
+        CellValue::Empty | CellValue::Error(_) => String::new(),
+        CellValue::String(value) => value.clone(),
+        CellValue::Number(value) => value.to_string(),
+        CellValue::Bool(value) => value.to_string(),
+    }
 }
 
 #[derive(Debug)]
@@ -733,6 +836,14 @@ fn join_and_normalize(base_dir: &str, target: &str) -> String {
     normalize_zip_path(&combined)
 }
 
+fn sheet_rels_path(sheet_path: &str) -> String {
+    let normalized = normalize_zip_path(sheet_path);
+    let Some((dir, file)) = normalized.rsplit_once('/') else {
+        return format!("_rels/{normalized}.rels");
+    };
+    format!("{dir}/_rels/{file}.rels")
+}
+
 fn a1_to_row_col(coord: &str) -> Option<(u32, u32)> {
     let mut col = 0u32;
     let mut row = 0u32;
@@ -835,7 +946,7 @@ mod tests {
             </row>
             <row r="2"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
         </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells></worksheet>"#;
-        let sheet = parse_worksheet(xml, &["Shared".to_string()]).expect("parse worksheet");
+        let sheet = parse_worksheet(xml, &["Shared".to_string()], None).expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
         assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
         assert_eq!(
@@ -848,6 +959,44 @@ mod tests {
         assert_eq!(
             sheet.cells[4].value,
             CellValue::String("Inline".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_sheet_hyperlinks_with_relationship_targets() {
+        let xml = r#"<worksheet xmlns:r="r"><sheetData><row r="1">
+            <c r="A1" t="inlineStr"><is><t>Website</t></is></c>
+            <c r="B1" t="inlineStr"><is><t>Internal</t></is></c>
+        </row></sheetData><hyperlinks>
+            <hyperlink ref="A1" r:id="rId1" tooltip="External site"/>
+            <hyperlink ref="B1" location="Other!A1" display="Jump"/>
+        </hyperlinks></worksheet>"#;
+        let rels = RelsGraph::parse(
+            br#"<Relationships>
+                <Relationship Id="rId1" Type="hyperlink" Target="https://example.com" TargetMode="External"/>
+            </Relationships>"#,
+        )
+        .expect("parse rels");
+
+        let sheet = parse_worksheet(xml, &[], Some(&rels)).expect("parse worksheet");
+        assert_eq!(
+            sheet.hyperlinks,
+            vec![
+                Hyperlink {
+                    cell: "A1".to_string(),
+                    target: "https://example.com".to_string(),
+                    display: "Website".to_string(),
+                    tooltip: Some("External site".to_string()),
+                    internal: false,
+                },
+                Hyperlink {
+                    cell: "B1".to_string(),
+                    target: "Other!A1".to_string(),
+                    display: "Jump".to_string(),
+                    tooltip: None,
+                    internal: true,
+                },
+            ]
         );
     }
 }

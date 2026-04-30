@@ -9,7 +9,10 @@ from typing import Any
 import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
+openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
 wolfxl = pytest.importorskip("wolfxl")
+
+Hyperlink = openpyxl_hyperlink.Hyperlink
 
 
 def _make_shadow_xlsx(path: Path) -> None:
@@ -25,6 +28,14 @@ def _make_shadow_xlsx(path: Path) -> None:
     ws["B3"] = dt.datetime(2024, 3, 5, 9, 45)
     ws["A4"] = "formula"
     ws["B4"] = "=B2*2"
+    ws["A5"] = "link"
+    ws["A5"].hyperlink = Hyperlink(
+        ref="A5",
+        target="https://example.com/shadow",
+        tooltip="Shadow link",
+    )
+    ws["B5"] = "jump"
+    ws["B5"].hyperlink = Hyperlink(ref="B5", location="Other!A1", display="Other")
     ws.merge_cells("D1:E1")
 
     other = wb.create_sheet("Other")
@@ -46,10 +57,21 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             if ws.max_row >= int(coord[1:])
         }
         merged = {str(r) for r in ws.merged_cells.ranges}
+        hyperlinks = {
+            coord: (
+                ws[coord].hyperlink.target,
+                ws[coord].hyperlink.location,
+                ws[coord].hyperlink.display,
+                ws[coord].hyperlink.tooltip,
+            )
+            for coord in ("A5", "B5")
+            if ws[coord].hyperlink is not None
+        }
         out["sheets"][sheet_name] = {
             "values": values,
             "number_formats": number_formats,
             "merged": merged,
+            "hyperlinks": hyperlinks,
         }
     return out
 

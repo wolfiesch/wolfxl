@@ -13,7 +13,10 @@ from pathlib import Path
 import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
+openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
 wolfxl = pytest.importorskip("wolfxl")
+
+Hyperlink = openpyxl_hyperlink.Hyperlink
 
 
 def _make_basic_xlsx(path: Path) -> None:
@@ -29,6 +32,14 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["A3"] = dt.datetime(2024, 1, 15, 12, 30)
     ws["B3"] = dt.date(2024, 6, 1)
     ws.merge_cells("D1:E1")
+    ws["A5"] = "External"
+    ws["A5"].hyperlink = Hyperlink(
+        ref="A5",
+        target="https://example.com/report",
+        tooltip="Example report",
+    )
+    ws["B5"] = "Internal"
+    ws["B5"].hyperlink = Hyperlink(ref="B5", location="Data!A1", display="Jump")
     wb.save(path)
     wb.close()
 
@@ -50,6 +61,14 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["B2"].value == "=B1*2"
         assert ws["A3"].value == dt.datetime(2024, 1, 15, 12, 30)
         assert ws["B3"].value == dt.datetime(2024, 6, 1, 0, 0)
+        assert ws["A5"].hyperlink is not None
+        assert ws["A5"].hyperlink.target == "https://example.com/report"
+        assert ws["A5"].hyperlink.display == "External"
+        assert ws["A5"].hyperlink.tooltip == "Example report"
+        assert ws["B5"].hyperlink is not None
+        assert ws["B5"].hyperlink.target is None
+        assert ws["B5"].hyperlink.location == "Data!A1"
+        assert ws["B5"].hyperlink.display == "Jump"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
         records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
         assert records["B1"]["number_format"] == "#,##0.00"
@@ -74,5 +93,6 @@ def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.Monk
             None,
             None,
         )
+        assert wb["Data"]["A5"].hyperlink.target == "https://example.com/report"
     finally:
         wb.close()
