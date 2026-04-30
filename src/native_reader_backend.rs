@@ -18,13 +18,13 @@ use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
-    ChartAxisInfo, ChartDataLabelsInfo, ChartErrorBarsInfo, ChartInfo, ChartSeriesInfo,
-    ChartTrendlineInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo,
-    FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo,
-    InlineFontProps, NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection,
-    SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo,
-    WorkbookSecurity, WorksheetData,
+    ChartAxisInfo, ChartDataLabelsInfo, ChartErrorBarsInfo, ChartGraphicalPropertiesInfo,
+    ChartInfo, ChartSeriesInfo, ChartTrendlineInfo, CustomPropertyInfo, DateGroupItemInfo,
+    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
+    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
+    PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo,
+    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
+    SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -1484,6 +1484,10 @@ fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyOb
     d.set_item("title_ref", series.title_ref.as_deref())?;
     d.set_item("title_value", series.title_value.as_deref())?;
     d.set_item(
+        "graphical_properties",
+        chart_graphical_properties_to_py(py, series.graphical_properties.as_ref())?,
+    )?;
+    d.set_item(
         "data_labels",
         chart_data_labels_to_py(py, series.data_labels.as_ref())?,
     )?;
@@ -1500,6 +1504,25 @@ fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyOb
     d.set_item("x_ref", series.x_ref.as_deref())?;
     d.set_item("y_ref", series.y_ref.as_deref())?;
     d.set_item("bubble_size_ref", series.bubble_size_ref.as_deref())?;
+    Ok(d.into())
+}
+
+fn chart_graphical_properties_to_py(
+    py: Python<'_>,
+    properties: Option<&ChartGraphicalPropertiesInfo>,
+) -> PyResult<PyObject> {
+    let Some(properties) = properties else {
+        return Ok(py.None());
+    };
+    let d = PyDict::new(py);
+    d.set_item("no_fill", properties.no_fill)?;
+    d.set_item("solid_fill", properties.solid_fill.as_deref())?;
+    let line = PyDict::new(py);
+    line.set_item("no_fill", properties.line_no_fill)?;
+    line.set_item("solid_fill", properties.line_solid_fill.as_deref())?;
+    line.set_item("prst_dash", properties.line_dash.as_deref())?;
+    line.set_item("w_emu", properties.line_width)?;
+    d.set_item("ln", line)?;
     Ok(d.into())
 }
 

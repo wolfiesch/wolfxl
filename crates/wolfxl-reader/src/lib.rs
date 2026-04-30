@@ -735,6 +735,7 @@ pub struct ChartSeriesInfo {
     pub order: Option<u32>,
     pub title_ref: Option<String>,
     pub title_value: Option<String>,
+    pub graphical_properties: Option<ChartGraphicalPropertiesInfo>,
     pub data_labels: Option<ChartDataLabelsInfo>,
     pub trendline: Option<ChartTrendlineInfo>,
     pub error_bars: Option<ChartErrorBarsInfo>,
@@ -743,6 +744,17 @@ pub struct ChartSeriesInfo {
     pub x_ref: Option<String>,
     pub y_ref: Option<String>,
     pub bubble_size_ref: Option<String>,
+}
+
+/// Parsed chart graphical properties for a series.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChartGraphicalPropertiesInfo {
+    pub no_fill: Option<bool>,
+    pub solid_fill: Option<String>,
+    pub line_no_fill: Option<bool>,
+    pub line_solid_fill: Option<String>,
+    pub line_dash: Option<String>,
+    pub line_width: Option<u32>,
 }
 
 /// Parsed chart trendline options for a series.
@@ -4385,6 +4397,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
             Ok(Event::Start(e)) => {
                 let local = e.local_name().as_ref().to_vec();
                 apply_chart_start(
+                    &stack,
                     &local,
                     &e,
                     &mut kind,
@@ -4409,6 +4422,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
             Ok(Event::Empty(e)) => {
                 let local = e.local_name().as_ref().to_vec();
                 apply_chart_start(
+                    &stack,
                     &local,
                     &e,
                     &mut kind,
@@ -4499,6 +4513,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
 }
 
 fn apply_chart_start(
+    stack: &[Vec<u8>],
     local: &[u8],
     e: &BytesStart<'_>,
     kind: &mut Option<String>,
@@ -4532,6 +4547,52 @@ fn apply_chart_start(
         }
         b"varyColors" => {
             *vary_colors = attr_bool(e, b"val");
+        }
+        b"spPr" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .graphical_properties
+                    .get_or_insert_with(ChartGraphicalPropertiesInfo::default);
+            }
+        }
+        b"solidFill" => {
+            if let Some(series) = current_series.as_mut() {
+                chart_series_graphical_properties_mut(series);
+            }
+        }
+        b"noFill" => {
+            if let Some(series) = current_series.as_mut() {
+                let gp = chart_series_graphical_properties_mut(series);
+                if chart_path_contains(stack, b"ln") {
+                    gp.line_no_fill = Some(true);
+                } else {
+                    gp.no_fill = Some(true);
+                }
+            }
+        }
+        b"ln" => {
+            if let Some(series) = current_series.as_mut() {
+                let gp = chart_series_graphical_properties_mut(series);
+                gp.line_width = attr_u32(e, b"w").or(gp.line_width);
+            }
+        }
+        b"srgbClr" => {
+            if let Some(series) = current_series.as_mut() {
+                let Some(color) = attr_value(e, b"val") else {
+                    return;
+                };
+                let gp = chart_series_graphical_properties_mut(series);
+                if chart_path_contains(stack, b"ln") {
+                    gp.line_solid_fill = Some(color);
+                } else {
+                    gp.solid_fill = Some(color);
+                }
+            }
+        }
+        b"prstDash" => {
+            if let Some(series) = current_series.as_mut() {
+                chart_series_graphical_properties_mut(series).line_dash = attr_value(e, b"val");
+            }
         }
         b"dLbls" => {
             chart_data_labels_mut(data_labels, current_series);
@@ -4753,6 +4814,14 @@ fn chart_data_labels_mut<'a>(
             .get_or_insert_with(ChartDataLabelsInfo::default);
     }
     chart_labels.get_or_insert_with(ChartDataLabelsInfo::default)
+}
+
+fn chart_series_graphical_properties_mut(
+    series: &mut ChartSeriesInfo,
+) -> &mut ChartGraphicalPropertiesInfo {
+    series
+        .graphical_properties
+        .get_or_insert_with(ChartGraphicalPropertiesInfo::default)
 }
 
 fn chart_axis_name(local: &[u8]) -> Option<&'static str> {
@@ -5956,6 +6025,7 @@ mod tests {
                         <c:ser>
                             <c:idx val="0"/><c:order val="0"/>
                             <c:tx><c:strRef><c:f>'Charts'!B1</c:f></c:strRef></c:tx>
+                            <c:spPr><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:ln w="20000"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:prstDash val="dash"/></a:ln></c:spPr>
                             <c:dLbls><c:dLblPos val="outEnd"/><c:showVal val="1"/></c:dLbls>
                             <c:trendline><c:trendlineType val="poly"/><c:order val="3"/><c:dispEq val="1"/><c:dispRSqr val="1"/></c:trendline>
                             <c:errBars><c:errBarType val="both"/><c:errValType val="fixedVal"/><c:noEndCap val="1"/><c:val val="2"/></c:errBars>
@@ -6026,6 +6096,14 @@ mod tests {
         assert_eq!(labels.show_val, Some(true));
         let series = &chart.series[0];
         assert_eq!(series.title_ref.as_deref(), Some("'Charts'!B1"));
+        let gp = series
+            .graphical_properties
+            .as_ref()
+            .expect("series graphical properties");
+        assert_eq!(gp.solid_fill.as_deref(), Some("FF0000"));
+        assert_eq!(gp.line_solid_fill.as_deref(), Some("00FF00"));
+        assert_eq!(gp.line_dash.as_deref(), Some("dash"));
+        assert_eq!(gp.line_width, Some(20000));
         let series_labels = series.data_labels.as_ref().expect("series labels");
         assert_eq!(series_labels.position.as_deref(), Some("outEnd"));
         assert_eq!(series_labels.show_val, Some(true));

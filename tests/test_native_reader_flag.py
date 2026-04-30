@@ -479,7 +479,9 @@ def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart.axis import DisplayUnitsLabelList
     from openpyxl.chart.error_bar import ErrorBars
     from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.shapes import GraphicalProperties
     from openpyxl.chart.trendline import Trendline
+    from openpyxl.drawing.line import LineProperties
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -519,6 +521,10 @@ def _make_chart_xlsx(path: Path) -> None:
     )
     chart.series[0].errBars = ErrorBars(
         errBarType="both", errValType="fixedVal", noEndCap=True, val=2
+    )
+    chart.series[0].graphicalProperties = GraphicalProperties(
+        solidFill="FF0000",
+        ln=LineProperties(solidFill="00FF00", prstDash="dash", w=20000),
     )
     ws.add_chart(chart, "D5")
     wb.save(path)
@@ -1044,6 +1050,10 @@ def test_native_reader_loads_drawing_charts(
         assert series.errBars.errValType == "fixedVal"
         assert series.errBars.noEndCap is True
         assert series.errBars.val == 2
+        assert series.graphicalProperties.solidFill == "FF0000"
+        assert series.graphicalProperties.line.solidFill == "00FF00"
+        assert series.graphicalProperties.line.prstDash == "dash"
+        assert series.graphicalProperties.line.w == 20000
 
         from wolfxl.drawing.spreadsheet_drawing import OneCellAnchor
 

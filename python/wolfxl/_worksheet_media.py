@@ -312,6 +312,8 @@ def _series_from_payload(kind: str, payload: dict[str, Any]) -> Any:
             series.cat = AxDataSource(strRef=StrRef(str(payload["cat_ref"])))
         if payload.get("val_ref"):
             series.val = NumDataSource(numRef=NumRef(f=str(payload["val_ref"])))
+    if isinstance(payload.get("graphical_properties"), dict):
+        series.spPr = _graphical_properties_from_payload(payload["graphical_properties"])
     if isinstance(payload.get("data_labels"), dict):
         series.dLbls = _data_labels_from_payload(payload["data_labels"])
     if isinstance(payload.get("trendline"), dict):
@@ -319,6 +321,28 @@ def _series_from_payload(kind: str, payload: dict[str, Any]) -> Any:
     if isinstance(payload.get("error_bars"), dict):
         series.errBars = _error_bars_from_payload(payload["error_bars"])
     return series
+
+
+def _graphical_properties_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.chart.shapes import GraphicalProperties, LineProperties
+
+    line_payload = payload.get("ln")
+    line = None
+    if isinstance(line_payload, dict) and any(
+        line_payload.get(key) is not None
+        for key in ("no_fill", "solid_fill", "prst_dash", "w_emu")
+    ):
+        line = LineProperties(
+            noFill=line_payload.get("no_fill"),
+            solidFill=line_payload.get("solid_fill"),
+            prstDash=line_payload.get("prst_dash"),
+            w=line_payload.get("w_emu"),
+        )
+    return GraphicalProperties(
+        noFill=payload.get("no_fill"),
+        solidFill=payload.get("solid_fill"),
+        ln=line,
+    )
 
 
 def _data_labels_from_payload(payload: dict[str, Any]) -> Any:
