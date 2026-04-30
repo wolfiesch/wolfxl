@@ -228,12 +228,12 @@ tables with pre-aggregated records.
 
 ## Footnotes on the underlying readers
 
-- WolfXL's `.xlsx` reader uses [calamine-styles](https://crates.io/crates/calamine-styles),
-  a fork of [calamine](https://github.com/tafia/calamine) that adds
-  Font / Fill / Border / Alignment / NumberFormat extraction.
-  Upstream calamine doesn't surface styles.
-- `.xlsb` and `.xls` reads route through upstream calamine directly
-  (no styles).
+- WolfXL's public `.xlsx` reader is now native. It parses OOXML workbook
+  topology, values, formulas, styles, rich text, comments, hyperlinks, tables,
+  validations, conditional formatting, drawings, charts, and sheet/workbook
+  metadata through the Rust native reader stack.
+- `.xlsb` and `.xls` reads still route through the Calamine-backed binary
+  compatibility readers (values and cached formula results; no styles).
 
 ## Tracking
 

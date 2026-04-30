@@ -79,8 +79,8 @@ The saved workbook opens in Excel without a refresh.
 
 What's also in the box (carried over from v1.7):
 
-- Read .xlsx / .xlsb / .xls (calamine-styles for styles on
-  .xlsx; values + formula caches on .xlsb / .xls).
+- Read .xlsx natively with styles and workbook metadata; read .xlsb / .xls
+  through Calamine-backed value and formula-cache compatibility paths.
 - Write .xlsx with full style fidelity.
 - Modify mode — surgical ZIP rewrite. Touching one cell in a
   100k-row workbook + saving takes <!-- TBD: BENCHMARK NUMBERS -->
