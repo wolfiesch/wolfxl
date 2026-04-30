@@ -333,15 +333,13 @@ def _xlsx_reader_class(
 ) -> Any:
     """Return the active XLSX Rust reader class.
 
-    Plain eager reads, permissive recovery, and modify-mode bootstrap reads use
-    WolfXL's native reader by default. Streaming mode stays on the legacy
-    reader until its row-iterator style seam has the same coverage.
+    Plain eager reads, permissive recovery, streaming bootstrap, and
+    modify-mode bootstrap reads use WolfXL's native reader by default.
     ``WOLFXL_CALAMINE_READER=1`` is a temporary escape hatch for legacy-reader
     diagnostics.
     """
     if (
         os.environ.get("WOLFXL_CALAMINE_READER") != "1"
-        and not read_only
         and hasattr(rust_module, "NativeXlsxBook")
     ):
         return rust_module.NativeXlsxBook

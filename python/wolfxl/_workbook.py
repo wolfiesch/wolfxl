@@ -85,9 +85,9 @@ class Workbook:
         rels-graph fallback when ``<sheets>`` is empty/self-closing.
 
         ``read_only`` activates the SAX streaming fast path on ``iter_rows``.
-        That mode still constructs the legacy reader for style/format lookups,
-        while the streaming reader bypasses eager materialization for the
-        large-sheet scan path. See
+        The workbook still keeps a Rust reader for style/format lookups, while
+        the streaming reader bypasses eager materialization for the large-sheet
+        scan path. See
         :func:`wolfxl.load_workbook` for details.
         """
         return _workbook_sources.from_reader(
