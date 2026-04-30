@@ -127,6 +127,7 @@ pub struct WorksheetData {
     pub merged_ranges: Vec<String>,
     pub hyperlinks: Vec<Hyperlink>,
     pub freeze_panes: Option<FreezePane>,
+    pub comments: Vec<Comment>,
     pub cells: Vec<Cell>,
 }
 
@@ -155,6 +156,15 @@ pub struct FreezePane {
 pub enum PaneMode {
     Freeze,
     Split,
+}
+
+/// Parsed worksheet comment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    pub cell: String,
+    pub text: String,
+    pub author: String,
+    pub threaded: bool,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -239,7 +249,17 @@ impl NativeXlsxBook {
                     .map_err(|e| ReaderError::Xml(format!("failed to parse sheet rels: {e}")))
             })
             .transpose()?;
-        parse_worksheet(&xml, &self.shared_strings, rels.as_ref())
+        let comments = match rels.as_ref().and_then(comments_target) {
+            Some(target) => read_part_optional(
+                &mut zip,
+                &join_and_normalize(&part_dir(&info.path), &target),
+            )?
+            .map(|xml| parse_comments(&xml))
+            .transpose()?
+            .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments)
     }
 }
 
@@ -504,6 +524,7 @@ fn parse_worksheet(
     xml: &str,
     shared_strings: &[String],
     rels: Option<&RelsGraph>,
+    comments: Vec<Comment>,
 ) -> Result<WorksheetData> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -612,6 +633,7 @@ fn parse_worksheet(
         merged_ranges,
         hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         freeze_panes,
+        comments,
         cells,
     })
 }
@@ -703,6 +725,84 @@ fn cell_display_text(cells: &[Cell], coordinate: &str) -> String {
         CellValue::Number(value) => value.to_string(),
         CellValue::Bool(value) => value.to_string(),
     }
+}
+
+fn comments_target(rels: &RelsGraph) -> Option<String> {
+    rels.iter()
+        .find(|rel| rel.rel_type.ends_with("/comments") || rel.rel_type == "comments")
+        .map(|rel| rel.target.clone())
+}
+
+fn parse_comments(xml: &str) -> Result<Vec<Comment>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut authors = Vec::new();
+    let mut comments = Vec::new();
+    let mut in_author = false;
+    let mut in_comment = false;
+    let mut in_t = false;
+    let mut current_cell = String::new();
+    let mut current_author_id = 0usize;
+    let mut current_text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"author" => in_author = true,
+                b"comment" => {
+                    in_comment = true;
+                    current_text.clear();
+                    current_cell = attr_value(&e, b"ref").unwrap_or_default();
+                    current_author_id = attr_value(&e, b"authorId")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(0);
+                }
+                b"t" => in_t = true,
+                _ => {}
+            },
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"author" => in_author = false,
+                b"comment" => {
+                    in_comment = false;
+                    comments.push(Comment {
+                        cell: current_cell.clone(),
+                        text: current_text.clone(),
+                        author: authors.get(current_author_id).cloned().unwrap_or_default(),
+                        threaded: false,
+                    });
+                }
+                b"t" => in_t = false,
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                let text = e
+                    .unescape()
+                    .map_err(|err| ReaderError::Xml(format!("comments text: {err}")))?
+                    .to_string();
+                if in_author {
+                    authors.push(text);
+                } else if in_comment && in_t {
+                    current_text.push_str(&text);
+                }
+            }
+            Ok(Event::CData(e)) => {
+                if in_comment && in_t {
+                    current_text.push_str(&String::from_utf8_lossy(e.as_ref()));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse comments XML: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(comments)
 }
 
 #[derive(Debug)]
@@ -881,6 +981,14 @@ fn join_and_normalize(base_dir: &str, target: &str) -> String {
     normalize_zip_path(&combined)
 }
 
+fn part_dir(path: &str) -> String {
+    let normalized = normalize_zip_path(path);
+    normalized
+        .rsplit_once('/')
+        .map(|(dir, _)| format!("{dir}/"))
+        .unwrap_or_default()
+}
+
 fn sheet_rels_path(sheet_path: &str) -> String {
     let normalized = normalize_zip_path(sheet_path);
     let Some((dir, file)) = normalized.rsplit_once('/') else {
@@ -993,7 +1101,8 @@ mod tests {
             </row>
             <row r="2"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
         </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells></worksheet>"#;
-        let sheet = parse_worksheet(xml, &["Shared".to_string()], None).expect("parse worksheet");
+        let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new())
+            .expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
         assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
         assert_eq!(
@@ -1035,7 +1144,7 @@ mod tests {
         )
         .expect("parse rels");
 
-        let sheet = parse_worksheet(xml, &[], Some(&rels)).expect("parse worksheet");
+        let sheet = parse_worksheet(xml, &[], Some(&rels), Vec::new()).expect("parse worksheet");
         assert_eq!(
             sheet.hyperlinks,
             vec![
@@ -1052,6 +1161,33 @@ mod tests {
                     display: "Jump".to_string(),
                     tooltip: None,
                     internal: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_comments_authors_and_rich_text() {
+        let xml = r#"<comments><authors><author>Alice</author><author>Bob</author></authors>
+            <commentList>
+                <comment ref="A1" authorId="0"><text><t>First note</t></text></comment>
+                <comment ref="B2" authorId="1"><text><r><t>Second</t></r><r><t> note</t></r></text></comment>
+            </commentList></comments>"#;
+
+        assert_eq!(
+            parse_comments(xml).expect("parse comments"),
+            vec![
+                Comment {
+                    cell: "A1".to_string(),
+                    text: "First note".to_string(),
+                    author: "Alice".to_string(),
+                    threaded: false,
+                },
+                Comment {
+                    cell: "B2".to_string(),
+                    text: "Second note".to_string(),
+                    author: "Bob".to_string(),
+                    threaded: false,
                 },
             ]
         );

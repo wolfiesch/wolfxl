@@ -40,6 +40,8 @@ def _make_basic_xlsx(path: Path) -> None:
     )
     ws["B5"] = "Internal"
     ws["B5"].hyperlink = Hyperlink(ref="B5", location="Data!A1", display="Jump")
+    ws["A6"] = "Commented"
+    ws["A6"].comment = openpyxl.comments.Comment("Native reader note", "Wolf")
     ws.freeze_panes = "B2"
     wb.save(path)
     wb.close()
@@ -70,6 +72,9 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["B5"].hyperlink.target is None
         assert ws["B5"].hyperlink.location == "Data!A1"
         assert ws["B5"].hyperlink.display == "Jump"
+        assert ws["A6"].comment is not None
+        assert ws["A6"].comment.text == "Native reader note"
+        assert ws["A6"].comment.author == "Wolf"
         assert ws.freeze_panes == "B2"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
         records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
@@ -96,5 +101,6 @@ def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.Monk
             None,
         )
         assert wb["Data"]["A5"].hyperlink.target == "https://example.com/report"
+        assert wb["Data"]["A6"].comment.text == "Native reader note"
     finally:
         wb.close()

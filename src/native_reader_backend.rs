@@ -316,8 +316,18 @@ impl NativeXlsxBook {
         Ok(result.into())
     }
 
-    pub fn read_comments(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_comments(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let comments = self.ensure_sheet(sheet)?.comments.clone();
+        let result = PyList::empty(py);
+        for comment in &comments {
+            let d = PyDict::new(py);
+            d.set_item("cell", &comment.cell)?;
+            d.set_item("text", &comment.text)?;
+            d.set_item("author", &comment.author)?;
+            d.set_item("threaded", comment.threaded)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_freeze_panes(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
