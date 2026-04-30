@@ -685,11 +685,22 @@ def test_native_reader_loads_workbook_calc_properties(
         assert wb.excel_base_date == CALENDAR_MAC_1904
         assert wb.iso_dates is False
         assert wb.template is False
+        assert wb.is_template is False
         assert wb.encoding == "utf-8"
+        assert wb.data_only is False
+        assert wb.read_only is False
+        assert wb.write_only is False
+        assert wb.path == "/xl/workbook.xml"
+        assert wb.rels == []
+        assert wb.shared_strings == []
+        assert wb.loaded_theme is None
+        assert wb.vba_archive is None
+        assert wb.style_names == ["Normal"]
         assert (
             wb.mime_type
             == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
         )
+        assert wb.code_name == "NativeWorkbook"
         assert properties.dateCompatibility is False
         assert properties.showObjects == "none"
         assert properties.filterPrivacy is True

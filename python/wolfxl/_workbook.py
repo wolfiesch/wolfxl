@@ -274,6 +274,41 @@ class Workbook:
         return bool(getattr(self, "_read_only", False))
 
     @property
+    def write_only(self) -> bool:
+        """Whether this workbook is in openpyxl write-only mode."""
+        return False
+
+    @property
+    def data_only(self) -> bool:
+        """Whether formulas expose cached values where available."""
+        return bool(getattr(self, "_data_only", False))
+
+    @property
+    def path(self) -> str:
+        """Openpyxl-compatible workbook part path."""
+        return "/xl/workbook.xml"
+
+    @property
+    def rels(self) -> list[Any]:
+        """Workbook relationship list placeholder."""
+        return []
+
+    @property
+    def shared_strings(self) -> list[Any]:
+        """Workbook shared-string table placeholder."""
+        return []
+
+    @property
+    def loaded_theme(self) -> Any:
+        """Loaded theme bytes, when exposed."""
+        return None
+
+    @property
+    def vba_archive(self) -> Any:
+        """VBA archive payload, when exposed."""
+        return None
+
+    @property
     def chartsheets(self) -> list[Any]:
         """Return chart sheets in this workbook.
 
@@ -328,6 +363,26 @@ class Workbook:
         return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
 
     @property
+    def is_template(self) -> bool:
+        """Compatibility alias for the workbook template flag."""
+        return bool(getattr(self, "template", False))
+
+    @is_template.setter
+    def is_template(self, value: bool) -> None:
+        """Set the workbook template flag."""
+        self.template = bool(value)
+
+    @property
+    def code_name(self) -> str | None:
+        """Workbook code name from ``workbook_properties.codeName``."""
+        return self.workbook_properties.codeName
+
+    @code_name.setter
+    def code_name(self, value: str | None) -> None:
+        """Set workbook code name."""
+        self.workbook_properties.codeName = value
+
+    @property
     def named_styles(self) -> list[Any]:
         """Return workbook named styles.
 
@@ -335,6 +390,11 @@ class Workbook:
         property yet, so this returns an empty list.
         """
         return []
+
+    @property
+    def style_names(self) -> list[str]:
+        """Return names for workbook named styles."""
+        return ["Normal"]
 
     def __getitem__(self, name: str) -> Worksheet:
         """Return a worksheet by title."""
