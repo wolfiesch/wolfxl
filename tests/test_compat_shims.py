@@ -248,6 +248,46 @@ def test_color_is_hashable() -> None:
     assert {a, b} == {a}
 
 
+def test_style_openpyxl_aliases() -> None:
+    font = wolfxl.Font(b=True, i=True, u=True, sz=14, strikethrough=True)
+    assert font.bold is True
+    assert font.b is True
+    assert font.italic is True
+    assert font.i is True
+    assert font.underline == "single"
+    assert font.u == "single"
+    assert font.size == 14
+    assert font.sz == 14
+    assert font.strikethrough is True
+
+    fill = wolfxl.PatternFill(fill_type="solid", start_color="FFFF0000", end_color="FF00FF00")
+    assert fill.patternType == "solid"
+    assert fill.fill_type == "solid"
+    assert fill.fgColor == "FFFF0000"
+    assert fill.start_color == "FFFF0000"
+    assert fill.bgColor == "FF00FF00"
+    assert fill.end_color == "FF00FF00"
+
+    align = wolfxl.Alignment(wrapText=True, textRotation=45, shrinkToFit=True)
+    assert align.wrap_text is True
+    assert align.wrapText is True
+    assert align.text_rotation == 45
+    assert align.textRotation == 45
+    assert align.shrink_to_fit is True
+    assert align.shrinkToFit is True
+
+    side = wolfxl.Side(border_style="thin")
+    assert side.style == "thin"
+    assert side.border_style == "thin"
+    border = wolfxl.Border(diagonal=side, diagonalUp=True)
+    assert border.diagonal is side
+    assert border.diagonal_direction == "up"
+
+    color = wolfxl.Color(indexed=3)
+    assert color.value == 3
+    assert color.index == 3
+
+
 def test_dataframe_to_rows_without_pandas_import() -> None:
     """Importing the module does not require pandas."""
     import wolfxl.utils.dataframe as dfmod
