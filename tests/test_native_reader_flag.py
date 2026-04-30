@@ -139,6 +139,12 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A1"].border.left.style is None
         assert ws["C1"].value is True
         assert ws["B2"].value == "=B1*2"
+        assert wb._rust_reader.read_cell_formula("Data", "B2") == {  # noqa: SLF001
+            "type": "formula",
+            "formula": "=B1*2",
+            "value": "=B1*2",
+        }
+        assert wb._rust_reader.read_cell_formula("Data", "A1") is None  # noqa: SLF001
         assert ws["A3"].value == dt.datetime(2024, 1, 15, 12, 30)
         assert ws["B3"].value == dt.datetime(2024, 6, 1, 0, 0)
         assert ws["A5"].hyperlink is not None

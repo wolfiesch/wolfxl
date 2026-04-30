@@ -272,6 +272,27 @@ impl NativeXlsxBook {
             .collect())
     }
 
+    pub fn read_cell_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let formula = self
+            .ensure_sheet(sheet)?
+            .cells
+            .iter()
+            .find(|cell| cell.row == row && cell.col == col)
+            .and_then(|cell| cell.formula.as_deref());
+        match formula {
+            Some(formula) => formula_to_py(py, formula),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_cached_formula_values(
         &mut self,
         py: Python<'_>,
@@ -711,12 +732,7 @@ fn cell_to_dict(
 ) -> PyResult<PyObject> {
     if !data_only {
         if let Some(formula) = &cell.formula {
-            let formula = ensure_formula_prefix(formula);
-            let d = PyDict::new(py);
-            d.set_item("type", "formula")?;
-            d.set_item("formula", &formula)?;
-            d.set_item("value", &formula)?;
-            return Ok(d.into());
+            return formula_to_py(py, formula);
         }
     }
     match &cell.value {
@@ -838,6 +854,15 @@ fn rich_font_to_py(py: Python<'_>, font: &InlineFontProps) -> PyResult<PyObject>
     if let Some(value) = &font.scheme {
         d.set_item("scheme", value)?;
     }
+    Ok(d.into())
+}
+
+fn formula_to_py(py: Python<'_>, formula: &str) -> PyResult<PyObject> {
+    let formula = ensure_formula_prefix(formula);
+    let d = PyDict::new(py);
+    d.set_item("type", "formula")?;
+    d.set_item("formula", &formula)?;
+    d.set_item("value", &formula)?;
     Ok(d.into())
 }
 
