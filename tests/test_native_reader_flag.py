@@ -21,6 +21,7 @@ def _make_basic_xlsx(path: Path) -> None:
     ws.title = "Data"
     ws["A1"] = "Label"
     ws["B1"] = 42
+    ws["B1"].number_format = "#,##0.00"
     ws["C1"] = True
     ws["A2"] = "Formula"
     ws["B2"] = "=B1*2"
@@ -41,9 +42,12 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         ws = wb["Data"]
         assert ws["A1"].value == "Label"
         assert ws["B1"].value == 42
+        assert ws["B1"].number_format == "#,##0.00"
         assert ws["C1"].value is True
         assert ws["B2"].value == "=B1*2"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
+        records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
+        assert records["B1"]["number_format"] == "#,##0.00"
     finally:
         wb.close()
 

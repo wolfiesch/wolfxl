@@ -186,9 +186,9 @@ impl NativeXlsxBook {
         _include_cached_formula_value: bool,
     ) -> PyResult<PyObject> {
         let window = self.resolve_window(sheet, cell_range)?;
-        let data = self.ensure_sheet(sheet)?;
+        let cells = self.ensure_sheet(sheet)?.cells.clone();
         let out = PyList::empty(py);
-        for cell in &data.cells {
+        for cell in &cells {
             if let Some((min_row, min_col, max_row, max_col)) = window {
                 if cell.row < min_row
                     || cell.row > max_row
@@ -211,6 +211,9 @@ impl NativeXlsxBook {
             }
             if include_style_id {
                 record.set_item("style_id", cell.style_id)?;
+            }
+            if let Some(number_format) = self.number_format_for_cell(cell) {
+                record.set_item("number_format", number_format)?;
             }
             if let Some(formula) = &cell.formula {
                 record.set_item("formula", ensure_formula_prefix(formula))?;
@@ -309,10 +312,29 @@ impl NativeXlsxBook {
         py.None()
     }
 
-    pub fn read_cell_format(&self, _sheet: &str, _a1: &str) -> PyResult<()> {
-        Err(PyErr::new::<PyNotImplementedError, _>(
-            "native XLSX style reads are not implemented yet; unset WOLFXL_NATIVE_READER",
-        ))
+    pub fn read_cell_format(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let style_id = {
+            let data = self.ensure_sheet(sheet)?;
+            data.cells
+                .iter()
+                .find(|c| c.row == row && c.col == col)
+                .and_then(|cell| cell.style_id)
+        };
+        let d = PyDict::new(py);
+        if let Some(style_id) = style_id {
+            if let Some(number_format) = self.book.number_format_for_style_id(style_id) {
+                d.set_item("number_format", number_format)?;
+            }
+        }
+        Ok(d.into())
     }
 
     pub fn read_cell_border(&self, _sheet: &str, _a1: &str) -> PyResult<()> {
@@ -363,6 +385,11 @@ impl NativeXlsxBook {
                 .map(Some);
         }
         self.read_bounds_1based(sheet)
+    }
+
+    fn number_format_for_cell(&self, cell: &Cell) -> Option<&str> {
+        cell.style_id
+            .and_then(|style_id| self.book.number_format_for_style_id(style_id))
     }
 }
 

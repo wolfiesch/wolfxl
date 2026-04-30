@@ -6,6 +6,7 @@
 //! this API while preserving the same value-only public contract they have
 //! today.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -133,6 +134,7 @@ pub struct NativeXlsxBook {
     bytes: Vec<u8>,
     sheets: Vec<SheetInfo>,
     shared_strings: Vec<String>,
+    styles: StyleTables,
     date1904: bool,
 }
 
@@ -156,11 +158,16 @@ impl NativeXlsxBook {
             Some(xml) => parse_shared_strings(&xml)?,
             None => Vec::new(),
         };
+        let styles = match read_part_optional(&mut zip, "xl/styles.xml")? {
+            Some(xml) => parse_style_tables(&xml)?,
+            None => StyleTables::default(),
+        };
 
         Ok(Self {
             bytes,
             sheets,
             shared_strings,
+            styles,
             date1904,
         })
     }
@@ -185,6 +192,11 @@ impl NativeXlsxBook {
         &self.shared_strings
     }
 
+    /// Resolve a style id to an Excel number format code.
+    pub fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
+        self.styles.number_format_for_style_id(style_id)
+    }
+
     /// Parse a worksheet into sparse decoded cells.
     pub fn worksheet(&self, sheet_name: &str) -> Result<WorksheetData> {
         let Some(info) = self.sheets.iter().find(|s| s.name == sheet_name) else {
@@ -202,6 +214,36 @@ struct SheetRef {
     sheet_id: Option<String>,
     state: SheetState,
     rid: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct StyleTables {
+    custom_num_fmts: HashMap<u32, String>,
+    cell_xfs: Vec<XfEntry>,
+}
+
+impl StyleTables {
+    fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
+        if style_id == 0 {
+            return None;
+        }
+        let xf = self.cell_xfs.get(style_id as usize)?;
+        if xf.num_fmt_id == 0 {
+            return None;
+        }
+        if let Some(custom) = self.custom_num_fmts.get(&xf.num_fmt_id) {
+            return Some(custom.as_str());
+        }
+        match builtin_num_fmt(xf.num_fmt_id) {
+            Some("General") => None,
+            other => other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct XfEntry {
+    num_fmt_id: u32,
 }
 
 fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool)> {
@@ -318,6 +360,109 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>> {
     }
 
     Ok(out)
+}
+
+fn parse_style_tables(xml: &str) -> Result<StyleTables> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut styles = StyleTables::default();
+    let mut in_num_fmts = false;
+    let mut in_cell_xfs = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"numFmts" => in_num_fmts = true,
+                b"cellXfs" => in_cell_xfs = true,
+                b"numFmt" if in_num_fmts => {
+                    push_num_fmt(&mut styles, &e);
+                }
+                b"xf" if in_cell_xfs => {
+                    styles.cell_xfs.push(parse_xf_entry(&e));
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"numFmt" if in_num_fmts => push_num_fmt(&mut styles, &e),
+                b"xf" if in_cell_xfs => styles.cell_xfs.push(parse_xf_entry(&e)),
+                _ => {}
+            },
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"numFmts" => in_num_fmts = false,
+                b"cellXfs" => in_cell_xfs = false,
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse xl/styles.xml: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(styles)
+}
+
+fn push_num_fmt(styles: &mut StyleTables, e: &BytesStart<'_>) {
+    let id = attr_value(e, b"numFmtId").and_then(|value| value.parse::<u32>().ok());
+    let code = attr_value(e, b"formatCode");
+    if let (Some(id), Some(code)) = (id, code) {
+        styles.custom_num_fmts.insert(id, code);
+    }
+}
+
+fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
+    XfEntry {
+        num_fmt_id: attr_value(e, b"numFmtId")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
+    }
+}
+
+fn builtin_num_fmt(format_id: u32) -> Option<&'static str> {
+    match format_id {
+        0 => Some("General"),
+        1 => Some("0"),
+        2 => Some("0.00"),
+        3 => Some("#,##0"),
+        4 => Some("#,##0.00"),
+        5 => Some("\"$\"#,##0_);(\"$\"#,##0)"),
+        6 => Some("\"$\"#,##0_);[Red](\"$\"#,##0)"),
+        7 => Some("\"$\"#,##0.00_);(\"$\"#,##0.00)"),
+        8 => Some("\"$\"#,##0.00_);[Red](\"$\"#,##0.00)"),
+        9 => Some("0%"),
+        10 => Some("0.00%"),
+        11 => Some("0.00E+00"),
+        12 => Some("# ?/?"),
+        13 => Some("# ??/??"),
+        14 => Some("mm-dd-yy"),
+        15 => Some("d-mmm-yy"),
+        16 => Some("d-mmm"),
+        17 => Some("mmm-yy"),
+        18 => Some("h:mm AM/PM"),
+        19 => Some("h:mm:ss AM/PM"),
+        20 => Some("h:mm"),
+        21 => Some("h:mm:ss"),
+        22 => Some("m/d/yy h:mm"),
+        37 => Some("#,##0_);(#,##0)"),
+        38 => Some("#,##0_);[Red](#,##0)"),
+        39 => Some("#,##0.00_);(#,##0.00)"),
+        40 => Some("#,##0.00_);[Red](#,##0.00)"),
+        41 => Some(r#"_(* #,##0_);_(* \(#,##0\);_(* "-"_);_(@_)"#),
+        42 => Some(r#"_("$"* #,##0_);_("$"* \(#,##0\);_("$"* "-"_);_(@_)"#),
+        43 => Some(r#"_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)"#),
+        44 => Some(r#"_("$"* #,##0.00_)_("$"* \(#,##0.00\)_("$"* "-"??_)_(@_)"#),
+        45 => Some("mm:ss"),
+        46 => Some("[h]:mm:ss"),
+        47 => Some("mmss.0"),
+        48 => Some("##0.0E+0"),
+        49 => Some("@"),
+        _ => None,
+    }
 }
 
 fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData> {
@@ -661,6 +806,22 @@ mod tests {
             r#"<sst><si><t>Plain</t></si><si><r><t>Rich</t></r><r><t> Text</t></r></si></sst>"#;
         let strings = parse_shared_strings(xml).expect("parse sst");
         assert_eq!(strings, vec!["Plain", "Rich Text"]);
+    }
+
+    #[test]
+    fn parses_custom_and_builtin_number_formats() {
+        let xml = r#"<styleSheet>
+            <numFmts count="1"><numFmt numFmtId="165" formatCode="$#,##0.00"/></numFmts>
+            <cellXfs count="3">
+                <xf numFmtId="0"/>
+                <xf numFmtId="4"/>
+                <xf numFmtId="165"/>
+            </cellXfs>
+        </styleSheet>"#;
+        let styles = parse_style_tables(xml).expect("parse styles");
+        assert_eq!(styles.number_format_for_style_id(0), None);
+        assert_eq!(styles.number_format_for_style_id(1), Some("#,##0.00"));
+        assert_eq!(styles.number_format_for_style_id(2), Some("$#,##0.00"));
     }
 
     #[test]
