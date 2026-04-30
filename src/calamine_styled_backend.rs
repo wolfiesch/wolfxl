@@ -26,9 +26,9 @@ use crate::calamine_styled_array_formulas::{
     parse_array_formulas_from_sheet_xml, ArrayFormulaInfo,
 };
 use crate::calamine_value_helpers::{
-    data_is_formula_text, data_to_plain_py, data_to_py, data_type_name, is_uncached_formula_value,
-    map_error_formula, normalize_formula_text, resolve_range_bounds, row_col_to_a1, update_bounds,
-    update_dimensions,
+    col_letter_to_index, data_is_formula_text, data_to_plain_py, data_to_py, data_type_name,
+    is_uncached_formula_value, map_error_formula, normalize_formula_text, resolve_range_bounds,
+    row_col_to_a1, update_bounds, update_dimensions,
 };
 use crate::ooxml_util;
 use crate::util::{a1_to_row_col, cell_blank, column_letter_from_zero_based};
@@ -1060,7 +1060,7 @@ impl CalamineStyledBook {
     }
 
     pub fn read_column_width(&mut self, sheet: &str, col_letter: &str) -> PyResult<Option<f64>> {
-        let col_0 = Self::col_letter_to_index(col_letter)?;
+        let col_0 = col_letter_to_index(col_letter)?;
         self.ensure_cache(sheet)?;
         let cache = self.style_cache.get(sheet).unwrap();
         Ok(cache
@@ -1837,19 +1837,6 @@ impl CalamineStyledBook {
 
         self.record_format_cache.insert(cache_key, info.clone());
         Ok(info)
-    }
-
-    fn col_letter_to_index(col: &str) -> PyResult<u32> {
-        let mut idx: u32 = 0;
-        for ch in col.chars() {
-            if !ch.is_ascii_alphabetic() {
-                return Err(PyErr::new::<PyValueError, _>(format!(
-                    "Invalid column letter: {col}"
-                )));
-            }
-            idx = idx * 26 + (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
-        }
-        Ok(idx - 1)
     }
 
     fn ensure_sheet_exists(&self, sheet: &str) -> PyResult<()> {

@@ -257,6 +257,19 @@ pub(crate) fn resolve_range_bounds(
     ))
 }
 
+pub(crate) fn col_letter_to_index(col: &str) -> PyResult<u32> {
+    let mut idx: u32 = 0;
+    for ch in col.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Invalid column letter: {col}"
+            )));
+        }
+        idx = idx * 26 + (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
+    }
+    Ok(idx - 1)
+}
+
 pub(crate) fn update_dimensions(
     dimensions: &mut Option<(u32, u32)>,
     row_count: u32,
