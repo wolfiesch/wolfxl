@@ -17,11 +17,12 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
-    BorderInfo, Cell, CellDataType, CellValue, ChartInfo, ChartSeriesInfo, DateGroupItemInfo,
-    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
-    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
-    PageMarginsInfo, PageSetupInfo, PaneMode, SheetProtection, SheetState, SortConditionInfo,
-    SortStateInfo, WorkbookSecurity, WorksheetData,
+    BorderInfo, BreakInfo, Cell, CellDataType, CellValue, ChartInfo, ChartSeriesInfo,
+    DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo,
+    HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
+    NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
+    PaneMode, SheetFormatInfo, SheetProtection, SheetState, SortConditionInfo, SortStateInfo,
+    WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -557,6 +558,27 @@ impl NativeXlsxBook {
     pub fn read_header_footer(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match &self.ensure_sheet(sheet)?.header_footer {
             Some(header_footer) => header_footer_to_py(py, header_footer),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_row_breaks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.row_breaks {
+            Some(breaks) => page_breaks_to_py(py, breaks),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_column_breaks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.column_breaks {
+            Some(breaks) => page_breaks_to_py(py, breaks),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_sheet_format(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.sheet_format {
+            Some(format) => sheet_format_to_py(py, format),
             None => Ok(py.None()),
         }
     }
@@ -1346,6 +1368,42 @@ fn header_footer_item_to_py(py: Python<'_>, item: &HeaderFooterItemInfo) -> PyRe
     d.set_item("left", item.left.as_deref())?;
     d.set_item("center", item.center.as_deref())?;
     d.set_item("right", item.right.as_deref())?;
+    Ok(d.into())
+}
+
+fn page_breaks_to_py(py: Python<'_>, breaks: &PageBreakListInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("count", breaks.count)?;
+    d.set_item("manual_break_count", breaks.manual_break_count)?;
+    let items = PyList::empty(py);
+    for item in &breaks.breaks {
+        items.append(break_to_py(py, item)?)?;
+    }
+    d.set_item("breaks", items)?;
+    Ok(d.into())
+}
+
+fn break_to_py(py: Python<'_>, item: &BreakInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("id", item.id)?;
+    d.set_item("min", item.min)?;
+    d.set_item("max", item.max)?;
+    d.set_item("man", item.man)?;
+    d.set_item("pt", item.pt)?;
+    Ok(d.into())
+}
+
+fn sheet_format_to_py(py: Python<'_>, format: &SheetFormatInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("base_col_width", format.base_col_width)?;
+    d.set_item("default_col_width", format.default_col_width)?;
+    d.set_item("default_row_height", format.default_row_height)?;
+    d.set_item("custom_height", format.custom_height)?;
+    d.set_item("zero_height", format.zero_height)?;
+    d.set_item("thick_top", format.thick_top)?;
+    d.set_item("thick_bottom", format.thick_bottom)?;
+    d.set_item("outline_level_row", format.outline_level_row)?;
+    d.set_item("outline_level_col", format.outline_level_col)?;
     Ok(d.into())
 }
 

@@ -353,28 +353,68 @@ def _sheet_protection_from_payload(payload: Any) -> Any:
 def get_row_breaks(ws: Worksheet) -> Any:
     """Return the lazy row page-break list."""
     if ws._row_breaks is None:  # noqa: SLF001
-        from wolfxl.worksheet.pagebreak import PageBreakList
-
-        ws._row_breaks = PageBreakList()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_row_breaks")
+        ws._row_breaks = _page_breaks_from_payload(payload, "row")  # noqa: SLF001
     return ws._row_breaks  # noqa: SLF001
 
 
 def get_col_breaks(ws: Worksheet) -> Any:
     """Return the lazy column page-break list."""
     if ws._col_breaks is None:  # noqa: SLF001
-        from wolfxl.worksheet.pagebreak import PageBreakList
-
-        ws._col_breaks = PageBreakList()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_column_breaks")
+        ws._col_breaks = _page_breaks_from_payload(payload, "column")  # noqa: SLF001
     return ws._col_breaks  # noqa: SLF001
 
 
 def get_sheet_format(ws: Worksheet) -> Any:
     """Return the lazy sheet format properties object."""
     if ws._sheet_format is None:  # noqa: SLF001
-        from wolfxl.worksheet.dimensions import SheetFormatProperties
-
-        ws._sheet_format = SheetFormatProperties()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_sheet_format")
+        ws._sheet_format = _sheet_format_from_payload(payload)  # noqa: SLF001
     return ws._sheet_format  # noqa: SLF001
+
+
+def _page_breaks_from_payload(payload: Any, kind: str) -> Any:
+    from wolfxl.worksheet.pagebreak import ColBreak, PageBreakList, RowBreak
+
+    if not isinstance(payload, dict):
+        return PageBreakList()
+    cls = RowBreak if kind == "row" else ColBreak
+    breaks = [
+        cls(
+            id=int(item.get("id", 0)),
+            min=item.get("min"),
+            max=item.get("max"),
+            man=bool(item.get("man", True)),
+            pt=bool(item.get("pt", False)),
+        )
+        for item in payload.get("breaks", [])
+        if isinstance(item, dict)
+    ]
+    page_breaks = PageBreakList(breaks=breaks)
+    page_breaks.count = int(payload.get("count", page_breaks.count))
+    page_breaks.manualBreakCount = int(
+        payload.get("manual_break_count", page_breaks.manualBreakCount)
+    )
+    return page_breaks
+
+
+def _sheet_format_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.dimensions import SheetFormatProperties
+
+    if not isinstance(payload, dict):
+        return SheetFormatProperties()
+    return SheetFormatProperties(
+        baseColWidth=int(payload.get("base_col_width", 8)),
+        defaultColWidth=payload.get("default_col_width"),
+        defaultRowHeight=float(payload.get("default_row_height", 15.0)),
+        customHeight=bool(payload.get("custom_height", False)),
+        zeroHeight=bool(payload.get("zero_height", False)),
+        thickTop=bool(payload.get("thick_top", False)),
+        thickBottom=bool(payload.get("thick_bottom", False)),
+        outlineLevelRow=int(payload.get("outline_level_row", 0)),
+        outlineLevelCol=int(payload.get("outline_level_col", 0)),
+    )
 
 
 def get_dimension_holder(ws: Worksheet) -> Any:

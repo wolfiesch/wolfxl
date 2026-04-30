@@ -146,6 +146,9 @@ pub struct WorksheetData {
     pub page_margins: Option<PageMarginsInfo>,
     pub page_setup: Option<PageSetupInfo>,
     pub header_footer: Option<HeaderFooterInfo>,
+    pub row_breaks: Option<PageBreakListInfo>,
+    pub column_breaks: Option<PageBreakListInfo>,
+    pub sheet_format: Option<SheetFormatInfo>,
     pub images: Vec<ImageInfo>,
     pub charts: Vec<ChartInfo>,
     pub tables: Vec<Table>,
@@ -298,6 +301,38 @@ pub struct HeaderFooterItemInfo {
     pub right: Option<String>,
 }
 
+/// Parsed row or column page-break list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PageBreakListInfo {
+    pub count: u32,
+    pub manual_break_count: u32,
+    pub breaks: Vec<BreakInfo>,
+}
+
+/// Parsed single row/column page break.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakInfo {
+    pub id: u32,
+    pub min: Option<u32>,
+    pub max: Option<u32>,
+    pub man: bool,
+    pub pt: bool,
+}
+
+/// Parsed worksheet sheet-format defaults.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetFormatInfo {
+    pub base_col_width: u32,
+    pub default_col_width: Option<f64>,
+    pub default_row_height: f64,
+    pub custom_height: bool,
+    pub zero_height: bool,
+    pub thick_top: bool,
+    pub thick_bottom: bool,
+    pub outline_level_row: u32,
+    pub outline_level_col: u32,
+}
+
 impl PageSetupInfo {
     fn from_start(e: &BytesStart<'_>) -> Self {
         Self {
@@ -350,6 +385,38 @@ enum HeaderFooterPart {
     EvenFooter,
     FirstHeader,
     FirstFooter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BreakListKind {
+    Row,
+    Column,
+}
+
+impl PageBreakListInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            count: attr_u32(e, b"count").unwrap_or_default(),
+            manual_break_count: attr_u32(e, b"manualBreakCount").unwrap_or_default(),
+            breaks: Vec::new(),
+        }
+    }
+}
+
+impl SheetFormatInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            base_col_width: attr_u32(e, b"baseColWidth").unwrap_or(8),
+            default_col_width: attr_f64(e, b"defaultColWidth"),
+            default_row_height: attr_f64(e, b"defaultRowHeight").unwrap_or(15.0),
+            custom_height: attr_bool_default(e, b"customHeight", false),
+            zero_height: attr_bool_default(e, b"zeroHeight", false),
+            thick_top: attr_bool_default(e, b"thickTop", false),
+            thick_bottom: attr_bool_default(e, b"thickBottom", false),
+            outline_level_row: attr_u32(e, b"outlineLevelRow").unwrap_or_default(),
+            outline_level_col: attr_u32(e, b"outlineLevelCol").unwrap_or_default(),
+        }
+    }
 }
 
 /// Parsed worksheet-level auto-filter metadata.
@@ -1778,6 +1845,9 @@ fn parse_worksheet(
     let mut page_margins = None;
     let mut page_setup = None;
     let mut header_footer = None;
+    let mut row_breaks = None;
+    let mut column_breaks = None;
+    let mut sheet_format = None;
     let mut conditional_formats = Vec::new();
     let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
     let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
@@ -1793,6 +1863,7 @@ fn parse_worksheet(
     let mut active_validation_text: Option<DataValidationFormula> = None;
     let mut current_header_footer: Option<HeaderFooterInfo> = None;
     let mut active_header_footer: Option<HeaderFooterPart> = None;
+    let mut active_breaks: Option<BreakListKind> = None;
     let mut cells = Vec::new();
 
     loop {
@@ -1813,6 +1884,9 @@ fn parse_worksheet(
                 }
                 b"pane" => {
                     freeze_panes = parse_pane(&e);
+                }
+                b"sheetFormatPr" => {
+                    sheet_format = Some(SheetFormatInfo::from_start(&e));
                 }
                 b"row" => {
                     row_index = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
@@ -1845,6 +1919,15 @@ fn parse_worksheet(
                 b"evenFooter" => active_header_footer = Some(HeaderFooterPart::EvenFooter),
                 b"firstHeader" => active_header_footer = Some(HeaderFooterPart::FirstHeader),
                 b"firstFooter" => active_header_footer = Some(HeaderFooterPart::FirstFooter),
+                b"rowBreaks" => {
+                    row_breaks = Some(PageBreakListInfo::from_start(&e));
+                    active_breaks = Some(BreakListKind::Row);
+                }
+                b"colBreaks" => {
+                    column_breaks = Some(PageBreakListInfo::from_start(&e));
+                    active_breaks = Some(BreakListKind::Column);
+                }
+                b"brk" => append_break(&mut row_breaks, &mut column_breaks, active_breaks, &e),
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
                 }
@@ -1932,6 +2015,9 @@ fn parse_worksheet(
                 b"pane" => {
                     freeze_panes = parse_pane(&e);
                 }
+                b"sheetFormatPr" => {
+                    sheet_format = Some(SheetFormatInfo::from_start(&e));
+                }
                 b"c" => {
                     let builder = CellBuilder::from_start(&e, row_index);
                     cells.push(builder.finish(shared_strings)?);
@@ -1966,6 +2052,13 @@ fn parse_worksheet(
                 b"headerFooter" => {
                     header_footer = Some(HeaderFooterInfo::from_start(&e));
                 }
+                b"rowBreaks" => {
+                    row_breaks = Some(PageBreakListInfo::from_start(&e));
+                }
+                b"colBreaks" => {
+                    column_breaks = Some(PageBreakListInfo::from_start(&e));
+                }
+                b"brk" => append_break(&mut row_breaks, &mut column_breaks, active_breaks, &e),
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
                 }
@@ -2022,6 +2115,9 @@ fn parse_worksheet(
                 b"headerFooter" => {
                     header_footer = current_header_footer.take();
                     active_header_footer = None;
+                }
+                b"rowBreaks" | b"colBreaks" => {
+                    active_breaks = None;
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = None;
@@ -2148,6 +2244,9 @@ fn parse_worksheet(
         page_margins,
         page_setup,
         header_footer,
+        row_breaks,
+        column_breaks,
+        sheet_format,
         images: Vec::new(),
         charts: Vec::new(),
         tables,
@@ -2228,6 +2327,41 @@ fn assign_header_footer_segment(
         b'L' => item.left = Some(value),
         b'R' => item.right = Some(value),
         _ => item.center = Some(value),
+    }
+}
+
+fn append_break(
+    row_breaks: &mut Option<PageBreakListInfo>,
+    column_breaks: &mut Option<PageBreakListInfo>,
+    active: Option<BreakListKind>,
+    e: &BytesStart<'_>,
+) {
+    let Some(active) = active else {
+        return;
+    };
+    let Some(id) = attr_u32(e, b"id") else {
+        return;
+    };
+    let break_info = BreakInfo {
+        id,
+        min: attr_u32(e, b"min"),
+        max: attr_u32(e, b"max"),
+        man: attr_bool_default(e, b"man", true),
+        pt: attr_bool_default(e, b"pt", false),
+    };
+    match active {
+        BreakListKind::Row => {
+            row_breaks
+                .get_or_insert_with(PageBreakListInfo::default)
+                .breaks
+                .push(break_info);
+        }
+        BreakListKind::Column => {
+            column_breaks
+                .get_or_insert_with(PageBreakListInfo::default)
+                .breaks
+                .push(break_info);
+        }
     }
 }
 

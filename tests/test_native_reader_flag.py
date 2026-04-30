@@ -277,6 +277,43 @@ def _make_print_setup_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_page_breaks_xlsx(path: Path) -> None:
+    from openpyxl.worksheet.pagebreak import Break
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Breaks"
+    ws.row_breaks.append(Break(id=5, min=0, max=16383, man=True))
+    ws.row_breaks.append(Break(id=10, min=0, max=16383, man=False))
+    ws.col_breaks.append(Break(id=3, min=0, max=1048575, man=True))
+    ws.sheet_format.defaultRowHeight = 22.0
+    ws.sheet_format.defaultColWidth = 12.5
+    ws.sheet_format.outlineLevelRow = 2
+    ws.sheet_format.outlineLevelCol = 1
+    ws.sheet_format.thickTop = True
+    wb.save(path)
+    wb.close()
+    _inject_sheet_format_outline_col(path)
+
+
+def _inject_sheet_format_outline_col(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    sheet_name = "xl/worksheets/sheet1.xml"
+    sheet_xml = entries[sheet_name].decode()
+    sheet_xml, count = re.subn(
+        r"(<sheetFormatPr\b(?![^>]*outlineLevelCol)(?:[^>/]|/(?!>))*)/>",
+        r'\1 outlineLevelCol="1"/>',
+        sheet_xml,
+        count=1,
+    )
+    assert count == 1
+    entries[sheet_name] = sheet_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart import BarChart, Reference
 
@@ -475,6 +512,38 @@ def test_native_reader_loads_print_setup_metadata(
         assert ws.header_footer.odd_footer.right == "Page &P"
         assert ws.header_footer.different_first is True
         assert ws.header_footer.align_with_margins is False
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_page_breaks_and_sheet_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-page-breaks.xlsx"
+    _make_page_breaks_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Breaks"]
+        assert ws.row_breaks.count == 2
+        assert ws.row_breaks.manualBreakCount == 2
+        row_breaks = list(ws.row_breaks)
+        assert [brk.id for brk in row_breaks] == [5, 10]
+        assert row_breaks[0].max == 16383
+        assert row_breaks[0].man is True
+        assert row_breaks[1].man is False
+
+        assert ws.col_breaks.count == 1
+        col_break = list(ws.col_breaks)[0]
+        assert col_break.id == 3
+        assert col_break.max == 1048575
+
+        assert ws.sheet_format.defaultRowHeight == 22.0
+        assert ws.sheet_format.defaultColWidth == 12.5
+        assert ws.sheet_format.outlineLevelRow == 2
+        assert ws.sheet_format.outlineLevelCol == 1
+        assert ws.sheet_format.thickTop is True
     finally:
         wb.close()
 
