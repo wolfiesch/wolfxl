@@ -91,6 +91,7 @@ def _make_basic_xlsx(path: Path) -> None:
     wb.save(path)
     wb.close()
     _inject_workbook_security(path)
+    _inject_auto_filter_details(path)
     _inject_merged_subordinate_style(path)
 
 
@@ -124,6 +125,28 @@ def _inject_merged_subordinate_style(path: Path) -> None:
     if '<c r="E1"' in sheet_xml:
         return
     sheet_xml = sheet_xml.replace("</row>", '<c r="E1" s="1"/></row>', 1)
+    entries[sheet_name] = sheet_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
+def _inject_auto_filter_details(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    sheet_name = "xl/worksheets/sheet1.xml"
+    sheet_xml = entries[sheet_name].decode()
+    auto_filter_xml = (
+        '<autoFilter ref="A1:D6">'
+        '<filterColumn colId="0"><filters><filter val="Label"/></filters></filterColumn>'
+        '<filterColumn colId="1"><customFilters and="1">'
+        '<customFilter operator="greaterThan" val="10"/>'
+        '</customFilters></filterColumn>'
+        '<sortState ref="A2:D6"><sortCondition ref="B2:B6" descending="1"/></sortState>'
+        "</autoFilter>"
+    )
+    sheet_xml, count = re.subn(r'<autoFilter ref="A1:D6"\s*/>', auto_filter_xml, sheet_xml)
+    assert count == 1
     entries[sheet_name] = sheet_xml.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
         for name, data in entries.items():
@@ -231,8 +254,16 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert validations[0].sqref == "C2:C6"
         assert ws.freeze_panes == "B2"
         assert ws.auto_filter.ref == "A1:D6"
-        assert ws.auto_filter.filter_columns == []
-        assert ws.auto_filter.sort_state is None
+        assert len(ws.auto_filter.filter_columns) == 2
+        assert ws.auto_filter.filter_columns[0].col_id == 0
+        assert ws.auto_filter.filter_columns[0].filter.values == ["Label"]
+        assert ws.auto_filter.filter_columns[1].filter.and_ is True
+        assert ws.auto_filter.filter_columns[1].filter.customFilter[0].operator == "greaterThan"
+        assert ws.auto_filter.filter_columns[1].filter.customFilter[0].val == "10"
+        assert ws.auto_filter.sort_state is not None
+        assert ws.auto_filter.sort_state.ref == "A2:D6"
+        assert ws.auto_filter.sort_state.sort_conditions[0].ref == "B2:B6"
+        assert ws.auto_filter.sort_state.sort_conditions[0].descending is True
         assert ws.protection.sheet is True
         assert ws.protection.objects is True
         assert ws.protection.formatCells is False

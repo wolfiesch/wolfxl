@@ -241,9 +241,94 @@ pub struct SheetProtection {
 }
 
 /// Parsed worksheet-level auto-filter metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AutoFilterInfo {
     pub ref_range: String,
+    pub filter_columns: Vec<FilterColumnInfo>,
+    pub sort_state: Option<SortStateInfo>,
+}
+
+/// Parsed worksheet-level auto-filter column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilterColumnInfo {
+    pub col_id: u32,
+    pub hidden_button: bool,
+    pub show_button: bool,
+    pub filter: Option<FilterInfo>,
+    pub date_group_items: Vec<DateGroupItemInfo>,
+}
+
+/// Parsed worksheet-level auto-filter predicate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FilterInfo {
+    Blank,
+    Color {
+        dxf_id: u32,
+        cell_color: bool,
+    },
+    Custom {
+        and_: bool,
+        filters: Vec<CustomFilterInfo>,
+    },
+    Dynamic {
+        filter_type: String,
+        val: Option<f64>,
+        val_iso: Option<String>,
+        max_val_iso: Option<String>,
+    },
+    Icon {
+        icon_set: String,
+        icon_id: u32,
+    },
+    String {
+        values: Vec<String>,
+    },
+    Top10 {
+        top: bool,
+        percent: bool,
+        val: f64,
+        filter_val: Option<f64>,
+    },
+}
+
+/// Parsed custom auto-filter predicate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomFilterInfo {
+    pub operator: String,
+    pub val: String,
+}
+
+/// Parsed date-group auto-filter predicate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DateGroupItemInfo {
+    pub year: u32,
+    pub month: Option<u32>,
+    pub day: Option<u32>,
+    pub hour: Option<u32>,
+    pub minute: Option<u32>,
+    pub second: Option<u32>,
+    pub date_time_grouping: String,
+}
+
+/// Parsed worksheet-level auto-filter sort state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SortStateInfo {
+    pub sort_conditions: Vec<SortConditionInfo>,
+    pub column_sort: bool,
+    pub case_sensitive: bool,
+    pub ref_range: Option<String>,
+}
+
+/// Parsed worksheet-level auto-filter sort condition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SortConditionInfo {
+    pub ref_range: String,
+    pub descending: bool,
+    pub sort_by: String,
+    pub custom_list: Option<String>,
+    pub dxf_id: Option<u32>,
+    pub icon_set: Option<String>,
+    pub icon_id: Option<u32>,
 }
 
 /// Parsed worksheet table metadata.
@@ -1434,7 +1519,6 @@ fn parse_worksheet(
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
     let mut sheet_protection = None;
-    let mut auto_filter = None;
     let mut conditional_formats = Vec::new();
     let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
     let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
@@ -1484,9 +1568,6 @@ fn parse_worksheet(
                 }
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
-                }
-                b"autoFilter" => {
-                    auto_filter = AutoFilterInfo::from_start(&e);
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1599,9 +1680,6 @@ fn parse_worksheet(
                 }
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
-                }
-                b"autoFilter" => {
-                    auto_filter = AutoFilterInfo::from_start(&e);
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1745,6 +1823,7 @@ fn parse_worksheet(
     row_outline_levels.sort_unstable_by_key(|(row, _)| *row);
     column_outline_levels.sort_unstable_by_key(|(col, _)| *col);
 
+    let auto_filter = parse_auto_filter(xml)?;
     resolve_shared_formulas(&mut cells);
     let array_formulas = build_array_formula_map(&cells);
 
@@ -1959,6 +2038,283 @@ fn parse_range_bounds_1based(range: &str) -> Option<(u32, u32, u32, u32)> {
     ))
 }
 
+fn parse_auto_filter(xml: &str) -> Result<Option<AutoFilterInfo>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut auto_filter: Option<AutoFilterInfo> = None;
+    let mut current_col: Option<FilterColumnInfo> = None;
+    let mut filters: Option<FiltersBuilder> = None;
+    let mut custom_filters: Option<CustomFiltersBuilder> = None;
+    let mut sort_state: Option<SortStateInfo> = None;
+    let mut in_auto_filter = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"autoFilter" => {
+                    in_auto_filter = true;
+                    auto_filter = attr_value(&e, b"ref")
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|ref_range| AutoFilterInfo {
+                            ref_range,
+                            filter_columns: Vec::new(),
+                            sort_state: None,
+                        });
+                }
+                b"filterColumn" if in_auto_filter => {
+                    current_col = Some(FilterColumnInfo::from_start(&e));
+                }
+                b"filters" if current_col.is_some() => {
+                    filters = Some(FiltersBuilder::from_start(&e));
+                }
+                b"customFilters" if current_col.is_some() => {
+                    custom_filters = Some(CustomFiltersBuilder::from_start(&e));
+                }
+                b"sortState" if in_auto_filter => {
+                    sort_state = Some(SortStateInfo::from_start(&e));
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"autoFilter" => {
+                    auto_filter = attr_value(&e, b"ref")
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|ref_range| AutoFilterInfo {
+                            ref_range,
+                            filter_columns: Vec::new(),
+                            sort_state: None,
+                        });
+                }
+                b"filterColumn" if in_auto_filter => {
+                    if let Some(auto_filter) = auto_filter.as_mut() {
+                        auto_filter
+                            .filter_columns
+                            .push(FilterColumnInfo::from_start(&e));
+                    }
+                }
+                b"filters" if current_col.is_some() => {
+                    if let Some(col) = current_col.as_mut() {
+                        let filter = FiltersBuilder::from_start(&e).finish();
+                        if filter.is_some() {
+                            col.filter = filter;
+                        }
+                    }
+                }
+                b"filter" if filters.is_some() => {
+                    if let (Some(filters), Some(value)) = (filters.as_mut(), attr_value(&e, b"val"))
+                    {
+                        filters.values.push(value);
+                    }
+                }
+                b"dateGroupItem" if current_col.is_some() => {
+                    if let Some(item) = DateGroupItemInfo::from_start(&e) {
+                        current_col.as_mut().unwrap().date_group_items.push(item);
+                    }
+                }
+                b"customFilters" if current_col.is_some() => {
+                    if let Some(col) = current_col.as_mut() {
+                        col.filter = Some(CustomFiltersBuilder::from_start(&e).finish());
+                    }
+                }
+                b"customFilter" if custom_filters.is_some() => {
+                    if let Some(filter) = CustomFilterInfo::from_start(&e) {
+                        custom_filters.as_mut().unwrap().filters.push(filter);
+                    }
+                }
+                b"dynamicFilter" if current_col.is_some() => {
+                    current_col.as_mut().unwrap().filter = Some(FilterInfo::Dynamic {
+                        filter_type: attr_value(&e, b"type").unwrap_or_else(|| "null".to_string()),
+                        val: attr_f64(&e, b"val"),
+                        val_iso: attr_value(&e, b"valIso"),
+                        max_val_iso: attr_value(&e, b"maxValIso"),
+                    });
+                }
+                b"colorFilter" if current_col.is_some() => {
+                    current_col.as_mut().unwrap().filter = Some(FilterInfo::Color {
+                        dxf_id: attr_u32(&e, b"dxfId").unwrap_or(0),
+                        cell_color: attr_bool_default(&e, b"cellColor", true),
+                    });
+                }
+                b"iconFilter" if current_col.is_some() => {
+                    current_col.as_mut().unwrap().filter = Some(FilterInfo::Icon {
+                        icon_set: attr_value(&e, b"iconSet")
+                            .unwrap_or_else(|| "3Arrows".to_string()),
+                        icon_id: attr_u32(&e, b"iconId").unwrap_or(0),
+                    });
+                }
+                b"top10" if current_col.is_some() => {
+                    current_col.as_mut().unwrap().filter = Some(FilterInfo::Top10 {
+                        top: attr_bool_default(&e, b"top", true),
+                        percent: attr_bool_default(&e, b"percent", false),
+                        val: attr_f64(&e, b"val").unwrap_or(10.0),
+                        filter_val: attr_f64(&e, b"filterVal"),
+                    });
+                }
+                b"sortCondition" if sort_state.is_some() => {
+                    if let Some(condition) = SortConditionInfo::from_start(&e) {
+                        sort_state.as_mut().unwrap().sort_conditions.push(condition);
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"autoFilter" => {
+                    if let Some(pending_sort_state) = sort_state.take() {
+                        if let Some(auto_filter) = auto_filter.as_mut() {
+                            auto_filter.sort_state = Some(pending_sort_state);
+                        }
+                    }
+                    break;
+                }
+                b"filterColumn" if in_auto_filter => {
+                    if let (Some(auto_filter), Some(col)) =
+                        (auto_filter.as_mut(), current_col.take())
+                    {
+                        auto_filter.filter_columns.push(col);
+                    }
+                }
+                b"filters" if current_col.is_some() => {
+                    if let (Some(col), Some(filters)) = (current_col.as_mut(), filters.take()) {
+                        if let Some(filter) = filters.finish() {
+                            col.filter = Some(filter);
+                        }
+                    }
+                }
+                b"customFilters" if current_col.is_some() => {
+                    if let (Some(col), Some(filters)) =
+                        (current_col.as_mut(), custom_filters.take())
+                    {
+                        col.filter = Some(filters.finish());
+                    }
+                }
+                b"sortState" if auto_filter.is_some() => {
+                    if let Some(auto_filter) = auto_filter.as_mut() {
+                        auto_filter.sort_state = sort_state.take();
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ReaderError::Xml(format!("failed to parse autoFilter: {e}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(auto_filter)
+}
+
+#[derive(Debug)]
+struct FiltersBuilder {
+    blank: bool,
+    values: Vec<String>,
+}
+
+impl FiltersBuilder {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            blank: attr_bool_default(e, b"blank", false),
+            values: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> Option<FilterInfo> {
+        if !self.values.is_empty() {
+            Some(FilterInfo::String {
+                values: self.values,
+            })
+        } else if self.blank {
+            Some(FilterInfo::Blank)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CustomFiltersBuilder {
+    and_: bool,
+    filters: Vec<CustomFilterInfo>,
+}
+
+impl CustomFiltersBuilder {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            and_: attr_bool_default(e, b"and", false),
+            filters: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> FilterInfo {
+        FilterInfo::Custom {
+            and_: self.and_,
+            filters: self.filters,
+        }
+    }
+}
+
+impl FilterColumnInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            col_id: attr_u32(e, b"colId").unwrap_or(0),
+            hidden_button: attr_bool_default(e, b"hiddenButton", false),
+            show_button: attr_bool_default(e, b"showButton", true),
+            filter: None,
+            date_group_items: Vec::new(),
+        }
+    }
+}
+
+impl CustomFilterInfo {
+    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
+        Some(Self {
+            operator: attr_value(e, b"operator").unwrap_or_else(|| "equal".to_string()),
+            val: attr_value(e, b"val")?,
+        })
+    }
+}
+
+impl DateGroupItemInfo {
+    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
+        Some(Self {
+            year: attr_u32(e, b"year")?,
+            month: attr_u32(e, b"month"),
+            day: attr_u32(e, b"day"),
+            hour: attr_u32(e, b"hour"),
+            minute: attr_u32(e, b"minute"),
+            second: attr_u32(e, b"second"),
+            date_time_grouping: attr_value(e, b"dateTimeGrouping")
+                .unwrap_or_else(|| "year".to_string()),
+        })
+    }
+}
+
+impl SortStateInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            sort_conditions: Vec::new(),
+            column_sort: attr_bool_default(e, b"columnSort", false),
+            case_sensitive: attr_bool_default(e, b"caseSensitive", false),
+            ref_range: attr_value(e, b"ref"),
+        }
+    }
+}
+
+impl SortConditionInfo {
+    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
+        Some(Self {
+            ref_range: attr_value(e, b"ref")?,
+            descending: attr_bool_default(e, b"descending", false),
+            sort_by: attr_value(e, b"sortBy").unwrap_or_else(|| "value".to_string()),
+            custom_list: attr_value(e, b"customList"),
+            dxf_id: attr_u32(e, b"dxfId"),
+            icon_set: attr_value(e, b"iconSet"),
+            icon_id: attr_u32(e, b"iconId"),
+        })
+    }
+}
+
 impl SheetProtection {
     fn from_start(e: &BytesStart<'_>) -> Self {
         Self {
@@ -1980,14 +2336,6 @@ impl SheetProtection {
             select_unlocked_cells: attr_bool_default(e, b"selectUnlockedCells", false),
             password_hash: attr_value(e, b"password"),
         }
-    }
-}
-
-impl AutoFilterInfo {
-    fn from_start(e: &BytesStart<'_>) -> Option<Self> {
-        attr_value(e, b"ref")
-            .filter(|value| !value.trim().is_empty())
-            .map(|ref_range| Self { ref_range })
     }
 }
 
@@ -2736,6 +3084,14 @@ fn attr_bool_default(e: &BytesStart<'_>, key: &[u8], default: bool) -> bool {
         .map_or(default, |value| attr_truthy(Some(value)))
 }
 
+fn attr_u32(e: &BytesStart<'_>, key: &[u8]) -> Option<u32> {
+    attr_value(e, key).and_then(|value| value.parse::<u32>().ok())
+}
+
+fn attr_f64(e: &BytesStart<'_>, key: &[u8]) -> Option<f64> {
+    attr_value(e, key).and_then(|value| value.parse::<f64>().ok())
+}
+
 fn parse_sheet_state(value: Option<&str>) -> SheetState {
     match value {
         Some("hidden") => SheetState::Hidden,
@@ -3001,7 +3357,11 @@ mod tests {
             <cfRule type="cellIs" operator="greaterThan" priority="1" stopIfTrue="1"><formula>50</formula></cfRule>
         </conditionalFormatting>
         <sheetProtection sheet="1" objects="1" formatCells="0" sort="0" password="C258"/>
-        <autoFilter ref="A1:D10"/>
+        <autoFilter ref="A1:D10">
+            <filterColumn colId="0"><filters><filter val="Label"/></filters></filterColumn>
+            <filterColumn colId="1"><customFilters and="1"><customFilter operator="greaterThan" val="10"/></customFilters></filterColumn>
+            <sortState ref="A2:D10"><sortCondition ref="B2:B10" descending="1"/></sortState>
+        </autoFilter>
         </worksheet>"#;
         let shared_strings = SharedStrings {
             values: vec!["Shared".to_string()],
@@ -3091,6 +3451,44 @@ mod tests {
             sheet.auto_filter,
             Some(AutoFilterInfo {
                 ref_range: "A1:D10".to_string(),
+                filter_columns: vec![
+                    FilterColumnInfo {
+                        col_id: 0,
+                        hidden_button: false,
+                        show_button: true,
+                        filter: Some(FilterInfo::String {
+                            values: vec!["Label".to_string()],
+                        }),
+                        date_group_items: Vec::new(),
+                    },
+                    FilterColumnInfo {
+                        col_id: 1,
+                        hidden_button: false,
+                        show_button: true,
+                        filter: Some(FilterInfo::Custom {
+                            and_: true,
+                            filters: vec![CustomFilterInfo {
+                                operator: "greaterThan".to_string(),
+                                val: "10".to_string(),
+                            }],
+                        }),
+                        date_group_items: Vec::new(),
+                    },
+                ],
+                sort_state: Some(SortStateInfo {
+                    sort_conditions: vec![SortConditionInfo {
+                        ref_range: "B2:B10".to_string(),
+                        descending: true,
+                        sort_by: "value".to_string(),
+                        custom_list: None,
+                        dxf_id: None,
+                        icon_set: None,
+                        icon_id: None,
+                    }],
+                    column_sort: false,
+                    case_sensitive: false,
+                    ref_range: Some("A2:D10".to_string()),
+                }),
             })
         );
         assert_eq!(

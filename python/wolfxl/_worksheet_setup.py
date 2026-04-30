@@ -60,7 +60,132 @@ def get_auto_filter(ws: Worksheet) -> Any:
         payload = workbook._rust_reader.read_auto_filter(ws._title)  # noqa: SLF001
         if isinstance(payload, dict):
             auto_filter.ref = payload.get("ref")
+            auto_filter.filter_columns = [
+                _filter_column_from_payload(column)
+                for column in payload.get("filter_columns", [])
+                if isinstance(column, dict)
+            ]
+            auto_filter.sort_state = _sort_state_from_payload(payload.get("sort_state"))
     return auto_filter
+
+
+def _filter_column_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.worksheet.filters import FilterColumn
+
+    return FilterColumn(
+        col_id=int(payload.get("col_id", 0)),
+        hidden_button=bool(payload.get("hidden_button", False)),
+        show_button=bool(payload.get("show_button", True)),
+        filter=_filter_from_payload(payload.get("filter")),
+        date_group_items=[
+            _date_group_item_from_payload(item)
+            for item in payload.get("date_group_items", [])
+            if isinstance(item, dict)
+        ],
+    )
+
+
+def _filter_from_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    from wolfxl.worksheet.filters import (
+        BlankFilter,
+        ColorFilter,
+        CustomFilter,
+        CustomFilters,
+        DynamicFilter,
+        IconFilter,
+        StringFilter,
+        Top10,
+    )
+
+    kind = payload.get("kind")
+    if kind == "blank":
+        return BlankFilter()
+    if kind == "color":
+        return ColorFilter(
+            dxf_id=int(payload.get("dxf_id", 0)),
+            cell_color=bool(payload.get("cell_color", True)),
+        )
+    if kind == "custom":
+        return CustomFilters(
+            customFilter=[
+                CustomFilter(
+                    operator=str(item.get("operator", "equal")),
+                    val=str(item.get("val", "")),
+                )
+                for item in payload.get("filters", [])
+                if isinstance(item, dict)
+            ],
+            and_=bool(payload.get("and_", False)),
+        )
+    if kind == "dynamic":
+        return DynamicFilter(
+            type=str(payload.get("type", "null")),
+            val=payload.get("val"),
+            val_iso=payload.get("val_iso"),
+            max_val_iso=payload.get("max_val_iso"),
+        )
+    if kind == "icon":
+        return IconFilter(
+            icon_set=str(payload.get("icon_set", "3Arrows")),
+            icon_id=int(payload.get("icon_id", 0)),
+        )
+    if kind == "string":
+        return StringFilter(values=[str(value) for value in payload.get("values", [])])
+    if kind == "top10":
+        return Top10(
+            top=bool(payload.get("top", True)),
+            percent=bool(payload.get("percent", False)),
+            val=float(payload.get("val", 10.0)),
+            filter_val=payload.get("filter_val"),
+        )
+    return None
+
+
+def _date_group_item_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.worksheet.filters import DateGroupItem
+
+    return DateGroupItem(
+        year=int(payload.get("year", 0)),
+        month=payload.get("month"),
+        day=payload.get("day"),
+        hour=payload.get("hour"),
+        minute=payload.get("minute"),
+        second=payload.get("second"),
+        date_time_grouping=str(payload.get("date_time_grouping", "year")),
+    )
+
+
+def _sort_state_from_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    from wolfxl.worksheet.filters import SortState
+
+    return SortState(
+        sort_conditions=[
+            _sort_condition_from_payload(condition)
+            for condition in payload.get("sort_conditions", [])
+            if isinstance(condition, dict)
+        ],
+        column_sort=bool(payload.get("column_sort", False)),
+        case_sensitive=bool(payload.get("case_sensitive", False)),
+        ref=payload.get("ref"),
+    )
+
+
+def _sort_condition_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.worksheet.filters import SortCondition
+
+    return SortCondition(
+        ref=str(payload.get("ref", "")),
+        descending=bool(payload.get("descending", False)),
+        sort_by=str(payload.get("sort_by", "value")),
+        custom_list=payload.get("custom_list"),
+        dxf_id=payload.get("dxf_id"),
+        icon_set=payload.get("icon_set"),
+        icon_id=payload.get("icon_id"),
+    )
 
 
 def get_page_setup(ws: Worksheet) -> Any:
