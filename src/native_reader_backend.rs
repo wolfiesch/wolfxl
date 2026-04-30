@@ -21,8 +21,8 @@ use wolfxl_reader::{
     DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo,
     HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    PaneMode, SheetFormatInfo, SheetProtection, SheetState, SortConditionInfo, SortStateInfo,
-    WorkbookSecurity, WorksheetData,
+    PaneMode, SelectionInfo, SheetFormatInfo, SheetProtection, SheetState, SheetViewInfo,
+    SortConditionInfo, SortStateInfo, WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -438,6 +438,13 @@ impl NativeXlsxBook {
             d.set_item("active_pane", active_pane)?;
         }
         Ok(d.into())
+    }
+
+    pub fn read_sheet_view(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.sheet_view {
+            Some(sheet_view) => sheet_view_to_py(py, sheet_view),
+            None => Ok(py.None()),
+        }
     }
 
     pub fn read_conditional_formats(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
@@ -1404,6 +1411,62 @@ fn sheet_format_to_py(py: Python<'_>, format: &SheetFormatInfo) -> PyResult<PyOb
     d.set_item("thick_bottom", format.thick_bottom)?;
     d.set_item("outline_level_row", format.outline_level_row)?;
     d.set_item("outline_level_col", format.outline_level_col)?;
+    Ok(d.into())
+}
+
+fn sheet_view_to_py(py: Python<'_>, sheet_view: &SheetViewInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("zoom_scale", sheet_view.zoom_scale)?;
+    d.set_item("zoom_scale_normal", sheet_view.zoom_scale_normal)?;
+    d.set_item("view", &sheet_view.view)?;
+    d.set_item("show_grid_lines", sheet_view.show_grid_lines)?;
+    d.set_item("show_row_col_headers", sheet_view.show_row_col_headers)?;
+    d.set_item("show_outline_symbols", sheet_view.show_outline_symbols)?;
+    d.set_item("show_zeros", sheet_view.show_zeros)?;
+    d.set_item("right_to_left", sheet_view.right_to_left)?;
+    d.set_item("tab_selected", sheet_view.tab_selected)?;
+    d.set_item("top_left_cell", sheet_view.top_left_cell.as_deref())?;
+    d.set_item("workbook_view_id", sheet_view.workbook_view_id)?;
+    match &sheet_view.pane {
+        Some(pane) => d.set_item("pane", pane_to_py(py, pane)?)?,
+        None => d.set_item("pane", py.None())?,
+    }
+    let selections = PyList::empty(py);
+    for selection in &sheet_view.selections {
+        selections.append(selection_to_py(py, selection)?)?;
+    }
+    d.set_item("selection", selections)?;
+    Ok(d.into())
+}
+
+fn pane_to_py(py: Python<'_>, pane: &wolfxl_reader::FreezePane) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("x_split", pane.x_split.unwrap_or_default())?;
+    d.set_item("y_split", pane.y_split.unwrap_or_default())?;
+    d.set_item(
+        "top_left_cell",
+        pane.top_left_cell.as_deref().unwrap_or("A1"),
+    )?;
+    d.set_item(
+        "active_pane",
+        pane.active_pane.as_deref().unwrap_or("topLeft"),
+    )?;
+    d.set_item(
+        "state",
+        match pane.mode {
+            PaneMode::Freeze => "frozen",
+            PaneMode::Split => "split",
+        },
+    )?;
+    Ok(d.into())
+}
+
+fn selection_to_py(py: Python<'_>, selection: &SelectionInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("active_cell", selection.active_cell.as_deref())?;
+    d.set_item("sqref", selection.sqref.as_deref())?;
+    d.set_item("pane", selection.pane.as_deref())?;
+    d.set_item("active_cell_id", selection.active_cell_id)?;
     Ok(d.into())
 }
 

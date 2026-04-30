@@ -291,11 +291,11 @@ def _header_footer_item_from_payload(payload: Any) -> Any:
 def get_sheet_view(ws: Worksheet) -> Any:
     """Return the lazy sheet view object, carrying pending freeze panes."""
     if ws._sheet_view is None:  # noqa: SLF001
-        from wolfxl.worksheet.views import Pane, SheetView
-
-        sheet_view = SheetView()
+        payload = _reader_payload(ws, "read_sheet_view")
+        sheet_view = _sheet_view_from_payload(payload)
         if ws._freeze_panes is not None:  # noqa: SLF001
             from wolfxl._utils import a1_to_rowcol
+            from wolfxl.worksheet.views import Pane
 
             try:
                 row, col = a1_to_rowcol(ws._freeze_panes)  # noqa: SLF001
@@ -310,6 +310,50 @@ def get_sheet_view(ws: Worksheet) -> Any:
                 pass
         ws._sheet_view = sheet_view  # noqa: SLF001
     return ws._sheet_view  # noqa: SLF001
+
+
+def _sheet_view_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.views import Pane, Selection, SheetView
+
+    if not isinstance(payload, dict):
+        return SheetView()
+    pane_payload = payload.get("pane")
+    return SheetView(
+        zoomScale=int(payload.get("zoom_scale", 100)),
+        zoomScaleNormal=int(payload.get("zoom_scale_normal", 100)),
+        view=str(payload.get("view") or "normal"),
+        showGridLines=bool(payload.get("show_grid_lines", True)),
+        showRowColHeaders=bool(payload.get("show_row_col_headers", True)),
+        showOutlineSymbols=bool(payload.get("show_outline_symbols", True)),
+        showZeros=bool(payload.get("show_zeros", True)),
+        rightToLeft=bool(payload.get("right_to_left", False)),
+        tabSelected=bool(payload.get("tab_selected", False)),
+        topLeftCell=payload.get("top_left_cell"),
+        workbookViewId=int(payload.get("workbook_view_id", 0)),
+        pane=_pane_from_payload(pane_payload, Pane),
+        selection=[
+            Selection(
+                activeCell=str(item.get("active_cell") or "A1"),
+                sqref=str(item.get("sqref") or item.get("active_cell") or "A1"),
+                pane=item.get("pane"),
+                activeCellId=item.get("active_cell_id"),
+            )
+            for item in payload.get("selection", [])
+            if isinstance(item, dict)
+        ],
+    )
+
+
+def _pane_from_payload(payload: Any, pane_cls: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    return pane_cls(
+        xSplit=float(payload.get("x_split", 0.0)),
+        ySplit=float(payload.get("y_split", 0.0)),
+        topLeftCell=str(payload.get("top_left_cell") or "A1"),
+        activePane=str(payload.get("active_pane") or "topLeft"),
+        state=str(payload.get("state") or "frozen"),
+    )
 
 
 def get_protection(ws: Worksheet) -> Any:

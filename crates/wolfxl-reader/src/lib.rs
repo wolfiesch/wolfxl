@@ -137,6 +137,7 @@ pub struct WorksheetData {
     pub merged_ranges: Vec<String>,
     pub hyperlinks: Vec<Hyperlink>,
     pub freeze_panes: Option<FreezePane>,
+    pub sheet_view: Option<SheetViewInfo>,
     pub comments: Vec<Comment>,
     pub row_heights: HashMap<u32, RowHeight>,
     pub column_widths: Vec<ColumnWidth>,
@@ -181,11 +182,69 @@ pub struct FreezePane {
     pub active_pane: Option<String>,
 }
 
+/// Parsed worksheet view metadata from the first `<sheetView>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetViewInfo {
+    pub zoom_scale: u32,
+    pub zoom_scale_normal: u32,
+    pub view: String,
+    pub show_grid_lines: bool,
+    pub show_row_col_headers: bool,
+    pub show_outline_symbols: bool,
+    pub show_zeros: bool,
+    pub right_to_left: bool,
+    pub tab_selected: bool,
+    pub top_left_cell: Option<String>,
+    pub workbook_view_id: u32,
+    pub pane: Option<FreezePane>,
+    pub selections: Vec<SelectionInfo>,
+}
+
+/// Parsed worksheet selection metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionInfo {
+    pub active_cell: Option<String>,
+    pub sqref: Option<String>,
+    pub pane: Option<String>,
+    pub active_cell_id: Option<u32>,
+}
+
 /// OOXML pane mode relevant to read compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneMode {
     Freeze,
     Split,
+}
+
+impl SheetViewInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            zoom_scale: attr_u32(e, b"zoomScale").unwrap_or(100),
+            zoom_scale_normal: attr_u32(e, b"zoomScaleNormal").unwrap_or(100),
+            view: attr_value(e, b"view").unwrap_or_else(|| "normal".to_string()),
+            show_grid_lines: attr_bool_default(e, b"showGridLines", true),
+            show_row_col_headers: attr_bool_default(e, b"showRowColHeaders", true),
+            show_outline_symbols: attr_bool_default(e, b"showOutlineSymbols", true),
+            show_zeros: attr_bool_default(e, b"showZeros", true),
+            right_to_left: attr_bool_default(e, b"rightToLeft", false),
+            tab_selected: attr_bool_default(e, b"tabSelected", false),
+            top_left_cell: attr_value(e, b"topLeftCell"),
+            workbook_view_id: attr_u32(e, b"workbookViewId").unwrap_or_default(),
+            pane: None,
+            selections: Vec::new(),
+        }
+    }
+}
+
+impl SelectionInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            active_cell: attr_value(e, b"activeCell"),
+            sqref: attr_value(e, b"sqref"),
+            pane: attr_value(e, b"pane"),
+            active_cell_id: attr_u32(e, b"activeCellId"),
+        }
+    }
 }
 
 /// Parsed worksheet comment.
@@ -1838,6 +1897,8 @@ fn parse_worksheet(
     let mut merged_ranges = Vec::new();
     let mut hyperlink_nodes = Vec::new();
     let mut freeze_panes = None;
+    let mut sheet_view = None;
+    let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row_heights = HashMap::new();
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
@@ -1883,7 +1944,22 @@ fn parse_worksheet(
                     }
                 }
                 b"pane" => {
-                    freeze_panes = parse_pane(&e);
+                    if let Some(pane) = parse_pane(&e) {
+                        freeze_panes = Some(pane.clone());
+                        if let Some(view) = current_sheet_view.as_mut() {
+                            view.pane = Some(pane);
+                        }
+                    }
+                }
+                b"sheetView" => {
+                    if current_sheet_view.is_none() && sheet_view.is_none() {
+                        current_sheet_view = Some(SheetViewInfo::from_start(&e));
+                    }
+                }
+                b"selection" => {
+                    if let Some(view) = current_sheet_view.as_mut() {
+                        view.selections.push(SelectionInfo::from_start(&e));
+                    }
                 }
                 b"sheetFormatPr" => {
                     sheet_format = Some(SheetFormatInfo::from_start(&e));
@@ -2013,7 +2089,22 @@ fn parse_worksheet(
                     }
                 }
                 b"pane" => {
-                    freeze_panes = parse_pane(&e);
+                    if let Some(pane) = parse_pane(&e) {
+                        freeze_panes = Some(pane.clone());
+                        if let Some(view) = current_sheet_view.as_mut() {
+                            view.pane = Some(pane);
+                        }
+                    }
+                }
+                b"sheetView" => {
+                    if sheet_view.is_none() {
+                        sheet_view = Some(SheetViewInfo::from_start(&e));
+                    }
+                }
+                b"selection" => {
+                    if let Some(view) = current_sheet_view.as_mut() {
+                        view.selections.push(SelectionInfo::from_start(&e));
+                    }
                 }
                 b"sheetFormatPr" => {
                     sheet_format = Some(SheetFormatInfo::from_start(&e));
@@ -2118,6 +2209,13 @@ fn parse_worksheet(
                 }
                 b"rowBreaks" | b"colBreaks" => {
                     active_breaks = None;
+                }
+                b"sheetView" => {
+                    if sheet_view.is_none() {
+                        sheet_view = current_sheet_view.take();
+                    } else {
+                        current_sheet_view = None;
+                    }
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = None;
@@ -2235,6 +2333,7 @@ fn parse_worksheet(
         merged_ranges,
         hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         freeze_panes,
+        sheet_view,
         comments,
         row_heights,
         column_widths,

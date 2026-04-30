@@ -314,6 +314,26 @@ def _inject_sheet_format_outline_col(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _make_sheet_view_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Views"
+    ws.sheet_view.zoomScale = 150
+    ws.sheet_view.zoomScaleNormal = 120
+    ws.sheet_view.view = "pageLayout"
+    ws.sheet_view.showGridLines = False
+    ws.sheet_view.showRowColHeaders = False
+    ws.sheet_view.showZeros = False
+    ws.sheet_view.rightToLeft = True
+    ws.sheet_view.tabSelected = True
+    ws.sheet_view.topLeftCell = "C3"
+    ws.freeze_panes = "B2"
+    ws.sheet_view.selection[0].activeCell = "C3"
+    ws.sheet_view.selection[0].sqref = "C3:D4"
+    wb.save(path)
+    wb.close()
+
+
 def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart import BarChart, Reference
 
@@ -544,6 +564,35 @@ def test_native_reader_loads_page_breaks_and_sheet_format(
         assert ws.sheet_format.outlineLevelRow == 2
         assert ws.sheet_format.outlineLevelCol == 1
         assert ws.sheet_format.thickTop is True
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_sheet_view_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-sheet-view.xlsx"
+    _make_sheet_view_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Views"]
+        view = ws.sheet_view
+        assert view.zoomScale == 150
+        assert view.zoomScaleNormal == 120
+        assert view.view == "pageLayout"
+        assert view.showGridLines is False
+        assert view.showRowColHeaders is False
+        assert view.showZeros is False
+        assert view.rightToLeft is True
+        assert view.tabSelected is True
+        assert view.topLeftCell == "C3"
+        assert view.pane is not None
+        assert view.pane.topLeftCell == "B2"
+        assert view.pane.activePane == "bottomRight"
+        assert view.selection[0].activeCell == "C3"
+        assert view.selection[0].sqref == "C3:D4"
     finally:
         wb.close()
 
