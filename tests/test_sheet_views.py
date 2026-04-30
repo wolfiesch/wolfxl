@@ -133,6 +133,13 @@ class TestWorksheetSheetView:
         )
         assert ws.path == "/xl/worksheets/sheet1.xml"
 
+    def test_set_printer_settings_matches_openpyxl_helper(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.set_printer_settings(ws.PAPERSIZE_A4, ws.ORIENTATION_LANDSCAPE)
+        assert ws.page_setup.paperSize == ws.PAPERSIZE_A4
+        assert ws.page_setup.orientation == ws.ORIENTATION_LANDSCAPE
+
 
 class TestSheetViewList:
     def test_default_creates_one_view(self):

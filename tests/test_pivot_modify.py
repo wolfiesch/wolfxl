@@ -111,6 +111,21 @@ def test_add_pivot_emits_all_parts(tmp_path: Path) -> None:
     assert tables, f"no pivotTable emitted: {entries}"
 
 
+def test_add_pivot_alias_emits_all_parts(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_pivot_source_fixture(src)
+    wb = load_workbook(src, modify=True)
+    cache, pt = _build_cache_and_table(wb)
+    wb.add_pivot_cache(cache)
+    wb["Data"].add_pivot(pt)
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    assert any(e.startswith("xl/pivotCache/pivotCacheDefinition") for e in entries)
+    assert any(re.match(r"^xl/pivotTables/pivotTable\d+\.xml$", e) for e in entries)
+
+
 def test_add_pivot_emits_content_type_overrides(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     dst = tmp_path / "dst.xlsx"

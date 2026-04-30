@@ -417,6 +417,11 @@ class Worksheet:
         parts = [part for part in [self.print_title_rows, self.print_title_cols] if part]
         return ",".join(parts)
 
+    def set_printer_settings(self, paper_size: int | str, orientation: str) -> None:
+        """Set page paper size and orientation."""
+        self.page_setup.paperSize = paper_size
+        self.page_setup.orientation = orientation
+
     @property
     def protection(self) -> Any:
         """Return the worksheet protection settings, creating them lazily."""
@@ -1184,6 +1189,10 @@ class Worksheet:
             RuntimeError: If the workbook is not in modify mode.
         """
         _add_pivot_table(self, pivot_table)
+
+    def add_pivot(self, pivot_table: Any) -> None:
+        """Openpyxl-compatible alias for :meth:`add_pivot_table`."""
+        self.add_pivot_table(pivot_table)
 
     def add_slicer(self, slicer: Any, anchor: str) -> None:
         """Attach a slicer presentation to this worksheet.
