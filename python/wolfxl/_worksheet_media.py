@@ -27,6 +27,8 @@ def add_chart(ws: Worksheet, chart: Any, anchor: Any = None) -> None:
 
     chart._anchor = anchor  # noqa: SLF001
     ws._pending_charts.append(chart)  # noqa: SLF001
+    if ws._charts_cache is not None:  # noqa: SLF001
+        ws._charts_cache.append(chart)  # noqa: SLF001
 
 
 def add_pivot_table(ws: Worksheet, pivot_table: Any) -> None:
@@ -141,6 +143,113 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
         validate_a1_anchor(anchor)
     new._anchor = anchor  # noqa: SLF001
     ws._pending_charts[index] = new  # noqa: SLF001
+
+
+def get_charts(ws: Worksheet) -> list[Any]:
+    """Return charts attached to this worksheet, hydrating read-mode drawings."""
+    workbook = ws._workbook  # noqa: SLF001
+    reader = getattr(workbook, "_rust_reader", None)
+    if reader is None or not hasattr(reader, "read_charts"):
+        return ws._pending_charts  # noqa: SLF001
+
+    if ws._charts_cache is None:  # noqa: SLF001
+        charts = []
+        for payload in reader.read_charts(ws._title):  # noqa: SLF001
+            if isinstance(payload, dict):
+                chart = _chart_from_payload(payload)
+                if chart is not None:
+                    charts.append(chart)
+        charts.extend(ws._pending_charts)  # noqa: SLF001
+        ws._charts_cache = charts  # noqa: SLF001
+    return ws._charts_cache  # noqa: SLF001
+
+
+def _chart_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.chart import (
+        AreaChart,
+        AreaChart3D,
+        BarChart,
+        BarChart3D,
+        BubbleChart,
+        DoughnutChart,
+        LineChart,
+        LineChart3D,
+        PieChart,
+        PieChart3D,
+        ProjectedPieChart,
+        RadarChart,
+        ScatterChart,
+        StockChart,
+        SurfaceChart,
+        SurfaceChart3D,
+    )
+
+    classes = {
+        "area": AreaChart,
+        "area3d": AreaChart3D,
+        "bar": BarChart,
+        "bar3d": BarChart3D,
+        "bubble": BubbleChart,
+        "doughnut": DoughnutChart,
+        "line": LineChart,
+        "line3d": LineChart3D,
+        "pie": PieChart,
+        "pie3d": PieChart3D,
+        "of_pie": ProjectedPieChart,
+        "radar": RadarChart,
+        "scatter": ScatterChart,
+        "stock": StockChart,
+        "surface": SurfaceChart,
+        "surface3d": SurfaceChart3D,
+    }
+    chart_cls = classes.get(str(payload.get("kind") or ""))
+    if chart_cls is None:
+        return None
+
+    chart = chart_cls()
+    if payload.get("title") is not None:
+        chart.title = str(payload["title"])
+    if payload.get("style") is not None:
+        chart.style = int(payload["style"])
+    chart._anchor = _anchor_from_payload(payload.get("anchor"))  # noqa: SLF001
+    chart.ser = [
+        _series_from_payload(str(payload.get("kind") or ""), series_payload)
+        for series_payload in payload.get("series", [])
+        if isinstance(series_payload, dict)
+    ]
+    return chart
+
+
+def _series_from_payload(kind: str, payload: dict[str, Any]) -> Any:
+    from wolfxl.chart.data_source import AxDataSource, NumDataSource, NumRef, StrRef
+    from wolfxl.chart.series import Series, SeriesLabel, XYSeries
+
+    is_xy = kind in {"scatter", "bubble"}
+    series = XYSeries() if is_xy else Series()
+    if payload.get("idx") is not None:
+        series.idx = int(payload["idx"])
+    if payload.get("order") is not None:
+        series.order = int(payload["order"])
+    if payload.get("title_ref"):
+        series.tx = SeriesLabel(strRef=StrRef(str(payload["title_ref"])))
+    elif payload.get("title_value"):
+        series.tx = SeriesLabel(v=str(payload["title_value"]))
+
+    if is_xy:
+        if payload.get("x_ref"):
+            series.xVal = AxDataSource(numRef=NumRef(f=str(payload["x_ref"])))
+        if payload.get("y_ref"):
+            series.yVal = NumDataSource(numRef=NumRef(f=str(payload["y_ref"])))
+        if payload.get("bubble_size_ref"):
+            series.bubbleSize = NumDataSource(
+                numRef=NumRef(f=str(payload["bubble_size_ref"]))
+            )
+    else:
+        if payload.get("cat_ref"):
+            series.cat = AxDataSource(strRef=StrRef(str(payload["cat_ref"])))
+        if payload.get("val_ref"):
+            series.val = NumDataSource(numRef=NumRef(f=str(payload["val_ref"])))
+    return series
 
 
 def add_image(ws: Worksheet, image: Any, anchor: Any = None) -> None:

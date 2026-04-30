@@ -17,8 +17,8 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
-    BorderInfo, Cell, CellDataType, CellValue, DateGroupItemInfo, FillInfo, FilterColumnInfo,
-    FilterInfo, FontInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
+    BorderInfo, Cell, CellDataType, CellValue, ChartInfo, ChartSeriesInfo, DateGroupItemInfo,
+    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, SheetState, SortConditionInfo,
     SortStateInfo, WorkbookSecurity, WorksheetData,
 };
@@ -526,6 +526,15 @@ impl NativeXlsxBook {
         let result = PyList::empty(py);
         for image in &images {
             result.append(image_to_py(py, image)?)?;
+        }
+        Ok(result.into())
+    }
+
+    pub fn read_charts(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let charts = self.ensure_sheet(sheet)?.charts.clone();
+        let result = PyList::empty(py);
+        for chart in &charts {
+            result.append(chart_to_py(py, chart)?)?;
         }
         Ok(result.into())
     }
@@ -1213,6 +1222,34 @@ fn image_to_py(py: Python<'_>, image: &ImageInfo) -> PyResult<PyObject> {
     d.set_item("data", PyBytes::new(py, &image.data))?;
     d.set_item("ext", &image.ext)?;
     d.set_item("anchor", image_anchor_to_py(py, &image.anchor)?)?;
+    Ok(d.into())
+}
+
+fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("kind", &chart.kind)?;
+    d.set_item("title", chart.title.as_deref())?;
+    d.set_item("style", chart.style)?;
+    d.set_item("anchor", image_anchor_to_py(py, &chart.anchor)?)?;
+    let series = PyList::empty(py);
+    for item in &chart.series {
+        series.append(chart_series_to_py(py, item)?)?;
+    }
+    d.set_item("series", series)?;
+    Ok(d.into())
+}
+
+fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("idx", series.idx)?;
+    d.set_item("order", series.order)?;
+    d.set_item("title_ref", series.title_ref.as_deref())?;
+    d.set_item("title_value", series.title_value.as_deref())?;
+    d.set_item("cat_ref", series.cat_ref.as_deref())?;
+    d.set_item("val_ref", series.val_ref.as_deref())?;
+    d.set_item("x_ref", series.x_ref.as_deref())?;
+    d.set_item("y_ref", series.y_ref.as_deref())?;
+    d.set_item("bubble_size_ref", series.bubble_size_ref.as_deref())?;
     Ok(d.into())
 }
 

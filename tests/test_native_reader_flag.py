@@ -253,6 +253,32 @@ def _make_print_area_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_chart_xlsx(path: Path) -> None:
+    from openpyxl.chart import BarChart, Reference
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Charts"
+    rows = [
+        ("Month", "Sales"),
+        ("Jan", 10),
+        ("Feb", 20),
+        ("Mar", 30),
+    ]
+    for row in rows:
+        ws.append(row)
+    chart = BarChart()
+    chart.title = "Sales Trend"
+    chart.style = 10
+    data = Reference(ws, min_col=2, min_row=1, max_row=4)
+    cats = Reference(ws, min_col=1, min_row=2, max_row=4)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    ws.add_chart(chart, "D5")
+    wb.save(path)
+    wb.close()
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -423,6 +449,37 @@ def test_native_reader_loads_drawing_images(
         assert img.anchor.ext is not None
         assert img.anchor.ext.cx > 0
         assert img.anchor.ext.cy > 0
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_drawing_charts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-charts.xlsx"
+    _make_chart_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Charts"]
+        charts = ws._charts  # noqa: SLF001
+        assert len(charts) == 1
+        chart = charts[0]
+        assert chart.__class__.__name__ == "BarChart"
+        assert chart.title.tx.rich.paragraphs[0].r[0].t == "Sales Trend"
+        assert chart.style == 10
+        assert len(chart.series) == 1
+        series = chart.series[0]
+        assert series.tx.strRef.f == "'Charts'!B1"
+        assert series.cat.strRef.f == "'Charts'!$A$2:$A$4"
+        assert series.val.numRef.f == "'Charts'!$B$2:$B$4"
+
+        from wolfxl.drawing.spreadsheet_drawing import OneCellAnchor
+
+        assert isinstance(chart._anchor, OneCellAnchor)  # noqa: SLF001
+        assert chart._anchor._from.col == 3  # noqa: SLF001
+        assert chart._anchor._from.row == 4  # noqa: SLF001
     finally:
         wb.close()
 

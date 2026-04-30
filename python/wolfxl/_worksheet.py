@@ -49,6 +49,7 @@ from wolfxl._worksheet_media import (
     add_chart as _add_chart,
     add_image as _add_image,
     add_pivot_table as _add_pivot_table,
+    get_charts as _get_charts,
     get_images as _get_images,
     add_slicer as _add_slicer,
     remove_chart as _remove_chart,
@@ -127,7 +128,7 @@ class Worksheet:
         # Read caches populated lazily on first access.
         "_comments_cache", "_hyperlinks_cache",
         "_tables_cache", "_data_validations_cache",
-        "_conditional_formatting_cache", "_images_cache",
+        "_conditional_formatting_cache", "_images_cache", "_charts_cache",
         # Write-mode pending queues flushed in _flush() on save().
         "_pending_comments", "_pending_hyperlinks",
         "_pending_tables", "_pending_data_validations",
@@ -978,7 +979,7 @@ class Worksheet:
         The returned list is live, matching openpyxl's private ``_charts``
         compatibility surface. Mutating it affects the next save.
         """
-        return self._pending_charts
+        return _get_charts(self)
 
     def add_chart(self, chart: Any, anchor: Any = None) -> None:
         """Attach a chart to this worksheet.

@@ -144,6 +144,7 @@ pub struct WorksheetData {
     pub sheet_protection: Option<SheetProtection>,
     pub auto_filter: Option<AutoFilterInfo>,
     pub images: Vec<ImageInfo>,
+    pub charts: Vec<ChartInfo>,
     pub tables: Vec<Table>,
     pub conditional_formats: Vec<ConditionalFormatRule>,
     pub hidden_rows: Vec<u32>,
@@ -338,6 +339,30 @@ pub struct ImageInfo {
     pub data: Vec<u8>,
     pub ext: String,
     pub anchor: ImageAnchorInfo,
+}
+
+/// Parsed worksheet chart payload and anchor metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartInfo {
+    pub kind: String,
+    pub title: Option<String>,
+    pub style: Option<u32>,
+    pub anchor: ImageAnchorInfo,
+    pub series: Vec<ChartSeriesInfo>,
+}
+
+/// Parsed chart series references.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChartSeriesInfo {
+    pub idx: Option<u32>,
+    pub order: Option<u32>,
+    pub title_ref: Option<String>,
+    pub title_value: Option<String>,
+    pub cat_ref: Option<String>,
+    pub val_ref: Option<String>,
+    pub x_ref: Option<String>,
+    pub y_ref: Option<String>,
+    pub bubble_size_ref: Option<String>,
 }
 
 /// Parsed drawing anchor for an embedded image.
@@ -646,9 +671,11 @@ impl NativeXlsxBook {
         };
         let tables = read_tables(&mut zip, &info.path, &xml, rels.as_ref())?;
         let images = read_images(&mut zip, &info.path, rels.as_ref())?;
+        let charts = read_charts(&mut zip, &info.path, rels.as_ref())?;
         let mut data =
             parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments, tables)?;
         data.images = images;
+        data.charts = charts;
         Ok(data)
     }
 }
@@ -1958,6 +1985,7 @@ fn parse_worksheet(
         sheet_protection,
         auto_filter,
         images: Vec::new(),
+        charts: Vec::new(),
         tables,
         conditional_formats,
         hidden_rows,
@@ -2903,8 +2931,64 @@ fn read_images<R: Read + std::io::Seek>(
     Ok(out)
 }
 
+fn read_charts<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    sheet_path: &str,
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<ChartInfo>> {
+    let Some(rels) = rels else {
+        return Ok(Vec::new());
+    };
+    let sheet_dir = part_dir(sheet_path);
+    let mut out = Vec::new();
+
+    for drawing_rel in rels.find_by_type(wolfxl_rels::rt::DRAWING) {
+        let drawing_path = join_and_normalize(&sheet_dir, &drawing_rel.target);
+        let Some(drawing_xml) = read_part_optional(zip, &drawing_path)? else {
+            continue;
+        };
+        let drawing_rels_path = sheet_rels_path(&drawing_path);
+        let chart_rels = read_part_optional(zip, &drawing_rels_path)?
+            .map(|xml| {
+                RelsGraph::parse(xml.as_bytes())
+                    .map_err(|e| ReaderError::Xml(format!("failed to parse drawing rels: {e}")))
+            })
+            .transpose()?;
+        let Some(chart_rels) = chart_rels else {
+            continue;
+        };
+        let chart_targets: HashMap<String, String> = chart_rels
+            .iter()
+            .filter(|rel| rel.rel_type == wolfxl_rels::rt::CHART)
+            .map(|rel| (rel.id.0.clone(), rel.target.clone()))
+            .collect();
+        let drawing_dir = part_dir(&drawing_path);
+
+        for chart_ref in parse_drawing_charts(&drawing_xml)? {
+            let Some(target) = chart_targets.get(&chart_ref.rid) else {
+                continue;
+            };
+            let chart_path = join_and_normalize(&drawing_dir, target);
+            let Some(chart_xml) = read_part_optional(zip, &chart_path)? else {
+                continue;
+            };
+            if let Some(chart) = parse_chart_xml(&chart_xml, chart_ref.anchor)? {
+                out.push(chart);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DrawingImageRef {
+    rid: String,
+    anchor: ImageAnchorInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DrawingChartRef {
     rid: String,
     anchor: ImageAnchorInfo,
 }
@@ -2958,6 +3042,51 @@ impl DrawingImageBuilder {
             },
         };
         Some(DrawingImageRef { rid, anchor })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DrawingChartBuilder {
+    kind: DrawingAnchorKind,
+    from: AnchorMarkerInfo,
+    to: AnchorMarkerInfo,
+    pos: AnchorPositionInfo,
+    ext: Option<AnchorExtentInfo>,
+    edit_as: Option<String>,
+    rid: Option<String>,
+}
+
+impl DrawingChartBuilder {
+    fn new(kind: DrawingAnchorKind, e: &BytesStart<'_>) -> Self {
+        Self {
+            kind,
+            from: AnchorMarkerInfo::default(),
+            to: AnchorMarkerInfo::default(),
+            pos: AnchorPositionInfo::default(),
+            ext: None,
+            edit_as: attr_value(e, b"editAs"),
+            rid: None,
+        }
+    }
+
+    fn finish(self) -> Option<DrawingChartRef> {
+        let rid = self.rid?;
+        let anchor = match self.kind {
+            DrawingAnchorKind::OneCell => ImageAnchorInfo::OneCell {
+                from: self.from,
+                ext: self.ext,
+            },
+            DrawingAnchorKind::TwoCell => ImageAnchorInfo::TwoCell {
+                from: self.from,
+                to: self.to,
+                edit_as: self.edit_as.unwrap_or_else(|| "oneCell".to_string()),
+            },
+            DrawingAnchorKind::Absolute => ImageAnchorInfo::Absolute {
+                pos: self.pos,
+                ext: self.ext.unwrap_or_default(),
+            },
+        };
+        Some(DrawingChartRef { rid, anchor })
     }
 }
 
@@ -3058,6 +3187,89 @@ fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
     Ok(out)
 }
 
+fn parse_drawing_charts(xml: &str) -> Result<Vec<DrawingChartRef>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    let mut current: Option<DrawingChartBuilder> = None;
+    let mut marker_slot: Option<MarkerSlot> = None;
+    let mut marker_text: Option<MarkerTextTarget> = None;
+    let mut in_graphic_frame = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"oneCellAnchor" => {
+                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::OneCell, &e));
+                }
+                b"twoCellAnchor" => {
+                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::TwoCell, &e));
+                }
+                b"absoluteAnchor" => {
+                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::Absolute, &e));
+                }
+                b"from" if current.is_some() => marker_slot = Some(MarkerSlot::From),
+                b"to" if current.is_some() => marker_slot = Some(MarkerSlot::To),
+                b"col" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Col),
+                b"row" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Row),
+                b"colOff" if marker_slot.is_some() => {
+                    marker_text = Some(MarkerTextTarget::ColOff);
+                }
+                b"rowOff" if marker_slot.is_some() => {
+                    marker_text = Some(MarkerTextTarget::RowOff);
+                }
+                b"graphicFrame" if current.is_some() => in_graphic_frame = true,
+                b"pos" => apply_chart_anchor_pos(&mut current, &e),
+                b"ext" if !in_graphic_frame => apply_chart_anchor_ext(&mut current, &e),
+                b"chart" => apply_chart_rid(&mut current, &e),
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"pos" => apply_chart_anchor_pos(&mut current, &e),
+                b"ext" if !in_graphic_frame => apply_chart_anchor_ext(&mut current, &e),
+                b"chart" => apply_chart_rid(&mut current, &e),
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                if let (Some(slot), Some(target), Some(builder)) =
+                    (marker_slot, marker_text, current.as_mut())
+                {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("drawing text: {err}")))?;
+                    if let Ok(value) = text.parse::<i64>() {
+                        apply_chart_marker_value(builder, slot, target, value);
+                    }
+                }
+            }
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"col" | b"row" | b"colOff" | b"rowOff" => marker_text = None,
+                b"from" | b"to" => {
+                    marker_slot = None;
+                    marker_text = None;
+                }
+                b"graphicFrame" => in_graphic_frame = false,
+                b"oneCellAnchor" | b"twoCellAnchor" | b"absoluteAnchor" => {
+                    marker_slot = None;
+                    marker_text = None;
+                    in_graphic_frame = false;
+                    if let Some(builder) = current.take().and_then(DrawingChartBuilder::finish) {
+                        out.push(builder);
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ReaderError::Xml(format!("failed to parse drawing: {e}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
 fn apply_anchor_pos(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
     let Some(builder) = builder.as_mut() else {
         return;
@@ -3066,6 +3278,210 @@ fn apply_anchor_pos(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_
         x: attr_i64(e, b"x").unwrap_or_default(),
         y: attr_i64(e, b"y").unwrap_or_default(),
     };
+}
+
+fn apply_chart_anchor_pos(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    builder.pos = AnchorPositionInfo {
+        x: attr_i64(e, b"x").unwrap_or_default(),
+        y: attr_i64(e, b"y").unwrap_or_default(),
+    };
+}
+
+fn apply_chart_anchor_ext(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    let Some(cx) = attr_i64(e, b"cx") else {
+        return;
+    };
+    let Some(cy) = attr_i64(e, b"cy") else {
+        return;
+    };
+    builder.ext = Some(AnchorExtentInfo { cx, cy });
+}
+
+fn apply_chart_rid(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    builder.rid = attr_value(e, b"r:id").or_else(|| attr_value(e, b"id"));
+}
+
+fn apply_chart_marker_value(
+    builder: &mut DrawingChartBuilder,
+    slot: MarkerSlot,
+    target: MarkerTextTarget,
+    value: i64,
+) {
+    let marker = match slot {
+        MarkerSlot::From => &mut builder.from,
+        MarkerSlot::To => &mut builder.to,
+    };
+    match target {
+        MarkerTextTarget::Col => marker.col = value,
+        MarkerTextTarget::Row => marker.row = value,
+        MarkerTextTarget::ColOff => marker.col_off = value,
+        MarkerTextTarget::RowOff => marker.row_off = value,
+    }
+}
+
+fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInfo>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut kind: Option<String> = None;
+    let mut title_parts: Vec<String> = Vec::new();
+    let mut style: Option<u32> = None;
+    let mut current_series: Option<ChartSeriesInfo> = None;
+    let mut series = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name().as_ref().to_vec();
+                apply_chart_start(&local, &e, &mut kind, &mut style, &mut current_series);
+                stack.push(local);
+            }
+            Ok(Event::Empty(e)) => {
+                let local = e.local_name().as_ref().to_vec();
+                apply_chart_start(&local, &e, &mut kind, &mut style, &mut current_series);
+            }
+            Ok(Event::Text(e)) => {
+                let text = e
+                    .unescape()
+                    .map_err(|err| ReaderError::Xml(format!("chart text: {err}")))?
+                    .to_string();
+                apply_chart_text(&stack, text.trim(), &mut title_parts, &mut current_series);
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"ser" {
+                    if let Some(ser) = current_series.take() {
+                        series.push(ser);
+                    }
+                }
+                stack.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ReaderError::Xml(format!("failed to parse chart: {e}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+    let title = if title_parts.is_empty() {
+        None
+    } else {
+        Some(title_parts.join(""))
+    };
+    Ok(Some(ChartInfo {
+        kind,
+        title,
+        style,
+        anchor,
+        series,
+    }))
+}
+
+fn apply_chart_start(
+    local: &[u8],
+    e: &BytesStart<'_>,
+    kind: &mut Option<String>,
+    style: &mut Option<u32>,
+    current_series: &mut Option<ChartSeriesInfo>,
+) {
+    if kind.is_none() {
+        *kind = chart_kind(local).map(str::to_string);
+    }
+    match local {
+        b"style" => {
+            *style = attr_u32(e, b"val");
+        }
+        b"ser" => {
+            *current_series = Some(ChartSeriesInfo::default());
+        }
+        b"idx" => {
+            if let Some(series) = current_series.as_mut() {
+                series.idx = attr_u32(e, b"val");
+            }
+        }
+        b"order" => {
+            if let Some(series) = current_series.as_mut() {
+                series.order = attr_u32(e, b"val");
+            }
+        }
+        _ => {}
+    }
+}
+
+fn apply_chart_text(
+    stack: &[Vec<u8>],
+    text: &str,
+    title_parts: &mut Vec<String>,
+    current_series: &mut Option<ChartSeriesInfo>,
+) {
+    if text.is_empty() {
+        return;
+    }
+    let Some(last) = stack.last().map(Vec::as_slice) else {
+        return;
+    };
+    if let Some(series) = current_series.as_mut() {
+        if last == b"f" {
+            if chart_path_contains(stack, b"tx") && chart_path_contains(stack, b"strRef") {
+                series.title_ref = Some(text.to_string());
+            } else if chart_path_contains(stack, b"cat") {
+                series.cat_ref = Some(text.to_string());
+            } else if chart_path_contains(stack, b"val") {
+                series.val_ref = Some(text.to_string());
+            } else if chart_path_contains(stack, b"xVal") {
+                series.x_ref = Some(text.to_string());
+            } else if chart_path_contains(stack, b"yVal") {
+                series.y_ref = Some(text.to_string());
+            } else if chart_path_contains(stack, b"bubbleSize") {
+                series.bubble_size_ref = Some(text.to_string());
+            }
+        } else if last == b"v" && chart_path_contains(stack, b"tx") {
+            series.title_value = Some(text.to_string());
+        }
+        return;
+    }
+
+    if last == b"t" && chart_path_contains(stack, b"title") {
+        title_parts.push(text.to_string());
+    }
+}
+
+fn chart_path_contains(stack: &[Vec<u8>], name: &[u8]) -> bool {
+    stack.iter().any(|part| part.as_slice() == name)
+}
+
+fn chart_kind(local: &[u8]) -> Option<&'static str> {
+    match local {
+        b"barChart" => Some("bar"),
+        b"bar3DChart" => Some("bar3d"),
+        b"lineChart" => Some("line"),
+        b"line3DChart" => Some("line3d"),
+        b"pieChart" => Some("pie"),
+        b"pie3DChart" => Some("pie3d"),
+        b"ofPieChart" => Some("of_pie"),
+        b"doughnutChart" => Some("doughnut"),
+        b"areaChart" => Some("area"),
+        b"area3DChart" => Some("area3d"),
+        b"scatterChart" => Some("scatter"),
+        b"bubbleChart" => Some("bubble"),
+        b"radarChart" => Some("radar"),
+        b"surfaceChart" => Some("surface"),
+        b"surface3DChart" => Some("surface3d"),
+        b"stockChart" => Some("stock"),
+        _ => None,
+    }
 }
 
 fn apply_anchor_ext(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
