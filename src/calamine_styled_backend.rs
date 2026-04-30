@@ -8,21 +8,18 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 
-use calamine_styles::{
-    Alignment, BorderStyle as CalBorderStyle, Fill, FillPattern, Font, FontStyle, FontWeight,
-    Style, StyleRange, TextRotation, WorksheetLayout,
-};
+use calamine_styles::{BorderStyle as CalBorderStyle, Style, StyleRange, WorksheetLayout};
 use calamine_styles::{Data, Range, Reader, Xlsx};
 
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use zip::ZipArchive;
 
-use crate::calamine_format_helpers::{
-    border_style_str, color_to_hex, h_align_str, openpyxl_builtin_num_fmt, strip_excel_padding,
-    underline_str, v_align_str,
-};
+use crate::calamine_format_helpers::{openpyxl_builtin_num_fmt, strip_excel_padding};
 use crate::calamine_record_format::{RawFontInfo, RecordFormatInfo};
+use crate::calamine_style_dicts::{
+    maybe_set_edge, populate_alignment, populate_fill, populate_font, set_edge_from_style,
+};
 use crate::calamine_styled_array_formulas::{
     parse_array_formulas_from_sheet_xml, ArrayFormulaInfo,
 };
@@ -976,14 +973,14 @@ impl CalamineStyledBook {
         if let Some(style) = style {
             // Font
             if let Some(font) = &style.font {
-                Self::populate_font(py, &d, font)?;
+                populate_font(&d, font)?;
             }
             if let Some(style_id) = style_id {
                 self.populate_raw_font(style_id, &d)?;
             }
             // Fill
             if let Some(fill) = &style.fill {
-                Self::populate_fill(py, &d, fill)?;
+                populate_fill(&d, fill)?;
             }
             // NumberFormat
             if let Some(number_format) = self.resolved_number_format(sheet, row, col)? {
@@ -991,7 +988,7 @@ impl CalamineStyledBook {
             }
             // Alignment
             if let Some(align) = &style.alignment {
-                Self::populate_alignment(py, &d, align)?;
+                populate_alignment(&d, align)?;
             }
         }
 
@@ -1013,12 +1010,12 @@ impl CalamineStyledBook {
 
         if let Some(style) = style {
             if let Some(borders) = &style.borders {
-                Self::maybe_set_edge(py, &d, "top", &borders.top)?;
-                Self::maybe_set_edge(py, &d, "bottom", &borders.bottom)?;
-                Self::maybe_set_edge(py, &d, "left", &borders.left)?;
-                Self::maybe_set_edge(py, &d, "right", &borders.right)?;
-                Self::maybe_set_edge(py, &d, "diagonal_up", &borders.diagonal_up)?;
-                Self::maybe_set_edge(py, &d, "diagonal_down", &borders.diagonal_down)?;
+                maybe_set_edge(py, &d, "top", &borders.top)?;
+                maybe_set_edge(py, &d, "bottom", &borders.bottom)?;
+                maybe_set_edge(py, &d, "left", &borders.left)?;
+                maybe_set_edge(py, &d, "right", &borders.right)?;
+                maybe_set_edge(py, &d, "diagonal_up", &borders.diagonal_up)?;
+                maybe_set_edge(py, &d, "diagonal_down", &borders.diagonal_down)?;
 
                 diag_up_missing = borders.diagonal_up.style == CalBorderStyle::None;
                 diag_down_missing = borders.diagonal_down.style == CalBorderStyle::None;
@@ -1033,7 +1030,7 @@ impl CalamineStyledBook {
                     if let Some(map) = &self.diagonal_borders {
                         if let Some(info) = map.get(&style_id) {
                             if diag_up_missing && info.up {
-                                Self::set_edge_from_style(
+                                set_edge_from_style(
                                     py,
                                     &d,
                                     "diagonal_up",
@@ -1042,7 +1039,7 @@ impl CalamineStyledBook {
                                 )?;
                             }
                             if diag_down_missing && info.down {
-                                Self::set_edge_from_style(
+                                set_edge_from_style(
                                     py,
                                     &d,
                                     "diagonal_down",
@@ -1857,111 +1854,6 @@ impl CalamineStyledBook {
 
         self.record_format_cache.insert(cache_key, info.clone());
         Ok(info)
-    }
-
-    fn populate_font(_py: Python<'_>, d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
-        if font.weight == FontWeight::Bold {
-            d.set_item("bold", true)?;
-        }
-        if font.style == FontStyle::Italic {
-            d.set_item("italic", true)?;
-        }
-        if let Some(u) = underline_str(&font.underline) {
-            d.set_item("underline", u)?;
-        }
-        if font.strikethrough {
-            d.set_item("strikethrough", true)?;
-        }
-        if let Some(name) = &font.name {
-            d.set_item("font_name", name.as_str())?;
-        }
-        if let Some(size) = font.size {
-            d.set_item("font_size", size)?;
-        }
-        if let Some(color) = &font.color {
-            d.set_item("font_color", color_to_hex(color))?;
-        }
-        Ok(())
-    }
-
-    fn populate_fill(_py: Python<'_>, d: &Bound<'_, PyDict>, fill: &Fill) -> PyResult<()> {
-        if fill.pattern != FillPattern::None {
-            if let Some(color) = fill.get_color() {
-                d.set_item("bg_color", color_to_hex(&color))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn populate_alignment(
-        _py: Python<'_>,
-        d: &Bound<'_, PyDict>,
-        align: &Alignment,
-    ) -> PyResult<()> {
-        if let Some(h) = h_align_str(&align.horizontal) {
-            d.set_item("h_align", h)?;
-        }
-        if let Some(v) = v_align_str(&align.vertical) {
-            d.set_item("v_align", v)?;
-        }
-        if align.wrap_text {
-            d.set_item("wrap", true)?;
-        }
-        match align.text_rotation {
-            TextRotation::None => {}
-            TextRotation::Degrees(deg) => {
-                if deg != 0 {
-                    d.set_item("rotation", deg)?;
-                }
-            }
-            TextRotation::Stacked => {
-                d.set_item("rotation", 255)?;
-            }
-        }
-        if let Some(indent) = align.indent {
-            if indent > 0 {
-                d.set_item("indent", indent)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn maybe_set_edge(
-        py: Python<'_>,
-        d: &Bound<'_, PyDict>,
-        key: &str,
-        border: &calamine_styles::Border,
-    ) -> PyResult<()> {
-        if border.style == CalBorderStyle::None {
-            return Ok(());
-        }
-        let edge = PyDict::new(py);
-        edge.set_item("style", border_style_str(&border.style))?;
-        let color_str = border
-            .color
-            .as_ref()
-            .map(|c| color_to_hex(c))
-            .unwrap_or_else(|| "#000000".to_string());
-        edge.set_item("color", color_str)?;
-        d.set_item(key, edge)?;
-        Ok(())
-    }
-
-    fn set_edge_from_style(
-        py: Python<'_>,
-        d: &Bound<'_, PyDict>,
-        key: &str,
-        style: &str,
-        color: &str,
-    ) -> PyResult<()> {
-        if style == "none" {
-            return Ok(());
-        }
-        let edge = PyDict::new(py);
-        edge.set_item("style", style)?;
-        edge.set_item("color", color)?;
-        d.set_item(key, edge)?;
-        Ok(())
     }
 
     fn col_letter_to_index(col: &str) -> PyResult<u32> {
