@@ -132,6 +132,7 @@ pub struct WorksheetData {
     pub column_widths: Vec<ColumnWidth>,
     pub data_validations: Vec<DataValidation>,
     pub tables: Vec<Table>,
+    pub conditional_formats: Vec<ConditionalFormatRule>,
     pub cells: Vec<Cell>,
 }
 
@@ -210,6 +211,17 @@ pub struct Table {
     pub style: Option<String>,
     pub columns: Vec<String>,
     pub autofilter: bool,
+}
+
+/// Parsed worksheet conditional-formatting rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionalFormatRule {
+    pub range: String,
+    pub rule_type: String,
+    pub operator: Option<String>,
+    pub formula: Option<String>,
+    pub priority: Option<i64>,
+    pub stop_if_true: Option<bool>,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -583,6 +595,10 @@ fn parse_worksheet(
     let mut row_heights = HashMap::new();
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
+    let mut conditional_formats = Vec::new();
+    let mut current_conditional_range: Option<String> = None;
+    let mut current_conditional_rule: Option<ConditionalFormatBuilder> = None;
+    let mut in_conditional_formula = false;
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
@@ -620,6 +636,20 @@ fn parse_worksheet(
                 }
                 b"dataValidation" => {
                     current_validation = Some(DataValidationBuilder::from_start(&e));
+                }
+                b"conditionalFormatting" => {
+                    current_conditional_range = attr_value(&e, b"sqref");
+                }
+                b"cfRule" => {
+                    current_conditional_rule = Some(ConditionalFormatBuilder::from_start(
+                        &e,
+                        current_conditional_range.clone().unwrap_or_default(),
+                    ));
+                }
+                b"formula" => {
+                    if current_conditional_rule.is_some() {
+                        in_conditional_formula = true;
+                    }
                 }
                 b"formula1" => {
                     if current_validation.is_some() {
@@ -681,6 +711,19 @@ fn parse_worksheet(
                         data_validations.push(validation);
                     }
                 }
+                b"conditionalFormatting" => {
+                    current_conditional_range = attr_value(&e, b"sqref");
+                }
+                b"cfRule" => {
+                    let rule = ConditionalFormatBuilder::from_start(
+                        &e,
+                        current_conditional_range.clone().unwrap_or_default(),
+                    )
+                    .finish();
+                    if !rule.range.trim().is_empty() && !rule.rule_type.trim().is_empty() {
+                        conditional_formats.push(rule);
+                    }
+                }
                 _ => {}
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
@@ -710,12 +753,41 @@ fn parse_worksheet(
                         }
                     }
                 }
+                b"conditionalFormatting" => {
+                    current_conditional_range = None;
+                }
+                b"formula" => {
+                    if in_conditional_formula {
+                        in_conditional_formula = false;
+                        if let Some(rule) = current_conditional_rule.as_mut() {
+                            rule.finish_formula();
+                        }
+                    } else {
+                        active_text = None;
+                    }
+                }
+                b"cfRule" => {
+                    in_conditional_formula = false;
+                    if let Some(rule) = current_conditional_rule.take() {
+                        let rule = rule.finish();
+                        if !rule.range.trim().is_empty() && !rule.rule_type.trim().is_empty() {
+                            conditional_formats.push(rule);
+                        }
+                    }
+                }
                 b"v" | b"f" | b"t" => active_text = None,
                 b"row" => row_index = None,
                 _ => {}
             },
             Ok(Event::Text(e)) => {
-                if let (Some(target), Some(validation)) =
+                if in_conditional_formula {
+                    if let Some(rule) = current_conditional_rule.as_mut() {
+                        let text = e
+                            .unescape()
+                            .map_err(|err| ReaderError::Xml(format!("worksheet text: {err}")))?;
+                        rule.push_formula_text(&text);
+                    }
+                } else if let (Some(target), Some(validation)) =
                     (active_validation_text, current_validation.as_mut())
                 {
                     let text = e
@@ -730,7 +802,11 @@ fn parse_worksheet(
                 }
             }
             Ok(Event::CData(e)) => {
-                if let (Some(target), Some(validation)) =
+                if in_conditional_formula {
+                    if let Some(rule) = current_conditional_rule.as_mut() {
+                        rule.push_formula_text(&String::from_utf8_lossy(e.as_ref()));
+                    }
+                } else if let (Some(target), Some(validation)) =
                     (active_validation_text, current_validation.as_mut())
                 {
                     validation.push_text(target, &String::from_utf8_lossy(e.as_ref()));
@@ -755,6 +831,7 @@ fn parse_worksheet(
         column_widths,
         data_validations,
         tables,
+        conditional_formats,
         cells,
     })
 }
@@ -851,6 +928,53 @@ impl DataValidationBuilder {
 enum DataValidationFormula {
     Formula1,
     Formula2,
+}
+
+#[derive(Debug)]
+struct ConditionalFormatBuilder {
+    range: String,
+    rule_type: String,
+    operator: Option<String>,
+    formula: Option<String>,
+    formula_text: String,
+    priority: Option<i64>,
+    stop_if_true: Option<bool>,
+}
+
+impl ConditionalFormatBuilder {
+    fn from_start(e: &BytesStart<'_>, range: String) -> Self {
+        Self {
+            range,
+            rule_type: attr_value(e, b"type").unwrap_or_default(),
+            operator: attr_value(e, b"operator"),
+            formula: None,
+            formula_text: String::new(),
+            priority: attr_value(e, b"priority").and_then(|value| value.parse::<i64>().ok()),
+            stop_if_true: attr_value(e, b"stopIfTrue").map(|value| attr_truthy(Some(&value))),
+        }
+    }
+
+    fn push_formula_text(&mut self, text: &str) {
+        self.formula_text.push_str(text);
+    }
+
+    fn finish_formula(&mut self) {
+        let formula = self.formula_text.trim();
+        if !formula.is_empty() && self.formula.is_none() {
+            self.formula = Some(ensure_formula_prefix(formula));
+        }
+    }
+
+    fn finish(self) -> ConditionalFormatRule {
+        ConditionalFormatRule {
+            range: self.range,
+            rule_type: self.rule_type,
+            operator: self.operator,
+            formula: self.formula,
+            priority: self.priority,
+            stop_if_true: self.stop_if_true,
+        }
+    }
 }
 
 fn parse_pane(e: &BytesStart<'_>) -> Option<FreezePane> {
@@ -1446,7 +1570,10 @@ mod tests {
             <dataValidation type="whole" operator="between" allowBlank="1" sqref="B2:B5" errorTitle="Invalid" error="Use 1-10">
                 <formula1>1</formula1><formula2>10</formula2>
             </dataValidation>
-        </dataValidations></worksheet>"#;
+        </dataValidations>
+        <conditionalFormatting sqref="C2:C5">
+            <cfRule type="cellIs" operator="greaterThan" priority="1" stopIfTrue="1"><formula>50</formula></cfRule>
+        </conditionalFormatting></worksheet>"#;
         let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new(), Vec::new())
             .expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
@@ -1488,6 +1615,17 @@ mod tests {
                 allow_blank: true,
                 error_title: Some("Invalid".to_string()),
                 error: Some("Use 1-10".to_string()),
+            }]
+        );
+        assert_eq!(
+            sheet.conditional_formats,
+            vec![ConditionalFormatRule {
+                range: "C2:C5".to_string(),
+                rule_type: "cellIs".to_string(),
+                operator: Some("greaterThan".to_string()),
+                formula: Some("=50".to_string()),
+                priority: Some(1),
+                stop_if_true: Some(true),
             }]
         );
         assert_eq!(

@@ -9,12 +9,15 @@ from typing import Any
 import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
+openpyxl_formatting_rule = pytest.importorskip("openpyxl.formatting.rule")
 openpyxl_datavalidation = pytest.importorskip("openpyxl.worksheet.datavalidation")
 openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
 openpyxl_table = pytest.importorskip("openpyxl.worksheet.table")
 wolfxl = pytest.importorskip("wolfxl")
 
 DataValidation = openpyxl_datavalidation.DataValidation
+CellIsRule = openpyxl_formatting_rule.CellIsRule
+FormulaRule = openpyxl_formatting_rule.FormulaRule
 Hyperlink = openpyxl_hyperlink.Hyperlink
 Table = openpyxl_table.Table
 TableStyleInfo = openpyxl_table.TableStyleInfo
@@ -51,6 +54,11 @@ def _make_shadow_xlsx(path: Path) -> None:
     table = Table(displayName="ShadowTable", ref="A1:B4")
     table.tableStyleInfo = TableStyleInfo(name="TableStyleLight9", showRowStripes=True)
     ws.add_table(table)
+    ws.conditional_formatting.add(
+        "B2:B4",
+        CellIsRule(operator="greaterThan", formula=["100"]),
+    )
+    ws.conditional_formatting.add("B2:B4", FormulaRule(formula=["$B2=1234.5"]))
     ws.merge_cells("D1:E1")
     ws.freeze_panes = "B2"
 
@@ -100,6 +108,13 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             )
             for name, table in ws.tables.items()
         }
+        conditional_formats = [
+            (
+                entry.sqref,
+                [(rule.type, rule.operator, tuple(rule.formula)) for rule in entry.rules],
+            )
+            for entry in ws.conditional_formatting
+        ]
         out["sheets"][sheet_name] = {
             "values": values,
             "number_formats": number_formats,
@@ -111,6 +126,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "column_width": ws.column_dimensions["C"].width,
             "data_validations": validations,
             "tables": tables,
+            "conditional_formats": conditional_formats,
         }
     return out
 

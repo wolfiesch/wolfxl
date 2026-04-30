@@ -357,8 +357,28 @@ impl NativeXlsxBook {
         Ok(d.into())
     }
 
-    pub fn read_conditional_formats(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_conditional_formats(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let rules = self.ensure_sheet(sheet)?.conditional_formats.clone();
+        let result = PyList::empty(py);
+        for rule in &rules {
+            let d = PyDict::new(py);
+            d.set_item("range", &rule.range)?;
+            d.set_item("rule_type", &rule.rule_type)?;
+            if let Some(operator) = &rule.operator {
+                d.set_item("operator", operator)?;
+            }
+            if let Some(formula) = &rule.formula {
+                d.set_item("formula", formula)?;
+            }
+            if let Some(priority) = rule.priority {
+                d.set_item("priority", priority)?;
+            }
+            if let Some(stop_if_true) = rule.stop_if_true {
+                d.set_item("stop_if_true", stop_if_true)?;
+            }
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_data_validations(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
