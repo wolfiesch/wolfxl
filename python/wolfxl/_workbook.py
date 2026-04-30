@@ -1,8 +1,8 @@
 """Workbook — multi-mode openpyxl-compatible wrapper.
 
 Write mode (``Workbook()``): creates a new workbook via NativeWorkbook.
-Read mode (``Workbook._from_reader(path)``): opens an existing .xlsx via CalamineStyledBook.
-Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, save via XlsxPatcher.
+Read mode (``Workbook._from_reader(path)``): opens an existing .xlsx via NativeXlsxBook by default.
+Modify mode (``Workbook._from_patcher(path)``): read via NativeXlsxBook by default, save via XlsxPatcher.
 """
 
 from __future__ import annotations
@@ -84,11 +84,10 @@ class Workbook:
         ``permissive`` plumbs through to the Rust reader and triggers a
         rels-graph fallback when ``<sheets>`` is empty/self-closing.
 
-        ``read_only`` activates the SAX streaming fast path on
-        ``iter_rows``. The CalamineStyledBook reader is still
-        constructed for style/format lookups used by non-streaming Cell
-        properties, but the streaming reader bypasses calamine's eager
-        materialization for the large-sheet scan path. See
+        ``read_only`` activates the SAX streaming fast path on ``iter_rows``.
+        That mode still constructs the legacy reader for style/format lookups,
+        while the streaming reader bypasses eager materialization for the
+        large-sheet scan path. See
         :func:`wolfxl.load_workbook` for details.
         """
         return _workbook_sources.from_reader(

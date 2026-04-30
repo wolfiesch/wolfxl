@@ -6,17 +6,18 @@ Status: in progress
 ## Current dependency truth
 
 WolfXL's eager `.xlsx` read path now uses `NativeXlsxBook` by default for
-plain, non-streaming, non-modify loads. The legacy `CalamineStyledBook` path is
-still compiled and reachable through `WOLFXL_CALAMINE_READER=1`, and it remains
-the active reader for modify mode and streaming mode until those seams are
+plain, non-streaming, non-permissive loads, including modify-mode bootstrap
+reads. The legacy `CalamineStyledBook` path is still compiled and reachable
+through `WOLFXL_CALAMINE_READER=1`, and it remains the active reader for
+streaming mode and permissive malformed-workbook recovery until those seams are
 fully moved to native reader helpers.
 
 The `calamine-styles` dependency is still a live runtime dependency. It is not
 safe to remove yet because these surfaces still compile against it:
 
 - `src/calamine_styled_backend.rs` and helper modules for the legacy styled
-  `.xlsx` reader, fallback diagnostics, modify-mode bootstrap reads, and
-  streaming bootstrap behavior.
+  `.xlsx` reader, fallback diagnostics, streaming bootstrap behavior, and
+  permissive malformed-workbook recovery.
 - `src/calamine_xlsb_xls_backend.rs` for value-only `.xlsb` and `.xls` reads.
 - `crates/wolfxl-core`, which still advertises and implements multi-format
   preview reads through calamine-backed `.xlsx` / `.xls` / `.xlsb` / `.ods`
@@ -27,13 +28,13 @@ safe to remove yet because these surfaces still compile against it:
   `calamine-styles` as an enabled backend.
 
 The current honest launch claim is therefore: WolfXL has a native default
-reader for eager `.xlsx` loads. WolfXL is not yet dependency-free from
-Calamine across the full read stack.
+reader for normal eager `.xlsx` loads and modify-mode bootstrap reads. WolfXL
+is not yet dependency-free from Calamine across the full read stack.
 
 ## Surfaces that can be removed after native parity
 
-These should be removable once native `.xlsx` covers fallback, streaming, and
-modify bootstrap reads:
+These should be removable once native `.xlsx` covers fallback, permissive
+recovery, and streaming reads:
 
 - `WOLFXL_CALAMINE_READER` and native-vs-legacy shadow tests.
 - `CalamineStyledBook` registration from the Python extension.
@@ -101,8 +102,10 @@ The docs should separate three facts:
 ### Stage 1: finish `.xlsx` native coverage
 
 - Move streaming `.xlsx` reads onto the native shared-string/style/date helpers.
-- Move modify-mode bootstrap reads onto `NativeXlsxBook`, keeping the patcher
-  itself unchanged.
+- Move permissive malformed-workbook recovery onto the native workbook topology
+  loader, including the self-closing `<sheets/>` rels-graph fallback.
+- Keep modify-mode bootstrap reads on `NativeXlsxBook`, while the patcher
+  itself stays unchanged.
 - Keep `WOLFXL_CALAMINE_READER=1` only as a temporary diagnostics escape hatch
   while side-by-side parity is still useful.
 - Keep full openpyxl parity, native shadow, streaming, and modify-mode tests in
@@ -144,4 +147,3 @@ rg "calamine_styles|calamine-styles|CalamineStyledBook|CalamineXlsbBook|Calamine
 
 The only acceptable hits after a full dependency-free release should be
 historical changelog/RFC context or explicit migration notes.
-

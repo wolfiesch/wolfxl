@@ -78,7 +78,7 @@ def build_xlsx_wb(
 
     Args:
         cls: Workbook class to instantiate without calling ``__init__``.
-        rust_reader: Open ``CalamineStyledBook``-compatible reader.
+        rust_reader: Open Rust reader with the workbook read API.
         rust_patcher: Optional open ``XlsxPatcher`` for modify mode.
         data_only: Whether formula cells should expose cached values.
         read_only: Whether streaming read mode was explicitly requested.

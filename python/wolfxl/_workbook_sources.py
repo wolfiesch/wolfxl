@@ -103,7 +103,12 @@ def from_reader(
     """Open an existing .xlsx file in read mode."""
     from wolfxl import _rust
 
-    reader_cls = _xlsx_reader_class(_rust, modify=False, read_only=read_only)
+    reader_cls = _xlsx_reader_class(
+        _rust,
+        modify=False,
+        read_only=read_only,
+        permissive=permissive,
+    )
     return build_xlsx_wb(
         cls,
         rust_reader=reader_cls.open(path, permissive),
@@ -250,7 +255,12 @@ def from_bytes(
     from wolfxl import _rust
 
     data_bytes = bytes(data)
-    reader_cls = _xlsx_reader_class(_rust, modify=modify, read_only=read_only)
+    reader_cls = _xlsx_reader_class(
+        _rust,
+        modify=modify,
+        read_only=read_only,
+        permissive=permissive,
+    )
     bytes_open = getattr(reader_cls, "open_from_bytes", None)
     needs_tempfile = modify or bytes_open is None
 
@@ -298,7 +308,12 @@ def from_patcher(
     """Open an existing .xlsx file in modify mode."""
     from wolfxl import _rust
 
-    reader_cls = _xlsx_reader_class(_rust, modify=True, read_only=False)
+    reader_cls = _xlsx_reader_class(
+        _rust,
+        modify=True,
+        read_only=False,
+        permissive=permissive,
+    )
     return build_xlsx_wb(
         cls,
         rust_reader=reader_cls.open(path, permissive),
@@ -309,18 +324,25 @@ def from_patcher(
     )
 
 
-def _xlsx_reader_class(rust_module: Any, *, modify: bool, read_only: bool) -> Any:
+def _xlsx_reader_class(
+    rust_module: Any,
+    *,
+    modify: bool,
+    read_only: bool,
+    permissive: bool,
+) -> Any:
     """Return the active XLSX Rust reader class.
 
-    Plain eager reads use WolfXL's native reader by default. Modify and
-    streaming modes stay on the legacy reader until those write/streaming seams
-    have the same coverage. ``WOLFXL_CALAMINE_READER=1`` is a temporary escape
-    hatch for legacy-reader diagnostics.
+    Plain eager reads and modify-mode bootstrap reads use WolfXL's native
+    reader by default. Streaming mode and permissive malformed-workbook
+    recovery stay on the legacy reader until those seams have the same
+    coverage. ``WOLFXL_CALAMINE_READER=1`` is a temporary escape hatch for
+    legacy-reader diagnostics.
     """
     if (
         os.environ.get("WOLFXL_CALAMINE_READER") != "1"
-        and not modify
         and not read_only
+        and not permissive
         and hasattr(rust_module, "NativeXlsxBook")
     ):
         return rust_module.NativeXlsxBook

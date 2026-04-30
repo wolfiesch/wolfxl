@@ -1176,6 +1176,29 @@ def test_native_reader_expands_shared_formula_children(
         wb.close()
 
 
+def test_modify_mode_bootstraps_with_native_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-modify.xlsx"
+    out = tmp_path / "native-modify-out.xlsx"
+    _make_basic_xlsx(path)
+
+    monkeypatch.delenv("WOLFXL_CALAMINE_READER", raising=False)
+    wb = wolfxl.load_workbook(path, modify=True)
+    try:
+        assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
+        wb["Data"]["A2"] = "patched"
+        wb.save(out)
+    finally:
+        wb.close()
+
+    roundtrip = wolfxl.load_workbook(out)
+    try:
+        assert roundtrip["Data"]["A2"].value == "patched"
+    finally:
+        roundtrip.close()
+
+
 def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-bytes.xlsx"
     _make_basic_xlsx(path)
