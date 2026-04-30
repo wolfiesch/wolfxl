@@ -640,6 +640,7 @@ def test_p_self_closing_sheets_block(tmp_path: Path) -> None:
     # when xl/workbook.xml's <sheets> block is empty/self-closing.
     # Default is False so well-formed inputs are unaffected.
     wb = load_workbook(src, modify=True, permissive=True)
+    assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
 
     # The synthesized title is "Sheet1" (rels-iteration order), which
     # may differ from the original fixture's "Grid". This is by design

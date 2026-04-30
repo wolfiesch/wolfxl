@@ -1031,11 +1031,23 @@ pub struct NativeXlsxBook {
 impl NativeXlsxBook {
     /// Open an OOXML workbook from disk.
     pub fn open_path(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_bytes(fs::read(path)?)
+        Self::open_path_permissive(path, false)
+    }
+
+    /// Open an OOXML workbook from disk, optionally enabling malformed-topology
+    /// recovery for legacy-compatible permissive loads.
+    pub fn open_path_permissive(path: impl AsRef<Path>, permissive: bool) -> Result<Self> {
+        Self::open_bytes_permissive(fs::read(path)?, permissive)
     }
 
     /// Open an OOXML workbook from bytes.
     pub fn open_bytes(bytes: impl Into<Vec<u8>>) -> Result<Self> {
+        Self::open_bytes_permissive(bytes, false)
+    }
+
+    /// Open an OOXML workbook from bytes, optionally enabling
+    /// malformed-topology recovery for legacy-compatible permissive loads.
+    pub fn open_bytes_permissive(bytes: impl Into<Vec<u8>>, permissive: bool) -> Result<Self> {
         let bytes = bytes.into();
         let mut zip = zip_from_bytes(&bytes)?;
         let workbook_xml = read_part_required(&mut zip, "xl/workbook.xml")?;
@@ -1053,6 +1065,11 @@ impl NativeXlsxBook {
             calc_properties,
             workbook_views,
         ) = parse_workbook(&workbook_xml)?;
+        let sheet_refs = if permissive && sheet_refs.is_empty() {
+            synthesize_sheet_refs_from_rels(&rels)
+        } else {
+            sheet_refs
+        };
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
             Some(xml) => parse_shared_strings(&xml)?,
@@ -1706,6 +1723,19 @@ fn resolve_sheet_paths(sheet_refs: Vec<SheetRef>, rels: &RelsGraph) -> Result<Ve
         });
     }
     Ok(sheets)
+}
+
+fn synthesize_sheet_refs_from_rels(rels: &RelsGraph) -> Vec<SheetRef> {
+    rels.find_by_type(wolfxl_rels::rt::WORKSHEET)
+        .into_iter()
+        .enumerate()
+        .map(|(idx, rel)| SheetRef {
+            name: format!("Sheet{}", idx + 1),
+            sheet_id: Some((idx + 1).to_string()),
+            state: SheetState::Visible,
+            rid: rel.id.0.clone(),
+        })
+        .collect()
 }
 
 fn parse_shared_strings(xml: &str) -> Result<SharedStrings> {
@@ -5483,6 +5513,28 @@ mod tests {
                 cols: Some("A:B".to_string()),
             })
         );
+    }
+
+    #[test]
+    fn synthesizes_sheet_refs_from_workbook_rels() {
+        let rels = RelsGraph::parse(
+            br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+                <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+                <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+            </Relationships>"#,
+        )
+        .expect("parse rels");
+
+        let sheet_refs = synthesize_sheet_refs_from_rels(&rels);
+
+        assert_eq!(sheet_refs.len(), 2);
+        assert_eq!(sheet_refs[0].name, "Sheet1");
+        assert_eq!(sheet_refs[0].sheet_id.as_deref(), Some("1"));
+        assert_eq!(sheet_refs[0].rid, "rId3");
+        assert_eq!(sheet_refs[1].name, "Sheet2");
+        assert_eq!(sheet_refs[1].sheet_id.as_deref(), Some("2"));
+        assert_eq!(sheet_refs[1].rid, "rId9");
     }
 
     #[test]

@@ -45,9 +45,9 @@ pub struct NativeXlsxBook {
 impl NativeXlsxBook {
     /// Open an XLSX/XLSM workbook from a filesystem path.
     #[staticmethod]
-    #[pyo3(signature = (path, _permissive = false))]
-    pub fn open(path: &str, _permissive: bool) -> PyResult<Self> {
-        let book = NativeReaderBook::open_path(path)
+    #[pyo3(signature = (path, permissive = false))]
+    pub fn open(path: &str, permissive: bool) -> PyResult<Self> {
+        let book = NativeReaderBook::open_path_permissive(path, permissive)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("native xlsx open failed: {e}")))?;
         let sheet_names = book.sheet_names().into_iter().map(str::to_string).collect();
         Ok(Self {
@@ -63,9 +63,9 @@ impl NativeXlsxBook {
 
     /// Open an XLSX/XLSM workbook from raw bytes.
     #[staticmethod]
-    #[pyo3(signature = (data, _permissive = false))]
-    pub fn open_from_bytes(data: &[u8], _permissive: bool) -> PyResult<Self> {
-        let book = NativeReaderBook::open_bytes(data.to_vec())
+    #[pyo3(signature = (data, permissive = false))]
+    pub fn open_from_bytes(data: &[u8], permissive: bool) -> PyResult<Self> {
+        let book = NativeReaderBook::open_bytes_permissive(data.to_vec(), permissive)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("native xlsx open failed: {e}")))?;
         let sheet_names = book.sheet_names().into_iter().map(str::to_string).collect();
         Ok(Self {
