@@ -37,6 +37,7 @@ def _make_shadow_xlsx(path: Path) -> None:
     ws["B5"] = "jump"
     ws["B5"].hyperlink = Hyperlink(ref="B5", location="Other!A1", display="Other")
     ws.merge_cells("D1:E1")
+    ws.freeze_panes = "B2"
 
     other = wb.create_sheet("Other")
     other["A1"] = True
@@ -72,6 +73,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "number_formats": number_formats,
             "merged": merged,
             "hyperlinks": hyperlinks,
+            "freeze_panes": ws.freeze_panes,
         }
     return out
 

@@ -126,6 +126,7 @@ pub struct WorksheetData {
     pub dimension: Option<String>,
     pub merged_ranges: Vec<String>,
     pub hyperlinks: Vec<Hyperlink>,
+    pub freeze_panes: Option<FreezePane>,
     pub cells: Vec<Cell>,
 }
 
@@ -137,6 +138,23 @@ pub struct Hyperlink {
     pub display: String,
     pub tooltip: Option<String>,
     pub internal: bool,
+}
+
+/// Parsed worksheet pane metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreezePane {
+    pub mode: PaneMode,
+    pub top_left_cell: Option<String>,
+    pub x_split: Option<i64>,
+    pub y_split: Option<i64>,
+    pub active_pane: Option<String>,
+}
+
+/// OOXML pane mode relevant to read compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneMode {
+    Freeze,
+    Split,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -493,6 +511,7 @@ fn parse_worksheet(
     let mut dimension = None;
     let mut merged_ranges = Vec::new();
     let mut hyperlink_nodes = Vec::new();
+    let mut freeze_panes = None;
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
@@ -513,6 +532,9 @@ fn parse_worksheet(
                     if let Some(node) = HyperlinkNode::from_start(&e) {
                         hyperlink_nodes.push(node);
                     }
+                }
+                b"pane" => {
+                    freeze_panes = parse_pane(&e);
                 }
                 b"row" => {
                     row_index = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
@@ -545,6 +567,9 @@ fn parse_worksheet(
                     if let Some(node) = HyperlinkNode::from_start(&e) {
                         hyperlink_nodes.push(node);
                     }
+                }
+                b"pane" => {
+                    freeze_panes = parse_pane(&e);
                 }
                 b"c" => {
                     let builder = CellBuilder::from_start(&e, row_index);
@@ -586,7 +611,27 @@ fn parse_worksheet(
         dimension,
         merged_ranges,
         hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
+        freeze_panes,
         cells,
+    })
+}
+
+fn parse_pane(e: &BytesStart<'_>) -> Option<FreezePane> {
+    let mode = match attr_value(e, b"state")?.to_ascii_lowercase().as_str() {
+        "split" => PaneMode::Split,
+        state if state.starts_with("frozen") => PaneMode::Freeze,
+        _ => return None,
+    };
+    Some(FreezePane {
+        mode,
+        top_left_cell: attr_value(e, b"topLeftCell").filter(|value| !value.is_empty()),
+        x_split: attr_value(e, b"xSplit")
+            .and_then(|value| value.parse::<f64>().ok())
+            .map(|value| value as i64),
+        y_split: attr_value(e, b"ySplit")
+            .and_then(|value| value.parse::<f64>().ok())
+            .map(|value| value as i64),
+        active_pane: attr_value(e, b"activePane").filter(|value| !value.is_empty()),
     })
 }
 
@@ -937,7 +982,9 @@ mod tests {
 
     #[test]
     fn parses_sheet_values_formulas_and_types() {
-        let xml = r#"<worksheet><dimension ref="A1:D2"/><sheetData>
+        let xml = r#"<worksheet><dimension ref="A1:D2"/><sheetViews><sheetView>
+            <pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>
+        </sheetView></sheetViews><sheetData>
             <row r="1">
                 <c r="A1" t="s"><v>0</v></c>
                 <c r="B1"><v>42</v></c>
@@ -949,6 +996,16 @@ mod tests {
         let sheet = parse_worksheet(xml, &["Shared".to_string()], None).expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
         assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
+        assert_eq!(
+            sheet.freeze_panes,
+            Some(FreezePane {
+                mode: PaneMode::Freeze,
+                top_left_cell: Some("B2".to_string()),
+                x_split: Some(1),
+                y_split: Some(1),
+                active_pane: Some("bottomRight".to_string()),
+            })
+        );
         assert_eq!(
             sheet.cells[0].value,
             CellValue::String("Shared".to_string())

@@ -16,7 +16,7 @@ type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    Cell, CellDataType, CellValue, NativeXlsxBook as NativeReaderBook, WorksheetData,
+    Cell, CellDataType, CellValue, NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -320,8 +320,31 @@ impl NativeXlsxBook {
         Ok(PyList::empty(py).into())
     }
 
-    pub fn read_freeze_panes(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(py.None())
+    pub fn read_freeze_panes(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let d = PyDict::new(py);
+        let Some(info) = self.ensure_sheet(sheet)?.freeze_panes.clone() else {
+            return Ok(d.into());
+        };
+        d.set_item(
+            "mode",
+            match info.mode {
+                PaneMode::Freeze => "freeze",
+                PaneMode::Split => "split",
+            },
+        )?;
+        if let Some(top_left_cell) = info.top_left_cell {
+            d.set_item("top_left_cell", top_left_cell)?;
+        }
+        if let Some(x_split) = info.x_split {
+            d.set_item("x_split", x_split)?;
+        }
+        if let Some(y_split) = info.y_split {
+            d.set_item("y_split", y_split)?;
+        }
+        if let Some(active_pane) = info.active_pane {
+            d.set_item("active_pane", active_pane)?;
+        }
+        Ok(d.into())
     }
 
     pub fn read_conditional_formats(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {

@@ -40,6 +40,7 @@ def _make_basic_xlsx(path: Path) -> None:
     )
     ws["B5"] = "Internal"
     ws["B5"].hyperlink = Hyperlink(ref="B5", location="Data!A1", display="Jump")
+    ws.freeze_panes = "B2"
     wb.save(path)
     wb.close()
 
@@ -69,6 +70,7 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["B5"].hyperlink.target is None
         assert ws["B5"].hyperlink.location == "Data!A1"
         assert ws["B5"].hyperlink.display == "Jump"
+        assert ws.freeze_panes == "B2"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
         records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
         assert records["B1"]["number_format"] == "#,##0.00"
