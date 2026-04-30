@@ -11,6 +11,7 @@ mod calamine_styled_array_formulas;
 mod calamine_styled_backend;
 mod calamine_value_helpers;
 mod calamine_xlsb_xls_backend;
+mod native_reader_backend;
 mod native_writer_anchors;
 mod native_writer_autofilter;
 mod native_writer_backend;
@@ -58,6 +59,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
+    m.add_class::<native_reader_backend::NativeXlsxBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsbBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsBook>()?;
     m.add_function(wrap_pyfunction!(

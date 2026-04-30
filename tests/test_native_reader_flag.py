@@ -1,0 +1,60 @@
+"""Opt-in smoke tests for the native XLSX reader.
+
+The native reader is intentionally hidden behind ``WOLFXL_NATIVE_READER`` while
+it grows to parity. These tests pin the first public seam without changing the
+default calamine-backed path.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+openpyxl = pytest.importorskip("openpyxl")
+wolfxl = pytest.importorskip("wolfxl")
+
+
+def _make_basic_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws["A1"] = "Label"
+    ws["B1"] = 42
+    ws["C1"] = True
+    ws["A2"] = "Formula"
+    ws["B2"] = "=B1*2"
+    wb.save(path)
+    wb.close()
+
+
+def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "native-smoke.xlsx"
+    _make_basic_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path, data_only=False)
+    try:
+        assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
+        assert wb.sheetnames == ["Data"]
+        ws = wb["Data"]
+        assert ws["A1"].value == "Label"
+        assert ws["B1"].value == 42
+        assert ws["C1"].value is True
+        assert ws["B2"].value == "=B1*2"
+    finally:
+        wb.close()
+
+
+def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "native-bytes.xlsx"
+    _make_basic_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path.read_bytes())
+    try:
+        assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
+        assert wb._rust_reader.opened_from_bytes() is True  # noqa: SLF001
+        assert wb["Data"].iter_rows(values_only=True).__next__() == ("Label", 42, True)
+    finally:
+        wb.close()

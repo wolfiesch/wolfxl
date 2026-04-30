@@ -1355,6 +1355,7 @@ dependencies = [
  "wolfxl-core",
  "wolfxl-merger",
  "wolfxl-pivot",
+ "wolfxl-reader",
  "wolfxl-rels",
  "wolfxl-structural",
  "wolfxl-writer",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from wolfxl._workbook_state import (
@@ -102,9 +103,10 @@ def from_reader(
     """Open an existing .xlsx file in read mode."""
     from wolfxl import _rust
 
+    reader_cls = _xlsx_reader_class(_rust, modify=False, read_only=read_only)
     return build_xlsx_wb(
         cls,
-        rust_reader=_rust.CalamineStyledBook.open(path, permissive),
+        rust_reader=reader_cls.open(path, permissive),
         rust_patcher=None,
         data_only=data_only,
         read_only=read_only,
@@ -248,7 +250,8 @@ def from_bytes(
     from wolfxl import _rust
 
     data_bytes = bytes(data)
-    bytes_open = getattr(_rust.CalamineStyledBook, "open_from_bytes", None)
+    reader_cls = _xlsx_reader_class(_rust, modify=modify, read_only=read_only)
+    bytes_open = getattr(reader_cls, "open_from_bytes", None)
     needs_tempfile = modify or bytes_open is None
 
     if needs_tempfile:
@@ -295,14 +298,32 @@ def from_patcher(
     """Open an existing .xlsx file in modify mode."""
     from wolfxl import _rust
 
+    reader_cls = _xlsx_reader_class(_rust, modify=True, read_only=False)
     return build_xlsx_wb(
         cls,
-        rust_reader=_rust.CalamineStyledBook.open(path, permissive),
+        rust_reader=reader_cls.open(path, permissive),
         rust_patcher=_rust.XlsxPatcher.open(path, permissive),
         data_only=data_only,
         read_only=False,
         source_path=path,
     )
+
+
+def _xlsx_reader_class(rust_module: Any, *, modify: bool, read_only: bool) -> Any:
+    """Return the active XLSX Rust reader class.
+
+    ``WOLFXL_NATIVE_READER=1`` opts into the early native reader for plain
+    eager reads. Modify and streaming modes stay on the current reader until
+    the native path grows full style/feature parity.
+    """
+    if (
+        os.environ.get("WOLFXL_NATIVE_READER") == "1"
+        and not modify
+        and not read_only
+        and hasattr(rust_module, "NativeXlsxBook")
+    ):
+        return rust_module.NativeXlsxBook
+    return rust_module.CalamineStyledBook
 
 
 def from_xlsb(

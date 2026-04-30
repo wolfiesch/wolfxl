@@ -45,6 +45,7 @@ chrono.workspace = true
 wolfxl-core = { path = "crates/wolfxl-core", version = "0.8" }
 wolfxl-writer = { path = "crates/wolfxl-writer", version = "0.1" }
 wolfxl-rels = { path = "crates/wolfxl-rels", version = "0.1" }
+wolfxl-reader = { path = "crates/wolfxl-reader", version = "0.1" }
 wolfxl-merger = { path = "crates/wolfxl-merger", version = "0.1" }
 wolfxl-structural = { path = "crates/wolfxl-structural", version = "0.1" }
 wolfxl-classify = { path = "crates/wolfxl-classify", version = "0.1" }
