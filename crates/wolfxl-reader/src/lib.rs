@@ -676,6 +676,8 @@ pub struct ImageInfo {
 pub struct ChartInfo {
     pub kind: String,
     pub title: Option<String>,
+    pub x_axis_title: Option<String>,
+    pub y_axis_title: Option<String>,
     pub style: Option<u32>,
     pub anchor: ImageAnchorInfo,
     pub series: Vec<ChartSeriesInfo>,
@@ -4289,6 +4291,11 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
     let mut stack: Vec<Vec<u8>> = Vec::new();
     let mut kind: Option<String> = None;
     let mut title_parts: Vec<String> = Vec::new();
+    let mut current_axis: Option<Vec<u8>> = None;
+    let mut current_axis_title_parts: Vec<String> = Vec::new();
+    let mut x_axis_title: Option<String> = None;
+    let mut y_axis_title: Option<String> = None;
+    let mut val_axis_titles_seen = 0usize;
     let mut style: Option<u32> = None;
     let mut current_series: Option<ChartSeriesInfo> = None;
     let mut series = Vec::new();
@@ -4298,6 +4305,10 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
             Ok(Event::Start(e)) => {
                 let local = e.local_name().as_ref().to_vec();
                 apply_chart_start(&local, &e, &mut kind, &mut style, &mut current_series);
+                if chart_axis_name(&local).is_some() {
+                    current_axis = Some(local.clone());
+                    current_axis_title_parts.clear();
+                }
                 stack.push(local);
             }
             Ok(Event::Empty(e)) => {
@@ -4309,13 +4320,33 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                     .unescape()
                     .map_err(|err| ReaderError::Xml(format!("chart text: {err}")))?
                     .to_string();
-                apply_chart_text(&stack, text.trim(), &mut title_parts, &mut current_series);
+                apply_chart_text(
+                    &stack,
+                    text.trim(),
+                    &mut title_parts,
+                    current_axis.as_deref(),
+                    &mut current_axis_title_parts,
+                    &mut current_series,
+                );
             }
             Ok(Event::End(e)) => {
-                if e.local_name().as_ref() == b"ser" {
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                if local == b"ser" {
                     if let Some(ser) = current_series.take() {
                         series.push(ser);
                     }
+                } else if chart_axis_name(local).is_some() {
+                    apply_chart_axis_title(
+                        local,
+                        &kind,
+                        &mut val_axis_titles_seen,
+                        &current_axis_title_parts,
+                        &mut x_axis_title,
+                        &mut y_axis_title,
+                    );
+                    current_axis = None;
+                    current_axis_title_parts.clear();
                 }
                 stack.pop();
             }
@@ -4337,6 +4368,8 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
     Ok(Some(ChartInfo {
         kind,
         title,
+        x_axis_title,
+        y_axis_title,
         style,
         anchor,
         series,
@@ -4378,6 +4411,8 @@ fn apply_chart_text(
     stack: &[Vec<u8>],
     text: &str,
     title_parts: &mut Vec<String>,
+    current_axis: Option<&[u8]>,
+    current_axis_title_parts: &mut Vec<String>,
     current_series: &mut Option<ChartSeriesInfo>,
 ) {
     if text.is_empty() {
@@ -4408,12 +4443,58 @@ fn apply_chart_text(
     }
 
     if last == b"t" && chart_path_contains(stack, b"title") {
-        title_parts.push(text.to_string());
+        if current_axis.is_some() {
+            current_axis_title_parts.push(text.to_string());
+        } else {
+            title_parts.push(text.to_string());
+        }
     }
 }
 
 fn chart_path_contains(stack: &[Vec<u8>], name: &[u8]) -> bool {
     stack.iter().any(|part| part.as_slice() == name)
+}
+
+fn chart_axis_name(local: &[u8]) -> Option<&'static str> {
+    match local {
+        b"catAx" | b"dateAx" | b"serAx" => Some("x"),
+        b"valAx" => Some("value"),
+        _ => None,
+    }
+}
+
+fn apply_chart_axis_title(
+    axis: &[u8],
+    kind: &Option<String>,
+    val_axis_titles_seen: &mut usize,
+    title_parts: &[String],
+    x_axis_title: &mut Option<String>,
+    y_axis_title: &mut Option<String>,
+) {
+    if title_parts.is_empty() {
+        return;
+    }
+    let title = title_parts.join("");
+    match axis {
+        b"catAx" | b"dateAx" | b"serAx" => {
+            if x_axis_title.is_none() {
+                *x_axis_title = Some(title);
+            }
+        }
+        b"valAx" => {
+            if matches!(kind.as_deref(), Some("scatter" | "bubble")) {
+                *val_axis_titles_seen += 1;
+                if *val_axis_titles_seen == 1 && x_axis_title.is_none() {
+                    *x_axis_title = Some(title);
+                } else if y_axis_title.is_none() {
+                    *y_axis_title = Some(title);
+                }
+            } else if y_axis_title.is_none() {
+                *y_axis_title = Some(title);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn chart_kind(local: &[u8]) -> Option<&'static str> {
@@ -5497,6 +5578,41 @@ mod tests {
                 autofilter: true,
             }
         );
+    }
+
+    #[test]
+    fn parses_chart_axis_titles_separately_from_chart_title() {
+        let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+            <c:chart>
+                <c:title><c:tx><c:rich><a:p><a:r><a:t>Sales Trend</a:t></a:r></a:p></c:rich></c:tx></c:title>
+                <c:plotArea>
+                    <c:barChart>
+                        <c:ser>
+                            <c:idx val="0"/><c:order val="0"/>
+                            <c:tx><c:strRef><c:f>'Charts'!B1</c:f></c:strRef></c:tx>
+                            <c:cat><c:strRef><c:f>'Charts'!$A$2:$A$4</c:f></c:strRef></c:cat>
+                            <c:val><c:numRef><c:f>'Charts'!$B$2:$B$4</c:f></c:numRef></c:val>
+                        </c:ser>
+                    </c:barChart>
+                    <c:catAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Month</a:t></a:r></a:p></c:rich></c:tx></c:title></c:catAx>
+                    <c:valAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title></c:valAx>
+                </c:plotArea>
+            </c:chart>
+        </c:chartSpace>"#;
+        let anchor = ImageAnchorInfo::Absolute {
+            pos: AnchorPositionInfo::default(),
+            ext: AnchorExtentInfo::default(),
+        };
+
+        let chart = parse_chart_xml(xml, anchor)
+            .expect("parse chart")
+            .expect("chart info");
+
+        assert_eq!(chart.kind, "bar");
+        assert_eq!(chart.title.as_deref(), Some("Sales Trend"));
+        assert_eq!(chart.x_axis_title.as_deref(), Some("Month"));
+        assert_eq!(chart.y_axis_title.as_deref(), Some("Sales"));
+        assert_eq!(chart.series[0].title_ref.as_deref(), Some("'Charts'!B1"));
     }
 
     #[test]

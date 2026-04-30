@@ -209,6 +209,10 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
     chart = chart_cls()
     if payload.get("title") is not None:
         chart.title = str(payload["title"])
+    if payload.get("x_axis_title") is not None and hasattr(chart, "x_axis"):
+        chart.x_axis.title = str(payload["x_axis_title"])
+    if payload.get("y_axis_title") is not None and hasattr(chart, "y_axis"):
+        chart.y_axis.title = str(payload["y_axis_title"])
     if payload.get("style") is not None:
         chart.style = int(payload["style"])
     chart._anchor = _anchor_from_payload(payload.get("anchor"))  # noqa: SLF001

@@ -490,6 +490,8 @@ def _make_chart_xlsx(path: Path) -> None:
         ws.append(row)
     chart = BarChart()
     chart.title = "Sales Trend"
+    chart.x_axis.title = "Month"
+    chart.y_axis.title = "Sales"
     chart.style = 10
     data = Reference(ws, min_col=2, min_row=1, max_row=4)
     cats = Reference(ws, min_col=1, min_row=2, max_row=4)
@@ -988,6 +990,8 @@ def test_native_reader_loads_drawing_charts(
         chart = charts[0]
         assert chart.__class__.__name__ == "BarChart"
         assert chart.title.tx.rich.paragraphs[0].r[0].t == "Sales Trend"
+        assert chart.x_axis.title.tx.rich.paragraphs[0].r[0].t == "Month"
+        assert chart.y_axis.title.tx.rich.paragraphs[0].r[0].t == "Sales"
         assert chart.style == 10
         assert len(chart.series) == 1
         series = chart.series[0]
