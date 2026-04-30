@@ -133,6 +133,10 @@ pub struct WorksheetData {
     pub data_validations: Vec<DataValidation>,
     pub tables: Vec<Table>,
     pub conditional_formats: Vec<ConditionalFormatRule>,
+    pub hidden_rows: Vec<u32>,
+    pub hidden_columns: Vec<u32>,
+    pub row_outline_levels: Vec<(u32, u8)>,
+    pub column_outline_levels: Vec<(u32, u8)>,
     pub cells: Vec<Cell>,
 }
 
@@ -697,6 +701,10 @@ fn parse_worksheet(
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
     let mut conditional_formats = Vec::new();
+    let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
+    let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
+    let mut row_outline_levels: HashMap<u32, u8> = HashMap::new();
+    let mut column_outline_levels: HashMap<u32, u8> = HashMap::new();
     let mut current_conditional_range: Option<String> = None;
     let mut current_conditional_rule: Option<ConditionalFormatBuilder> = None;
     let mut in_conditional_formula = false;
@@ -731,6 +739,7 @@ fn parse_worksheet(
                     if let Some((row, height)) = parse_row_height(&e, row_index) {
                         row_heights.insert(row, height);
                     }
+                    update_row_visibility(&e, row_index, &mut hidden_rows, &mut row_outline_levels);
                 }
                 b"c" => {
                     current = Some(CellBuilder::from_start(&e, row_index));
@@ -779,6 +788,7 @@ fn parse_worksheet(
                     if let Some(width) = parse_column_width(&e) {
                         column_widths.push(width);
                     }
+                    update_column_visibility(&e, &mut hidden_columns, &mut column_outline_levels);
                 }
                 b"dimension" => {
                     dimension = attr_value(&e, b"ref");
@@ -805,6 +815,7 @@ fn parse_worksheet(
                     if let Some((row, height)) = parse_row_height(&e, row) {
                         row_heights.insert(row, height);
                     }
+                    update_row_visibility(&e, row, &mut hidden_rows, &mut row_outline_levels);
                 }
                 b"dataValidation" => {
                     let validation = DataValidationBuilder::from_start(&e).finish();
@@ -922,6 +933,21 @@ fn parse_worksheet(
         buf.clear();
     }
 
+    let mut hidden_rows: Vec<u32> = hidden_rows
+        .into_iter()
+        .filter_map(|(row, hidden)| hidden.then_some(row))
+        .collect();
+    let mut hidden_columns: Vec<u32> = hidden_columns
+        .into_iter()
+        .filter_map(|(col, hidden)| hidden.then_some(col))
+        .collect();
+    let mut row_outline_levels: Vec<(u32, u8)> = row_outline_levels.into_iter().collect();
+    let mut column_outline_levels: Vec<(u32, u8)> = column_outline_levels.into_iter().collect();
+    hidden_rows.sort_unstable();
+    hidden_columns.sort_unstable();
+    row_outline_levels.sort_unstable_by_key(|(row, _)| *row);
+    column_outline_levels.sort_unstable_by_key(|(col, _)| *col);
+
     Ok(WorksheetData {
         dimension,
         merged_ranges,
@@ -933,6 +959,10 @@ fn parse_worksheet(
         data_validations,
         tables,
         conditional_formats,
+        hidden_rows,
+        hidden_columns,
+        row_outline_levels,
+        column_outline_levels,
         cells,
     })
 }
@@ -956,6 +986,51 @@ fn parse_column_width(e: &BytesStart<'_>) -> Option<ColumnWidth> {
         width: attr_value(e, b"width")?.parse::<f64>().ok()?,
         custom_width: attr_truthy(attr_value(e, b"customWidth").as_deref()),
     })
+}
+
+fn update_row_visibility(
+    e: &BytesStart<'_>,
+    row: Option<u32>,
+    hidden_rows: &mut HashMap<u32, bool>,
+    row_outline_levels: &mut HashMap<u32, u8>,
+) {
+    let Some(row) = row else {
+        return;
+    };
+    hidden_rows.insert(row, attr_truthy(attr_value(e, b"hidden").as_deref()));
+    let outline_level = attr_value(e, b"outlineLevel")
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(0);
+    if outline_level > 0 {
+        row_outline_levels.insert(row, outline_level);
+    } else {
+        row_outline_levels.remove(&row);
+    }
+}
+
+fn update_column_visibility(
+    e: &BytesStart<'_>,
+    hidden_columns: &mut HashMap<u32, bool>,
+    column_outline_levels: &mut HashMap<u32, u8>,
+) {
+    let min = attr_value(e, b"min")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(1);
+    let max = attr_value(e, b"max")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(min);
+    let hidden = attr_truthy(attr_value(e, b"hidden").as_deref());
+    let outline_level = attr_value(e, b"outlineLevel")
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(0);
+    for col in min..=max {
+        hidden_columns.insert(col, hidden);
+        if outline_level > 0 {
+            column_outline_levels.insert(col, outline_level);
+        } else {
+            column_outline_levels.remove(&col);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1751,14 +1826,14 @@ mod tests {
     fn parses_sheet_values_formulas_and_types() {
         let xml = r#"<worksheet><dimension ref="A1:D2"/><sheetViews><sheetView>
             <pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>
-        </sheetView></sheetViews><cols><col min="2" max="3" width="18.5" customWidth="1"/></cols><sheetData>
+        </sheetView></sheetViews><cols><col min="2" max="3" width="18.5" customWidth="1" hidden="1" outlineLevel="2"/></cols><sheetData>
             <row r="1">
                 <c r="A1" t="s"><v>0</v></c>
                 <c r="B1"><v>42</v></c>
                 <c r="C1" t="b"><v>1</v></c>
                 <c r="D1"><f>SUM(B1:B1)</f><v>42</v></c>
             </row>
-            <row r="2" ht="24" customHeight="1"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
+            <row r="2" ht="24" customHeight="1" hidden="1" outlineLevel="1"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
         </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells>
         <dataValidations count="1">
             <dataValidation type="whole" operator="between" allowBlank="1" sqref="B2:B5" errorTitle="Invalid" error="Use 1-10">
@@ -1798,6 +1873,10 @@ mod tests {
                 custom_width: true,
             }]
         );
+        assert_eq!(sheet.hidden_rows, vec![2]);
+        assert_eq!(sheet.hidden_columns, vec![2, 3]);
+        assert_eq!(sheet.row_outline_levels, vec![(2, 1)]);
+        assert_eq!(sheet.column_outline_levels, vec![(2, 2), (3, 2)]);
         assert_eq!(
             sheet.data_validations,
             vec![DataValidation {

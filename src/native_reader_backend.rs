@@ -289,12 +289,21 @@ impl NativeXlsxBook {
         Ok(self.ensure_sheet(sheet)?.merged_ranges.clone())
     }
 
-    pub fn read_sheet_visibility(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
+    pub fn read_sheet_visibility(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let data = self.ensure_sheet(sheet)?;
         let d = PyDict::new(py);
-        d.set_item("hidden_rows", PyList::empty(py))?;
-        d.set_item("hidden_columns", PyList::empty(py))?;
-        d.set_item("row_outline_levels", PyList::empty(py))?;
-        d.set_item("column_outline_levels", PyList::empty(py))?;
+        d.set_item("hidden_rows", data.hidden_rows.clone())?;
+        d.set_item("hidden_columns", data.hidden_columns.clone())?;
+        let row_levels = PyDict::new(py);
+        for (row, level) in &data.row_outline_levels {
+            row_levels.set_item(*row, *level)?;
+        }
+        d.set_item("row_outline_levels", row_levels)?;
+        let column_levels = PyDict::new(py);
+        for (col, level) in &data.column_outline_levels {
+            column_levels.set_item(*col, *level)?;
+        }
+        d.set_item("column_outline_levels", column_levels)?;
         Ok(d.into())
     }
 

@@ -47,7 +47,11 @@ def _make_shadow_xlsx(path: Path) -> None:
     ws["A6"] = "note"
     ws["A6"].comment = openpyxl.comments.Comment("Shadow note", "Wolf")
     ws.row_dimensions[6].height = 24
+    ws.row_dimensions[6].hidden = True
+    ws.row_dimensions[6].outlineLevel = 1
     ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["C"].hidden = True
+    ws.column_dimensions["C"].outlineLevel = 2
     dv = DataValidation(type="list", formula1='"Red,Blue"', allow_blank=True)
     dv.add("C2:C6")
     ws.add_data_validation(dv)
@@ -124,6 +128,10 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "freeze_panes": ws.freeze_panes,
             "row_height": ws.row_dimensions[6].height,
             "column_width": ws.column_dimensions["C"].width,
+            "row_hidden": ws.row_dimensions[6].hidden,
+            "column_hidden": ws.column_dimensions["C"].hidden,
+            "row_outline_level": ws.row_dimensions[6].outline_level,
+            "column_outline_level": ws.column_dimensions["C"].outline_level,
             "data_validations": validations,
             "tables": tables,
             "conditional_formats": conditional_formats,
