@@ -288,6 +288,49 @@ def test_style_openpyxl_aliases() -> None:
     assert color.index == 3
 
 
+def test_style_tree_helpers_round_trip() -> None:
+    from xml.etree import ElementTree as ET
+
+    font = wolfxl.Font(b=True, i=True, sz=14, color="FF0000")
+    font_xml = ET.tostring(font.to_tree()).decode()
+    assert "<b" in font_xml
+    assert "<i" in font_xml
+    assert 'rgb="00FF0000"' in font_xml
+    assert wolfxl.Font.from_tree(font.to_tree()).bold is True
+
+    fill = wolfxl.PatternFill(fill_type="solid", start_color="FF0000")
+    assert wolfxl.PatternFill.from_tree(fill.to_tree()).fill_type == "solid"
+
+    alignment = wolfxl.Alignment(horizontal="center", wrapText=True)
+    assert wolfxl.Alignment.from_tree(alignment.to_tree()).wrapText is True
+
+    side = wolfxl.Side(border_style="thin")
+    border = wolfxl.Border(left=side, diagonalUp=True)
+    assert wolfxl.Border.from_tree(border.to_tree()).left.border_style == "thin"
+
+    color = wolfxl.Color.from_tree(wolfxl.Color(theme=1, tint=-0.3).to_tree())
+    assert color.theme == 1
+    assert color.tint == -0.3
+
+
+def test_protection_and_named_style_helpers() -> None:
+    from wolfxl.styles import NamedStyle, Protection
+
+    protection = Protection(locked=False, hidden=True)
+    assert Protection.from_tree(protection.to_tree()).locked is False
+    assert Protection.from_tree(protection.to_tree()).hidden is True
+
+    style = NamedStyle(name="Metric", builtinId=42, xfId=7, hidden=True)
+    assert style.as_name().name == "Metric"
+    assert style.as_tuple() == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+    assert style.as_xf().xfId == 7
+    restored = NamedStyle.from_tree(style.to_tree())
+    assert restored.name == "Metric"
+    assert restored.builtinId == 42
+    assert restored.xfId == 7
+    assert restored.hidden is True
+
+
 def test_dataframe_to_rows_without_pandas_import() -> None:
     """Importing the module does not require pandas."""
     import wolfxl.utils.dataframe as dfmod

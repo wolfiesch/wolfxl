@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import ClassVar
+from xml.etree import ElementTree as ET
 
 # openpyxl's INDEXED_COLORS - 64 legacy palette entries (index 0..63).
 # Copied verbatim from openpyxl 3.1.x (MIT-licensed) so that reading a
@@ -34,8 +35,50 @@ COLOR_INDEX: tuple[str, ...] = (
 )
 
 
+def _bool_attr(value: bool | None) -> str | None:
+    if value is None:
+        return None
+    return "1" if value else "0"
+
+
+def _argb(value: Color | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, Color):
+        if value.rgb is not None:
+            raw = value.rgb
+        elif value.indexed is not None:
+            return None
+        else:
+            return None
+    else:
+        raw = str(value)
+    raw = raw.lstrip("#").upper()
+    if len(raw) == 6:
+        return f"00{raw}"
+    return raw
+
+
+class _TreeMixin:
+    tagname: ClassVar[str]
+
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002 - openpyxl signature
+        namespace: str | None = None,  # noqa: ARG002 - openpyxl signature
+    ) -> ET.Element:
+        """Serialize this style value to a compact ElementTree node."""
+        return ET.Element(tagname or self.tagname)
+
+    @classmethod
+    def from_tree(cls, node: ET.Element):  # type: ignore[no-untyped-def]
+        """Build this style value from a compact ElementTree node."""
+        return cls(**dict(node.attrib))
+
+
 @dataclass(frozen=True, init=False)
-class Color:
+class Color(_TreeMixin):
     """An Excel color.
 
     A color is identified by exactly one of three strategies: direct RGB,
@@ -132,9 +175,41 @@ class Color:
             return cls(rgb=f"FF{raw.upper()}")
         return cls(rgb=raw.upper())
 
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        if self.type == "rgb" and self.rgb is not None:
+            node.set("rgb", _argb(self.rgb) or self.rgb)
+        elif self.type == "indexed" and self.indexed is not None:
+            node.set("indexed", str(self.indexed))
+        elif self.type == "theme" and self.theme is not None:
+            node.set("theme", str(self.theme))
+        elif self.type == "auto" and self.auto is not None:
+            node.set("auto", _bool_attr(self.auto) or "0")
+        if self.tint:
+            node.set("tint", str(self.tint))
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> Color:
+        attrs = node.attrib
+        if "rgb" in attrs:
+            return cls(rgb=attrs["rgb"], tint=float(attrs.get("tint", 0.0)))
+        if "indexed" in attrs:
+            return cls(indexed=int(attrs["indexed"]), tint=float(attrs.get("tint", 0.0)))
+        if "theme" in attrs:
+            return cls(theme=int(attrs["theme"]), tint=float(attrs.get("tint", 0.0)))
+        if "auto" in attrs:
+            return cls(auto=attrs["auto"] not in {"0", "false", "False"})
+        return cls()
+
 
 @dataclass(frozen=True, init=False)
-class Font:
+class Font(_TreeMixin):
     """Text font properties."""
 
     name: str | None = None
@@ -238,9 +313,60 @@ class Font:
             return f"#{raw[2:]}"
         return f"#{raw}"
 
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        for attr, tag in ((self.bold, "b"), (self.italic, "i"), (self.strike, "strike")):
+            if attr:
+                child = ET.SubElement(node, tag)
+                child.set("val", "1")
+        if self.color is not None:
+            node.append(Color(rgb=_argb(self.color)).to_tree("color"))
+        if self.size is not None:
+            ET.SubElement(node, "sz").set("val", str(self.size))
+        if self.name is not None:
+            ET.SubElement(node, "name").set("val", self.name)
+        if self.underline is not None:
+            child = ET.SubElement(node, "u")
+            if self.underline not in {True, "single"}:
+                child.set("val", str(self.underline))
+        if self.vertAlign is not None:
+            ET.SubElement(node, "vertAlign").set("val", self.vertAlign)
+        if self.scheme is not None:
+            ET.SubElement(node, "scheme").set("val", self.scheme)
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> Font:
+        kwargs: dict[str, object] = {}
+        for child in node:
+            if child.tag == "b":
+                kwargs["bold"] = child.attrib.get("val", "1") != "0"
+            elif child.tag == "i":
+                kwargs["italic"] = child.attrib.get("val", "1") != "0"
+            elif child.tag == "strike":
+                kwargs["strike"] = child.attrib.get("val", "1") != "0"
+            elif child.tag == "color":
+                kwargs["color"] = Color.from_tree(child)
+            elif child.tag == "sz":
+                kwargs["size"] = float(child.attrib["val"])
+            elif child.tag == "name":
+                kwargs["name"] = child.attrib.get("val")
+            elif child.tag == "u":
+                kwargs["underline"] = child.attrib.get("val", "single")
+            elif child.tag == "vertAlign":
+                kwargs["vertAlign"] = child.attrib.get("val")
+            elif child.tag == "scheme":
+                kwargs["scheme"] = child.attrib.get("val")
+        return cls(**kwargs)
+
 
 @dataclass(frozen=True, init=False)
-class PatternFill:
+class PatternFill(_TreeMixin):
     """Cell fill (solid pattern only for now).
 
     Accepts both ``patternType=`` and ``fill_type=`` for openpyxl compatibility.
@@ -291,15 +417,43 @@ class PatternFill:
             return f"#{raw[2:]}"
         return f"#{raw}"
 
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        outer = ET.Element(tagname or "fill")
+        inner = ET.SubElement(outer, self.tagname)
+        if self.patternType is not None:
+            inner.set("patternType", self.patternType)
+        if self.fgColor is not None:
+            inner.append(Color(rgb=_argb(self.fgColor)).to_tree("fgColor"))
+        if self.bgColor is not None:
+            inner.append(Color(rgb=_argb(self.bgColor)).to_tree("bgColor"))
+        return outer
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> PatternFill:
+        inner = next(iter(node), node)
+        kwargs: dict[str, object] = {"patternType": inner.attrib.get("patternType")}
+        for child in inner:
+            if child.tag == "fgColor":
+                kwargs["fgColor"] = Color.from_tree(child)
+            elif child.tag == "bgColor":
+                kwargs["bgColor"] = Color.from_tree(child)
+        return cls(**kwargs)
+
 
 @dataclass(frozen=True, init=False)
-class Side:
+class Side(_TreeMixin):
     """One edge of a border."""
 
     style: str | None = None  # "thin", "medium", "thick", etc.
     color: Color | str | None = None
     namespace: ClassVar[str | None] = None
     idx_base: ClassVar[int] = 0
+    tagname: ClassVar[str] = "side"
 
     def __init__(
         self,
@@ -325,9 +479,30 @@ class Side:
             return f"#{raw[2:]}"
         return f"#{raw}"
 
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        if self.style is not None:
+            node.set("style", self.style)
+        if self.color is not None:
+            node.append(Color(rgb=_argb(self.color)).to_tree("color"))
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> Side:
+        color = None
+        for child in node:
+            if child.tag == "color":
+                color = Color.from_tree(child)
+        return cls(style=node.attrib.get("style"), color=color)
+
 
 @dataclass(frozen=True)
-class Border:
+class Border(_TreeMixin):
     """Cell borders."""
 
     left: Side = field(default_factory=Side)
@@ -356,9 +531,37 @@ class Border:
             return "down"
         return None
 
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        if self.diagonalUp:
+            node.set("diagonalUp", "1")
+        if self.diagonalDown:
+            node.set("diagonalDown", "1")
+        for name in ("left", "right", "top", "bottom", "diagonal"):
+            side = getattr(self, name)
+            if side is not None and side != Side():
+                node.append(side.to_tree(name))
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> Border:
+        kwargs: dict[str, object] = {
+            "diagonalUp": node.attrib.get("diagonalUp") == "1",
+            "diagonalDown": node.attrib.get("diagonalDown") == "1",
+        }
+        for child in node:
+            if child.tag in {"left", "right", "top", "bottom", "diagonal"}:
+                kwargs[child.tag] = Side.from_tree(child)
+        return cls(**kwargs)
+
 
 @dataclass(frozen=True, init=False)
-class Alignment:
+class Alignment(_TreeMixin):
     """Cell alignment."""
 
     horizontal: str | None = None
@@ -419,3 +622,43 @@ class Alignment:
     @property
     def shrinkToFit(self) -> bool | None:
         return self.shrink_to_fit
+
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002
+        namespace: str | None = None,  # noqa: ARG002
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        attrs = {
+            "horizontal": self.horizontal,
+            "vertical": self.vertical,
+            "wrapText": _bool_attr(self.wrap_text),
+            "textRotation": str(self.text_rotation) if self.text_rotation else None,
+            "indent": str(self.indent) if self.indent else None,
+            "relativeIndent": str(self.relativeIndent) if self.relativeIndent else None,
+            "justifyLastLine": _bool_attr(self.justifyLastLine),
+            "readingOrder": str(self.readingOrder) if self.readingOrder else None,
+            "shrinkToFit": _bool_attr(self.shrink_to_fit),
+        }
+        for key, value in attrs.items():
+            if value is not None:
+                node.set(key, value)
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> Alignment:
+        attrs = node.attrib
+        return cls(
+            horizontal=attrs.get("horizontal"),
+            vertical=attrs.get("vertical"),
+            wrapText=attrs.get("wrapText") == "1" if "wrapText" in attrs else None,
+            textRotation=int(attrs.get("textRotation", 0)),
+            indent=int(attrs.get("indent", 0)),
+            relativeIndent=int(attrs.get("relativeIndent", 0)),
+            justifyLastLine=attrs.get("justifyLastLine") == "1"
+            if "justifyLastLine" in attrs
+            else None,
+            readingOrder=float(attrs.get("readingOrder", 0.0)),
+            shrinkToFit=attrs.get("shrinkToFit") == "1" if "shrinkToFit" in attrs else None,
+        )
