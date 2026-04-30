@@ -76,7 +76,7 @@ use patcher_payload::{
     dict_to_border_spec, dict_to_format_spec, extract_bool, extract_cf_rule, extract_f64,
     extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
 };
-use patcher_save::SaveWorkspace;
+use patcher_save::{open_source_zip, SaveWorkspace};
 use patcher_workbook::{
     load_or_empty_rels, replace_first_occurrence, sheet_rels_path_for, xml_escape_attr,
 };
@@ -1563,11 +1563,7 @@ impl XlsxPatcher {
             .get(sheet)
             .cloned()
             .ok_or_else(|| PyErr::new::<PyValueError, _>(format!("no such sheet: {sheet}")))?;
-        let f = File::open(&self.file_path).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
-        })?;
-        let mut zip = ZipArchive::new(f)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+        let mut zip = open_source_zip(&self.file_path)?;
         self.ancillary
             .populate_for_sheet(&mut zip, sheet, &path)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("ancillary populate: {e}")))?;
@@ -1658,11 +1654,7 @@ impl XlsxPatcher {
             .get(sheet)
             .cloned()
             .ok_or_else(|| PyErr::new::<PyValueError, _>(format!("no such sheet: {sheet}")))?;
-        let f = File::open(&self.file_path).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
-        })?;
-        let mut zip = ZipArchive::new(f)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+        let mut zip = open_source_zip(&self.file_path)?;
         let rels_path = sheet_rels_path_for(&sheet_path);
         let rels = load_or_empty_rels(&mut zip, &rels_path)?;
         let xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
@@ -1688,11 +1680,7 @@ impl XlsxPatcher {
             return Ok(());
         }
 
-        let f = File::open(&self.file_path).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Cannot open '{}': {e}", self.file_path))
-        })?;
-        let mut zip = ZipArchive::new(f)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+        let mut zip = open_source_zip(&self.file_path)?;
 
         // Centralized part-suffix allocator (RFC-035 §5.2 / §8 risk #1).
         // Built once per save; seeded from the source ZIP's part listing

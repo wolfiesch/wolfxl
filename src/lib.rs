@@ -6,6 +6,7 @@ type PyObject = Py<PyAny>;
 mod calamine_format_helpers;
 mod calamine_styled_array_formulas;
 mod calamine_styled_backend;
+mod calamine_value_helpers;
 mod calamine_xlsb_xls_backend;
 mod native_writer_anchors;
 mod native_writer_autofilter;

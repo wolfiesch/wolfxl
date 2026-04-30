@@ -3,9 +3,18 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 
+use pyo3::exceptions::PyIOError;
+use pyo3::prelude::*;
 use zip::ZipArchive;
 
 use wolfxl_merger::SheetBlock;
+
+/// Open the source workbook as a ZIP archive with consistent PyO3 errors.
+pub(super) fn open_source_zip(file_path: &str) -> PyResult<ZipArchive<File>> {
+    let file = File::open(file_path)
+        .map_err(|e| PyErr::new::<PyIOError, _>(format!("Cannot open '{file_path}': {e}")))?;
+    ZipArchive::new(file).map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))
+}
 
 /// Mutable workspace threaded through the ordered save phases.
 ///
