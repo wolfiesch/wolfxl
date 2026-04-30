@@ -46,12 +46,41 @@ def _sheet_values(ws: object) -> list[list[object]]:
     return _trim_trailing_empty(rows)
 
 
+def _cell_style_signature(cell: object) -> dict[str, object]:
+    font = cell.font  # type: ignore[attr-defined]
+    return {
+        "style_id": cell.style_id,  # type: ignore[attr-defined]
+        "number_format": cell.number_format,  # type: ignore[attr-defined]
+        "font": {
+            "name": font.name,
+            "size": font.size,
+            "bold": bool(font.bold),
+            "italic": bool(font.italic),
+        },
+    }
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda p: p.name)
 def test_xlsb_values_match_committed_goldens(fixture: Path) -> None:
     """Native xlsb reads match committed dependency-free value sidecars."""
     wb = wolfxl.load_workbook(str(fixture), data_only=True)
     expected = json.loads(fixture.with_suffix(".golden.json").read_text())
     actual = {sheet_name: _sheet_values(wb[sheet_name]) for sheet_name in wb.sheetnames}
+    assert actual == expected
+
+
+def test_xlsb_styles_match_committed_goldens() -> None:
+    """Native xlsb style reads match the committed style sidecar."""
+    fixture = FIXTURES_DIR / "dates.xlsb"
+    expected = json.loads(fixture.with_suffix(".styles.golden.json").read_text())
+    wb = wolfxl.load_workbook(str(fixture), data_only=True)
+    actual = {
+        sheet_name: {
+            coord: _cell_style_signature(wb[sheet_name][coord])
+            for coord in cells
+        }
+        for sheet_name, cells in expected.items()
+    }
     assert actual == expected
 
 

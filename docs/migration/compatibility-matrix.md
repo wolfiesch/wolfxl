@@ -178,7 +178,7 @@ verbatim.
 | Removal of charts that survive from source workbook | Not Yet — v1.8 | RFC-050 §6 / `Worksheet.remove_chart` docstring |
 | OpenDocument (`.ods`) | Out of scope | Not on roadmap |
 | `.xlsb` / `.xls` writes | Out of scope | xlsx-only; transcribe via fresh `Workbook()` |
-| Style accessors on `.xlsb` / `.xls` reads | Not Yet | calamine doesn't surface non-xlsx styles |
+| Style accessors on `.xlsb` / `.xls` reads | Partial | Native `.xlsb` exposes read-side style metadata; `.xls` remains value-only |
 
 ## Ecosystem comparison
 

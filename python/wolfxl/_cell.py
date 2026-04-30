@@ -159,7 +159,7 @@ class Cell:
     @property
     def style_id(self) -> int:
         """Return the workbook style identifier for this cell."""
-        if self._format_dirty or self.has_style:
+        if self._format_dirty:
             return 1
         return self._read_style_id()
 
@@ -250,10 +250,9 @@ class Cell:
         value = self.value
         if hasattr(value, "year") and hasattr(value, "month"):
             return True
-        # Sprint Κ Pod-β: xlsb / xls workbooks don't expose number_format
-        # because the binary backends don't carry per-cell style records.
-        # Fall back to the value-type check above and return False rather
-        # than raise out of an introspection accessor.
+        # Binary formats may not expose style metadata. Fall back to the
+        # value-type check above rather than raise from an introspection
+        # accessor.
         wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
         if wb_format != "xlsx":
             return False

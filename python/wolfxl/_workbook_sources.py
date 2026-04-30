@@ -353,9 +353,10 @@ def from_xlsb(
 
     rust_cls = getattr(_rust, "NativeXlsbBook", None)
     if rust_cls is None:
-        rust_cls = getattr(_rust, "CalamineXlsbBook", None)
-    if rust_cls is None:
-        raise NotImplementedError(".xlsb reads require a Rust workbook backend.")
+        raise NotImplementedError(
+            ".xlsb reads require the NativeXlsbBook backend from the "
+            "wolfxl Rust extension."
+        )
 
     if data is not None:
         rust_book, tmp_path = _open_binary_bytes(

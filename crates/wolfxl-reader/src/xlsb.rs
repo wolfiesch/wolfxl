@@ -7,11 +7,11 @@ use wolfxl_rels::{RelId, RelsGraph};
 use zip::ZipArchive;
 
 use crate::{
-    row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, BorderSide, Cell, CellDataType,
-    CellValue, ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo,
-    FreezePane, HeaderFooterInfo, Hyperlink, ImageInfo, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
+    row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
+    ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
+    HeaderFooterInfo, Hyperlink, ImageInfo, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
+    SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables,
+    Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -511,18 +511,8 @@ fn parse_fill(payload: &[u8]) -> FillInfo {
 }
 
 fn parse_border(payload: &[u8]) -> BorderInfo {
-    let mut border = BorderInfo::default();
-    if payload.iter().any(|b| *b != 0) {
-        let side = Some(BorderSide {
-            style: "thin".to_string(),
-            color: "#000000".to_string(),
-        });
-        border.left = side.clone();
-        border.right = side.clone();
-        border.top = side.clone();
-        border.bottom = side;
-    }
-    border
+    let _ = payload;
+    BorderInfo::default()
 }
 
 fn parse_binary_alignment(payload: &[u8]) -> Option<AlignmentInfo> {
