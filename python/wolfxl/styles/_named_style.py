@@ -42,6 +42,10 @@ class NamedStyle:
             "xf_id": self.xfId,
         }
 
+    def bind(self, workbook: Any) -> None:
+        """Bind this named style to a workbook."""
+        self._wb = workbook
+
 
 def _style_to_dict(value: Any) -> dict[str, Any] | None:
     if value is None:

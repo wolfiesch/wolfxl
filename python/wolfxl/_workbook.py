@@ -384,17 +384,27 @@ class Workbook:
 
     @property
     def named_styles(self) -> list[Any]:
-        """Return workbook named styles.
-
-        Named-style objects are not exposed through this compatibility
-        property yet, so this returns an empty list.
-        """
-        return []
+        """Return workbook named-style names."""
+        return self._named_style_names()
 
     @property
     def style_names(self) -> list[str]:
         """Return names for workbook named styles."""
-        return ["Normal"]
+        return self._named_style_names()
+
+    def _named_style_names(self) -> list[str]:
+        """Return openpyxl-shaped named-style names."""
+        return ["Normal"] + [
+            style.name for style in self._named_style_registry().user_styles()
+        ]
+
+    def _named_style_registry(self) -> Any:
+        """Return the lazily seeded named-style registry."""
+        if getattr(self, "_named_styles_registry", None) is None:
+            from wolfxl.styles._named_style import _NamedStyleList
+
+            self._named_styles_registry = _NamedStyleList()
+        return self._named_styles_registry
 
     def __getitem__(self, name: str) -> Worksheet:
         """Return a worksheet by title."""
@@ -414,9 +424,17 @@ class Workbook:
         """Look up a sheet by name. Deprecated in openpyxl but still widely used."""
         return self[name]
 
+    def get_sheet_names(self) -> list[str]:
+        """Deprecated openpyxl alias for :attr:`sheetnames`."""
+        return self.sheetnames
+
     def index(self, worksheet: Worksheet) -> int:
         """Return the 0-based index of ``worksheet`` in sheet order."""
         return self._sheet_names.index(worksheet.title)
+
+    def get_index(self, worksheet: Worksheet) -> int:
+        """Deprecated openpyxl alias for :meth:`index`."""
+        return self.index(worksheet)
 
     def remove(self, worksheet: Worksheet) -> None:
         """Remove a worksheet from the workbook (write mode only).
@@ -488,6 +506,35 @@ class Workbook:
         through to the Rust writer in write mode.
         """
         return _workbook_metadata.get_defined_names(self)
+
+    def create_named_range(
+        self,
+        name: str,
+        worksheet: Worksheet | None = None,
+        value: str | None = None,
+        scope: Any = None,  # noqa: ARG002 - openpyxl deprecated signature
+    ) -> None:
+        """Create a deprecated openpyxl-style defined name."""
+        from wolfxl.utils import quote_sheetname
+        from wolfxl.workbook.defined_name import DefinedName
+
+        if worksheet is not None:
+            value = f"{quote_sheetname(worksheet.title)}!{value}"
+        self.defined_names[name] = DefinedName(name=name, value=value)
+
+    def add_named_style(self, style: Any) -> None:
+        """Register a named style on the workbook."""
+        self._named_style_registry().append(style)
+        if hasattr(style, "bind"):
+            style.bind(self)
+
+    def create_chartsheet(self, title: str | None = None, index: int | None = None) -> Any:
+        """Raise clearly for chart-sheet creation, which WolfXL does not write yet."""
+        raise NotImplementedError(
+            "Workbook.create_chartsheet is not yet supported by wolfxl. "
+            "Existing chartsheets are preserved where possible, but creating "
+            "new chart-sheet parts requires chart-sheet writer support."
+        )
 
     @property
     def workbook_properties(self) -> Any:

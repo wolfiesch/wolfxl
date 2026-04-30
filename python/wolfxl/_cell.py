@@ -117,6 +117,11 @@ class Cell:
         return self._col
 
     @property
+    def col_idx(self) -> int:
+        """Return this cell's 1-based column index."""
+        return self._col
+
+    @property
     def column_letter(self) -> str:
         """Column letter (e.g. ``"A"``, ``"AA"``) — openpyxl alias."""
         return _column_letter(self._col)
@@ -126,6 +131,38 @@ class Cell:
         """The containing Worksheet — openpyxl alias."""
         return self._ws
 
+    @property
+    def base_date(self) -> Any:
+        """Workbook epoch used for Excel serial date conversion."""
+        return self._ws._workbook.excel_base_date  # noqa: SLF001
+
+    @property
+    def encoding(self) -> str:
+        """Cell text encoding marker for openpyxl compatibility."""
+        return "utf-8"
+
+    @property
+    def internal_value(self) -> Any:
+        """Internal cell value; WolfXL stores the openpyxl-facing value."""
+        return self.value
+
+    @property
+    def pivotButton(self) -> bool:  # noqa: N802 - openpyxl public alias
+        """Whether the cell displays a pivot-table field button."""
+        return False
+
+    @property
+    def quotePrefix(self) -> bool:  # noqa: N802 - openpyxl public alias
+        """Whether the cell has Excel's quote-prefix flag."""
+        return False
+
+    @property
+    def style_id(self) -> int:
+        """Return the workbook style identifier for this cell."""
+        if self._format_dirty or self.has_style:
+            return 1
+        return self._read_style_id()
+
     def offset(self, row: int = 0, column: int = 0) -> Cell:
         """Return the cell ``row`` rows down and ``column`` columns right.
 
@@ -134,6 +171,24 @@ class Cell:
         1-based address space.
         """
         return self._ws._get_or_create_cell(self._row + row, self._col + column)  # noqa: SLF001
+
+    def check_string(self, value: Any) -> str | None:
+        """Validate a worksheet string using openpyxl's public helper rules."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value, self.encoding)
+        value = str(value)[:32767]
+        if ILLEGAL_CHARACTERS_RE.search(value):
+            raise IllegalCharacterError(f"{value} cannot be used in worksheets.")
+        return value
+
+    def check_error(self, value: Any) -> str:
+        """Convert an error-like value to openpyxl's string representation."""
+        try:
+            return str(value)
+        except UnicodeDecodeError:
+            return "#N/A"
 
     @property
     def data_type(self) -> str:
@@ -754,6 +809,30 @@ class Cell:
         if isinstance(payload, dict):
             return payload.get("number_format")
         return None
+
+    def _read_style_id(self) -> int:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return 0
+        try:
+            records = wb._rust_reader.read_sheet_records(  # noqa: SLF001
+                self._ws.title,
+                f"{self.coordinate}:{self.coordinate}",
+                getattr(wb, "_data_only", False),
+                True,
+                True,
+                True,
+                False,
+                True,
+                False,
+                False,
+            )
+        except AttributeError:
+            return 0
+        for record in records:
+            style_id = record.get("style_id")
+            return int(style_id or 0)
+        return 0
 
     def __repr__(self) -> str:
         """Return a compact debug representation for this cell."""
