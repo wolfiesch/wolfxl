@@ -8,6 +8,7 @@ default calamine-backed path.
 from __future__ import annotations
 
 import datetime as dt
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,8 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["B2"] = "=B1*2"
     ws["A3"] = dt.datetime(2024, 1, 15, 12, 30)
     ws["B3"] = dt.date(2024, 6, 1)
+    ws["D1"] = "Anchor"
+    ws["D1"].number_format = "#,##0"
     ws.merge_cells("D1:E1")
     ws["A5"] = "External"
     ws["A5"].hyperlink = Hyperlink(
@@ -80,6 +83,22 @@ def _make_basic_xlsx(path: Path) -> None:
     ws.freeze_panes = "B2"
     wb.save(path)
     wb.close()
+    _inject_merged_subordinate_style(path)
+
+
+def _inject_merged_subordinate_style(path: Path) -> None:
+    """Add a styled blank subordinate cell to the merged D1:E1 range."""
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    sheet_name = "xl/worksheets/sheet1.xml"
+    sheet_xml = entries[sheet_name].decode()
+    if '<c r="E1"' in sheet_xml:
+        return
+    sheet_xml = sheet_xml.replace("</row>", '<c r="E1" s="1"/></row>', 1)
+    entries[sheet_name] = sheet_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
 
 
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,8 +162,15 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert validations[0].sqref == "C2:C6"
         assert ws.freeze_panes == "B2"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
-        records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
+        assert ws["D1"].number_format == "#,##0"
+        assert ws["E1"].number_format is None
+        assert ws["E1"].font.name is None
+        records = {
+            record["coordinate"]: record
+            for record in ws.cell_records(include_format=True, include_empty=True)
+        }
         assert records["B1"]["number_format"] == "#,##0.00"
+        assert "number_format" not in records["E1"]
         assert records["A3"]["data_type"] == "datetime"
     finally:
         wb.close()
@@ -163,7 +189,7 @@ def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.Monk
             "Label",
             42,
             True,
-            None,
+            "Anchor",
             None,
         )
         assert wb["Data"]["A5"].hyperlink.target == "https://example.com/report"

@@ -210,6 +210,7 @@ impl NativeXlsxBook {
     ) -> PyResult<PyObject> {
         let window = self.resolve_window(sheet, cell_range)?;
         let cells = self.ensure_sheet(sheet)?.cells.clone();
+        let merged_ranges = self.ensure_sheet(sheet)?.merged_ranges.clone();
         let out = PyList::empty(py);
         for cell in &cells {
             if let Some((min_row, min_col, max_row, max_col)) = window {
@@ -227,7 +228,12 @@ impl NativeXlsxBook {
             let record = PyDict::new(py);
             record.set_item("row", cell.row)?;
             record.set_item("column", cell.col)?;
-            let number_format = self.number_format_for_cell(cell);
+            let is_merged_subordinate = is_merged_subordinate(&merged_ranges, cell.row, cell.col);
+            let number_format = if is_merged_subordinate {
+                None
+            } else {
+                self.number_format_for_cell(cell)
+            };
             record.set_item(
                 "value",
                 cell_to_plain(py, cell, data_only, number_format, self.book.date1904())?,
@@ -242,7 +248,7 @@ impl NativeXlsxBook {
             if include_style_id {
                 record.set_item("style_id", cell.style_id)?;
             }
-            if let Some(number_format) = self.number_format_for_cell(cell) {
+            if let Some(number_format) = number_format {
                 record.set_item("number_format", number_format)?;
             }
             if let Some(formula) = &cell.formula {
@@ -585,6 +591,9 @@ impl NativeXlsxBook {
         let col = col0 + 1;
         let style_id = {
             let data = self.ensure_sheet(sheet)?;
+            if is_merged_subordinate(&data.merged_ranges, row, col) {
+                return Ok(PyDict::new(py).into());
+            }
             data.cells
                 .iter()
                 .find(|c| c.row == row && c.col == col)
@@ -622,6 +631,9 @@ impl NativeXlsxBook {
         let col = col0 + 1;
         let style_id = {
             let data = self.ensure_sheet(sheet)?;
+            if is_merged_subordinate(&data.merged_ranges, row, col) {
+                return Ok(PyDict::new(py).into());
+            }
             data.cells
                 .iter()
                 .find(|c| c.row == row && c.col == col)
@@ -944,6 +956,18 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
         }
         None => *bounds = Some((row, col, row, col)),
     }
+}
+
+fn is_merged_subordinate(merged_ranges: &[String], row: u32, col: u32) -> bool {
+    merged_ranges.iter().any(|range| {
+        parse_range_1based(range).is_some_and(|(min_row, min_col, max_row, max_col)| {
+            row >= min_row
+                && row <= max_row
+                && col >= min_col
+                && col <= max_col
+                && !(row == min_row && col == min_col)
+        })
+    })
 }
 
 fn col_letter_to_index_1based(col: &str) -> PyResult<u32> {
