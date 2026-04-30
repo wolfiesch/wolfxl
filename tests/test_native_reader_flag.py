@@ -679,6 +679,17 @@ def test_native_reader_loads_workbook_calc_properties(
     try:
         properties = wb.workbook_properties
         assert properties.date1904 is True
+        from wolfxl.utils.datetime import CALENDAR_MAC_1904
+
+        assert wb.epoch == CALENDAR_MAC_1904
+        assert wb.excel_base_date == CALENDAR_MAC_1904
+        assert wb.iso_dates is False
+        assert wb.template is False
+        assert wb.encoding == "utf-8"
+        assert (
+            wb.mime_type
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+        )
         assert properties.dateCompatibility is False
         assert properties.showObjects == "none"
         assert properties.filterPrivacy is True

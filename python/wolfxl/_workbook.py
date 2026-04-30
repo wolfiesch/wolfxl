@@ -49,6 +49,9 @@ class Workbook:
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
         self._data_only = False
+        self._iso_dates = False
+        self.template = False
+        self.encoding = "utf-8"
         # Flipped to True via load_workbook(rich_text=True).
         self._rich_text: bool = False
         self._evaluator: Any = None
@@ -278,6 +281,51 @@ class Workbook:
         Python chart-sheet objects through this compatibility property yet.
         """
         return []
+
+    @property
+    def epoch(self) -> Any:
+        """Workbook date epoch, matching openpyxl's public property."""
+        from wolfxl.utils.datetime import CALENDAR_MAC_1904, CALENDAR_WINDOWS_1900
+
+        return (
+            CALENDAR_MAC_1904
+            if self.workbook_properties.date1904
+            else CALENDAR_WINDOWS_1900
+        )
+
+    @epoch.setter
+    def epoch(self, value: Any) -> None:
+        """Set the workbook date epoch."""
+        from wolfxl.utils.datetime import CALENDAR_MAC_1904, CALENDAR_WINDOWS_1900
+
+        if value == CALENDAR_MAC_1904:
+            self.workbook_properties.date1904 = True
+        elif value == CALENDAR_WINDOWS_1900:
+            self.workbook_properties.date1904 = False
+        else:
+            raise ValueError("epoch must be CALENDAR_WINDOWS_1900 or CALENDAR_MAC_1904")
+
+    @property
+    def excel_base_date(self) -> Any:
+        """Compatibility alias for :attr:`epoch`."""
+        return self.epoch
+
+    @property
+    def iso_dates(self) -> bool:
+        """Whether datetime values should be stored as ISO strings."""
+        return bool(getattr(self, "_iso_dates", False))
+
+    @iso_dates.setter
+    def iso_dates(self, value: bool) -> None:
+        """Set ISO-date serialization preference."""
+        self._iso_dates = bool(value)
+
+    @property
+    def mime_type(self) -> str:
+        """Openpyxl-compatible workbook MIME type."""
+        if getattr(self, "template", False):
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
 
     @property
     def named_styles(self) -> list[Any]:

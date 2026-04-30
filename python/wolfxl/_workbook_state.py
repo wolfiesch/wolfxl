@@ -92,6 +92,9 @@ def build_xlsx_wb(
     wb._rust_patcher = rust_patcher
     wb._rust_reader = rust_reader
     wb._data_only = data_only
+    wb._iso_dates = False
+    wb.template = False
+    wb.encoding = "utf-8"
     wb._rich_text = False
     wb._evaluator = None
     wb._read_only = read_only
@@ -116,6 +119,9 @@ def build_xlsb_xls_wb(
     wb._rust_patcher = None
     wb._rust_reader = rust_book
     wb._data_only = data_only
+    wb._iso_dates = False
+    wb.template = False
+    wb.encoding = "utf-8"
     wb._rich_text = False
     wb._evaluator = None
     wb._read_only = False
