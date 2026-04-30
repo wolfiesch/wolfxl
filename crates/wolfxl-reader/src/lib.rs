@@ -128,6 +128,8 @@ pub struct WorksheetData {
     pub hyperlinks: Vec<Hyperlink>,
     pub freeze_panes: Option<FreezePane>,
     pub comments: Vec<Comment>,
+    pub row_heights: HashMap<u32, RowHeight>,
+    pub column_widths: Vec<ColumnWidth>,
     pub cells: Vec<Cell>,
 }
 
@@ -165,6 +167,22 @@ pub struct Comment {
     pub text: String,
     pub author: String,
     pub threaded: bool,
+}
+
+/// Row dimension metadata from worksheet XML.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowHeight {
+    pub height: f64,
+    pub custom_height: bool,
+}
+
+/// Column dimension metadata from worksheet XML.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColumnWidth {
+    pub min: u32,
+    pub max: u32,
+    pub width: f64,
+    pub custom_width: bool,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -533,6 +551,8 @@ fn parse_worksheet(
     let mut merged_ranges = Vec::new();
     let mut hyperlink_nodes = Vec::new();
     let mut freeze_panes = None;
+    let mut row_heights = HashMap::new();
+    let mut column_widths = Vec::new();
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
@@ -559,6 +579,9 @@ fn parse_worksheet(
                 }
                 b"row" => {
                     row_index = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
+                    if let Some((row, height)) = parse_row_height(&e, row_index) {
+                        row_heights.insert(row, height);
+                    }
                 }
                 b"c" => {
                     current = Some(CellBuilder::from_start(&e, row_index));
@@ -576,6 +599,11 @@ fn parse_worksheet(
                 _ => {}
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"col" => {
+                    if let Some(width) = parse_column_width(&e) {
+                        column_widths.push(width);
+                    }
+                }
                 b"dimension" => {
                     dimension = attr_value(&e, b"ref");
                 }
@@ -595,6 +623,12 @@ fn parse_worksheet(
                 b"c" => {
                     let builder = CellBuilder::from_start(&e, row_index);
                     cells.push(builder.finish(shared_strings)?);
+                }
+                b"row" => {
+                    let row = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
+                    if let Some((row, height)) = parse_row_height(&e, row) {
+                        row_heights.insert(row, height);
+                    }
                 }
                 _ => {}
             },
@@ -634,7 +668,30 @@ fn parse_worksheet(
         hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         freeze_panes,
         comments,
+        row_heights,
+        column_widths,
         cells,
+    })
+}
+
+fn parse_row_height(e: &BytesStart<'_>, row: Option<u32>) -> Option<(u32, RowHeight)> {
+    let row = row?;
+    let height = attr_value(e, b"ht")?.parse::<f64>().ok()?;
+    Some((
+        row,
+        RowHeight {
+            height,
+            custom_height: attr_truthy(attr_value(e, b"customHeight").as_deref()),
+        },
+    ))
+}
+
+fn parse_column_width(e: &BytesStart<'_>) -> Option<ColumnWidth> {
+    Some(ColumnWidth {
+        min: attr_value(e, b"min")?.parse::<u32>().ok()?,
+        max: attr_value(e, b"max")?.parse::<u32>().ok()?,
+        width: attr_value(e, b"width")?.parse::<f64>().ok()?,
+        custom_width: attr_truthy(attr_value(e, b"customWidth").as_deref()),
     })
 }
 
@@ -1092,14 +1149,14 @@ mod tests {
     fn parses_sheet_values_formulas_and_types() {
         let xml = r#"<worksheet><dimension ref="A1:D2"/><sheetViews><sheetView>
             <pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/>
-        </sheetView></sheetViews><sheetData>
+        </sheetView></sheetViews><cols><col min="2" max="3" width="18.5" customWidth="1"/></cols><sheetData>
             <row r="1">
                 <c r="A1" t="s"><v>0</v></c>
                 <c r="B1"><v>42</v></c>
                 <c r="C1" t="b"><v>1</v></c>
                 <c r="D1"><f>SUM(B1:B1)</f><v>42</v></c>
             </row>
-            <row r="2"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
+            <row r="2" ht="24" customHeight="1"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
         </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells></worksheet>"#;
         let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new())
             .expect("parse worksheet");
@@ -1114,6 +1171,22 @@ mod tests {
                 y_split: Some(1),
                 active_pane: Some("bottomRight".to_string()),
             })
+        );
+        assert_eq!(
+            sheet.row_heights.get(&2),
+            Some(&RowHeight {
+                height: 24.0,
+                custom_height: true,
+            })
+        );
+        assert_eq!(
+            sheet.column_widths,
+            vec![ColumnWidth {
+                min: 2,
+                max: 3,
+                width: 18.5,
+                custom_width: true,
+            }]
         );
         assert_eq!(
             sheet.cells[0].value,

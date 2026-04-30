@@ -377,12 +377,26 @@ impl NativeXlsxBook {
         Ok(PyDict::new(py).into())
     }
 
-    pub fn read_row_height(&self, _sheet: &str, _row: i64) -> Option<f64> {
-        None
+    pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
+        if row < 1 {
+            return Ok(None);
+        }
+        Ok(self
+            .ensure_sheet(sheet)?
+            .row_heights
+            .get(&(row as u32))
+            .filter(|height| height.custom_height)
+            .map(|height| height.height))
     }
 
-    pub fn read_column_width(&self, _sheet: &str, _col_letter: &str) -> Option<f64> {
-        None
+    pub fn read_column_width(&mut self, sheet: &str, col_letter: &str) -> PyResult<Option<f64>> {
+        let col = col_letter_to_index_1based(col_letter)?;
+        Ok(self
+            .ensure_sheet(sheet)?
+            .column_widths
+            .iter()
+            .find(|width| width.custom_width && col >= width.min && col <= width.max)
+            .map(|width| strip_excel_padding(width.width)))
     }
 
     pub fn read_cell_array_formula(&self, py: Python<'_>, _sheet: &str, _a1: &str) -> PyObject {
@@ -610,6 +624,46 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
         }
         None => *bounds = Some((row, col, row, col)),
     }
+}
+
+fn col_letter_to_index_1based(col: &str) -> PyResult<u32> {
+    let mut idx = 0u32;
+    for ch in col.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Invalid column letter: {col}"
+            )));
+        }
+        idx = idx
+            .checked_mul(26)
+            .and_then(|value| value.checked_add((ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32))
+            .ok_or_else(|| {
+                PyErr::new::<PyValueError, _>(format!("Invalid column letter: {col}"))
+            })?;
+    }
+    if idx == 0 {
+        return Err(PyErr::new::<PyValueError, _>(format!(
+            "Invalid column letter: {col}"
+        )));
+    }
+    Ok(idx)
+}
+
+fn strip_excel_padding(raw: f64) -> f64 {
+    const CALIBRI_WIDTH_PADDING: f64 = 0.83203125;
+    const ALT_WIDTH_PADDING: f64 = 0.7109375;
+    const WIDTH_TOLERANCE: f64 = 0.0005;
+
+    let frac = raw % 1.0;
+    for padding in [CALIBRI_WIDTH_PADDING, ALT_WIDTH_PADDING] {
+        if (frac - padding).abs() < WIDTH_TOLERANCE {
+            let adjusted = raw - padding;
+            if adjusted >= 0.0 {
+                return (adjusted * 10000.0).round() / 10000.0;
+            }
+        }
+    }
+    (raw * 10000.0).round() / 10000.0
 }
 
 fn is_date_format(format: Option<&str>) -> bool {

@@ -38,6 +38,8 @@ def _make_shadow_xlsx(path: Path) -> None:
     ws["B5"].hyperlink = Hyperlink(ref="B5", location="Other!A1", display="Other")
     ws["A6"] = "note"
     ws["A6"].comment = openpyxl.comments.Comment("Shadow note", "Wolf")
+    ws.row_dimensions[6].height = 24
+    ws.column_dimensions["C"].width = 18
     ws.merge_cells("D1:E1")
     ws.freeze_panes = "B2"
 
@@ -82,6 +84,8 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "hyperlinks": hyperlinks,
             "comments": comments,
             "freeze_panes": ws.freeze_panes,
+            "row_height": ws.row_dimensions[6].height,
+            "column_width": ws.column_dimensions["C"].width,
         }
     return out
 
