@@ -21,6 +21,7 @@ pub mod patcher_drawing;
 pub mod patcher_models;
 pub mod patcher_payload;
 pub mod patcher_pivot;
+mod patcher_save;
 pub mod patcher_sheet_blocks;
 pub mod patcher_sheet_copy;
 pub mod patcher_structural;
@@ -75,6 +76,7 @@ use patcher_payload::{
     dict_to_border_spec, dict_to_format_spec, extract_bool, extract_cf_rule, extract_f64,
     extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
 };
+use patcher_save::SaveWorkspace;
 use patcher_workbook::{
     load_or_empty_rels, replace_first_occurrence, sheet_rels_path_for, xml_escape_attr,
 };
@@ -1678,30 +1680,6 @@ impl XlsxPatcher {
 // ---------------------------------------------------------------------------
 // Save implementation
 // ---------------------------------------------------------------------------
-
-struct SaveWorkspace {
-    file_patches: HashMap<String, Vec<u8>>,
-    part_id_allocator: wolfxl_rels::PartIdAllocator,
-    cloned_table_names: HashSet<String>,
-    local_blocks: HashMap<String, Vec<SheetBlock>>,
-}
-
-impl SaveWorkspace {
-    fn new(zip: &mut ZipArchive<File>, queued_blocks: &HashMap<String, Vec<SheetBlock>>) -> Self {
-        let names: Vec<String> = (0..zip.len())
-            .filter_map(|i| zip.by_index(i).ok().map(|e| e.name().to_string()))
-            .collect();
-
-        Self {
-            file_patches: HashMap::new(),
-            part_id_allocator: wolfxl_rels::PartIdAllocator::from_zip_parts(
-                names.iter().map(|s| s.as_str()),
-            ),
-            cloned_table_names: HashSet::new(),
-            local_blocks: queued_blocks.clone(),
-        }
-    }
-}
 
 impl XlsxPatcher {
     fn do_save(&mut self, output_path: &str) -> PyResult<()> {
