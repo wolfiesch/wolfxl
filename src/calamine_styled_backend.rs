@@ -431,6 +431,24 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
     }
 }
 
+fn one_based_bound_to_zero(value: Option<u32>) -> Option<u32> {
+    value.map(|v| v.saturating_sub(1))
+}
+
+fn cell_within_sparse_bounds(
+    row: u32,
+    col: u32,
+    min_row: Option<u32>,
+    max_row: Option<u32>,
+    min_col: Option<u32>,
+    max_col: Option<u32>,
+) -> bool {
+    min_row.is_none_or(|bound| row >= bound)
+        && max_row.is_none_or(|bound| row <= bound)
+        && min_col.is_none_or(|bound| col >= bound)
+        && max_col.is_none_or(|bound| col <= bound)
+}
+
 fn ooxml_attr_truthy(value: Option<&str>) -> bool {
     matches!(value, Some(v) if v != "0" && !v.eq_ignore_ascii_case("false"))
 }
@@ -1325,6 +1343,10 @@ impl CalamineStyledBook {
         include_extended_format = true,
         include_cached_formula_value = false,
         include_number_format = false,
+        sparse_min_row = None,
+        sparse_max_row = None,
+        sparse_min_col = None,
+        sparse_max_col = None,
     ))]
     pub fn read_sheet_records(
         &mut self,
@@ -1340,6 +1362,10 @@ impl CalamineStyledBook {
         include_extended_format: bool,
         include_cached_formula_value: bool,
         include_number_format: bool,
+        sparse_min_row: Option<u32>,
+        sparse_max_row: Option<u32>,
+        sparse_min_col: Option<u32>,
+        sparse_max_col: Option<u32>,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         if include_format {
@@ -1378,6 +1404,10 @@ impl CalamineStyledBook {
 
         let records = PyList::empty(py);
         if cell_range.is_none() && !include_empty {
+            let sparse_min_row = one_based_bound_to_zero(sparse_min_row);
+            let sparse_max_row = one_based_bound_to_zero(sparse_max_row);
+            let sparse_min_col = one_based_bound_to_zero(sparse_min_col);
+            let sparse_max_col = one_based_bound_to_zero(sparse_max_col);
             let start = self
                 .range_cache
                 .get(sheet)
@@ -1389,12 +1419,35 @@ impl CalamineStyledBook {
                 for (rel_row, rel_col, value) in range.used_cells() {
                     let row = start.0 + rel_row as u32;
                     let col = start.1 + rel_col as u32;
+                    if sparse_max_row.is_some_and(|bound| row > bound) {
+                        break;
+                    }
+                    if !cell_within_sparse_bounds(
+                        row,
+                        col,
+                        sparse_min_row,
+                        sparse_max_row,
+                        sparse_min_col,
+                        sparse_max_col,
+                    ) {
+                        continue;
+                    }
                     emitted.insert((row, col));
                     cells.push((row, col, Some(value.clone())));
                 }
             }
             if let Some(formulas) = self.formula_map_cache.get(sheet) {
                 for &(row, col) in formulas.keys() {
+                    if !cell_within_sparse_bounds(
+                        row,
+                        col,
+                        sparse_min_row,
+                        sparse_max_row,
+                        sparse_min_col,
+                        sparse_max_col,
+                    ) {
+                        continue;
+                    }
                     if !emitted.contains(&(row, col)) {
                         cells.push((row, col, None));
                     }
@@ -2294,9 +2347,7 @@ impl CalamineStyledBook {
             )?;
         } else if include_number_format {
             let style_id = self.record_style_id(sheet, row, col);
-            self.populate_record_number_format_for_style_id(
-                sheet, row, col, style_id, &record,
-            )?;
+            self.populate_record_number_format_for_style_id(sheet, row, col, style_id, &record)?;
         }
 
         records.append(record)?;
