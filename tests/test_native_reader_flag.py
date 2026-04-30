@@ -24,6 +24,7 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["C1"] = True
     ws["A2"] = "Formula"
     ws["B2"] = "=B1*2"
+    ws.merge_cells("D1:E1")
     wb.save(path)
     wb.close()
 
@@ -42,6 +43,7 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["B1"].value == 42
         assert ws["C1"].value is True
         assert ws["B2"].value == "=B1*2"
+        assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
     finally:
         wb.close()
 

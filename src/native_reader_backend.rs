@@ -248,8 +248,8 @@ impl NativeXlsxBook {
         Ok(out.into())
     }
 
-    pub fn read_merged_ranges(&self, _sheet: &str) -> Vec<String> {
-        Vec::new()
+    pub fn read_merged_ranges(&mut self, sheet: &str) -> PyResult<Vec<String>> {
+        Ok(self.ensure_sheet(sheet)?.merged_ranges.clone())
     }
 
     pub fn read_sheet_visibility(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {

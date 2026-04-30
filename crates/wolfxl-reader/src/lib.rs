@@ -123,6 +123,7 @@ pub enum CellDataType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorksheetData {
     pub dimension: Option<String>,
+    pub merged_ranges: Vec<String>,
     pub cells: Vec<Cell>,
 }
 
@@ -324,6 +325,7 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut dimension = None;
+    let mut merged_ranges = Vec::new();
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
@@ -334,6 +336,11 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
                 b"dimension" => {
                     dimension = attr_value(&e, b"ref");
+                }
+                b"mergeCell" => {
+                    if let Some(range) = attr_value(&e, b"ref") {
+                        merged_ranges.push(range);
+                    }
                 }
                 b"row" => {
                     row_index = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
@@ -356,6 +363,11 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"dimension" => {
                     dimension = attr_value(&e, b"ref");
+                }
+                b"mergeCell" => {
+                    if let Some(range) = attr_value(&e, b"ref") {
+                        merged_ranges.push(range);
+                    }
                 }
                 b"c" => {
                     let builder = CellBuilder::from_start(&e, row_index);
@@ -393,7 +405,11 @@ fn parse_worksheet(xml: &str, shared_strings: &[String]) -> Result<WorksheetData
         buf.clear();
     }
 
-    Ok(WorksheetData { dimension, cells })
+    Ok(WorksheetData {
+        dimension,
+        merged_ranges,
+        cells,
+    })
 }
 
 #[derive(Debug)]
@@ -657,9 +673,10 @@ mod tests {
                 <c r="D1"><f>SUM(B1:B1)</f><v>42</v></c>
             </row>
             <row r="2"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
-        </sheetData></worksheet>"#;
+        </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells></worksheet>"#;
         let sheet = parse_worksheet(xml, &["Shared".to_string()]).expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
+        assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
         assert_eq!(
             sheet.cells[0].value,
             CellValue::String("Shared".to_string())
