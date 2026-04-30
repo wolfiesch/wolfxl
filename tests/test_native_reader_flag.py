@@ -619,7 +619,16 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A6"].comment.height == 79
         assert ws["A6"].comment.width == 144
         assert ws.row_dimensions[6].height == 24
+        assert ws.row_dimensions[6].index == 6
+        assert ws.row_dimensions[6].r == 6
+        assert ws.row_dimensions[6].ht == 24
+        assert ws.row_dimensions[6].customHeight is True
         assert ws.column_dimensions["C"].width == 18
+        assert ws.column_dimensions["C"].index == "C"
+        assert ws.column_dimensions["C"].customWidth is True
+        assert ws.column_dimensions["C"].min == 3
+        assert ws.column_dimensions["C"].max == 3
+        assert ws.column_dimensions["C"].range == "C:C"
         validations = list(ws.data_validations)
         assert len(validations) == 1
         assert validations[0].type == "list"
