@@ -119,6 +119,26 @@ class Worksheet:
     workbook that owns it.
     """
 
+    BREAK_NONE = 0
+    BREAK_ROW = 1
+    BREAK_COLUMN = 2
+    ORIENTATION_LANDSCAPE = "landscape"
+    ORIENTATION_PORTRAIT = "portrait"
+    PAPERSIZE_LETTER = "1"
+    PAPERSIZE_LETTER_SMALL = "2"
+    PAPERSIZE_TABLOID = "3"
+    PAPERSIZE_LEDGER = "4"
+    PAPERSIZE_LEGAL = "5"
+    PAPERSIZE_STATEMENT = "6"
+    PAPERSIZE_EXECUTIVE = "7"
+    PAPERSIZE_A3 = "8"
+    PAPERSIZE_A4 = "9"
+    PAPERSIZE_A4_SMALL = "10"
+    PAPERSIZE_A5 = "11"
+    SHEETSTATE_VISIBLE = "visible"
+    SHEETSTATE_HIDDEN = "hidden"
+    SHEETSTATE_VERYHIDDEN = "veryHidden"
+
     __slots__ = (
         "_workbook", "_title", "_cells", "_dirty", "_dimensions",
         "_max_col_idx", "_next_append_row",
@@ -247,6 +267,36 @@ class Worksheet:
         return self.header_footer
 
     @property
+    def oddHeader(self) -> Any:  # noqa: N802 - openpyxl alias
+        """Odd-page header alias."""
+        return self.header_footer.odd_header
+
+    @property
+    def oddFooter(self) -> Any:  # noqa: N802 - openpyxl alias
+        """Odd-page footer alias."""
+        return self.header_footer.odd_footer
+
+    @property
+    def evenHeader(self) -> Any:  # noqa: N802 - openpyxl alias
+        """Even-page header alias."""
+        return self.header_footer.even_header
+
+    @property
+    def evenFooter(self) -> Any:  # noqa: N802 - openpyxl alias
+        """Even-page footer alias."""
+        return self.header_footer.even_footer
+
+    @property
+    def firstHeader(self) -> Any:  # noqa: N802 - openpyxl alias
+        """First-page header alias."""
+        return self.header_footer.first_header
+
+    @property
+    def firstFooter(self) -> Any:  # noqa: N802 - openpyxl alias
+        """First-page footer alias."""
+        return self.header_footer.first_footer
+
+    @property
     def header_footer(self) -> Any:
         """Return the worksheet header/footer settings, creating them lazily."""
         return get_header_footer(self)
@@ -280,6 +330,92 @@ class Worksheet:
                 serializer.
         """
         self._sheet_view = value
+
+    @property
+    def views(self) -> Any:
+        """Return worksheet sheet views as a ``SheetViewList``."""
+        from wolfxl.worksheet.views import SheetViewList
+
+        return SheetViewList([self.sheet_view])
+
+    @property
+    def active_cell(self) -> str:
+        """Active cell from the first sheet-view selection."""
+        selections = self.sheet_view.selection
+        return selections[0].activeCell if selections else "A1"
+
+    @property
+    def selected_cell(self) -> str:
+        """Selected cell reference from the first sheet-view selection."""
+        selections = self.sheet_view.selection
+        return selections[0].sqref if selections else self.active_cell
+
+    @property
+    def show_gridlines(self) -> bool:
+        """Whether worksheet gridlines are visible."""
+        return self.sheet_view.showGridLines
+
+    @show_gridlines.setter
+    def show_gridlines(self, value: bool) -> None:
+        """Set worksheet gridline visibility."""
+        self.sheet_view.showGridLines = bool(value)
+
+    @property
+    def encoding(self) -> str:
+        """Worksheet encoding marker for openpyxl compatibility."""
+        return "utf-8"
+
+    @property
+    def mime_type(self) -> str:
+        """Openpyxl-compatible worksheet MIME type."""
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+
+    @property
+    def path(self) -> str:
+        """Best-effort worksheet part path."""
+        try:
+            index = self._workbook._sheet_names.index(self._title) + 1  # noqa: SLF001
+        except ValueError:
+            index = 1
+        return f"/xl/worksheets/sheet{index}.xml"
+
+    @property
+    def legacy_drawing(self) -> None:
+        """Legacy VML drawing relationship, when exposed."""
+        return None
+
+    @property
+    def array_formulae(self) -> dict[str, str]:
+        """Return array formula ranges by master cell."""
+        return {}
+
+    @property
+    def column_groups(self) -> list[Any]:
+        """Column group metadata placeholder."""
+        return []
+
+    @property
+    def defined_names(self) -> dict[str, Any]:
+        """Worksheet-scoped defined names placeholder."""
+        return {}
+
+    @property
+    def scenarios(self) -> list[Any]:
+        """Scenario metadata placeholder."""
+        return []
+
+    @property
+    def print_options(self) -> Any:
+        """Return worksheet print options."""
+        from wolfxl.worksheet.page import PrintOptions
+
+        return PrintOptions()
+
+    @property
+    def print_titles(self) -> str:
+        """Combined print-title range string."""
+        parts = [part for part in [self.print_title_rows, self.print_title_cols] if part]
+        return ",".join(parts)
 
     @property
     def protection(self) -> Any:

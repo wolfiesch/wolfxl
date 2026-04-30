@@ -106,6 +106,33 @@ class TestWorksheetSheetView:
         ws.freeze_panes = None
         assert ws.sheet_view.pane is None
 
+    def test_openpyxl_surface_aliases(self):
+        wb = Workbook()
+        ws = wb.active
+        assert ws.BREAK_ROW == 1
+        assert ws.ORIENTATION_LANDSCAPE == "landscape"
+        assert ws.PAPERSIZE_A4 == "9"
+        assert ws.SHEETSTATE_VISIBLE == "visible"
+        assert ws.active_cell == "A1"
+        assert ws.selected_cell == "A1"
+        assert ws.show_gridlines is True
+        ws.show_gridlines = False
+        assert ws.sheet_view.showGridLines is False
+        assert len(ws.views.sheetView) == 1
+        assert ws.oddHeader is ws.header_footer.odd_header
+        assert ws.evenFooter is ws.header_footer.even_footer
+        assert ws.print_titles == ""
+        assert ws.array_formulae == {}
+        assert ws.column_groups == []
+        assert ws.defined_names == {}
+        assert ws.legacy_drawing is None
+        assert ws.encoding == "utf-8"
+        assert (
+            ws.mime_type
+            == "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+        )
+        assert ws.path == "/xl/worksheets/sheet1.xml"
+
 
 class TestSheetViewList:
     def test_default_creates_one_view(self):
