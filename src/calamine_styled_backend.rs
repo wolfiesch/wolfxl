@@ -20,6 +20,7 @@ use crate::calamine_record_format::{RawFontInfo, RecordFormatInfo};
 use crate::calamine_sheet_records::SheetRecordOptions;
 use crate::calamine_style_dicts::{
     maybe_set_edge, populate_alignment, populate_fill, populate_font, set_edge_from_style,
+    DiagonalBorderInfo,
 };
 use crate::calamine_styled_array_formulas::{
     parse_array_formulas_from_sheet_xml, ArrayFormulaInfo,
@@ -129,14 +130,6 @@ struct TableInfo {
     style: Option<String>,
     columns: Vec<String>,
     autofilter: bool,
-}
-
-#[derive(Clone, Debug)]
-struct DiagonalBorderInfo {
-    up: bool,
-    down: bool,
-    style: String,
-    color: String,
 }
 
 #[derive(Default)]

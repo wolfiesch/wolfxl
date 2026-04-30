@@ -11,6 +11,14 @@ use crate::calamine_format_helpers::{
     border_style_str, color_to_hex, h_align_str, underline_str, v_align_str,
 };
 
+#[derive(Clone, Debug)]
+pub(crate) struct DiagonalBorderInfo {
+    pub(crate) up: bool,
+    pub(crate) down: bool,
+    pub(crate) style: String,
+    pub(crate) color: String,
+}
+
 pub(crate) fn populate_font(d: &Bound<'_, PyDict>, font: &Font) -> PyResult<()> {
     if font.weight == FontWeight::Bold {
         d.set_item("bold", true)?;
