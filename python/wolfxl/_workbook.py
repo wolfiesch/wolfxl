@@ -386,7 +386,7 @@ class Workbook:
         ``wb.security = wb.security`` after mutating to force the flush
         if needed (the property write is what flips the dirty flag).
         """
-        return self._security
+        return _workbook_metadata.get_security(self)
 
     @security.setter
     def security(self, value: Any) -> None:
@@ -406,7 +406,7 @@ class Workbook:
         Attribute name matches openpyxl's ``wb.fileSharing`` exactly so
         existing code continues to work.
         """
-        return self._file_sharing
+        return _workbook_metadata.get_file_sharing(self)
 
     @fileSharing.setter
     def fileSharing(self, value: Any) -> None:  # noqa: N802

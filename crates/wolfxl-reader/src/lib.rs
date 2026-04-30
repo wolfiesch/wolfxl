@@ -259,6 +259,40 @@ pub struct NamedRange {
     pub refers_to: String,
 }
 
+/// Parsed workbook-level protection and file-sharing metadata.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkbookSecurity {
+    pub workbook_protection: Option<WorkbookProtection>,
+    pub file_sharing: Option<FileSharing>,
+}
+
+/// Parsed `<workbookProtection>` metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbookProtection {
+    pub lock_structure: bool,
+    pub lock_windows: bool,
+    pub lock_revision: bool,
+    pub workbook_algorithm_name: Option<String>,
+    pub workbook_hash_value: Option<String>,
+    pub workbook_salt_value: Option<String>,
+    pub workbook_spin_count: Option<u32>,
+    pub revisions_algorithm_name: Option<String>,
+    pub revisions_hash_value: Option<String>,
+    pub revisions_salt_value: Option<String>,
+    pub revisions_spin_count: Option<u32>,
+}
+
+/// Parsed `<fileSharing>` metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileSharing {
+    pub read_only_recommended: bool,
+    pub user_name: Option<String>,
+    pub algorithm_name: Option<String>,
+    pub hash_value: Option<String>,
+    pub salt_value: Option<String>,
+    pub spin_count: Option<u32>,
+}
+
 /// Parsed worksheet conditional-formatting rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionalFormatRule {
@@ -317,6 +351,7 @@ pub struct NativeXlsxBook {
     bytes: Vec<u8>,
     sheets: Vec<SheetInfo>,
     named_ranges: Vec<NamedRange>,
+    workbook_security: WorkbookSecurity,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
     styles: StyleTables,
@@ -337,7 +372,8 @@ impl NativeXlsxBook {
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
             .map_err(|e| ReaderError::Xml(format!("failed to parse workbook rels: {e}")))?;
-        let (sheet_refs, date1904, named_ranges) = parse_workbook(&workbook_xml)?;
+        let (sheet_refs, date1904, named_ranges, workbook_security) =
+            parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
             Some(xml) => parse_shared_strings(&xml)?,
@@ -359,6 +395,7 @@ impl NativeXlsxBook {
             bytes,
             sheets,
             named_ranges,
+            workbook_security,
             doc_properties,
             shared_strings,
             styles,
@@ -379,6 +416,11 @@ impl NativeXlsxBook {
     /// Workbook defined names.
     pub fn named_ranges(&self) -> &[NamedRange] {
         &self.named_ranges
+    }
+
+    /// Workbook protection and file-sharing blocks.
+    pub fn workbook_security(&self) -> &WorkbookSecurity {
+        &self.workbook_security
     }
 
     /// Workbook document properties parsed from `docProps/core.xml` and app.xml.
@@ -559,13 +601,15 @@ pub struct BorderSide {
     pub color: String,
 }
 
-fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>)> {
+fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>, WorkbookSecurity)> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut sheets = Vec::new();
     let mut raw_names = Vec::new();
     let mut date1904 = false;
+    let mut workbook_protection = None;
+    let mut file_sharing = None;
     let mut in_defined_name = false;
     let mut current_name: Option<String> = None;
     let mut current_local_id: Option<usize> = None;
@@ -576,6 +620,12 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>)> {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"workbookPr" => {
                     date1904 = attr_truthy(attr_value(&e, b"date1904").as_deref());
+                }
+                b"workbookProtection" => {
+                    workbook_protection = Some(WorkbookProtection::from_start(&e));
+                }
+                b"fileSharing" => {
+                    file_sharing = Some(FileSharing::from_start(&e));
                 }
                 b"sheet" => {
                     let name = attr_value(&e, b"name");
@@ -633,7 +683,15 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>)> {
     }
 
     let named_ranges = resolve_named_ranges(&sheets, raw_names);
-    Ok((sheets, date1904, named_ranges))
+    Ok((
+        sheets,
+        date1904,
+        named_ranges,
+        WorkbookSecurity {
+            workbook_protection,
+            file_sharing,
+        },
+    ))
 }
 
 #[derive(Debug)]
@@ -641,6 +699,39 @@ struct RawNamedRange {
     name: String,
     local_id: Option<usize>,
     refers_to: String,
+}
+
+impl WorkbookProtection {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            lock_structure: attr_bool_default(e, b"lockStructure", false),
+            lock_windows: attr_bool_default(e, b"lockWindows", false),
+            lock_revision: attr_bool_default(e, b"lockRevision", false),
+            workbook_algorithm_name: attr_value(e, b"workbookAlgorithmName"),
+            workbook_hash_value: attr_value(e, b"workbookHashValue"),
+            workbook_salt_value: attr_value(e, b"workbookSaltValue"),
+            workbook_spin_count: attr_value(e, b"workbookSpinCount")
+                .and_then(|value| value.parse::<u32>().ok()),
+            revisions_algorithm_name: attr_value(e, b"revisionsAlgorithmName"),
+            revisions_hash_value: attr_value(e, b"revisionsHashValue"),
+            revisions_salt_value: attr_value(e, b"revisionsSaltValue"),
+            revisions_spin_count: attr_value(e, b"revisionsSpinCount")
+                .and_then(|value| value.parse::<u32>().ok()),
+        }
+    }
+}
+
+impl FileSharing {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            read_only_recommended: attr_bool_default(e, b"readOnlyRecommended", false),
+            user_name: attr_value(e, b"userName"),
+            algorithm_name: attr_value(e, b"algorithmName"),
+            hash_value: attr_value(e, b"hashValue"),
+            salt_value: attr_value(e, b"saltValue"),
+            spin_count: attr_value(e, b"spinCount").and_then(|value| value.parse::<u32>().ok()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -2734,7 +2825,11 @@ mod tests {
 
     #[test]
     fn parses_workbook_sheet_order_and_state() {
-        let xml = r#"<workbook xmlns:r="r"><workbookPr date1904="1"/><sheets>
+        let xml = r#"<workbook xmlns:r="r">
+        <fileSharing readOnlyRecommended="1" userName="Wolf" algorithmName="SHA-512" hashValue="FILEHASH" saltValue="FILESALT" spinCount="100000"/>
+        <workbookPr date1904="1"/>
+        <workbookProtection lockStructure="1" workbookAlgorithmName="SHA-512" workbookHashValue="HASH" workbookSaltValue="SALT" workbookSpinCount="100000"/>
+        <sheets>
             <sheet name="Visible" sheetId="1" r:id="rId1"/>
             <sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>
             <sheet name="Very" sheetId="3" state="veryHidden" r:id="rId3"/>
@@ -2743,11 +2838,39 @@ mod tests {
             <definedName name="LocalName" localSheetId="1">$B$2</definedName>
             <definedName name="_xlnm.Print_Area">Visible!$A$1:$B$2</definedName>
         </definedNames></workbook>"#;
-        let (sheets, date1904, named_ranges) = parse_workbook(xml).expect("parse workbook");
+        let (sheets, date1904, named_ranges, security) =
+            parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
         assert_eq!(sheets[0].name, "Visible");
         assert_eq!(sheets[1].state, SheetState::Hidden);
         assert_eq!(sheets[2].state, SheetState::VeryHidden);
+        assert_eq!(
+            security.workbook_protection,
+            Some(WorkbookProtection {
+                lock_structure: true,
+                lock_windows: false,
+                lock_revision: false,
+                workbook_algorithm_name: Some("SHA-512".to_string()),
+                workbook_hash_value: Some("HASH".to_string()),
+                workbook_salt_value: Some("SALT".to_string()),
+                workbook_spin_count: Some(100000),
+                revisions_algorithm_name: None,
+                revisions_hash_value: None,
+                revisions_salt_value: None,
+                revisions_spin_count: None,
+            })
+        );
+        assert_eq!(
+            security.file_sharing,
+            Some(FileSharing {
+                read_only_recommended: true,
+                user_name: Some("Wolf".to_string()),
+                algorithm_name: Some("SHA-512".to_string()),
+                hash_value: Some("FILEHASH".to_string()),
+                salt_value: Some("FILESALT".to_string()),
+                spin_count: Some(100000),
+            })
+        );
         assert_eq!(
             named_ranges,
             vec![

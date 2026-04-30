@@ -89,7 +89,29 @@ def _make_basic_xlsx(path: Path) -> None:
     ws.protection.set_password("hunter2")
     wb.save(path)
     wb.close()
+    _inject_workbook_security(path)
     _inject_merged_subordinate_style(path)
+
+
+def _inject_workbook_security(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    workbook_name = "xl/workbook.xml"
+    workbook_xml = entries[workbook_name].decode()
+    workbook_xml = re.sub(r"<fileSharing\b[^>]*/>", "", workbook_xml)
+    workbook_xml = re.sub(r"<workbookProtection\b[^>]*/>", "", workbook_xml)
+    security_xml = (
+        '<fileSharing readOnlyRecommended="1" userName="Wolf" algorithmName="SHA-512" '
+        'hashValue="FILEHASH" saltValue="FILESALT" spinCount="100000"/>'
+        '<workbookProtection lockStructure="1" workbookAlgorithmName="SHA-512" '
+        'workbookHashValue="HASH" workbookSaltValue="SALT" workbookSpinCount="100000"/>'
+    )
+    workbook_xml, count = re.subn(r"(<workbookPr\b)", security_xml + r"\1", workbook_xml)
+    assert count == 1
+    entries[workbook_name] = workbook_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
 
 
 def _inject_merged_subordinate_style(path: Path) -> None:
@@ -212,6 +234,19 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws.protection.formatCells is False
         assert ws.protection.sort is False
         assert ws.protection.password == "C258"
+        assert wb.security is not None
+        assert wb.security.lock_structure is True
+        assert wb.security.workbook_algorithm_name == "SHA-512"
+        assert wb.security.workbook_hash_value == "HASH"
+        assert wb.security.workbook_salt_value == "SALT"
+        assert wb.security.workbook_spin_count == 100000
+        assert wb.fileSharing is not None
+        assert wb.fileSharing.read_only_recommended is True
+        assert wb.fileSharing.user_name == "Wolf"
+        assert wb.fileSharing.algorithm_name == "SHA-512"
+        assert wb.fileSharing.hash_value == "FILEHASH"
+        assert wb.fileSharing.salt_value == "FILESALT"
+        assert wb.fileSharing.spin_count == 100000
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
         assert ws["D1"].number_format == "#,##0"
         assert ws["E1"].number_format is None

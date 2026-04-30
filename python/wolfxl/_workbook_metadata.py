@@ -115,7 +115,14 @@ def set_security(wb: Any, value: Any) -> None:
             f"got {type(value).__name__}"
         )
     wb._security = value  # noqa: SLF001
+    wb._security_loaded = True  # noqa: SLF001
     wb._pending_security_update = True  # noqa: SLF001
+
+
+def get_security(wb: Any) -> Any:
+    """Return workbook protection metadata, lazily loaded from the reader."""
+    _ensure_security_loaded(wb)
+    return wb._security  # noqa: SLF001
 
 
 def set_file_sharing(wb: Any, value: Any) -> None:
@@ -136,4 +143,65 @@ def set_file_sharing(wb: Any, value: Any) -> None:
             f"got {type(value).__name__}"
         )
     wb._file_sharing = value  # noqa: SLF001
+    wb._security_loaded = True  # noqa: SLF001
     wb._pending_security_update = True  # noqa: SLF001
+
+
+def get_file_sharing(wb: Any) -> Any:
+    """Return workbook file-sharing metadata, lazily loaded from the reader."""
+    _ensure_security_loaded(wb)
+    return wb._file_sharing  # noqa: SLF001
+
+
+def _ensure_security_loaded(wb: Any) -> None:
+    if getattr(wb, "_security_loaded", False):
+        return
+    wb._security_loaded = True  # noqa: SLF001
+    reader = getattr(wb, "_rust_reader", None)
+    if reader is None or not hasattr(reader, "read_workbook_security"):
+        return
+    try:
+        payload = reader.read_workbook_security()
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    wb._security = _workbook_protection_from_payload(  # noqa: SLF001
+        payload.get("workbook_protection")
+    )
+    wb._file_sharing = _file_sharing_from_payload(payload.get("file_sharing"))  # noqa: SLF001
+
+
+def _workbook_protection_from_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    from wolfxl.workbook.protection import WorkbookProtection
+
+    return WorkbookProtection(
+        lock_structure=bool(payload.get("lock_structure", False)),
+        lock_windows=bool(payload.get("lock_windows", False)),
+        lock_revision=bool(payload.get("lock_revision", False)),
+        workbook_algorithm_name=payload.get("workbook_algorithm_name"),
+        workbook_hash_value=payload.get("workbook_hash_value"),
+        workbook_salt_value=payload.get("workbook_salt_value"),
+        workbook_spin_count=payload.get("workbook_spin_count"),
+        revisions_algorithm_name=payload.get("revisions_algorithm_name"),
+        revisions_hash_value=payload.get("revisions_hash_value"),
+        revisions_salt_value=payload.get("revisions_salt_value"),
+        revisions_spin_count=payload.get("revisions_spin_count"),
+    )
+
+
+def _file_sharing_from_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    from wolfxl.workbook.protection import FileSharing
+
+    return FileSharing(
+        read_only_recommended=bool(payload.get("read_only_recommended", False)),
+        user_name=payload.get("user_name"),
+        algorithm_name=payload.get("algorithm_name"),
+        hash_value=payload.get("hash_value"),
+        salt_value=payload.get("salt_value"),
+        spin_count=payload.get("spin_count"),
+    )

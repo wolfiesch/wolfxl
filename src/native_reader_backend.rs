@@ -17,7 +17,8 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, FillInfo, FontInfo,
-    InlineFontProps, NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, WorksheetData,
+    InlineFontProps, NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection,
+    WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -522,6 +523,10 @@ impl NativeXlsxBook {
             d.set_item(key, value)?;
         }
         Ok(d.into())
+    }
+
+    pub fn read_workbook_security(&self, py: Python<'_>) -> PyResult<PyObject> {
+        workbook_security_to_py(py, self.book.workbook_security())
     }
 
     pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
@@ -1086,6 +1091,60 @@ fn sheet_protection_to_py(py: Python<'_>, protection: &SheetProtection) -> PyRes
     d.set_item("select_unlocked_cells", protection.select_unlocked_cells)?;
     if let Some(password_hash) = &protection.password_hash {
         d.set_item("password_hash", password_hash)?;
+    }
+    Ok(d.into())
+}
+
+fn workbook_security_to_py(py: Python<'_>, security: &WorkbookSecurity) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    match &security.workbook_protection {
+        Some(protection) => {
+            let p = PyDict::new(py);
+            p.set_item("lock_structure", protection.lock_structure)?;
+            p.set_item("lock_windows", protection.lock_windows)?;
+            p.set_item("lock_revision", protection.lock_revision)?;
+            p.set_item(
+                "workbook_algorithm_name",
+                protection.workbook_algorithm_name.as_deref(),
+            )?;
+            p.set_item(
+                "workbook_hash_value",
+                protection.workbook_hash_value.as_deref(),
+            )?;
+            p.set_item(
+                "workbook_salt_value",
+                protection.workbook_salt_value.as_deref(),
+            )?;
+            p.set_item("workbook_spin_count", protection.workbook_spin_count)?;
+            p.set_item(
+                "revisions_algorithm_name",
+                protection.revisions_algorithm_name.as_deref(),
+            )?;
+            p.set_item(
+                "revisions_hash_value",
+                protection.revisions_hash_value.as_deref(),
+            )?;
+            p.set_item(
+                "revisions_salt_value",
+                protection.revisions_salt_value.as_deref(),
+            )?;
+            p.set_item("revisions_spin_count", protection.revisions_spin_count)?;
+            d.set_item("workbook_protection", p)?;
+        }
+        None => d.set_item("workbook_protection", py.None())?,
+    }
+    match &security.file_sharing {
+        Some(file_sharing) => {
+            let f = PyDict::new(py);
+            f.set_item("read_only_recommended", file_sharing.read_only_recommended)?;
+            f.set_item("user_name", file_sharing.user_name.as_deref())?;
+            f.set_item("algorithm_name", file_sharing.algorithm_name.as_deref())?;
+            f.set_item("hash_value", file_sharing.hash_value.as_deref())?;
+            f.set_item("salt_value", file_sharing.salt_value.as_deref())?;
+            f.set_item("spin_count", file_sharing.spin_count)?;
+            d.set_item("file_sharing", f)?;
+        }
+        None => d.set_item("file_sharing", py.None())?,
     }
     Ok(d.into())
 }
