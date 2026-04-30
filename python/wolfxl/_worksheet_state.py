@@ -42,6 +42,7 @@ def initialize_worksheet_state(
     ws._tables_cache: dict[str, Any] | None = None  # noqa: SLF001
     ws._data_validations_cache: Any | None = None  # noqa: SLF001
     ws._conditional_formatting_cache: Any | None = None  # noqa: SLF001
+    ws._images_cache: list[Any] | None = None  # noqa: SLF001
 
     ws._pending_comments: dict[str, Any] = {}  # noqa: SLF001
     ws._pending_hyperlinks: dict[str, Any] = {}  # noqa: SLF001

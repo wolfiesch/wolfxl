@@ -9,15 +9,16 @@ use std::collections::HashMap;
 use chrono::{Datelike, Duration, NaiveDate, Timelike};
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDateTime, PyDict, PyList};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList};
 use pyo3::IntoPyObjectExt;
 
 type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    AlignmentInfo, ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, DateGroupItemInfo,
-    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, InlineFontProps,
+    AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
+    BorderInfo, Cell, CellDataType, CellValue, DateGroupItemInfo, FillInfo, FilterColumnInfo,
+    FilterInfo, FontInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, SortConditionInfo,
     SortStateInfo, WorkbookSecurity, WorksheetData,
 };
@@ -493,6 +494,15 @@ impl NativeXlsxBook {
             }
             None => Ok(py.None()),
         }
+    }
+
+    pub fn read_images(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let images = self.ensure_sheet(sheet)?.images.clone();
+        let result = PyList::empty(py);
+        for image in &images {
+            result.append(image_to_py(py, image)?)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_named_ranges(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
@@ -1171,6 +1181,63 @@ fn workbook_security_to_py(py: Python<'_>, security: &WorkbookSecurity) -> PyRes
         None => d.set_item("file_sharing", py.None())?,
     }
     Ok(d.into())
+}
+
+fn image_to_py(py: Python<'_>, image: &ImageInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("data", PyBytes::new(py, &image.data))?;
+    d.set_item("ext", &image.ext)?;
+    d.set_item("anchor", image_anchor_to_py(py, &image.anchor)?)?;
+    Ok(d.into())
+}
+
+fn image_anchor_to_py(py: Python<'_>, anchor: &ImageAnchorInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    match anchor {
+        ImageAnchorInfo::OneCell { from, ext } => {
+            d.set_item("type", "one_cell")?;
+            populate_marker(&d, "from", from)?;
+            match ext {
+                Some(ext) => populate_extent(&d, ext)?,
+                None => {
+                    d.set_item("cx_emu", py.None())?;
+                    d.set_item("cy_emu", py.None())?;
+                }
+            }
+        }
+        ImageAnchorInfo::TwoCell { from, to, edit_as } => {
+            d.set_item("type", "two_cell")?;
+            populate_marker(&d, "from", from)?;
+            populate_marker(&d, "to", to)?;
+            d.set_item("edit_as", edit_as)?;
+        }
+        ImageAnchorInfo::Absolute { pos, ext } => {
+            d.set_item("type", "absolute")?;
+            populate_position(&d, pos)?;
+            populate_extent(&d, ext)?;
+        }
+    }
+    Ok(d.into())
+}
+
+fn populate_marker(d: &Bound<'_, PyDict>, prefix: &str, marker: &AnchorMarkerInfo) -> PyResult<()> {
+    d.set_item(format!("{prefix}_col"), marker.col)?;
+    d.set_item(format!("{prefix}_row"), marker.row)?;
+    d.set_item(format!("{prefix}_col_off"), marker.col_off)?;
+    d.set_item(format!("{prefix}_row_off"), marker.row_off)?;
+    Ok(())
+}
+
+fn populate_position(d: &Bound<'_, PyDict>, pos: &AnchorPositionInfo) -> PyResult<()> {
+    d.set_item("x_emu", pos.x)?;
+    d.set_item("y_emu", pos.y)?;
+    Ok(())
+}
+
+fn populate_extent(d: &Bound<'_, PyDict>, ext: &AnchorExtentInfo) -> PyResult<()> {
+    d.set_item("cx_emu", ext.cx)?;
+    d.set_item("cy_emu", ext.cy)?;
+    Ok(())
 }
 
 fn filter_column_to_py(py: Python<'_>, column: &FilterColumnInfo) -> PyResult<PyObject> {

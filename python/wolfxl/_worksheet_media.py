@@ -157,3 +157,88 @@ def add_image(ws: Worksheet, image: Any, anchor: Any = None) -> None:
 
     image.anchor = anchor
     ws._pending_images.append(image)  # noqa: SLF001
+    if ws._images_cache is not None:  # noqa: SLF001
+        ws._images_cache.append(image)  # noqa: SLF001
+
+
+def get_images(ws: Worksheet) -> list[Any]:
+    """Return images attached to this worksheet, hydrating read-mode drawings."""
+    workbook = ws._workbook  # noqa: SLF001
+    reader = getattr(workbook, "_rust_reader", None)
+    if reader is None or not hasattr(reader, "read_images"):
+        return ws._pending_images  # noqa: SLF001
+
+    if ws._images_cache is None:  # noqa: SLF001
+        images = [
+            _image_from_payload(payload)
+            for payload in reader.read_images(ws._title)  # noqa: SLF001
+            if isinstance(payload, dict)
+        ]
+        images.extend(ws._pending_images)  # noqa: SLF001
+        ws._images_cache = images  # noqa: SLF001
+    return ws._images_cache  # noqa: SLF001
+
+
+def _image_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.drawing.image import Image
+
+    image = Image(payload["data"])
+    image.anchor = _anchor_from_payload(payload.get("anchor"))
+    return image
+
+
+def _anchor_from_payload(payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return None
+
+    from wolfxl.drawing.spreadsheet_drawing import (
+        AbsoluteAnchor,
+        OneCellAnchor,
+        TwoCellAnchor,
+        XDRPoint2D,
+        XDRPositiveSize2D,
+    )
+
+    kind = payload.get("type")
+    if kind == "one_cell":
+        ext = _extent_from_payload(payload)
+        return OneCellAnchor(
+            _from=_marker_from_payload(payload, "from"),
+            ext=ext,
+        )
+    if kind == "two_cell":
+        return TwoCellAnchor(
+            _from=_marker_from_payload(payload, "from"),
+            to=_marker_from_payload(payload, "to"),
+            editAs=str(payload.get("edit_as") or "oneCell"),
+        )
+    if kind == "absolute":
+        return AbsoluteAnchor(
+            pos=XDRPoint2D(
+                x=int(payload.get("x_emu") or 0),
+                y=int(payload.get("y_emu") or 0),
+            ),
+            ext=_extent_from_payload(payload) or XDRPositiveSize2D(),
+        )
+    return None
+
+
+def _marker_from_payload(payload: dict[str, Any], prefix: str) -> Any:
+    from wolfxl.drawing.spreadsheet_drawing import AnchorMarker
+
+    return AnchorMarker(
+        col=int(payload.get(f"{prefix}_col") or 0),
+        row=int(payload.get(f"{prefix}_row") or 0),
+        colOff=int(payload.get(f"{prefix}_col_off") or 0),
+        rowOff=int(payload.get(f"{prefix}_row_off") or 0),
+    )
+
+
+def _extent_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.drawing.spreadsheet_drawing import XDRPositiveSize2D
+
+    cx = payload.get("cx_emu")
+    cy = payload.get("cy_emu")
+    if cx is None or cy is None:
+        return None
+    return XDRPositiveSize2D(cx=int(cx), cy=int(cy))

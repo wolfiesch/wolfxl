@@ -17,15 +17,20 @@ import pytest
 openpyxl = pytest.importorskip("openpyxl")
 openpyxl_datavalidation = pytest.importorskip("openpyxl.worksheet.datavalidation")
 openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
+openpyxl_image = pytest.importorskip("openpyxl.drawing.image")
 wolfxl = pytest.importorskip("wolfxl")
 
 DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
+OpenpyxlImage = openpyxl_image.Image
 Border = openpyxl.styles.Border
 Font = openpyxl.styles.Font
 PatternFill = openpyxl.styles.PatternFill
 Side = openpyxl.styles.Side
 Alignment = openpyxl.styles.Alignment
+
+FIXTURES = Path(__file__).parent / "fixtures"
+PNG_PATH = FIXTURES / "images" / "tiny_red_dot.png"
 
 
 def _make_basic_xlsx(path: Path) -> None:
@@ -187,6 +192,47 @@ def _make_shared_formula_xlsx(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _make_image_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Images"
+    ws["A1"] = "with image"
+    ws.add_image(OpenpyxlImage(PNG_PATH), "B5")
+    wb.save(path)
+    wb.close()
+
+
+def _make_wolfxl_anchor_image_xlsx(path: Path) -> None:
+    from wolfxl.drawing import Image as WolfImage
+    from wolfxl.drawing.spreadsheet_drawing import (
+        AbsoluteAnchor,
+        AnchorMarker,
+        TwoCellAnchor,
+        XDRPoint2D,
+        XDRPositiveSize2D,
+    )
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.title = "Anchors"
+    ws.add_image(
+        WolfImage(PNG_PATH),
+        TwoCellAnchor(
+            _from=AnchorMarker(col=1, row=1, colOff=10, rowOff=20),
+            to=AnchorMarker(col=3, row=4, colOff=30, rowOff=40),
+            editAs="twoCell",
+        ),
+    )
+    ws.add_image(
+        WolfImage(PNG_PATH),
+        AbsoluteAnchor(
+            pos=XDRPoint2D(x=1000, y=2000),
+            ext=XDRPositiveSize2D(cx=3000, cy=4000),
+        ),
+    )
+    wb.save(path)
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -293,6 +339,71 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert records["B1"]["number_format"] == "#,##0.00"
         assert "number_format" not in records["E1"]
         assert records["A3"]["data_type"] == "datetime"
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_drawing_images(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-images.xlsx"
+    _make_image_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Images"]
+        images = ws._images  # noqa: SLF001
+        assert len(images) == 1
+        img = images[0]
+        assert img.format == "png"
+        assert img._data == PNG_PATH.read_bytes()  # noqa: SLF001
+
+        from wolfxl.drawing.spreadsheet_drawing import OneCellAnchor
+
+        assert isinstance(img.anchor, OneCellAnchor)
+        assert img.anchor._from.col == 1
+        assert img.anchor._from.row == 4
+        assert img.anchor.ext is not None
+        assert img.anchor.ext.cx > 0
+        assert img.anchor.ext.cy > 0
+    finally:
+        wb.close()
+
+
+def test_native_reader_preserves_image_anchor_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-image-anchors.xlsx"
+    _make_wolfxl_anchor_image_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Anchors"]
+        images = ws._images  # noqa: SLF001
+        assert len(images) == 2
+
+        from wolfxl.drawing.spreadsheet_drawing import AbsoluteAnchor, TwoCellAnchor
+
+        two_cell = images[0].anchor
+        assert isinstance(two_cell, TwoCellAnchor)
+        assert two_cell._from.col == 1
+        assert two_cell._from.row == 1
+        assert two_cell._from.colOff == 10
+        assert two_cell._from.rowOff == 20
+        assert two_cell.to.col == 3
+        assert two_cell.to.row == 4
+        assert two_cell.to.colOff == 30
+        assert two_cell.to.rowOff == 40
+        assert two_cell.editAs == "twoCell"
+
+        absolute = images[1].anchor
+        assert isinstance(absolute, AbsoluteAnchor)
+        assert absolute.pos.x == 1000
+        assert absolute.pos.y == 2000
+        assert absolute.ext.cx == 3000
+        assert absolute.ext.cy == 4000
     finally:
         wb.close()
 

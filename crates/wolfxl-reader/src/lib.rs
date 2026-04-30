@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
@@ -143,6 +143,7 @@ pub struct WorksheetData {
     pub data_validations: Vec<DataValidation>,
     pub sheet_protection: Option<SheetProtection>,
     pub auto_filter: Option<AutoFilterInfo>,
+    pub images: Vec<ImageInfo>,
     pub tables: Vec<Table>,
     pub conditional_formats: Vec<ConditionalFormatRule>,
     pub hidden_rows: Vec<u32>,
@@ -329,6 +330,55 @@ pub struct SortConditionInfo {
     pub dxf_id: Option<u32>,
     pub icon_set: Option<String>,
     pub icon_id: Option<u32>,
+}
+
+/// Parsed worksheet image payload and anchor metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageInfo {
+    pub data: Vec<u8>,
+    pub ext: String,
+    pub anchor: ImageAnchorInfo,
+}
+
+/// Parsed drawing anchor for an embedded image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageAnchorInfo {
+    OneCell {
+        from: AnchorMarkerInfo,
+        ext: Option<AnchorExtentInfo>,
+    },
+    TwoCell {
+        from: AnchorMarkerInfo,
+        to: AnchorMarkerInfo,
+        edit_as: String,
+    },
+    Absolute {
+        pos: AnchorPositionInfo,
+        ext: AnchorExtentInfo,
+    },
+}
+
+/// Parsed cell-relative drawing marker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnchorMarkerInfo {
+    pub col: i64,
+    pub row: i64,
+    pub col_off: i64,
+    pub row_off: i64,
+}
+
+/// Parsed EMU drawing position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnchorPositionInfo {
+    pub x: i64,
+    pub y: i64,
+}
+
+/// Parsed EMU drawing extent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AnchorExtentInfo {
+    pub cx: i64,
+    pub cy: i64,
 }
 
 /// Parsed worksheet table metadata.
@@ -579,7 +629,11 @@ impl NativeXlsxBook {
             None => Vec::new(),
         };
         let tables = read_tables(&mut zip, &info.path, &xml, rels.as_ref())?;
-        parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments, tables)
+        let images = read_images(&mut zip, &info.path, rels.as_ref())?;
+        let mut data =
+            parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments, tables)?;
+        data.images = images;
+        Ok(data)
     }
 }
 
@@ -1838,6 +1892,7 @@ fn parse_worksheet(
         data_validations,
         sheet_protection,
         auto_filter,
+        images: Vec::new(),
         tables,
         conditional_formats,
         hidden_rows,
@@ -2731,6 +2786,269 @@ fn read_tables<R: Read + std::io::Seek>(
     Ok(out)
 }
 
+fn read_images<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    sheet_path: &str,
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<ImageInfo>> {
+    let Some(rels) = rels else {
+        return Ok(Vec::new());
+    };
+    let sheet_dir = part_dir(sheet_path);
+    let mut out = Vec::new();
+
+    for drawing_rel in rels.find_by_type(wolfxl_rels::rt::DRAWING) {
+        let drawing_path = join_and_normalize(&sheet_dir, &drawing_rel.target);
+        let Some(drawing_xml) = read_part_optional(zip, &drawing_path)? else {
+            continue;
+        };
+        let drawing_rels_path = sheet_rels_path(&drawing_path);
+        let image_rels = read_part_optional(zip, &drawing_rels_path)?
+            .map(|xml| {
+                RelsGraph::parse(xml.as_bytes())
+                    .map_err(|e| ReaderError::Xml(format!("failed to parse drawing rels: {e}")))
+            })
+            .transpose()?;
+        let Some(image_rels) = image_rels else {
+            continue;
+        };
+        let image_targets: HashMap<String, String> = image_rels
+            .iter()
+            .filter(|rel| rel.rel_type == wolfxl_rels::rt::IMAGE)
+            .map(|rel| (rel.id.0.clone(), rel.target.clone()))
+            .collect();
+        let drawing_dir = part_dir(&drawing_path);
+
+        for image_ref in parse_drawing_images(&drawing_xml)? {
+            let Some(target) = image_targets.get(&image_ref.rid) else {
+                continue;
+            };
+            let image_path = join_and_normalize(&drawing_dir, target);
+            let Some(data) = read_part_optional_bytes(zip, &image_path)? else {
+                continue;
+            };
+            out.push(ImageInfo {
+                data,
+                ext: image_ext_from_path(&image_path),
+                anchor: image_ref.anchor,
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DrawingImageRef {
+    rid: String,
+    anchor: ImageAnchorInfo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawingAnchorKind {
+    OneCell,
+    TwoCell,
+    Absolute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DrawingImageBuilder {
+    kind: DrawingAnchorKind,
+    from: AnchorMarkerInfo,
+    to: AnchorMarkerInfo,
+    pos: AnchorPositionInfo,
+    ext: Option<AnchorExtentInfo>,
+    edit_as: Option<String>,
+    rid: Option<String>,
+}
+
+impl DrawingImageBuilder {
+    fn new(kind: DrawingAnchorKind, e: &BytesStart<'_>) -> Self {
+        Self {
+            kind,
+            from: AnchorMarkerInfo::default(),
+            to: AnchorMarkerInfo::default(),
+            pos: AnchorPositionInfo::default(),
+            ext: None,
+            edit_as: attr_value(e, b"editAs"),
+            rid: None,
+        }
+    }
+
+    fn finish(self) -> Option<DrawingImageRef> {
+        let rid = self.rid?;
+        let anchor = match self.kind {
+            DrawingAnchorKind::OneCell => ImageAnchorInfo::OneCell {
+                from: self.from,
+                ext: self.ext,
+            },
+            DrawingAnchorKind::TwoCell => ImageAnchorInfo::TwoCell {
+                from: self.from,
+                to: self.to,
+                edit_as: self.edit_as.unwrap_or_else(|| "oneCell".to_string()),
+            },
+            DrawingAnchorKind::Absolute => ImageAnchorInfo::Absolute {
+                pos: self.pos,
+                ext: self.ext.unwrap_or_default(),
+            },
+        };
+        Some(DrawingImageRef { rid, anchor })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkerSlot {
+    From,
+    To,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkerTextTarget {
+    Col,
+    Row,
+    ColOff,
+    RowOff,
+}
+
+fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    let mut current: Option<DrawingImageBuilder> = None;
+    let mut marker_slot: Option<MarkerSlot> = None;
+    let mut marker_text: Option<MarkerTextTarget> = None;
+    let mut in_pic = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"oneCellAnchor" => {
+                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::OneCell, &e));
+                }
+                b"twoCellAnchor" => {
+                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::TwoCell, &e));
+                }
+                b"absoluteAnchor" => {
+                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::Absolute, &e));
+                }
+                b"from" if current.is_some() => marker_slot = Some(MarkerSlot::From),
+                b"to" if current.is_some() => marker_slot = Some(MarkerSlot::To),
+                b"col" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Col),
+                b"row" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Row),
+                b"colOff" if marker_slot.is_some() => {
+                    marker_text = Some(MarkerTextTarget::ColOff);
+                }
+                b"rowOff" if marker_slot.is_some() => {
+                    marker_text = Some(MarkerTextTarget::RowOff);
+                }
+                b"pic" if current.is_some() => in_pic = true,
+                b"pos" => apply_anchor_pos(&mut current, &e),
+                b"ext" if !in_pic => apply_anchor_ext(&mut current, &e),
+                b"blip" => apply_blip_rid(&mut current, &e),
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"pos" => apply_anchor_pos(&mut current, &e),
+                b"ext" if !in_pic => apply_anchor_ext(&mut current, &e),
+                b"blip" => apply_blip_rid(&mut current, &e),
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                if let (Some(slot), Some(target), Some(builder)) =
+                    (marker_slot, marker_text, current.as_mut())
+                {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("drawing text: {err}")))?;
+                    if let Ok(value) = text.parse::<i64>() {
+                        apply_marker_value(builder, slot, target, value);
+                    }
+                }
+            }
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"col" | b"row" | b"colOff" | b"rowOff" => marker_text = None,
+                b"from" | b"to" => {
+                    marker_slot = None;
+                    marker_text = None;
+                }
+                b"pic" => in_pic = false,
+                b"oneCellAnchor" | b"twoCellAnchor" | b"absoluteAnchor" => {
+                    marker_slot = None;
+                    marker_text = None;
+                    in_pic = false;
+                    if let Some(builder) = current.take().and_then(DrawingImageBuilder::finish) {
+                        out.push(builder);
+                    }
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ReaderError::Xml(format!("failed to parse drawing: {e}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn apply_anchor_pos(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    builder.pos = AnchorPositionInfo {
+        x: attr_i64(e, b"x").unwrap_or_default(),
+        y: attr_i64(e, b"y").unwrap_or_default(),
+    };
+}
+
+fn apply_anchor_ext(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    let Some(cx) = attr_i64(e, b"cx") else {
+        return;
+    };
+    let Some(cy) = attr_i64(e, b"cy") else {
+        return;
+    };
+    builder.ext = Some(AnchorExtentInfo { cx, cy });
+}
+
+fn apply_blip_rid(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+    let Some(builder) = builder.as_mut() else {
+        return;
+    };
+    builder.rid = attr_value(e, b"r:embed").or_else(|| attr_value(e, b"embed"));
+}
+
+fn apply_marker_value(
+    builder: &mut DrawingImageBuilder,
+    slot: MarkerSlot,
+    target: MarkerTextTarget,
+    value: i64,
+) {
+    let marker = match slot {
+        MarkerSlot::From => &mut builder.from,
+        MarkerSlot::To => &mut builder.to,
+    };
+    match target {
+        MarkerTextTarget::Col => marker.col = value,
+        MarkerTextTarget::Row => marker.row = value,
+        MarkerTextTarget::ColOff => marker.col_off = value,
+        MarkerTextTarget::RowOff => marker.row_off = value,
+    }
+}
+
+fn image_ext_from_path(path: &str) -> String {
+    PathBuf::from(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default()
+}
+
 fn parse_table_rids(xml: &str) -> Result<Vec<String>> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -3062,6 +3380,21 @@ fn read_part_optional<R: Read + std::io::Seek>(
     }
 }
 
+fn read_part_optional_bytes<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>> {
+    match zip.by_name(name) {
+        Ok(mut file) => {
+            let mut out = Vec::new();
+            file.read_to_end(&mut out)?;
+            Ok(Some(out))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(e) => Err(ReaderError::Zip(e)),
+    }
+}
+
 fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
     for a in e.attributes().with_checks(false).flatten() {
         if a.key.as_ref() == key {
@@ -3086,6 +3419,10 @@ fn attr_bool_default(e: &BytesStart<'_>, key: &[u8], default: bool) -> bool {
 
 fn attr_u32(e: &BytesStart<'_>, key: &[u8]) -> Option<u32> {
     attr_value(e, key).and_then(|value| value.parse::<u32>().ok())
+}
+
+fn attr_i64(e: &BytesStart<'_>, key: &[u8]) -> Option<i64> {
+    attr_value(e, key).and_then(|value| value.parse::<i64>().ok())
 }
 
 fn attr_f64(e: &BytesStart<'_>, key: &[u8]) -> Option<f64> {
