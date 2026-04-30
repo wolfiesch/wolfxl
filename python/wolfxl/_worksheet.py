@@ -1301,6 +1301,7 @@ class Worksheet:
         include_style_id: bool = True,
         include_extended_format: bool = True,
         include_cached_formula_value: bool = False,
+        include_number_format: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """Iterate populated cells as compact dictionaries.
 
@@ -1321,6 +1322,8 @@ class Worksheet:
         ``include_extended_format=False`` to keep raw font flags and number
         formats while skipping expensive style-grid fields such as fill,
         alignment, and border cues. Pass
+        ``include_number_format=True`` with ``include_format=False`` when only
+        date/currency/percentage format strings are needed. Pass
         ``include_cached_formula_value=True`` to include a ``cached_value`` key
         on formula records that have a saved cached result.
         """
@@ -1332,6 +1335,7 @@ class Worksheet:
                 max_col=max_col,
                 include_empty=include_empty,
                 include_coordinate=include_coordinate,
+                include_number_format=include_number_format or include_format,
             )
             return
 
@@ -1367,6 +1371,7 @@ class Worksheet:
             include_style_id,
             include_extended_format,
             include_cached_formula_value,
+            include_number_format,
         )
 
         # Modify mode can have pending Python-side edits the Rust reader
@@ -1428,6 +1433,10 @@ class Worksheet:
                 extra["formula"] = value[1:]
             if include_coordinate:
                 extra["coordinate"] = rowcol_to_a1(row, col)
+            if include_number_format or include_format:
+                cell = self._cells.get((row, col))
+                if cell is not None and cell.number_format:
+                    extra["number_format"] = cell.number_format
             yield extra
 
     def _collect_pending_overlay(self) -> dict[tuple[int, int], Any]:
@@ -1469,6 +1478,7 @@ class Worksheet:
         include_style_id: bool = True,
         include_extended_format: bool = True,
         include_cached_formula_value: bool = False,
+        include_number_format: bool = False,
     ) -> list[dict[str, Any]]:
         """Return ``iter_cell_records(...)`` as a list."""
         return list(
@@ -1485,6 +1495,7 @@ class Worksheet:
                 include_style_id=include_style_id,
                 include_extended_format=include_extended_format,
                 include_cached_formula_value=include_cached_formula_value,
+                include_number_format=include_number_format,
             ),
         )
 
@@ -1536,6 +1547,7 @@ class Worksheet:
         max_col: int | None,
         include_empty: bool,
         include_coordinate: bool = True,
+        include_number_format: bool = False,
     ) -> Iterator[dict[str, Any]]:
         r_min = min_row or 1
         r_max = max_row or self._max_row()
@@ -1555,6 +1567,8 @@ class Worksheet:
                 }
                 if include_coordinate:
                     record["coordinate"] = rowcol_to_a1(row, col)
+                if include_number_format and cell.number_format:
+                    record["number_format"] = cell.number_format
                 yield record
 
     def calculate_dimension(self) -> str:
