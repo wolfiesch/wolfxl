@@ -56,6 +56,7 @@ This file is regenerated from each RFC's frontmatter. Edit a source RFC, not thi
 | 064 | Styles — NamedStyle + GradientFill + Protection + DifferentialStyle + Fill (Sprint Π Pod Π-γ) | Approved | 5 (2.0) | XL | 026, 061 | (v2.0 launch) |
 | 065 | Workbook properties + internals (Sprint Π Pod Π-δ) | Approved | 5 (2.0) | M | 058 | (v2.0 launch) |
 | 066 | Re-routes + RFC-060 doc cleanup (Sprint Π Pod Π-ε) | Approved | 5 (2.0) | XS | 055, 060 | (v2.0 launch) |
+| 067 | Native reader stack — remove `calamine-styles` runtime dependency | Draft | Pre-release | XL | read parity harness, XLSX/XLSB/XLS fixtures | (native-reader launch claim) |
 
 Estimate buckets: S = ≤2 days, M = 3-5 days, L = 1-2 weeks, XL = 2+ weeks (calendar, with parallel subagent dispatch + review overhead).
 
