@@ -86,6 +86,15 @@ impl NativeXlsxBook {
         })
     }
 
+    pub fn read_print_area(&self, sheet: &str) -> PyResult<Option<String>> {
+        if !self.sheet_names.iter().any(|name| name == sheet) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Unknown sheet: {sheet}"
+            )));
+        }
+        Ok(self.book.print_area(sheet).map(str::to_string))
+    }
+
     pub fn opened_from_bytes(&self) -> bool {
         self.opened_from_bytes
     }

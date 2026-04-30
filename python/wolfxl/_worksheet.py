@@ -439,6 +439,13 @@ class Worksheet:
         Stored locally and flushed to the Rust writer on ``save()`` if the
         writer supports ``set_print_area()``.
         """
+        reader = getattr(self._workbook, "_rust_reader", None)
+        if (
+            self._print_area is None
+            and reader is not None
+            and hasattr(reader, "read_print_area")
+        ):
+            self._print_area = reader.read_print_area(self._title)
         return self._print_area
 
     @print_area.setter

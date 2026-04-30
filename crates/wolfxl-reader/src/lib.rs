@@ -493,6 +493,7 @@ pub struct NativeXlsxBook {
     bytes: Vec<u8>,
     sheets: Vec<SheetInfo>,
     named_ranges: Vec<NamedRange>,
+    print_areas: HashMap<String, String>,
     workbook_security: WorkbookSecurity,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
@@ -514,7 +515,7 @@ impl NativeXlsxBook {
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
             .map_err(|e| ReaderError::Xml(format!("failed to parse workbook rels: {e}")))?;
-        let (sheet_refs, date1904, named_ranges, workbook_security) =
+        let (sheet_refs, date1904, named_ranges, print_areas, workbook_security) =
             parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
@@ -537,6 +538,7 @@ impl NativeXlsxBook {
             bytes,
             sheets,
             named_ranges,
+            print_areas,
             workbook_security,
             doc_properties,
             shared_strings,
@@ -567,6 +569,11 @@ impl NativeXlsxBook {
     /// Workbook defined names.
     pub fn named_ranges(&self) -> &[NamedRange] {
         &self.named_ranges
+    }
+
+    /// Worksheet print area parsed from `_xlnm.Print_Area`, if present.
+    pub fn print_area(&self, sheet_name: &str) -> Option<&str> {
+        self.print_areas.get(sheet_name).map(String::as_str)
     }
 
     /// Workbook protection and file-sharing blocks.
@@ -756,12 +763,21 @@ pub struct BorderSide {
     pub color: String,
 }
 
-fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>, WorkbookSecurity)> {
+fn parse_workbook(
+    xml: &str,
+) -> Result<(
+    Vec<SheetRef>,
+    bool,
+    Vec<NamedRange>,
+    HashMap<String, String>,
+    WorkbookSecurity,
+)> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut sheets = Vec::new();
     let mut raw_names = Vec::new();
+    let mut raw_print_areas = Vec::new();
     let mut date1904 = false;
     let mut workbook_protection = None;
     let mut file_sharing = None;
@@ -816,7 +832,13 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>, Wo
                     in_defined_name = false;
                     if let Some(name) = current_name.take() {
                         let refers_to = current_name_text.trim().to_string();
-                        if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
+                        if name == "_xlnm.Print_Area" && !refers_to.is_empty() {
+                            raw_print_areas.push(RawNamedRange {
+                                name,
+                                local_id: current_local_id.take(),
+                                refers_to,
+                            });
+                        } else if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
                             raw_names.push(RawNamedRange {
                                 name,
                                 local_id: current_local_id.take(),
@@ -838,10 +860,12 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>, Wo
     }
 
     let named_ranges = resolve_named_ranges(&sheets, raw_names);
+    let print_areas = resolve_print_areas(&sheets, raw_print_areas);
     Ok((
         sheets,
         date1904,
         named_ranges,
+        print_areas,
         WorkbookSecurity {
             workbook_protection,
             file_sharing,
@@ -922,6 +946,38 @@ fn resolve_named_ranges(sheet_refs: &[SheetRef], raw_names: Vec<RawNamedRange>) 
             }
         })
         .collect()
+}
+
+fn resolve_print_areas(
+    sheet_refs: &[SheetRef],
+    raw_print_areas: Vec<RawNamedRange>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for raw in raw_print_areas {
+        let sheet_name = raw
+            .local_id
+            .and_then(|index| sheet_refs.get(index).map(|sheet| sheet.name.clone()))
+            .or_else(|| sheet_name_from_ref(&raw.refers_to));
+        let Some(sheet_name) = sheet_name else {
+            continue;
+        };
+        let refers_to = if raw.refers_to.contains('!') {
+            raw.refers_to
+        } else {
+            format!("{sheet_name}!{}", raw.refers_to)
+        };
+        out.insert(sheet_name, refers_to);
+    }
+    out
+}
+
+fn sheet_name_from_ref(refers_to: &str) -> Option<String> {
+    let (sheet, _) = refers_to.split_once('!')?;
+    let unquoted = sheet
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .unwrap_or(sheet);
+    Some(unquoted.replace("''", "'"))
 }
 
 fn resolve_sheet_paths(sheet_refs: Vec<SheetRef>, rels: &RelsGraph) -> Result<Vec<SheetInfo>> {
@@ -3563,7 +3619,7 @@ mod tests {
             <definedName name="LocalName" localSheetId="1">$B$2</definedName>
             <definedName name="_xlnm.Print_Area">Visible!$A$1:$B$2</definedName>
         </definedNames></workbook>"#;
-        let (sheets, date1904, named_ranges, security) =
+        let (sheets, date1904, named_ranges, print_areas, security) =
             parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
         assert_eq!(sheets[0].name, "Visible");
@@ -3610,6 +3666,10 @@ mod tests {
                     refers_to: "Hidden!$B$2".to_string(),
                 },
             ]
+        );
+        assert_eq!(
+            print_areas.get("Visible").map(String::as_str),
+            Some("Visible!$A$1:$B$2")
         );
     }
 

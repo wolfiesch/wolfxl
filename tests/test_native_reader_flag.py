@@ -244,6 +244,15 @@ def _make_sheet_state_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_print_area_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Print"
+    ws.print_area = "A1:D10"
+    wb.save(path)
+    wb.close()
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -367,6 +376,25 @@ def test_native_reader_loads_workbook_sheet_states(
         assert wb["Visible"].sheet_state == "visible"
         assert wb["Hidden"].sheet_state == "hidden"
         assert wb["VeryHidden"].sheet_state == "veryHidden"
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_print_area(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-print-area.xlsx"
+    _make_print_area_xlsx(path)
+    expected = openpyxl.load_workbook(path)
+    try:
+        expected_print_area = expected["Print"].print_area
+    finally:
+        expected.close()
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        assert wb["Print"].print_area == expected_print_area
     finally:
         wb.close()
 
