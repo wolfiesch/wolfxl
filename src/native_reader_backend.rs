@@ -361,8 +361,32 @@ impl NativeXlsxBook {
         Ok(PyList::empty(py).into())
     }
 
-    pub fn read_data_validations(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_data_validations(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let validations = self.ensure_sheet(sheet)?.data_validations.clone();
+        let result = PyList::empty(py);
+        for validation in &validations {
+            let d = PyDict::new(py);
+            d.set_item("range", &validation.range)?;
+            d.set_item("validation_type", &validation.validation_type)?;
+            if let Some(operator) = &validation.operator {
+                d.set_item("operator", operator)?;
+            }
+            if let Some(formula1) = &validation.formula1 {
+                d.set_item("formula1", formula1)?;
+            }
+            if let Some(formula2) = &validation.formula2 {
+                d.set_item("formula2", formula2)?;
+            }
+            d.set_item("allow_blank", validation.allow_blank)?;
+            if let Some(error_title) = &validation.error_title {
+                d.set_item("error_title", error_title)?;
+            }
+            if let Some(error) = &validation.error {
+                d.set_item("error", error)?;
+            }
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_named_ranges(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {

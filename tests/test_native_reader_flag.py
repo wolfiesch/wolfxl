@@ -13,9 +13,11 @@ from pathlib import Path
 import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
+openpyxl_datavalidation = pytest.importorskip("openpyxl.worksheet.datavalidation")
 openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
 wolfxl = pytest.importorskip("wolfxl")
 
+DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
 
 
@@ -44,6 +46,9 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["A6"].comment = openpyxl.comments.Comment("Native reader note", "Wolf")
     ws.row_dimensions[6].height = 24
     ws.column_dimensions["C"].width = 18
+    dv = DataValidation(type="list", formula1='"Red,Blue"', allow_blank=True)
+    dv.add("C2:C6")
+    ws.add_data_validation(dv)
     ws.freeze_panes = "B2"
     wb.save(path)
     wb.close()
@@ -79,6 +84,12 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A6"].comment.author == "Wolf"
         assert ws.row_dimensions[6].height == 24
         assert ws.column_dimensions["C"].width == 18
+        validations = list(ws.data_validations)
+        assert len(validations) == 1
+        assert validations[0].type == "list"
+        assert validations[0].formula1 == '="Red,Blue"'
+        assert validations[0].allowBlank is True
+        assert validations[0].sqref == "C2:C6"
         assert ws.freeze_panes == "B2"
         assert {str(r) for r in ws.merged_cells.ranges} == {"D1:E1"}
         records = {record["coordinate"]: record for record in ws.cell_records(include_format=True)}
@@ -107,5 +118,6 @@ def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.Monk
         assert wb["Data"]["A5"].hyperlink.target == "https://example.com/report"
         assert wb["Data"]["A6"].comment.text == "Native reader note"
         assert wb["Data"].column_dimensions["C"].width == 18
+        assert len(list(wb["Data"].data_validations)) == 1
     finally:
         wb.close()

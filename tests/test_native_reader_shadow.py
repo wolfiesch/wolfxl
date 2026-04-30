@@ -9,9 +9,11 @@ from typing import Any
 import pytest
 
 openpyxl = pytest.importorskip("openpyxl")
+openpyxl_datavalidation = pytest.importorskip("openpyxl.worksheet.datavalidation")
 openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
 wolfxl = pytest.importorskip("wolfxl")
 
+DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
 
 
@@ -40,6 +42,9 @@ def _make_shadow_xlsx(path: Path) -> None:
     ws["A6"].comment = openpyxl.comments.Comment("Shadow note", "Wolf")
     ws.row_dimensions[6].height = 24
     ws.column_dimensions["C"].width = 18
+    dv = DataValidation(type="list", formula1='"Red,Blue"', allow_blank=True)
+    dv.add("C2:C6")
+    ws.add_data_validation(dv)
     ws.merge_cells("D1:E1")
     ws.freeze_panes = "B2"
 
@@ -77,6 +82,10 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             for coord in ("A6",)
             if ws[coord].comment is not None
         }
+        validations = [
+            (dv.type, dv.formula1, dv.allowBlank, str(dv.sqref))
+            for dv in ws.data_validations
+        ]
         out["sheets"][sheet_name] = {
             "values": values,
             "number_formats": number_formats,
@@ -86,6 +95,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "freeze_panes": ws.freeze_panes,
             "row_height": ws.row_dimensions[6].height,
             "column_width": ws.column_dimensions["C"].width,
+            "data_validations": validations,
         }
     return out
 

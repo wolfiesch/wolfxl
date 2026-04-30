@@ -130,6 +130,7 @@ pub struct WorksheetData {
     pub comments: Vec<Comment>,
     pub row_heights: HashMap<u32, RowHeight>,
     pub column_widths: Vec<ColumnWidth>,
+    pub data_validations: Vec<DataValidation>,
     pub cells: Vec<Cell>,
 }
 
@@ -183,6 +184,19 @@ pub struct ColumnWidth {
     pub max: u32,
     pub width: f64,
     pub custom_width: bool,
+}
+
+/// Parsed worksheet data-validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataValidation {
+    pub range: String,
+    pub validation_type: String,
+    pub operator: Option<String>,
+    pub formula1: Option<String>,
+    pub formula2: Option<String>,
+    pub allow_blank: bool,
+    pub error_title: Option<String>,
+    pub error: Option<String>,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -553,9 +567,12 @@ fn parse_worksheet(
     let mut freeze_panes = None;
     let mut row_heights = HashMap::new();
     let mut column_widths = Vec::new();
+    let mut data_validations = Vec::new();
     let mut row_index: Option<u32> = None;
     let mut current: Option<CellBuilder> = None;
     let mut active_text: Option<TextTarget> = None;
+    let mut current_validation: Option<DataValidationBuilder> = None;
+    let mut active_validation_text: Option<DataValidationFormula> = None;
     let mut cells = Vec::new();
 
     loop {
@@ -585,6 +602,19 @@ fn parse_worksheet(
                 }
                 b"c" => {
                     current = Some(CellBuilder::from_start(&e, row_index));
+                }
+                b"dataValidation" => {
+                    current_validation = Some(DataValidationBuilder::from_start(&e));
+                }
+                b"formula1" => {
+                    if current_validation.is_some() {
+                        active_validation_text = Some(DataValidationFormula::Formula1);
+                    }
+                }
+                b"formula2" => {
+                    if current_validation.is_some() {
+                        active_validation_text = Some(DataValidationFormula::Formula2);
+                    }
                 }
                 b"v" => active_text = Some(TextTarget::Value),
                 b"f" => active_text = Some(TextTarget::Formula),
@@ -630,6 +660,12 @@ fn parse_worksheet(
                         row_heights.insert(row, height);
                     }
                 }
+                b"dataValidation" => {
+                    let validation = DataValidationBuilder::from_start(&e).finish();
+                    if !validation.range.trim().is_empty() {
+                        data_validations.push(validation);
+                    }
+                }
                 _ => {}
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
@@ -638,12 +674,40 @@ fn parse_worksheet(
                         cells.push(builder.finish(shared_strings)?);
                     }
                 }
+                b"formula1" => {
+                    active_validation_text = None;
+                    if let Some(validation) = current_validation.as_mut() {
+                        validation.finish_formula1();
+                    }
+                }
+                b"formula2" => {
+                    active_validation_text = None;
+                    if let Some(validation) = current_validation.as_mut() {
+                        validation.finish_formula2();
+                    }
+                }
+                b"dataValidation" => {
+                    active_validation_text = None;
+                    if let Some(validation) = current_validation.take() {
+                        let validation = validation.finish();
+                        if !validation.range.trim().is_empty() {
+                            data_validations.push(validation);
+                        }
+                    }
+                }
                 b"v" | b"f" | b"t" => active_text = None,
                 b"row" => row_index = None,
                 _ => {}
             },
             Ok(Event::Text(e)) => {
-                if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
+                if let (Some(target), Some(validation)) =
+                    (active_validation_text, current_validation.as_mut())
+                {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("worksheet text: {err}")))?;
+                    validation.push_text(target, &text);
+                } else if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
                     let text = e
                         .unescape()
                         .map_err(|err| ReaderError::Xml(format!("worksheet text: {err}")))?;
@@ -651,7 +715,11 @@ fn parse_worksheet(
                 }
             }
             Ok(Event::CData(e)) => {
-                if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
+                if let (Some(target), Some(validation)) =
+                    (active_validation_text, current_validation.as_mut())
+                {
+                    validation.push_text(target, &String::from_utf8_lossy(e.as_ref()));
+                } else if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
                     cell.push_text(target, &String::from_utf8_lossy(e.as_ref()));
                 }
             }
@@ -670,6 +738,7 @@ fn parse_worksheet(
         comments,
         row_heights,
         column_widths,
+        data_validations,
         cells,
     })
 }
@@ -693,6 +762,79 @@ fn parse_column_width(e: &BytesStart<'_>) -> Option<ColumnWidth> {
         width: attr_value(e, b"width")?.parse::<f64>().ok()?,
         custom_width: attr_truthy(attr_value(e, b"customWidth").as_deref()),
     })
+}
+
+#[derive(Debug)]
+struct DataValidationBuilder {
+    range: String,
+    validation_type: String,
+    operator: Option<String>,
+    formula1: Option<String>,
+    formula2: Option<String>,
+    formula1_text: String,
+    formula2_text: String,
+    allow_blank: bool,
+    error_title: Option<String>,
+    error: Option<String>,
+}
+
+impl DataValidationBuilder {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            range: attr_value(e, b"sqref").unwrap_or_default(),
+            validation_type: attr_value(e, b"type").unwrap_or_else(|| "any".to_string()),
+            operator: attr_value(e, b"operator"),
+            formula1: None,
+            formula2: None,
+            formula1_text: String::new(),
+            formula2_text: String::new(),
+            allow_blank: attr_value(e, b"allowBlank")
+                .map(|value| attr_truthy(Some(&value)))
+                .unwrap_or(true),
+            error_title: attr_value(e, b"errorTitle").filter(|value| !value.is_empty()),
+            error: attr_value(e, b"error").filter(|value| !value.is_empty()),
+        }
+    }
+
+    fn push_text(&mut self, target: DataValidationFormula, text: &str) {
+        match target {
+            DataValidationFormula::Formula1 => self.formula1_text.push_str(text),
+            DataValidationFormula::Formula2 => self.formula2_text.push_str(text),
+        }
+    }
+
+    fn finish_formula1(&mut self) {
+        let formula = self.formula1_text.trim();
+        if !formula.is_empty() {
+            self.formula1 = Some(ensure_formula_prefix(formula));
+        }
+    }
+
+    fn finish_formula2(&mut self) {
+        let formula = self.formula2_text.trim();
+        if !formula.is_empty() {
+            self.formula2 = Some(ensure_formula_prefix(formula));
+        }
+    }
+
+    fn finish(self) -> DataValidation {
+        DataValidation {
+            range: self.range,
+            validation_type: self.validation_type,
+            operator: self.operator,
+            formula1: self.formula1,
+            formula2: self.formula2,
+            allow_blank: self.allow_blank,
+            error_title: self.error_title,
+            error: self.error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DataValidationFormula {
+    Formula1,
+    Formula2,
 }
 
 fn parse_pane(e: &BytesStart<'_>) -> Option<FreezePane> {
@@ -1013,6 +1155,14 @@ fn parse_sheet_state(value: Option<&str>) -> SheetState {
     }
 }
 
+fn ensure_formula_prefix(formula: &str) -> String {
+    if formula.starts_with('=') {
+        formula.to_string()
+    } else {
+        format!("={formula}")
+    }
+}
+
 fn normalize_zip_path(path: &str) -> String {
     let mut stack = Vec::new();
     for part in path.split('/') {
@@ -1157,7 +1307,12 @@ mod tests {
                 <c r="D1"><f>SUM(B1:B1)</f><v>42</v></c>
             </row>
             <row r="2" ht="24" customHeight="1"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
-        </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells></worksheet>"#;
+        </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells>
+        <dataValidations count="1">
+            <dataValidation type="whole" operator="between" allowBlank="1" sqref="B2:B5" errorTitle="Invalid" error="Use 1-10">
+                <formula1>1</formula1><formula2>10</formula2>
+            </dataValidation>
+        </dataValidations></worksheet>"#;
         let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new())
             .expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
@@ -1186,6 +1341,19 @@ mod tests {
                 max: 3,
                 width: 18.5,
                 custom_width: true,
+            }]
+        );
+        assert_eq!(
+            sheet.data_validations,
+            vec![DataValidation {
+                range: "B2:B5".to_string(),
+                validation_type: "whole".to_string(),
+                operator: Some("between".to_string()),
+                formula1: Some("=1".to_string()),
+                formula2: Some("=10".to_string()),
+                allow_blank: true,
+                error_title: Some("Invalid".to_string()),
+                error: Some("Use 1-10".to_string()),
             }]
         );
         assert_eq!(
