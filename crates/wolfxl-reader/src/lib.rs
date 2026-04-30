@@ -749,16 +749,15 @@ fn parse_shared_strings(xml: &str) -> Result<SharedStrings> {
             },
             Ok(Event::Text(e)) => {
                 if in_si && in_t {
-                    text_buf.push_str(
-                        &e.unescape().map_err(|err| {
-                            ReaderError::Xml(format!("shared string text: {err}"))
-                        })?,
-                    );
+                    let text = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("shared string text: {err}")))?;
+                    text_buf.push_str(&normalize_ooxml_text(&text));
                 }
             }
             Ok(Event::CData(e)) => {
                 if in_si && in_t {
-                    text_buf.push_str(&String::from_utf8_lossy(e.as_ref()));
+                    text_buf.push_str(&normalize_ooxml_text(&String::from_utf8_lossy(e.as_ref())));
                 }
             }
             Ok(Event::Eof) => break,
@@ -2302,9 +2301,10 @@ impl CellBuilder {
             TextTarget::Value => self.value_text.push_str(text),
             TextTarget::Formula => self.formula_text.push_str(text),
             TextTarget::InlineString => {
-                self.inline_text.push_str(text);
+                let text = normalize_ooxml_text(text);
+                self.inline_text.push_str(&text);
                 if let Some(run) = self.inline_current_run.as_mut() {
-                    run.text.push_str(text);
+                    run.text.push_str(&text);
                 }
             }
         }
@@ -2434,6 +2434,10 @@ enum TextTarget {
 
 fn zip_from_bytes(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
     ZipArchive::new(Cursor::new(bytes)).map_err(ReaderError::Zip)
+}
+
+fn normalize_ooxml_text(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn read_part_required<R: Read + std::io::Seek>(
@@ -2619,14 +2623,14 @@ mod tests {
 
     #[test]
     fn parses_shared_strings_plain_and_rich_text() {
-        let xml = r#"<sst><si><t>Plain</t></si><si><r><rPr><b/><color rgb="FFFF0000"/></rPr><t>Rich</t></r><r><t> Text</t></r></si></sst>"#;
+        let xml = r#"<sst><si><t>Plain</t></si><si><r><rPr><b/><color rgb="FFFF0000"/></rPr><t>Rich&#13;&#10;</t></r><r><t>Text</t></r></si></sst>"#;
         let strings = parse_shared_strings(xml).expect("parse sst");
-        assert_eq!(strings.values, vec!["Plain", "Rich Text"]);
+        assert_eq!(strings.values, vec!["Plain", "Rich\nText"]);
         assert_eq!(strings.rich_text[0], None);
         let rich = strings.rich_text[1].as_ref().expect("rich runs");
         assert_eq!(
             rich.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(),
-            vec!["Rich", " Text"]
+            vec!["Rich\n", "Text"]
         );
         assert_eq!(rich[0].font.as_ref().and_then(|font| font.bold), Some(true));
         assert_eq!(
