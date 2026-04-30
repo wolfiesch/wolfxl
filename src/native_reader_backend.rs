@@ -16,8 +16,8 @@ type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    ArrayFormulaInfo, Cell, CellDataType, CellValue, NativeXlsxBook as NativeReaderBook, PaneMode,
-    WorksheetData,
+    ArrayFormulaInfo, Cell, CellDataType, CellValue, InlineFontProps,
+    NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -542,8 +542,36 @@ impl NativeXlsxBook {
         Ok(d.into())
     }
 
-    pub fn read_cell_rich_text(&self, py: Python<'_>, _sheet: &str, _a1: &str) -> PyObject {
-        py.None()
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let runs = {
+            let data = self.ensure_sheet(sheet)?;
+            data.cells
+                .iter()
+                .find(|c| c.row == row && c.col == col)
+                .and_then(|cell| cell.rich_text.clone())
+        };
+        let Some(runs) = runs else {
+            return Ok(py.None());
+        };
+        let out = PyList::empty(py);
+        for run in runs {
+            let item = PyList::empty(py);
+            item.append(run.text)?;
+            match run.font {
+                Some(font) => item.append(rich_font_to_py(py, &font)?)?,
+                None => item.append(py.None())?,
+            }
+            out.append(item)?;
+        }
+        Ok(out.into())
     }
 
     pub fn read_cell_format(
@@ -732,6 +760,44 @@ fn ensure_formula_prefix(formula: &str) -> String {
     } else {
         format!("={formula}")
     }
+}
+
+fn rich_font_to_py(py: Python<'_>, font: &InlineFontProps) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    if let Some(value) = font.bold {
+        d.set_item("b", value)?;
+    }
+    if let Some(value) = font.italic {
+        d.set_item("i", value)?;
+    }
+    if let Some(value) = font.strike {
+        d.set_item("strike", value)?;
+    }
+    if let Some(value) = &font.underline {
+        d.set_item("u", value)?;
+    }
+    if let Some(value) = font.size {
+        d.set_item("sz", value)?;
+    }
+    if let Some(value) = &font.color {
+        d.set_item("color", value)?;
+    }
+    if let Some(value) = &font.name {
+        d.set_item("rFont", value)?;
+    }
+    if let Some(value) = font.family {
+        d.set_item("family", value)?;
+    }
+    if let Some(value) = font.charset {
+        d.set_item("charset", value)?;
+    }
+    if let Some(value) = &font.vert_align {
+        d.set_item("vertAlign", value)?;
+    }
+    if let Some(value) = &font.scheme {
+        d.set_item("scheme", value)?;
+    }
+    Ok(d.into())
 }
 
 fn parse_range_1based(range: &str) -> Option<(u32, u32, u32, u32)> {

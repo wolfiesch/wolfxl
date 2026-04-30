@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
 use wolfxl_rels::{RelId, RelsGraph};
@@ -99,6 +100,8 @@ pub struct Cell {
     pub formula: Option<String>,
     /// Array/data-table formula metadata when this cell is the master.
     pub array_formula: Option<ArrayFormulaInfo>,
+    /// Structured rich-text runs for shared-string or inline-string cells.
+    pub rich_text: Option<Vec<RichTextRun>>,
 }
 
 /// Native cell value model shared by future readers.
@@ -257,6 +260,29 @@ pub enum ArrayFormulaInfo {
     SpillChild,
 }
 
+/// Inline font properties attached to a rich-text run.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InlineFontProps {
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub strike: Option<bool>,
+    pub underline: Option<String>,
+    pub size: Option<f64>,
+    pub color: Option<String>,
+    pub name: Option<String>,
+    pub family: Option<i32>,
+    pub charset: Option<i32>,
+    pub vert_align: Option<String>,
+    pub scheme: Option<String>,
+}
+
+/// One structured rich-text run from `<si>` or inline `<is>` content.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RichTextRun {
+    pub text: String,
+    pub font: Option<InlineFontProps>,
+}
+
 /// Native XLSX/XLSM workbook reader.
 #[derive(Debug, Clone)]
 pub struct NativeXlsxBook {
@@ -264,7 +290,7 @@ pub struct NativeXlsxBook {
     sheets: Vec<SheetInfo>,
     named_ranges: Vec<NamedRange>,
     doc_properties: HashMap<String, String>,
-    shared_strings: Vec<String>,
+    shared_strings: SharedStrings,
     styles: StyleTables,
     date1904: bool,
 }
@@ -287,7 +313,7 @@ impl NativeXlsxBook {
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
             Some(xml) => parse_shared_strings(&xml)?,
-            None => Vec::new(),
+            None => SharedStrings::default(),
         };
         let styles = match read_part_optional(&mut zip, "xl/styles.xml")? {
             Some(xml) => parse_style_tables(&xml)?,
@@ -339,7 +365,7 @@ impl NativeXlsxBook {
 
     /// Shared-string table as plain strings.
     pub fn shared_strings(&self) -> &[String] {
-        &self.shared_strings
+        &self.shared_strings.values
     }
 
     /// Resolve a style id to an Excel number format code.
@@ -497,6 +523,12 @@ struct RawNamedRange {
     refers_to: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct SharedStrings {
+    values: Vec<String>,
+    rich_text: Vec<Option<Vec<RichTextRun>>>,
+}
+
 fn resolve_named_ranges(sheet_refs: &[SheetRef], raw_names: Vec<RawNamedRange>) -> Vec<NamedRange> {
     raw_names
         .into_iter()
@@ -542,14 +574,19 @@ fn resolve_sheet_paths(sheet_refs: Vec<SheetRef>, rels: &RelsGraph) -> Result<Ve
     Ok(sheets)
 }
 
-fn parse_shared_strings(xml: &str) -> Result<Vec<String>> {
+fn parse_shared_strings(xml: &str) -> Result<SharedStrings> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut out = Vec::new();
+    let mut out = SharedStrings::default();
     let mut current = String::new();
+    let mut runs: Vec<RichTextRun> = Vec::new();
+    let mut current_run: Option<RichTextRun> = None;
+    let mut current_props: Option<InlineFontProps> = None;
     let mut in_si = false;
     let mut in_t = false;
+    let mut saw_r = false;
+    let mut text_buf = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -557,25 +594,70 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>> {
                 b"si" => {
                     in_si = true;
                     current.clear();
+                    runs.clear();
+                    current_run = None;
+                    current_props = None;
+                    saw_r = false;
+                    text_buf.clear();
+                }
+                b"r" if in_si => {
+                    saw_r = true;
+                    current_run = Some(RichTextRun::default());
+                    current_props = None;
+                }
+                b"rPr" if in_si && current_run.is_some() => {
+                    current_props = Some(InlineFontProps::default());
                 }
                 b"t" => {
                     if in_si {
                         in_t = true;
+                        text_buf.clear();
                     }
+                }
+                other if current_props.is_some() => {
+                    apply_rich_font_attr(current_props.as_mut().unwrap(), other, e.attributes());
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"si" => {
+                    out.values.push(String::new());
+                    out.rich_text.push(None);
+                }
+                other if current_props.is_some() => {
+                    apply_rich_font_attr(current_props.as_mut().unwrap(), other, e.attributes());
                 }
                 _ => {}
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 b"si" => {
-                    out.push(std::mem::take(&mut current));
+                    out.values.push(std::mem::take(&mut current));
+                    out.rich_text.push(saw_r.then(|| std::mem::take(&mut runs)));
                     in_si = false;
                 }
-                b"t" => in_t = false,
+                b"t" => {
+                    current.push_str(&text_buf);
+                    if let Some(run) = current_run.as_mut() {
+                        run.text.push_str(&text_buf);
+                    }
+                    text_buf.clear();
+                    in_t = false;
+                }
+                b"rPr" => {
+                    if let (Some(run), Some(props)) = (current_run.as_mut(), current_props.take()) {
+                        run.font = Some(props);
+                    }
+                }
+                b"r" => {
+                    if let Some(run) = current_run.take() {
+                        runs.push(run);
+                    }
+                }
                 _ => {}
             },
             Ok(Event::Text(e)) => {
                 if in_si && in_t {
-                    current.push_str(
+                    text_buf.push_str(
                         &e.unescape().map_err(|err| {
                             ReaderError::Xml(format!("shared string text: {err}"))
                         })?,
@@ -584,7 +666,7 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>> {
             }
             Ok(Event::CData(e)) => {
                 if in_si && in_t {
-                    current.push_str(&String::from_utf8_lossy(e.as_ref()));
+                    text_buf.push_str(&String::from_utf8_lossy(e.as_ref()));
                 }
             }
             Ok(Event::Eof) => break,
@@ -599,6 +681,68 @@ fn parse_shared_strings(xml: &str) -> Result<Vec<String>> {
     }
 
     Ok(out)
+}
+
+fn apply_rich_font_attr(
+    props: &mut InlineFontProps,
+    tag: &[u8],
+    mut attrs: quick_xml::events::attributes::Attributes<'_>,
+) {
+    let mut all_attrs: Vec<(Vec<u8>, String)> = Vec::with_capacity(2);
+    for a in attrs.with_checks(false) {
+        if let Ok(Attribute { key, value }) = a {
+            all_attrs.push((
+                key.local_name().as_ref().to_vec(),
+                String::from_utf8_lossy(value.as_ref()).into_owned(),
+            ));
+        }
+    }
+    let val = || -> Option<String> {
+        all_attrs
+            .iter()
+            .rev()
+            .find(|(k, _)| k.as_slice() == b"val")
+            .map(|(_, v)| v.clone())
+    };
+    match tag {
+        b"b" => props.bold = Some(parse_rich_bool(val())),
+        b"i" => props.italic = Some(parse_rich_bool(val())),
+        b"strike" => props.strike = Some(parse_rich_bool(val())),
+        b"u" => props.underline = Some(val().unwrap_or_else(|| "single".to_string())),
+        b"sz" => props.size = val().and_then(|v| v.parse::<f64>().ok()),
+        b"rFont" => props.name = val(),
+        b"family" => props.family = val().and_then(|v| v.parse::<i32>().ok()),
+        b"charset" => props.charset = val().and_then(|v| v.parse::<i32>().ok()),
+        b"vertAlign" => props.vert_align = val(),
+        b"scheme" => props.scheme = val(),
+        b"color" => {
+            let mut rgb = None;
+            let mut theme = None;
+            let mut indexed = None;
+            for (k, v) in &all_attrs {
+                match k.as_slice() {
+                    b"rgb" => rgb = Some(v.clone()),
+                    b"theme" => theme = Some(v.clone()),
+                    b"indexed" => indexed = Some(v.clone()),
+                    _ => {}
+                }
+            }
+            props.color = rgb
+                .or_else(|| theme.map(|v| format!("theme:{v}")))
+                .or_else(|| indexed.map(|v| format!("indexed:{v}")));
+        }
+        _ => {}
+    }
+}
+
+fn parse_rich_bool(value: Option<String>) -> bool {
+    match value.as_deref() {
+        None => true,
+        Some(raw) => {
+            let trimmed = raw.trim();
+            !(trimmed == "0" || trimmed.eq_ignore_ascii_case("false"))
+        }
+    }
 }
 
 fn parse_style_tables(xml: &str) -> Result<StyleTables> {
@@ -706,7 +850,7 @@ fn builtin_num_fmt(format_id: u32) -> Option<&'static str> {
 
 fn parse_worksheet(
     xml: &str,
-    shared_strings: &[String],
+    shared_strings: &SharedStrings,
     rels: Option<&RelsGraph>,
     comments: Vec<Comment>,
     tables: Vec<Table>,
@@ -807,7 +951,30 @@ fn parse_worksheet(
                         active_text = Some(TextTarget::InlineString);
                     }
                 }
-                _ => {}
+                b"r" => {
+                    if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.start_inline_run();
+                    }
+                }
+                b"rPr" => {
+                    if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.start_inline_props();
+                    }
+                }
+                other => {
+                    if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.apply_inline_font_tag(other, e.attributes());
+                    }
+                }
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"col" => {
@@ -867,7 +1034,14 @@ fn parse_worksheet(
                         conditional_formats.push(rule);
                     }
                 }
-                _ => {}
+                other => {
+                    if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.apply_inline_font_tag(other, e.attributes());
+                    }
+                }
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 b"c" => {
@@ -919,6 +1093,16 @@ fn parse_worksheet(
                     }
                 }
                 b"v" | b"f" | b"t" => active_text = None,
+                b"rPr" => {
+                    if let Some(cell) = current.as_mut() {
+                        cell.end_inline_props();
+                    }
+                }
+                b"r" => {
+                    if let Some(cell) = current.as_mut() {
+                        cell.end_inline_run();
+                    }
+                }
                 b"row" => row_index = None,
                 _ => {}
             },
@@ -1614,6 +1798,10 @@ struct CellBuilder {
     formula_dtr: bool,
     formula_r1: Option<String>,
     formula_r2: Option<String>,
+    inline_runs: Vec<RichTextRun>,
+    inline_current_run: Option<RichTextRun>,
+    inline_current_props: Option<InlineFontProps>,
+    inline_saw_r: bool,
 }
 
 impl CellBuilder {
@@ -1649,6 +1837,10 @@ impl CellBuilder {
             formula_dtr: false,
             formula_r1: None,
             formula_r2: None,
+            inline_runs: Vec::new(),
+            inline_current_run: None,
+            inline_current_props: None,
+            inline_saw_r: false,
         }
     }
 
@@ -1666,18 +1858,76 @@ impl CellBuilder {
         match target {
             TextTarget::Value => self.value_text.push_str(text),
             TextTarget::Formula => self.formula_text.push_str(text),
-            TextTarget::InlineString => self.inline_text.push_str(text),
+            TextTarget::InlineString => {
+                self.inline_text.push_str(text);
+                if let Some(run) = self.inline_current_run.as_mut() {
+                    run.text.push_str(text);
+                }
+            }
         }
     }
 
-    fn finish(self, shared_strings: &[String]) -> Result<Cell> {
+    fn start_inline_run(&mut self) {
+        self.inline_saw_r = true;
+        self.inline_current_run = Some(RichTextRun::default());
+        self.inline_current_props = None;
+    }
+
+    fn start_inline_props(&mut self) {
+        if self.inline_current_run.is_some() {
+            self.inline_current_props = Some(InlineFontProps::default());
+        }
+    }
+
+    fn apply_inline_font_tag(
+        &mut self,
+        tag: &[u8],
+        attrs: quick_xml::events::attributes::Attributes<'_>,
+    ) {
+        if let Some(props) = self.inline_current_props.as_mut() {
+            apply_rich_font_attr(props, tag, attrs);
+        }
+    }
+
+    fn end_inline_props(&mut self) {
+        if let (Some(run), Some(props)) = (
+            self.inline_current_run.as_mut(),
+            self.inline_current_props.take(),
+        ) {
+            run.font = Some(props);
+        }
+    }
+
+    fn end_inline_run(&mut self) {
+        if let Some(run) = self.inline_current_run.take() {
+            self.inline_runs.push(run);
+        }
+        self.inline_current_props = None;
+    }
+
+    fn finish(mut self, shared_strings: &SharedStrings) -> Result<Cell> {
+        if self.inline_current_props.is_some() {
+            self.end_inline_props();
+        }
+        if self.inline_current_run.is_some() {
+            self.end_inline_run();
+        }
+        let shared_string_idx = if self.data_type == CellDataType::SharedString {
+            self.value_text.trim().parse::<usize>().ok()
+        } else {
+            None
+        };
+        let rich_text = match self.data_type {
+            CellDataType::SharedString => shared_string_idx
+                .and_then(|idx| shared_strings.rich_text.get(idx).cloned().flatten()),
+            CellDataType::InlineString if self.inline_saw_r => Some(self.inline_runs),
+            _ => None,
+        };
         let value = match self.data_type {
-            CellDataType::SharedString => {
-                let idx = self.value_text.trim().parse::<usize>().ok();
-                idx.and_then(|i| shared_strings.get(i).cloned())
-                    .map(CellValue::String)
-                    .unwrap_or(CellValue::Empty)
-            }
+            CellDataType::SharedString => shared_string_idx
+                .and_then(|i| shared_strings.values.get(i).cloned())
+                .map(CellValue::String)
+                .unwrap_or(CellValue::Empty),
             CellDataType::InlineString => {
                 if self.inline_text.is_empty() {
                     CellValue::Empty
@@ -1727,6 +1977,7 @@ impl CellBuilder {
                 Some(self.formula_text)
             },
             array_formula,
+            rich_text,
         })
     }
 }
@@ -1925,10 +2176,20 @@ mod tests {
 
     #[test]
     fn parses_shared_strings_plain_and_rich_text() {
-        let xml =
-            r#"<sst><si><t>Plain</t></si><si><r><t>Rich</t></r><r><t> Text</t></r></si></sst>"#;
+        let xml = r#"<sst><si><t>Plain</t></si><si><r><rPr><b/><color rgb="FFFF0000"/></rPr><t>Rich</t></r><r><t> Text</t></r></si></sst>"#;
         let strings = parse_shared_strings(xml).expect("parse sst");
-        assert_eq!(strings, vec!["Plain", "Rich Text"]);
+        assert_eq!(strings.values, vec!["Plain", "Rich Text"]);
+        assert_eq!(strings.rich_text[0], None);
+        let rich = strings.rich_text[1].as_ref().expect("rich runs");
+        assert_eq!(
+            rich.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(),
+            vec!["Rich", " Text"]
+        );
+        assert_eq!(rich[0].font.as_ref().and_then(|font| font.bold), Some(true));
+        assert_eq!(
+            rich[0].font.as_ref().and_then(|font| font.color.clone()),
+            Some("FFFF0000".to_string())
+        );
     }
 
     #[test]
@@ -1958,7 +2219,7 @@ mod tests {
                 <c r="C1" t="b"><v>1</v></c>
                 <c r="D1"><f>SUM(B1:B1)</f><v>42</v></c>
             </row>
-            <row r="2" ht="24" customHeight="1" hidden="1" outlineLevel="1"><c r="A2" t="inlineStr"><is><t>Inline</t></is></c></row>
+            <row r="2" ht="24" customHeight="1" hidden="1" outlineLevel="1"><c r="A2" t="inlineStr"><is><r><rPr><i/></rPr><t>In</t></r><r><t>line</t></r></is></c></row>
         </sheetData><mergeCells count="1"><mergeCell ref="A3:B3"/></mergeCells>
         <dataValidations count="1">
             <dataValidation type="whole" operator="between" allowBlank="1" sqref="B2:B5" errorTitle="Invalid" error="Use 1-10">
@@ -1968,7 +2229,11 @@ mod tests {
         <conditionalFormatting sqref="C2:C5">
             <cfRule type="cellIs" operator="greaterThan" priority="1" stopIfTrue="1"><formula>50</formula></cfRule>
         </conditionalFormatting></worksheet>"#;
-        let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new(), Vec::new())
+        let shared_strings = SharedStrings {
+            values: vec!["Shared".to_string()],
+            rich_text: vec![None],
+        };
+        let sheet = parse_worksheet(xml, &shared_strings, None, Vec::new(), Vec::new())
             .expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
         assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
@@ -2037,6 +2302,18 @@ mod tests {
             sheet.cells[4].value,
             CellValue::String("Inline".to_string())
         );
+        let inline_rich = sheet.cells[4].rich_text.as_ref().expect("inline rich text");
+        assert_eq!(
+            inline_rich
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["In", "line"]
+        );
+        assert_eq!(
+            inline_rich[0].font.as_ref().and_then(|font| font.italic),
+            Some(true)
+        );
     }
 
     #[test]
@@ -2055,8 +2332,14 @@ mod tests {
         )
         .expect("parse rels");
 
-        let sheet = parse_worksheet(xml, &[], Some(&rels), Vec::new(), Vec::new())
-            .expect("parse worksheet");
+        let sheet = parse_worksheet(
+            xml,
+            &SharedStrings::default(),
+            Some(&rels),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("parse worksheet");
         assert_eq!(
             sheet.hyperlinks,
             vec![
