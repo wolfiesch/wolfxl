@@ -131,6 +131,7 @@ pub struct WorksheetData {
     pub row_heights: HashMap<u32, RowHeight>,
     pub column_widths: Vec<ColumnWidth>,
     pub data_validations: Vec<DataValidation>,
+    pub tables: Vec<Table>,
     pub cells: Vec<Cell>,
 }
 
@@ -197,6 +198,18 @@ pub struct DataValidation {
     pub allow_blank: bool,
     pub error_title: Option<String>,
     pub error: Option<String>,
+}
+
+/// Parsed worksheet table metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Table {
+    pub name: String,
+    pub ref_range: String,
+    pub header_row: bool,
+    pub totals_row: bool,
+    pub style: Option<String>,
+    pub columns: Vec<String>,
+    pub autofilter: bool,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -291,7 +304,8 @@ impl NativeXlsxBook {
             .unwrap_or_default(),
             None => Vec::new(),
         };
-        parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments)
+        let tables = read_tables(&mut zip, &info.path, &xml, rels.as_ref())?;
+        parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments, tables)
     }
 }
 
@@ -557,6 +571,7 @@ fn parse_worksheet(
     shared_strings: &[String],
     rels: Option<&RelsGraph>,
     comments: Vec<Comment>,
+    tables: Vec<Table>,
 ) -> Result<WorksheetData> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -739,6 +754,7 @@ fn parse_worksheet(
         row_heights,
         column_widths,
         data_validations,
+        tables,
         cells,
     })
 }
@@ -1002,6 +1018,124 @@ fn parse_comments(xml: &str) -> Result<Vec<Comment>> {
     }
 
     Ok(comments)
+}
+
+fn read_tables<R: Read + std::io::Seek>(
+    zip: &mut ZipArchive<R>,
+    sheet_path: &str,
+    sheet_xml: &str,
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<Table>> {
+    let Some(rels) = rels else {
+        return Ok(Vec::new());
+    };
+    let table_rids = parse_table_rids(sheet_xml)?;
+    if table_rids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let sheet_dir = part_dir(sheet_path);
+    let mut out = Vec::new();
+    for rid in table_rids {
+        let Some(rel) = rels.get(&RelId(rid)) else {
+            continue;
+        };
+        let table_path = join_and_normalize(&sheet_dir, &rel.target);
+        let Some(table_xml) = read_part_optional(zip, &table_path)? else {
+            continue;
+        };
+        if let Ok(table) = parse_table_xml(&table_xml) {
+            out.push(table);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_table_rids(xml: &str) -> Result<Vec<String>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if e.local_name().as_ref() == b"tablePart" {
+                    if let Some(rid) = attr_value(&e, b"r:id").filter(|value| !value.is_empty()) {
+                        out.push(rid);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse worksheet table parts: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn parse_table_xml(xml: &str) -> Result<Table> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut name = String::new();
+    let mut ref_range = String::new();
+    let mut header_row = true;
+    let mut totals_row = false;
+    let mut style = None;
+    let mut columns = Vec::new();
+    let mut autofilter = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"table" => {
+                    name = attr_value(&e, b"name")
+                        .or_else(|| attr_value(&e, b"displayName"))
+                        .unwrap_or_default();
+                    ref_range = attr_value(&e, b"ref").unwrap_or_default();
+                    header_row = attr_value(&e, b"headerRowCount")
+                        .map(|value| value != "0")
+                        .unwrap_or(true);
+                    totals_row = attr_value(&e, b"totalsRowCount")
+                        .map(|value| value != "0")
+                        .unwrap_or(false);
+                }
+                b"tableStyleInfo" => {
+                    style = attr_value(&e, b"name").filter(|value| !value.is_empty());
+                }
+                b"tableColumn" => {
+                    if let Some(column) = attr_value(&e, b"name") {
+                        columns.push(column);
+                    }
+                }
+                b"autoFilter" => {
+                    autofilter = true;
+                }
+                _ => {}
+            },
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ReaderError::Xml(format!("failed to parse table XML: {e}"))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(Table {
+        name,
+        ref_range,
+        header_row,
+        totals_row,
+        style,
+        columns,
+        autofilter,
+    })
 }
 
 #[derive(Debug)]
@@ -1313,7 +1447,7 @@ mod tests {
                 <formula1>1</formula1><formula2>10</formula2>
             </dataValidation>
         </dataValidations></worksheet>"#;
-        let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new())
+        let sheet = parse_worksheet(xml, &["Shared".to_string()], None, Vec::new(), Vec::new())
             .expect("parse worksheet");
         assert_eq!(sheet.dimension.as_deref(), Some("A1:D2"));
         assert_eq!(sheet.merged_ranges, vec!["A3:B3"]);
@@ -1385,7 +1519,8 @@ mod tests {
         )
         .expect("parse rels");
 
-        let sheet = parse_worksheet(xml, &[], Some(&rels), Vec::new()).expect("parse worksheet");
+        let sheet = parse_worksheet(xml, &[], Some(&rels), Vec::new(), Vec::new())
+            .expect("parse worksheet");
         assert_eq!(
             sheet.hyperlinks,
             vec![
@@ -1431,6 +1566,28 @@ mod tests {
                     threaded: false,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn parses_table_metadata() {
+        let xml = r#"<table name="SalesTable" displayName="SalesTable" ref="A1:B3" headerRowCount="1" totalsRowCount="0">
+            <autoFilter ref="A1:B3"/>
+            <tableColumns count="2"><tableColumn id="1" name="Name"/><tableColumn id="2" name="Sales"/></tableColumns>
+            <tableStyleInfo name="TableStyleLight9"/>
+        </table>"#;
+
+        assert_eq!(
+            parse_table_xml(xml).expect("parse table"),
+            Table {
+                name: "SalesTable".to_string(),
+                ref_range: "A1:B3".to_string(),
+                header_row: true,
+                totals_row: false,
+                style: Some("TableStyleLight9".to_string()),
+                columns: vec!["Name".to_string(), "Sales".to_string()],
+                autofilter: true,
+            }
         );
     }
 }

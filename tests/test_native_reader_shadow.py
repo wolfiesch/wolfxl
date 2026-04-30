@@ -11,10 +11,13 @@ import pytest
 openpyxl = pytest.importorskip("openpyxl")
 openpyxl_datavalidation = pytest.importorskip("openpyxl.worksheet.datavalidation")
 openpyxl_hyperlink = pytest.importorskip("openpyxl.worksheet.hyperlink")
+openpyxl_table = pytest.importorskip("openpyxl.worksheet.table")
 wolfxl = pytest.importorskip("wolfxl")
 
 DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
+Table = openpyxl_table.Table
+TableStyleInfo = openpyxl_table.TableStyleInfo
 
 
 def _make_shadow_xlsx(path: Path) -> None:
@@ -45,6 +48,9 @@ def _make_shadow_xlsx(path: Path) -> None:
     dv = DataValidation(type="list", formula1='"Red,Blue"', allow_blank=True)
     dv.add("C2:C6")
     ws.add_data_validation(dv)
+    table = Table(displayName="ShadowTable", ref="A1:B4")
+    table.tableStyleInfo = TableStyleInfo(name="TableStyleLight9", showRowStripes=True)
+    ws.add_table(table)
     ws.merge_cells("D1:E1")
     ws.freeze_panes = "B2"
 
@@ -86,6 +92,14 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             (dv.type, dv.formula1, dv.allowBlank, str(dv.sqref))
             for dv in ws.data_validations
         ]
+        tables = {
+            name: (
+                table.ref,
+                [column.name for column in table.tableColumns],
+                table.tableStyleInfo.name if table.tableStyleInfo else None,
+            )
+            for name, table in ws.tables.items()
+        }
         out["sheets"][sheet_name] = {
             "values": values,
             "number_formats": number_formats,
@@ -96,6 +110,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "row_height": ws.row_dimensions[6].height,
             "column_width": ws.column_dimensions["C"].width,
             "data_validations": validations,
+            "tables": tables,
         }
     return out
 

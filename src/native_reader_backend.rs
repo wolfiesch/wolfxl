@@ -393,8 +393,24 @@ impl NativeXlsxBook {
         Ok(PyList::empty(py).into())
     }
 
-    pub fn read_tables(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_tables(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let tables = self.ensure_sheet(sheet)?.tables.clone();
+        let result = PyList::empty(py);
+        for table in &tables {
+            let d = PyDict::new(py);
+            d.set_item("name", &table.name)?;
+            d.set_item("ref", &table.ref_range)?;
+            d.set_item("header_row", table.header_row)?;
+            d.set_item("totals_row", table.totals_row)?;
+            match &table.style {
+                Some(style) => d.set_item("style", style)?,
+                None => d.set_item("style", py.None())?,
+            }
+            d.set_item("columns", table.columns.clone())?;
+            d.set_item("autofilter", table.autofilter)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_doc_properties(&self, py: Python<'_>) -> PyResult<PyObject> {
