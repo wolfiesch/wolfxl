@@ -67,6 +67,12 @@ def test_native_reader_flag_loads_bytes(tmp_path: Path, monkeypatch: pytest.Monk
     try:
         assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
         assert wb._rust_reader.opened_from_bytes() is True  # noqa: SLF001
-        assert wb["Data"].iter_rows(values_only=True).__next__() == ("Label", 42, True)
+        assert wb["Data"].iter_rows(values_only=True).__next__() == (
+            "Label",
+            42,
+            True,
+            None,
+            None,
+        )
     finally:
         wb.close()

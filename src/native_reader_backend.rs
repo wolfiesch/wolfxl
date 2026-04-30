@@ -400,6 +400,12 @@ impl NativeXlsxBook {
         for cell in &data.cells {
             update_bounds(&mut bounds, cell.row, cell.col);
         }
+        for range in &data.merged_ranges {
+            if let Some((min_row, min_col, max_row, max_col)) = parse_range_1based(range) {
+                update_bounds(&mut bounds, min_row, min_col);
+                update_bounds(&mut bounds, max_row, max_col);
+            }
+        }
         if bounds.is_none() {
             bounds = data.dimension.as_deref().and_then(parse_range_1based);
         }
