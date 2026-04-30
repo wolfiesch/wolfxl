@@ -93,3 +93,26 @@ def test_defined_name_dict_add_helper() -> None:
     dn = DefinedName(name="Totals", value="Sheet1!$B$1")
     wb.defined_names.add(dn)
     assert wb.defined_names["Totals"] is dn
+
+
+def test_sheet_scoped_defined_names_live_on_worksheet(tmp_path: Path) -> None:
+    from openpyxl.workbook.defined_name import DefinedName as XDefinedName
+
+    path = tmp_path / "sheet-scoped-names.xlsx"
+    op_wb = openpyxl.Workbook()
+    data = op_wb.active
+    data.title = "Data"
+    other = op_wb.create_sheet("Other")
+    op_wb.defined_names.add(XDefinedName("GlobalName", attr_text="Data!$A$1"))
+    data.defined_names.add(XDefinedName("LocalName", attr_text="$B$2"))
+    other.defined_names.add(XDefinedName("OtherLocal", attr_text="$C$3"))
+    op_wb.save(path)
+
+    wb = Workbook._from_reader(str(path))
+
+    assert list(wb.defined_names) == ["GlobalName"]
+    assert wb.defined_names["GlobalName"].attr_text == "Data!$A$1"
+    assert list(wb["Data"].defined_names) == ["LocalName"]
+    assert wb["Data"].defined_names["LocalName"].attr_text == "$B$2"
+    assert list(wb["Other"].defined_names) == ["OtherLocal"]
+    assert wb["Other"].defined_names["OtherLocal"].attr_text == "$C$3"

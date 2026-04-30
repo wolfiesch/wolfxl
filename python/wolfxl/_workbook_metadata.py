@@ -99,19 +99,16 @@ def get_defined_names(wb: Any) -> Any:
                 continue
             for entry in entries:
                 name = entry["name"]
+                scope = entry.get("scope", "workbook")
+                if scope == "sheet":
+                    continue
                 if name in seen:
                     continue
                 seen.add(name)
                 refers_to = entry["refers_to"]
                 if refers_to.startswith("="):
                     refers_to = refers_to[1:]
-                scope = entry.get("scope", "workbook")
-                local_id: int | None = None
-                if scope == "sheet":
-                    # The reader encodes sheet scope in refers_to; keep the
-                    # previous conservative behavior and do not guess the id.
-                    local_id = None
-                dn = DefinedName(name=name, value=refers_to, localSheetId=local_id)
+                dn = DefinedName(name=name, value=refers_to, localSheetId=None)
                 dict.__setitem__(dnd, name, dn)
     dnd._wb = wb  # noqa: SLF001
     wb._defined_names_cache = dnd  # noqa: SLF001

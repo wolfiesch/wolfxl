@@ -8,6 +8,45 @@ if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
 
 
+def _strip_sheet_prefix(refers_to: str, sheet_name: str) -> str:
+    if refers_to.startswith("="):
+        refers_to = refers_to[1:]
+    if "!" not in refers_to:
+        return refers_to
+    prefix, _, tail = refers_to.partition("!")
+    if prefix.strip("'").replace("''", "'") == sheet_name:
+        return tail
+    return refers_to
+
+
+def get_defined_names(ws: Worksheet) -> dict[str, Any]:
+    """Return worksheet-scoped defined names for ``ws``."""
+    if ws._defined_names_cache is not None:  # noqa: SLF001
+        return ws._defined_names_cache  # noqa: SLF001
+    from wolfxl.workbook import DefinedNameDict
+    from wolfxl.workbook.defined_name import DefinedName
+
+    names = DefinedNameDict()
+    wb = ws._workbook  # noqa: SLF001
+    if wb._rust_reader is not None:  # noqa: SLF001
+        try:
+            entries = wb._rust_reader.read_named_ranges(ws._title)  # noqa: SLF001
+        except Exception:
+            entries = []
+        for entry in entries:
+            if entry.get("scope") != "sheet":
+                continue
+            name = entry["name"]
+            refers_to = _strip_sheet_prefix(entry["refers_to"], ws._title)
+            dict.__setitem__(
+                names,
+                name,
+                DefinedName(name=name, value=refers_to, localSheetId=None),
+            )
+    ws._defined_names_cache = names  # noqa: SLF001
+    return names
+
+
 def get_comments_map(ws: Worksheet) -> dict[str, Any]:
     """Return ``{cell_ref: Comment}`` for ``ws``, cached on the worksheet."""
     if ws._comments_cache is not None:  # noqa: SLF001
