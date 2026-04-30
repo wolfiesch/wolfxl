@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -19,14 +20,16 @@ import pytest
 def _save_with_status(tmp_path: Path, status: str) -> Path:
     env = {**os.environ, "WOLFXL_TEST_EPOCH": "0"}
     out = tmp_path / "out.xlsx"
-    script = f"""
-import wolfxl
-wb = wolfxl.Workbook()
-wb._rust_writer.set_properties({{"contentStatus": {status!r}}})
-wb.save({str(out)!r})
-"""
+    script = "\n".join(
+        [
+            "import wolfxl",
+            "wb = wolfxl.Workbook()",
+            f"wb._rust_writer.set_properties({{'contentStatus': {status!r}}})",
+            f"wb.save({str(out)!r})",
+        ]
+    )
     subprocess.run(
-        ["python", "-c", script],
+        [sys.executable, "-c", script],
         env=env,
         check=True,
         capture_output=True,
