@@ -477,6 +477,9 @@ def _make_sheet_properties_xlsx(path: Path) -> None:
 def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart import BarChart, Reference
     from openpyxl.chart.axis import DisplayUnitsLabelList
+    from openpyxl.chart.error_bar import ErrorBars
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.trendline import Trendline
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -510,6 +513,13 @@ def _make_chart_xlsx(path: Path) -> None:
     cats = Reference(ws, min_col=1, min_row=2, max_row=4)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
+    chart.dataLabels = DataLabelList(showVal=True, dLblPos="outEnd")
+    chart.series[0].trendline = Trendline(
+        trendlineType="poly", order=3, dispEq=True, dispRSqr=True
+    )
+    chart.series[0].errBars = ErrorBars(
+        errBarType="both", errValType="fixedVal", noEndCap=True, val=2
+    )
     ws.add_chart(chart, "D5")
     wb.save(path)
     wb.close()
@@ -1019,11 +1029,21 @@ def test_native_reader_loads_drawing_charts(
         assert chart.y_axis.numFmt.formatCode == "0.0"
         assert chart.y_axis.tickLblPos == "high"
         assert chart.y_axis.dispUnits.builtInUnit == "thousands"
+        assert chart.dLbls.showVal is True
+        assert chart.dLbls.position == "outEnd"
         assert len(chart.series) == 1
         series = chart.series[0]
         assert series.tx.strRef.f == "'Charts'!B1"
         assert series.cat.strRef.f == "'Charts'!$A$2:$A$4"
         assert series.val.numRef.f == "'Charts'!$B$2:$B$4"
+        assert series.trendline.trendlineType == "poly"
+        assert series.trendline.order == 3
+        assert series.trendline.dispEq is True
+        assert series.trendline.dispRSqr is True
+        assert series.errBars.errBarType == "both"
+        assert series.errBars.errValType == "fixedVal"
+        assert series.errBars.noEndCap is True
+        assert series.errBars.val == 2
 
         from wolfxl.drawing.spreadsheet_drawing import OneCellAnchor
 

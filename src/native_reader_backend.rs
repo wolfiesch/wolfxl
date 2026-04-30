@@ -18,12 +18,13 @@ use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
-    ChartAxisInfo, ChartInfo, ChartSeriesInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo,
-    FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
-    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
-    PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo,
-    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
-    SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
+    ChartAxisInfo, ChartDataLabelsInfo, ChartErrorBarsInfo, ChartInfo, ChartSeriesInfo,
+    ChartTrendlineInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo,
+    FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo,
+    InlineFontProps, NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo,
+    PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection,
+    SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo,
+    WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -1430,6 +1431,10 @@ fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
     d.set_item("y_axis_title", chart.y_axis_title.as_deref())?;
     d.set_item("x_axis", chart_axis_to_py(py, chart.x_axis.as_ref())?)?;
     d.set_item("y_axis", chart_axis_to_py(py, chart.y_axis.as_ref())?)?;
+    d.set_item(
+        "data_labels",
+        chart_data_labels_to_py(py, chart.data_labels.as_ref())?,
+    )?;
     d.set_item("legend_position", chart.legend_position.as_deref())?;
     d.set_item("bar_dir", chart.bar_dir.as_deref())?;
     d.set_item("grouping", chart.grouping.as_deref())?;
@@ -1478,11 +1483,77 @@ fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyOb
     d.set_item("order", series.order)?;
     d.set_item("title_ref", series.title_ref.as_deref())?;
     d.set_item("title_value", series.title_value.as_deref())?;
+    d.set_item(
+        "data_labels",
+        chart_data_labels_to_py(py, series.data_labels.as_ref())?,
+    )?;
+    d.set_item(
+        "trendline",
+        chart_trendline_to_py(py, series.trendline.as_ref())?,
+    )?;
+    d.set_item(
+        "error_bars",
+        chart_error_bars_to_py(py, series.error_bars.as_ref())?,
+    )?;
     d.set_item("cat_ref", series.cat_ref.as_deref())?;
     d.set_item("val_ref", series.val_ref.as_deref())?;
     d.set_item("x_ref", series.x_ref.as_deref())?;
     d.set_item("y_ref", series.y_ref.as_deref())?;
     d.set_item("bubble_size_ref", series.bubble_size_ref.as_deref())?;
+    Ok(d.into())
+}
+
+fn chart_data_labels_to_py(
+    py: Python<'_>,
+    labels: Option<&ChartDataLabelsInfo>,
+) -> PyResult<PyObject> {
+    let Some(labels) = labels else {
+        return Ok(py.None());
+    };
+    let d = PyDict::new(py);
+    d.set_item("position", labels.position.as_deref())?;
+    d.set_item("show_legend_key", labels.show_legend_key)?;
+    d.set_item("show_val", labels.show_val)?;
+    d.set_item("show_cat_name", labels.show_cat_name)?;
+    d.set_item("show_ser_name", labels.show_ser_name)?;
+    d.set_item("show_percent", labels.show_percent)?;
+    d.set_item("show_bubble_size", labels.show_bubble_size)?;
+    d.set_item("show_leader_lines", labels.show_leader_lines)?;
+    Ok(d.into())
+}
+
+fn chart_trendline_to_py(
+    py: Python<'_>,
+    trendline: Option<&ChartTrendlineInfo>,
+) -> PyResult<PyObject> {
+    let Some(trendline) = trendline else {
+        return Ok(py.None());
+    };
+    let d = PyDict::new(py);
+    d.set_item("trendline_type", trendline.trendline_type.as_deref())?;
+    d.set_item("order", trendline.order)?;
+    d.set_item("period", trendline.period)?;
+    d.set_item("forward", trendline.forward)?;
+    d.set_item("backward", trendline.backward)?;
+    d.set_item("intercept", trendline.intercept)?;
+    d.set_item("display_equation", trendline.display_equation)?;
+    d.set_item("display_r_squared", trendline.display_r_squared)?;
+    Ok(d.into())
+}
+
+fn chart_error_bars_to_py(
+    py: Python<'_>,
+    error_bars: Option<&ChartErrorBarsInfo>,
+) -> PyResult<PyObject> {
+    let Some(error_bars) = error_bars else {
+        return Ok(py.None());
+    };
+    let d = PyDict::new(py);
+    d.set_item("direction", error_bars.direction.as_deref())?;
+    d.set_item("bar_type", error_bars.bar_type.as_deref())?;
+    d.set_item("val_type", error_bars.val_type.as_deref())?;
+    d.set_item("no_end_cap", error_bars.no_end_cap)?;
+    d.set_item("val", error_bars.val)?;
     Ok(d.into())
 }
 

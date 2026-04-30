@@ -217,6 +217,8 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
         _hydrate_axis_from_payload(chart.x_axis, payload["x_axis"])
     if isinstance(payload.get("y_axis"), dict) and hasattr(chart, "y_axis"):
         _hydrate_axis_from_payload(chart.y_axis, payload["y_axis"])
+    if isinstance(payload.get("data_labels"), dict):
+        chart.dLbls = _data_labels_from_payload(payload["data_labels"])
     if payload.get("legend_position") is not None and chart.legend is not None:
         chart.legend.position = str(payload["legend_position"])
     if payload.get("bar_dir") is not None and hasattr(chart, "barDir"):
@@ -310,7 +312,56 @@ def _series_from_payload(kind: str, payload: dict[str, Any]) -> Any:
             series.cat = AxDataSource(strRef=StrRef(str(payload["cat_ref"])))
         if payload.get("val_ref"):
             series.val = NumDataSource(numRef=NumRef(f=str(payload["val_ref"])))
+    if isinstance(payload.get("data_labels"), dict):
+        series.dLbls = _data_labels_from_payload(payload["data_labels"])
+    if isinstance(payload.get("trendline"), dict):
+        series.trendline = _trendline_from_payload(payload["trendline"])
+    if isinstance(payload.get("error_bars"), dict):
+        series.errBars = _error_bars_from_payload(payload["error_bars"])
     return series
+
+
+def _data_labels_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.chart.label import DataLabelList
+
+    kwargs = {
+        "position": payload.get("position"),
+        "showLegendKey": payload.get("show_legend_key"),
+        "showVal": payload.get("show_val"),
+        "showCatName": payload.get("show_cat_name"),
+        "showSerName": payload.get("show_ser_name"),
+        "showPercent": payload.get("show_percent"),
+        "showBubbleSize": payload.get("show_bubble_size"),
+        "showLeaderLines": payload.get("show_leader_lines"),
+    }
+    return DataLabelList(**{key: value for key, value in kwargs.items() if value is not None})
+
+
+def _trendline_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.chart.trendline import Trendline
+
+    return Trendline(
+        trendlineType=str(payload.get("trendline_type") or "linear"),
+        order=payload.get("order"),
+        period=payload.get("period"),
+        forward=payload.get("forward"),
+        backward=payload.get("backward"),
+        intercept=payload.get("intercept"),
+        dispEq=payload.get("display_equation"),
+        dispRSqr=payload.get("display_r_squared"),
+    )
+
+
+def _error_bars_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.chart.error_bar import ErrorBars
+
+    return ErrorBars(
+        errDir=payload.get("direction"),
+        errBarType=str(payload.get("bar_type") or "both"),
+        errValType=str(payload.get("val_type") or "fixedVal"),
+        noEndCap=payload.get("no_end_cap"),
+        val=payload.get("val"),
+    )
 
 
 def add_image(ws: Worksheet, image: Any, anchor: Any = None) -> None:

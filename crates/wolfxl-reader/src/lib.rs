@@ -680,6 +680,7 @@ pub struct ChartInfo {
     pub y_axis_title: Option<String>,
     pub x_axis: Option<ChartAxisInfo>,
     pub y_axis: Option<ChartAxisInfo>,
+    pub data_labels: Option<ChartDataLabelsInfo>,
     pub legend_position: Option<String>,
     pub bar_dir: Option<String>,
     pub grouping: Option<String>,
@@ -688,6 +689,19 @@ pub struct ChartInfo {
     pub style: Option<u32>,
     pub anchor: ImageAnchorInfo,
     pub series: Vec<ChartSeriesInfo>,
+}
+
+/// Parsed chart data label options.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChartDataLabelsInfo {
+    pub position: Option<String>,
+    pub show_legend_key: Option<bool>,
+    pub show_val: Option<bool>,
+    pub show_cat_name: Option<bool>,
+    pub show_ser_name: Option<bool>,
+    pub show_percent: Option<bool>,
+    pub show_bubble_size: Option<bool>,
+    pub show_leader_lines: Option<bool>,
 }
 
 /// Parsed chart axis metadata for native chart hydration.
@@ -715,17 +729,43 @@ pub struct ChartAxisInfo {
 }
 
 /// Parsed chart series references.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChartSeriesInfo {
     pub idx: Option<u32>,
     pub order: Option<u32>,
     pub title_ref: Option<String>,
     pub title_value: Option<String>,
+    pub data_labels: Option<ChartDataLabelsInfo>,
+    pub trendline: Option<ChartTrendlineInfo>,
+    pub error_bars: Option<ChartErrorBarsInfo>,
     pub cat_ref: Option<String>,
     pub val_ref: Option<String>,
     pub x_ref: Option<String>,
     pub y_ref: Option<String>,
     pub bubble_size_ref: Option<String>,
+}
+
+/// Parsed chart trendline options for a series.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChartTrendlineInfo {
+    pub trendline_type: Option<String>,
+    pub order: Option<u32>,
+    pub period: Option<u32>,
+    pub forward: Option<f64>,
+    pub backward: Option<f64>,
+    pub intercept: Option<f64>,
+    pub display_equation: Option<bool>,
+    pub display_r_squared: Option<bool>,
+}
+
+/// Parsed chart error bar options for a series.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChartErrorBarsInfo {
+    pub direction: Option<String>,
+    pub bar_type: Option<String>,
+    pub val_type: Option<String>,
+    pub no_end_cap: Option<bool>,
+    pub val: Option<f64>,
 }
 
 /// Parsed drawing anchor for an embedded image.
@@ -4329,6 +4369,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
     let mut y_axis_title: Option<String> = None;
     let mut x_axis: Option<ChartAxisInfo> = None;
     let mut y_axis: Option<ChartAxisInfo> = None;
+    let mut data_labels: Option<ChartDataLabelsInfo> = None;
     let mut val_axis_titles_seen = 0usize;
     let mut legend_position: Option<String> = None;
     let mut bar_dir: Option<String> = None;
@@ -4352,6 +4393,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                     &mut grouping,
                     &mut scatter_style,
                     &mut vary_colors,
+                    &mut data_labels,
                     &mut style,
                     &mut current_series,
                 );
@@ -4375,6 +4417,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                     &mut grouping,
                     &mut scatter_style,
                     &mut vary_colors,
+                    &mut data_labels,
                     &mut style,
                     &mut current_series,
                 );
@@ -4443,6 +4486,7 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
         y_axis_title,
         x_axis,
         y_axis,
+        data_labels,
         legend_position,
         bar_dir,
         grouping,
@@ -4463,6 +4507,7 @@ fn apply_chart_start(
     grouping: &mut Option<String>,
     scatter_style: &mut Option<String>,
     vary_colors: &mut Option<bool>,
+    data_labels: &mut Option<ChartDataLabelsInfo>,
     style: &mut Option<u32>,
     current_series: &mut Option<ChartSeriesInfo>,
 ) {
@@ -4488,6 +4533,99 @@ fn apply_chart_start(
         b"varyColors" => {
             *vary_colors = attr_bool(e, b"val");
         }
+        b"dLbls" => {
+            chart_data_labels_mut(data_labels, current_series);
+        }
+        b"dLblPos" => {
+            chart_data_labels_mut(data_labels, current_series).position = attr_value(e, b"val");
+        }
+        b"showLegendKey" => {
+            chart_data_labels_mut(data_labels, current_series).show_legend_key =
+                attr_bool(e, b"val");
+        }
+        b"showVal" => {
+            chart_data_labels_mut(data_labels, current_series).show_val = attr_bool(e, b"val");
+        }
+        b"showCatName" => {
+            chart_data_labels_mut(data_labels, current_series).show_cat_name = attr_bool(e, b"val");
+        }
+        b"showSerName" => {
+            chart_data_labels_mut(data_labels, current_series).show_ser_name = attr_bool(e, b"val");
+        }
+        b"showPercent" => {
+            chart_data_labels_mut(data_labels, current_series).show_percent = attr_bool(e, b"val");
+        }
+        b"showBubbleSize" => {
+            chart_data_labels_mut(data_labels, current_series).show_bubble_size =
+                attr_bool(e, b"val");
+        }
+        b"showLeaderLines" => {
+            chart_data_labels_mut(data_labels, current_series).show_leader_lines =
+                attr_bool(e, b"val");
+        }
+        b"trendline" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default);
+            }
+        }
+        b"trendlineType" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .trendline_type = attr_value(e, b"val");
+            }
+        }
+        b"errBars" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .error_bars
+                    .get_or_insert_with(ChartErrorBarsInfo::default);
+            }
+        }
+        b"errDir" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .error_bars
+                    .get_or_insert_with(ChartErrorBarsInfo::default)
+                    .direction = attr_value(e, b"val");
+            }
+        }
+        b"errBarType" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .error_bars
+                    .get_or_insert_with(ChartErrorBarsInfo::default)
+                    .bar_type = attr_value(e, b"val");
+            }
+        }
+        b"errValType" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .error_bars
+                    .get_or_insert_with(ChartErrorBarsInfo::default)
+                    .val_type = attr_value(e, b"val");
+            }
+        }
+        b"noEndCap" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .error_bars
+                    .get_or_insert_with(ChartErrorBarsInfo::default)
+                    .no_end_cap = attr_bool(e, b"val");
+            }
+        }
+        b"val" => {
+            if let Some(series) = current_series.as_mut() {
+                if let (Some(error_bars), Some(value)) =
+                    (series.error_bars.as_mut(), attr_f64(e, b"val"))
+                {
+                    error_bars.val = Some(value);
+                }
+            }
+        }
         b"ser" => {
             *current_series = Some(ChartSeriesInfo::default());
         }
@@ -4498,7 +4636,59 @@ fn apply_chart_start(
         }
         b"order" => {
             if let Some(series) = current_series.as_mut() {
-                series.order = attr_u32(e, b"val");
+                if let Some(trendline) = series.trendline.as_mut() {
+                    trendline.order = attr_u32(e, b"val");
+                } else {
+                    series.order = attr_u32(e, b"val");
+                }
+            }
+        }
+        b"period" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .period = attr_u32(e, b"val");
+            }
+        }
+        b"forward" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .forward = attr_f64(e, b"val");
+            }
+        }
+        b"backward" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .backward = attr_f64(e, b"val");
+            }
+        }
+        b"intercept" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .intercept = attr_f64(e, b"val");
+            }
+        }
+        b"dispEq" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .display_equation = attr_bool(e, b"val");
+            }
+        }
+        b"dispRSqr" => {
+            if let Some(series) = current_series.as_mut() {
+                series
+                    .trendline
+                    .get_or_insert_with(ChartTrendlineInfo::default)
+                    .display_r_squared = attr_bool(e, b"val");
             }
         }
         _ => {}
@@ -4551,6 +4741,18 @@ fn apply_chart_text(
 
 fn chart_path_contains(stack: &[Vec<u8>], name: &[u8]) -> bool {
     stack.iter().any(|part| part.as_slice() == name)
+}
+
+fn chart_data_labels_mut<'a>(
+    chart_labels: &'a mut Option<ChartDataLabelsInfo>,
+    current_series: &'a mut Option<ChartSeriesInfo>,
+) -> &'a mut ChartDataLabelsInfo {
+    if let Some(series) = current_series.as_mut() {
+        return series
+            .data_labels
+            .get_or_insert_with(ChartDataLabelsInfo::default);
+    }
+    chart_labels.get_or_insert_with(ChartDataLabelsInfo::default)
 }
 
 fn chart_axis_name(local: &[u8]) -> Option<&'static str> {
@@ -5754,9 +5956,13 @@ mod tests {
                         <c:ser>
                             <c:idx val="0"/><c:order val="0"/>
                             <c:tx><c:strRef><c:f>'Charts'!B1</c:f></c:strRef></c:tx>
+                            <c:dLbls><c:dLblPos val="outEnd"/><c:showVal val="1"/></c:dLbls>
+                            <c:trendline><c:trendlineType val="poly"/><c:order val="3"/><c:dispEq val="1"/><c:dispRSqr val="1"/></c:trendline>
+                            <c:errBars><c:errBarType val="both"/><c:errValType val="fixedVal"/><c:noEndCap val="1"/><c:val val="2"/></c:errBars>
                             <c:cat><c:strRef><c:f>'Charts'!$A$2:$A$4</c:f></c:strRef></c:cat>
                             <c:val><c:numRef><c:f>'Charts'!$B$2:$B$4</c:f></c:numRef></c:val>
                         </c:ser>
+                        <c:dLbls><c:dLblPos val="outEnd"/><c:showVal val="1"/></c:dLbls>
                     </c:barChart>
                     <c:catAx>
                         <c:axId val="10"/><c:axPos val="b"/><c:tickLblPos val="low"/>
@@ -5815,7 +6021,24 @@ mod tests {
         assert_eq!(y_axis.minor_tick_mark.as_deref(), Some("in"));
         assert_eq!(y_axis.cross_between.as_deref(), Some("between"));
         assert_eq!(y_axis.display_unit.as_deref(), Some("thousands"));
-        assert_eq!(chart.series[0].title_ref.as_deref(), Some("'Charts'!B1"));
+        let labels = chart.data_labels.as_ref().expect("chart labels");
+        assert_eq!(labels.position.as_deref(), Some("outEnd"));
+        assert_eq!(labels.show_val, Some(true));
+        let series = &chart.series[0];
+        assert_eq!(series.title_ref.as_deref(), Some("'Charts'!B1"));
+        let series_labels = series.data_labels.as_ref().expect("series labels");
+        assert_eq!(series_labels.position.as_deref(), Some("outEnd"));
+        assert_eq!(series_labels.show_val, Some(true));
+        let trendline = series.trendline.as_ref().expect("series trendline");
+        assert_eq!(trendline.trendline_type.as_deref(), Some("poly"));
+        assert_eq!(trendline.order, Some(3));
+        assert_eq!(trendline.display_equation, Some(true));
+        assert_eq!(trendline.display_r_squared, Some(true));
+        let error_bars = series.error_bars.as_ref().expect("series error bars");
+        assert_eq!(error_bars.bar_type.as_deref(), Some("both"));
+        assert_eq!(error_bars.val_type.as_deref(), Some("fixedVal"));
+        assert_eq!(error_bars.no_end_cap, Some(true));
+        assert_eq!(error_bars.val, Some(2.0));
     }
 
     #[test]
