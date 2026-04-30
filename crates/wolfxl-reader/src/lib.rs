@@ -14,6 +14,7 @@ use std::path::Path;
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
+use wolfxl_formula::{translate as translate_formula, RefDelta};
 use wolfxl_rels::{RelId, RelsGraph};
 use zip::ZipArchive;
 
@@ -98,6 +99,10 @@ pub struct Cell {
     pub value: CellValue,
     /// Formula text without a leading equals sign when present.
     pub formula: Option<String>,
+    /// Raw OOXML formula kind (`array`, `dataTable`, `shared`, etc.).
+    pub formula_kind: Option<String>,
+    /// Raw OOXML shared-formula index (`si`) when present.
+    pub formula_shared_index: Option<String>,
     /// Array/data-table formula metadata when this cell is the master.
     pub array_formula: Option<ArrayFormulaInfo>,
     /// Structured rich-text runs for shared-string or inline-string cells.
@@ -1605,6 +1610,7 @@ fn parse_worksheet(
     row_outline_levels.sort_unstable_by_key(|(row, _)| *row);
     column_outline_levels.sort_unstable_by_key(|(col, _)| *col);
 
+    resolve_shared_formulas(&mut cells);
     let array_formulas = build_array_formula_map(&cells);
 
     Ok(WorksheetData {
@@ -1709,6 +1715,78 @@ fn build_array_formula_map(cells: &[Cell]) -> HashMap<(u32, u32), ArrayFormulaIn
         }
     }
     out
+}
+
+#[derive(Debug, Clone)]
+struct SharedFormulaMaster {
+    row: u32,
+    col: u32,
+    formula: String,
+}
+
+fn resolve_shared_formulas(cells: &mut [Cell]) {
+    let mut masters: HashMap<String, SharedFormulaMaster> = HashMap::new();
+    for cell in cells.iter() {
+        if cell.formula_kind.as_deref() != Some("shared") {
+            continue;
+        }
+        let (Some(index), Some(formula)) = (&cell.formula_shared_index, &cell.formula) else {
+            continue;
+        };
+        masters
+            .entry(index.clone())
+            .or_insert_with(|| SharedFormulaMaster {
+                row: cell.row,
+                col: cell.col,
+                formula: formula.clone(),
+            });
+    }
+
+    for cell in cells.iter_mut() {
+        if cell.formula_kind.as_deref() != Some("shared") || cell.formula.is_some() {
+            continue;
+        }
+        let Some(index) = &cell.formula_shared_index else {
+            continue;
+        };
+        let Some(master) = masters.get(index) else {
+            continue;
+        };
+        cell.formula = Some(translate_shared_formula(
+            &master.formula,
+            cell.row as i32 - master.row as i32,
+            cell.col as i32 - master.col as i32,
+        ));
+    }
+}
+
+fn translate_shared_formula(formula: &str, rows: i32, cols: i32) -> String {
+    if rows == 0 && cols == 0 {
+        return formula.to_string();
+    }
+    let had_equals = formula.starts_with('=');
+    let wrapped;
+    let input = if had_equals {
+        formula
+    } else {
+        wrapped = format!("={formula}");
+        &wrapped
+    };
+    let mut delta = RefDelta::empty();
+    delta.rows = rows;
+    delta.cols = cols;
+    delta.anchor_row = 1;
+    delta.anchor_col = 1;
+    delta.respect_dollar = true;
+    let translated = translate_formula(input, &delta).unwrap_or_else(|_| input.to_string());
+    if had_equals {
+        translated
+    } else {
+        translated
+            .strip_prefix('=')
+            .unwrap_or(&translated)
+            .to_string()
+    }
 }
 
 fn mark_array_spill_children(
@@ -2234,6 +2312,7 @@ struct CellBuilder {
     inline_text: String,
     formula_text: String,
     formula_kind: Option<String>,
+    formula_shared_index: Option<String>,
     formula_ref: Option<String>,
     formula_ca: bool,
     formula_dt2_d: bool,
@@ -2273,6 +2352,7 @@ impl CellBuilder {
             inline_text: String::new(),
             formula_text: String::new(),
             formula_kind: None,
+            formula_shared_index: None,
             formula_ref: None,
             formula_ca: false,
             formula_dt2_d: false,
@@ -2288,6 +2368,7 @@ impl CellBuilder {
 
     fn start_formula(&mut self, e: &BytesStart<'_>) {
         self.formula_kind = attr_value(e, b"t");
+        self.formula_shared_index = attr_value(e, b"si");
         self.formula_ref = attr_value(e, b"ref");
         self.formula_ca = attr_truthy(attr_value(e, b"ca").as_deref());
         self.formula_dt2_d = attr_truthy(attr_value(e, b"dt2D").as_deref());
@@ -2419,6 +2500,8 @@ impl CellBuilder {
             } else {
                 Some(self.formula_text)
             },
+            formula_kind: self.formula_kind,
+            formula_shared_index: self.formula_shared_index,
             array_formula,
             rich_text,
         })
@@ -2795,6 +2878,46 @@ mod tests {
             inline_rich[0].font.as_ref().and_then(|font| font.italic),
             Some(true)
         );
+    }
+
+    #[test]
+    fn expands_shared_formula_children() {
+        let xml = r#"<worksheet><sheetData>
+            <row r="1">
+                <c r="A1"><v>1</v></c>
+                <c r="B1"><f t="shared" si="0" ref="B1:B3">A1*2</f><v/></c>
+                <c r="C1"><f t="shared" si="1" ref="C1:C3">$A$1+A1+B$1+$A1</f><v/></c>
+            </row>
+            <row r="2">
+                <c r="A2"><v>2</v></c>
+                <c r="B2"><f t="shared" si="0"/><v/></c>
+                <c r="C2"><f t="shared" si="1"/><v/></c>
+            </row>
+            <row r="3">
+                <c r="A3"><v>3</v></c>
+                <c r="B3"><f t="shared" si="0"/><v/></c>
+                <c r="C3"><f t="shared" si="1"/><v/></c>
+            </row>
+        </sheetData></worksheet>"#;
+
+        let sheet = parse_worksheet(xml, &SharedStrings::default(), None, Vec::new(), Vec::new())
+            .expect("parse worksheet");
+        let formulas: HashMap<_, _> = sheet
+            .cells
+            .iter()
+            .filter_map(|cell| {
+                cell.formula
+                    .as_deref()
+                    .map(|formula| (cell.coordinate.as_str(), formula))
+            })
+            .collect();
+
+        assert_eq!(formulas.get("B1"), Some(&"A1*2"));
+        assert_eq!(formulas.get("B2"), Some(&"A2*2"));
+        assert_eq!(formulas.get("B3"), Some(&"A3*2"));
+        assert_eq!(formulas.get("C1"), Some(&"$A$1+A1+B$1+$A1"));
+        assert_eq!(formulas.get("C2"), Some(&"$A$1+A2+B$1+$A2"));
+        assert_eq!(formulas.get("C3"), Some(&"$A$1+A3+B$1+$A3"));
     }
 
     #[test]

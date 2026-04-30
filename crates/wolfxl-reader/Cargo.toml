@@ -9,4 +9,5 @@ description = "Native WolfXL workbook readers used to replace calamine-backed re
 [dependencies]
 quick-xml.workspace = true
 zip.workspace = true
+wolfxl-formula = { path = "../wolfxl-formula", version = "0.1" }
 wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }

@@ -8,6 +8,7 @@ default calamine-backed path.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import zipfile
 from pathlib import Path
 
@@ -101,6 +102,40 @@ def _inject_merged_subordinate_style(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _make_shared_formula_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    for row in range(1, 4):
+        ws[f"A{row}"] = row
+        ws[f"B{row}"] = f"=A{row}*2"
+    wb.save(path)
+    wb.close()
+
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    sheet_name = "xl/worksheets/sheet1.xml"
+    sheet_xml = entries[sheet_name].decode()
+    replacements = {
+        r'<c r="B1"[^>]*>\s*<f>A1\*2</f>\s*(?:<v(?:>[^<]*</v>|\s*/>)\s*)?</c>': (
+            '<c r="B1"><f t="shared" si="0" ref="B1:B3">A1*2</f><v/></c>'
+        ),
+        r'<c r="B2"[^>]*>\s*<f>A2\*2</f>\s*(?:<v(?:>[^<]*</v>|\s*/>)\s*)?</c>': (
+            '<c r="B2"><f t="shared" si="0"/><v/></c>'
+        ),
+        r'<c r="B3"[^>]*>\s*<f>A3\*2</f>\s*(?:<v(?:>[^<]*</v>|\s*/>)\s*)?</c>': (
+            '<c r="B3"><f t="shared" si="0"/><v/></c>'
+        ),
+    }
+    for pattern, replacement in replacements.items():
+        sheet_xml, count = re.subn(pattern, replacement, sheet_xml)
+        assert count == 1
+    entries[sheet_name] = sheet_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -178,6 +213,31 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert records["B1"]["number_format"] == "#,##0.00"
         assert "number_format" not in records["E1"]
         assert records["A3"]["data_type"] == "datetime"
+    finally:
+        wb.close()
+
+
+def test_native_reader_expands_shared_formula_children(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-shared-formulas.xlsx"
+    _make_shared_formula_xlsx(path)
+    expected_book = openpyxl.load_workbook(path, data_only=False)
+    try:
+        expected = [expected_book.active[f"B{row}"].value for row in range(1, 4)]
+    finally:
+        expected_book.close()
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path, data_only=False)
+    try:
+        ws = wb["Sheet1"]
+        assert [ws[f"B{row}"].value for row in range(1, 4)] == expected
+        assert wb._rust_reader.read_cell_formula("Sheet1", "B2") == {  # noqa: SLF001
+            "type": "formula",
+            "formula": "=A2*2",
+            "value": "=A2*2",
+        }
     finally:
         wb.close()
 

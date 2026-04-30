@@ -1430,6 +1430,7 @@ name = "wolfxl-reader"
 version = "0.1.0"
 dependencies = [
  "quick-xml 0.37.5",
+ "wolfxl-formula",
  "wolfxl-rels",
  "zip 2.4.2",
 ]
