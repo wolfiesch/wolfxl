@@ -1342,17 +1342,16 @@ class Worksheet:
         reader = self._workbook._rust_reader  # noqa: SLF001
         effective_data_only = self._workbook._data_only if data_only is None else data_only  # noqa: SLF001
         overlay = self._collect_pending_overlay()
-        unbounded_sparse_read = (
-            min_row is None
-            and max_row is None
-            and min_col is None
-            and max_col is None
-            and not include_empty
+        sparse_record_read = (
+            not include_empty
             and not overlay
+            and (min_row is None or max_row is None or min_col is None or max_col is None)
         )
-        if unbounded_sparse_read:
-            r_min = c_min = 1
-            r_max = c_max = None
+        if sparse_record_read:
+            r_min = min_row or 1
+            r_max = max_row
+            c_min = min_col or 1
+            c_max = max_col
             range_str = None
         else:
             r_min = min_row or 1
@@ -1372,6 +1371,10 @@ class Worksheet:
             include_extended_format,
             include_cached_formula_value,
             include_number_format,
+            r_min if sparse_record_read else None,
+            r_max if sparse_record_read else None,
+            c_min if sparse_record_read else None,
+            c_max if sparse_record_read else None,
         )
 
         # Modify mode can have pending Python-side edits the Rust reader
