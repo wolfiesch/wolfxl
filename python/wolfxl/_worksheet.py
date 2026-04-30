@@ -382,6 +382,16 @@ class Worksheet:
     @property
     def print_title_rows(self) -> str | None:
         """Row range repeated at the top of each printed page."""
+        reader = getattr(self._workbook, "_rust_reader", None)
+        if (
+            self._print_title_rows is None
+            and reader is not None
+            and hasattr(reader, "read_print_titles")
+        ):
+            payload = reader.read_print_titles(self._title)
+            if isinstance(payload, dict):
+                self._print_title_rows = payload.get("rows")
+                self._print_title_cols = payload.get("cols")
         return self._print_title_rows
 
     @print_title_rows.setter
@@ -397,6 +407,16 @@ class Worksheet:
     @property
     def print_title_cols(self) -> str | None:
         """Column range repeated at the left of each printed page."""
+        reader = getattr(self._workbook, "_rust_reader", None)
+        if (
+            self._print_title_cols is None
+            and reader is not None
+            and hasattr(reader, "read_print_titles")
+        ):
+            payload = reader.read_print_titles(self._title)
+            if isinstance(payload, dict):
+                self._print_title_rows = payload.get("rows")
+                self._print_title_cols = payload.get("cols")
         return self._print_title_cols
 
     @print_title_cols.setter

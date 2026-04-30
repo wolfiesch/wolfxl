@@ -253,6 +253,16 @@ def _make_print_area_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_print_titles_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Titles"
+    ws.print_title_rows = "1:2"
+    ws.print_title_cols = "A:B"
+    wb.save(path)
+    wb.close()
+
+
 def _make_print_setup_xlsx(path: Path) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -502,6 +512,22 @@ def test_native_reader_loads_print_area(
     wb = wolfxl.load_workbook(path)
     try:
         assert wb["Print"].print_area == expected_print_area
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_print_titles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-print-titles.xlsx"
+    _make_print_titles_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Titles"]
+        assert ws.print_title_rows == "1:2"
+        assert ws.print_title_cols == "A:B"
     finally:
         wb.close()
 

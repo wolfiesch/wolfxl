@@ -662,6 +662,13 @@ pub struct NamedRange {
     pub refers_to: String,
 }
 
+/// Parsed worksheet print-title ranges.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrintTitlesInfo {
+    pub rows: Option<String>,
+    pub cols: Option<String>,
+}
+
 /// Parsed workbook-level protection and file-sharing metadata.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkbookSecurity {
@@ -755,6 +762,7 @@ pub struct NativeXlsxBook {
     sheets: Vec<SheetInfo>,
     named_ranges: Vec<NamedRange>,
     print_areas: HashMap<String, String>,
+    print_titles: HashMap<String, PrintTitlesInfo>,
     workbook_security: WorkbookSecurity,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
@@ -776,7 +784,7 @@ impl NativeXlsxBook {
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
             .map_err(|e| ReaderError::Xml(format!("failed to parse workbook rels: {e}")))?;
-        let (sheet_refs, date1904, named_ranges, print_areas, workbook_security) =
+        let (sheet_refs, date1904, named_ranges, print_areas, print_titles, workbook_security) =
             parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
@@ -800,6 +808,7 @@ impl NativeXlsxBook {
             sheets,
             named_ranges,
             print_areas,
+            print_titles,
             workbook_security,
             doc_properties,
             shared_strings,
@@ -835,6 +844,11 @@ impl NativeXlsxBook {
     /// Worksheet print area parsed from `_xlnm.Print_Area`, if present.
     pub fn print_area(&self, sheet_name: &str) -> Option<&str> {
         self.print_areas.get(sheet_name).map(String::as_str)
+    }
+
+    /// Worksheet print titles parsed from `_xlnm.Print_Titles`, if present.
+    pub fn print_titles(&self, sheet_name: &str) -> Option<&PrintTitlesInfo> {
+        self.print_titles.get(sheet_name)
     }
 
     /// Workbook protection and file-sharing blocks.
@@ -1033,6 +1047,7 @@ fn parse_workbook(
     bool,
     Vec<NamedRange>,
     HashMap<String, String>,
+    HashMap<String, PrintTitlesInfo>,
     WorkbookSecurity,
 )> {
     let mut reader = XmlReader::from_str(xml);
@@ -1041,6 +1056,7 @@ fn parse_workbook(
     let mut sheets = Vec::new();
     let mut raw_names = Vec::new();
     let mut raw_print_areas = Vec::new();
+    let mut raw_print_titles = Vec::new();
     let mut date1904 = false;
     let mut workbook_protection = None;
     let mut file_sharing = None;
@@ -1101,6 +1117,12 @@ fn parse_workbook(
                                 local_id: current_local_id.take(),
                                 refers_to,
                             });
+                        } else if name == "_xlnm.Print_Titles" && !refers_to.is_empty() {
+                            raw_print_titles.push(RawNamedRange {
+                                name,
+                                local_id: current_local_id.take(),
+                                refers_to,
+                            });
                         } else if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
                             raw_names.push(RawNamedRange {
                                 name,
@@ -1124,11 +1146,13 @@ fn parse_workbook(
 
     let named_ranges = resolve_named_ranges(&sheets, raw_names);
     let print_areas = resolve_print_areas(&sheets, raw_print_areas);
+    let print_titles = resolve_print_titles(&sheets, raw_print_titles);
     Ok((
         sheets,
         date1904,
         named_ranges,
         print_areas,
+        print_titles,
         WorkbookSecurity {
             workbook_protection,
             file_sharing,
@@ -1232,6 +1256,54 @@ fn resolve_print_areas(
         out.insert(sheet_name, refers_to);
     }
     out
+}
+
+fn resolve_print_titles(
+    sheet_refs: &[SheetRef],
+    raw_print_titles: Vec<RawNamedRange>,
+) -> HashMap<String, PrintTitlesInfo> {
+    let mut out = HashMap::new();
+    for raw in raw_print_titles {
+        let sheet_name = raw
+            .local_id
+            .and_then(|index| sheet_refs.get(index).map(|sheet| sheet.name.clone()))
+            .or_else(|| sheet_name_from_ref(&raw.refers_to));
+        let Some(sheet_name) = sheet_name else {
+            continue;
+        };
+        let titles = parse_print_titles_ref(&raw.refers_to);
+        if titles.rows.is_some() || titles.cols.is_some() {
+            out.insert(sheet_name, titles);
+        }
+    }
+    out
+}
+
+fn parse_print_titles_ref(refers_to: &str) -> PrintTitlesInfo {
+    let mut info = PrintTitlesInfo::default();
+    for part in refers_to.split(',') {
+        let range = part
+            .split_once('!')
+            .map(|(_, range)| range)
+            .unwrap_or(part)
+            .replace('$', "");
+        let Some((start, end)) = range.split_once(':') else {
+            continue;
+        };
+        if start.chars().all(|ch| ch.is_ascii_digit()) && end.chars().all(|ch| ch.is_ascii_digit())
+        {
+            info.rows = Some(format!("{start}:{end}"));
+        } else if start.chars().all(|ch| ch.is_ascii_alphabetic())
+            && end.chars().all(|ch| ch.is_ascii_alphabetic())
+        {
+            info.cols = Some(format!(
+                "{}:{}",
+                start.to_ascii_uppercase(),
+                end.to_ascii_uppercase()
+            ));
+        }
+    }
+    info
 }
 
 fn sheet_name_from_ref(refers_to: &str) -> Option<String> {
@@ -4486,8 +4558,9 @@ mod tests {
             <definedName name="GlobalName">Visible!$A$1</definedName>
             <definedName name="LocalName" localSheetId="1">$B$2</definedName>
             <definedName name="_xlnm.Print_Area">Visible!$A$1:$B$2</definedName>
+            <definedName name="_xlnm.Print_Titles" localSheetId="0">Visible!$1:$2,Visible!$A:$B</definedName>
         </definedNames></workbook>"#;
-        let (sheets, date1904, named_ranges, print_areas, security) =
+        let (sheets, date1904, named_ranges, print_areas, print_titles, security) =
             parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
         assert_eq!(sheets[0].name, "Visible");
@@ -4538,6 +4611,13 @@ mod tests {
         assert_eq!(
             print_areas.get("Visible").map(String::as_str),
             Some("Visible!$A$1:$B$2")
+        );
+        assert_eq!(
+            print_titles.get("Visible"),
+            Some(&PrintTitlesInfo {
+                rows: Some("1:2".to_string()),
+                cols: Some("A:B".to_string()),
+            })
         );
     }
 

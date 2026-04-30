@@ -97,6 +97,21 @@ impl NativeXlsxBook {
         Ok(self.book.print_area(sheet).map(str::to_string))
     }
 
+    pub fn read_print_titles(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        if !self.sheet_names.iter().any(|name| name == sheet) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Unknown sheet: {sheet}"
+            )));
+        }
+        let Some(titles) = self.book.print_titles(sheet) else {
+            return Ok(py.None());
+        };
+        let d = PyDict::new(py);
+        d.set_item("rows", titles.rows.as_deref())?;
+        d.set_item("cols", titles.cols.as_deref())?;
+        Ok(d.into())
+    }
+
     pub fn opened_from_bytes(&self) -> bool {
         self.opened_from_bytes
     }
