@@ -1,0 +1,15 @@
+"""Runtime backend metadata smoke tests."""
+
+from __future__ import annotations
+
+
+def test_build_info_names_native_xlsx_and_binary_compat() -> None:
+    from wolfxl import _rust
+
+    info = _rust.build_info()
+
+    assert info["package"] == "wolfxl"
+    assert "native-xlsx" in info["enabled_backends"]
+    assert "calamine-binary" in info["enabled_backends"]
+    assert "calamine-styles" not in info["enabled_backends"]
+    assert "calamine-binary" in info["backend_versions"]

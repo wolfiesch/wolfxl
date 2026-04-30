@@ -22,8 +22,8 @@ safe to remove yet because these surfaces still compile against it:
   paths.
 - `crates/wolfxl-classify`, which still uses calamine types for binary-format
   source validation.
-- Build metadata in `build.rs` / `src/lib.rs`, which still reports
-  `calamine-styles` as an enabled backend.
+- Build metadata in `build.rs` / `src/lib.rs`, which still reports the
+  Calamine-backed binary compatibility version.
 
 The current honest launch claim is therefore: WolfXL has a native default
 reader for normal eager `.xlsx` loads, streaming bootstrap reads, permissive
@@ -112,8 +112,8 @@ The docs should separate three facts:
 
 - Delete the styled `.xlsx` calamine modules once no tests or runtime code
   import them.
-- Update `build_info()` so enabled backends distinguishes native `.xlsx` from
-  compatibility binary readers.
+- Keep `build_info()` distinguishing native `.xlsx` from compatibility binary
+  readers.
 - Run `rg "CalamineStyledBook|WOLFXL_CALAMINE_READER|calamine_styled"`.
 
 ### Stage 3: decide binary-format strategy

@@ -29,12 +29,12 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     info.set_item("package", "wolfxl")?;
     info.set_item("package_version", env!("CARGO_PKG_VERSION"))?;
 
-    let enabled = PyList::new(py, ["calamine-styles", "wolfxl", "native"])?;
+    let enabled = PyList::new(py, ["native-xlsx", "calamine-binary", "wolfxl"])?;
     info.set_item("enabled_backends", enabled)?;
 
     let versions = PyDict::new(py);
     versions.set_item(
-        "calamine-styles",
+        "calamine-binary",
         option_env!("WOLFXL_DEP_CALAMINE_VERSION"),
     )?;
     info.set_item("backend_versions", versions)?;
