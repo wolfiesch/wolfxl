@@ -143,6 +143,9 @@ pub struct WorksheetData {
     pub data_validations: Vec<DataValidation>,
     pub sheet_protection: Option<SheetProtection>,
     pub auto_filter: Option<AutoFilterInfo>,
+    pub page_margins: Option<PageMarginsInfo>,
+    pub page_setup: Option<PageSetupInfo>,
+    pub header_footer: Option<HeaderFooterInfo>,
     pub images: Vec<ImageInfo>,
     pub charts: Vec<ChartInfo>,
     pub tables: Vec<Table>,
@@ -240,6 +243,113 @@ pub struct SheetProtection {
     pub pivot_tables: bool,
     pub select_unlocked_cells: bool,
     pub password_hash: Option<String>,
+}
+
+/// Parsed worksheet page margins.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageMarginsInfo {
+    pub left: f64,
+    pub right: f64,
+    pub top: f64,
+    pub bottom: f64,
+    pub header: f64,
+    pub footer: f64,
+}
+
+/// Parsed worksheet page setup.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PageSetupInfo {
+    pub orientation: Option<String>,
+    pub paper_size: Option<u32>,
+    pub fit_to_width: Option<u32>,
+    pub fit_to_height: Option<u32>,
+    pub scale: Option<u32>,
+    pub first_page_number: Option<u32>,
+    pub horizontal_dpi: Option<u32>,
+    pub vertical_dpi: Option<u32>,
+    pub cell_comments: Option<String>,
+    pub errors: Option<String>,
+    pub use_first_page_number: Option<bool>,
+    pub use_printer_defaults: Option<bool>,
+    pub black_and_white: Option<bool>,
+    pub draft: Option<bool>,
+}
+
+/// Parsed worksheet header/footer settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeaderFooterInfo {
+    pub odd_header: HeaderFooterItemInfo,
+    pub odd_footer: HeaderFooterItemInfo,
+    pub even_header: HeaderFooterItemInfo,
+    pub even_footer: HeaderFooterItemInfo,
+    pub first_header: HeaderFooterItemInfo,
+    pub first_footer: HeaderFooterItemInfo,
+    pub different_odd_even: bool,
+    pub different_first: bool,
+    pub scale_with_doc: bool,
+    pub align_with_margins: bool,
+}
+
+/// Parsed left/center/right header/footer text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeaderFooterItemInfo {
+    pub left: Option<String>,
+    pub center: Option<String>,
+    pub right: Option<String>,
+}
+
+impl PageSetupInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            orientation: attr_value(e, b"orientation"),
+            paper_size: attr_u32(e, b"paperSize"),
+            fit_to_width: attr_u32(e, b"fitToWidth"),
+            fit_to_height: attr_u32(e, b"fitToHeight"),
+            scale: attr_u32(e, b"scale"),
+            first_page_number: attr_u32(e, b"firstPageNumber"),
+            horizontal_dpi: attr_u32(e, b"horizontalDpi"),
+            vertical_dpi: attr_u32(e, b"verticalDpi"),
+            cell_comments: attr_value(e, b"cellComments"),
+            errors: attr_value(e, b"errors"),
+            use_first_page_number: attr_bool(e, b"useFirstPageNumber"),
+            use_printer_defaults: attr_bool(e, b"usePrinterDefaults"),
+            black_and_white: attr_bool(e, b"blackAndWhite"),
+            draft: attr_bool(e, b"draft"),
+        }
+    }
+}
+
+impl HeaderFooterInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            different_odd_even: attr_bool_default(e, b"differentOddEven", false),
+            different_first: attr_bool_default(e, b"differentFirst", false),
+            scale_with_doc: attr_bool_default(e, b"scaleWithDoc", true),
+            align_with_margins: attr_bool_default(e, b"alignWithMargins", true),
+            ..Self::default()
+        }
+    }
+
+    fn set_part(&mut self, part: HeaderFooterPart, item: HeaderFooterItemInfo) {
+        match part {
+            HeaderFooterPart::OddHeader => self.odd_header = item,
+            HeaderFooterPart::OddFooter => self.odd_footer = item,
+            HeaderFooterPart::EvenHeader => self.even_header = item,
+            HeaderFooterPart::EvenFooter => self.even_footer = item,
+            HeaderFooterPart::FirstHeader => self.first_header = item,
+            HeaderFooterPart::FirstFooter => self.first_footer = item,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderFooterPart {
+    OddHeader,
+    OddFooter,
+    EvenHeader,
+    EvenFooter,
+    FirstHeader,
+    FirstFooter,
 }
 
 /// Parsed worksheet-level auto-filter metadata.
@@ -1665,6 +1775,9 @@ fn parse_worksheet(
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
     let mut sheet_protection = None;
+    let mut page_margins = None;
+    let mut page_setup = None;
+    let mut header_footer = None;
     let mut conditional_formats = Vec::new();
     let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
     let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
@@ -1678,6 +1791,8 @@ fn parse_worksheet(
     let mut active_text: Option<TextTarget> = None;
     let mut current_validation: Option<DataValidationBuilder> = None;
     let mut active_validation_text: Option<DataValidationFormula> = None;
+    let mut current_header_footer: Option<HeaderFooterInfo> = None;
+    let mut active_header_footer: Option<HeaderFooterPart> = None;
     let mut cells = Vec::new();
 
     loop {
@@ -1715,6 +1830,21 @@ fn parse_worksheet(
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
                 }
+                b"pageMargins" => {
+                    page_margins = parse_page_margins(&e);
+                }
+                b"pageSetup" => {
+                    page_setup = Some(PageSetupInfo::from_start(&e));
+                }
+                b"headerFooter" => {
+                    current_header_footer = Some(HeaderFooterInfo::from_start(&e));
+                }
+                b"oddHeader" => active_header_footer = Some(HeaderFooterPart::OddHeader),
+                b"oddFooter" => active_header_footer = Some(HeaderFooterPart::OddFooter),
+                b"evenHeader" => active_header_footer = Some(HeaderFooterPart::EvenHeader),
+                b"evenFooter" => active_header_footer = Some(HeaderFooterPart::EvenFooter),
+                b"firstHeader" => active_header_footer = Some(HeaderFooterPart::FirstHeader),
+                b"firstFooter" => active_header_footer = Some(HeaderFooterPart::FirstFooter),
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
                 }
@@ -1827,6 +1957,15 @@ fn parse_worksheet(
                 b"sheetProtection" => {
                     sheet_protection = Some(SheetProtection::from_start(&e));
                 }
+                b"pageMargins" => {
+                    page_margins = parse_page_margins(&e);
+                }
+                b"pageSetup" => {
+                    page_setup = Some(PageSetupInfo::from_start(&e));
+                }
+                b"headerFooter" => {
+                    header_footer = Some(HeaderFooterInfo::from_start(&e));
+                }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
                 }
@@ -1875,6 +2014,14 @@ fn parse_worksheet(
                             data_validations.push(validation);
                         }
                     }
+                }
+                b"oddHeader" | b"oddFooter" | b"evenHeader" | b"evenFooter" | b"firstHeader"
+                | b"firstFooter" => {
+                    active_header_footer = None;
+                }
+                b"headerFooter" => {
+                    header_footer = current_header_footer.take();
+                    active_header_footer = None;
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = None;
@@ -1927,6 +2074,13 @@ fn parse_worksheet(
                         .unescape()
                         .map_err(|err| ReaderError::Xml(format!("worksheet text: {err}")))?;
                     validation.push_text(target, &text);
+                } else if let (Some(part), Some(header_footer)) =
+                    (active_header_footer, current_header_footer.as_mut())
+                {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("worksheet text: {err}")))?;
+                    header_footer.set_part(part, parse_header_footer_item_text(&text));
                 } else if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
                     let text = e
                         .unescape()
@@ -1943,6 +2097,13 @@ fn parse_worksheet(
                     (active_validation_text, current_validation.as_mut())
                 {
                     validation.push_text(target, &String::from_utf8_lossy(e.as_ref()));
+                } else if let (Some(part), Some(header_footer)) =
+                    (active_header_footer, current_header_footer.as_mut())
+                {
+                    header_footer.set_part(
+                        part,
+                        parse_header_footer_item_text(&String::from_utf8_lossy(e.as_ref())),
+                    );
                 } else if let (Some(target), Some(cell)) = (active_text, current.as_mut()) {
                     cell.push_text(target, &String::from_utf8_lossy(e.as_ref()));
                 }
@@ -1984,6 +2145,9 @@ fn parse_worksheet(
         data_validations,
         sheet_protection,
         auto_filter,
+        page_margins,
+        page_setup,
+        header_footer,
         images: Vec::new(),
         charts: Vec::new(),
         tables,
@@ -2016,6 +2180,55 @@ fn parse_column_width(e: &BytesStart<'_>) -> Option<ColumnWidth> {
         width: attr_value(e, b"width")?.parse::<f64>().ok()?,
         custom_width: attr_truthy(attr_value(e, b"customWidth").as_deref()),
     })
+}
+
+fn parse_page_margins(e: &BytesStart<'_>) -> Option<PageMarginsInfo> {
+    Some(PageMarginsInfo {
+        left: attr_f64(e, b"left")?,
+        right: attr_f64(e, b"right")?,
+        top: attr_f64(e, b"top")?,
+        bottom: attr_f64(e, b"bottom")?,
+        header: attr_f64(e, b"header")?,
+        footer: attr_f64(e, b"footer")?,
+    })
+}
+
+fn parse_header_footer_item_text(text: &str) -> HeaderFooterItemInfo {
+    let mut item = HeaderFooterItemInfo::default();
+    let mut current: Option<u8> = None;
+    let mut buf = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '&' {
+            match chars.peek().copied() {
+                Some('L') | Some('C') | Some('R') => {
+                    assign_header_footer_segment(&mut item, current, std::mem::take(&mut buf));
+                    current = chars.next().map(|marker| marker as u8);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        buf.push(ch);
+    }
+    assign_header_footer_segment(&mut item, current, buf);
+    item
+}
+
+fn assign_header_footer_segment(
+    item: &mut HeaderFooterItemInfo,
+    segment: Option<u8>,
+    value: String,
+) {
+    if value.is_empty() {
+        return;
+    }
+    match segment.unwrap_or(b'C') {
+        b'L' => item.left = Some(value),
+        b'R' => item.right = Some(value),
+        _ => item.center = Some(value),
+    }
 }
 
 fn update_row_visibility(
@@ -3896,6 +4109,12 @@ fn attr_bool_default(e: &BytesStart<'_>, key: &[u8], default: bool) -> bool {
     attr_value(e, key)
         .as_deref()
         .map_or(default, |value| attr_truthy(Some(value)))
+}
+
+fn attr_bool(e: &BytesStart<'_>, key: &[u8]) -> Option<bool> {
+    attr_value(e, key)
+        .as_deref()
+        .map(|value| attr_truthy(Some(value)))
 }
 
 fn attr_u32(e: &BytesStart<'_>, key: &[u8]) -> Option<u32> {

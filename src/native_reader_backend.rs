@@ -18,8 +18,9 @@ use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BorderInfo, Cell, CellDataType, CellValue, ChartInfo, ChartSeriesInfo, DateGroupItemInfo,
-    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
-    NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, SheetState, SortConditionInfo,
+    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
+    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
+    PageMarginsInfo, PageSetupInfo, PaneMode, SheetProtection, SheetState, SortConditionInfo,
     SortStateInfo, WorkbookSecurity, WorksheetData,
 };
 
@@ -537,6 +538,27 @@ impl NativeXlsxBook {
             result.append(chart_to_py(py, chart)?)?;
         }
         Ok(result.into())
+    }
+
+    pub fn read_page_margins(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match self.ensure_sheet(sheet)?.page_margins {
+            Some(margins) => page_margins_to_py(py, &margins),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_page_setup(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.page_setup {
+            Some(setup) => page_setup_to_py(py, setup),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_header_footer(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.header_footer {
+            Some(header_footer) => header_footer_to_py(py, header_footer),
+            None => Ok(py.None()),
+        }
     }
 
     pub fn read_named_ranges(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
@@ -1250,6 +1272,80 @@ fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyOb
     d.set_item("x_ref", series.x_ref.as_deref())?;
     d.set_item("y_ref", series.y_ref.as_deref())?;
     d.set_item("bubble_size_ref", series.bubble_size_ref.as_deref())?;
+    Ok(d.into())
+}
+
+fn page_margins_to_py(py: Python<'_>, margins: &PageMarginsInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("left", margins.left)?;
+    d.set_item("right", margins.right)?;
+    d.set_item("top", margins.top)?;
+    d.set_item("bottom", margins.bottom)?;
+    d.set_item("header", margins.header)?;
+    d.set_item("footer", margins.footer)?;
+    Ok(d.into())
+}
+
+fn page_setup_to_py(py: Python<'_>, setup: &PageSetupInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("orientation", setup.orientation.as_deref())?;
+    d.set_item("paper_size", setup.paper_size)?;
+    d.set_item("fit_to_width", setup.fit_to_width)?;
+    d.set_item("fit_to_height", setup.fit_to_height)?;
+    d.set_item("scale", setup.scale)?;
+    d.set_item("first_page_number", setup.first_page_number)?;
+    d.set_item("horizontal_dpi", setup.horizontal_dpi)?;
+    d.set_item("vertical_dpi", setup.vertical_dpi)?;
+    d.set_item("cell_comments", setup.cell_comments.as_deref())?;
+    d.set_item("errors", setup.errors.as_deref())?;
+    d.set_item("use_first_page_number", setup.use_first_page_number)?;
+    d.set_item("use_printer_defaults", setup.use_printer_defaults)?;
+    d.set_item("black_and_white", setup.black_and_white)?;
+    d.set_item("draft", setup.draft)?;
+    Ok(d.into())
+}
+
+fn header_footer_to_py(py: Python<'_>, header_footer: &HeaderFooterInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item(
+        "odd_header",
+        header_footer_item_to_py(py, &header_footer.odd_header)?,
+    )?;
+    d.set_item(
+        "odd_footer",
+        header_footer_item_to_py(py, &header_footer.odd_footer)?,
+    )?;
+    d.set_item(
+        "even_header",
+        header_footer_item_to_py(py, &header_footer.even_header)?,
+    )?;
+    d.set_item(
+        "even_footer",
+        header_footer_item_to_py(py, &header_footer.even_footer)?,
+    )?;
+    d.set_item(
+        "first_header",
+        header_footer_item_to_py(py, &header_footer.first_header)?,
+    )?;
+    d.set_item(
+        "first_footer",
+        header_footer_item_to_py(py, &header_footer.first_footer)?,
+    )?;
+    d.set_item("different_odd_even", header_footer.different_odd_even)?;
+    d.set_item("different_first", header_footer.different_first)?;
+    d.set_item("scale_with_doc", header_footer.scale_with_doc)?;
+    d.set_item("align_with_margins", header_footer.align_with_margins)?;
+    Ok(d.into())
+}
+
+fn header_footer_item_to_py(py: Python<'_>, item: &HeaderFooterItemInfo) -> PyResult<PyObject> {
+    if item.left.is_none() && item.center.is_none() && item.right.is_none() {
+        return Ok(py.None());
+    }
+    let d = PyDict::new(py);
+    d.set_item("left", item.left.as_deref())?;
+    d.set_item("center", item.center.as_deref())?;
+    d.set_item("right", item.right.as_deref())?;
     Ok(d.into())
 }
 

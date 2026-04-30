@@ -253,6 +253,30 @@ def _make_print_area_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_print_setup_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Setup"
+    ws.page_margins.left = 1.1
+    ws.page_margins.right = 1.2
+    ws.page_margins.top = 1.3
+    ws.page_margins.bottom = 1.4
+    ws.page_margins.header = 0.5
+    ws.page_margins.footer = 0.6
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_setup.scale = 75
+    ws.oddHeader.left.text = "Left"
+    ws.oddHeader.center.text = "Center"
+    ws.oddFooter.right.text = "Page &P"
+    ws.HeaderFooter.differentFirst = True
+    ws.HeaderFooter.alignWithMargins = False
+    wb.save(path)
+    wb.close()
+
+
 def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart import BarChart, Reference
 
@@ -421,6 +445,36 @@ def test_native_reader_loads_print_area(
     wb = wolfxl.load_workbook(path)
     try:
         assert wb["Print"].print_area == expected_print_area
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_print_setup_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-print-setup.xlsx"
+    _make_print_setup_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Setup"]
+        assert ws.page_margins.left == 1.1
+        assert ws.page_margins.right == 1.2
+        assert ws.page_margins.top == 1.3
+        assert ws.page_margins.bottom == 1.4
+        assert ws.page_margins.header == 0.5
+        assert ws.page_margins.footer == 0.6
+        assert ws.page_setup.orientation == "landscape"
+        assert ws.page_setup.paperSize == 9
+        assert ws.page_setup.fitToWidth == 1
+        assert ws.page_setup.fitToHeight == 0
+        assert ws.page_setup.scale == 75
+        assert ws.header_footer.odd_header.left == "Left"
+        assert ws.header_footer.odd_header.center == "Center"
+        assert ws.header_footer.odd_footer.right == "Page &P"
+        assert ws.header_footer.different_first is True
+        assert ws.header_footer.align_with_margins is False
     finally:
         wb.close()
 

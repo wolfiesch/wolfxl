@@ -191,28 +191,101 @@ def _sort_condition_from_payload(payload: dict[str, Any]) -> Any:
 def get_page_setup(ws: Worksheet) -> Any:
     """Return the lazy page setup object."""
     if ws._page_setup is None:  # noqa: SLF001
-        from wolfxl.worksheet.page_setup import PageSetup
-
-        ws._page_setup = PageSetup()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_page_setup")
+        ws._page_setup = _page_setup_from_payload(payload)  # noqa: SLF001
     return ws._page_setup  # noqa: SLF001
 
 
 def get_page_margins(ws: Worksheet) -> Any:
     """Return the lazy page margins object."""
     if ws._page_margins is None:  # noqa: SLF001
-        from wolfxl.worksheet.page_setup import PageMargins
-
-        ws._page_margins = PageMargins()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_page_margins")
+        ws._page_margins = _page_margins_from_payload(payload)  # noqa: SLF001
     return ws._page_margins  # noqa: SLF001
 
 
 def get_header_footer(ws: Worksheet) -> Any:
     """Return the lazy header/footer object."""
     if ws._header_footer is None:  # noqa: SLF001
-        from wolfxl.worksheet.header_footer import HeaderFooter
-
-        ws._header_footer = HeaderFooter()  # noqa: SLF001
+        payload = _reader_payload(ws, "read_header_footer")
+        ws._header_footer = _header_footer_from_payload(payload)  # noqa: SLF001
     return ws._header_footer  # noqa: SLF001
+
+
+def _reader_payload(ws: Worksheet, method_name: str) -> Any:
+    reader = getattr(ws._workbook, "_rust_reader", None)  # noqa: SLF001
+    if reader is None or not hasattr(reader, method_name):
+        return None
+    return getattr(reader, method_name)(ws._title)  # noqa: SLF001
+
+
+def _page_setup_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.page_setup import PageSetup
+
+    if not isinstance(payload, dict):
+        return PageSetup()
+    return PageSetup(
+        orientation=str(payload.get("orientation") or "default"),
+        paperSize=payload.get("paper_size"),
+        fitToWidth=payload.get("fit_to_width"),
+        fitToHeight=payload.get("fit_to_height"),
+        scale=payload.get("scale"),
+        firstPageNumber=payload.get("first_page_number"),
+        horizontalDpi=payload.get("horizontal_dpi"),
+        verticalDpi=payload.get("vertical_dpi"),
+        cellComments=payload.get("cell_comments"),
+        errors=payload.get("errors"),
+        useFirstPageNumber=payload.get("use_first_page_number"),
+        usePrinterDefaults=payload.get("use_printer_defaults"),
+        blackAndWhite=payload.get("black_and_white"),
+        draft=payload.get("draft"),
+    )
+
+
+def _page_margins_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.page_setup import PageMargins
+
+    if not isinstance(payload, dict):
+        return PageMargins()
+    return PageMargins(
+        left=float(payload.get("left", 0.7)),
+        right=float(payload.get("right", 0.7)),
+        top=float(payload.get("top", 0.75)),
+        bottom=float(payload.get("bottom", 0.75)),
+        header=float(payload.get("header", 0.3)),
+        footer=float(payload.get("footer", 0.3)),
+    )
+
+
+def _header_footer_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.header_footer import HeaderFooter
+
+    if not isinstance(payload, dict):
+        return HeaderFooter()
+    return HeaderFooter(
+        odd_header=_header_footer_item_from_payload(payload.get("odd_header")),
+        odd_footer=_header_footer_item_from_payload(payload.get("odd_footer")),
+        even_header=_header_footer_item_from_payload(payload.get("even_header")),
+        even_footer=_header_footer_item_from_payload(payload.get("even_footer")),
+        first_header=_header_footer_item_from_payload(payload.get("first_header")),
+        first_footer=_header_footer_item_from_payload(payload.get("first_footer")),
+        different_odd_even=bool(payload.get("different_odd_even", False)),
+        different_first=bool(payload.get("different_first", False)),
+        scale_with_doc=bool(payload.get("scale_with_doc", True)),
+        align_with_margins=bool(payload.get("align_with_margins", True)),
+    )
+
+
+def _header_footer_item_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.header_footer import HeaderFooterItem
+
+    if not isinstance(payload, dict):
+        return HeaderFooterItem()
+    return HeaderFooterItem(
+        left=payload.get("left"),
+        center=payload.get("center"),
+        right=payload.get("right"),
+    )
 
 
 def get_sheet_view(ws: Worksheet) -> Any:
