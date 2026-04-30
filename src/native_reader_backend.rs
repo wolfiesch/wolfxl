@@ -409,8 +409,30 @@ impl NativeXlsxBook {
         Ok(result.into())
     }
 
-    pub fn read_named_ranges(&self, py: Python<'_>, _sheet: &str) -> PyResult<PyObject> {
-        Ok(PyList::empty(py).into())
+    pub fn read_named_ranges(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        if !self.sheet_names.iter().any(|name| name == sheet) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Unknown sheet: {sheet}"
+            )));
+        }
+        let result = PyList::empty(py);
+        for named_range in self.book.named_ranges() {
+            if named_range.scope == "sheet" {
+                let refers_to = named_range.refers_to.trim_start_matches('=');
+                let Some((sheet_part, _addr)) = refers_to.split_once('!') else {
+                    continue;
+                };
+                if sheet_part.trim_matches('\'') != sheet {
+                    continue;
+                }
+            }
+            let d = PyDict::new(py);
+            d.set_item("name", &named_range.name)?;
+            d.set_item("scope", &named_range.scope)?;
+            d.set_item("refers_to", &named_range.refers_to)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_tables(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {

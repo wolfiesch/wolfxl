@@ -213,6 +213,14 @@ pub struct Table {
     pub autofilter: bool,
 }
 
+/// Parsed workbook defined name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedRange {
+    pub name: String,
+    pub scope: String,
+    pub refers_to: String,
+}
+
 /// Parsed worksheet conditional-formatting rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionalFormatRule {
@@ -229,6 +237,7 @@ pub struct ConditionalFormatRule {
 pub struct NativeXlsxBook {
     bytes: Vec<u8>,
     sheets: Vec<SheetInfo>,
+    named_ranges: Vec<NamedRange>,
     shared_strings: Vec<String>,
     styles: StyleTables,
     date1904: bool,
@@ -248,7 +257,7 @@ impl NativeXlsxBook {
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
             .map_err(|e| ReaderError::Xml(format!("failed to parse workbook rels: {e}")))?;
-        let (sheet_refs, date1904) = parse_workbook(&workbook_xml)?;
+        let (sheet_refs, date1904, named_ranges) = parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
             Some(xml) => parse_shared_strings(&xml)?,
@@ -262,6 +271,7 @@ impl NativeXlsxBook {
         Ok(Self {
             bytes,
             sheets,
+            named_ranges,
             shared_strings,
             styles,
             date1904,
@@ -276,6 +286,11 @@ impl NativeXlsxBook {
     /// Workbook sheet metadata in document order.
     pub fn sheets(&self) -> &[SheetInfo] {
         &self.sheets
+    }
+
+    /// Workbook defined names.
+    pub fn named_ranges(&self) -> &[NamedRange] {
+        &self.named_ranges
     }
 
     /// Whether the workbook uses the 1904 date system.
@@ -359,12 +374,17 @@ struct XfEntry {
     num_fmt_id: u32,
 }
 
-fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool)> {
+fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>)> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut sheets = Vec::new();
+    let mut raw_names = Vec::new();
     let mut date1904 = false;
+    let mut in_defined_name = false;
+    let mut current_name: Option<String> = None;
+    let mut current_local_id: Option<usize> = None;
+    let mut current_name_text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -384,8 +404,38 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool)> {
                         });
                     }
                 }
+                b"definedName" => {
+                    in_defined_name = true;
+                    current_name = attr_value(&e, b"name");
+                    current_local_id =
+                        attr_value(&e, b"localSheetId").and_then(|v| v.parse::<usize>().ok());
+                    current_name_text.clear();
+                }
                 _ => {}
             },
+            Ok(Event::Text(e)) => {
+                if in_defined_name {
+                    current_name_text
+                        .push_str(&e.unescape().map_err(|err| {
+                            ReaderError::Xml(format!("defined name text: {err}"))
+                        })?);
+                }
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"definedName" {
+                    in_defined_name = false;
+                    if let Some(name) = current_name.take() {
+                        let refers_to = current_name_text.trim().to_string();
+                        if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
+                            raw_names.push(RawNamedRange {
+                                name,
+                                local_id: current_local_id.take(),
+                                refers_to,
+                            });
+                        }
+                    }
+                }
+            }
             Ok(Event::Eof) => break,
             Err(e) => {
                 return Err(ReaderError::Xml(format!(
@@ -397,7 +447,44 @@ fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool)> {
         buf.clear();
     }
 
-    Ok((sheets, date1904))
+    let named_ranges = resolve_named_ranges(&sheets, raw_names);
+    Ok((sheets, date1904, named_ranges))
+}
+
+#[derive(Debug)]
+struct RawNamedRange {
+    name: String,
+    local_id: Option<usize>,
+    refers_to: String,
+}
+
+fn resolve_named_ranges(sheet_refs: &[SheetRef], raw_names: Vec<RawNamedRange>) -> Vec<NamedRange> {
+    raw_names
+        .into_iter()
+        .map(|raw| {
+            let (scope, sheet_name) = match raw.local_id {
+                Some(index) => (
+                    "sheet".to_string(),
+                    sheet_refs.get(index).map(|sheet| sheet.name.clone()),
+                ),
+                None => ("workbook".to_string(), None),
+            };
+            let refers_to = if scope == "sheet" && !raw.refers_to.contains('!') {
+                if let Some(sheet_name) = sheet_name {
+                    format!("{sheet_name}!{}", raw.refers_to)
+                } else {
+                    raw.refers_to
+                }
+            } else {
+                raw.refers_to
+            };
+            NamedRange {
+                name: raw.name,
+                scope,
+                refers_to,
+            }
+        })
+        .collect()
 }
 
 fn resolve_sheet_paths(sheet_refs: Vec<SheetRef>, rels: &RelsGraph) -> Result<Vec<SheetInfo>> {
@@ -1521,12 +1608,31 @@ mod tests {
             <sheet name="Visible" sheetId="1" r:id="rId1"/>
             <sheet name="Hidden" sheetId="2" state="hidden" r:id="rId2"/>
             <sheet name="Very" sheetId="3" state="veryHidden" r:id="rId3"/>
-        </sheets></workbook>"#;
-        let (sheets, date1904) = parse_workbook(xml).expect("parse workbook");
+        </sheets><definedNames>
+            <definedName name="GlobalName">Visible!$A$1</definedName>
+            <definedName name="LocalName" localSheetId="1">$B$2</definedName>
+            <definedName name="_xlnm.Print_Area">Visible!$A$1:$B$2</definedName>
+        </definedNames></workbook>"#;
+        let (sheets, date1904, named_ranges) = parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
         assert_eq!(sheets[0].name, "Visible");
         assert_eq!(sheets[1].state, SheetState::Hidden);
         assert_eq!(sheets[2].state, SheetState::VeryHidden);
+        assert_eq!(
+            named_ranges,
+            vec![
+                NamedRange {
+                    name: "GlobalName".to_string(),
+                    scope: "workbook".to_string(),
+                    refers_to: "Visible!$A$1".to_string(),
+                },
+                NamedRange {
+                    name: "LocalName".to_string(),
+                    scope: "sheet".to_string(),
+                    refers_to: "Hidden!$B$2".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]
