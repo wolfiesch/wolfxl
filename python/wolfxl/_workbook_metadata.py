@@ -138,6 +138,20 @@ def set_calc_properties(wb: Any, value: Any) -> None:
     wb._calc_properties_cache = value  # noqa: SLF001
 
 
+def get_views(wb: Any) -> list[Any]:
+    """Return workbook window views, lazily loaded from the reader."""
+    if wb._views_cache is not None:  # noqa: SLF001
+        return wb._views_cache  # noqa: SLF001
+    payload = _reader_workbook_payload(wb, "read_workbook_views")
+    wb._views_cache = _book_views_from_payload(payload)  # noqa: SLF001
+    return wb._views_cache  # noqa: SLF001
+
+
+def set_views(wb: Any, value: Any) -> None:
+    """Replace workbook window views."""
+    wb._views_cache = list(value)  # noqa: SLF001
+
+
 def set_security(wb: Any, value: Any) -> None:
     """Set workbook protection metadata.
 
@@ -253,6 +267,41 @@ def _calc_properties_from_payload(payload: Any) -> Any:
         concurrentCalc=_payload_value(payload, "concurrent_calc", True),
         concurrentManualCount=payload.get("concurrent_manual_count"),
         forceFullCalc=_payload_value(payload, "force_full_calc", False),
+    )
+
+
+def _book_views_from_payload(payload: Any) -> list[Any]:
+    from wolfxl.workbook.views import BookView
+
+    if not isinstance(payload, list):
+        return [BookView()]
+    views = [
+        _book_view_from_payload(item)
+        for item in payload
+        if isinstance(item, dict)
+    ]
+    return views or [BookView()]
+
+
+def _book_view_from_payload(payload: dict[str, Any]) -> Any:
+    from wolfxl.workbook.views import BookView
+
+    return BookView(
+        visibility=str(payload.get("visibility") or "visible"),
+        minimized=bool(payload.get("minimized", False)),
+        showHorizontalScroll=bool(payload.get("show_horizontal_scroll", True)),
+        showVerticalScroll=bool(payload.get("show_vertical_scroll", True)),
+        showSheetTabs=bool(payload.get("show_sheet_tabs", True)),
+        xWindow=payload.get("x_window"),
+        yWindow=payload.get("y_window"),
+        windowWidth=payload.get("window_width"),
+        windowHeight=payload.get("window_height"),
+        tabRatio=int(payload.get("tab_ratio", 600)),
+        firstSheet=int(payload.get("first_sheet", 0)),
+        activeTab=int(payload.get("active_tab", 0)),
+        autoFilterDateGrouping=bool(
+            payload.get("auto_filter_date_grouping", True)
+        ),
     )
 
 

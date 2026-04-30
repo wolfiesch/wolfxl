@@ -17,9 +17,9 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
-    BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue, ChartInfo,
-    ChartSeriesInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo,
-    HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
+    BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
+    ChartInfo, ChartSeriesInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo,
+    FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
     PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
     SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity,
@@ -683,6 +683,14 @@ impl NativeXlsxBook {
             Some(properties) => calc_properties_to_py(py, properties),
             None => Ok(py.None()),
         }
+    }
+
+    pub fn read_workbook_views(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let result = PyList::empty(py);
+        for view in self.book.workbook_views() {
+            result.append(book_view_to_py(py, view)?)?;
+        }
+        Ok(result.into())
     }
 
     pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
@@ -1362,6 +1370,24 @@ fn calc_properties_to_py(py: Python<'_>, properties: &CalcPropertiesInfo) -> PyR
         properties.concurrent_manual_count,
     )?;
     d.set_item("force_full_calc", properties.force_full_calc)?;
+    Ok(d.into())
+}
+
+fn book_view_to_py(py: Python<'_>, view: &BookViewInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("visibility", &view.visibility)?;
+    d.set_item("minimized", view.minimized)?;
+    d.set_item("show_horizontal_scroll", view.show_horizontal_scroll)?;
+    d.set_item("show_vertical_scroll", view.show_vertical_scroll)?;
+    d.set_item("show_sheet_tabs", view.show_sheet_tabs)?;
+    d.set_item("x_window", view.x_window)?;
+    d.set_item("y_window", view.y_window)?;
+    d.set_item("window_width", view.window_width)?;
+    d.set_item("window_height", view.window_height)?;
+    d.set_item("tab_ratio", view.tab_ratio)?;
+    d.set_item("first_sheet", view.first_sheet)?;
+    d.set_item("active_tab", view.active_tab)?;
+    d.set_item("auto_filter_date_grouping", view.auto_filter_date_grouping)?;
     Ok(d.into())
 }
 

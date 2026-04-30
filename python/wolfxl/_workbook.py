@@ -401,6 +401,16 @@ class Workbook:
         """Compatibility alias for :attr:`calculation`."""
         self.calculation = value
 
+    @property
+    def views(self) -> list[Any]:
+        """Return workbook window views."""
+        return _workbook_metadata.get_views(self)
+
+    @views.setter
+    def views(self, value: Any) -> None:
+        """Replace workbook window views."""
+        _workbook_metadata.set_views(self, value)
+
     # ------------------------------------------------------------------
     # Workbook-level security
     # ------------------------------------------------------------------

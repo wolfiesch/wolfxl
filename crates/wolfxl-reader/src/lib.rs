@@ -812,6 +812,24 @@ pub struct CalcPropertiesInfo {
     pub force_full_calc: Option<bool>,
 }
 
+/// Parsed workbook window view metadata from `<workbookView>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookViewInfo {
+    pub visibility: String,
+    pub minimized: bool,
+    pub show_horizontal_scroll: bool,
+    pub show_vertical_scroll: bool,
+    pub show_sheet_tabs: bool,
+    pub x_window: Option<i64>,
+    pub y_window: Option<i64>,
+    pub window_width: Option<u32>,
+    pub window_height: Option<u32>,
+    pub tab_ratio: u32,
+    pub first_sheet: u32,
+    pub active_tab: u32,
+    pub auto_filter_date_grouping: bool,
+}
+
 /// Parsed `<workbookProtection>` metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbookProtection {
@@ -902,6 +920,7 @@ pub struct NativeXlsxBook {
     workbook_security: WorkbookSecurity,
     workbook_properties: Option<WorkbookPropertiesInfo>,
     calc_properties: Option<CalcPropertiesInfo>,
+    workbook_views: Vec<BookViewInfo>,
     doc_properties: HashMap<String, String>,
     shared_strings: SharedStrings,
     styles: StyleTables,
@@ -931,6 +950,7 @@ impl NativeXlsxBook {
             workbook_security,
             workbook_properties,
             calc_properties,
+            workbook_views,
         ) = parse_workbook(&workbook_xml)?;
         let sheets = resolve_sheet_paths(sheet_refs, &rels)?;
         let shared_strings = match read_part_optional(&mut zip, "xl/sharedStrings.xml")? {
@@ -958,6 +978,7 @@ impl NativeXlsxBook {
             workbook_security,
             workbook_properties,
             calc_properties,
+            workbook_views,
             doc_properties,
             shared_strings,
             styles,
@@ -1012,6 +1033,11 @@ impl NativeXlsxBook {
     /// Workbook calculation properties parsed from `<calcPr>`.
     pub fn calc_properties(&self) -> Option<&CalcPropertiesInfo> {
         self.calc_properties.as_ref()
+    }
+
+    /// Workbook window views parsed from `<bookViews>`.
+    pub fn workbook_views(&self) -> &[BookViewInfo] {
+        &self.workbook_views
     }
 
     /// Workbook document properties parsed from `docProps/core.xml` and app.xml.
@@ -1209,6 +1235,7 @@ fn parse_workbook(
     WorkbookSecurity,
     Option<WorkbookPropertiesInfo>,
     Option<CalcPropertiesInfo>,
+    Vec<BookViewInfo>,
 )> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1222,6 +1249,7 @@ fn parse_workbook(
     let mut file_sharing = None;
     let mut workbook_properties = None;
     let mut calc_properties = None;
+    let mut workbook_views = Vec::new();
     let mut in_defined_name = false;
     let mut current_name: Option<String> = None;
     let mut current_local_id: Option<usize> = None;
@@ -1236,6 +1264,9 @@ fn parse_workbook(
                 }
                 b"calcPr" => {
                     calc_properties = Some(CalcPropertiesInfo::from_start(&e));
+                }
+                b"workbookView" => {
+                    workbook_views.push(BookViewInfo::from_start(&e));
                 }
                 b"workbookProtection" => {
                     workbook_protection = Some(WorkbookProtection::from_start(&e));
@@ -1325,6 +1356,7 @@ fn parse_workbook(
         },
         workbook_properties,
         calc_properties,
+        workbook_views,
     ))
 }
 
@@ -1397,6 +1429,26 @@ impl CalcPropertiesInfo {
             concurrent_calc: attr_bool(e, b"concurrentCalc"),
             concurrent_manual_count: attr_u32(e, b"concurrentManualCount"),
             force_full_calc: attr_bool(e, b"forceFullCalc"),
+        }
+    }
+}
+
+impl BookViewInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            visibility: attr_value(e, b"visibility").unwrap_or_else(|| "visible".to_string()),
+            minimized: attr_bool_default(e, b"minimized", false),
+            show_horizontal_scroll: attr_bool_default(e, b"showHorizontalScroll", true),
+            show_vertical_scroll: attr_bool_default(e, b"showVerticalScroll", true),
+            show_sheet_tabs: attr_bool_default(e, b"showSheetTabs", true),
+            x_window: attr_i64(e, b"xWindow"),
+            y_window: attr_i64(e, b"yWindow"),
+            window_width: attr_u32(e, b"windowWidth"),
+            window_height: attr_u32(e, b"windowHeight"),
+            tab_ratio: attr_u32(e, b"tabRatio").unwrap_or(600),
+            first_sheet: attr_u32(e, b"firstSheet").unwrap_or_default(),
+            active_tab: attr_u32(e, b"activeTab").unwrap_or_default(),
+            auto_filter_date_grouping: attr_bool_default(e, b"autoFilterDateGrouping", true),
         }
     }
 }
@@ -4802,6 +4854,7 @@ mod tests {
         <fileSharing readOnlyRecommended="1" userName="Wolf" algorithmName="SHA-512" hashValue="FILEHASH" saltValue="FILESALT" spinCount="100000"/>
         <workbookPr date1904="1" codeName="ThisWorkbook" defaultThemeVersion="164011"/>
         <workbookProtection lockStructure="1" workbookAlgorithmName="SHA-512" workbookHashValue="HASH" workbookSaltValue="SALT" workbookSpinCount="100000"/>
+        <bookViews><workbookView visibility="hidden" minimized="1" showHorizontalScroll="0" showVerticalScroll="0" showSheetTabs="0" xWindow="10" yWindow="20" windowWidth="12000" windowHeight="8000" tabRatio="750" firstSheet="1" activeTab="2" autoFilterDateGrouping="0"/></bookViews>
         <calcPr calcId="191029" calcMode="manual" fullCalcOnLoad="1" iterate="1" iterateCount="25" iterateDelta="0.01" forceFullCalc="1"/>
         <sheets>
             <sheet name="Visible" sheetId="1" r:id="rId1"/>
@@ -4822,6 +4875,7 @@ mod tests {
             security,
             workbook_properties,
             calc_properties,
+            workbook_views,
         ) = parse_workbook(xml).expect("parse workbook");
         assert!(date1904);
         let workbook_properties = workbook_properties.expect("workbookPr");
@@ -4838,6 +4892,11 @@ mod tests {
         assert_eq!(calc_properties.iterate_count, Some(25));
         assert_eq!(calc_properties.iterate_delta, Some(0.01));
         assert_eq!(calc_properties.force_full_calc, Some(true));
+        assert_eq!(workbook_views.len(), 1);
+        assert_eq!(workbook_views[0].visibility, "hidden");
+        assert!(workbook_views[0].minimized);
+        assert!(!workbook_views[0].show_horizontal_scroll);
+        assert_eq!(workbook_views[0].active_tab, 2);
         assert_eq!(sheets[0].name, "Visible");
         assert_eq!(sheets[1].state, SheetState::Hidden);
         assert_eq!(sheets[2].state, SheetState::VeryHidden);

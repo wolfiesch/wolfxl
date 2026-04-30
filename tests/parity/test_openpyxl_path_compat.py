@@ -136,6 +136,7 @@ PATHS: list[tuple[str, str]] = [
     ("openpyxl.workbook.protection", "FileSharing"),
     ("openpyxl.workbook.properties", "CalcProperties"),
     ("openpyxl.workbook.properties", "WorkbookProperties"),
+    ("openpyxl.workbook.views", "BookView"),
     ("openpyxl.workbook.child", "_WorkbookChild"),
 
     # ---- utils -----------------------------------------------------------

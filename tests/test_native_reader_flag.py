@@ -157,6 +157,32 @@ def _inject_workbook_calc_properties(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _inject_workbook_views(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    workbook_name = "xl/workbook.xml"
+    workbook_xml = entries[workbook_name].decode()
+    book_views_xml = (
+        "<bookViews>"
+        '<workbookView visibility="hidden" minimized="1" showHorizontalScroll="0" '
+        'showVerticalScroll="0" showSheetTabs="0" xWindow="10" yWindow="20" '
+        'windowWidth="12000" windowHeight="8000" tabRatio="750" '
+        'firstSheet="1" activeTab="2" autoFilterDateGrouping="0"/>'
+        "</bookViews>"
+    )
+    workbook_xml, count = re.subn(
+        r"<bookViews\b.*?</bookViews>",
+        book_views_xml,
+        workbook_xml,
+        count=1,
+    )
+    assert count == 1
+    entries[workbook_name] = workbook_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def _inject_merged_subordinate_style(path: Path) -> None:
     """Add a styled blank subordinate cell to the merged D1:E1 range."""
     with zipfile.ZipFile(path, "r") as zin:
@@ -312,10 +338,13 @@ def _make_sheet_state_xlsx(path: Path) -> None:
 
 def _make_workbook_calc_properties_xlsx(path: Path) -> None:
     wb = openpyxl.Workbook()
-    wb.active.title = "Props"
+    wb.active.title = "Visible"
+    wb.create_sheet("Second")
+    wb.create_sheet("Third")
     wb.save(path)
     wb.close()
     _inject_workbook_calc_properties(path)
+    _inject_workbook_views(path)
 
 
 def _make_print_area_xlsx(path: Path) -> None:
@@ -674,6 +703,22 @@ def test_native_reader_loads_workbook_calc_properties(
         assert calculation.concurrentCalc is False
         assert calculation.concurrentManualCount == 4
         assert calculation.forceFullCalc is True
+
+        assert len(wb.views) == 1
+        view = wb.views[0]
+        assert view.visibility == "hidden"
+        assert view.minimized is True
+        assert view.showHorizontalScroll is False
+        assert view.showVerticalScroll is False
+        assert view.showSheetTabs is False
+        assert view.xWindow == 10
+        assert view.yWindow == 20
+        assert view.windowWidth == 12000
+        assert view.windowHeight == 8000
+        assert view.tabRatio == 750
+        assert view.firstSheet == 1
+        assert view.activeTab == 2
+        assert view.autoFilterDateGrouping is False
     finally:
         wb.close()
 
