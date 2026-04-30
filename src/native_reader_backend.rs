@@ -1,8 +1,11 @@
 //! PyO3 bridge for the native WolfXL XLSX reader.
 //!
-//! This class is opt-in while the native reader grows to parity. It preserves
-//! the reader method shape Python already calls, but only the value/topology
-//! subset is implemented in this first slice.
+//! This bridge preserves the reader method shape Python already calls while the
+//! Rust reader owns XLSX parsing. Payload helpers below intentionally serialize
+//! openpyxl-compatible dictionaries for worksheet values, formatting, workbook
+//! metadata, filters, print settings, drawings, images, and charts. Keep new
+//! keys additive whenever possible so older Python hydration code can ignore
+//! fields it does not understand.
 
 use std::collections::HashMap;
 
@@ -1497,6 +1500,11 @@ fn image_to_py(py: Python<'_>, image: &ImageInfo) -> PyResult<PyObject> {
     Ok(d.into())
 }
 
+/// Serialize native chart metadata into the Python hydration contract.
+///
+/// The keys intentionally mirror openpyxl-facing attributes in
+/// `python/wolfxl/_worksheet_media.py`; keep this payload additive to avoid
+/// breaking older hydration code.
 fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
     let d = PyDict::new(py);
     d.set_item("kind", &chart.kind)?;
