@@ -233,6 +233,17 @@ def _make_wolfxl_anchor_image_xlsx(path: Path) -> None:
     wb.save(path)
 
 
+def _make_sheet_state_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    wb.active.title = "Visible"
+    hidden = wb.create_sheet("Hidden")
+    hidden.sheet_state = "hidden"
+    very_hidden = wb.create_sheet("VeryHidden")
+    very_hidden.sheet_state = "veryHidden"
+    wb.save(path)
+    wb.close()
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -339,6 +350,23 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert records["B1"]["number_format"] == "#,##0.00"
         assert "number_format" not in records["E1"]
         assert records["A3"]["data_type"] == "datetime"
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_workbook_sheet_states(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-sheet-states.xlsx"
+    _make_sheet_state_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        assert wb.sheetnames == ["Visible", "Hidden", "VeryHidden"]
+        assert wb["Visible"].sheet_state == "visible"
+        assert wb["Hidden"].sheet_state == "hidden"
+        assert wb["VeryHidden"].sheet_state == "veryHidden"
     finally:
         wb.close()
 

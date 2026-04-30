@@ -33,6 +33,7 @@ def initialize_worksheet_state(
     ws._auto_filter = AutoFilter()  # noqa: SLF001
     ws._row_heights: dict[int, float | None] = {}  # noqa: SLF001
     ws._col_widths: dict[str, float | None] = {}  # noqa: SLF001
+    ws._sheet_state: str | None = None  # noqa: SLF001
     ws._merged_ranges: set[str] = set()  # noqa: SLF001
     ws._print_area: str | None = None  # noqa: SLF001
     ws._sheet_visibility_cache: dict[str, Any] | None = None  # noqa: SLF001

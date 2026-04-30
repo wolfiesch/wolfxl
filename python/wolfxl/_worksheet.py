@@ -122,7 +122,7 @@ class Worksheet:
         "_max_col_idx", "_next_append_row",
         "_append_buffer", "_append_buffer_start", "_bulk_writes",
         "_freeze_panes", "_auto_filter",
-        "_row_heights", "_col_widths",
+        "_row_heights", "_col_widths", "_sheet_state",
         "_merged_ranges", "_print_area", "_sheet_visibility_cache",
         # Read caches populated lazily on first access.
         "_comments_cache", "_hyperlinks_cache",
@@ -943,11 +943,26 @@ class Worksheet:
     def sheet_state(self) -> str:
         """Visibility state: ``"visible"``, ``"hidden"``, or ``"veryHidden"``.
 
-        Defaults to ``"visible"``. wolfxl doesn't yet wire through the
-        ``<sheet state="hidden">`` XML attribute; returning the default
-        matches openpyxl's value for a freshly-created sheet.
+        Defaults to ``"visible"`` and lazily reflects the native reader's
+        parsed ``<sheet state="hidden">`` workbook metadata when available.
         """
-        return "visible"
+        reader = getattr(self._workbook, "_rust_reader", None)
+        if (
+            self._sheet_state is None
+            and reader is not None
+            and hasattr(reader, "read_sheet_state")
+        ):
+            self._sheet_state = reader.read_sheet_state(self._title)
+        return self._sheet_state or "visible"
+
+    @sheet_state.setter
+    def sheet_state(self, value: str) -> None:
+        """Set worksheet visibility state for openpyxl-shaped callers."""
+        if value not in {"visible", "hidden", "veryHidden"}:
+            raise ValueError(
+                "sheet_state must be 'visible', 'hidden', or 'veryHidden'"
+            )
+        self._sheet_state = value
 
     @property
     def _charts(self) -> list[Any]:

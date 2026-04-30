@@ -555,6 +555,15 @@ impl NativeXlsxBook {
         &self.sheets
     }
 
+    /// Resolve a worksheet's workbook-tab visibility state.
+    pub fn sheet_state(&self, sheet_name: &str) -> Result<SheetState> {
+        self.sheets
+            .iter()
+            .find(|s| s.name == sheet_name)
+            .map(|sheet| sheet.state)
+            .ok_or_else(|| ReaderError::SheetNotFound(sheet_name.to_string()))
+    }
+
     /// Workbook defined names.
     pub fn named_ranges(&self) -> &[NamedRange] {
         &self.named_ranges

@@ -19,7 +19,7 @@ use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BorderInfo, Cell, CellDataType, CellValue, DateGroupItemInfo, FillInfo, FilterColumnInfo,
     FilterInfo, FontInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
-    NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, SortConditionInfo,
+    NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, SheetState, SortConditionInfo,
     SortStateInfo, WorkbookSecurity, WorksheetData,
 };
 
@@ -68,6 +68,22 @@ impl NativeXlsxBook {
 
     pub fn sheet_names(&self) -> Vec<String> {
         self.sheet_names.clone()
+    }
+
+    pub fn read_sheet_state(&self, sheet: &str) -> PyResult<&'static str> {
+        if !self.sheet_names.iter().any(|name| name == sheet) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Unknown sheet: {sheet}"
+            )));
+        }
+        let state = self.book.sheet_state(sheet).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("native sheet state read failed: {e}"))
+        })?;
+        Ok(match state {
+            SheetState::Visible => "visible",
+            SheetState::Hidden => "hidden",
+            SheetState::VeryHidden => "veryHidden",
+        })
     }
 
     pub fn opened_from_bytes(&self) -> bool {
