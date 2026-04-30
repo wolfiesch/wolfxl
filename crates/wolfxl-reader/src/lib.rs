@@ -378,6 +378,21 @@ impl NativeXlsxBook {
         self.styles.border_for_style_id(style_id)
     }
 
+    /// Resolve a style id to font metadata.
+    pub fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
+        self.styles.font_for_style_id(style_id)
+    }
+
+    /// Resolve a style id to fill metadata.
+    pub fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
+        self.styles.fill_for_style_id(style_id)
+    }
+
+    /// Resolve a style id to alignment metadata.
+    pub fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
+        self.styles.alignment_for_style_id(style_id)
+    }
+
     /// Parse a worksheet into sparse decoded cells.
     pub fn worksheet(&self, sheet_name: &str) -> Result<WorksheetData> {
         let Some(info) = self.sheets.iter().find(|s| s.name == sheet_name) else {
@@ -414,10 +429,12 @@ struct SheetRef {
     rid: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 struct StyleTables {
     custom_num_fmts: HashMap<u32, String>,
     cell_xfs: Vec<XfEntry>,
+    fonts: Vec<FontInfo>,
+    fills: Vec<FillInfo>,
     borders: Vec<BorderInfo>,
 }
 
@@ -443,12 +460,57 @@ impl StyleTables {
         let xf = self.cell_xfs.get(style_id as usize)?;
         self.borders.get(xf.border_id as usize)
     }
+
+    fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
+        let xf = self.cell_xfs.get(style_id as usize)?;
+        self.fonts.get(xf.font_id as usize)
+    }
+
+    fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
+        let xf = self.cell_xfs.get(style_id as usize)?;
+        self.fills.get(xf.fill_id as usize)
+    }
+
+    fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
+        self.cell_xfs.get(style_id as usize)?.alignment.as_ref()
+    }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct XfEntry {
     num_fmt_id: u32,
+    font_id: u32,
+    fill_id: u32,
     border_id: u32,
+    alignment: Option<AlignmentInfo>,
+}
+
+/// Parsed cell font.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FontInfo {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: Option<String>,
+    pub strikethrough: bool,
+    pub name: Option<String>,
+    pub size: Option<f64>,
+    pub color: Option<String>,
+}
+
+/// Parsed cell fill.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FillInfo {
+    pub bg_color: Option<String>,
+}
+
+/// Parsed cell alignment.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlignmentInfo {
+    pub horizontal: Option<String>,
+    pub vertical: Option<String>,
+    pub wrap_text: bool,
+    pub text_rotation: Option<u32>,
+    pub indent: Option<u32>,
 }
 
 /// Parsed cell border.
@@ -781,8 +843,13 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
     let mut buf = Vec::new();
     let mut styles = StyleTables::default();
     let mut in_num_fmts = false;
+    let mut in_fonts = false;
+    let mut in_fills = false;
     let mut in_cell_xfs = false;
     let mut in_borders = false;
+    let mut current_font: Option<FontBuilder> = None;
+    let mut current_fill: Option<FillBuilder> = None;
+    let mut in_pattern_fill = false;
     let mut current_border: Option<BorderBuilder> = None;
     let mut current_border_edge: Option<BorderEdgeKind> = None;
 
@@ -790,8 +857,32 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
                 b"numFmts" => in_num_fmts = true,
+                b"fonts" => in_fonts = true,
+                b"fills" => in_fills = true,
                 b"cellXfs" => in_cell_xfs = true,
                 b"borders" => in_borders = true,
+                b"font" if in_fonts => {
+                    current_font = Some(FontBuilder::default());
+                }
+                tag if in_fonts && current_font.is_some() => {
+                    if let Some(font) = current_font.as_mut() {
+                        font.apply_tag(tag, &e);
+                    }
+                }
+                b"fill" if in_fills => {
+                    current_fill = Some(FillBuilder::default());
+                }
+                b"patternFill" if in_fills && current_fill.is_some() => {
+                    in_pattern_fill = true;
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.pattern_type = attr_value(&e, b"patternType");
+                    }
+                }
+                tag if in_pattern_fill && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.apply_color_tag(tag, &e);
+                    }
+                }
                 b"border" if in_borders => {
                     current_border = Some(BorderBuilder::from_start(&e));
                 }
@@ -815,11 +906,38 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                 b"xf" if in_cell_xfs => {
                     styles.cell_xfs.push(parse_xf_entry(&e));
                 }
+                b"alignment" if in_cell_xfs => {
+                    if let Some(xf) = styles.cell_xfs.last_mut() {
+                        xf.alignment = parse_alignment(&e);
+                    }
+                }
                 _ => {}
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"numFmt" if in_num_fmts => push_num_fmt(&mut styles, &e),
                 b"xf" if in_cell_xfs => styles.cell_xfs.push(parse_xf_entry(&e)),
+                b"font" if in_fonts => styles.fonts.push(FontInfo::default()),
+                tag if in_fonts && current_font.is_some() => {
+                    if let Some(font) = current_font.as_mut() {
+                        font.apply_tag(tag, &e);
+                    }
+                }
+                b"fill" if in_fills => styles.fills.push(FillInfo::default()),
+                b"patternFill" if in_fills && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.pattern_type = attr_value(&e, b"patternType");
+                    }
+                }
+                tag if in_pattern_fill && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.apply_color_tag(tag, &e);
+                    }
+                }
+                b"alignment" if in_cell_xfs => {
+                    if let Some(xf) = styles.cell_xfs.last_mut() {
+                        xf.alignment = parse_alignment(&e);
+                    }
+                }
                 b"border" if in_borders => {
                     styles.borders.push(BorderBuilder::from_start(&e).finish());
                 }
@@ -840,8 +958,22 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 b"numFmts" => in_num_fmts = false,
+                b"fonts" => in_fonts = false,
+                b"fills" => in_fills = false,
                 b"cellXfs" => in_cell_xfs = false,
                 b"borders" => in_borders = false,
+                b"font" => {
+                    if let Some(font) = current_font.take() {
+                        styles.fonts.push(font.finish());
+                    }
+                }
+                b"fill" => {
+                    if let Some(fill) = current_fill.take() {
+                        styles.fills.push(fill.finish());
+                    }
+                    in_pattern_fill = false;
+                }
+                b"patternFill" => in_pattern_fill = false,
                 b"border" => {
                     if let Some(border) = current_border.take() {
                         styles.borders.push(border.finish());
@@ -880,10 +1012,114 @@ fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
         num_fmt_id: attr_value(e, b"numFmtId")
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
+        font_id: attr_value(e, b"fontId")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
+        fill_id: attr_value(e, b"fillId")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
         border_id: attr_value(e, b"borderId")
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
+        alignment: None,
     }
+}
+
+#[derive(Debug, Default)]
+struct FontBuilder {
+    font: FontInfo,
+}
+
+impl FontBuilder {
+    fn apply_tag(&mut self, tag: &[u8], e: &BytesStart<'_>) {
+        match tag {
+            b"b" => self.font.bold = parse_bool_attr_or_true(e, b"val"),
+            b"i" => self.font.italic = parse_bool_attr_or_true(e, b"val"),
+            b"strike" => self.font.strikethrough = parse_bool_attr_or_true(e, b"val"),
+            b"u" => {
+                self.font.underline =
+                    Some(attr_value(e, b"val").unwrap_or_else(|| "single".to_string()));
+            }
+            b"name" => self.font.name = attr_value(e, b"val"),
+            b"sz" => {
+                self.font.size = attr_value(e, b"val").and_then(|value| value.parse().ok());
+            }
+            b"color" => self.font.color = parse_ooxml_color(e),
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> FontInfo {
+        self.font
+    }
+}
+
+#[derive(Debug, Default)]
+struct FillBuilder {
+    pattern_type: Option<String>,
+    fg_color: Option<String>,
+    bg_color: Option<String>,
+}
+
+impl FillBuilder {
+    fn apply_color_tag(&mut self, tag: &[u8], e: &BytesStart<'_>) {
+        match tag {
+            b"fgColor" => self.fg_color = parse_ooxml_color(e),
+            b"bgColor" => self.bg_color = parse_ooxml_color(e),
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> FillInfo {
+        let is_none = self
+            .pattern_type
+            .as_deref()
+            .is_none_or(|pattern| pattern.eq_ignore_ascii_case("none"));
+        FillInfo {
+            bg_color: (!is_none)
+                .then(|| self.fg_color.or(self.bg_color))
+                .flatten(),
+        }
+    }
+}
+
+fn parse_alignment(e: &BytesStart<'_>) -> Option<AlignmentInfo> {
+    let horizontal = attr_value(e, b"horizontal").filter(|value| value != "general");
+    let vertical = attr_value(e, b"vertical");
+    let wrap_text = attr_truthy(attr_value(e, b"wrapText").as_deref());
+    let text_rotation = attr_value(e, b"textRotation").and_then(|value| value.parse().ok());
+    let indent = attr_value(e, b"indent").and_then(|value| value.parse().ok());
+    let alignment = AlignmentInfo {
+        horizontal,
+        vertical,
+        wrap_text,
+        text_rotation,
+        indent,
+    };
+    (alignment.horizontal.is_some()
+        || alignment.vertical.is_some()
+        || alignment.wrap_text
+        || alignment
+            .text_rotation
+            .is_some_and(|rotation| rotation != 0)
+        || alignment.indent.is_some_and(|indent| indent != 0))
+    .then_some(alignment)
+}
+
+fn parse_bool_attr_or_true(e: &BytesStart<'_>, key: &[u8]) -> bool {
+    attr_value(e, key)
+        .map(|value| attr_truthy(Some(&value)))
+        .unwrap_or(true)
+}
+
+fn parse_ooxml_color(e: &BytesStart<'_>) -> Option<String> {
+    if let Some(rgb) = attr_value(e, b"rgb") {
+        return Some(normalize_ooxml_rgb(&rgb));
+    }
+    if let Some(indexed) = attr_value(e, b"indexed").and_then(|value| value.parse::<usize>().ok()) {
+        return Some(indexed_color_hex(indexed));
+    }
+    attr_value(e, b"theme").map(|_| "#000000".to_string())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -989,13 +1225,7 @@ fn parse_border_side(e: &BytesStart<'_>) -> Option<BorderSide> {
 }
 
 fn parse_border_color(e: &BytesStart<'_>) -> Option<String> {
-    if let Some(rgb) = attr_value(e, b"rgb") {
-        return Some(normalize_ooxml_rgb(&rgb));
-    }
-    if let Some(indexed) = attr_value(e, b"indexed").and_then(|value| value.parse::<usize>().ok()) {
-        return Some(indexed_color_hex(indexed));
-    }
-    attr_value(e, b"theme").map(|_| "#000000".to_string())
+    parse_ooxml_color(e)
 }
 
 fn normalize_ooxml_rgb(rgb: &str) -> String {

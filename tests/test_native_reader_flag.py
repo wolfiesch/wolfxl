@@ -20,7 +20,10 @@ wolfxl = pytest.importorskip("wolfxl")
 DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
 Border = openpyxl.styles.Border
+Font = openpyxl.styles.Font
+PatternFill = openpyxl.styles.PatternFill
 Side = openpyxl.styles.Side
+Alignment = openpyxl.styles.Alignment
 
 
 def _make_basic_xlsx(path: Path) -> None:
@@ -30,6 +33,23 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["A1"] = "Label"
     ws["B1"] = 42
     ws["B1"].number_format = "#,##0.00"
+    ws["B1"].font = Font(
+        name="Arial",
+        size=14,
+        bold=True,
+        italic=True,
+        underline="single",
+        strike=True,
+        color="FF123456",
+    )
+    ws["B1"].fill = PatternFill(patternType="solid", fgColor="FFABCDEF")
+    ws["B1"].alignment = Alignment(
+        horizontal="center",
+        vertical="top",
+        wrap_text=True,
+        text_rotation=45,
+        indent=2,
+    )
     ws["B1"].border = Border(
         left=Side(style="thin", color="FFFF0000"),
         right=Side(style="medium"),
@@ -75,6 +95,20 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A1"].value == "Label"
         assert ws["B1"].value == 42
         assert ws["B1"].number_format == "#,##0.00"
+        assert ws["B1"].font.name == "Arial"
+        assert ws["B1"].font.size == 14.0
+        assert ws["B1"].font.bold is True
+        assert ws["B1"].font.italic is True
+        assert ws["B1"].font.underline == "single"
+        assert ws["B1"].font.strike is True
+        assert ws["B1"].font.color == "#123456"
+        assert ws["B1"].fill.patternType == "solid"
+        assert ws["B1"].fill.fgColor == "#ABCDEF"
+        assert ws["B1"].alignment.horizontal == "center"
+        assert ws["B1"].alignment.vertical == "top"
+        assert ws["B1"].alignment.wrap_text is True
+        assert ws["B1"].alignment.text_rotation == 45
+        assert ws["B1"].alignment.indent == 2
         assert ws["B1"].border.left.style == "thin"
         assert ws["B1"].border.left.color == "#FF0000"
         assert ws["B1"].border.right.style == "medium"

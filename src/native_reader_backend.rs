@@ -16,8 +16,8 @@ type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, InlineFontProps,
-    NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
+    AlignmentInfo, ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, FillInfo, FontInfo,
+    InlineFontProps, NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -592,8 +592,20 @@ impl NativeXlsxBook {
         };
         let d = PyDict::new(py);
         if let Some(style_id) = style_id {
+            if style_id == 0 {
+                return Ok(d.into());
+            }
+            if let Some(font) = self.book.font_for_style_id(style_id) {
+                populate_font(&d, font)?;
+            }
+            if let Some(fill) = self.book.fill_for_style_id(style_id) {
+                populate_fill(&d, fill)?;
+            }
             if let Some(number_format) = self.book.number_format_for_style_id(style_id) {
                 d.set_item("number_format", number_format)?;
+            }
+            if let Some(alignment) = self.book.alignment_for_style_id(style_id) {
+                populate_alignment(&d, alignment)?;
             }
         }
         Ok(d.into())
@@ -815,6 +827,57 @@ fn rich_font_to_py(py: Python<'_>, font: &InlineFontProps) -> PyResult<PyObject>
         d.set_item("scheme", value)?;
     }
     Ok(d.into())
+}
+
+fn populate_font(d: &Bound<'_, PyDict>, font: &FontInfo) -> PyResult<()> {
+    if font.bold {
+        d.set_item("bold", true)?;
+    }
+    if font.italic {
+        d.set_item("italic", true)?;
+    }
+    if let Some(value) = &font.underline {
+        d.set_item("underline", value)?;
+    }
+    if font.strikethrough {
+        d.set_item("strikethrough", true)?;
+    }
+    if let Some(value) = &font.name {
+        d.set_item("font_name", value)?;
+    }
+    if let Some(value) = font.size {
+        d.set_item("font_size", value)?;
+    }
+    if let Some(value) = &font.color {
+        d.set_item("font_color", value)?;
+    }
+    Ok(())
+}
+
+fn populate_fill(d: &Bound<'_, PyDict>, fill: &FillInfo) -> PyResult<()> {
+    if let Some(value) = &fill.bg_color {
+        d.set_item("bg_color", value)?;
+    }
+    Ok(())
+}
+
+fn populate_alignment(d: &Bound<'_, PyDict>, alignment: &AlignmentInfo) -> PyResult<()> {
+    if let Some(value) = &alignment.horizontal {
+        d.set_item("h_align", value)?;
+    }
+    if let Some(value) = &alignment.vertical {
+        d.set_item("v_align", value)?;
+    }
+    if alignment.wrap_text {
+        d.set_item("wrap", true)?;
+    }
+    if let Some(value) = alignment.text_rotation.filter(|value| *value != 0) {
+        d.set_item("rotation", value)?;
+    }
+    if let Some(value) = alignment.indent.filter(|value| *value != 0) {
+        d.set_item("indent", value)?;
+    }
+    Ok(())
 }
 
 fn populate_border(py: Python<'_>, d: &Bound<'_, PyDict>, border: &BorderInfo) -> PyResult<()> {
