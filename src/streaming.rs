@@ -5,7 +5,7 @@
 //! time using a hand-rolled byte-scanner over the sheet XML, resolving
 //! shared-string-table (SST) references upfront. Style metadata is
 //! exposed as a `style_id` only — Python-side `StreamingCell` resolves the
-//! actual font/fill/etc. via the existing `CalamineStyledBook` code path
+//! actual font/fill/etc. via the eager Rust reader code path
 //! (which already loads `xl/styles.xml` and exposes O(1) style lookups).
 //!
 //! Public surface (Python):

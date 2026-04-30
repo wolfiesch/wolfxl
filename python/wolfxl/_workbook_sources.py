@@ -334,16 +334,11 @@ def _xlsx_reader_class(
     """Return the active XLSX Rust reader class.
 
     Plain eager reads, permissive recovery, streaming bootstrap, and
-    modify-mode bootstrap reads use WolfXL's native reader by default.
-    ``WOLFXL_CALAMINE_READER=1`` is a temporary escape hatch for legacy-reader
-    diagnostics.
+    modify-mode bootstrap reads use WolfXL's native reader.
     """
-    if (
-        os.environ.get("WOLFXL_CALAMINE_READER") != "1"
-        and hasattr(rust_module, "NativeXlsxBook")
-    ):
+    if hasattr(rust_module, "NativeXlsxBook"):
         return rust_module.NativeXlsxBook
-    return rust_module.CalamineStyledBook
+    raise RuntimeError("wolfxl Rust extension is missing NativeXlsxBook")
 
 
 def from_xlsb(

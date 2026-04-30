@@ -149,14 +149,14 @@ def test_calamine_xls_book_styles_raise() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CalamineStyledBook.open_from_bytes (xlsx bytes path)
+# NativeXlsxBook.open_from_bytes (xlsx bytes path)
 # ---------------------------------------------------------------------------
 
 
-def test_calamine_styled_book_open_from_bytes() -> None:
-    from wolfxl._rust import CalamineStyledBook
+def test_native_xlsx_book_open_from_bytes() -> None:
+    from wolfxl._rust import NativeXlsxBook
 
-    book = CalamineStyledBook.open_from_bytes(XLSX_FIXTURE.read_bytes())
+    book = NativeXlsxBook.open_from_bytes(XLSX_FIXTURE.read_bytes())
     names = book.sheet_names()
     assert names
     assert book.opened_from_bytes() is True

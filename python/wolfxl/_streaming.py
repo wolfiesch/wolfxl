@@ -6,15 +6,14 @@ more than ``AUTO_STREAM_ROW_THRESHOLD`` rows. Wraps the Rust
 ``StreamingSheetReader`` and converts its row tuples into either:
 
 - ``StreamingCell`` instances (mutation-rejected proxies that lazily look
-  up styles via the existing ``CalamineStyledBook`` reader), or
+  up styles via the eager workbook reader), or
 - plain value tuples (when ``values_only=True``), padded by the configured
   column bounds.
 
-The streaming path bypasses ``calamine-styles``' eager sheet
-materialization for the value scan but still uses the
-``CalamineStyledBook`` style table for ``StreamingCell.font`` /
-``.fill`` / etc. — that table is loaded once on first style access and
-shared across every cell in the iteration.
+The streaming path bypasses eager sheet materialization for the value scan but
+still uses the eager workbook reader's style table for ``StreamingCell.font`` /
+``.fill`` / etc. That table is loaded once on first style access and shared
+across every cell in the iteration.
 """
 
 from __future__ import annotations
@@ -86,8 +85,8 @@ class StreamingCell:
 
     Holds a snapshot of the value (parsed by the Rust SAX scanner) plus
     the originating row/column and a reference back to the Worksheet so
-    style lookups can defer to the existing
-    ``CalamineStyledBook.read_cell_format`` path. Style attributes are
+    style lookups can defer to the workbook reader's ``read_cell_format`` path.
+    Style attributes are
     fully featured (font, fill, border, alignment, number_format) and
     behave identically to the eager ``Cell`` properties — the difference
     is mutation: every setter raises ``RuntimeError``.
@@ -169,7 +168,7 @@ class StreamingCell:
         }.get(self._cell_type, "n")
 
     # ------------------------------------------------------------------
-    # Style lookups — defer to the eager CalamineStyledBook reader.
+    # Style lookups — defer to the eager workbook reader.
     # The streaming path does NOT re-implement xl/styles.xml parsing;
     # the styles table is small (~KB) regardless of sheet size and the
     # eager reader caches it after first access.

@@ -3,13 +3,6 @@ use pyo3::types::{PyDict, PyList};
 
 type PyObject = Py<PyAny>;
 
-mod calamine_format_helpers;
-mod calamine_record_format;
-mod calamine_sheet_records;
-mod calamine_style_dicts;
-mod calamine_styled_array_formulas;
-mod calamine_styled_backend;
-mod calamine_value_helpers;
 mod calamine_xlsb_xls_backend;
 mod native_reader_backend;
 mod native_writer_anchors;
@@ -29,11 +22,6 @@ mod streaming;
 mod util;
 mod wolfxl;
 mod wolfxl_core_bridge;
-
-// Re-export the rich-text helpers (parse/emit) from the writer crate so
-// the calamine read path and the modify-mode patcher can both reach
-// them without depending on the cdylib crate's own modules.
-pub(crate) use wolfxl_writer::rich_text;
 
 #[pyfunction]
 fn build_info(py: Python<'_>) -> PyResult<PyObject> {
@@ -58,7 +46,6 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
 fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
-    m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
     m.add_class::<native_reader_backend::NativeXlsxBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsbBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsBook>()?;

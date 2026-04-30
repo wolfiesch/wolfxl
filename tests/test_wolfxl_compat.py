@@ -110,7 +110,7 @@ PARITY_FIXTURES = REPO_ROOT / "tests" / "parity" / "fixtures" / "synthgl_snapsho
 
 
 class TestReadMode:
-    """Read an existing Excel fixture via CalamineStyledBook."""
+    """Read an existing Excel fixture via the native Rust reader."""
 
     def setup_method(self) -> None:
         _require_rust()

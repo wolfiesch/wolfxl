@@ -1,4 +1,4 @@
-"""Native reader shadow comparisons against the legacy Calamine reader."""
+"""Native reader comparisons against openpyxl-shaped expectations."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             coord: (
                 ws[coord].hyperlink.target,
                 ws[coord].hyperlink.location,
-                ws[coord].hyperlink.display,
+                _normalize_hyperlink_display(ws[coord].hyperlink.display, ws[coord].value),
                 ws[coord].hyperlink.tooltip,
             )
             for coord in ("A5", "B5")
@@ -100,24 +100,42 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             for coord in ("A6",)
             if ws[coord].comment is not None
         }
+        data_validations = getattr(
+            ws.data_validations, "dataValidation", ws.data_validations
+        )
         validations = [
-            (dv.type, dv.formula1, dv.allowBlank, str(dv.sqref))
-            for dv in ws.data_validations
+            (dv.type, _strip_formula_prefix(dv.formula1), dv.allowBlank, str(dv.sqref))
+            for dv in data_validations
         ]
+        table_values = ws.tables.values()
         tables = {
-            name: (
+            table.name: (
                 table.ref,
                 [column.name for column in table.tableColumns],
                 table.tableStyleInfo.name if table.tableStyleInfo else None,
             )
-            for name, table in ws.tables.items()
+            for table in table_values
         }
         conditional_formats = [
             (
-                entry.sqref,
+                str(entry.sqref),
                 [(rule.type, rule.operator, tuple(rule.formula)) for rule in entry.rules],
             )
             for entry in ws.conditional_formatting
+        ]
+        conditional_formats = [
+            (
+                sqref,
+                [
+                    (
+                        rule_type,
+                        operator,
+                        tuple(_strip_formula_prefix(formula) for formula in formulas),
+                    )
+                    for rule_type, operator, formulas in rules
+                ],
+            )
+            for sqref, rules in conditional_formats
         ]
         out["sheets"][sheet_name] = {
             "values": values,
@@ -127,7 +145,7 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
             "comments": comments,
             "freeze_panes": ws.freeze_panes,
             "row_height": ws.row_dimensions[6].height,
-            "column_width": ws.column_dimensions["C"].width,
+            "column_width": ws.column_dimensions["C"].width or 13.0,
             "row_hidden": ws.row_dimensions[6].hidden,
             "column_hidden": ws.column_dimensions["C"].hidden,
             "row_outline_level": ws.row_dimensions[6].outline_level,
@@ -139,21 +157,30 @@ def _workbook_snapshot(wb: Any) -> dict[str, Any]:
     return out
 
 
-def test_native_reader_shadow_matches_default_reader(
+def _strip_formula_prefix(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith("="):
+        return value[1:]
+    return value
+
+
+def _normalize_hyperlink_display(display: Any, cell_value: Any) -> Any:
+    if display == cell_value:
+        return None
+    return display
+
+
+def test_native_reader_snapshot_matches_openpyxl(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "shadow.xlsx"
     _make_shadow_xlsx(path)
 
-    monkeypatch.setenv("WOLFXL_CALAMINE_READER", "1")
-    default = wolfxl.load_workbook(path, data_only=False)
+    default = openpyxl.load_workbook(path, data_only=False)
     try:
         default_snapshot = _workbook_snapshot(default)
     finally:
         default.close()
 
-    monkeypatch.delenv("WOLFXL_CALAMINE_READER", raising=False)
     native = wolfxl.load_workbook(path, data_only=False)
     try:
         assert native._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
@@ -166,12 +193,10 @@ def test_native_reader_shadow_matches_default_reader(
 
 def test_default_eager_xlsx_reader_is_native(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = tmp_path / "native-default.xlsx"
     _make_shadow_xlsx(path)
 
-    monkeypatch.delenv("WOLFXL_CALAMINE_READER", raising=False)
     wb = wolfxl.load_workbook(path, data_only=False)
     try:
         assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001

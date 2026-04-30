@@ -6,18 +6,6 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime};
 
 type PyObject = Py<PyAny>;
 
-/// Convert a 0-based column index to its A1 letter (0 → "A", 26 → "AA").
-pub(crate) fn column_letter_from_zero_based(col: u32) -> String {
-    let mut n = col + 1;
-    let mut out = Vec::new();
-    while n > 0 {
-        let rem = ((n - 1) % 26) as u8;
-        out.push((b'A' + rem) as char);
-        n = (n - 1) / 26;
-    }
-    out.iter().rev().collect()
-}
-
 pub fn a1_to_row_col(a1: &str) -> Result<(u32, u32), String> {
     let mut col: u32 = 0;
     let mut row_digits = String::new();

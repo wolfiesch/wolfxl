@@ -108,11 +108,11 @@ streaming mode are
 `wolfxl._streaming.StreamingCell` proxies that surface
 `value`, `coordinate`, `row`, `column`, `font`, `fill`, `border`,
 `alignment`, and `number_format` — every setter raises
-`RuntimeError("read_only=True: ...")` immediately. Style attributes
-defer to the existing eager `CalamineStyledBook` style table for
-O(1) lookups; the streaming layer parses sheet XML directly via a
-hand-rolled byte scanner driven by `quick-xml`-style lookahead, plus
-`xl/sharedStrings.xml` once at construction time.
+`RuntimeError("read_only=True: ...")` immediately. Style attributes defer to the
+eager native reader style table for O(1) lookups; the streaming layer parses
+sheet XML directly via a hand-rolled byte scanner driven by
+`quick-xml`-style lookahead, plus `xl/sharedStrings.xml` once at construction
+time.
 
 Implementation: `src/streaming.rs` (Rust SAX scanner), exposed via
 `wolfxl._rust.StreamingSheetReader`; `python/wolfxl/_streaming.py`
