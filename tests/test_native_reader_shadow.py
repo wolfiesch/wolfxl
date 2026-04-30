@@ -1,4 +1,4 @@
-"""Native reader shadow comparisons against the current default reader."""
+"""Native reader shadow comparisons against the legacy Calamine reader."""
 
 from __future__ import annotations
 
@@ -146,14 +146,14 @@ def test_native_reader_shadow_matches_default_reader(
     path = tmp_path / "shadow.xlsx"
     _make_shadow_xlsx(path)
 
-    monkeypatch.delenv("WOLFXL_NATIVE_READER", raising=False)
+    monkeypatch.setenv("WOLFXL_CALAMINE_READER", "1")
     default = wolfxl.load_workbook(path, data_only=False)
     try:
         default_snapshot = _workbook_snapshot(default)
     finally:
         default.close()
 
-    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    monkeypatch.delenv("WOLFXL_CALAMINE_READER", raising=False)
     native = wolfxl.load_workbook(path, data_only=False)
     try:
         assert native._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
@@ -162,3 +162,18 @@ def test_native_reader_shadow_matches_default_reader(
         native.close()
 
     assert native_snapshot == default_snapshot
+
+
+def test_default_eager_xlsx_reader_is_native(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "native-default.xlsx"
+    _make_shadow_xlsx(path)
+
+    monkeypatch.delenv("WOLFXL_CALAMINE_READER", raising=False)
+    wb = wolfxl.load_workbook(path, data_only=False)
+    try:
+        assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
+    finally:
+        wb.close()

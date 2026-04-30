@@ -312,12 +312,13 @@ def from_patcher(
 def _xlsx_reader_class(rust_module: Any, *, modify: bool, read_only: bool) -> Any:
     """Return the active XLSX Rust reader class.
 
-    ``WOLFXL_NATIVE_READER=1`` opts into the early native reader for plain
-    eager reads. Modify and streaming modes stay on the current reader until
-    the native path grows full style/feature parity.
+    Plain eager reads use WolfXL's native reader by default. Modify and
+    streaming modes stay on the legacy reader until those write/streaming seams
+    have the same coverage. ``WOLFXL_CALAMINE_READER=1`` is a temporary escape
+    hatch for legacy-reader diagnostics.
     """
     if (
-        os.environ.get("WOLFXL_NATIVE_READER") == "1"
+        os.environ.get("WOLFXL_CALAMINE_READER") != "1"
         and not modify
         and not read_only
         and hasattr(rust_module, "NativeXlsxBook")

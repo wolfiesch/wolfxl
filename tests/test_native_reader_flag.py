@@ -1,8 +1,8 @@
-"""Opt-in smoke tests for the native XLSX reader.
+"""Smoke tests for the native XLSX reader.
 
-The native reader is intentionally hidden behind ``WOLFXL_NATIVE_READER`` while
-it grows to parity. These tests pin the first public seam without changing the
-default calamine-backed path.
+The native reader is the eager XLSX read path. Most tests still set the old
+``WOLFXL_NATIVE_READER`` flag so older invocation patterns stay covered while
+the implementation no longer depends on that opt-in.
 """
 
 from __future__ import annotations
