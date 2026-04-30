@@ -213,6 +213,16 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
         chart.x_axis.title = str(payload["x_axis_title"])
     if payload.get("y_axis_title") is not None and hasattr(chart, "y_axis"):
         chart.y_axis.title = str(payload["y_axis_title"])
+    if payload.get("legend_position") is not None and chart.legend is not None:
+        chart.legend.position = str(payload["legend_position"])
+    if payload.get("bar_dir") is not None and hasattr(chart, "barDir"):
+        chart.barDir = str(payload["bar_dir"])
+    if payload.get("grouping") is not None and hasattr(chart, "grouping"):
+        chart.grouping = str(payload["grouping"])
+    if payload.get("scatter_style") is not None and hasattr(chart, "scatterStyle"):
+        chart.scatterStyle = str(payload["scatter_style"])
+    if payload.get("vary_colors") is not None and hasattr(chart, "varyColors"):
+        chart.varyColors = bool(payload["vary_colors"])
     if payload.get("style") is not None:
         chart.style = int(payload["style"])
     chart._anchor = _anchor_from_payload(payload.get("anchor"))  # noqa: SLF001

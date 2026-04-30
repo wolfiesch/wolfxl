@@ -1428,6 +1428,11 @@ fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
     d.set_item("title", chart.title.as_deref())?;
     d.set_item("x_axis_title", chart.x_axis_title.as_deref())?;
     d.set_item("y_axis_title", chart.y_axis_title.as_deref())?;
+    d.set_item("legend_position", chart.legend_position.as_deref())?;
+    d.set_item("bar_dir", chart.bar_dir.as_deref())?;
+    d.set_item("grouping", chart.grouping.as_deref())?;
+    d.set_item("scatter_style", chart.scatter_style.as_deref())?;
+    d.set_item("vary_colors", chart.vary_colors)?;
     d.set_item("style", chart.style)?;
     d.set_item("anchor", image_anchor_to_py(py, &chart.anchor)?)?;
     let series = PyList::empty(py);

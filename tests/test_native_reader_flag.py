@@ -493,6 +493,10 @@ def _make_chart_xlsx(path: Path) -> None:
     chart.x_axis.title = "Month"
     chart.y_axis.title = "Sales"
     chart.style = 10
+    chart.type = "bar"
+    chart.grouping = "stacked"
+    chart.varyColors = True
+    chart.legend.position = "t"
     data = Reference(ws, min_col=2, min_row=1, max_row=4)
     cats = Reference(ws, min_col=1, min_row=2, max_row=4)
     chart.add_data(data, titles_from_data=True)
@@ -546,6 +550,7 @@ def _make_chart_family_xlsx(path: Path) -> None:
 
     scatter = ScatterChart()
     scatter.title = "Scatter Trend"
+    scatter.scatterStyle = "smoothMarker"
     scatter.series.append(Series(sales, labels, title="Scatter Sales"))
     ws.add_chart(scatter, "F50")
 
@@ -993,6 +998,10 @@ def test_native_reader_loads_drawing_charts(
         assert chart.x_axis.title.tx.rich.paragraphs[0].r[0].t == "Month"
         assert chart.y_axis.title.tx.rich.paragraphs[0].r[0].t == "Sales"
         assert chart.style == 10
+        assert chart.type == "bar"
+        assert chart.grouping == "stacked"
+        assert chart.varyColors is True
+        assert chart.legend.position == "t"
         assert len(chart.series) == 1
         series = chart.series[0]
         assert series.tx.strRef.f == "'Charts'!B1"
@@ -1044,6 +1053,7 @@ def test_native_reader_loads_common_chart_families(
             assert series.val.numRef.f == "'Chart Families'!$B$2:$B$4"
 
         scatter_series = charts_by_title["Scatter Trend"].series[0]
+        assert charts_by_title["Scatter Trend"].scatterStyle == "smoothMarker"
         assert scatter_series.tx.v == "Scatter Sales"
         assert scatter_series.xVal.numRef.f == "'Chart Families'!$A$2:$A$4"
         assert scatter_series.yVal.numRef.f == "'Chart Families'!$B$2:$B$4"

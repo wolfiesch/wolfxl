@@ -678,6 +678,11 @@ pub struct ChartInfo {
     pub title: Option<String>,
     pub x_axis_title: Option<String>,
     pub y_axis_title: Option<String>,
+    pub legend_position: Option<String>,
+    pub bar_dir: Option<String>,
+    pub grouping: Option<String>,
+    pub scatter_style: Option<String>,
+    pub vary_colors: Option<bool>,
     pub style: Option<u32>,
     pub anchor: ImageAnchorInfo,
     pub series: Vec<ChartSeriesInfo>,
@@ -4296,6 +4301,11 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
     let mut x_axis_title: Option<String> = None;
     let mut y_axis_title: Option<String> = None;
     let mut val_axis_titles_seen = 0usize;
+    let mut legend_position: Option<String> = None;
+    let mut bar_dir: Option<String> = None;
+    let mut grouping: Option<String> = None;
+    let mut scatter_style: Option<String> = None;
+    let mut vary_colors: Option<bool> = None;
     let mut style: Option<u32> = None;
     let mut current_series: Option<ChartSeriesInfo> = None;
     let mut series = Vec::new();
@@ -4304,7 +4314,18 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
                 let local = e.local_name().as_ref().to_vec();
-                apply_chart_start(&local, &e, &mut kind, &mut style, &mut current_series);
+                apply_chart_start(
+                    &local,
+                    &e,
+                    &mut kind,
+                    &mut legend_position,
+                    &mut bar_dir,
+                    &mut grouping,
+                    &mut scatter_style,
+                    &mut vary_colors,
+                    &mut style,
+                    &mut current_series,
+                );
                 if chart_axis_name(&local).is_some() {
                     current_axis = Some(local.clone());
                     current_axis_title_parts.clear();
@@ -4313,7 +4334,18 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
             }
             Ok(Event::Empty(e)) => {
                 let local = e.local_name().as_ref().to_vec();
-                apply_chart_start(&local, &e, &mut kind, &mut style, &mut current_series);
+                apply_chart_start(
+                    &local,
+                    &e,
+                    &mut kind,
+                    &mut legend_position,
+                    &mut bar_dir,
+                    &mut grouping,
+                    &mut scatter_style,
+                    &mut vary_colors,
+                    &mut style,
+                    &mut current_series,
+                );
             }
             Ok(Event::Text(e)) => {
                 let text = e
@@ -4370,6 +4402,11 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
         title,
         x_axis_title,
         y_axis_title,
+        legend_position,
+        bar_dir,
+        grouping,
+        scatter_style,
+        vary_colors,
         style,
         anchor,
         series,
@@ -4380,6 +4417,11 @@ fn apply_chart_start(
     local: &[u8],
     e: &BytesStart<'_>,
     kind: &mut Option<String>,
+    legend_position: &mut Option<String>,
+    bar_dir: &mut Option<String>,
+    grouping: &mut Option<String>,
+    scatter_style: &mut Option<String>,
+    vary_colors: &mut Option<bool>,
     style: &mut Option<u32>,
     current_series: &mut Option<ChartSeriesInfo>,
 ) {
@@ -4389,6 +4431,21 @@ fn apply_chart_start(
     match local {
         b"style" => {
             *style = attr_u32(e, b"val");
+        }
+        b"legendPos" => {
+            *legend_position = attr_value(e, b"val");
+        }
+        b"barDir" => {
+            *bar_dir = attr_value(e, b"val");
+        }
+        b"grouping" => {
+            *grouping = attr_value(e, b"val");
+        }
+        b"scatterStyle" => {
+            *scatter_style = attr_value(e, b"val");
+        }
+        b"varyColors" => {
+            *vary_colors = attr_bool(e, b"val");
         }
         b"ser" => {
             *current_series = Some(ChartSeriesInfo::default());
@@ -5587,6 +5644,9 @@ mod tests {
                 <c:title><c:tx><c:rich><a:p><a:r><a:t>Sales Trend</a:t></a:r></a:p></c:rich></c:tx></c:title>
                 <c:plotArea>
                     <c:barChart>
+                        <c:barDir val="bar"/>
+                        <c:grouping val="stacked"/>
+                        <c:varyColors val="1"/>
                         <c:ser>
                             <c:idx val="0"/><c:order val="0"/>
                             <c:tx><c:strRef><c:f>'Charts'!B1</c:f></c:strRef></c:tx>
@@ -5597,6 +5657,7 @@ mod tests {
                     <c:catAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Month</a:t></a:r></a:p></c:rich></c:tx></c:title></c:catAx>
                     <c:valAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title></c:valAx>
                 </c:plotArea>
+                <c:legend><c:legendPos val="t"/></c:legend>
             </c:chart>
         </c:chartSpace>"#;
         let anchor = ImageAnchorInfo::Absolute {
@@ -5612,6 +5673,10 @@ mod tests {
         assert_eq!(chart.title.as_deref(), Some("Sales Trend"));
         assert_eq!(chart.x_axis_title.as_deref(), Some("Month"));
         assert_eq!(chart.y_axis_title.as_deref(), Some("Sales"));
+        assert_eq!(chart.legend_position.as_deref(), Some("t"));
+        assert_eq!(chart.bar_dir.as_deref(), Some("bar"));
+        assert_eq!(chart.grouping.as_deref(), Some("stacked"));
+        assert_eq!(chart.vary_colors, Some(true));
         assert_eq!(chart.series[0].title_ref.as_deref(), Some("'Charts'!B1"));
     }
 
