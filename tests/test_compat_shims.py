@@ -331,6 +331,43 @@ def test_protection_and_named_style_helpers() -> None:
     assert restored.hidden is True
 
 
+def test_data_validation_openpyxl_aliases_and_tree_helpers() -> None:
+    from xml.etree import ElementTree as ET
+
+    from wolfxl.worksheet.datavalidation import DataValidation, DataValidationList
+
+    dv = DataValidation(type="list", formula1='"A,B"', allow_blank=True)
+    dv.add("A1:B2")
+    dv.hide_drop_down = True
+
+    assert dv.validation_type == "list"
+    assert dv.allowBlank is True
+    assert dv.allow_blank is True
+    assert dv.showDropDown is True
+    assert dv.hide_drop_down is True
+    assert str(dv.ranges) == "A1:B2"
+    assert "A1" in dv.cells
+
+    xml = ET.tostring(dv.to_tree()).decode()
+    assert 'sqref="A1:B2"' in xml
+    assert '<formula1>"A,B"</formula1>' in xml
+
+    restored = DataValidation.from_tree(dv.to_tree())
+    assert restored.validation_type == "list"
+    assert restored.formula1 == '"A,B"'
+    assert restored.hide_drop_down is True
+    assert str(restored.sqref) == "A1:B2"
+
+    validations = DataValidationList()
+    validations.append(DataValidation())
+    validations.append(restored)
+    assert validations.count == 2
+    list_xml = ET.tostring(validations.to_tree()).decode()
+    assert 'count="1"' in list_xml
+    assert "<dataValidation" in list_xml
+    assert DataValidationList.from_tree(validations.to_tree()).count == 1
+
+
 def test_dataframe_to_rows_without_pandas_import() -> None:
     """Importing the module does not require pandas."""
     import wolfxl.utils.dataframe as dfmod

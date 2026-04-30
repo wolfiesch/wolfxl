@@ -304,6 +304,8 @@ class MultiCellRange:
         return any(target.issubset(r) for r in self.ranges)
 
     def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return str(self) == other
         if not isinstance(other, MultiCellRange):
             return NotImplemented
         return self.ranges == other.ranges

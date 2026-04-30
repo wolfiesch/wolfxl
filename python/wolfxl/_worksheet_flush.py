@@ -285,7 +285,7 @@ def _flush_pending_data_validations(ws: Worksheet, writer: Any, sheet: str) -> N
 def _data_validation_payload(data_validation: Any) -> dict[str, Any]:
     """Build the native writer payload for a worksheet data validation."""
     return {
-        "range": data_validation.sqref,
+        "range": str(data_validation.sqref),
         "validation_type": data_validation.type,
         "operator": data_validation.operator,
         "formula1": data_validation.formula1,
