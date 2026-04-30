@@ -648,10 +648,17 @@ impl NativeXlsxBook {
             d.set_item("ref", &table.ref_range)?;
             d.set_item("header_row", table.header_row)?;
             d.set_item("totals_row", table.totals_row)?;
+            d.set_item("comment", table.comment.clone())?;
+            d.set_item("table_type", table.table_type.clone())?;
+            d.set_item("totals_row_shown", table.totals_row_shown)?;
             match &table.style {
                 Some(style) => d.set_item("style", style)?,
                 None => d.set_item("style", py.None())?,
             }
+            d.set_item("show_first_column", table.show_first_column)?;
+            d.set_item("show_last_column", table.show_last_column)?;
+            d.set_item("show_row_stripes", table.show_row_stripes)?;
+            d.set_item("show_column_stripes", table.show_column_stripes)?;
             d.set_item("columns", table.columns.clone())?;
             d.set_item("autofilter", table.autofilter)?;
             result.append(d)?;

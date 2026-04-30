@@ -65,8 +65,11 @@ class Table:
     name: str
     displayName: str = ""  # noqa: N815 - openpyxl public API
     ref: str = ""
+    comment: str | None = None
+    tableType: str | None = None  # noqa: N815
     headerRowCount: int = 1  # noqa: N815
     totalsRowCount: int = 0  # noqa: N815
+    totalsRowShown: bool | None = None  # noqa: N815
     tableStyleInfo: TableStyleInfo | None = None  # noqa: N815
     tableColumns: list[TableColumn] = field(default_factory=list)  # noqa: N815
 

@@ -148,8 +148,11 @@ def get_tables_map(ws: Worksheet) -> dict[str, Any]:
             name=name,
             displayName=entry.get("displayName") or name,
             ref=entry.get("ref", ""),
+            comment=entry.get("comment"),
+            tableType=entry.get("table_type"),
             headerRowCount=1 if entry.get("header_row", True) else 0,
             totalsRowCount=1 if entry.get("totals_row", False) else 0,
+            totalsRowShown=entry.get("totals_row_shown"),
             tableStyleInfo=table_style_info,
             tableColumns=table_columns,
         )

@@ -743,7 +743,14 @@ pub struct Table {
     pub ref_range: String,
     pub header_row: bool,
     pub totals_row: bool,
+    pub comment: Option<String>,
+    pub table_type: Option<String>,
+    pub totals_row_shown: Option<bool>,
     pub style: Option<String>,
+    pub show_first_column: bool,
+    pub show_last_column: bool,
+    pub show_row_stripes: bool,
+    pub show_column_stripes: bool,
     pub columns: Vec<String>,
     pub autofilter: bool,
 }
@@ -4514,7 +4521,14 @@ fn parse_table_xml(xml: &str) -> Result<Table> {
     let mut ref_range = String::new();
     let mut header_row = true;
     let mut totals_row = false;
+    let mut comment = None;
+    let mut table_type = None;
+    let mut totals_row_shown = None;
     let mut style = None;
+    let mut show_first_column = false;
+    let mut show_last_column = false;
+    let mut show_row_stripes = false;
+    let mut show_column_stripes = false;
     let mut columns = Vec::new();
     let mut autofilter = false;
 
@@ -4532,9 +4546,17 @@ fn parse_table_xml(xml: &str) -> Result<Table> {
                     totals_row = attr_value(&e, b"totalsRowCount")
                         .map(|value| value != "0")
                         .unwrap_or(false);
+                    comment = attr_value(&e, b"comment").filter(|value| !value.is_empty());
+                    table_type = attr_value(&e, b"tableType").filter(|value| !value.is_empty());
+                    totals_row_shown = attr_bool(&e, b"totalsRowShown");
                 }
                 b"tableStyleInfo" => {
                     style = attr_value(&e, b"name").filter(|value| !value.is_empty());
+                    show_first_column = attr_truthy(attr_value(&e, b"showFirstColumn").as_deref());
+                    show_last_column = attr_truthy(attr_value(&e, b"showLastColumn").as_deref());
+                    show_row_stripes = attr_truthy(attr_value(&e, b"showRowStripes").as_deref());
+                    show_column_stripes =
+                        attr_truthy(attr_value(&e, b"showColumnStripes").as_deref());
                 }
                 b"tableColumn" => {
                     if let Some(column) = attr_value(&e, b"name") {
@@ -4558,7 +4580,14 @@ fn parse_table_xml(xml: &str) -> Result<Table> {
         ref_range,
         header_row,
         totals_row,
+        comment,
+        table_type,
+        totals_row_shown,
         style,
+        show_first_column,
+        show_last_column,
+        show_row_stripes,
+        show_column_stripes,
         columns,
         autofilter,
     })
@@ -5443,10 +5472,10 @@ mod tests {
 
     #[test]
     fn parses_table_metadata() {
-        let xml = r#"<table name="SalesTable" displayName="SalesTable" ref="A1:B3" headerRowCount="1" totalsRowCount="0">
+        let xml = r#"<table name="SalesTable" displayName="SalesTable" ref="A1:B3" headerRowCount="1" totalsRowCount="0" totalsRowShown="1" comment="table comment" tableType="worksheet">
             <autoFilter ref="A1:B3"/>
             <tableColumns count="2"><tableColumn id="1" name="Name"/><tableColumn id="2" name="Sales"/></tableColumns>
-            <tableStyleInfo name="TableStyleLight9"/>
+            <tableStyleInfo name="TableStyleLight9" showFirstColumn="1" showLastColumn="1" showRowStripes="1" showColumnStripes="1"/>
         </table>"#;
 
         assert_eq!(
@@ -5456,7 +5485,14 @@ mod tests {
                 ref_range: "A1:B3".to_string(),
                 header_row: true,
                 totals_row: false,
+                comment: Some("table comment".to_string()),
+                table_type: Some("worksheet".to_string()),
+                totals_row_shown: Some(true),
                 style: Some("TableStyleLight9".to_string()),
+                show_first_column: true,
+                show_last_column: true,
+                show_row_stripes: true,
+                show_column_stripes: true,
                 columns: vec!["Name".to_string(), "Sales".to_string()],
                 autofilter: true,
             }
