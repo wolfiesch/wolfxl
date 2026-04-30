@@ -13,6 +13,7 @@ def flush_workbook_writes(wb: Any) -> None:
 
     _flush_properties(wb, writer)
     _flush_defined_names(wb, writer)
+    _flush_named_styles(wb, writer)
     _flush_security(wb, writer)
 
 
@@ -66,6 +67,17 @@ def _flush_defined_names(wb: Any, writer: Any) -> None:
                 },
             )
         wb._pending_defined_names.clear()  # noqa: SLF001
+
+
+def _flush_named_styles(wb: Any, writer: Any) -> None:
+    """Push workbook named-style registrations to the native writer."""
+    if not hasattr(writer, "add_named_style"):
+        return
+    registry = getattr(wb, "_named_styles_registry", None)  # noqa: SLF001
+    if registry is None:
+        return
+    for style in registry.user_styles():
+        writer.add_named_style(style.name)
 
 
 def _flush_security(wb: Any, writer: Any) -> None:

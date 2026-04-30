@@ -118,6 +118,8 @@ pub struct StylesBuilder {
     /// Differential-format records referenced by conditional-formatting rules.
     /// Index into this vec is what `<cfRule dxfId="N">` points at.
     pub dxfs: Vec<DxfRecord>,
+    /// Workbook-level named cell styles beyond the built-in Normal style.
+    pub named_styles: Vec<NamedStyleRecord>,
 
     // --- Dedup indices (not serialized) ---
     font_index: HashMap<FontSpec, u32>,
@@ -138,6 +140,7 @@ impl Default for StylesBuilder {
             num_fmts: Vec::new(),
             cell_xfs: Vec::new(),
             dxfs: Vec::new(),
+            named_styles: Vec::new(),
             font_index: HashMap::new(),
             fill_index: HashMap::new(),
             border_index: HashMap::new(),
@@ -287,6 +290,25 @@ impl StylesBuilder {
         self.dxf_index.insert(dxf.clone(), idx);
         idx
     }
+
+    /// Register a workbook-level named style by name.
+    pub fn add_named_style(&mut self, name: &str) {
+        if name.is_empty() || name == "Normal" {
+            return;
+        }
+        if self.named_styles.iter().any(|style| style.name == name) {
+            return;
+        }
+        self.named_styles.push(NamedStyleRecord {
+            name: name.to_string(),
+        });
+    }
+}
+
+/// One workbook-level named cell style.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NamedStyleRecord {
+    pub name: String,
 }
 
 /// One row of the `<cellXfs>` table. Two cells with the same `XfRecord`

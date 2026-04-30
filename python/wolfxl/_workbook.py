@@ -551,6 +551,10 @@ class Workbook:
 
     def add_named_style(self, style: Any) -> None:
         """Register a named style on the workbook."""
+        from wolfxl.styles import NamedStyle
+
+        if not isinstance(style, NamedStyle) and hasattr(style, "name"):
+            style = NamedStyle(name=str(style.name))
         self._named_style_registry().append(style)
         if hasattr(style, "bind"):
             style.bind(self)

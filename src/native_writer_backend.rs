@@ -352,6 +352,11 @@ impl NativeWorkbook {
         Ok(())
     }
 
+    pub fn add_named_style(&mut self, name: &str) -> PyResult<()> {
+        self.inner.styles.add_named_style(name);
+        Ok(())
+    }
+
     pub fn add_table(&mut self, sheet: &str, table: &Bound<'_, PyAny>) -> PyResult<()> {
         let dict = table
             .cast::<PyDict>()

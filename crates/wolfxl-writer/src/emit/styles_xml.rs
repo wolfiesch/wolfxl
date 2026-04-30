@@ -23,9 +23,9 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
     emit_fonts(&mut out, styles);
     emit_fills(&mut out, styles);
     emit_borders(&mut out, styles);
-    emit_cell_style_xfs(&mut out);
+    emit_cell_style_xfs(&mut out, styles);
     emit_cell_xfs(&mut out, styles);
-    emit_cell_styles(&mut out);
+    emit_cell_styles(&mut out, styles);
     emit_dxfs(&mut out, styles);
     emit_table_styles(&mut out);
 
@@ -75,12 +75,15 @@ fn emit_borders(out: &mut String, styles: &StylesBuilder) {
     out.push_str("</borders>");
 }
 
-fn emit_cell_style_xfs(out: &mut String) {
-    out.push_str(
-        "<cellStyleXfs count=\"1\">\
-         <xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>\
-         </cellStyleXfs>",
-    );
+fn emit_cell_style_xfs(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!(
+        "<cellStyleXfs count=\"{}\">",
+        1 + styles.named_styles.len()
+    ));
+    for _ in 0..=styles.named_styles.len() {
+        out.push_str("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>");
+    }
+    out.push_str("</cellStyleXfs>");
 }
 
 fn emit_cell_xfs(out: &mut String, styles: &StylesBuilder) {
@@ -91,12 +94,20 @@ fn emit_cell_xfs(out: &mut String, styles: &StylesBuilder) {
     out.push_str("</cellXfs>");
 }
 
-fn emit_cell_styles(out: &mut String) {
-    out.push_str(
-        "<cellStyles count=\"1\">\
-         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>\
-         </cellStyles>",
-    );
+fn emit_cell_styles(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!(
+        "<cellStyles count=\"{}\">\
+         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>",
+        1 + styles.named_styles.len()
+    ));
+    for (idx, style) in styles.named_styles.iter().enumerate() {
+        out.push_str(&format!(
+            "<cellStyle name=\"{}\" xfId=\"{}\"/>",
+            xml_escape::attr(&style.name),
+            idx + 1
+        ));
+    }
+    out.push_str("</cellStyles>");
 }
 
 fn emit_dxfs(out: &mut String, styles: &StylesBuilder) {
@@ -639,6 +650,17 @@ mod tests {
             text.contains("<cellStyles count=\"1\">"),
             "cellStyles wrapper missing"
         );
+    }
+
+    #[test]
+    fn custom_named_styles_emit_cell_style_entries() {
+        let mut styles = StylesBuilder::default();
+        styles.add_named_style("Metric");
+        let text = emit_str(&styles);
+
+        assert!(text.contains("<cellStyleXfs count=\"2\">"));
+        assert!(text.contains("<cellStyles count=\"2\">"));
+        assert!(text.contains("<cellStyle name=\"Metric\" xfId=\"1\"/>"));
     }
 
     // -------------------------------------------------------------------

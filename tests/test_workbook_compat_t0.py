@@ -66,6 +66,20 @@ def test_style_names_read_existing_named_styles(tmp_path: Path) -> None:
     assert wb.named_styles == ["Normal", "Metric"]
 
 
+def test_add_named_style_persists_name_on_save(tmp_path: Path) -> None:
+    from openpyxl.styles import NamedStyle
+
+    path = tmp_path / "wolfxl-named-style.xlsx"
+    wb = wolfxl.Workbook()
+    wb.add_named_style(NamedStyle(name="Metric"))
+    wb.save(path)
+
+    op_wb = openpyxl.load_workbook(path)
+    assert op_wb.style_names == ["Normal", "Metric"]
+    rt = wolfxl.load_workbook(path)
+    assert rt.style_names == ["Normal", "Metric"]
+
+
 def test_create_chartsheet_raises_clear_error() -> None:
     wb = wolfxl.Workbook()
     with pytest.raises(NotImplementedError, match="create_chartsheet"):
