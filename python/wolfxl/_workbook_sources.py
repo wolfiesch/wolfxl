@@ -348,15 +348,14 @@ def from_xlsb(
     data_only: bool = False,
     permissive: bool = False,
 ) -> Any:
-    """Open an .xlsb workbook via ``CalamineXlsbBook``."""
+    """Open an .xlsb workbook via the native BIFF12 reader."""
     from wolfxl import _rust
 
-    rust_cls = getattr(_rust, "CalamineXlsbBook", None)
+    rust_cls = getattr(_rust, "NativeXlsbBook", None)
     if rust_cls is None:
-        raise NotImplementedError(
-            ".xlsb reads require the CalamineXlsbBook backend "
-            "from the wolfxl Rust extension."
-        )
+        rust_cls = getattr(_rust, "CalamineXlsbBook", None)
+    if rust_cls is None:
+        raise NotImplementedError(".xlsb reads require a Rust workbook backend.")
 
     if data is not None:
         rust_book, tmp_path = _open_binary_bytes(

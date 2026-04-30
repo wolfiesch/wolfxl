@@ -695,14 +695,10 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
         category=SurfaceCategory.WORKBOOK_OPEN,
         synthgl_usage=(),
         parity_note=(
-            "Sprint Κ Pod-α: .xlsb reads via the new "
-            "``CalamineXlsbBook`` backend (calamine_styles' upstream "
-            "``Xlsb`` reader, already publicly exported by the existing "
-            "workspace dep — no new crate needed). Values + cached "
-            "formula results only; style accessors raise "
-            "NotImplementedError because xlsb encodes styles inline in "
-            "the binary parts and the styles fork only ports the xlsx "
-            "path. Parity target is pandas+calamine — verified by "
+            ".xlsb reads now route through ``NativeXlsbBook``. Values, "
+            "cached formula results, and read-side styles are verified by "
+            "committed sidecar goldens; modify/read_only/password/write "
+            "remain xlsx-only. "
             "``tests/parity/test_xlsb_reads.py``. The "
             "``(.xlsb dispatch)`` annotation is a parametric marker; "
             "the smoke test strips it via ``split(' ')[0]`` and "

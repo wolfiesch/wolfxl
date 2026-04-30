@@ -1,7 +1,8 @@
 # `.xlsb` parity fixtures (Sprint Κ Pod-γ)
 
-Five committed `.xlsb` files used by `tests/parity/test_xlsb_reads.py` to
-assert wolfxl reads match `pandas.read_excel(engine="calamine")`.
+Five committed `.xlsb` files plus JSON sidecars used by
+`tests/parity/test_xlsb_reads.py` to assert native BIFF12 reads match the
+dependency-free golden values.
 
 | File              | Source                          | Notes                              |
 |-------------------|---------------------------------|------------------------------------|

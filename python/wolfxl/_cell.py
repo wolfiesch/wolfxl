@@ -597,15 +597,16 @@ class Cell:
     # ------------------------------------------------------------------
 
     def _require_xlsx_for_style(self, attr: str) -> None:
-        """Raise NotImplementedError if the workbook isn't xlsx.
-
-        xlsb / xls workbooks load via calamine's binary readers which
-        don't expose the per-cell style records that ``cell.font``,
-        ``cell.fill`` etc. need.  Surface a clear error at the Python
-        layer so callers don't get a confusing Rust panic / empty
-        Font object.
-        """
+        """Raise NotImplementedError if this format cannot expose styles."""
         wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format == "xlsb" and attr in {
+            "font",
+            "fill",
+            "border",
+            "alignment",
+            "number_format",
+        }:
+            return
         if wb_format != "xlsx":
             raise NotImplementedError(
                 f"cell.{attr} is xlsx-only; this workbook is .{wb_format}. "
@@ -719,6 +720,11 @@ class Cell:
 
     def _set_style_value(self, public_attr: str, storage_attr: str, value: Any) -> None:
         """Set a cached style value and mark the cell dirty."""
+        if getattr(self._ws._workbook, "_format", "xlsx") == "xlsb":  # noqa: SLF001
+            raise NotImplementedError(
+                f"cell.{public_attr} assignment is xlsx-only; .xlsb workbooks "
+                "are read-only in WolfXL. Transcribe to .xlsx before editing styles."
+            )
         self._require_xlsx_for_style(public_attr)
         setattr(self, storage_attr, value)
         self._format_dirty = True

@@ -6,6 +6,10 @@
 //! this API while preserving the same value-only public contract they have
 //! today.
 
+mod xlsb;
+
+pub use xlsb::NativeXlsbBook;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -1251,16 +1255,16 @@ struct SheetRef {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-struct StyleTables {
-    custom_num_fmts: HashMap<u32, String>,
-    cell_xfs: Vec<XfEntry>,
-    fonts: Vec<FontInfo>,
-    fills: Vec<FillInfo>,
-    borders: Vec<BorderInfo>,
+pub(crate) struct StyleTables {
+    pub(crate) custom_num_fmts: HashMap<u32, String>,
+    pub(crate) cell_xfs: Vec<XfEntry>,
+    pub(crate) fonts: Vec<FontInfo>,
+    pub(crate) fills: Vec<FillInfo>,
+    pub(crate) borders: Vec<BorderInfo>,
 }
 
 impl StyleTables {
-    fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
+    pub(crate) fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
         if style_id == 0 {
             return None;
         }
@@ -1277,33 +1281,33 @@ impl StyleTables {
         }
     }
 
-    fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
+    pub(crate) fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
         let xf = self.cell_xfs.get(style_id as usize)?;
         self.borders.get(xf.border_id as usize)
     }
 
-    fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
+    pub(crate) fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
         let xf = self.cell_xfs.get(style_id as usize)?;
         self.fonts.get(xf.font_id as usize)
     }
 
-    fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
+    pub(crate) fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
         let xf = self.cell_xfs.get(style_id as usize)?;
         self.fills.get(xf.fill_id as usize)
     }
 
-    fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
+    pub(crate) fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
         self.cell_xfs.get(style_id as usize)?.alignment.as_ref()
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct XfEntry {
-    num_fmt_id: u32,
-    font_id: u32,
-    fill_id: u32,
-    border_id: u32,
-    alignment: Option<AlignmentInfo>,
+pub(crate) struct XfEntry {
+    pub(crate) num_fmt_id: u32,
+    pub(crate) font_id: u32,
+    pub(crate) fill_id: u32,
+    pub(crate) border_id: u32,
+    pub(crate) alignment: Option<AlignmentInfo>,
 }
 
 /// Parsed cell font.
@@ -5381,7 +5385,7 @@ fn a1_to_row_col(coord: &str) -> Option<(u32, u32)> {
     }
 }
 
-fn row_col_to_a1(row: u32, col: u32) -> String {
+pub(crate) fn row_col_to_a1(row: u32, col: u32) -> String {
     let mut c = col;
     let mut letters = Vec::new();
     while c > 0 {

@@ -24,11 +24,73 @@ use wolfxl_reader::{
     ChartAxisInfo, ChartDataLabelsInfo, ChartErrorBarsInfo, ChartGraphicalPropertiesInfo,
     ChartInfo, ChartSeriesInfo, ChartTrendlineInfo, CustomPropertyInfo, DateGroupItemInfo,
     FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
-    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
-    PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo,
-    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
-    SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
+    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsbBook as NativeXlsbReaderBook,
+    NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
+    PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
+    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity,
+    WorksheetData,
 };
+
+trait NativeStyleResolver {
+    fn number_format_for_style_id(&self, style_id: u32) -> Option<&str>;
+    fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo>;
+    fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo>;
+    fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo>;
+    fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo>;
+    fn date1904(&self) -> bool;
+}
+
+impl NativeStyleResolver for NativeReaderBook {
+    fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
+        self.number_format_for_style_id(style_id)
+    }
+
+    fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
+        self.border_for_style_id(style_id)
+    }
+
+    fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
+        self.font_for_style_id(style_id)
+    }
+
+    fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
+        self.fill_for_style_id(style_id)
+    }
+
+    fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
+        self.alignment_for_style_id(style_id)
+    }
+
+    fn date1904(&self) -> bool {
+        self.date1904()
+    }
+}
+
+impl NativeStyleResolver for NativeXlsbReaderBook {
+    fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
+        self.number_format_for_style_id(style_id)
+    }
+
+    fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
+        self.border_for_style_id(style_id)
+    }
+
+    fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo> {
+        self.font_for_style_id(style_id)
+    }
+
+    fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo> {
+        self.fill_for_style_id(style_id)
+    }
+
+    fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
+        self.alignment_for_style_id(style_id)
+    }
+
+    fn date1904(&self) -> bool {
+        self.date1904()
+    }
+}
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
 pub struct NativeXlsxBook {
@@ -39,6 +101,14 @@ pub struct NativeXlsxBook {
     sheet_merged_bounds: HashMap<String, Vec<(u32, u32, u32, u32)>>,
     opened_from_bytes: bool,
     source_path: Option<String>,
+}
+
+#[pyclass(unsendable, module = "wolfxl._rust")]
+pub struct NativeXlsbBook {
+    book: NativeXlsbReaderBook,
+    sheet_names: Vec<String>,
+    sheet_cache: HashMap<String, WorksheetData>,
+    sheet_cell_indexes: HashMap<String, HashMap<(u32, u32), usize>>,
 }
 
 #[pymethods]
@@ -131,15 +201,15 @@ impl NativeXlsxBook {
         self.source_path.clone()
     }
 
+    pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
+        self.read_bounds_1based(sheet)
+    }
+
     pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
         let Some((_, _, max_row, max_col)) = self.read_bounds_1based(sheet)? else {
             return Ok(None);
         };
         Ok(Some((max_row, max_col)))
-    }
-
-    pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
-        self.read_bounds_1based(sheet)
     }
 
     #[pyo3(signature = (sheet, a1, data_only = false))]
@@ -926,6 +996,330 @@ impl NativeXlsxBook {
     }
 }
 
+#[pymethods]
+impl NativeXlsbBook {
+    /// Open an XLSB workbook from a filesystem path.
+    #[staticmethod]
+    #[pyo3(signature = (path, _permissive = false))]
+    pub fn open(path: &str, _permissive: bool) -> PyResult<Self> {
+        let book = NativeXlsbReaderBook::open_path(path)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("native xlsb open failed: {e}")))?;
+        let sheet_names = book.sheet_names().into_iter().map(str::to_string).collect();
+        Ok(Self {
+            book,
+            sheet_names,
+            sheet_cache: HashMap::new(),
+            sheet_cell_indexes: HashMap::new(),
+        })
+    }
+
+    /// Open an XLSB workbook from raw bytes.
+    #[staticmethod]
+    #[pyo3(signature = (data, _permissive = false))]
+    pub fn open_from_bytes(data: &[u8], _permissive: bool) -> PyResult<Self> {
+        let book = NativeXlsbReaderBook::open_bytes(data.to_vec())
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("native xlsb open failed: {e}")))?;
+        let sheet_names = book.sheet_names().into_iter().map(str::to_string).collect();
+        Ok(Self {
+            book,
+            sheet_names,
+            sheet_cache: HashMap::new(),
+            sheet_cell_indexes: HashMap::new(),
+        })
+    }
+
+    pub fn sheet_names(&self) -> Vec<String> {
+        self.sheet_names.clone()
+    }
+
+    pub fn read_sheet_state(&self, sheet: &str) -> PyResult<&'static str> {
+        let state = self
+            .book
+            .sheet_state(sheet)
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("{e}")))?;
+        Ok(match state {
+            SheetState::Visible => "visible",
+            SheetState::Hidden => "hidden",
+            SheetState::VeryHidden => "veryHidden",
+        })
+    }
+
+    pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
+        self.read_bounds_1based(sheet)
+    }
+
+    pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
+        let Some((_, _, max_row, max_col)) = self.read_bounds_1based(sheet)? else {
+            return Ok(None);
+        };
+        Ok(Some((max_row, max_col)))
+    }
+
+    #[pyo3(signature = (sheet, a1, data_only = false))]
+    pub fn read_cell_value(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let cell = {
+            self.ensure_sheet_indexes(sheet)?;
+            let index = self
+                .sheet_cell_indexes
+                .get(sheet)
+                .and_then(|cells| cells.get(&(row, col)))
+                .copied();
+            let data = self.ensure_sheet(sheet)?;
+            index.map(|idx| data.cells[idx].clone())
+        };
+        let Some(cell) = cell else {
+            return cell_blank(py);
+        };
+        let number_format = self.number_format_for_cell(&cell);
+        cell_to_dict(py, &cell, data_only, number_format, self.book.date1904())
+    }
+
+    #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
+    pub fn read_sheet_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        let window = self.resolve_window(sheet, cell_range)?;
+        let Some((min_row, min_col, max_row, max_col)) = window else {
+            return Ok(PyList::empty(py).into());
+        };
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
+        let data = self.ensure_sheet(sheet)?.clone();
+        let outer = PyList::empty(py);
+        for row in min_row..=max_row {
+            let inner = PyList::empty(py);
+            for col in min_col..=max_col {
+                let cell = cell_index
+                    .get(&(row, col))
+                    .map(|idx| data.cells[*idx].clone());
+                match cell {
+                    Some(cell) => {
+                        let number_format = self.number_format_for_cell(&cell);
+                        inner.append(cell_to_dict(
+                            py,
+                            &cell,
+                            data_only,
+                            number_format,
+                            self.book.date1904(),
+                        )?)?;
+                    }
+                    None => inner.append(cell_blank(py)?)?,
+                }
+            }
+            outer.append(inner)?;
+        }
+        Ok(outer.into())
+    }
+
+    #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
+    pub fn read_sheet_values_plain(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        let window = self.resolve_window(sheet, cell_range)?;
+        let Some((min_row, min_col, max_row, max_col)) = window else {
+            return Ok(PyList::empty(py).into());
+        };
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
+        let data = self.ensure_sheet(sheet)?.clone();
+        let outer = PyList::empty(py);
+        for row in min_row..=max_row {
+            let inner = PyList::empty(py);
+            for col in min_col..=max_col {
+                let cell = cell_index
+                    .get(&(row, col))
+                    .map(|idx| data.cells[*idx].clone());
+                match cell {
+                    Some(cell) => {
+                        let number_format = self.number_format_for_cell(&cell);
+                        inner.append(cell_to_plain(
+                            py,
+                            &cell,
+                            data_only,
+                            number_format,
+                            self.book.date1904(),
+                        )?)?;
+                    }
+                    None => inner.append(py.None())?,
+                }
+            }
+            outer.append(inner)?;
+        }
+        Ok(outer.into())
+    }
+
+    #[pyo3(signature = (
+        sheet,
+        cell_range = None,
+        data_only = false,
+        include_format = true,
+        include_empty = false,
+        include_formula_blanks = true,
+        include_coordinate = true,
+        include_style_id = true,
+        include_extended_format = true,
+        include_cached_formula_value = false,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn read_sheet_records(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+        include_format: bool,
+        include_empty: bool,
+        include_formula_blanks: bool,
+        include_coordinate: bool,
+        include_style_id: bool,
+        include_extended_format: bool,
+        include_cached_formula_value: bool,
+    ) -> PyResult<PyObject> {
+        let window = self.resolve_window(sheet, cell_range)?;
+        self.ensure_sheet_indexes(sheet)?;
+        let cell_index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .cloned()
+            .unwrap_or_default();
+        let data = self.ensure_sheet(sheet)?.clone();
+        let options = NativeRecordOptions {
+            data_only,
+            include_format,
+            include_empty,
+            include_formula_blanks,
+            include_coordinate,
+            include_style_id,
+            include_extended_format,
+            include_cached_formula_value,
+        };
+        let out = PyList::empty(py);
+        if include_empty {
+            if let Some((min_row, min_col, max_row, max_col)) = window {
+                for row in min_row..=max_row {
+                    for col in min_col..=max_col {
+                        append_native_record(
+                            py,
+                            &out,
+                            &self.book,
+                            &[],
+                            cell_index.get(&(row, col)).map(|idx| &data.cells[*idx]),
+                            row,
+                            col,
+                            options,
+                        )?;
+                    }
+                }
+                return Ok(out.into());
+            }
+        }
+        for cell in &data.cells {
+            if let Some((min_row, min_col, max_row, max_col)) = window {
+                if cell.row < min_row
+                    || cell.row > max_row
+                    || cell.col < min_col
+                    || cell.col > max_col
+                {
+                    continue;
+                }
+            }
+            if !native_record_should_emit(cell, options) {
+                continue;
+            }
+            append_native_record(
+                py,
+                &out,
+                &self.book,
+                &[],
+                Some(cell),
+                cell.row,
+                cell.col,
+                options,
+            )?;
+        }
+        Ok(out.into())
+    }
+
+    pub fn read_sheet_formulas(&mut self, sheet: &str) -> PyResult<HashMap<(u32, u32), String>> {
+        let data = self.ensure_sheet(sheet)?;
+        Ok(data
+            .cells
+            .iter()
+            .filter_map(|c| {
+                c.formula
+                    .as_ref()
+                    .map(|f| ((c.row - 1, c.col - 1), f.clone()))
+            })
+            .collect())
+    }
+
+    pub fn read_cell_format(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let style_id = self.style_id_for_a1(sheet, a1)?;
+        let d = PyDict::new(py);
+        if let Some(style_id) = style_id {
+            if let Some(font) = self.book.font_for_style_id(style_id) {
+                populate_font(&d, font)?;
+            }
+            if let Some(fill) = self.book.fill_for_style_id(style_id) {
+                populate_fill(&d, fill)?;
+            }
+            if let Some(number_format) = self.book.number_format_for_style_id(style_id) {
+                d.set_item("number_format", number_format)?;
+            }
+            if let Some(alignment) = self.book.alignment_for_style_id(style_id) {
+                populate_alignment(&d, alignment)?;
+            }
+        }
+        Ok(d.into())
+    }
+
+    pub fn read_cell_border(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let d = PyDict::new(py);
+        if let Some(border) = self
+            .style_id_for_a1(sheet, a1)?
+            .and_then(|id| self.book.border_for_style_id(id))
+        {
+            populate_border(py, &d, border)?;
+        }
+        Ok(d.into())
+    }
+}
+
 impl NativeXlsxBook {
     fn ensure_sheet(&mut self, sheet: &str) -> PyResult<&WorksheetData> {
         if !self.sheet_names.iter().any(|name| name == sheet) {
@@ -1009,6 +1403,82 @@ impl NativeXlsxBook {
     }
 }
 
+impl NativeXlsbBook {
+    fn ensure_sheet(&mut self, sheet: &str) -> PyResult<&WorksheetData> {
+        if !self.sheet_names.iter().any(|name| name == sheet) {
+            return Err(PyErr::new::<PyValueError, _>(format!(
+                "Unknown sheet: {sheet}"
+            )));
+        }
+        if !self.sheet_cache.contains_key(sheet) {
+            let data = self.book.worksheet(sheet).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!("native xlsb sheet read failed: {e}"))
+            })?;
+            self.sheet_cache.insert(sheet.to_string(), data);
+        }
+        Ok(self.sheet_cache.get(sheet).unwrap())
+    }
+
+    fn ensure_sheet_indexes(&mut self, sheet: &str) -> PyResult<()> {
+        if self.sheet_cell_indexes.contains_key(sheet) {
+            return Ok(());
+        }
+        let cell_index = self
+            .ensure_sheet(sheet)?
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(idx, cell)| ((cell.row, cell.col), idx))
+            .collect();
+        self.sheet_cell_indexes
+            .insert(sheet.to_string(), cell_index);
+        Ok(())
+    }
+
+    fn read_bounds_1based(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
+        let data = self.ensure_sheet(sheet)?;
+        let mut bounds: Option<(u32, u32, u32, u32)> = None;
+        for cell in &data.cells {
+            update_bounds(&mut bounds, cell.row, cell.col);
+        }
+        Ok(bounds)
+    }
+
+    fn resolve_window(
+        &mut self,
+        sheet: &str,
+        cell_range: Option<&str>,
+    ) -> PyResult<Option<(u32, u32, u32, u32)>> {
+        if let Some(range) = cell_range.filter(|s| !s.is_empty()) {
+            return parse_range_1based(range)
+                .ok_or_else(|| {
+                    PyErr::new::<PyValueError, _>(format!("Invalid cell range: {range}"))
+                })
+                .map(Some);
+        }
+        self.read_bounds_1based(sheet)
+    }
+
+    fn number_format_for_cell(&self, cell: &Cell) -> Option<&str> {
+        cell.style_id
+            .and_then(|style_id| self.book.number_format_for_style_id(style_id))
+    }
+
+    fn style_id_for_a1(&mut self, sheet: &str, a1: &str) -> PyResult<Option<u32>> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        self.ensure_sheet_indexes(sheet)?;
+        let index = self
+            .sheet_cell_indexes
+            .get(sheet)
+            .and_then(|cells| cells.get(&(row, col)))
+            .copied();
+        let data = self.ensure_sheet(sheet)?;
+        Ok(index.and_then(|idx| data.cells[idx].style_id))
+    }
+}
+
 #[derive(Clone, Copy)]
 struct NativeRecordOptions {
     data_only: bool,
@@ -1029,10 +1499,10 @@ fn native_record_should_emit(cell: &Cell, options: NativeRecordOptions) -> bool 
     options.include_empty || should_emit_formula || has_value
 }
 
-fn append_native_record(
+fn append_native_record<B: NativeStyleResolver>(
     py: Python<'_>,
     out: &Bound<'_, PyList>,
-    book: &NativeReaderBook,
+    book: &B,
     merged_bounds: &[(u32, u32, u32, u32)],
     cell: Option<&Cell>,
     row: u32,
@@ -1111,8 +1581,8 @@ fn append_native_record(
     Ok(())
 }
 
-fn populate_record_format(
-    book: &NativeReaderBook,
+fn populate_record_format<B: NativeStyleResolver>(
+    book: &B,
     record: &Bound<'_, PyDict>,
     style_id: Option<u32>,
     options: NativeRecordOptions,

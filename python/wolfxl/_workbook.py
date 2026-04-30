@@ -203,13 +203,11 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
     ) -> Workbook:
-        """Open an .xlsb workbook via ``CalamineXlsbBook``.
+        """Open an .xlsb workbook via the native BIFF12 reader.
 
-        xlsb is a binary OOXML container; we surface values + cached
-        formula results only (no per-cell styles, no rich text, no
-        comments — that's the same shape calamine's stock xlsb reader
-        exposes).  Callers that need style metadata should
-        load + transcribe to xlsx first.
+        xlsb is a binary OOXML container. WolfXL surfaces values,
+        cached formula results, and read-side cell styles; modify mode,
+        streaming, password reads, and writes remain xlsx-only.
         """
         return _workbook_sources.from_xlsb(
             cls,

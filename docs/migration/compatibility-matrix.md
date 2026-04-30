@@ -141,8 +141,8 @@ benchmarks, and manual advanced-pivot visual checks.
 | openpyxl behaviour | WolfXL status |
 |---|---|
 | `.xlsx` reads | Supported |
-| `.xlsb` reads | Supported (calamine; styles are `NotImplementedError` — read-only of values) |
-| `.xls` reads (BIFF8) | Supported (calamine; same caveats as `.xlsb`) |
+| `.xlsb` reads | Supported (native BIFF12; values, cached formulas, and read-side styles) |
+| `.xls` reads (BIFF8) | Supported (calamine; value-only, styles raise) |
 | `.ods` reads | Out of scope |
 | `read_only=True` streaming | Supported (`tests/parity/test_streaming_parity.py`) |
 | `password=` decryption | Supported (`pip install wolfxl[encrypted]`) |
@@ -232,8 +232,9 @@ tables with pre-aggregated records.
   topology, values, formulas, styles, rich text, comments, hyperlinks, tables,
   validations, conditional formatting, drawings, charts, and sheet/workbook
   metadata through the Rust native reader stack.
-- `.xlsb` and `.xls` reads still route through the Calamine-backed binary
-  compatibility readers (values and cached formula results; no styles).
+- `.xlsb` reads now route through the native BIFF12 reader for values, cached
+  formula results, and read-side styles. `.xls` remains on the Calamine-backed
+  value compatibility reader.
 
 ## Tracking
 

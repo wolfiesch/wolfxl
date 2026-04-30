@@ -1,24 +1,13 @@
-"""Sprint Κ Pod-γ — ``.xlsb`` read parity vs ``pandas + calamine``.
-
-These tests assert that ``wolfxl.load_workbook`` returns the same cell
-values as ``pandas.read_excel(engine="calamine")`` for every committed
-``.xlsb`` fixture. They also pin down the fail-fast behaviour for
-xlsx-only options (``modify=``, ``read_only=``, ``password=``) and the
-``NotImplementedError`` raised by style accessors on legacy formats.
-
-Will go green once Pod-α (xls reader) and Pod-β (xlsb reader) land.
-"""
+"""Native ``.xlsb`` read parity against committed sidecar goldens."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 import wolfxl
-
-pd = pytest.importorskip("pandas")
-pytest.importorskip("python_calamine")
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "xlsb"
 
@@ -37,98 +26,33 @@ pytestmark = pytest.mark.skipif(
 
 
 def _coerce(v: object) -> object:
-    """Normalise Python values for cross-engine equality."""
-    import datetime as _dt
-
-    # pandas-calamine surfaces empty cells as NaN; wolfxl uses None.
-    if v is None:
-        return None
-    if isinstance(v, float):
-        # NaN equality is not reflexive — treat as None.
-        if v != v:  # noqa: PLR0124
-            return None
-    # Time-only normalization: pandas+calamine returns datetime.time for
-    # time-only cells, while calamine_styles attaches the Excel epoch
-    # base date (1899-12-31 / 1900-01-10 depending on format), giving
-    # wolfxl a datetime whose time component matches but date is the
-    # epoch root. Strip to time-of-day for comparison.
-    if isinstance(v, _dt.datetime):
-        if v.year < 1901:  # epoch root, not a real date
-            return v.time()
-    # pandas+calamine surfaces some xlsb time cells as timedelta
-    # (number-of-days from the epoch). Reduce to time-of-day to match
-    # wolfxl's datetime.time / .datetime representation.
-    if isinstance(v, _dt.timedelta):
-        seconds_in_day = v.seconds
-        h = seconds_in_day // 3600
-        m = (seconds_in_day % 3600) // 60
-        s = seconds_in_day % 60
-        return _dt.time(h, m, s)
+    """Normalize workbook values for JSON-sidecar equality."""
+    if hasattr(v, "isoformat"):
+        return v.isoformat()  # type: ignore[no-any-return]
     return v
 
 
+def _trim_trailing_empty(rows: list[list[object]]) -> list[list[object]]:
+    while rows and all(value is None for value in rows[-1]):
+        rows.pop()
+    return rows
+
+
+def _sheet_values(ws: object) -> list[list[object]]:
+    rows = [
+        [_coerce(cell.value) for cell in row]
+        for row in ws.iter_rows()  # type: ignore[attr-defined]
+    ]
+    return _trim_trailing_empty(rows)
+
+
 @pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda p: p.name)
-def test_xlsb_values_match_pandas_calamine(fixture: Path) -> None:
-    """wolfxl.load_workbook reads same cell values as pandas+calamine.
-
-    ``data_only=True`` matches pandas+calamine's behaviour, which
-    returns cached formula results rather than formula strings.
-    """
+def test_xlsb_values_match_committed_goldens(fixture: Path) -> None:
+    """Native xlsb reads match committed dependency-free value sidecars."""
     wb = wolfxl.load_workbook(str(fixture), data_only=True)
-    df = pd.read_excel(
-        str(fixture), engine="calamine", sheet_name=None, header=None,
-    )
-
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        if sheet_name not in df:
-            # pandas+calamine and wolfxl might disagree on chart-only
-            # sheets being "sheets". If wolfxl exposes one but pandas
-            # doesn't, the wolfxl-side sheet must therefore be empty —
-            # OR it's an unreadable chartsheet that calamine errors on
-            # in worksheet_range. Either way: skip.
-            try:
-                empty = all(
-                    cell.value is None
-                    for row in ws.iter_rows()
-                    for cell in row
-                )
-            except OSError:
-                # Chartsheet — calamine can't materialise a value range.
-                # That's fine; it's not in pandas either.
-                continue
-            assert empty, (
-                f"{fixture.name}: {sheet_name!r} unique to wolfxl with content"
-            )
-            continue
-
-        df_sheet = df[sheet_name]
-        for row in ws.iter_rows():
-            for cell in row:
-                cv = _coerce(cell.value)
-                if cv is None:
-                    continue
-                # df_sheet is 0-indexed, cell.row/column are 1-indexed.
-                if (cell.row - 1) >= df_sheet.shape[0]:
-                    continue
-                if (cell.column - 1) >= df_sheet.shape[1]:
-                    continue
-                df_value = _coerce(df_sheet.iat[cell.row - 1, cell.column - 1])
-                if df_value is None:
-                    continue
-                # Numeric: float compare with tolerance.
-                if isinstance(cv, (int, float)) and isinstance(
-                    df_value, (int, float)
-                ):
-                    assert abs(float(cv) - float(df_value)) < 1e-9, (
-                        f"{fixture.name}!{sheet_name}!{cell.coordinate}: "
-                        f"wolfxl={cv} pandas={df_value}"
-                    )
-                else:
-                    assert cv == df_value or str(cv) == str(df_value), (
-                        f"{fixture.name}!{sheet_name}!{cell.coordinate}: "
-                        f"wolfxl={cv!r} pandas={df_value!r}"
-                    )
+    expected = json.loads(fixture.with_suffix(".golden.json").read_text())
+    actual = {sheet_name: _sheet_values(wb[sheet_name]) for sheet_name in wb.sheetnames}
+    assert actual == expected
 
 
 def test_xlsb_modify_raises() -> None:
@@ -149,16 +73,19 @@ def test_xlsb_password_raises() -> None:
         wolfxl.load_workbook(str(fixture), password="anything")
 
 
-def test_xlsb_cell_font_raises() -> None:
-    """Style accessors are xlsx-only; xlsb must surface NotImplementedError."""
+def test_xlsb_cell_styles_are_readable() -> None:
+    """Native xlsb exposes read-side style accessors."""
     fixture = _FIXTURES[0]
     wb = wolfxl.load_workbook(str(fixture))
     ws = wb.active
     for row in ws.iter_rows():
         for cell in row:
             if cell.value is not None:
-                with pytest.raises(NotImplementedError, match="xlsx-only"):
-                    _ = cell.font
+                assert cell.font is not None
+                assert cell.fill is not None
+                assert cell.border is not None
+                assert cell.alignment is not None
+                _ = cell.number_format
                 return
     pytest.fail("no non-empty cells in fixture")
 

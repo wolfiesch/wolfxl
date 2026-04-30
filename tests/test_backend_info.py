@@ -10,6 +10,7 @@ def test_build_info_names_native_xlsx_and_binary_compat() -> None:
 
     assert info["package"] == "wolfxl"
     assert "native-xlsx" in info["enabled_backends"]
-    assert "calamine-binary" in info["enabled_backends"]
+    assert "native-xlsb" in info["enabled_backends"]
+    assert "calamine-xls" in info["enabled_backends"]
     assert "calamine-styles" not in info["enabled_backends"]
-    assert "calamine-binary" in info["backend_versions"]
+    assert "calamine-xls" in info["backend_versions"]

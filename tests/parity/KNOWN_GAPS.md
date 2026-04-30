@@ -137,15 +137,16 @@ Documented divergences (out of scope for Pod-β, tracked elsewhere):
 
 ### Phase 5 — T1 .xls / .xlsb (✅ SHIPPED in 1.4, Sprint Κ)
 
-`load_workbook("foo.xlsb")` and `load_workbook("foo.xls")` ship in 1.4
-via runtime-dispatched calamine backends (`CalamineXlsbBook` /
-`CalamineXlsBook`). Reads return values + cached formula results.
-Style accessors (`cell.font` / `.fill` / `.border` / `.alignment` /
-`.number_format`) raise `NotImplementedError` on non-xlsx workbooks;
+`load_workbook("foo.xlsb")` and `load_workbook("foo.xls")` ship in 1.4.
+`.xlsb` now routes through `NativeXlsbBook`; `.xls` remains on
+`CalamineXlsBook`. Reads return values + cached formula results, and native
+`.xlsb` exposes read-side style accessors (`cell.font` / `.fill` / `.border` /
+`.alignment` / `.number_format`). `.xls` style accessors still raise
+`NotImplementedError`;
 `modify=True`, `read_only=True`, `password=`, and `Workbook.save("out.xlsb")`
-are explicitly xlsx-only. Parity target is
-`pandas.read_excel(engine="calamine")`, pinned by
-`tests/parity/test_xlsb_reads.py` and `tests/parity/test_xls_reads.py`.
+are explicitly xlsx-only. `.xlsb` parity is pinned by committed JSON sidecars
+in `tests/parity/fixtures/xlsb/`; `.xls` parity still uses
+`tests/parity/test_xls_reads.py`.
 See `Plans/rfcs/043-xlsb-xls-reads.md`.
 
 ## Per-fixture read gaps (surfaced by Phase 0 baseline run)

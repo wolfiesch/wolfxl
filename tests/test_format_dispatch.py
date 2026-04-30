@@ -277,7 +277,7 @@ def test_workbook_format_bytes_path_is_xlsx() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("fmt", ["xlsb", "xls"])
+@pytest.mark.parametrize("fmt", ["xls"])
 @pytest.mark.parametrize(
     "attr", ["font", "fill", "border", "alignment", "number_format"]
 )
@@ -289,6 +289,16 @@ def test_cell_style_accessor_raises_on_non_xlsx(fmt: str, attr: str) -> None:
     cell = ws["A1"]
     with pytest.raises(NotImplementedError, match="xlsx-only"):
         getattr(cell, attr)
+
+
+def test_xlsb_style_access_is_allowed_when_native_backend_supports_it() -> None:
+    """Native .xlsb reads expose style getters instead of the old guard."""
+    fixture = Path("tests/parity/fixtures/xlsb/dates.xlsb")
+    wb = wolfxl.load_workbook(str(fixture))
+    cell = wb.active["A1"]
+    assert wb._rust_reader.__class__.__name__ == "NativeXlsbBook"  # noqa: SLF001
+    assert cell.number_format is not None
+    assert cell.font is not None
 
 
 @pytest.mark.parametrize("fmt", ["xlsb", "xls"])
