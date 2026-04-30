@@ -27,7 +27,8 @@ use crate::calamine_styled_array_formulas::{
 };
 use crate::calamine_value_helpers::{
     data_is_formula_text, data_to_plain_py, data_to_py, data_type_name, is_uncached_formula_value,
-    map_error_formula, row_col_to_a1, update_bounds, update_dimensions,
+    map_error_formula, normalize_formula_text, resolve_range_bounds, row_col_to_a1, update_bounds,
+    update_dimensions,
 };
 use crate::ooxml_util;
 use crate::util::{a1_to_row_col, cell_blank, column_letter_from_zero_based};
@@ -663,11 +664,7 @@ impl CalamineStyledBook {
             // Check the fast formula map (parsed from worksheet XML in a single pass).
             if let Some(fmap) = self.formula_map_cache.get(sheet) {
                 if let Some(f) = fmap.get(&(row, col)) {
-                    let formula = if f.starts_with('=') {
-                        f.clone()
-                    } else {
-                        format!("={f}")
-                    };
+                    let formula = normalize_formula_text(f);
 
                     if let Some(err_val) = map_error_formula(&formula) {
                         let d = PyDict::new(py);
@@ -707,42 +704,11 @@ impl CalamineStyledBook {
         self.ensure_value_caches(sheet)?;
 
         let range = self.range_cache.get(sheet).unwrap();
-
-        let (start_row, start_col, end_row, end_col) = if let Some(cr) = cell_range {
-            if !cr.is_empty() {
-                // Parse A1:B2 style range.
-                let clean = cr.replace('$', "").to_ascii_uppercase();
-                let parts: Vec<&str> = clean.split(':').collect();
-                let a = parts[0];
-                let b = if parts.len() > 1 { parts[1] } else { a };
-                let (r0, c0) =
-                    a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                let (r1, c1) =
-                    a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                (r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1))
-            } else {
-                let (h, w) = range.get_size();
-                let start = range.start().unwrap_or((0, 0));
-                (
-                    start.0,
-                    start.1,
-                    start.0 + h as u32 - 1,
-                    start.1 + w as u32 - 1,
-                )
-            }
-        } else {
-            let (h, w) = range.get_size();
-            if h == 0 || w == 0 {
-                return Ok(PyList::empty(py).into());
-            }
-            let start = range.start().unwrap_or((0, 0));
-            (
-                start.0,
-                start.1,
-                start.0 + h as u32 - 1,
-                start.1 + w as u32 - 1,
-            )
-        };
+        let (height, width) = range.get_size();
+        if cell_range.is_none() && (height == 0 || width == 0) {
+            return Ok(PyList::empty(py).into());
+        }
+        let (start_row, start_col, end_row, end_col) = resolve_range_bounds(range, cell_range)?;
 
         // Use the fast formula map for formula lookups.
         let fmap = self.formula_map_cache.get(sheet);
@@ -755,11 +721,7 @@ impl CalamineStyledBook {
                     // Check fast formula map first.
                     if let Some(ref fm) = fmap {
                         if let Some(f) = fm.get(&(row, col)) {
-                            let formula = if f.starts_with('=') {
-                                f.clone()
-                            } else {
-                                format!("={f}")
-                            };
+                            let formula = normalize_formula_text(f);
                             if let Some(err_val) = map_error_formula(&formula) {
                                 let d = PyDict::new(py);
                                 d.set_item("type", "error")?;
@@ -813,41 +775,11 @@ impl CalamineStyledBook {
         self.ensure_value_caches(sheet)?;
 
         let range = self.range_cache.get(sheet).unwrap();
-
-        let (start_row, start_col, end_row, end_col) = if let Some(cr) = cell_range {
-            if !cr.is_empty() {
-                let clean = cr.replace('$', "").to_ascii_uppercase();
-                let parts: Vec<&str> = clean.split(':').collect();
-                let a = parts[0];
-                let b = if parts.len() > 1 { parts[1] } else { a };
-                let (r0, c0) =
-                    a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                let (r1, c1) =
-                    a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                (r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1))
-            } else {
-                let (h, w) = range.get_size();
-                let start = range.start().unwrap_or((0, 0));
-                (
-                    start.0,
-                    start.1,
-                    start.0 + h as u32 - 1,
-                    start.1 + w as u32 - 1,
-                )
-            }
-        } else {
-            let (h, w) = range.get_size();
-            if h == 0 || w == 0 {
-                return Ok(PyList::empty(py).into());
-            }
-            let start = range.start().unwrap_or((0, 0));
-            (
-                start.0,
-                start.1,
-                start.0 + h as u32 - 1,
-                start.1 + w as u32 - 1,
-            )
-        };
+        let (height, width) = range.get_size();
+        if cell_range.is_none() && (height == 0 || width == 0) {
+            return Ok(PyList::empty(py).into());
+        }
+        let (start_row, start_col, end_row, end_col) = resolve_range_bounds(range, cell_range)?;
 
         let fmap = self.formula_map_cache.get(sheet);
 
@@ -859,11 +791,7 @@ impl CalamineStyledBook {
                     // Check formula map first.
                     if let Some(ref fm) = fmap {
                         if let Some(f) = fm.get(&(row, col)) {
-                            let formula = if f.starts_with('=') {
-                                f.clone()
-                            } else {
-                                format!("={f}")
-                            };
+                            let formula = normalize_formula_text(f);
                             // For error-producing formulas, return the error string.
                             if let Some(err_val) = map_error_formula(&formula) {
                                 inner.append(err_val)?;
@@ -952,7 +880,7 @@ impl CalamineStyledBook {
                 }
                 bounds.unwrap_or((0, 0, 0, 0))
             } else {
-                Self::resolve_range_bounds(range, cell_range)?
+                resolve_range_bounds(range, cell_range)?
             }
         };
 
@@ -986,13 +914,7 @@ impl CalamineStyledBook {
                     .formula_map_cache
                     .get(sheet)
                     .and_then(|m| m.get(&(row, col)).cloned())
-                    .map(|f| {
-                        if f.starts_with('=') {
-                            f
-                        } else {
-                            format!("={f}")
-                        }
-                    });
+                    .map(|f| normalize_formula_text(&f));
                 self.append_sheet_record(
                     py,
                     &records,
@@ -1019,13 +941,7 @@ impl CalamineStyledBook {
                     .formula_map_cache
                     .get(sheet)
                     .and_then(|m| m.get(&(row, col)).cloned())
-                    .map(|f| {
-                        if f.starts_with('=') {
-                            f
-                        } else {
-                            format!("={f}")
-                        }
-                    });
+                    .map(|f| normalize_formula_text(&f));
                 let value = self
                     .range_cache
                     .get(sheet)
@@ -1070,11 +986,7 @@ impl CalamineStyledBook {
         };
         match fmap.get(&(row, col)) {
             Some(f) => {
-                let formula = if f.starts_with('=') {
-                    f.clone()
-                } else {
-                    format!("={f}")
-                };
+                let formula = normalize_formula_text(f);
                 let d = PyDict::new(py);
                 d.set_item("type", "formula")?;
                 d.set_item("formula", &formula)?;
@@ -1868,37 +1780,6 @@ impl CalamineStyledBook {
 
         records.append(record)?;
         Ok(())
-    }
-
-    fn resolve_range_bounds(
-        range: &Range<Data>,
-        cell_range: Option<&str>,
-    ) -> PyResult<(u32, u32, u32, u32)> {
-        if let Some(cr) = cell_range {
-            if !cr.is_empty() {
-                let clean = cr.replace('$', "").to_ascii_uppercase();
-                let parts: Vec<&str> = clean.split(':').collect();
-                let a = parts[0];
-                let b = if parts.len() > 1 { parts[1] } else { a };
-                let (r0, c0) =
-                    a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                let (r1, c1) =
-                    a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-                return Ok((r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)));
-            }
-        }
-
-        let (h, w) = range.get_size();
-        if h == 0 || w == 0 {
-            return Ok((0, 0, 0, 0));
-        }
-        let start = range.start().unwrap_or((0, 0));
-        Ok((
-            start.0,
-            start.1,
-            start.0 + h as u32 - 1,
-            start.1 + w as u32 - 1,
-        ))
     }
 
     /// Ensure the StyleRange + WorksheetLayout are cached for this sheet.
@@ -3811,12 +3692,7 @@ impl CalamineStyledBook {
                             let f = formula_buf.trim().to_string();
                             if let Some(ref mut rule) = cur_rule {
                                 if rule.formula.is_none() && !f.is_empty() {
-                                    let formula = if f.starts_with('=') {
-                                        f
-                                    } else {
-                                        format!("={f}")
-                                    };
-                                    rule.formula = Some(formula);
+                                    rule.formula = Some(normalize_formula_text(&f));
                                 }
                             }
                         }
@@ -3973,12 +3849,7 @@ impl CalamineStyledBook {
                         if let Some(ref mut dv) = cur {
                             let f = formula1_buf.trim().to_string();
                             if !f.is_empty() {
-                                let formula = if f.starts_with('=') {
-                                    f
-                                } else {
-                                    format!("={f}")
-                                };
-                                dv.formula1 = Some(formula);
+                                dv.formula1 = Some(normalize_formula_text(&f));
                             }
                         }
                     } else if e.local_name().as_ref() == b"formula2" {
@@ -3986,12 +3857,7 @@ impl CalamineStyledBook {
                         if let Some(ref mut dv) = cur {
                             let f = formula2_buf.trim().to_string();
                             if !f.is_empty() {
-                                let formula = if f.starts_with('=') {
-                                    f
-                                } else {
-                                    format!("={f}")
-                                };
-                                dv.formula2 = Some(formula);
+                                dv.formula2 = Some(normalize_formula_text(&f));
                             }
                         }
                     } else if e.local_name().as_ref() == b"dataValidation" {

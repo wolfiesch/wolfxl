@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 
-use calamine_styles::Data;
+use calamine_styles::{Data, Range};
 use chrono::{Datelike, NaiveTime, Timelike};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDateTime, PyDict};
 use pyo3::IntoPyObjectExt;
 
-use crate::util::{cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
+use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
 
 type PyObject = Py<PyAny>;
 
@@ -161,6 +162,14 @@ pub(crate) fn map_error_formula(formula: &str) -> Option<&'static str> {
     None
 }
 
+pub(crate) fn normalize_formula_text(formula: &str) -> String {
+    if formula.starts_with('=') {
+        formula.to_string()
+    } else {
+        format!("={formula}")
+    }
+}
+
 pub(crate) fn data_type_name(value: &Data) -> &'static str {
     match value {
         Data::Empty => "blank",
@@ -217,6 +226,35 @@ pub(crate) fn row_col_to_a1(row: u32, col: u32) -> String {
     }
     letters.reverse();
     format!("{}{}", letters.into_iter().collect::<String>(), row + 1)
+}
+
+pub(crate) fn resolve_range_bounds(
+    range: &Range<Data>,
+    cell_range: Option<&str>,
+) -> PyResult<(u32, u32, u32, u32)> {
+    if let Some(cr) = cell_range {
+        if !cr.is_empty() {
+            let clean = cr.replace('$', "").to_ascii_uppercase();
+            let parts: Vec<&str> = clean.split(':').collect();
+            let a = parts[0];
+            let b = if parts.len() > 1 { parts[1] } else { a };
+            let (r0, c0) = a1_to_row_col(a).map_err(PyErr::new::<PyValueError, _>)?;
+            let (r1, c1) = a1_to_row_col(b).map_err(PyErr::new::<PyValueError, _>)?;
+            return Ok((r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1)));
+        }
+    }
+
+    let (height, width) = range.get_size();
+    if height == 0 || width == 0 {
+        return Ok((0, 0, 0, 0));
+    }
+    let start = range.start().unwrap_or((0, 0));
+    Ok((
+        start.0,
+        start.1,
+        start.0 + height as u32 - 1,
+        start.1 + width as u32 - 1,
+    ))
 }
 
 pub(crate) fn update_dimensions(
