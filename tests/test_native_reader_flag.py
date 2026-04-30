@@ -19,6 +19,8 @@ wolfxl = pytest.importorskip("wolfxl")
 
 DataValidation = openpyxl_datavalidation.DataValidation
 Hyperlink = openpyxl_hyperlink.Hyperlink
+Border = openpyxl.styles.Border
+Side = openpyxl.styles.Side
 
 
 def _make_basic_xlsx(path: Path) -> None:
@@ -28,6 +30,12 @@ def _make_basic_xlsx(path: Path) -> None:
     ws["A1"] = "Label"
     ws["B1"] = 42
     ws["B1"].number_format = "#,##0.00"
+    ws["B1"].border = Border(
+        left=Side(style="thin", color="FFFF0000"),
+        right=Side(style="medium"),
+        top=Side(style="double", color="FF00FF00"),
+        bottom=Side(style="dashed", color="FF0000FF"),
+    )
     ws["C1"] = True
     ws["A2"] = "Formula"
     ws["B2"] = "=B1*2"
@@ -67,6 +75,15 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A1"].value == "Label"
         assert ws["B1"].value == 42
         assert ws["B1"].number_format == "#,##0.00"
+        assert ws["B1"].border.left.style == "thin"
+        assert ws["B1"].border.left.color == "#FF0000"
+        assert ws["B1"].border.right.style == "medium"
+        assert ws["B1"].border.right.color == "#000000"
+        assert ws["B1"].border.top.style == "double"
+        assert ws["B1"].border.top.color == "#00FF00"
+        assert ws["B1"].border.bottom.style == "dashed"
+        assert ws["B1"].border.bottom.color == "#0000FF"
+        assert ws["A1"].border.left.style is None
         assert ws["C1"].value is True
         assert ws["B2"].value == "=B1*2"
         assert ws["A3"].value == dt.datetime(2024, 1, 15, 12, 30)

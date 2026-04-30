@@ -373,6 +373,11 @@ impl NativeXlsxBook {
         self.styles.number_format_for_style_id(style_id)
     }
 
+    /// Resolve a style id to cell border metadata.
+    pub fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
+        self.styles.border_for_style_id(style_id)
+    }
+
     /// Parse a worksheet into sparse decoded cells.
     pub fn worksheet(&self, sheet_name: &str) -> Result<WorksheetData> {
         let Some(info) = self.sheets.iter().find(|s| s.name == sheet_name) else {
@@ -413,6 +418,7 @@ struct SheetRef {
 struct StyleTables {
     custom_num_fmts: HashMap<u32, String>,
     cell_xfs: Vec<XfEntry>,
+    borders: Vec<BorderInfo>,
 }
 
 impl StyleTables {
@@ -432,11 +438,35 @@ impl StyleTables {
             other => other,
         }
     }
+
+    fn border_for_style_id(&self, style_id: u32) -> Option<&BorderInfo> {
+        let xf = self.cell_xfs.get(style_id as usize)?;
+        self.borders.get(xf.border_id as usize)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct XfEntry {
     num_fmt_id: u32,
+    border_id: u32,
+}
+
+/// Parsed cell border.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BorderInfo {
+    pub left: Option<BorderSide>,
+    pub right: Option<BorderSide>,
+    pub top: Option<BorderSide>,
+    pub bottom: Option<BorderSide>,
+    pub diagonal_up: Option<BorderSide>,
+    pub diagonal_down: Option<BorderSide>,
+}
+
+/// Parsed border side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BorderSide {
+    pub style: String,
+    pub color: String,
 }
 
 fn parse_workbook(xml: &str) -> Result<(Vec<SheetRef>, bool, Vec<NamedRange>)> {
@@ -752,12 +782,33 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
     let mut styles = StyleTables::default();
     let mut in_num_fmts = false;
     let mut in_cell_xfs = false;
+    let mut in_borders = false;
+    let mut current_border: Option<BorderBuilder> = None;
+    let mut current_border_edge: Option<BorderEdgeKind> = None;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
                 b"numFmts" => in_num_fmts = true,
                 b"cellXfs" => in_cell_xfs = true,
+                b"borders" => in_borders = true,
+                b"border" if in_borders => {
+                    current_border = Some(BorderBuilder::from_start(&e));
+                }
+                tag if in_borders && current_border.is_some() => {
+                    if let Some(edge) = BorderEdgeKind::from_tag(tag) {
+                        current_border_edge = Some(edge);
+                        if let Some(border) = current_border.as_mut() {
+                            border.set_edge(edge, parse_border_side(&e));
+                        }
+                    } else if tag == b"color" {
+                        if let (Some(border), Some(edge)) =
+                            (current_border.as_mut(), current_border_edge)
+                        {
+                            border.update_edge_color(edge, parse_border_color(&e));
+                        }
+                    }
+                }
                 b"numFmt" if in_num_fmts => {
                     push_num_fmt(&mut styles, &e);
                 }
@@ -769,11 +820,37 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"numFmt" if in_num_fmts => push_num_fmt(&mut styles, &e),
                 b"xf" if in_cell_xfs => styles.cell_xfs.push(parse_xf_entry(&e)),
+                b"border" if in_borders => {
+                    styles.borders.push(BorderBuilder::from_start(&e).finish());
+                }
+                tag if in_borders && current_border.is_some() => {
+                    if let Some(edge) = BorderEdgeKind::from_tag(tag) {
+                        if let Some(border) = current_border.as_mut() {
+                            border.set_edge(edge, parse_border_side(&e));
+                        }
+                    } else if tag == b"color" {
+                        if let (Some(border), Some(edge)) =
+                            (current_border.as_mut(), current_border_edge)
+                        {
+                            border.update_edge_color(edge, parse_border_color(&e));
+                        }
+                    }
+                }
                 _ => {}
             },
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 b"numFmts" => in_num_fmts = false,
                 b"cellXfs" => in_cell_xfs = false,
+                b"borders" => in_borders = false,
+                b"border" => {
+                    if let Some(border) = current_border.take() {
+                        styles.borders.push(border.finish());
+                    }
+                    current_border_edge = None;
+                }
+                tag if BorderEdgeKind::from_tag(tag).is_some() => {
+                    current_border_edge = None;
+                }
                 _ => {}
             },
             Ok(Event::Eof) => break,
@@ -803,7 +880,143 @@ fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
         num_fmt_id: attr_value(e, b"numFmtId")
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
+        border_id: attr_value(e, b"borderId")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BorderEdgeKind {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Diagonal,
+}
+
+impl BorderEdgeKind {
+    fn from_tag(tag: &[u8]) -> Option<Self> {
+        match tag {
+            b"left" => Some(Self::Left),
+            b"right" => Some(Self::Right),
+            b"top" => Some(Self::Top),
+            b"bottom" => Some(Self::Bottom),
+            b"diagonal" => Some(Self::Diagonal),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct BorderBuilder {
+    border: BorderInfo,
+    diagonal_up: bool,
+    diagonal_down: bool,
+}
+
+impl BorderBuilder {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            border: BorderInfo::default(),
+            diagonal_up: attr_truthy(attr_value(e, b"diagonalUp").as_deref()),
+            diagonal_down: attr_truthy(attr_value(e, b"diagonalDown").as_deref()),
+        }
+    }
+
+    fn set_edge(&mut self, edge: BorderEdgeKind, side: Option<BorderSide>) {
+        match edge {
+            BorderEdgeKind::Left => self.border.left = side,
+            BorderEdgeKind::Right => self.border.right = side,
+            BorderEdgeKind::Top => self.border.top = side,
+            BorderEdgeKind::Bottom => self.border.bottom = side,
+            BorderEdgeKind::Diagonal => {
+                if self.diagonal_up {
+                    self.border.diagonal_up = side.clone();
+                }
+                if self.diagonal_down {
+                    self.border.diagonal_down = side;
+                }
+            }
+        }
+    }
+
+    fn update_edge_color(&mut self, edge: BorderEdgeKind, color: Option<String>) {
+        let Some(color) = color else {
+            return;
+        };
+        match edge {
+            BorderEdgeKind::Left => {
+                if let Some(side) = self.border.left.as_mut() {
+                    side.color = color;
+                }
+            }
+            BorderEdgeKind::Right => {
+                if let Some(side) = self.border.right.as_mut() {
+                    side.color = color;
+                }
+            }
+            BorderEdgeKind::Top => {
+                if let Some(side) = self.border.top.as_mut() {
+                    side.color = color;
+                }
+            }
+            BorderEdgeKind::Bottom => {
+                if let Some(side) = self.border.bottom.as_mut() {
+                    side.color = color;
+                }
+            }
+            BorderEdgeKind::Diagonal => {
+                if let Some(side) = self.border.diagonal_up.as_mut() {
+                    side.color = color.clone();
+                }
+                if let Some(side) = self.border.diagonal_down.as_mut() {
+                    side.color = color;
+                }
+            }
+        }
+    }
+
+    fn finish(self) -> BorderInfo {
+        self.border
+    }
+}
+
+fn parse_border_side(e: &BytesStart<'_>) -> Option<BorderSide> {
+    let style = attr_value(e, b"style").filter(|value| !value.is_empty() && value != "none")?;
+    let color = parse_border_color(e).unwrap_or_else(|| "#000000".to_string());
+    Some(BorderSide { style, color })
+}
+
+fn parse_border_color(e: &BytesStart<'_>) -> Option<String> {
+    if let Some(rgb) = attr_value(e, b"rgb") {
+        return Some(normalize_ooxml_rgb(&rgb));
+    }
+    if let Some(indexed) = attr_value(e, b"indexed").and_then(|value| value.parse::<usize>().ok()) {
+        return Some(indexed_color_hex(indexed));
+    }
+    attr_value(e, b"theme").map(|_| "#000000".to_string())
+}
+
+fn normalize_ooxml_rgb(rgb: &str) -> String {
+    let raw = rgb.trim().trim_start_matches('#');
+    let rgb = if raw.len() == 8 { &raw[2..] } else { raw };
+    format!("#{}", rgb.to_ascii_uppercase())
+}
+
+fn indexed_color_hex(index: usize) -> String {
+    const COLORS: [&str; 66] = [
+        "#000000", "#FFFFFF", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF",
+        "#000000", "#FFFFFF", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF",
+        "#800000", "#008000", "#000080", "#808000", "#800080", "#008080", "#C0C0C0", "#808080",
+        "#9999FF", "#993366", "#FFFFCC", "#CCFFFF", "#660066", "#FF8080", "#0066CC", "#CCCCFF",
+        "#000080", "#FF00FF", "#FFFF00", "#00FFFF", "#800080", "#800000", "#008080", "#0000FF",
+        "#00CCFF", "#CCFFFF", "#CCFFCC", "#FFFF99", "#99CCFF", "#FF99CC", "#CC99FF", "#FFCC99",
+        "#3366FF", "#33CCCC", "#99CC00", "#FFCC00", "#FF9900", "#FF6600", "#666699", "#969696",
+        "#003366", "#339966", "#003300", "#333300", "#993300", "#993366", "#333399", "#333333",
+        "#000000", "#FFFFFF",
+    ];
+    COLORS.get(index).unwrap_or(&"#000000").to_string()
 }
 
 fn builtin_num_fmt(format_id: u32) -> Option<&'static str> {
@@ -2196,16 +2409,50 @@ mod tests {
     fn parses_custom_and_builtin_number_formats() {
         let xml = r#"<styleSheet>
             <numFmts count="1"><numFmt numFmtId="165" formatCode="$#,##0.00"/></numFmts>
+            <borders count="2">
+                <border><left/><right/><top/><bottom/><diagonal/></border>
+                <border diagonalUp="1"><left style="thin"><color rgb="FFFF0000"/></left><right style="medium"/><top style="double"/><bottom style="dashed"><color indexed="4"/></bottom><diagonal style="hair"><color rgb="FF00FF00"/></diagonal></border>
+            </borders>
             <cellXfs count="3">
                 <xf numFmtId="0"/>
                 <xf numFmtId="4"/>
-                <xf numFmtId="165"/>
+                <xf numFmtId="165" borderId="1"/>
             </cellXfs>
         </styleSheet>"#;
         let styles = parse_style_tables(xml).expect("parse styles");
         assert_eq!(styles.number_format_for_style_id(0), None);
         assert_eq!(styles.number_format_for_style_id(1), Some("#,##0.00"));
         assert_eq!(styles.number_format_for_style_id(2), Some("$#,##0.00"));
+        let border = styles.border_for_style_id(2).expect("border");
+        assert_eq!(
+            border.left,
+            Some(BorderSide {
+                style: "thin".to_string(),
+                color: "#FF0000".to_string(),
+            })
+        );
+        assert_eq!(
+            border.right,
+            Some(BorderSide {
+                style: "medium".to_string(),
+                color: "#000000".to_string(),
+            })
+        );
+        assert_eq!(
+            border.bottom,
+            Some(BorderSide {
+                style: "dashed".to_string(),
+                color: "#0000FF".to_string(),
+            })
+        );
+        assert_eq!(
+            border.diagonal_up,
+            Some(BorderSide {
+                style: "hair".to_string(),
+                color: "#00FF00".to_string(),
+            })
+        );
+        assert_eq!(border.diagonal_down, None);
     }
 
     #[test]

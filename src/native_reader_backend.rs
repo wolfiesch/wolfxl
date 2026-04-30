@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use chrono::{Datelike, Duration, NaiveDate, Timelike};
-use pyo3::exceptions::{PyIOError, PyNotImplementedError, PyValueError};
+use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDateTime, PyDict, PyList};
 use pyo3::IntoPyObjectExt;
@@ -16,7 +16,7 @@ type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    ArrayFormulaInfo, Cell, CellDataType, CellValue, InlineFontProps,
+    ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
 };
 
@@ -599,10 +599,27 @@ impl NativeXlsxBook {
         Ok(d.into())
     }
 
-    pub fn read_cell_border(&self, _sheet: &str, _a1: &str) -> PyResult<()> {
-        Err(PyErr::new::<PyNotImplementedError, _>(
-            "native XLSX border reads are not implemented yet; unset WOLFXL_NATIVE_READER",
-        ))
+    pub fn read_cell_border(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let style_id = {
+            let data = self.ensure_sheet(sheet)?;
+            data.cells
+                .iter()
+                .find(|c| c.row == row && c.col == col)
+                .and_then(|cell| cell.style_id)
+        };
+        let d = PyDict::new(py);
+        if let Some(border) = style_id.and_then(|id| self.book.border_for_style_id(id)) {
+            populate_border(py, &d, border)?;
+        }
+        Ok(d.into())
     }
 }
 
@@ -798,6 +815,41 @@ fn rich_font_to_py(py: Python<'_>, font: &InlineFontProps) -> PyResult<PyObject>
         d.set_item("scheme", value)?;
     }
     Ok(d.into())
+}
+
+fn populate_border(py: Python<'_>, d: &Bound<'_, PyDict>, border: &BorderInfo) -> PyResult<()> {
+    if let Some(side) = &border.left {
+        set_border_side(py, d, "left", side)?;
+    }
+    if let Some(side) = &border.right {
+        set_border_side(py, d, "right", side)?;
+    }
+    if let Some(side) = &border.top {
+        set_border_side(py, d, "top", side)?;
+    }
+    if let Some(side) = &border.bottom {
+        set_border_side(py, d, "bottom", side)?;
+    }
+    if let Some(side) = &border.diagonal_up {
+        set_border_side(py, d, "diagonal_up", side)?;
+    }
+    if let Some(side) = &border.diagonal_down {
+        set_border_side(py, d, "diagonal_down", side)?;
+    }
+    Ok(())
+}
+
+fn set_border_side(
+    py: Python<'_>,
+    d: &Bound<'_, PyDict>,
+    key: &str,
+    side: &wolfxl_reader::BorderSide,
+) -> PyResult<()> {
+    let edge = PyDict::new(py);
+    edge.set_item("style", &side.style)?;
+    edge.set_item("color", &side.color)?;
+    d.set_item(key, edge)?;
+    Ok(())
 }
 
 fn parse_range_1based(range: &str) -> Option<(u32, u32, u32, u32)> {
