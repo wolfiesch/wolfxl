@@ -6,9 +6,10 @@
 
 use std::collections::HashMap;
 
+use chrono::{Datelike, Duration, NaiveDate, Timelike};
 use pyo3::exceptions::{PyIOError, PyNotImplementedError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDateTime, PyDict, PyList};
 use pyo3::IntoPyObjectExt;
 
 type PyObject = Py<PyAny>;
@@ -95,11 +96,18 @@ impl NativeXlsxBook {
         let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
         let row = row0 + 1;
         let col = col0 + 1;
-        let data = self.ensure_sheet(sheet)?;
-        let Some(cell) = data.cells.iter().find(|c| c.row == row && c.col == col) else {
+        let cell = {
+            let data = self.ensure_sheet(sheet)?;
+            data.cells
+                .iter()
+                .find(|c| c.row == row && c.col == col)
+                .cloned()
+        };
+        let Some(cell) = cell else {
             return cell_blank(py);
         };
-        cell_to_dict(py, cell, data_only)
+        let number_format = self.number_format_for_cell(&cell);
+        cell_to_dict(py, &cell, data_only, number_format, self.book.date1904())
     }
 
     #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
@@ -114,13 +122,20 @@ impl NativeXlsxBook {
             Some(bounds) => bounds,
             None => return Ok(PyList::empty(py).into()),
         };
-        let data = self.ensure_sheet(sheet)?;
+        let cells = self.ensure_sheet(sheet)?.cells.clone();
         let outer = PyList::empty(py);
         for row in min_row..=max_row {
             let inner = PyList::empty(py);
             for col in min_col..=max_col {
-                if let Some(cell) = data.cells.iter().find(|c| c.row == row && c.col == col) {
-                    inner.append(cell_to_dict(py, cell, data_only)?)?;
+                if let Some(cell) = cells.iter().find(|c| c.row == row && c.col == col) {
+                    let number_format = self.number_format_for_cell(cell);
+                    inner.append(cell_to_dict(
+                        py,
+                        cell,
+                        data_only,
+                        number_format,
+                        self.book.date1904(),
+                    )?)?;
                 } else {
                     inner.append(cell_blank(py)?)?;
                 }
@@ -142,13 +157,20 @@ impl NativeXlsxBook {
             Some(bounds) => bounds,
             None => return Ok(PyList::empty(py).into()),
         };
-        let data = self.ensure_sheet(sheet)?;
+        let cells = self.ensure_sheet(sheet)?.cells.clone();
         let outer = PyList::empty(py);
         for row in min_row..=max_row {
             let inner = PyList::empty(py);
             for col in min_col..=max_col {
-                if let Some(cell) = data.cells.iter().find(|c| c.row == row && c.col == col) {
-                    inner.append(cell_to_plain(py, cell, data_only)?)?;
+                if let Some(cell) = cells.iter().find(|c| c.row == row && c.col == col) {
+                    let number_format = self.number_format_for_cell(cell);
+                    inner.append(cell_to_plain(
+                        py,
+                        cell,
+                        data_only,
+                        number_format,
+                        self.book.date1904(),
+                    )?)?;
                 } else {
                     inner.append(py.None())?;
                 }
@@ -204,8 +226,15 @@ impl NativeXlsxBook {
             let record = PyDict::new(py);
             record.set_item("row", cell.row)?;
             record.set_item("column", cell.col)?;
-            record.set_item("value", cell_to_plain(py, cell, data_only)?)?;
-            record.set_item("data_type", native_data_type(cell, data_only))?;
+            let number_format = self.number_format_for_cell(cell);
+            record.set_item(
+                "value",
+                cell_to_plain(py, cell, data_only, number_format, self.book.date1904())?,
+            )?;
+            record.set_item(
+                "data_type",
+                native_data_type(cell, data_only, number_format),
+            )?;
             if include_coordinate {
                 record.set_item("coordinate", &cell.coordinate)?;
             }
@@ -241,11 +270,16 @@ impl NativeXlsxBook {
         py: Python<'_>,
         sheet: &str,
     ) -> PyResult<PyObject> {
-        let data = self.ensure_sheet(sheet)?;
+        let cells = self.ensure_sheet(sheet)?.cells.clone();
+        let date1904 = self.book.date1904();
         let out = PyDict::new(py);
-        for cell in &data.cells {
+        for cell in &cells {
             if cell.formula.is_some() {
-                out.set_item(&cell.coordinate, cell_to_plain(py, cell, true)?)?;
+                let number_format = self.number_format_for_cell(cell);
+                out.set_item(
+                    &cell.coordinate,
+                    cell_to_plain(py, cell, true, number_format, date1904)?,
+                )?;
             }
         }
         Ok(out.into())
@@ -393,7 +427,13 @@ impl NativeXlsxBook {
     }
 }
 
-fn cell_to_dict(py: Python<'_>, cell: &Cell, data_only: bool) -> PyResult<PyObject> {
+fn cell_to_dict(
+    py: Python<'_>,
+    cell: &Cell,
+    data_only: bool,
+    number_format: Option<&str>,
+    date1904: bool,
+) -> PyResult<PyObject> {
     if !data_only {
         if let Some(formula) = &cell.formula {
             let formula = ensure_formula_prefix(formula);
@@ -407,13 +447,28 @@ fn cell_to_dict(py: Python<'_>, cell: &Cell, data_only: bool) -> PyResult<PyObje
     match &cell.value {
         CellValue::Empty => cell_blank(py),
         CellValue::String(s) => cell_with_value(py, "string", s),
+        CellValue::Number(n) if is_date_format(number_format) => {
+            let dt = excel_serial_to_datetime(*n, date1904);
+            let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+            if dt.time() == midnight {
+                cell_with_value(py, "date", dt.date().format("%Y-%m-%d").to_string())
+            } else {
+                cell_with_value(py, "datetime", dt.format("%Y-%m-%dT%H:%M:%S").to_string())
+            }
+        }
         CellValue::Number(n) => cell_with_value(py, "number", *n),
         CellValue::Bool(b) => cell_with_value(py, "boolean", *b),
         CellValue::Error(e) => cell_with_value(py, "error", e),
     }
 }
 
-fn cell_to_plain(py: Python<'_>, cell: &Cell, data_only: bool) -> PyResult<PyObject> {
+fn cell_to_plain(
+    py: Python<'_>,
+    cell: &Cell,
+    data_only: bool,
+    number_format: Option<&str>,
+    date1904: bool,
+) -> PyResult<PyObject> {
     if !data_only {
         if let Some(formula) = &cell.formula {
             return Ok(ensure_formula_prefix(formula).into_py_any(py)?);
@@ -422,13 +477,28 @@ fn cell_to_plain(py: Python<'_>, cell: &Cell, data_only: bool) -> PyResult<PyObj
     match &cell.value {
         CellValue::Empty => Ok(py.None()),
         CellValue::String(s) => Ok(s.clone().into_py_any(py)?),
+        CellValue::Number(n) if is_date_format(number_format) => {
+            let dt = excel_serial_to_datetime(*n, date1904);
+            let py_dt = PyDateTime::new(
+                py,
+                dt.year(),
+                dt.month() as u8,
+                dt.day() as u8,
+                dt.hour() as u8,
+                dt.minute() as u8,
+                dt.second() as u8,
+                0,
+                None,
+            )?;
+            Ok(py_dt.into_any().unbind())
+        }
         CellValue::Number(n) => Ok((*n).into_py_any(py)?),
         CellValue::Bool(b) => Ok((*b).into_py_any(py)?),
         CellValue::Error(e) => Ok(e.clone().into_py_any(py)?),
     }
 }
 
-fn native_data_type(cell: &Cell, data_only: bool) -> &'static str {
+fn native_data_type(cell: &Cell, data_only: bool, number_format: Option<&str>) -> &'static str {
     if !data_only && cell.formula.is_some() {
         return "formula";
     }
@@ -441,6 +511,8 @@ fn native_data_type(cell: &Cell, data_only: bool) -> &'static str {
         CellDataType::Number => {
             if matches!(cell.value, CellValue::Empty) {
                 "blank"
+            } else if is_date_format(number_format) {
+                "datetime"
             } else {
                 "number"
             }
@@ -485,4 +557,72 @@ fn update_bounds(bounds: &mut Option<(u32, u32, u32, u32)>, row: u32, col: u32) 
         }
         None => *bounds = Some((row, col, row, col)),
     }
+}
+
+fn is_date_format(format: Option<&str>) -> bool {
+    let Some(format) = format else {
+        return false;
+    };
+    let first = format.split(';').next().unwrap_or(format);
+    let mut in_quote = false;
+    let chars: Vec<char> = first.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '"' {
+            in_quote = !in_quote;
+            i += 1;
+            continue;
+        }
+        if in_quote {
+            i += 1;
+            continue;
+        }
+        if ch == '[' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] != ']' {
+                j += 1;
+            }
+            if j < chars.len() {
+                let bracket: String = chars[i + 1..j].iter().collect();
+                let lower = bracket.to_ascii_lowercase();
+                if lower != "h"
+                    && lower != "hh"
+                    && lower != "m"
+                    && lower != "mm"
+                    && lower != "s"
+                    && lower != "ss"
+                {
+                    i = j + 1;
+                    continue;
+                }
+            }
+        }
+        if matches!(
+            ch,
+            'd' | 'D' | 'm' | 'M' | 'h' | 'H' | 'y' | 'Y' | 's' | 'S'
+        ) {
+            let prev = i.checked_sub(1).and_then(|idx| chars.get(idx)).copied();
+            if prev != Some('_') && prev != Some('\\') {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn excel_serial_to_datetime(serial: f64, date1904: bool) -> chrono::NaiveDateTime {
+    let epoch = if date1904 {
+        NaiveDate::from_ymd_opt(1904, 1, 1).unwrap()
+    } else {
+        NaiveDate::from_ymd_opt(1899, 12, 30).unwrap()
+    };
+    let mut days = serial.trunc() as i64;
+    if !date1904 && serial > 0.0 && serial < 60.0 {
+        days += 1;
+    }
+    let fraction = serial - serial.trunc();
+    let millis = (fraction * 86_400_000.0).round() as i64;
+    epoch.and_hms_opt(0, 0, 0).unwrap() + Duration::days(days) + Duration::milliseconds(millis)
 }
