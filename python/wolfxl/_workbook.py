@@ -8,6 +8,8 @@ Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, sav
 from __future__ import annotations
 
 import os
+import zipfile
+from xml.etree import ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from wolfxl._workbook_state import CopyOptions as CopyOptions
@@ -394,9 +396,34 @@ class Workbook:
 
     def _named_style_names(self) -> list[str]:
         """Return openpyxl-shaped named-style names."""
+        read_names = self._read_style_names()
+        if read_names is not None:
+            return read_names
         return ["Normal"] + [
             style.name for style in self._named_style_registry().user_styles()
         ]
+
+    def _read_style_names(self) -> list[str] | None:
+        """Read named-style names from ``xl/styles.xml`` when available."""
+        if getattr(self, "_rust_reader", None) is None:
+            return None
+        if getattr(self, "_style_names_cache", None) is not None:
+            return list(self._style_names_cache)
+        source_path = getattr(self, "_source_path", None)
+        if not source_path:
+            return None
+        try:
+            with zipfile.ZipFile(source_path) as zf:
+                styles_xml = zf.read("xl/styles.xml")
+        except (KeyError, OSError, zipfile.BadZipFile):
+            self._style_names_cache = ["Normal"]
+            return list(self._style_names_cache)
+        root = ET.fromstring(styles_xml)
+        namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        style_nodes = root.findall("main:cellStyles/main:cellStyle", namespace)
+        names = [node.attrib["name"] for node in style_nodes if node.attrib.get("name")]
+        self._style_names_cache = names or ["Normal"]
+        return list(self._style_names_cache)
 
     def _named_style_registry(self) -> Any:
         """Return the lazily seeded named-style registry."""

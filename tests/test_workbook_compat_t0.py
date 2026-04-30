@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import openpyxl
 import openpyxl.utils.cell as ouc
 import pytest
 import wolfxl.utils as wu
@@ -50,6 +51,19 @@ def test_add_named_style_registers_name_and_binds() -> None:
     assert "Metric" in wb.named_styles
     assert "Metric" in wb.style_names
     assert style._wb is wb
+
+
+def test_style_names_read_existing_named_styles(tmp_path: Path) -> None:
+    from openpyxl.styles import NamedStyle
+
+    path = tmp_path / "named-style.xlsx"
+    op_wb = openpyxl.Workbook()
+    op_wb.add_named_style(NamedStyle(name="Metric"))
+    op_wb.save(path)
+
+    wb = wolfxl.load_workbook(path)
+    assert wb.style_names == op_wb.style_names == ["Normal", "Metric"]
+    assert wb.named_styles == ["Normal", "Metric"]
 
 
 def test_create_chartsheet_raises_clear_error() -> None:

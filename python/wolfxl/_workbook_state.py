@@ -146,6 +146,7 @@ def initialize_pending_state(wb: Any) -> None:
     wb._properties_dirty = False
     wb._defined_names_cache = None
     wb._named_styles_registry = None
+    wb._style_names_cache = None
     wb._pending_defined_names = {}
     wb._security = None
     wb._file_sharing = None
