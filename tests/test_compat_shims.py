@@ -368,6 +368,60 @@ def test_data_validation_openpyxl_aliases_and_tree_helpers() -> None:
     assert DataValidationList.from_tree(validations.to_tree()).count == 1
 
 
+def test_filter_classes_accept_openpyxl_public_names() -> None:
+    from wolfxl.worksheet.filters import (
+        AutoFilter,
+        ColorFilter,
+        CustomFilter,
+        CustomFilters,
+        DynamicFilter,
+        FilterColumn,
+        Filters,
+        IconFilter,
+        SortCondition,
+        SortState,
+        Top10,
+    )
+
+    filters = Filters(blank=True, filter=["North"])
+    column = FilterColumn(colId=0, filters=filters, hiddenButton=True)
+    assert column.col_id == 0
+    assert column.colId == 0
+    assert column.hiddenButton is True
+    assert column.vals == ["North"]
+    assert column.blank is True
+
+    custom = FilterColumn(customFilters=CustomFilters(_and=True, customFilter=[CustomFilter(val="A")]))
+    assert custom.customFilters is not None
+    assert custom.customFilters.and_ is True
+
+    dynamic = DynamicFilter(type="today", valIso="2024-01-01", maxValIso="2024-01-31")
+    assert dynamic.valIso == "2024-01-01"
+    assert dynamic.maxValIso == "2024-01-31"
+
+    color = ColorFilter(dxfId=2, cellColor=False)
+    icon = IconFilter(iconSet="3Arrows", iconId=1)
+    top = Top10(filterVal=5.0)
+    assert color.dxfId == 2
+    assert color.cellColor is False
+    assert icon.iconSet == "3Arrows"
+    assert icon.iconId == 1
+    assert top.filterVal == 5.0
+
+    sort = SortCondition(ref="A2:A10", sortBy="cellColor", dxfId=2, iconSet="3Arrows")
+    state = SortState(sortCondition=[sort], columnSort=True, caseSensitive=True, sortMethod="stroke")
+    auto_filter = AutoFilter(ref="A1:A10", filterColumn=[column], sortState=state)
+    assert auto_filter.filterColumn == [column]
+    assert auto_filter.sortState is state
+    assert state.sortCondition == [sort]
+    assert state.columnSort is True
+    assert state.caseSensitive is True
+    assert state.sortMethod == "stroke"
+    assert sort.sortBy == "cellColor"
+    assert sort.dxfId == 2
+    assert sort.iconSet == "3Arrows"
+
+
 def test_dataframe_to_rows_without_pandas_import() -> None:
     """Importing the module does not require pandas."""
     import wolfxl.utils.dataframe as dfmod

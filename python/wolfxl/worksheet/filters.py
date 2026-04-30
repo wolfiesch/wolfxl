@@ -17,6 +17,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Union
+from xml.etree import ElementTree as ET
+
+
+class _TreeMixin:
+    tagname = ""
+    namespace = None
+    idx_base = 0
+
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002 - openpyxl signature
+        namespace: str | None = None,  # noqa: ARG002 - openpyxl signature
+    ) -> ET.Element:
+        """Serialize this filter helper to a compact ElementTree node."""
+        node = ET.Element(tagname or self.tagname)
+        for key, value in _public_xml_attrs(self).items():
+            if value is not None:
+                node.set(key, "1" if value is True else "0" if value is False else str(value))
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element):  # type: ignore[no-untyped-def]
+        """Build this filter helper from a compact ElementTree node."""
+        return cls(**dict(node.attrib))
+
+
+def _public_xml_attrs(obj: Any) -> dict[str, Any]:
+    skip = {"tagname", "namespace", "idx_base"}
+    return {
+        key: value
+        for key, value in vars(obj).items()
+        if not key.startswith("_") and key not in skip and not isinstance(value, list)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -25,16 +59,24 @@ from typing import Any, Literal, Optional, Union
 
 
 @dataclass
-class BlankFilter:
+class BlankFilter(_TreeMixin):
     """Pass iff the cell is blank.
 
     openpyxl emits this as ``<filters blank="1"/>``. Wolfxl emits the
     same shape (RFC-056 §3.1).
     """
 
+    operator: str = "notEqual"
+    val: str = " "
+    tagname = "customFilter"
+
+    def convert(self) -> None:
+        """Openpyxl compatibility hook; blank filters keep their sentinel value."""
+        return None
+
 
 @dataclass
-class ColorFilter:
+class ColorFilter(_TreeMixin):
     """Pass iff the cell's ``dxfId`` matches.
 
     ``cell_color = True`` (default) → match against the cell fill.
@@ -46,10 +88,31 @@ class ColorFilter:
 
     dxf_id: int = 0
     cell_color: bool = True
+    tagname = "colorFilter"
+
+    def __init__(self, dxf_id: int | None = None, cell_color: bool | None = None, **kwargs: Any) -> None:
+        self.dxf_id = int(kwargs.pop("dxfId", dxf_id if dxf_id is not None else 0))
+        self.cell_color = bool(kwargs.pop("cellColor", cell_color if cell_color is not None else True))
+
+    @property
+    def dxfId(self) -> int:  # noqa: N802
+        return self.dxf_id
+
+    @dxfId.setter
+    def dxfId(self, value: int) -> None:  # noqa: N802
+        self.dxf_id = int(value)
+
+    @property
+    def cellColor(self) -> bool:  # noqa: N802
+        return self.cell_color
+
+    @cellColor.setter
+    def cellColor(self, value: bool) -> None:  # noqa: N802
+        self.cell_color = bool(value)
 
 
 @dataclass
-class CustomFilter:
+class CustomFilter(_TreeMixin):
     """One ``<customFilter operator val>`` row.
 
     ``operator`` ∈ {"equal", "lessThan", "lessThanOrEqual",
@@ -65,10 +128,15 @@ class CustomFilter:
         "greaterThan",
     ] = "equal"
     val: str = ""
+    tagname = "customFilter"
+
+    def convert(self) -> None:
+        """Openpyxl compatibility hook for descriptor coercion."""
+        return None
 
 
 @dataclass
-class CustomFilters:
+class CustomFilters(_TreeMixin):
     """Group of ``CustomFilter`` joined by AND or OR.
 
     ``and_ = False`` (default) → logical OR.
@@ -77,6 +145,16 @@ class CustomFilters:
 
     customFilter: list[CustomFilter] = field(default_factory=list)  # noqa: N815 — openpyxl name
     and_: bool = False
+    tagname = "customFilters"
+
+    def __init__(
+        self,
+        customFilter: list[CustomFilter] | tuple[CustomFilter, ...] | None = None,  # noqa: N803
+        and_: bool = False,
+        _and: bool | None = None,
+    ) -> None:
+        self.customFilter = list(customFilter or [])
+        self.and_ = bool(and_ if _and is None else _and)
 
     @property
     def filters(self) -> list[CustomFilter]:
@@ -89,7 +167,7 @@ class CustomFilters:
 
 
 @dataclass
-class DateGroupItem:
+class DateGroupItem(_TreeMixin):
     """Date-component matcher inside a ``<filters>`` group.
 
     Components below ``date_time_grouping`` are typically ``None``.
@@ -104,10 +182,38 @@ class DateGroupItem:
     date_time_grouping: Literal[
         "year", "month", "day", "hour", "minute", "second"
     ] = "year"
+    tagname = "dateGroupItem"
+
+    def __init__(
+        self,
+        year: int = 0,
+        month: Optional[int] = None,
+        day: Optional[int] = None,
+        hour: Optional[int] = None,
+        minute: Optional[int] = None,
+        second: Optional[int] = None,
+        date_time_grouping: Literal["year", "month", "day", "hour", "minute", "second"] = "year",
+        dateTimeGrouping: Literal["year", "month", "day", "hour", "minute", "second"] | None = None,  # noqa: N803
+    ) -> None:
+        self.year = year
+        self.month = month
+        self.day = day
+        self.hour = hour
+        self.minute = minute
+        self.second = second
+        self.date_time_grouping = date_time_grouping if dateTimeGrouping is None else dateTimeGrouping
+
+    @property
+    def dateTimeGrouping(self) -> str:  # noqa: N802
+        return self.date_time_grouping
+
+    @dateTimeGrouping.setter
+    def dateTimeGrouping(self, value: str) -> None:  # noqa: N802
+        self.date_time_grouping = value  # type: ignore[assignment]
 
 
 @dataclass
-class DynamicFilter:
+class DynamicFilter(_TreeMixin):
     """Date- or aggregate-driven dynamic filter.
 
     Type values (subset shown) include
@@ -118,12 +224,55 @@ class DynamicFilter:
 
     type: str = "null"
     val: Optional[float] = None
+    max_val: Optional[float] = None
     val_iso: Optional[str] = None
     max_val_iso: Optional[str] = None
+    tagname = "dynamicFilter"
+
+    def __init__(
+        self,
+        type: str = "null",  # noqa: A002 - openpyxl public API
+        val: Optional[float] = None,
+        val_iso: Optional[str] = None,
+        max_val: Optional[float] = None,
+        max_val_iso: Optional[str] = None,
+        valIso: Optional[str] = None,  # noqa: N803
+        maxVal: Optional[float] = None,  # noqa: N803
+        maxValIso: Optional[str] = None,  # noqa: N803
+    ) -> None:
+        self.type = type
+        self.val = val
+        self.max_val = max_val if maxVal is None else maxVal
+        self.val_iso = val_iso if valIso is None else valIso
+        self.max_val_iso = max_val_iso if maxValIso is None else maxValIso
+
+    @property
+    def valIso(self) -> Optional[str]:  # noqa: N802
+        return self.val_iso
+
+    @valIso.setter
+    def valIso(self, value: Optional[str]) -> None:  # noqa: N802
+        self.val_iso = value
+
+    @property
+    def maxVal(self) -> Optional[float]:  # noqa: N802
+        return self.max_val
+
+    @maxVal.setter
+    def maxVal(self, value: Optional[float]) -> None:  # noqa: N802
+        self.max_val = value
+
+    @property
+    def maxValIso(self) -> Optional[str]:  # noqa: N802
+        return self.max_val_iso
+
+    @maxValIso.setter
+    def maxValIso(self, value: Optional[str]) -> None:  # noqa: N802
+        self.max_val_iso = value
 
 
 @dataclass
-class IconFilter:
+class IconFilter(_TreeMixin):
     """Filter on conditional-format icon set + index.
 
     ``icon_set`` is the named CF icon set (e.g. ``"3Arrows"``,
@@ -134,6 +283,36 @@ class IconFilter:
 
     icon_set: str = "3Arrows"
     icon_id: int = 0
+    tagname = "iconFilter"
+
+    def __init__(
+        self,
+        icon_set: str | None = None,
+        icon_id: int | None = None,
+        iconSet: str | None = None,  # noqa: N803
+        iconId: int | None = None,  # noqa: N803
+    ) -> None:
+        self.icon_set = icon_set if iconSet is None else iconSet
+        if self.icon_set is None:
+            self.icon_set = "3Arrows"
+        resolved_icon_id = icon_id if iconId is None else iconId
+        self.icon_id = int(0 if resolved_icon_id is None else resolved_icon_id)
+
+    @property
+    def iconSet(self) -> str:  # noqa: N802
+        return self.icon_set
+
+    @iconSet.setter
+    def iconSet(self, value: str) -> None:  # noqa: N802
+        self.icon_set = value
+
+    @property
+    def iconId(self) -> int:  # noqa: N802
+        return self.icon_id
+
+    @iconId.setter
+    def iconId(self, value: int) -> None:  # noqa: N802
+        self.icon_id = int(value)
 
 
 @dataclass
@@ -153,7 +332,38 @@ class StringFilter:
 
 
 @dataclass
-class Top10:
+class Filters(_TreeMixin):
+    """Openpyxl-shaped inner ``<filters>`` element."""
+
+    blank: bool | None = None
+    calendarType: str | None = None  # noqa: N815
+    filter: list[str] = field(default_factory=list)
+    dateGroupItem: list[DateGroupItem] = field(default_factory=list)  # noqa: N815
+    tagname = "filters"
+
+    def __init__(
+        self,
+        blank: bool | None = None,
+        calendarType: str | None = None,  # noqa: N803
+        filter: list[str] | tuple[str, ...] | None = None,  # noqa: A002
+        dateGroupItem: list[DateGroupItem] | tuple[DateGroupItem, ...] | None = None,  # noqa: N803
+    ) -> None:
+        self.blank = blank
+        self.calendarType = calendarType
+        self.filter = list(filter or [])
+        self.dateGroupItem = list(dateGroupItem or [])
+
+    @property
+    def filters(self) -> list[str]:
+        return self.filter
+
+    @filters.setter
+    def filters(self, value: list[str]) -> None:
+        self.filter = value
+
+
+@dataclass
+class Top10(_TreeMixin):
     """Top-N or bottom-N filter, optionally as percent.
 
     ``top = True`` → top N. ``top = False`` → bottom N.
@@ -167,6 +377,28 @@ class Top10:
     percent: bool = False
     val: float = 10.0
     filter_val: Optional[float] = None
+    tagname = "top10"
+
+    def __init__(
+        self,
+        top: bool = True,
+        percent: bool = False,
+        val: float = 10.0,
+        filter_val: Optional[float] = None,
+        filterVal: Optional[float] = None,  # noqa: N803
+    ) -> None:
+        self.top = top
+        self.percent = percent
+        self.val = val
+        self.filter_val = filter_val if filterVal is None else filterVal
+
+    @property
+    def filterVal(self) -> Optional[float]:  # noqa: N802
+        return self.filter_val
+
+    @filterVal.setter
+    def filterVal(self, value: Optional[float]) -> None:  # noqa: N802
+        self.filter_val = value
 
 
 # ---------------------------------------------------------------------------
@@ -183,12 +415,13 @@ FilterT = Union[
     IconFilter,
     NumberFilter,
     StringFilter,
+    Filters,
     Top10,
 ]
 
 
 @dataclass
-class FilterColumn:
+class FilterColumn(_TreeMixin):
     """One ``<filterColumn colId>`` entry inside ``<autoFilter>``.
 
     ``col_id`` is **0-based** relative to ``auto_filter.ref``'s left
@@ -201,10 +434,146 @@ class FilterColumn:
     show_button: bool = True
     filter: Optional[FilterT] = None
     date_group_items: list[DateGroupItem] = field(default_factory=list)
+    extLst: Any = None  # noqa: N815
+    tagname = "filterColumn"
+
+    def __init__(
+        self,
+        col_id: int = 0,
+        hidden_button: bool = False,
+        show_button: bool = True,
+        filter: Optional[FilterT] = None,  # noqa: A002
+        date_group_items: Optional[list[DateGroupItem]] = None,
+        colId: int | None = None,  # noqa: N803
+        hiddenButton: bool | None = None,  # noqa: N803
+        showButton: bool | None = None,  # noqa: N803
+        filters: Filters | NumberFilter | StringFilter | None = None,
+        top10: Top10 | None = None,
+        customFilters: CustomFilters | None = None,  # noqa: N803
+        dynamicFilter: DynamicFilter | None = None,  # noqa: N803
+        colorFilter: ColorFilter | None = None,  # noqa: N803
+        iconFilter: IconFilter | None = None,  # noqa: N803
+        blank: bool | None = None,
+        vals: list[str] | tuple[str, ...] | None = None,
+        extLst: Any = None,  # noqa: N803
+    ) -> None:
+        self.col_id = int(col_id if colId is None else colId)
+        self.hidden_button = hidden_button if hiddenButton is None else hiddenButton
+        self.show_button = show_button if showButton is None else showButton
+        self.date_group_items = list(date_group_items or [])
+        openpyxl_filter: Optional[FilterT] = (
+            filters
+            or top10
+            or customFilters
+            or dynamicFilter
+            or colorFilter
+            or iconFilter
+        )
+        if vals is not None:
+            openpyxl_filter = Filters(blank=blank, filter=list(vals))
+        elif blank is not None and openpyxl_filter is None:
+            openpyxl_filter = Filters(blank=blank)
+        self.filter = filter if filter is not None else openpyxl_filter
+        self.extLst = extLst
+
+    @property
+    def colId(self) -> int:  # noqa: N802
+        return self.col_id
+
+    @colId.setter
+    def colId(self, value: int) -> None:  # noqa: N802
+        self.col_id = int(value)
+
+    @property
+    def hiddenButton(self) -> bool:  # noqa: N802
+        return self.hidden_button
+
+    @hiddenButton.setter
+    def hiddenButton(self, value: bool) -> None:  # noqa: N802
+        self.hidden_button = bool(value)
+
+    @property
+    def showButton(self) -> bool:  # noqa: N802
+        return self.show_button
+
+    @showButton.setter
+    def showButton(self, value: bool) -> None:  # noqa: N802
+        self.show_button = bool(value)
+
+    @property
+    def filters(self) -> Optional[Filters | NumberFilter | StringFilter]:
+        return self.filter if isinstance(self.filter, (Filters, NumberFilter, StringFilter)) else None
+
+    @filters.setter
+    def filters(self, value: Filters | NumberFilter | StringFilter | None) -> None:
+        self.filter = value
+
+    @property
+    def vals(self) -> list[str]:
+        if isinstance(self.filter, Filters):
+            return self.filter.filter
+        if isinstance(self.filter, StringFilter):
+            return self.filter.values
+        return []
+
+    @vals.setter
+    def vals(self, value: list[str]) -> None:
+        self.filter = Filters(filter=value)
+
+    @property
+    def blank(self) -> bool | None:
+        return self.filter.blank if isinstance(self.filter, Filters) else None
+
+    @blank.setter
+    def blank(self, value: bool | None) -> None:
+        if isinstance(self.filter, Filters):
+            self.filter.blank = value
+        else:
+            self.filter = Filters(blank=value)
+
+    @property
+    def customFilters(self) -> Optional[CustomFilters]:  # noqa: N802
+        return self.filter if isinstance(self.filter, CustomFilters) else None
+
+    @customFilters.setter
+    def customFilters(self, value: CustomFilters | None) -> None:  # noqa: N802
+        self.filter = value
+
+    @property
+    def dynamicFilter(self) -> Optional[DynamicFilter]:  # noqa: N802
+        return self.filter if isinstance(self.filter, DynamicFilter) else None
+
+    @dynamicFilter.setter
+    def dynamicFilter(self, value: DynamicFilter | None) -> None:  # noqa: N802
+        self.filter = value
+
+    @property
+    def colorFilter(self) -> Optional[ColorFilter]:  # noqa: N802
+        return self.filter if isinstance(self.filter, ColorFilter) else None
+
+    @colorFilter.setter
+    def colorFilter(self, value: ColorFilter | None) -> None:  # noqa: N802
+        self.filter = value
+
+    @property
+    def iconFilter(self) -> Optional[IconFilter]:  # noqa: N802
+        return self.filter if isinstance(self.filter, IconFilter) else None
+
+    @iconFilter.setter
+    def iconFilter(self, value: IconFilter | None) -> None:  # noqa: N802
+        self.filter = value
+
+    @property
+    def top10(self) -> Optional[Top10]:
+        return self.filter if isinstance(self.filter, Top10) else None
+
+    @top10.setter
+    def top10(self, value: Top10 | None) -> None:
+        self.filter = value
 
 
 @dataclass
-class SortCondition:
+class SortCondition(_TreeMixin):
     """One ``<sortCondition>`` inside ``<sortState>``."""
 
     ref: str = ""
@@ -214,10 +583,74 @@ class SortCondition:
     dxf_id: Optional[int] = None
     icon_set: Optional[str] = None
     icon_id: Optional[int] = None
+    tagname = "sortCondition"
+
+    def __init__(
+        self,
+        ref: str = "",
+        descending: bool = False,
+        sort_by: Literal["value", "cellColor", "fontColor", "icon"] = "value",
+        custom_list: Optional[str] = None,
+        dxf_id: Optional[int] = None,
+        icon_set: Optional[str] = None,
+        icon_id: Optional[int] = None,
+        sortBy: Literal["value", "cellColor", "fontColor", "icon"] | None = None,  # noqa: N803
+        customList: Optional[str] = None,  # noqa: N803
+        dxfId: Optional[int] = None,  # noqa: N803
+        iconSet: Optional[str] = None,  # noqa: N803
+        iconId: Optional[int] = None,  # noqa: N803
+    ) -> None:
+        self.ref = ref
+        self.descending = descending
+        self.sort_by = sort_by if sortBy is None else sortBy
+        self.custom_list = custom_list if customList is None else customList
+        self.dxf_id = dxf_id if dxfId is None else dxfId
+        self.icon_set = icon_set if iconSet is None else iconSet
+        self.icon_id = icon_id if iconId is None else iconId
+
+    @property
+    def sortBy(self) -> str:  # noqa: N802
+        return self.sort_by
+
+    @sortBy.setter
+    def sortBy(self, value: str) -> None:  # noqa: N802
+        self.sort_by = value  # type: ignore[assignment]
+
+    @property
+    def customList(self) -> Optional[str]:  # noqa: N802
+        return self.custom_list
+
+    @customList.setter
+    def customList(self, value: Optional[str]) -> None:  # noqa: N802
+        self.custom_list = value
+
+    @property
+    def dxfId(self) -> Optional[int]:  # noqa: N802
+        return self.dxf_id
+
+    @dxfId.setter
+    def dxfId(self, value: Optional[int]) -> None:  # noqa: N802
+        self.dxf_id = value
+
+    @property
+    def iconSet(self) -> Optional[str]:  # noqa: N802
+        return self.icon_set
+
+    @iconSet.setter
+    def iconSet(self, value: Optional[str]) -> None:  # noqa: N802
+        self.icon_set = value
+
+    @property
+    def iconId(self) -> Optional[int]:  # noqa: N802
+        return self.icon_id
+
+    @iconId.setter
+    def iconId(self, value: Optional[int]) -> None:  # noqa: N802
+        self.icon_id = value
 
 
 @dataclass
-class SortState:
+class SortState(_TreeMixin):
     """``<sortState>`` block.
 
     .. note::
@@ -229,7 +662,62 @@ class SortState:
     sort_conditions: list[SortCondition] = field(default_factory=list)
     column_sort: bool = False
     case_sensitive: bool = False
+    sort_method: str | None = None
     ref: Optional[str] = None
+    extLst: Any = None  # noqa: N815
+    tagname = "sortState"
+
+    def __init__(
+        self,
+        sort_conditions: Optional[list[SortCondition]] = None,
+        column_sort: bool = False,
+        case_sensitive: bool = False,
+        ref: Optional[str] = None,
+        sortCondition: Optional[list[SortCondition] | tuple[SortCondition, ...]] = None,  # noqa: N803
+        columnSort: bool | None = None,  # noqa: N803
+        caseSensitive: bool | None = None,  # noqa: N803
+        sortMethod: str | None = None,  # noqa: N803
+        extLst: Any = None,  # noqa: N803
+    ) -> None:
+        conditions = sort_conditions if sortCondition is None else sortCondition
+        self.sort_conditions = list(conditions or [])
+        self.column_sort = column_sort if columnSort is None else columnSort
+        self.case_sensitive = case_sensitive if caseSensitive is None else caseSensitive
+        self.sort_method = sortMethod
+        self.ref = ref
+        self.extLst = extLst
+
+    @property
+    def sortCondition(self) -> list[SortCondition]:  # noqa: N802
+        return self.sort_conditions
+
+    @sortCondition.setter
+    def sortCondition(self, value: list[SortCondition]) -> None:  # noqa: N802
+        self.sort_conditions = value
+
+    @property
+    def columnSort(self) -> bool:  # noqa: N802
+        return self.column_sort
+
+    @columnSort.setter
+    def columnSort(self, value: bool) -> None:  # noqa: N802
+        self.column_sort = bool(value)
+
+    @property
+    def caseSensitive(self) -> bool:  # noqa: N802
+        return self.case_sensitive
+
+    @caseSensitive.setter
+    def caseSensitive(self, value: bool) -> None:  # noqa: N802
+        self.case_sensitive = bool(value)
+
+    @property
+    def sortMethod(self) -> str | None:  # noqa: N802
+        return self.sort_method
+
+    @sortMethod.setter
+    def sortMethod(self, value: str | None) -> None:  # noqa: N802
+        self.sort_method = value
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +727,7 @@ class SortState:
 
 
 @dataclass
-class AutoFilter:
+class AutoFilter(_TreeMixin):
     """``ws.auto_filter`` — sheet-scoped filter state.
 
     ``ref`` is the A1-notation range. ``filter_columns`` is the list
@@ -252,6 +740,39 @@ class AutoFilter:
     ref: Optional[str] = None
     filter_columns: list[FilterColumn] = field(default_factory=list)
     sort_state: Optional[SortState] = None
+    extLst: Any = None  # noqa: N815
+    tagname = "autoFilter"
+
+    def __init__(
+        self,
+        ref: Optional[str] = None,
+        filter_columns: Optional[list[FilterColumn]] = None,
+        sort_state: Optional[SortState] = None,
+        filterColumn: Optional[list[FilterColumn] | tuple[FilterColumn, ...]] = None,  # noqa: N803
+        sortState: Optional[SortState] = None,  # noqa: N803
+        extLst: Any = None,  # noqa: N803
+    ) -> None:
+        self.ref = ref
+        columns = filter_columns if filterColumn is None else filterColumn
+        self.filter_columns = list(columns or [])
+        self.sort_state = sort_state if sortState is None else sortState
+        self.extLst = extLst
+
+    @property
+    def filterColumn(self) -> list[FilterColumn]:  # noqa: N802
+        return self.filter_columns
+
+    @filterColumn.setter
+    def filterColumn(self, value: list[FilterColumn]) -> None:  # noqa: N802
+        self.filter_columns = value
+
+    @property
+    def sortState(self) -> Optional[SortState]:  # noqa: N802
+        return self.sort_state
+
+    @sortState.setter
+    def sortState(self, value: Optional[SortState]) -> None:  # noqa: N802
+        self.sort_state = value
 
     # ------------------------------------------------------------------
     # Builders matching openpyxl-style fluency.
@@ -372,6 +893,22 @@ def _filter_to_dict(f: FilterT) -> dict[str, Any]:
             "icon_set": f.icon_set,
             "icon_id": int(f.icon_id),
         }
+    if isinstance(f, Filters):
+        values = f.filter
+        if f.dateGroupItem:
+            return {
+                "kind": "number",
+                "filters": [],
+                "blank": bool(f.blank),
+                "calendar_type": f.calendarType,
+                "date_group_items": [_date_group_item_to_dict(d) for d in f.dateGroupItem],
+            }
+        return {
+            "kind": "string",
+            "values": [str(v) for v in values],
+            "blank": bool(f.blank),
+            "calendar_type": f.calendarType,
+        }
     if isinstance(f, NumberFilter):
         return {
             "kind": "number",
@@ -426,12 +963,6 @@ def _sort_condition_to_dict(sc: SortCondition) -> dict[str, Any]:
         "icon_set": sc.icon_set,
         "icon_id": int(sc.icon_id) if sc.icon_id is not None else None,
     }
-
-
-# Aliased name kept for openpyxl compatibility — its module exports
-# `Filters` (the inner `<filters>` element); we expose it as an alias
-# to NumberFilter since they share XML shape.
-Filters = NumberFilter
 
 
 __all__ = [
