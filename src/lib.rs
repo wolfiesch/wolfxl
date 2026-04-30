@@ -4,6 +4,7 @@ use pyo3::types::{PyDict, PyList};
 type PyObject = Py<PyAny>;
 
 mod calamine_format_helpers;
+mod calamine_record_format;
 mod calamine_styled_array_formulas;
 mod calamine_styled_backend;
 mod calamine_value_helpers;
