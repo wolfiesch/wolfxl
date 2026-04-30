@@ -185,13 +185,13 @@ impl NativeXlsxBook {
         sheet,
         cell_range = None,
         data_only = false,
-        _include_format = true,
+        include_format = true,
         include_empty = false,
-        _include_formula_blanks = true,
+        include_formula_blanks = true,
         include_coordinate = true,
         include_style_id = true,
-        _include_extended_format = true,
-        _include_cached_formula_value = false,
+        include_extended_format = true,
+        include_cached_formula_value = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn read_sheet_records(
@@ -200,19 +200,55 @@ impl NativeXlsxBook {
         sheet: &str,
         cell_range: Option<&str>,
         data_only: bool,
-        _include_format: bool,
+        include_format: bool,
         include_empty: bool,
-        _include_formula_blanks: bool,
+        include_formula_blanks: bool,
         include_coordinate: bool,
         include_style_id: bool,
-        _include_extended_format: bool,
-        _include_cached_formula_value: bool,
+        include_extended_format: bool,
+        include_cached_formula_value: bool,
     ) -> PyResult<PyObject> {
         let window = self.resolve_window(sheet, cell_range)?;
-        let cells = self.ensure_sheet(sheet)?.cells.clone();
-        let merged_ranges = self.ensure_sheet(sheet)?.merged_ranges.clone();
+        let data = self.ensure_sheet(sheet)?.clone();
+        let cells_by_coord: HashMap<(u32, u32), Cell> = data
+            .cells
+            .iter()
+            .cloned()
+            .map(|cell| ((cell.row, cell.col), cell))
+            .collect();
+        let options = NativeRecordOptions {
+            data_only,
+            include_format,
+            include_empty,
+            include_formula_blanks,
+            include_coordinate,
+            include_style_id,
+            include_extended_format,
+            include_cached_formula_value,
+        };
         let out = PyList::empty(py);
-        for cell in &cells {
+
+        if include_empty {
+            if let Some((min_row, min_col, max_row, max_col)) = window {
+                for row in min_row..=max_row {
+                    for col in min_col..=max_col {
+                        append_native_record(
+                            py,
+                            &out,
+                            &self.book,
+                            &data.merged_ranges,
+                            cells_by_coord.get(&(row, col)),
+                            row,
+                            col,
+                            options,
+                        )?;
+                    }
+                }
+                return Ok(out.into());
+            }
+        }
+
+        for cell in &data.cells {
             if let Some((min_row, min_col, max_row, max_col)) = window {
                 if cell.row < min_row
                     || cell.row > max_row
@@ -222,39 +258,19 @@ impl NativeXlsxBook {
                     continue;
                 }
             }
-            if !include_empty && matches!(cell.value, CellValue::Empty) && cell.formula.is_none() {
+            if !native_record_should_emit(cell, options) {
                 continue;
             }
-            let record = PyDict::new(py);
-            record.set_item("row", cell.row)?;
-            record.set_item("column", cell.col)?;
-            let is_merged_subordinate = is_merged_subordinate(&merged_ranges, cell.row, cell.col);
-            let number_format = if is_merged_subordinate {
-                None
-            } else {
-                self.number_format_for_cell(cell)
-            };
-            record.set_item(
-                "value",
-                cell_to_plain(py, cell, data_only, number_format, self.book.date1904())?,
+            append_native_record(
+                py,
+                &out,
+                &self.book,
+                &data.merged_ranges,
+                Some(cell),
+                cell.row,
+                cell.col,
+                options,
             )?;
-            record.set_item(
-                "data_type",
-                native_data_type(cell, data_only, number_format),
-            )?;
-            if include_coordinate {
-                record.set_item("coordinate", &cell.coordinate)?;
-            }
-            if include_style_id {
-                record.set_item("style_id", cell.style_id)?;
-            }
-            if let Some(number_format) = number_format {
-                record.set_item("number_format", number_format)?;
-            }
-            if let Some(formula) = &cell.formula {
-                record.set_item("formula", ensure_formula_prefix(formula))?;
-            }
-            out.append(record)?;
         }
         Ok(out.into())
     }
@@ -723,6 +739,182 @@ impl NativeXlsxBook {
     }
 }
 
+#[derive(Clone, Copy)]
+struct NativeRecordOptions {
+    data_only: bool,
+    include_format: bool,
+    include_empty: bool,
+    include_formula_blanks: bool,
+    include_coordinate: bool,
+    include_style_id: bool,
+    include_extended_format: bool,
+    include_cached_formula_value: bool,
+}
+
+fn native_record_should_emit(cell: &Cell, options: NativeRecordOptions) -> bool {
+    let has_formula = cell.formula.is_some();
+    let has_value = !matches!(cell.value, CellValue::Empty);
+    let should_emit_formula =
+        has_formula && !options.data_only && (options.include_formula_blanks || has_value);
+    options.include_empty || should_emit_formula || has_value
+}
+
+fn append_native_record(
+    py: Python<'_>,
+    out: &Bound<'_, PyList>,
+    book: &NativeReaderBook,
+    merged_ranges: &[String],
+    cell: Option<&Cell>,
+    row: u32,
+    col: u32,
+    options: NativeRecordOptions,
+) -> PyResult<()> {
+    let Some(cell) = cell else {
+        if !options.include_empty {
+            return Ok(());
+        }
+        let record = PyDict::new(py);
+        record.set_item("row", row)?;
+        record.set_item("column", col)?;
+        record.set_item("data_type", "blank")?;
+        record.set_item("value", py.None())?;
+        if options.include_coordinate {
+            record.set_item("coordinate", row_col_to_a1_1based(row, col))?;
+        }
+        out.append(record)?;
+        return Ok(());
+    };
+
+    if !native_record_should_emit(cell, options) {
+        return Ok(());
+    }
+
+    let is_merged_subordinate = is_merged_subordinate(merged_ranges, cell.row, cell.col);
+    let number_format = if is_merged_subordinate {
+        None
+    } else {
+        cell.style_id
+            .and_then(|style_id| book.number_format_for_style_id(style_id))
+    };
+    let has_formula = cell.formula.is_some();
+    let has_cached_value = !matches!(cell.value, CellValue::Empty);
+    let should_emit_formula =
+        has_formula && !options.data_only && (options.include_formula_blanks || has_cached_value);
+
+    let record = PyDict::new(py);
+    record.set_item("row", cell.row)?;
+    record.set_item("column", cell.col)?;
+    if options.include_coordinate {
+        record.set_item("coordinate", &cell.coordinate)?;
+    }
+    if let Some(formula) = &cell.formula {
+        record.set_item("formula", ensure_formula_prefix(formula))?;
+        if options.include_cached_formula_value && has_cached_value {
+            record.set_item(
+                "cached_value",
+                cell_to_plain(py, cell, true, number_format, book.date1904())?,
+            )?;
+        }
+    }
+    if should_emit_formula {
+        let formula = ensure_formula_prefix(cell.formula.as_deref().unwrap_or_default());
+        record.set_item("data_type", "formula")?;
+        record.set_item("value", formula)?;
+    } else if options.data_only && has_formula && !has_cached_value {
+        record.set_item("data_type", "blank")?;
+        record.set_item("value", py.None())?;
+    } else {
+        record.set_item(
+            "data_type",
+            native_data_type(cell, options.data_only, number_format),
+        )?;
+        record.set_item(
+            "value",
+            cell_to_plain(py, cell, options.data_only, number_format, book.date1904())?,
+        )?;
+    }
+
+    if options.include_format && !is_merged_subordinate {
+        populate_record_format(book, &record, cell.style_id, options)?;
+    }
+    out.append(record)?;
+    Ok(())
+}
+
+fn populate_record_format(
+    book: &NativeReaderBook,
+    record: &Bound<'_, PyDict>,
+    style_id: Option<u32>,
+    options: NativeRecordOptions,
+) -> PyResult<()> {
+    let Some(style_id) = style_id else {
+        return Ok(());
+    };
+    if options.include_style_id {
+        record.set_item("style_id", style_id)?;
+    }
+    if style_id == 0 {
+        return Ok(());
+    }
+    if options.include_extended_format {
+        if let Some(font) = book.font_for_style_id(style_id) {
+            if font.bold {
+                record.set_item("bold", true)?;
+            }
+            if font.italic {
+                record.set_item("italic", true)?;
+            }
+            if let Some(value) = &font.underline {
+                record.set_item("underline", value)?;
+            }
+            if font.strikethrough {
+                record.set_item("strikethrough", true)?;
+            }
+            if let Some(value) = font
+                .size
+                .filter(|value| (*value - 11.0).abs() > f64::EPSILON)
+            {
+                record.set_item("font_size", value)?;
+            }
+        }
+        if let Some(fill) = book.fill_for_style_id(style_id) {
+            if let Some(value) = &fill.bg_color {
+                record.set_item("bg_color", value)?;
+            }
+        }
+        if let Some(alignment) = book.alignment_for_style_id(style_id) {
+            if let Some(value) = &alignment.horizontal {
+                record.set_item("h_align", value)?;
+            }
+            if let Some(value) = &alignment.vertical {
+                record.set_item("v_align", value)?;
+            }
+            if alignment.wrap_text {
+                record.set_item("wrap", true)?;
+            }
+            if let Some(value) = alignment.text_rotation.filter(|value| *value != 0) {
+                record.set_item("rotation", value)?;
+            }
+            if let Some(value) = alignment.indent.filter(|value| *value != 0) {
+                record.set_item("indent", value)?;
+            }
+        }
+        if let Some(border) = book.border_for_style_id(style_id) {
+            if let Some(bottom) = &border.bottom {
+                record.set_item("bottom_border_style", &bottom.style)?;
+                record.set_item("has_bottom_border", true)?;
+                if bottom.style == "double" {
+                    record.set_item("is_double_underline", true)?;
+                }
+            }
+        }
+    }
+    if let Some(number_format) = book.number_format_for_style_id(style_id) {
+        record.set_item("number_format", number_format)?;
+    }
+    Ok(())
+}
+
 fn cell_to_dict(
     py: Python<'_>,
     cell: &Cell,
@@ -993,6 +1185,17 @@ fn is_merged_subordinate(merged_ranges: &[String], row: u32, col: u32) -> bool {
                 && !(row == min_row && col == min_col)
         })
     })
+}
+
+fn row_col_to_a1_1based(row: u32, col: u32) -> String {
+    let mut n = col;
+    let mut letters = String::new();
+    while n > 0 {
+        n -= 1;
+        letters.insert(0, (b'A' + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    format!("{letters}{row}")
 }
 
 fn col_letter_to_index_1based(col: &str) -> PyResult<u32> {
