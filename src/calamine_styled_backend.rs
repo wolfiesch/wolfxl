@@ -17,6 +17,7 @@ use zip::ZipArchive;
 
 use crate::calamine_format_helpers::{openpyxl_builtin_num_fmt, strip_excel_padding};
 use crate::calamine_record_format::{RawFontInfo, RecordFormatInfo};
+use crate::calamine_sheet_records::SheetRecordOptions;
 use crate::calamine_style_dicts::{
     maybe_set_edge, populate_alignment, populate_fill, populate_font, set_edge_from_style,
 };
@@ -686,6 +687,17 @@ impl CalamineStyledBook {
         include_extended_format: bool,
         include_cached_formula_value: bool,
     ) -> PyResult<PyObject> {
+        let record_options = SheetRecordOptions {
+            data_only,
+            include_format,
+            include_empty,
+            include_formula_blanks,
+            include_coordinate,
+            include_style_id,
+            include_extended_format,
+            include_cached_formula_value,
+        };
+
         self.ensure_sheet_exists(sheet)?;
         if include_format {
             self.ensure_value_and_style_caches(sheet)?;
@@ -757,14 +769,7 @@ impl CalamineStyledBook {
                     col,
                     value.as_ref(),
                     formula.as_deref(),
-                    data_only,
-                    include_format,
-                    include_empty,
-                    include_formula_blanks,
-                    include_coordinate,
-                    include_style_id,
-                    include_extended_format,
-                    include_cached_formula_value,
+                    record_options,
                 )?;
             }
             return Ok(records.into());
@@ -788,14 +793,7 @@ impl CalamineStyledBook {
                     col,
                     value.as_ref(),
                     formula.as_deref(),
-                    data_only,
-                    include_format,
-                    include_empty,
-                    include_formula_blanks,
-                    include_coordinate,
-                    include_style_id,
-                    include_extended_format,
-                    include_cached_formula_value,
+                    record_options,
                 )?;
             }
         }
@@ -1502,7 +1500,6 @@ impl CalamineStyledBook {
         Ok(None)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn append_sheet_record(
         &mut self,
         py: Python<'_>,
@@ -1512,14 +1509,7 @@ impl CalamineStyledBook {
         col: u32,
         value: Option<&Data>,
         formula: Option<&str>,
-        data_only: bool,
-        include_format: bool,
-        include_empty: bool,
-        include_formula_blanks: bool,
-        include_coordinate: bool,
-        include_style_id: bool,
-        include_extended_format: bool,
-        include_cached_formula_value: bool,
+        options: SheetRecordOptions,
     ) -> PyResult<()> {
         // calamine writes an empty `<v/>` element on a formula cell as
         // `Some(Data::String(""))`, and renders blank cells inside the
@@ -1531,29 +1521,29 @@ impl CalamineStyledBook {
         let value_is_formula_placeholder = formula
             .zip(value)
             .is_some_and(|(formula_text, v)| data_is_formula_text(v, formula_text));
-        let value_is_uncached_formula = data_only && value_is_formula_placeholder;
+        let value_is_uncached_formula = options.data_only && value_is_formula_placeholder;
         let has_value = value.is_some_and(|v| !matches!(v, Data::Empty))
             && !value_is_uncached_formula
             && !value_is_formula_placeholder;
         let has_formula_backing_entry =
             value.is_some_and(|v| !matches!(v, Data::Empty)) && !value_is_formula_placeholder;
         let should_emit_formula = formula.is_some()
-            && !data_only
-            && (include_formula_blanks || has_formula_backing_entry);
-        if !include_empty && !should_emit_formula && !has_value {
+            && !options.data_only
+            && (options.include_formula_blanks || has_formula_backing_entry);
+        if !options.include_empty && !should_emit_formula && !has_value {
             return Ok(());
         }
 
         let record = PyDict::new(py);
         record.set_item("row", row + 1)?;
         record.set_item("column", col + 1)?;
-        if include_coordinate {
+        if options.include_coordinate {
             record.set_item("coordinate", row_col_to_a1(row, col))?;
         }
 
         if let Some(formula_text) = formula {
             record.set_item("formula", formula_text)?;
-            if include_cached_formula_value {
+            if options.include_cached_formula_value {
                 if let Some(v) = value {
                     if !matches!(v, Data::Empty) && !value_is_formula_placeholder {
                         record.set_item("cached_value", data_to_plain_py(py, v)?)?;
@@ -1575,7 +1565,7 @@ impl CalamineStyledBook {
             if value_is_uncached_formula {
                 record.set_item("data_type", "blank")?;
                 record.set_item("value", py.None())?;
-                if include_format {
+                if options.include_format {
                     let style_id = self.record_style_id(sheet, row, col);
                     self.populate_record_format_for_style_id(
                         py,
@@ -1584,8 +1574,8 @@ impl CalamineStyledBook {
                         col,
                         style_id,
                         &record,
-                        include_style_id,
-                        include_extended_format,
+                        options.include_style_id,
+                        options.include_extended_format,
                     )?;
                 }
                 records.append(record)?;
@@ -1598,7 +1588,7 @@ impl CalamineStyledBook {
             record.set_item("value", py.None())?;
         }
 
-        if include_format {
+        if options.include_format {
             let style_id = self.record_style_id(sheet, row, col);
             self.populate_record_format_for_style_id(
                 py,
@@ -1607,8 +1597,8 @@ impl CalamineStyledBook {
                 col,
                 style_id,
                 &record,
-                include_style_id,
-                include_extended_format,
+                options.include_style_id,
+                options.include_extended_format,
             )?;
         }
 

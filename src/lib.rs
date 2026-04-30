@@ -5,6 +5,7 @@ type PyObject = Py<PyAny>;
 
 mod calamine_format_helpers;
 mod calamine_record_format;
+mod calamine_sheet_records;
 mod calamine_style_dicts;
 mod calamine_styled_array_formulas;
 mod calamine_styled_backend;
