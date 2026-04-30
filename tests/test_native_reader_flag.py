@@ -158,6 +158,36 @@ def _inject_auto_filter_details(path: Path) -> None:
             zout.writestr(name, data)
 
 
+def _inject_sheet_properties(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as zin:
+        entries = {name: zin.read(name) for name in zin.namelist()}
+    sheet_name = "xl/worksheets/sheet1.xml"
+    sheet_xml = entries[sheet_name].decode()
+    sheet_xml = re.sub(r"<sheetPr\b.*?</sheetPr>", "", sheet_xml)
+    sheet_xml = re.sub(r"<sheetPr\b[^>]*/>", "", sheet_xml)
+    sheet_pr_xml = (
+        '<sheetPr codeName="NativeProps" enableFormatConditionsCalculation="0" '
+        'filterMode="1" published="0" syncHorizontal="1" syncRef="B2" '
+        'syncVertical="1" transitionEvaluation="1" transitionEntry="1">'
+        '<tabColor rgb="FF33AA55"/>'
+        '<outlinePr summaryBelow="0" summaryRight="0" applyStyles="1" '
+        'showOutlineSymbols="0"/>'
+        '<pageSetUpPr autoPageBreaks="0" fitToPage="1"/>'
+        "</sheetPr>"
+    )
+    sheet_xml, count = re.subn(
+        r"(<worksheet\b[^>]*>)",
+        r"\1" + sheet_pr_xml,
+        sheet_xml,
+        count=1,
+    )
+    assert count == 1
+    entries[sheet_name] = sheet_xml.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def _make_shared_formula_xlsx(path: Path) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -342,6 +372,16 @@ def _make_sheet_view_xlsx(path: Path) -> None:
     ws.sheet_view.selection[0].sqref = "C3:D4"
     wb.save(path)
     wb.close()
+
+
+def _make_sheet_properties_xlsx(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet Properties"
+    ws["A1"] = "metadata"
+    wb.save(path)
+    wb.close()
+    _inject_sheet_properties(path)
 
 
 def _make_chart_xlsx(path: Path) -> None:
@@ -677,6 +717,37 @@ def test_native_reader_loads_sheet_view_metadata(
         assert view.pane.activePane == "bottomRight"
         assert view.selection[0].activeCell == "C3"
         assert view.selection[0].sqref == "C3:D4"
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_sheet_properties(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-sheet-properties.xlsx"
+    _make_sheet_properties_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Sheet Properties"]
+        properties = ws.sheet_properties
+        assert properties.codeName == "NativeProps"
+        assert properties.enableFormatConditionsCalculation is False
+        assert properties.filterMode is True
+        assert properties.published is False
+        assert properties.syncHorizontal is True
+        assert properties.syncRef == "B2"
+        assert properties.syncVertical is True
+        assert properties.transitionEvaluation is True
+        assert properties.transitionEntry is True
+        assert properties.tabColor == "33AA55"
+        assert properties.outlinePr.summaryBelow is False
+        assert properties.outlinePr.summaryRight is False
+        assert properties.outlinePr.applyStyles is True
+        assert properties.outlinePr.showOutlineSymbols is False
+        assert properties.pageSetUpPr.autoPageBreaks is False
+        assert properties.pageSetUpPr.fitToPage is True
     finally:
         wb.close()
 

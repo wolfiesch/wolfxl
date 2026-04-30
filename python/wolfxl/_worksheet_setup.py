@@ -212,6 +212,14 @@ def get_header_footer(ws: Worksheet) -> Any:
     return ws._header_footer  # noqa: SLF001
 
 
+def get_sheet_properties(ws: Worksheet) -> Any:
+    """Return the lazy worksheet properties object."""
+    if ws._sheet_properties is None:  # noqa: SLF001
+        payload = _reader_payload(ws, "read_sheet_properties")
+        ws._sheet_properties = _sheet_properties_from_payload(payload)  # noqa: SLF001
+    return ws._sheet_properties  # noqa: SLF001
+
+
 def _reader_payload(ws: Worksheet, method_name: str) -> Any:
     reader = getattr(ws._workbook, "_rust_reader", None)  # noqa: SLF001
     if reader is None or not hasattr(reader, method_name):
@@ -286,6 +294,59 @@ def _header_footer_item_from_payload(payload: Any) -> Any:
         center=payload.get("center"),
         right=payload.get("right"),
     )
+
+
+def _sheet_properties_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.properties import (
+        Outline,
+        PageSetupProperties,
+        WorksheetProperties,
+    )
+
+    if not isinstance(payload, dict):
+        return WorksheetProperties()
+    outline_payload = payload.get("outline")
+    page_setup_payload = payload.get("page_setup")
+    return WorksheetProperties(
+        codeName=payload.get("code_name"),
+        enableFormatConditionsCalculation=payload.get(
+            "enable_format_conditions_calculation"
+        ),
+        filterMode=payload.get("filter_mode"),
+        published=payload.get("published"),
+        syncHorizontal=payload.get("sync_horizontal"),
+        syncRef=payload.get("sync_ref"),
+        syncVertical=payload.get("sync_vertical"),
+        transitionEvaluation=payload.get("transition_evaluation"),
+        transitionEntry=payload.get("transition_entry"),
+        tabColor=_normalize_sheet_property_color(payload.get("tab_color")),
+        outlinePr=(
+            Outline(
+                summaryBelow=bool(outline_payload.get("summary_below", True)),
+                summaryRight=bool(outline_payload.get("summary_right", True)),
+                applyStyles=bool(outline_payload.get("apply_styles", False)),
+                showOutlineSymbols=bool(
+                    outline_payload.get("show_outline_symbols", True)
+                ),
+            )
+            if isinstance(outline_payload, dict)
+            else Outline()
+        ),
+        pageSetUpPr=(
+            PageSetupProperties(
+                autoPageBreaks=bool(page_setup_payload.get("auto_page_breaks", True)),
+                fitToPage=bool(page_setup_payload.get("fit_to_page", False)),
+            )
+            if isinstance(page_setup_payload, dict)
+            else PageSetupProperties()
+        ),
+    )
+
+
+def _normalize_sheet_property_color(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.removeprefix("#")
 
 
 def get_sheet_view(ws: Worksheet) -> Any:

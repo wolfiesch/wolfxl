@@ -137,6 +137,7 @@ pub struct WorksheetData {
     pub merged_ranges: Vec<String>,
     pub hyperlinks: Vec<Hyperlink>,
     pub freeze_panes: Option<FreezePane>,
+    pub sheet_properties: Option<SheetPropertiesInfo>,
     pub sheet_view: Option<SheetViewInfo>,
     pub comments: Vec<Comment>,
     pub row_heights: HashMap<u32, RowHeight>,
@@ -214,6 +215,99 @@ pub struct SelectionInfo {
 pub enum PaneMode {
     Freeze,
     Split,
+}
+
+/// Parsed worksheet properties from `<sheetPr>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetPropertiesInfo {
+    pub code_name: Option<String>,
+    pub enable_format_conditions_calculation: Option<bool>,
+    pub filter_mode: Option<bool>,
+    pub published: Option<bool>,
+    pub sync_horizontal: Option<bool>,
+    pub sync_ref: Option<String>,
+    pub sync_vertical: Option<bool>,
+    pub transition_evaluation: Option<bool>,
+    pub transition_entry: Option<bool>,
+    pub tab_color: Option<String>,
+    pub outline: OutlineInfo,
+    pub page_setup: PageSetupPropertiesInfo,
+}
+
+/// Parsed worksheet outline display properties.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineInfo {
+    pub summary_below: bool,
+    pub summary_right: bool,
+    pub apply_styles: bool,
+    pub show_outline_symbols: bool,
+}
+
+/// Parsed worksheet page-setup flags from `<sheetPr><pageSetUpPr>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageSetupPropertiesInfo {
+    pub auto_page_breaks: bool,
+    pub fit_to_page: bool,
+}
+
+impl Default for OutlineInfo {
+    fn default() -> Self {
+        Self {
+            summary_below: true,
+            summary_right: true,
+            apply_styles: false,
+            show_outline_symbols: true,
+        }
+    }
+}
+
+impl Default for PageSetupPropertiesInfo {
+    fn default() -> Self {
+        Self {
+            auto_page_breaks: true,
+            fit_to_page: false,
+        }
+    }
+}
+
+impl SheetPropertiesInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            code_name: attr_value(e, b"codeName"),
+            enable_format_conditions_calculation: attr_bool(
+                e,
+                b"enableFormatConditionsCalculation",
+            ),
+            filter_mode: attr_bool(e, b"filterMode"),
+            published: attr_bool(e, b"published"),
+            sync_horizontal: attr_bool(e, b"syncHorizontal"),
+            sync_ref: attr_value(e, b"syncRef"),
+            sync_vertical: attr_bool(e, b"syncVertical"),
+            transition_evaluation: attr_bool(e, b"transitionEvaluation"),
+            transition_entry: attr_bool(e, b"transitionEntry"),
+            ..Self::default()
+        }
+    }
+
+    fn apply_tab_color(&mut self, e: &BytesStart<'_>) {
+        self.tab_color = parse_ooxml_color(e);
+    }
+
+    fn apply_outline(&mut self, e: &BytesStart<'_>) {
+        self.outline = OutlineInfo {
+            summary_below: attr_bool_default(e, b"summaryBelow", true),
+            summary_right: attr_bool_default(e, b"summaryRight", true),
+            apply_styles: attr_bool_default(e, b"applyStyles", false),
+            show_outline_symbols: attr_bool_default(e, b"showOutlineSymbols", true),
+        };
+    }
+
+    fn apply_page_setup(&mut self, e: &BytesStart<'_>) {
+        self.page_setup = PageSetupPropertiesInfo {
+            auto_page_breaks: attr_bool_default(e, b"autoPageBreaks", true),
+            fit_to_page: attr_bool_default(e, b"fitToPage", false),
+        };
+    }
 }
 
 impl SheetViewInfo {
@@ -1969,6 +2063,7 @@ fn parse_worksheet(
     let mut merged_ranges = Vec::new();
     let mut hyperlink_nodes = Vec::new();
     let mut freeze_panes = None;
+    let mut sheet_properties = None;
     let mut sheet_view = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row_heights = HashMap::new();
@@ -2002,6 +2097,24 @@ fn parse_worksheet(
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"sheetPr" => {
+                    sheet_properties = Some(SheetPropertiesInfo::from_start(&e));
+                }
+                b"tabColor" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_tab_color(&e);
+                }
+                b"outlinePr" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_outline(&e);
+                }
+                b"pageSetUpPr" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_page_setup(&e);
+                }
                 b"dimension" => {
                     dimension = attr_value(&e, b"ref");
                 }
@@ -2141,6 +2254,24 @@ fn parse_worksheet(
                 }
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"sheetPr" => {
+                    sheet_properties = Some(SheetPropertiesInfo::from_start(&e));
+                }
+                b"tabColor" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_tab_color(&e);
+                }
+                b"outlinePr" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_outline(&e);
+                }
+                b"pageSetUpPr" => {
+                    sheet_properties
+                        .get_or_insert_with(SheetPropertiesInfo::default)
+                        .apply_page_setup(&e);
+                }
                 b"col" => {
                     if let Some(width) = parse_column_width(&e) {
                         column_widths.push(width);
@@ -2405,6 +2536,7 @@ fn parse_worksheet(
         merged_ranges,
         hyperlinks: resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         freeze_panes,
+        sheet_properties,
         sheet_view,
         comments,
         row_heights,

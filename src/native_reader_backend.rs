@@ -21,8 +21,8 @@ use wolfxl_reader::{
     DateGroupItemInfo, FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo,
     HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    PaneMode, SelectionInfo, SheetFormatInfo, SheetProtection, SheetState, SheetViewInfo,
-    SortConditionInfo, SortStateInfo, WorkbookSecurity, WorksheetData,
+    PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
+    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -458,6 +458,13 @@ impl NativeXlsxBook {
     pub fn read_sheet_view(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match &self.ensure_sheet(sheet)?.sheet_view {
             Some(sheet_view) => sheet_view_to_py(py, sheet_view),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_sheet_properties(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.sheet_properties {
+            Some(properties) => sheet_properties_to_py(py, properties),
             None => Ok(py.None()),
         }
     }
@@ -1426,6 +1433,39 @@ fn sheet_format_to_py(py: Python<'_>, format: &SheetFormatInfo) -> PyResult<PyOb
     d.set_item("thick_bottom", format.thick_bottom)?;
     d.set_item("outline_level_row", format.outline_level_row)?;
     d.set_item("outline_level_col", format.outline_level_col)?;
+    Ok(d.into())
+}
+
+fn sheet_properties_to_py(py: Python<'_>, properties: &SheetPropertiesInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("code_name", properties.code_name.as_deref())?;
+    d.set_item(
+        "enable_format_conditions_calculation",
+        properties.enable_format_conditions_calculation,
+    )?;
+    d.set_item("filter_mode", properties.filter_mode)?;
+    d.set_item("published", properties.published)?;
+    d.set_item("sync_horizontal", properties.sync_horizontal)?;
+    d.set_item("sync_ref", properties.sync_ref.as_deref())?;
+    d.set_item("sync_vertical", properties.sync_vertical)?;
+    d.set_item("transition_evaluation", properties.transition_evaluation)?;
+    d.set_item("transition_entry", properties.transition_entry)?;
+    d.set_item("tab_color", properties.tab_color.as_deref())?;
+
+    let outline = PyDict::new(py);
+    outline.set_item("summary_below", properties.outline.summary_below)?;
+    outline.set_item("summary_right", properties.outline.summary_right)?;
+    outline.set_item("apply_styles", properties.outline.apply_styles)?;
+    outline.set_item(
+        "show_outline_symbols",
+        properties.outline.show_outline_symbols,
+    )?;
+    d.set_item("outline", outline)?;
+
+    let page_setup = PyDict::new(py);
+    page_setup.set_item("auto_page_breaks", properties.page_setup.auto_page_breaks)?;
+    page_setup.set_item("fit_to_page", properties.page_setup.fit_to_page)?;
+    d.set_item("page_setup", page_setup)?;
     Ok(d.into())
 }
 

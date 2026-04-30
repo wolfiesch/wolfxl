@@ -80,6 +80,7 @@ from wolfxl._worksheet_setup import (
     get_protection,
     get_row_breaks,
     get_sheet_format,
+    get_sheet_properties,
     get_sheet_view,
     set_freeze_panes,
     set_print_title_cols,
@@ -149,7 +150,7 @@ class Worksheet:
         "_pending_pivot_tables",
         # Print/view/protection lazy slots.
         "_page_setup", "_page_margins", "_header_footer",
-        "_sheet_view", "_protection",
+        "_sheet_properties", "_sheet_view", "_protection",
         "_print_title_rows", "_print_title_cols",
         # Pending slicer presentations.
         "_pending_slicers",
@@ -355,6 +356,21 @@ class Worksheet:
                 sheet format serializer.
         """
         self._sheet_format = value
+
+    @property
+    def sheet_properties(self) -> Any:
+        """Return worksheet properties, creating them lazily."""
+        return get_sheet_properties(self)
+
+    @sheet_properties.setter
+    def sheet_properties(self, value: Any) -> None:
+        """Replace worksheet properties.
+
+        Args:
+            value: Worksheet properties object compatible with openpyxl's
+                ``Worksheet.sheet_properties`` shape.
+        """
+        self._sheet_properties = value
 
     @property
     def dimension_holder(self) -> Any:

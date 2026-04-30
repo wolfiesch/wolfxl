@@ -63,6 +63,7 @@ def initialize_worksheet_state(
     ws._page_setup: Any = None  # noqa: SLF001
     ws._page_margins: Any = None  # noqa: SLF001
     ws._header_footer: Any = None  # noqa: SLF001
+    ws._sheet_properties: Any = None  # noqa: SLF001
     ws._sheet_view: Any = None  # noqa: SLF001
     ws._protection: Any = None  # noqa: SLF001
     ws._print_title_rows: str | None = None  # noqa: SLF001
