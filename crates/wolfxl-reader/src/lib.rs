@@ -238,6 +238,7 @@ pub struct NativeXlsxBook {
     bytes: Vec<u8>,
     sheets: Vec<SheetInfo>,
     named_ranges: Vec<NamedRange>,
+    doc_properties: HashMap<String, String>,
     shared_strings: Vec<String>,
     styles: StyleTables,
     date1904: bool,
@@ -267,11 +268,19 @@ impl NativeXlsxBook {
             Some(xml) => parse_style_tables(&xml)?,
             None => StyleTables::default(),
         };
+        let mut doc_properties = HashMap::new();
+        if let Some(xml) = read_part_optional(&mut zip, "docProps/core.xml")? {
+            parse_doc_properties_into(&xml, &mut doc_properties, doc_property_core_key);
+        }
+        if let Some(xml) = read_part_optional(&mut zip, "docProps/app.xml")? {
+            parse_doc_properties_into(&xml, &mut doc_properties, doc_property_app_key);
+        }
 
         Ok(Self {
             bytes,
             sheets,
             named_ranges,
+            doc_properties,
             shared_strings,
             styles,
             date1904,
@@ -291,6 +300,11 @@ impl NativeXlsxBook {
     /// Workbook defined names.
     pub fn named_ranges(&self) -> &[NamedRange] {
         &self.named_ranges
+    }
+
+    /// Workbook document properties parsed from `docProps/core.xml` and app.xml.
+    pub fn doc_properties(&self) -> &HashMap<String, String> {
+        &self.doc_properties
     }
 
     /// Whether the workbook uses the 1904 date system.
@@ -1231,6 +1245,80 @@ fn parse_comments(xml: &str) -> Result<Vec<Comment>> {
     Ok(comments)
 }
 
+fn parse_doc_properties_into(
+    xml: &str,
+    out: &mut HashMap<String, String>,
+    key_for_tag: fn(&[u8]) -> Option<&'static str>,
+) {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut current_tag: Option<Vec<u8>> = None;
+    let mut current_text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                current_tag = Some(e.local_name().as_ref().to_vec());
+                current_text.clear();
+            }
+            Ok(Event::Text(e)) => {
+                if current_tag.is_some() {
+                    current_text.push_str(&e.unescape().unwrap_or_default());
+                }
+            }
+            Ok(Event::End(e)) => {
+                let name = e.local_name();
+                let name = name.as_ref();
+                if current_tag.as_deref() == Some(name) {
+                    if let Some(key) = key_for_tag(name) {
+                        let value = current_text.trim();
+                        if !value.is_empty() {
+                            out.entry(key.to_string())
+                                .or_insert_with(|| value.to_string());
+                        }
+                    }
+                }
+                current_tag = None;
+                current_text.clear();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn doc_property_core_key(name: &[u8]) -> Option<&'static str> {
+    match name {
+        b"title" => Some("title"),
+        b"subject" => Some("subject"),
+        b"creator" => Some("creator"),
+        b"keywords" => Some("keywords"),
+        b"description" => Some("description"),
+        b"lastModifiedBy" => Some("lastModifiedBy"),
+        b"category" => Some("category"),
+        b"contentStatus" => Some("contentStatus"),
+        b"identifier" => Some("identifier"),
+        b"language" => Some("language"),
+        b"revision" => Some("revision"),
+        b"version" => Some("version"),
+        b"created" => Some("created"),
+        b"modified" => Some("modified"),
+        _ => None,
+    }
+}
+
+fn doc_property_app_key(name: &[u8]) -> Option<&'static str> {
+    match name {
+        b"Company" => Some("company"),
+        b"Manager" => Some("manager"),
+        b"Application" => Some("application"),
+        _ => None,
+    }
+}
+
 fn read_tables<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     sheet_path: &str,
@@ -1833,5 +1921,35 @@ mod tests {
                 autofilter: true,
             }
         );
+    }
+
+    #[test]
+    fn parses_document_properties() {
+        let mut props = HashMap::new();
+        parse_doc_properties_into(
+            r#"<cp:coreProperties>
+                <dc:title>Q3 Report</dc:title>
+                <dc:creator>Alice</dc:creator>
+                <cp:lastModifiedBy>Bob</cp:lastModifiedBy>
+                <dcterms:created>2024-01-01T00:00:00Z</dcterms:created>
+            </cp:coreProperties>"#,
+            &mut props,
+            doc_property_core_key,
+        );
+        parse_doc_properties_into(
+            r#"<Properties><Application>Excel</Application><Company>SynthGL</Company></Properties>"#,
+            &mut props,
+            doc_property_app_key,
+        );
+
+        assert_eq!(props.get("title").map(String::as_str), Some("Q3 Report"));
+        assert_eq!(props.get("creator").map(String::as_str), Some("Alice"));
+        assert_eq!(props.get("lastModifiedBy").map(String::as_str), Some("Bob"));
+        assert_eq!(
+            props.get("created").map(String::as_str),
+            Some("2024-01-01T00:00:00Z")
+        );
+        assert_eq!(props.get("application").map(String::as_str), Some("Excel"));
+        assert_eq!(props.get("company").map(String::as_str), Some("SynthGL"));
     }
 }

@@ -456,7 +456,11 @@ impl NativeXlsxBook {
     }
 
     pub fn read_doc_properties(&self, py: Python<'_>) -> PyResult<PyObject> {
-        Ok(PyDict::new(py).into())
+        let d = PyDict::new(py);
+        for (key, value) in self.book.doc_properties() {
+            d.set_item(key, value)?;
+        }
+        Ok(d.into())
     }
 
     pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
