@@ -4021,16 +4021,13 @@ fn read_charts<R: Read + std::io::Seek>(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DrawingImageRef {
+struct DrawingObjectRef {
     rid: String,
     anchor: ImageAnchorInfo,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DrawingChartRef {
-    rid: String,
-    anchor: ImageAnchorInfo,
-}
+type DrawingImageRef = DrawingObjectRef;
+type DrawingChartRef = DrawingObjectRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DrawingAnchorKind {
@@ -4040,7 +4037,7 @@ enum DrawingAnchorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DrawingImageBuilder {
+struct DrawingObjectBuilder {
     kind: DrawingAnchorKind,
     from: AnchorMarkerInfo,
     to: AnchorMarkerInfo,
@@ -4050,7 +4047,7 @@ struct DrawingImageBuilder {
     rid: Option<String>,
 }
 
-impl DrawingImageBuilder {
+impl DrawingObjectBuilder {
     fn new(kind: DrawingAnchorKind, e: &BytesStart<'_>) -> Self {
         Self {
             kind,
@@ -4063,7 +4060,7 @@ impl DrawingImageBuilder {
         }
     }
 
-    fn finish(self) -> Option<DrawingImageRef> {
+    fn finish(self) -> Option<DrawingObjectRef> {
         let rid = self.rid?;
         let anchor = match self.kind {
             DrawingAnchorKind::OneCell => ImageAnchorInfo::OneCell {
@@ -4080,52 +4077,7 @@ impl DrawingImageBuilder {
                 ext: self.ext.unwrap_or_default(),
             },
         };
-        Some(DrawingImageRef { rid, anchor })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DrawingChartBuilder {
-    kind: DrawingAnchorKind,
-    from: AnchorMarkerInfo,
-    to: AnchorMarkerInfo,
-    pos: AnchorPositionInfo,
-    ext: Option<AnchorExtentInfo>,
-    edit_as: Option<String>,
-    rid: Option<String>,
-}
-
-impl DrawingChartBuilder {
-    fn new(kind: DrawingAnchorKind, e: &BytesStart<'_>) -> Self {
-        Self {
-            kind,
-            from: AnchorMarkerInfo::default(),
-            to: AnchorMarkerInfo::default(),
-            pos: AnchorPositionInfo::default(),
-            ext: None,
-            edit_as: attr_value(e, b"editAs"),
-            rid: None,
-        }
-    }
-
-    fn finish(self) -> Option<DrawingChartRef> {
-        let rid = self.rid?;
-        let anchor = match self.kind {
-            DrawingAnchorKind::OneCell => ImageAnchorInfo::OneCell {
-                from: self.from,
-                ext: self.ext,
-            },
-            DrawingAnchorKind::TwoCell => ImageAnchorInfo::TwoCell {
-                from: self.from,
-                to: self.to,
-                edit_as: self.edit_as.unwrap_or_else(|| "oneCell".to_string()),
-            },
-            DrawingAnchorKind::Absolute => ImageAnchorInfo::Absolute {
-                pos: self.pos,
-                ext: self.ext.unwrap_or_default(),
-            },
-        };
-        Some(DrawingChartRef { rid, anchor })
+        Some(DrawingObjectRef { rid, anchor })
     }
 }
 
@@ -4144,26 +4096,43 @@ enum MarkerTextTarget {
 }
 
 fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
+    parse_drawing_objects(xml, DrawingObjectKind::Image)
+}
+
+fn parse_drawing_charts(xml: &str) -> Result<Vec<DrawingChartRef>> {
+    parse_drawing_objects(xml, DrawingObjectKind::Chart)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrawingObjectKind {
+    Image,
+    Chart,
+}
+
+fn parse_drawing_objects(
+    xml: &str,
+    object_kind: DrawingObjectKind,
+) -> Result<Vec<DrawingObjectRef>> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut out = Vec::new();
-    let mut current: Option<DrawingImageBuilder> = None;
+    let mut current: Option<DrawingObjectBuilder> = None;
     let mut marker_slot: Option<MarkerSlot> = None;
     let mut marker_text: Option<MarkerTextTarget> = None;
-    let mut in_pic = false;
+    let mut in_target_frame = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
                 b"oneCellAnchor" => {
-                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::OneCell, &e));
+                    current = Some(DrawingObjectBuilder::new(DrawingAnchorKind::OneCell, &e));
                 }
                 b"twoCellAnchor" => {
-                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::TwoCell, &e));
+                    current = Some(DrawingObjectBuilder::new(DrawingAnchorKind::TwoCell, &e));
                 }
                 b"absoluteAnchor" => {
-                    current = Some(DrawingImageBuilder::new(DrawingAnchorKind::Absolute, &e));
+                    current = Some(DrawingObjectBuilder::new(DrawingAnchorKind::Absolute, &e));
                 }
                 b"from" if current.is_some() => marker_slot = Some(MarkerSlot::From),
                 b"to" if current.is_some() => marker_slot = Some(MarkerSlot::To),
@@ -4175,16 +4144,31 @@ fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
                 b"rowOff" if marker_slot.is_some() => {
                     marker_text = Some(MarkerTextTarget::RowOff);
                 }
-                b"pic" if current.is_some() => in_pic = true,
+                b"pic" if object_kind == DrawingObjectKind::Image && current.is_some() => {
+                    in_target_frame = true;
+                }
+                b"graphicFrame" if object_kind == DrawingObjectKind::Chart && current.is_some() => {
+                    in_target_frame = true;
+                }
                 b"pos" => apply_anchor_pos(&mut current, &e),
-                b"ext" if !in_pic => apply_anchor_ext(&mut current, &e),
-                b"blip" => apply_blip_rid(&mut current, &e),
+                b"ext" if !in_target_frame => apply_anchor_ext(&mut current, &e),
+                b"blip" if object_kind == DrawingObjectKind::Image => {
+                    apply_blip_rid(&mut current, &e);
+                }
+                b"chart" if object_kind == DrawingObjectKind::Chart => {
+                    apply_chart_rid(&mut current, &e);
+                }
                 _ => {}
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"pos" => apply_anchor_pos(&mut current, &e),
-                b"ext" if !in_pic => apply_anchor_ext(&mut current, &e),
-                b"blip" => apply_blip_rid(&mut current, &e),
+                b"ext" if !in_target_frame => apply_anchor_ext(&mut current, &e),
+                b"blip" if object_kind == DrawingObjectKind::Image => {
+                    apply_blip_rid(&mut current, &e);
+                }
+                b"chart" if object_kind == DrawingObjectKind::Chart => {
+                    apply_chart_rid(&mut current, &e);
+                }
                 _ => {}
             },
             Ok(Event::Text(e)) => {
@@ -4205,12 +4189,15 @@ fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
                     marker_slot = None;
                     marker_text = None;
                 }
-                b"pic" => in_pic = false,
+                b"pic" if object_kind == DrawingObjectKind::Image => in_target_frame = false,
+                b"graphicFrame" if object_kind == DrawingObjectKind::Chart => {
+                    in_target_frame = false;
+                }
                 b"oneCellAnchor" | b"twoCellAnchor" | b"absoluteAnchor" => {
                     marker_slot = None;
                     marker_text = None;
-                    in_pic = false;
-                    if let Some(builder) = current.take().and_then(DrawingImageBuilder::finish) {
+                    in_target_frame = false;
+                    if let Some(builder) = current.take().and_then(DrawingObjectBuilder::finish) {
                         out.push(builder);
                     }
                 }
@@ -4226,90 +4213,7 @@ fn parse_drawing_images(xml: &str) -> Result<Vec<DrawingImageRef>> {
     Ok(out)
 }
 
-fn parse_drawing_charts(xml: &str) -> Result<Vec<DrawingChartRef>> {
-    let mut reader = XmlReader::from_str(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut out = Vec::new();
-    let mut current: Option<DrawingChartBuilder> = None;
-    let mut marker_slot: Option<MarkerSlot> = None;
-    let mut marker_text: Option<MarkerTextTarget> = None;
-    let mut in_graphic_frame = false;
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => match e.local_name().as_ref() {
-                b"oneCellAnchor" => {
-                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::OneCell, &e));
-                }
-                b"twoCellAnchor" => {
-                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::TwoCell, &e));
-                }
-                b"absoluteAnchor" => {
-                    current = Some(DrawingChartBuilder::new(DrawingAnchorKind::Absolute, &e));
-                }
-                b"from" if current.is_some() => marker_slot = Some(MarkerSlot::From),
-                b"to" if current.is_some() => marker_slot = Some(MarkerSlot::To),
-                b"col" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Col),
-                b"row" if marker_slot.is_some() => marker_text = Some(MarkerTextTarget::Row),
-                b"colOff" if marker_slot.is_some() => {
-                    marker_text = Some(MarkerTextTarget::ColOff);
-                }
-                b"rowOff" if marker_slot.is_some() => {
-                    marker_text = Some(MarkerTextTarget::RowOff);
-                }
-                b"graphicFrame" if current.is_some() => in_graphic_frame = true,
-                b"pos" => apply_chart_anchor_pos(&mut current, &e),
-                b"ext" if !in_graphic_frame => apply_chart_anchor_ext(&mut current, &e),
-                b"chart" => apply_chart_rid(&mut current, &e),
-                _ => {}
-            },
-            Ok(Event::Empty(e)) => match e.local_name().as_ref() {
-                b"pos" => apply_chart_anchor_pos(&mut current, &e),
-                b"ext" if !in_graphic_frame => apply_chart_anchor_ext(&mut current, &e),
-                b"chart" => apply_chart_rid(&mut current, &e),
-                _ => {}
-            },
-            Ok(Event::Text(e)) => {
-                if let (Some(slot), Some(target), Some(builder)) =
-                    (marker_slot, marker_text, current.as_mut())
-                {
-                    let text = e
-                        .unescape()
-                        .map_err(|err| ReaderError::Xml(format!("drawing text: {err}")))?;
-                    if let Ok(value) = text.parse::<i64>() {
-                        apply_chart_marker_value(builder, slot, target, value);
-                    }
-                }
-            }
-            Ok(Event::End(e)) => match e.local_name().as_ref() {
-                b"col" | b"row" | b"colOff" | b"rowOff" => marker_text = None,
-                b"from" | b"to" => {
-                    marker_slot = None;
-                    marker_text = None;
-                }
-                b"graphicFrame" => in_graphic_frame = false,
-                b"oneCellAnchor" | b"twoCellAnchor" | b"absoluteAnchor" => {
-                    marker_slot = None;
-                    marker_text = None;
-                    in_graphic_frame = false;
-                    if let Some(builder) = current.take().and_then(DrawingChartBuilder::finish) {
-                        out.push(builder);
-                    }
-                }
-                _ => {}
-            },
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(ReaderError::Xml(format!("failed to parse drawing: {e}"))),
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(out)
-}
-
-fn apply_anchor_pos(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+fn apply_anchor_pos(builder: &mut Option<DrawingObjectBuilder>, e: &BytesStart<'_>) {
     let Some(builder) = builder.as_mut() else {
         return;
     };
@@ -4319,52 +4223,11 @@ fn apply_anchor_pos(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_
     };
 }
 
-fn apply_chart_anchor_pos(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
-    let Some(builder) = builder.as_mut() else {
-        return;
-    };
-    builder.pos = AnchorPositionInfo {
-        x: attr_i64(e, b"x").unwrap_or_default(),
-        y: attr_i64(e, b"y").unwrap_or_default(),
-    };
-}
-
-fn apply_chart_anchor_ext(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
-    let Some(builder) = builder.as_mut() else {
-        return;
-    };
-    let Some(cx) = attr_i64(e, b"cx") else {
-        return;
-    };
-    let Some(cy) = attr_i64(e, b"cy") else {
-        return;
-    };
-    builder.ext = Some(AnchorExtentInfo { cx, cy });
-}
-
-fn apply_chart_rid(builder: &mut Option<DrawingChartBuilder>, e: &BytesStart<'_>) {
+fn apply_chart_rid(builder: &mut Option<DrawingObjectBuilder>, e: &BytesStart<'_>) {
     let Some(builder) = builder.as_mut() else {
         return;
     };
     builder.rid = attr_value(e, b"r:id").or_else(|| attr_value(e, b"id"));
-}
-
-fn apply_chart_marker_value(
-    builder: &mut DrawingChartBuilder,
-    slot: MarkerSlot,
-    target: MarkerTextTarget,
-    value: i64,
-) {
-    let marker = match slot {
-        MarkerSlot::From => &mut builder.from,
-        MarkerSlot::To => &mut builder.to,
-    };
-    match target {
-        MarkerTextTarget::Col => marker.col = value,
-        MarkerTextTarget::Row => marker.row = value,
-        MarkerTextTarget::ColOff => marker.col_off = value,
-        MarkerTextTarget::RowOff => marker.row_off = value,
-    }
 }
 
 fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInfo>> {
@@ -4951,7 +4814,7 @@ fn chart_kind(local: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn apply_anchor_ext(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+fn apply_anchor_ext(builder: &mut Option<DrawingObjectBuilder>, e: &BytesStart<'_>) {
     let Some(builder) = builder.as_mut() else {
         return;
     };
@@ -4964,7 +4827,7 @@ fn apply_anchor_ext(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_
     builder.ext = Some(AnchorExtentInfo { cx, cy });
 }
 
-fn apply_blip_rid(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>) {
+fn apply_blip_rid(builder: &mut Option<DrawingObjectBuilder>, e: &BytesStart<'_>) {
     let Some(builder) = builder.as_mut() else {
         return;
     };
@@ -4972,7 +4835,7 @@ fn apply_blip_rid(builder: &mut Option<DrawingImageBuilder>, e: &BytesStart<'_>)
 }
 
 fn apply_marker_value(
-    builder: &mut DrawingImageBuilder,
+    builder: &mut DrawingObjectBuilder,
     slot: MarkerSlot,
     target: MarkerTextTarget,
     value: i64,
