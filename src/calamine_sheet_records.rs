@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::calamine_value_helpers::{
-    data_is_formula_text, data_to_plain_py, data_type_name, map_error_formula,
+    data_is_formula_text, data_to_plain_py, data_type_name, map_error_formula, row_col_to_a1,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -53,6 +53,21 @@ pub(crate) fn analyze_sheet_record(
         should_emit_formula,
         should_emit,
     }
+}
+
+pub(crate) fn new_record_dict(
+    py: Python<'_>,
+    row: u32,
+    col: u32,
+    options: SheetRecordOptions,
+) -> PyResult<Bound<'_, PyDict>> {
+    let record = PyDict::new(py);
+    record.set_item("row", row + 1)?;
+    record.set_item("column", col + 1)?;
+    if options.include_coordinate {
+        record.set_item("coordinate", row_col_to_a1(row, col))?;
+    }
+    Ok(record)
 }
 
 pub(crate) fn populate_formula_fields(

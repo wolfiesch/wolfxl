@@ -162,7 +162,7 @@ Current largest WolfXL hotspots:
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
 | `src/wolfxl/mod.rs` | 2491 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
-| `src/calamine_styled_backend.rs` | 3932 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
+| `src/calamine_styled_backend.rs` | 3927 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
 | `src/native_writer_backend.rs` | 527 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
 | `python/wolfxl/_worksheet.py` | 1395 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
 | `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 386 | Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage. |
@@ -762,7 +762,9 @@ First no-behavior split target, completed 2026-04-28:
 133. Sheet-record emission decisions plus formula/value PyDict population moved
    into `src/calamine_sheet_records.rs` on 2026-04-29, leaving the backend to
    provide style-cache callbacks and append the completed records.
-134. Next helper candidate: continue splitting Rust save orchestration only
+134. Base sheet-record PyDict creation moved to `src/calamine_sheet_records.rs`
+   on 2026-04-29; only style enrichment remains in the backend record path.
+135. Next helper candidate: continue splitting Rust save orchestration only
    where the state boundary is clean. The next high-value but higher-risk
    targets are `XlsxPatcher::do_save` phase extraction, then
    `src/calamine_styled_backend.rs` record-building / OOXML feature-reader

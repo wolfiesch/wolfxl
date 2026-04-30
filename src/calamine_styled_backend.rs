@@ -18,7 +18,8 @@ use zip::ZipArchive;
 use crate::calamine_format_helpers::{openpyxl_builtin_num_fmt, strip_excel_padding};
 use crate::calamine_record_format::{RawFontInfo, RecordFormatInfo};
 use crate::calamine_sheet_records::{
-    analyze_sheet_record, populate_formula_fields, populate_record_value, SheetRecordOptions,
+    analyze_sheet_record, new_record_dict, populate_formula_fields, populate_record_value,
+    SheetRecordOptions,
 };
 use crate::calamine_style_dicts::{
     maybe_set_edge, populate_alignment, populate_fill, populate_font, set_edge_from_style,
@@ -1511,13 +1512,7 @@ impl CalamineStyledBook {
             return Ok(());
         }
 
-        let record = PyDict::new(py);
-        record.set_item("row", row + 1)?;
-        record.set_item("column", col + 1)?;
-        if options.include_coordinate {
-            record.set_item("coordinate", row_col_to_a1(row, col))?;
-        }
-
+        let record = new_record_dict(py, row, col, options)?;
         if let Some(formula_text) = formula {
             populate_formula_fields(py, &record, value, formula_text, options, decision)?;
         }
