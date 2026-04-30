@@ -13,9 +13,6 @@ exported from the Python extension.
 The `calamine-styles` dependency is still a live runtime dependency. It is not
 safe to remove yet because these surfaces still compile against it:
 
-- `src/calamine_styled_backend.rs` and helper modules remain in the worktree
-  as retired legacy code until the dirty local edits touching those files are
-  parked or intentionally integrated.
 - `src/calamine_xlsb_xls_backend.rs` for value-only `.xlsb` and `.xls` reads.
 - `crates/wolfxl-core`, which still advertises and implements multi-format
   preview reads through calamine-backed `.xlsx` / `.xls` / `.xlsb` / `.ods`
@@ -27,23 +24,24 @@ safe to remove yet because these surfaces still compile against it:
 
 The current honest launch claim is therefore: WolfXL has a native default
 reader for normal eager `.xlsx` loads, streaming bootstrap reads, permissive
-topology recovery, and modify-mode bootstrap reads, with no exported legacy
-styled `.xlsx` backend. WolfXL is not yet dependency-free from Calamine across
-the full read stack.
+topology recovery, and modify-mode bootstrap reads, with the retired styled
+`.xlsx` backend files deleted. WolfXL is not yet dependency-free from Calamine
+across the full read stack.
 
 ## Surfaces that can be removed after native parity
 
-These should be removable after the dirty retired-backend edits are parked or
-intentionally integrated:
+Removed in the native-reader sprint:
 
-- The styled `.xlsx` backend modules:
-  - `src/calamine_styled_backend.rs`
-  - `src/calamine_format_helpers.rs`
-  - `src/calamine_record_format.rs`
-  - `src/calamine_sheet_records.rs`
-  - `src/calamine_style_dicts.rs`
-  - `src/calamine_styled_array_formulas.rs`
-  - `src/calamine_value_helpers.rs`
+- `src/calamine_styled_backend.rs`
+- `src/calamine_format_helpers.rs`
+- `src/calamine_record_format.rs`
+- `src/calamine_sheet_records.rs`
+- `src/calamine_style_dicts.rs`
+- `src/calamine_styled_array_formulas.rs`
+- `src/calamine_value_helpers.rs`
+
+Still to finish:
+
 - README, compatibility, trust, release-note, and launch-copy references that
   describe `.xlsx` reading as calamine-backed.
 
@@ -110,8 +108,7 @@ The docs should separate three facts:
 
 ### Stage 2: retire legacy styled `.xlsx`
 
-- Delete the styled `.xlsx` calamine modules once no tests or runtime code
-  import them.
+- Keep the styled `.xlsx` calamine modules deleted.
 - Keep `build_info()` distinguishing native `.xlsx` from compatibility binary
   readers.
 - Run `rg "CalamineStyledBook|WOLFXL_CALAMINE_READER|calamine_styled"`.

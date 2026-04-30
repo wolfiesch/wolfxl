@@ -80,8 +80,7 @@ pub fn parse_workbook_sheet_rids(xml: &str) -> PyResult<Vec<(String, String)>> {
 pub fn parse_relationship_targets(xml: &str) -> PyResult<HashMap<String, String>> {
     // Body-only swap: the wolfxl-rels crate is the single source of truth
     // for the rels grammar. Signature (and lenient skipping of malformed
-    // entries) are preserved so call sites in calamine_styled_backend.rs
-    // and src/wolfxl/mod.rs need not change.
+    // entries) are preserved so existing patcher call sites need not change.
     let graph = wolfxl_rels::RelsGraph::parse(xml.as_bytes())
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to parse rels: {e}")))?;
     let mut out: HashMap<String, String> = HashMap::with_capacity(graph.len());

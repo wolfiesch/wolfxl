@@ -1,10 +1,9 @@
 //! Sprint Κ Pod-α — `.xlsb` / `.xls` value-only read backends.
 //!
 //! Two new pyclasses, [`CalamineXlsbBook`] and [`CalamineXlsBook`],
-//! present the same Python-facing read API as the existing
-//! [`crate::calamine_styled_backend::CalamineStyledBook`] for **values
-//! + cached formula results + sheet names + dimensions + bulk cell
-//! records**.  All style-related accessors strictly raise
+//! present the same Python-facing value-read API as the native `.xlsx`
+//! reader for **values + cached formula results + sheet names +
+//! dimensions + bulk cell records**.  All style-related accessors strictly raise
 //! `NotImplementedError` with the message
 //! `"styles not supported for .{xlsb|xls} files; use .xlsx for
 //! style-aware reads"`.
@@ -44,7 +43,7 @@ pub use wolfxl_classify::{
 // version-skew between the cdylib and the helper crate.
 
 // ---------------------------------------------------------------------------
-// Local helpers (mirror the small subset we need from calamine_styled_backend)
+// Local helpers for the binary-format value contract.
 // ---------------------------------------------------------------------------
 
 fn map_error_value(err_str: &str) -> &'static str {
@@ -61,9 +60,8 @@ fn map_error_value(err_str: &str) -> &'static str {
     }
 }
 
-/// Convert a calamine [`Data`] cell value to the dict-shaped Python
-/// payload used by `CalamineStyledBook.read_cell_value` (the same
-/// contract Pod-β consumes via the dispatcher).
+/// Convert a calamine [`Data`] cell value to the dict-shaped Python payload
+/// used by the workbook-source dispatcher.
 fn data_to_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
     match value {
         Data::Empty => cell_blank(py),
@@ -344,8 +342,7 @@ macro_rules! define_calamine_book {
                 )))
             }
 
-            /// Bulk-read all sheet values as a `list[list[dict]]`
-            /// mirroring `CalamineStyledBook.read_sheet_values`.
+            /// Bulk-read all sheet values as a `list[list[dict]]`.
             #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
             pub fn read_sheet_values(
                 &mut self,

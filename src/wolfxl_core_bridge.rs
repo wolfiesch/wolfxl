@@ -2,12 +2,11 @@
 //!
 //! Sprint 2 task #22a. This module is purely additive: it exposes
 //! `wolfxl_core`'s value-add functions (`classify_format`,
-//! `classify_sheet`, `infer_sheet_schema`) to Python so future call
-//! sites in `calamine_styled_backend.rs` can delegate instead of
-//! reimplementing the same heuristics. The duplicate per-cell
-//! classifiers inside the cdylib are *not* replaced here — that wiring
-//! is task #22b, which lands as a follow-up PR to keep this one
-//! easy to review.
+//! `classify_sheet`, `infer_sheet_schema`) to Python so cdylib call sites can
+//! share the same heuristics instead of reimplementing them. The duplicate
+//! per-cell classifiers inside the cdylib are *not* replaced here — that
+//! wiring is task #22b, which lands as a follow-up PR to keep this one easy to
+//! review.
 //!
 //! The three wrappers all follow the same shape:
 //!
