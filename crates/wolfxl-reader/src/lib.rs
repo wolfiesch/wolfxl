@@ -97,6 +97,8 @@ pub struct Cell {
     pub value: CellValue,
     /// Formula text without a leading equals sign when present.
     pub formula: Option<String>,
+    /// Array/data-table formula metadata when this cell is the master.
+    pub array_formula: Option<ArrayFormulaInfo>,
 }
 
 /// Native cell value model shared by future readers.
@@ -137,6 +139,7 @@ pub struct WorksheetData {
     pub hidden_columns: Vec<u32>,
     pub row_outline_levels: Vec<(u32, u8)>,
     pub column_outline_levels: Vec<(u32, u8)>,
+    pub array_formulas: HashMap<(u32, u32), ArrayFormulaInfo>,
     pub cells: Vec<Cell>,
 }
 
@@ -234,6 +237,24 @@ pub struct ConditionalFormatRule {
     pub formula: Option<String>,
     pub priority: Option<i64>,
     pub stop_if_true: Option<bool>,
+}
+
+/// Array/data-table formula metadata for a cell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrayFormulaInfo {
+    Array {
+        ref_range: String,
+        text: String,
+    },
+    DataTable {
+        ref_range: String,
+        ca: bool,
+        dt2_d: bool,
+        dtr: bool,
+        r1: Option<String>,
+        r2: Option<String>,
+    },
+    SpillChild,
 }
 
 /// Native XLSX/XLSM workbook reader.
@@ -772,7 +793,12 @@ fn parse_worksheet(
                     }
                 }
                 b"v" => active_text = Some(TextTarget::Value),
-                b"f" => active_text = Some(TextTarget::Formula),
+                b"f" => {
+                    if let Some(cell) = current.as_mut() {
+                        cell.start_formula(&e);
+                    }
+                    active_text = Some(TextTarget::Formula);
+                }
                 b"t" => {
                     if current
                         .as_ref()
@@ -809,6 +835,11 @@ fn parse_worksheet(
                 b"c" => {
                     let builder = CellBuilder::from_start(&e, row_index);
                     cells.push(builder.finish(shared_strings)?);
+                }
+                b"f" => {
+                    if let Some(cell) = current.as_mut() {
+                        cell.start_formula(&e);
+                    }
                 }
                 b"row" => {
                     let row = attr_value(&e, b"r").and_then(|v| v.parse::<u32>().ok());
@@ -948,6 +979,8 @@ fn parse_worksheet(
     row_outline_levels.sort_unstable_by_key(|(row, _)| *row);
     column_outline_levels.sort_unstable_by_key(|(col, _)| *col);
 
+    let array_formulas = build_array_formula_map(&cells);
+
     Ok(WorksheetData {
         dimension,
         merged_ranges,
@@ -963,6 +996,7 @@ fn parse_worksheet(
         hidden_columns,
         row_outline_levels,
         column_outline_levels,
+        array_formulas,
         cells,
     })
 }
@@ -1031,6 +1065,57 @@ fn update_column_visibility(
             column_outline_levels.remove(&col);
         }
     }
+}
+
+fn build_array_formula_map(cells: &[Cell]) -> HashMap<(u32, u32), ArrayFormulaInfo> {
+    let mut out = HashMap::new();
+    for cell in cells {
+        let Some(info) = &cell.array_formula else {
+            continue;
+        };
+        out.insert((cell.row, cell.col), info.clone());
+        match info {
+            ArrayFormulaInfo::Array { ref_range, .. }
+            | ArrayFormulaInfo::DataTable { ref_range, .. } => {
+                mark_array_spill_children(&mut out, ref_range, (cell.row, cell.col));
+            }
+            ArrayFormulaInfo::SpillChild => {}
+        }
+    }
+    out
+}
+
+fn mark_array_spill_children(
+    out: &mut HashMap<(u32, u32), ArrayFormulaInfo>,
+    ref_range: &str,
+    master: (u32, u32),
+) {
+    let Some((min_row, min_col, max_row, max_col)) = parse_range_bounds_1based(ref_range) else {
+        return;
+    };
+    for row in min_row..=max_row {
+        for col in min_col..=max_col {
+            if (row, col) != master {
+                out.entry((row, col))
+                    .or_insert(ArrayFormulaInfo::SpillChild);
+            }
+        }
+    }
+}
+
+fn parse_range_bounds_1based(range: &str) -> Option<(u32, u32, u32, u32)> {
+    let clean = range.replace('$', "").to_ascii_uppercase();
+    let mut parts = clean.split(':');
+    let start = parts.next()?;
+    let end = parts.next().unwrap_or(start);
+    let (start_row, start_col) = a1_to_row_col(start)?;
+    let (end_row, end_col) = a1_to_row_col(end)?;
+    Some((
+        start_row.min(end_row),
+        start_col.min(end_col),
+        start_row.max(end_row),
+        start_col.max(end_col),
+    ))
 }
 
 #[derive(Debug)]
@@ -1522,6 +1607,13 @@ struct CellBuilder {
     value_text: String,
     inline_text: String,
     formula_text: String,
+    formula_kind: Option<String>,
+    formula_ref: Option<String>,
+    formula_ca: bool,
+    formula_dt2_d: bool,
+    formula_dtr: bool,
+    formula_r1: Option<String>,
+    formula_r2: Option<String>,
 }
 
 impl CellBuilder {
@@ -1550,7 +1642,24 @@ impl CellBuilder {
             value_text: String::new(),
             inline_text: String::new(),
             formula_text: String::new(),
+            formula_kind: None,
+            formula_ref: None,
+            formula_ca: false,
+            formula_dt2_d: false,
+            formula_dtr: false,
+            formula_r1: None,
+            formula_r2: None,
         }
+    }
+
+    fn start_formula(&mut self, e: &BytesStart<'_>) {
+        self.formula_kind = attr_value(e, b"t");
+        self.formula_ref = attr_value(e, b"ref");
+        self.formula_ca = attr_truthy(attr_value(e, b"ca").as_deref());
+        self.formula_dt2_d = attr_truthy(attr_value(e, b"dt2D").as_deref());
+        self.formula_dtr = attr_truthy(attr_value(e, b"dtr").as_deref());
+        self.formula_r1 = attr_value(e, b"r1");
+        self.formula_r2 = attr_value(e, b"r2");
     }
 
     fn push_text(&mut self, target: TextTarget, text: &str) {
@@ -1590,6 +1699,21 @@ impl CellBuilder {
                 }
             }
         };
+        let array_formula = match self.formula_kind.as_deref() {
+            Some("array") => Some(ArrayFormulaInfo::Array {
+                ref_range: self.formula_ref.clone().unwrap_or_default(),
+                text: self.formula_text.clone(),
+            }),
+            Some("dataTable") => Some(ArrayFormulaInfo::DataTable {
+                ref_range: self.formula_ref.clone().unwrap_or_default(),
+                ca: self.formula_ca,
+                dt2_d: self.formula_dt2_d,
+                dtr: self.formula_dtr,
+                r1: self.formula_r1.clone(),
+                r2: self.formula_r2.clone(),
+            }),
+            _ => None,
+        };
         Ok(Cell {
             row: self.row,
             col: self.col,
@@ -1602,6 +1726,7 @@ impl CellBuilder {
             } else {
                 Some(self.formula_text)
             },
+            array_formula,
         })
     }
 }

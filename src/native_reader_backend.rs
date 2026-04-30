@@ -16,7 +16,8 @@ type PyObject = Py<PyAny>;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
-    Cell, CellDataType, CellValue, NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
+    ArrayFormulaInfo, Cell, CellDataType, CellValue, NativeXlsxBook as NativeReaderBook, PaneMode,
+    WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -494,8 +495,51 @@ impl NativeXlsxBook {
             .map(|width| strip_excel_padding(width.width)))
     }
 
-    pub fn read_cell_array_formula(&self, py: Python<'_>, _sheet: &str, _a1: &str) -> PyObject {
-        py.None()
+    pub fn read_cell_array_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let Some(info) = self
+            .ensure_sheet(sheet)?
+            .array_formulas
+            .get(&(row, col))
+            .cloned()
+        else {
+            return Ok(py.None());
+        };
+        let d = PyDict::new(py);
+        match info {
+            ArrayFormulaInfo::Array { ref_range, text } => {
+                d.set_item("kind", "array")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("text", text)?;
+            }
+            ArrayFormulaInfo::DataTable {
+                ref_range,
+                ca,
+                dt2_d,
+                dtr,
+                r1,
+                r2,
+            } => {
+                d.set_item("kind", "data_table")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("ca", ca)?;
+                d.set_item("dt2D", dt2_d)?;
+                d.set_item("dtr", dtr)?;
+                d.set_item("r1", r1)?;
+                d.set_item("r2", r2)?;
+            }
+            ArrayFormulaInfo::SpillChild => {
+                d.set_item("kind", "spill_child")?;
+            }
+        }
+        Ok(d.into())
     }
 
     pub fn read_cell_rich_text(&self, py: Python<'_>, _sheet: &str, _a1: &str) -> PyObject {
