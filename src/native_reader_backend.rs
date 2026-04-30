@@ -17,7 +17,7 @@ type PyObject = Py<PyAny>;
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, ArrayFormulaInfo, BorderInfo, Cell, CellDataType, CellValue, FillInfo, FontInfo,
-    InlineFontProps, NativeXlsxBook as NativeReaderBook, PaneMode, WorksheetData,
+    InlineFontProps, NativeXlsxBook as NativeReaderBook, PaneMode, SheetProtection, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -460,6 +460,14 @@ impl NativeXlsxBook {
             result.append(d)?;
         }
         Ok(result.into())
+    }
+
+    pub fn read_sheet_protection(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let protection = self.ensure_sheet(sheet)?.sheet_protection.clone();
+        match protection {
+            Some(protection) => sheet_protection_to_py(py, &protection),
+            None => Ok(py.None()),
+        }
     }
 
     pub fn read_named_ranges(&self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
@@ -1055,6 +1063,30 @@ fn formula_to_py(py: Python<'_>, formula: &str) -> PyResult<PyObject> {
     d.set_item("type", "formula")?;
     d.set_item("formula", &formula)?;
     d.set_item("value", &formula)?;
+    Ok(d.into())
+}
+
+fn sheet_protection_to_py(py: Python<'_>, protection: &SheetProtection) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("sheet", protection.sheet)?;
+    d.set_item("objects", protection.objects)?;
+    d.set_item("scenarios", protection.scenarios)?;
+    d.set_item("format_cells", protection.format_cells)?;
+    d.set_item("format_columns", protection.format_columns)?;
+    d.set_item("format_rows", protection.format_rows)?;
+    d.set_item("insert_columns", protection.insert_columns)?;
+    d.set_item("insert_rows", protection.insert_rows)?;
+    d.set_item("insert_hyperlinks", protection.insert_hyperlinks)?;
+    d.set_item("delete_columns", protection.delete_columns)?;
+    d.set_item("delete_rows", protection.delete_rows)?;
+    d.set_item("select_locked_cells", protection.select_locked_cells)?;
+    d.set_item("sort", protection.sort)?;
+    d.set_item("auto_filter", protection.auto_filter)?;
+    d.set_item("pivot_tables", protection.pivot_tables)?;
+    d.set_item("select_unlocked_cells", protection.select_unlocked_cells)?;
+    if let Some(password_hash) = &protection.password_hash {
+        d.set_item("password_hash", password_hash)?;
+    }
     Ok(d.into())
 }
 

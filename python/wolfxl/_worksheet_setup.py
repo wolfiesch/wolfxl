@@ -100,10 +100,39 @@ def get_sheet_view(ws: Worksheet) -> Any:
 def get_protection(ws: Worksheet) -> Any:
     """Return the lazy sheet protection object."""
     if ws._protection is None:  # noqa: SLF001
-        from wolfxl.worksheet.protection import SheetProtection
-
-        ws._protection = SheetProtection()  # noqa: SLF001
+        workbook = ws._workbook  # noqa: SLF001
+        payload = None
+        reader = getattr(workbook, "_rust_reader", None)
+        if reader is not None and hasattr(reader, "read_sheet_protection"):
+            payload = reader.read_sheet_protection(ws._title)  # noqa: SLF001
+        ws._protection = _sheet_protection_from_payload(payload)  # noqa: SLF001
     return ws._protection  # noqa: SLF001
+
+
+def _sheet_protection_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.protection import SheetProtection
+
+    if not isinstance(payload, dict):
+        return SheetProtection()
+    return SheetProtection(
+        sheet=bool(payload.get("sheet", False)),
+        objects=bool(payload.get("objects", False)),
+        scenarios=bool(payload.get("scenarios", False)),
+        formatCells=bool(payload.get("format_cells", True)),
+        formatColumns=bool(payload.get("format_columns", True)),
+        formatRows=bool(payload.get("format_rows", True)),
+        insertColumns=bool(payload.get("insert_columns", True)),
+        insertRows=bool(payload.get("insert_rows", True)),
+        insertHyperlinks=bool(payload.get("insert_hyperlinks", True)),
+        deleteColumns=bool(payload.get("delete_columns", True)),
+        deleteRows=bool(payload.get("delete_rows", True)),
+        selectLockedCells=bool(payload.get("select_locked_cells", False)),
+        sort=bool(payload.get("sort", True)),
+        autoFilter=bool(payload.get("auto_filter", True)),
+        pivotTables=bool(payload.get("pivot_tables", True)),
+        selectUnlockedCells=bool(payload.get("select_unlocked_cells", False)),
+        password=payload.get("password_hash"),
+    )
 
 
 def get_row_breaks(ws: Worksheet) -> Any:

@@ -141,6 +141,7 @@ pub struct WorksheetData {
     pub row_heights: HashMap<u32, RowHeight>,
     pub column_widths: Vec<ColumnWidth>,
     pub data_validations: Vec<DataValidation>,
+    pub sheet_protection: Option<SheetProtection>,
     pub tables: Vec<Table>,
     pub conditional_formats: Vec<ConditionalFormatRule>,
     pub hidden_rows: Vec<u32>,
@@ -214,6 +215,28 @@ pub struct DataValidation {
     pub allow_blank: bool,
     pub error_title: Option<String>,
     pub error: Option<String>,
+}
+
+/// Parsed worksheet protection flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetProtection {
+    pub sheet: bool,
+    pub objects: bool,
+    pub scenarios: bool,
+    pub format_cells: bool,
+    pub format_columns: bool,
+    pub format_rows: bool,
+    pub insert_columns: bool,
+    pub insert_rows: bool,
+    pub insert_hyperlinks: bool,
+    pub delete_columns: bool,
+    pub delete_rows: bool,
+    pub select_locked_cells: bool,
+    pub sort: bool,
+    pub auto_filter: bool,
+    pub pivot_tables: bool,
+    pub select_unlocked_cells: bool,
+    pub password_hash: Option<String>,
 }
 
 /// Parsed worksheet table metadata.
@@ -1312,6 +1335,7 @@ fn parse_worksheet(
     let mut row_heights = HashMap::new();
     let mut column_widths = Vec::new();
     let mut data_validations = Vec::new();
+    let mut sheet_protection = None;
     let mut conditional_formats = Vec::new();
     let mut hidden_rows: HashMap<u32, bool> = HashMap::new();
     let mut hidden_columns: HashMap<u32, bool> = HashMap::new();
@@ -1358,6 +1382,9 @@ fn parse_worksheet(
                 }
                 b"dataValidation" => {
                     current_validation = Some(DataValidationBuilder::from_start(&e));
+                }
+                b"sheetProtection" => {
+                    sheet_protection = Some(SheetProtection::from_start(&e));
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1467,6 +1494,9 @@ fn parse_worksheet(
                     if !validation.range.trim().is_empty() {
                         data_validations.push(validation);
                     }
+                }
+                b"sheetProtection" => {
+                    sheet_protection = Some(SheetProtection::from_start(&e));
                 }
                 b"conditionalFormatting" => {
                     current_conditional_range = attr_value(&e, b"sqref");
@@ -1622,6 +1652,7 @@ fn parse_worksheet(
         row_heights,
         column_widths,
         data_validations,
+        sheet_protection,
         tables,
         conditional_formats,
         hidden_rows,
@@ -1820,6 +1851,30 @@ fn parse_range_bounds_1based(range: &str) -> Option<(u32, u32, u32, u32)> {
         start_row.max(end_row),
         start_col.max(end_col),
     ))
+}
+
+impl SheetProtection {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            sheet: attr_bool_default(e, b"sheet", false),
+            objects: attr_bool_default(e, b"objects", false),
+            scenarios: attr_bool_default(e, b"scenarios", false),
+            format_cells: attr_bool_default(e, b"formatCells", true),
+            format_columns: attr_bool_default(e, b"formatColumns", true),
+            format_rows: attr_bool_default(e, b"formatRows", true),
+            insert_columns: attr_bool_default(e, b"insertColumns", true),
+            insert_rows: attr_bool_default(e, b"insertRows", true),
+            insert_hyperlinks: attr_bool_default(e, b"insertHyperlinks", true),
+            delete_columns: attr_bool_default(e, b"deleteColumns", true),
+            delete_rows: attr_bool_default(e, b"deleteRows", true),
+            select_locked_cells: attr_bool_default(e, b"selectLockedCells", false),
+            sort: attr_bool_default(e, b"sort", true),
+            auto_filter: attr_bool_default(e, b"autoFilter", true),
+            pivot_tables: attr_bool_default(e, b"pivotTables", true),
+            select_unlocked_cells: attr_bool_default(e, b"selectUnlockedCells", false),
+            password_hash: attr_value(e, b"password"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -2561,6 +2616,12 @@ fn attr_truthy(value: Option<&str>) -> bool {
     matches!(value, Some(v) if v != "0" && !v.eq_ignore_ascii_case("false"))
 }
 
+fn attr_bool_default(e: &BytesStart<'_>, key: &[u8], default: bool) -> bool {
+    attr_value(e, key)
+        .as_deref()
+        .map_or(default, |value| attr_truthy(Some(value)))
+}
+
 fn parse_sheet_state(value: Option<&str>) -> SheetState {
     match value {
         Some("hidden") => SheetState::Hidden,
@@ -2792,7 +2853,9 @@ mod tests {
         </dataValidations>
         <conditionalFormatting sqref="C2:C5">
             <cfRule type="cellIs" operator="greaterThan" priority="1" stopIfTrue="1"><formula>50</formula></cfRule>
-        </conditionalFormatting></worksheet>"#;
+        </conditionalFormatting>
+        <sheetProtection sheet="1" objects="1" formatCells="0" sort="0" password="C258"/>
+        </worksheet>"#;
         let shared_strings = SharedStrings {
             values: vec!["Shared".to_string()],
             rich_text: vec![None],
@@ -2854,6 +2917,28 @@ mod tests {
                 priority: Some(1),
                 stop_if_true: Some(true),
             }]
+        );
+        assert_eq!(
+            sheet.sheet_protection,
+            Some(SheetProtection {
+                sheet: true,
+                objects: true,
+                scenarios: false,
+                format_cells: false,
+                format_columns: true,
+                format_rows: true,
+                insert_columns: true,
+                insert_rows: true,
+                insert_hyperlinks: true,
+                delete_columns: true,
+                delete_rows: true,
+                select_locked_cells: false,
+                sort: false,
+                auto_filter: true,
+                pivot_tables: true,
+                select_unlocked_cells: false,
+                password_hash: Some("C258".to_string()),
+            })
         );
         assert_eq!(
             sheet.cells[0].value,
