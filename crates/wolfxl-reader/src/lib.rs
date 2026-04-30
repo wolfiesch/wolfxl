@@ -672,12 +672,14 @@ pub struct ImageInfo {
 }
 
 /// Parsed worksheet chart payload and anchor metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChartInfo {
     pub kind: String,
     pub title: Option<String>,
     pub x_axis_title: Option<String>,
     pub y_axis_title: Option<String>,
+    pub x_axis: Option<ChartAxisInfo>,
+    pub y_axis: Option<ChartAxisInfo>,
     pub legend_position: Option<String>,
     pub bar_dir: Option<String>,
     pub grouping: Option<String>,
@@ -686,6 +688,30 @@ pub struct ChartInfo {
     pub style: Option<u32>,
     pub anchor: ImageAnchorInfo,
     pub series: Vec<ChartSeriesInfo>,
+}
+
+/// Parsed chart axis metadata for native chart hydration.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChartAxisInfo {
+    pub axis_type: String,
+    pub axis_position: Option<String>,
+    pub ax_id: Option<u32>,
+    pub cross_ax: Option<u32>,
+    pub scaling_min: Option<f64>,
+    pub scaling_max: Option<f64>,
+    pub scaling_orientation: Option<String>,
+    pub scaling_log_base: Option<f64>,
+    pub num_format_code: Option<String>,
+    pub num_format_source_linked: Option<bool>,
+    pub major_unit: Option<f64>,
+    pub minor_unit: Option<f64>,
+    pub tick_lbl_pos: Option<String>,
+    pub major_tick_mark: Option<String>,
+    pub minor_tick_mark: Option<String>,
+    pub crosses: Option<String>,
+    pub crosses_at: Option<f64>,
+    pub cross_between: Option<String>,
+    pub display_unit: Option<String>,
 }
 
 /// Parsed chart series references.
@@ -4297,9 +4323,12 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
     let mut kind: Option<String> = None;
     let mut title_parts: Vec<String> = Vec::new();
     let mut current_axis: Option<Vec<u8>> = None;
+    let mut current_axis_info: Option<ChartAxisInfo> = None;
     let mut current_axis_title_parts: Vec<String> = Vec::new();
     let mut x_axis_title: Option<String> = None;
     let mut y_axis_title: Option<String> = None;
+    let mut x_axis: Option<ChartAxisInfo> = None;
+    let mut y_axis: Option<ChartAxisInfo> = None;
     let mut val_axis_titles_seen = 0usize;
     let mut legend_position: Option<String> = None;
     let mut bar_dir: Option<String> = None;
@@ -4328,7 +4357,10 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                 );
                 if chart_axis_name(&local).is_some() {
                     current_axis = Some(local.clone());
+                    current_axis_info = Some(new_chart_axis_info(&local, &e));
                     current_axis_title_parts.clear();
+                } else if let Some(axis) = current_axis_info.as_mut() {
+                    apply_chart_axis_start(axis, &local, &e);
                 }
                 stack.push(local);
             }
@@ -4346,6 +4378,9 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                     &mut style,
                     &mut current_series,
                 );
+                if let Some(axis) = current_axis_info.as_mut() {
+                    apply_chart_axis_start(axis, &local, &e);
+                }
             }
             Ok(Event::Text(e)) => {
                 let text = e
@@ -4369,13 +4404,17 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
                         series.push(ser);
                     }
                 } else if chart_axis_name(local).is_some() {
+                    let axis_info = current_axis_info.take();
                     apply_chart_axis_title(
                         local,
                         &kind,
                         &mut val_axis_titles_seen,
                         &current_axis_title_parts,
+                        axis_info,
                         &mut x_axis_title,
                         &mut y_axis_title,
+                        &mut x_axis,
+                        &mut y_axis,
                     );
                     current_axis = None;
                     current_axis_title_parts.clear();
@@ -4402,6 +4441,8 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
         title,
         x_axis_title,
         y_axis_title,
+        x_axis,
+        y_axis,
         legend_position,
         bar_dir,
         grouping,
@@ -4520,37 +4561,100 @@ fn chart_axis_name(local: &[u8]) -> Option<&'static str> {
     }
 }
 
+fn new_chart_axis_info(local: &[u8], e: &BytesStart<'_>) -> ChartAxisInfo {
+    let axis_type = match local {
+        b"catAx" => "cat",
+        b"dateAx" => "date",
+        b"serAx" => "ser",
+        b"valAx" => "val",
+        _ => "unknown",
+    };
+    let mut axis = ChartAxisInfo {
+        axis_type: axis_type.to_string(),
+        ..ChartAxisInfo::default()
+    };
+    apply_chart_axis_start(&mut axis, local, e);
+    axis
+}
+
+fn apply_chart_axis_start(axis: &mut ChartAxisInfo, local: &[u8], e: &BytesStart<'_>) {
+    match local {
+        b"axId" => axis.ax_id = attr_u32(e, b"val"),
+        b"crossAx" => axis.cross_ax = attr_u32(e, b"val"),
+        b"axPos" => axis.axis_position = attr_value(e, b"val"),
+        b"min" => axis.scaling_min = attr_f64(e, b"val"),
+        b"max" => axis.scaling_max = attr_f64(e, b"val"),
+        b"orientation" => axis.scaling_orientation = attr_value(e, b"val"),
+        b"logBase" => axis.scaling_log_base = attr_f64(e, b"val"),
+        b"numFmt" => {
+            axis.num_format_code = attr_value(e, b"formatCode");
+            axis.num_format_source_linked = attr_bool(e, b"sourceLinked");
+        }
+        b"majorUnit" => axis.major_unit = attr_f64(e, b"val"),
+        b"minorUnit" => axis.minor_unit = attr_f64(e, b"val"),
+        b"tickLblPos" => axis.tick_lbl_pos = attr_value(e, b"val"),
+        b"majorTickMark" => axis.major_tick_mark = attr_value(e, b"val"),
+        b"minorTickMark" => axis.minor_tick_mark = attr_value(e, b"val"),
+        b"crosses" => axis.crosses = attr_value(e, b"val"),
+        b"crossesAt" => axis.crosses_at = attr_f64(e, b"val"),
+        b"crossBetween" => axis.cross_between = attr_value(e, b"val"),
+        b"builtInUnit" => axis.display_unit = attr_value(e, b"val"),
+        _ => {}
+    }
+}
+
 fn apply_chart_axis_title(
     axis: &[u8],
     kind: &Option<String>,
     val_axis_titles_seen: &mut usize,
     title_parts: &[String],
+    axis_info: Option<ChartAxisInfo>,
     x_axis_title: &mut Option<String>,
     y_axis_title: &mut Option<String>,
+    x_axis: &mut Option<ChartAxisInfo>,
+    y_axis: &mut Option<ChartAxisInfo>,
 ) {
-    if title_parts.is_empty() {
-        return;
-    }
-    let title = title_parts.join("");
     match axis {
         b"catAx" | b"dateAx" | b"serAx" => {
             if x_axis_title.is_none() {
-                *x_axis_title = Some(title);
+                apply_axis_title_parts(title_parts, x_axis_title);
+            }
+            if x_axis.is_none() {
+                *x_axis = axis_info;
             }
         }
         b"valAx" => {
             if matches!(kind.as_deref(), Some("scatter" | "bubble")) {
                 *val_axis_titles_seen += 1;
                 if *val_axis_titles_seen == 1 && x_axis_title.is_none() {
-                    *x_axis_title = Some(title);
+                    apply_axis_title_parts(title_parts, x_axis_title);
+                    if x_axis.is_none() {
+                        *x_axis = axis_info;
+                    }
                 } else if y_axis_title.is_none() {
-                    *y_axis_title = Some(title);
+                    apply_axis_title_parts(title_parts, y_axis_title);
+                    if y_axis.is_none() {
+                        *y_axis = axis_info;
+                    }
+                } else if y_axis.is_none() {
+                    *y_axis = axis_info;
                 }
-            } else if y_axis_title.is_none() {
-                *y_axis_title = Some(title);
+            } else {
+                if y_axis_title.is_none() {
+                    apply_axis_title_parts(title_parts, y_axis_title);
+                }
+                if y_axis.is_none() {
+                    *y_axis = axis_info;
+                }
             }
         }
         _ => {}
+    }
+}
+
+fn apply_axis_title_parts(title_parts: &[String], target: &mut Option<String>) {
+    if !title_parts.is_empty() {
+        *target = Some(title_parts.join(""));
     }
 }
 
@@ -5654,8 +5758,22 @@ mod tests {
                             <c:val><c:numRef><c:f>'Charts'!$B$2:$B$4</c:f></c:numRef></c:val>
                         </c:ser>
                     </c:barChart>
-                    <c:catAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Month</a:t></a:r></a:p></c:rich></c:tx></c:title></c:catAx>
-                    <c:valAx><c:title><c:tx><c:rich><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title></c:valAx>
+                    <c:catAx>
+                        <c:axId val="10"/><c:axPos val="b"/><c:tickLblPos val="low"/>
+                        <c:title><c:tx><c:rich><a:p><a:r><a:t>Month</a:t></a:r></a:p></c:rich></c:tx></c:title>
+                        <c:crossAx val="100"/>
+                    </c:catAx>
+                    <c:valAx>
+                        <c:axId val="100"/>
+                        <c:scaling><c:orientation val="minMax"/><c:min val="0"/><c:max val="40"/></c:scaling>
+                        <c:axPos val="l"/>
+                        <c:title><c:tx><c:rich><a:p><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title>
+                        <c:numFmt formatCode="0.0" sourceLinked="0"/>
+                        <c:majorTickMark val="out"/><c:minorTickMark val="in"/><c:tickLblPos val="high"/>
+                        <c:crossAx val="10"/><c:crossBetween val="between"/>
+                        <c:majorUnit val="10"/><c:minorUnit val="5"/>
+                        <c:dispUnits><c:builtInUnit val="thousands"/></c:dispUnits>
+                    </c:valAx>
                 </c:plotArea>
                 <c:legend><c:legendPos val="t"/></c:legend>
             </c:chart>
@@ -5677,6 +5795,26 @@ mod tests {
         assert_eq!(chart.bar_dir.as_deref(), Some("bar"));
         assert_eq!(chart.grouping.as_deref(), Some("stacked"));
         assert_eq!(chart.vary_colors, Some(true));
+        let x_axis = chart.x_axis.as_ref().expect("x axis metadata");
+        assert_eq!(x_axis.axis_type, "cat");
+        assert_eq!(x_axis.ax_id, Some(10));
+        assert_eq!(x_axis.tick_lbl_pos.as_deref(), Some("low"));
+        let y_axis = chart.y_axis.as_ref().expect("y axis metadata");
+        assert_eq!(y_axis.axis_type, "val");
+        assert_eq!(y_axis.ax_id, Some(100));
+        assert_eq!(y_axis.cross_ax, Some(10));
+        assert_eq!(y_axis.scaling_min, Some(0.0));
+        assert_eq!(y_axis.scaling_max, Some(40.0));
+        assert_eq!(y_axis.scaling_orientation.as_deref(), Some("minMax"));
+        assert_eq!(y_axis.num_format_code.as_deref(), Some("0.0"));
+        assert_eq!(y_axis.num_format_source_linked, Some(false));
+        assert_eq!(y_axis.major_unit, Some(10.0));
+        assert_eq!(y_axis.minor_unit, Some(5.0));
+        assert_eq!(y_axis.tick_lbl_pos.as_deref(), Some("high"));
+        assert_eq!(y_axis.major_tick_mark.as_deref(), Some("out"));
+        assert_eq!(y_axis.minor_tick_mark.as_deref(), Some("in"));
+        assert_eq!(y_axis.cross_between.as_deref(), Some("between"));
+        assert_eq!(y_axis.display_unit.as_deref(), Some("thousands"));
         assert_eq!(chart.series[0].title_ref.as_deref(), Some("'Charts'!B1"));
     }
 

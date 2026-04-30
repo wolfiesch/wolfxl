@@ -18,12 +18,12 @@ use crate::util::{a1_to_row_col, cell_blank, cell_with_value};
 use wolfxl_reader::{
     AlignmentInfo, AnchorExtentInfo, AnchorMarkerInfo, AnchorPositionInfo, ArrayFormulaInfo,
     BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
-    ChartInfo, ChartSeriesInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo, FilterColumnInfo,
-    FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo,
-    InlineFontProps, NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection,
-    SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo,
-    WorkbookSecurity, WorksheetData,
+    ChartAxisInfo, ChartInfo, ChartSeriesInfo, CustomPropertyInfo, DateGroupItemInfo, FillInfo,
+    FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
+    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsxBook as NativeReaderBook,
+    PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, SelectionInfo, SheetFormatInfo,
+    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
+    SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
 };
 
 #[pyclass(unsendable, module = "wolfxl._rust")]
@@ -1428,6 +1428,8 @@ fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
     d.set_item("title", chart.title.as_deref())?;
     d.set_item("x_axis_title", chart.x_axis_title.as_deref())?;
     d.set_item("y_axis_title", chart.y_axis_title.as_deref())?;
+    d.set_item("x_axis", chart_axis_to_py(py, chart.x_axis.as_ref())?)?;
+    d.set_item("y_axis", chart_axis_to_py(py, chart.y_axis.as_ref())?)?;
     d.set_item("legend_position", chart.legend_position.as_deref())?;
     d.set_item("bar_dir", chart.bar_dir.as_deref())?;
     d.set_item("grouping", chart.grouping.as_deref())?;
@@ -1440,6 +1442,33 @@ fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
         series.append(chart_series_to_py(py, item)?)?;
     }
     d.set_item("series", series)?;
+    Ok(d.into())
+}
+
+fn chart_axis_to_py(py: Python<'_>, axis: Option<&ChartAxisInfo>) -> PyResult<PyObject> {
+    let Some(axis) = axis else {
+        return Ok(py.None());
+    };
+    let d = PyDict::new(py);
+    d.set_item("axis_type", &axis.axis_type)?;
+    d.set_item("axis_position", axis.axis_position.as_deref())?;
+    d.set_item("ax_id", axis.ax_id)?;
+    d.set_item("cross_ax", axis.cross_ax)?;
+    d.set_item("scaling_min", axis.scaling_min)?;
+    d.set_item("scaling_max", axis.scaling_max)?;
+    d.set_item("scaling_orientation", axis.scaling_orientation.as_deref())?;
+    d.set_item("scaling_log_base", axis.scaling_log_base)?;
+    d.set_item("num_format_code", axis.num_format_code.as_deref())?;
+    d.set_item("num_format_source_linked", axis.num_format_source_linked)?;
+    d.set_item("major_unit", axis.major_unit)?;
+    d.set_item("minor_unit", axis.minor_unit)?;
+    d.set_item("tick_lbl_pos", axis.tick_lbl_pos.as_deref())?;
+    d.set_item("major_tick_mark", axis.major_tick_mark.as_deref())?;
+    d.set_item("minor_tick_mark", axis.minor_tick_mark.as_deref())?;
+    d.set_item("crosses", axis.crosses.as_deref())?;
+    d.set_item("crosses_at", axis.crosses_at)?;
+    d.set_item("cross_between", axis.cross_between.as_deref())?;
+    d.set_item("display_unit", axis.display_unit.as_deref())?;
     Ok(d.into())
 }
 

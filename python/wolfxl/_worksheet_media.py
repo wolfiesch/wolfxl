@@ -213,6 +213,10 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
         chart.x_axis.title = str(payload["x_axis_title"])
     if payload.get("y_axis_title") is not None and hasattr(chart, "y_axis"):
         chart.y_axis.title = str(payload["y_axis_title"])
+    if isinstance(payload.get("x_axis"), dict) and hasattr(chart, "x_axis"):
+        _hydrate_axis_from_payload(chart.x_axis, payload["x_axis"])
+    if isinstance(payload.get("y_axis"), dict) and hasattr(chart, "y_axis"):
+        _hydrate_axis_from_payload(chart.y_axis, payload["y_axis"])
     if payload.get("legend_position") is not None and chart.legend is not None:
         chart.legend.position = str(payload["legend_position"])
     if payload.get("bar_dir") is not None and hasattr(chart, "barDir"):
@@ -232,6 +236,49 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
         if isinstance(series_payload, dict)
     ]
     return chart
+
+
+def _hydrate_axis_from_payload(axis: Any, payload: dict[str, Any]) -> None:
+    from wolfxl.chart.axis import DisplayUnitsLabelList
+    from wolfxl.chart.data_source import NumFmt
+
+    scalar_attrs = {
+        "ax_id": "axId",
+        "cross_ax": "crossAx",
+        "axis_position": "axPos",
+        "major_unit": "majorUnit",
+        "minor_unit": "minorUnit",
+        "tick_lbl_pos": "tickLblPos",
+        "major_tick_mark": "majorTickMark",
+        "minor_tick_mark": "minorTickMark",
+        "crosses": "crosses",
+        "crosses_at": "crossesAt",
+        "cross_between": "crossBetween",
+    }
+    for key, attr in scalar_attrs.items():
+        if payload.get(key) is not None and hasattr(axis, attr):
+            setattr(axis, attr, payload[key])
+
+    if payload.get("num_format_code") is not None:
+        axis.numFmt = NumFmt(
+            formatCode=str(payload["num_format_code"]),
+            sourceLinked=bool(payload.get("num_format_source_linked") or False),
+        )
+
+    scaling = getattr(axis, "scaling", None)
+    if scaling is not None:
+        scaling_attrs = {
+            "scaling_min": "min",
+            "scaling_max": "max",
+            "scaling_orientation": "orientation",
+            "scaling_log_base": "logBase",
+        }
+        for key, attr in scaling_attrs.items():
+            if payload.get(key) is not None:
+                setattr(scaling, attr, payload[key])
+
+    if payload.get("display_unit") is not None and hasattr(axis, "dispUnits"):
+        axis.dispUnits = DisplayUnitsLabelList(builtInUnit=str(payload["display_unit"]))
 
 
 def _series_from_payload(kind: str, payload: dict[str, Any]) -> Any:

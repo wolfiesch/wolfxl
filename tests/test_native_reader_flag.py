@@ -476,6 +476,7 @@ def _make_sheet_properties_xlsx(path: Path) -> None:
 
 def _make_chart_xlsx(path: Path) -> None:
     from openpyxl.chart import BarChart, Reference
+    from openpyxl.chart.axis import DisplayUnitsLabelList
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -497,6 +498,14 @@ def _make_chart_xlsx(path: Path) -> None:
     chart.grouping = "stacked"
     chart.varyColors = True
     chart.legend.position = "t"
+    chart.x_axis.tickLblPos = "low"
+    chart.y_axis.majorUnit = 10
+    chart.y_axis.minorUnit = 5
+    chart.y_axis.scaling.min = 0
+    chart.y_axis.scaling.max = 40
+    chart.y_axis.numFmt = "0.0"
+    chart.y_axis.tickLblPos = "high"
+    chart.y_axis.dispUnits = DisplayUnitsLabelList(builtInUnit="thousands")
     data = Reference(ws, min_col=2, min_row=1, max_row=4)
     cats = Reference(ws, min_col=1, min_row=2, max_row=4)
     chart.add_data(data, titles_from_data=True)
@@ -1002,6 +1011,14 @@ def test_native_reader_loads_drawing_charts(
         assert chart.grouping == "stacked"
         assert chart.varyColors is True
         assert chart.legend.position == "t"
+        assert chart.x_axis.tickLblPos == "low"
+        assert chart.y_axis.majorUnit == 10
+        assert chart.y_axis.minorUnit == 5
+        assert chart.y_axis.scaling.min == 0
+        assert chart.y_axis.scaling.max == 40
+        assert chart.y_axis.numFmt.formatCode == "0.0"
+        assert chart.y_axis.tickLblPos == "high"
+        assert chart.y_axis.dispUnits.builtInUnit == "thousands"
         assert len(chart.series) == 1
         series = chart.series[0]
         assert series.tx.strRef.f == "'Charts'!B1"
