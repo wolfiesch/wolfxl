@@ -73,4 +73,5 @@ def set_comment(cell: Any, value: Any) -> None:
 
     if not isinstance(value, Comment):
         raise TypeError(f"comment must be a Comment, got {type(value).__name__}")
+    value.bind(cell)
     ws._pending_comments[coord] = value

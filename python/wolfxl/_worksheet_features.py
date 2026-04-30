@@ -27,10 +27,12 @@ def get_comments_map(ws: Worksheet) -> dict[str, Any]:
         cell_ref = entry.get("cell")
         if not cell_ref:
             continue
-        result[cell_ref] = Comment(
+        comment = Comment(
             text=entry.get("text", ""),
             author=entry.get("author") or None,
         )
+        comment.bind(ws[cell_ref])
+        result[cell_ref] = comment
     ws._comments_cache = result  # noqa: SLF001
     return result
 

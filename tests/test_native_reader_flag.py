@@ -615,6 +615,9 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert ws["A6"].comment is not None
         assert ws["A6"].comment.text == "Native reader note"
         assert ws["A6"].comment.author == "Wolf"
+        assert ws["A6"].comment.parent is ws["A6"]
+        assert ws["A6"].comment.height == 79
+        assert ws["A6"].comment.width == 144
         assert ws.row_dimensions[6].height == 24
         assert ws.column_dimensions["C"].width == 18
         validations = list(ws.data_validations)

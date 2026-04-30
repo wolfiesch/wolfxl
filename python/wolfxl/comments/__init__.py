@@ -9,6 +9,7 @@ file opened in read or modify mode.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -23,8 +24,9 @@ class Comment:
 
     text: str
     author: str | None = None
-    height: int | None = None
-    width: int | None = None
+    height: int | None = 79
+    width: int | None = 144
+    parent: Any = None
 
     @property
     def content(self) -> str:
@@ -33,6 +35,14 @@ class Comment:
     @content.setter
     def content(self, value: str) -> None:
         self.text = value
+
+    def bind(self, parent: Any) -> None:
+        """Bind this comment to a parent cell, matching openpyxl's public surface."""
+        self.parent = parent
+
+    def unbind(self) -> None:
+        """Clear the parent-cell binding."""
+        self.parent = None
 
 
 __all__ = ["Comment"]

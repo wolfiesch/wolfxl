@@ -81,6 +81,11 @@ def test_comment_visible_before_save(tmp_path: Path) -> None:
     # The getter must surface the queued value without needing a flush.
     got = ws["C3"].comment
     assert got is c
+    assert got.parent is ws["C3"]
+    assert got.height == 79
+    assert got.width == 144
+    got.unbind()
+    assert got.parent is None
 
 
 def test_comment_assign_none_removes(tmp_path: Path) -> None:
