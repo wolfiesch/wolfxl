@@ -491,6 +491,13 @@ macro_rules! define_calamine_book {
                 _cell_range: Option<&str>,
                 _data_only: bool,
                 _include_format: bool,
+                _include_empty: bool,
+                _include_formula_blanks: bool,
+                _include_coordinate: bool,
+                _include_style_id: bool,
+                _include_extended_format: bool,
+                _include_cached_formula_value: bool,
+                _include_number_format: bool,
             ) -> PyResult<()> {
                 styles_unsupported($format_name)
             }

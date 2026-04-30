@@ -262,6 +262,44 @@ class TestReadMode:
         assert records["C4"]["data_type"] == "formula"
         assert records["C4"]["formula"] == "=SUM(B2:B2)"
 
+    def test_cell_records_can_emit_number_formats_without_full_format_metadata(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        from wolfxl import load_workbook
+
+        path = tmp_path / "number-format-records.xlsx"
+        op_wb = Workbook()
+        ws = op_wb.active
+        ws.title = "Records"
+        ws["A1"] = "Period"
+        ws["A1"].font = Font(bold=True)
+        ws["A2"] = 45292
+        ws["A2"].number_format = "yyyy-mm-dd"
+        op_wb.save(path)
+        op_wb.close()
+
+        with load_workbook(str(path)) as wb:
+            no_format = {
+                record["coordinate"]: record
+                for record in wb["Records"].cell_records(include_format=False)
+            }
+            number_format_only = {
+                record["coordinate"]: record
+                for record in wb["Records"].cell_records(
+                    include_format=False,
+                    include_number_format=True,
+                )
+            }
+
+        assert "number_format" not in no_format["A2"]
+        assert number_format_only["A2"]["number_format"] == "yyyy-mm-dd"
+        assert "bold" not in number_format_only["A1"]
+        assert "style_id" not in number_format_only["A2"]
+
     def test_cell_records_can_emit_dense_empty_range(self, tmp_path: Path) -> None:
         from openpyxl import Workbook
 

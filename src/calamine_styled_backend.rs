@@ -1324,6 +1324,7 @@ impl CalamineStyledBook {
         include_style_id = true,
         include_extended_format = true,
         include_cached_formula_value = false,
+        include_number_format = false,
     ))]
     pub fn read_sheet_records(
         &mut self,
@@ -1338,12 +1339,16 @@ impl CalamineStyledBook {
         include_style_id: bool,
         include_extended_format: bool,
         include_cached_formula_value: bool,
+        include_number_format: bool,
     ) -> PyResult<PyObject> {
         self.ensure_sheet_exists(sheet)?;
         if include_format {
             self.ensure_value_and_style_caches(sheet)?;
         } else {
             self.ensure_value_caches(sheet)?;
+            if include_number_format {
+                self.ensure_cell_style_ids(sheet)?;
+            }
         }
 
         let (start_row, start_col, end_row, end_col) = {
@@ -1424,6 +1429,7 @@ impl CalamineStyledBook {
                     include_style_id,
                     include_extended_format,
                     include_cached_formula_value,
+                    include_number_format,
                 )?;
             }
             return Ok(records.into());
@@ -1461,6 +1467,7 @@ impl CalamineStyledBook {
                     include_style_id,
                     include_extended_format,
                     include_cached_formula_value,
+                    include_number_format,
                 )?;
             }
         }
@@ -2189,6 +2196,7 @@ impl CalamineStyledBook {
         include_style_id: bool,
         include_extended_format: bool,
         include_cached_formula_value: bool,
+        include_number_format: bool,
     ) -> PyResult<()> {
         // calamine writes an empty `<v/>` element on a formula cell as
         // `Some(Data::String(""))`, and renders blank cells inside the
@@ -2256,6 +2264,11 @@ impl CalamineStyledBook {
                         include_style_id,
                         include_extended_format,
                     )?;
+                } else if include_number_format {
+                    let style_id = self.record_style_id(sheet, row, col);
+                    self.populate_record_number_format_for_style_id(
+                        sheet, row, col, style_id, &record,
+                    )?;
                 }
                 records.append(record)?;
                 return Ok(());
@@ -2278,6 +2291,11 @@ impl CalamineStyledBook {
                 &record,
                 include_style_id,
                 include_extended_format,
+            )?;
+        } else if include_number_format {
+            let style_id = self.record_style_id(sheet, row, col);
+            self.populate_record_number_format_for_style_id(
+                sheet, row, col, style_id, &record,
             )?;
         }
 
@@ -2512,6 +2530,29 @@ impl CalamineStyledBook {
             info.populate_dict(d)?;
         }
 
+        Ok(())
+    }
+
+    fn populate_record_number_format_for_style_id(
+        &mut self,
+        sheet: &str,
+        row: u32,
+        col: u32,
+        style_id: Option<u32>,
+        d: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        if self.is_merged_subordinate(sheet, row, col)? {
+            return Ok(());
+        }
+        let Some(style_id) = style_id else {
+            return Ok(());
+        };
+        if style_id == 0 {
+            return Ok(());
+        }
+        if let Some(number_format) = self.resolved_number_format_for_style_id(style_id)? {
+            d.set_item("number_format", number_format)?;
+        }
         Ok(())
     }
 
