@@ -120,7 +120,7 @@ ws.add_chart(chart, "F18")
 
 | Mode | Usage | Engine | What it does |
 |------|-------|--------|--------------|
-| **Read** | `load_workbook(path)` | [calamine-styles](https://crates.io/crates/calamine-styles) | Parse XLSX with full style extraction |
+| **Read** | `load_workbook(path)` | NativeXlsxBook | Parse XLSX with values, formulas, styles, metadata, drawings, and tables |
 | **Write** | `Workbook()` | [rust_xlsxwriter](https://github.com/jmcnamara/rust_xlsxwriter) | Create new XLSX files from scratch |
 | **Modify** | `load_workbook(path, modify=True)` | XlsxPatcher | Surgical ZIP patch — only changed cells are rewritten |
 
@@ -204,7 +204,7 @@ Python-side constructor that emits the `pivotCacheRecords` snapshot.
 WolfXL's public ecosystem claim here is pending the final
 public-launch truth pass.
 
-Upstream [calamine](https://github.com/tafia/calamine) does not parse styles. WolfXL's read engine uses [calamine-styles](https://crates.io/crates/calamine-styles), a fork that adds Font/Fill/Border/Alignment/NumberFormat extraction from OOXML.
+WolfXL's public `.xlsx` reader is native. The compatibility readers for `.xlsb` and `.xls` still use Calamine-backed value and formula-cache paths.
 
 ## Batch APIs for Maximum Speed
 
