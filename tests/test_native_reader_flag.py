@@ -370,6 +370,64 @@ def _make_chart_xlsx(path: Path) -> None:
     wb.close()
 
 
+def _make_chart_family_xlsx(path: Path) -> None:
+    from openpyxl.chart import (
+        AreaChart,
+        BubbleChart,
+        LineChart,
+        PieChart,
+        RadarChart,
+        Reference,
+        ScatterChart,
+        Series,
+    )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chart Families"
+    rows = [
+        ("Month", "Sales", "Expenses", "Size"),
+        ("Jan", 10, 7, 3),
+        ("Feb", 20, 12, 4),
+        ("Mar", 30, 15, 5),
+    ]
+    for row in rows:
+        ws.append(row)
+
+    labels = Reference(ws, min_col=1, min_row=2, max_row=4)
+    sales_with_title = Reference(ws, min_col=2, min_row=1, max_row=4)
+    sales = Reference(ws, min_col=2, min_row=2, max_row=4)
+    expenses = Reference(ws, min_col=3, min_row=2, max_row=4)
+    bubble_sizes = Reference(ws, min_col=4, min_row=2, max_row=4)
+
+    categorical_chart_specs = [
+        (LineChart(), "Line Trend", "F2"),
+        (PieChart(), "Pie Mix", "F14"),
+        (AreaChart(), "Area Trend", "F26"),
+        (RadarChart(), "Radar Trend", "F38"),
+    ]
+    for chart, title, anchor in categorical_chart_specs:
+        chart.title = title
+        chart.add_data(sales_with_title, titles_from_data=True)
+        chart.set_categories(labels)
+        ws.add_chart(chart, anchor)
+
+    scatter = ScatterChart()
+    scatter.title = "Scatter Trend"
+    scatter.series.append(Series(sales, labels, title="Scatter Sales"))
+    ws.add_chart(scatter, "F50")
+
+    bubble = BubbleChart()
+    bubble.title = "Bubble Trend"
+    bubble.series.append(
+        Series(expenses, sales, bubble_sizes, title="Bubble Expenses")
+    )
+    ws.add_chart(bubble, "F62")
+
+    wb.save(path)
+    wb.close()
+
+
 def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "native-smoke.xlsx"
     _make_basic_xlsx(path)
@@ -678,6 +736,55 @@ def test_native_reader_loads_drawing_charts(
         assert isinstance(chart._anchor, OneCellAnchor)  # noqa: SLF001
         assert chart._anchor._from.col == 3  # noqa: SLF001
         assert chart._anchor._from.row == 4  # noqa: SLF001
+    finally:
+        wb.close()
+
+
+def test_native_reader_loads_common_chart_families(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "native-chart-families.xlsx"
+    _make_chart_family_xlsx(path)
+
+    monkeypatch.setenv("WOLFXL_NATIVE_READER", "1")
+    wb = wolfxl.load_workbook(path)
+    try:
+        ws = wb["Chart Families"]
+        charts_by_title = {
+            chart.title.tx.rich.paragraphs[0].r[0].t: chart
+            for chart in ws._charts  # noqa: SLF001
+        }
+        expected_classes = {
+            "Line Trend": "LineChart",
+            "Pie Mix": "PieChart",
+            "Area Trend": "AreaChart",
+            "Radar Trend": "RadarChart",
+            "Scatter Trend": "ScatterChart",
+            "Bubble Trend": "BubbleChart",
+        }
+        assert set(charts_by_title) == set(expected_classes)
+
+        for title, class_name in expected_classes.items():
+            chart = charts_by_title[title]
+            assert chart.__class__.__name__ == class_name
+            assert len(chart.series) == 1
+
+        for title in ["Line Trend", "Pie Mix", "Area Trend", "Radar Trend"]:
+            series = charts_by_title[title].series[0]
+            assert series.tx.strRef.f == "'Chart Families'!B1"
+            assert series.cat.strRef.f == "'Chart Families'!$A$2:$A$4"
+            assert series.val.numRef.f == "'Chart Families'!$B$2:$B$4"
+
+        scatter_series = charts_by_title["Scatter Trend"].series[0]
+        assert scatter_series.tx.v == "Scatter Sales"
+        assert scatter_series.xVal.numRef.f == "'Chart Families'!$A$2:$A$4"
+        assert scatter_series.yVal.numRef.f == "'Chart Families'!$B$2:$B$4"
+
+        bubble_series = charts_by_title["Bubble Trend"].series[0]
+        assert bubble_series.tx.v == "Bubble Expenses"
+        assert bubble_series.xVal.numRef.f == "'Chart Families'!$B$2:$B$4"
+        assert bubble_series.yVal.numRef.f == "'Chart Families'!$C$2:$C$4"
+        assert bubble_series.bubbleSize.numRef.f == "'Chart Families'!$D$2:$D$4"
     finally:
         wb.close()
 
