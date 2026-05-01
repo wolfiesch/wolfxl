@@ -179,6 +179,16 @@ impl NativeXlsbBook {
                 })
             })
             .transpose()?;
+        let comments = match rels.as_ref().and_then(comments_target) {
+            Some(target) => read_zip_part_optional(
+                &mut zip,
+                &join_and_normalize(&part_dir(&sheet.path), &target),
+            )?
+            .map(|data| parse_comments_bin(&data))
+            .transpose()?
+            .unwrap_or_default(),
+            None => Vec::new(),
+        };
         let context = FormulaContext {
             sheets: &self.sheets,
             extern_sheets: &self.extern_sheets,
@@ -188,6 +198,7 @@ impl NativeXlsbBook {
             &data,
             &self.shared_strings,
             rels.as_ref(),
+            comments,
             Some(&context),
         )?)
     }
@@ -245,6 +256,35 @@ fn sheet_rels_path(sheet_path: &str) -> String {
     } else {
         format!("{dir}/_rels/{file}.rels")
     }
+}
+
+fn part_dir(path: &str) -> String {
+    path.trim_start_matches('/')
+        .rsplit_once('/')
+        .map(|(dir, _)| dir.to_string())
+        .unwrap_or_default()
+}
+
+fn join_and_normalize(base_dir: &str, target: &str) -> String {
+    let target = target.trim_start_matches('/');
+    let raw = if target.starts_with("xl/") {
+        target.to_string()
+    } else if base_dir.is_empty() {
+        target.to_string()
+    } else {
+        format!("{base_dir}/{target}")
+    };
+    let mut parts = Vec::new();
+    for part in raw.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            value => parts.push(value),
+        }
+    }
+    parts.join("/")
 }
 
 fn read_workbook(
@@ -547,6 +587,7 @@ fn parse_worksheet(
     data: &[u8],
     shared_strings: &[String],
     rels: Option<&RelsGraph>,
+    comments: Vec<Comment>,
     formula_context: Option<&FormulaContext<'_>>,
 ) -> Result<WorksheetData> {
     let mut cells = Vec::new();
@@ -765,6 +806,7 @@ fn parse_worksheet(
         freeze_panes,
         sheet_view,
         resolve_hyperlinks(hyperlink_nodes, rels, &cells),
+        comments,
         cells,
     ))
 }
@@ -1056,6 +1098,76 @@ fn cell_display_text(cells: &[Cell], coordinate: &str) -> String {
         CellValue::Number(value) => value.to_string(),
         CellValue::Bool(value) => value.to_string(),
     }
+}
+
+fn comments_target(rels: &RelsGraph) -> Option<String> {
+    rels.iter()
+        .find(|rel| rel.rel_type.ends_with("/comments") || rel.rel_type == "comments")
+        .map(|rel| rel.target.clone())
+}
+
+fn parse_comments_bin(data: &[u8]) -> Result<Vec<Comment>> {
+    let mut authors = Vec::new();
+    let mut comments = Vec::new();
+    let mut current: Option<PendingComment> = None;
+
+    for record in Records::new(data) {
+        let record = record?;
+        match record.typ {
+            0x0278 => {
+                let mut consumed = 0;
+                authors.push(wide_string(record.payload, &mut consumed)?);
+            }
+            0x027b => {
+                current =
+                    parse_comment_header(record.payload).map(|(author_id, cell)| PendingComment {
+                        cell,
+                        author_id,
+                        text: String::new(),
+                    });
+            }
+            0x027d => {
+                if let Some(comment) = current.as_mut() {
+                    comment.text = parse_rich_string(record.payload)?;
+                }
+            }
+            0x027c => {
+                if let Some(comment) = current.take() {
+                    comments.push(Comment {
+                        cell: comment.cell,
+                        text: comment.text,
+                        author: authors.get(comment.author_id).cloned().unwrap_or_default(),
+                        threaded: false,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(comments)
+}
+
+#[derive(Debug)]
+struct PendingComment {
+    cell: String,
+    author_id: usize,
+    text: String,
+}
+
+fn parse_comment_header(payload: &[u8]) -> Option<(usize, String)> {
+    let author_id = payload.get(0..4).map(le_u32)? as usize;
+    let cell = parse_rfx(payload.get(4..20)?)?;
+    Some((author_id, cell))
+}
+
+fn parse_rich_string(payload: &[u8]) -> Result<String> {
+    let mut consumed = 0;
+    if payload.len() > 1 {
+        if let Ok(value) = wide_string(&payload[1..], &mut consumed) {
+            return Ok(value);
+        }
+    }
+    wide_string(payload, &mut consumed)
 }
 
 fn parse_formula_from_cell_record(
@@ -1577,6 +1689,7 @@ fn worksheet_data(
     freeze_panes: Option<FreezePane>,
     sheet_view: Option<SheetViewInfo>,
     hyperlinks: Vec<Hyperlink>,
+    comments: Vec<Comment>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1586,7 +1699,7 @@ fn worksheet_data(
         freeze_panes,
         sheet_properties: None::<SheetPropertiesInfo>,
         sheet_view,
-        comments: Vec::<Comment>::new(),
+        comments,
         row_heights,
         column_widths,
         data_validations: Vec::<DataValidation>::new(),
@@ -1980,7 +2093,8 @@ mod tests {
         put_u32(&mut merge, 2);
         push_record(&mut data, 0x00b0, &merge);
 
-        let sheet = parse_worksheet(&data, &[], None, None).expect("parse synthetic worksheet");
+        let sheet =
+            parse_worksheet(&data, &[], None, Vec::new(), None).expect("parse synthetic worksheet");
         assert_eq!(sheet.merged_ranges, vec!["B5:C5"]);
         assert_eq!(sheet.hidden_rows, vec![5]);
         assert_eq!(sheet.row_outline_levels, vec![(5, 1)]);
@@ -2038,7 +2152,8 @@ mod tests {
         pane.push(0x02);
         push_record(&mut data, 0x0097, &pane);
 
-        let sheet = parse_worksheet(&data, &[], None, None).expect("parse freeze worksheet");
+        let sheet =
+            parse_worksheet(&data, &[], None, Vec::new(), None).expect("parse freeze worksheet");
 
         assert_eq!(
             sheet.freeze_panes,
@@ -2134,7 +2249,8 @@ mod tests {
         push_record(&mut data, 0x0098, &selection);
         push_record(&mut data, 0x008a, &[]);
 
-        let sheet = parse_worksheet(&data, &[], None, None).expect("parse sheet view worksheet");
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse sheet view worksheet");
         let view = sheet.sheet_view.unwrap();
 
         assert_eq!(view.view, "normal");
@@ -2222,12 +2338,60 @@ mod tests {
         )
         .expect("parse rels");
 
-        let sheet = parse_worksheet(&data, &[], Some(&rels), None).expect("parse hyperlinks");
+        let sheet =
+            parse_worksheet(&data, &[], Some(&rels), Vec::new(), None).expect("parse hyperlinks");
 
         assert_eq!(sheet.hyperlinks.len(), 1);
         assert_eq!(sheet.hyperlinks[0].cell, "A1");
         assert_eq!(sheet.hyperlinks[0].target, "https://docs.example");
         assert_eq!(sheet.hyperlinks[0].display, "Docs");
+    }
+
+    #[test]
+    fn parses_xlsb_binary_comments_authors_and_text() {
+        let mut data = Vec::new();
+        let mut author = Vec::new();
+        put_wide_string(&mut author, "Analyst");
+        push_record(&mut data, 0x0278, &author);
+
+        let mut comment = Vec::new();
+        put_u32(&mut comment, 0);
+        put_u32(&mut comment, 2);
+        put_u32(&mut comment, 2);
+        put_u32(&mut comment, 1);
+        put_u32(&mut comment, 1);
+        comment.extend_from_slice(&[0; 16]);
+        push_record(&mut data, 0x027b, &comment);
+
+        let mut text = vec![0];
+        put_wide_string(&mut text, "Review EBITDA addback");
+        push_record(&mut data, 0x027d, &text);
+        push_record(&mut data, 0x027c, &[]);
+
+        assert_eq!(
+            parse_comments_bin(&data).expect("parse comments"),
+            vec![Comment {
+                cell: "B3".to_string(),
+                text: "Review EBITDA addback".to_string(),
+                author: "Analyst".to_string(),
+                threaded: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_comments() {
+        let comments = vec![Comment {
+            cell: "A1".to_string(),
+            text: "Looks right".to_string(),
+            author: "Reviewer".to_string(),
+            threaded: false,
+        }];
+
+        let sheet =
+            parse_worksheet(&[], &[], None, comments.clone(), None).expect("parse comments");
+
+        assert_eq!(sheet.comments, comments);
     }
 
     #[test]
@@ -2306,7 +2470,8 @@ mod tests {
         push_record(&mut data, 0x0000, &row);
         push_record(&mut data, 0x0009, &payload);
 
-        let sheet = parse_worksheet(&data, &[], None, None).expect("parse formula worksheet");
+        let sheet =
+            parse_worksheet(&data, &[], None, Vec::new(), None).expect("parse formula worksheet");
         assert_eq!(sheet.cells.len(), 1);
         assert_eq!(sheet.cells[0].value, CellValue::Number(42.0));
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("40+2"));
@@ -2359,8 +2524,8 @@ mod tests {
         push_record(&mut data, 0x0000, &row);
         push_record(&mut data, 0x0009, &payload);
 
-        let sheet =
-            parse_worksheet(&data, &[], None, Some(&context)).expect("parse formula worksheet");
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), Some(&context))
+            .expect("parse formula worksheet");
 
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("Inputs!$A$1"));
     }

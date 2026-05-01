@@ -1146,6 +1146,20 @@ impl NativeXlsbBook {
         Ok(result.into())
     }
 
+    pub fn read_comments(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let comments = self.ensure_sheet(sheet)?.comments.clone();
+        let result = PyList::empty(py);
+        for comment in &comments {
+            let d = PyDict::new(py);
+            d.set_item("cell", &comment.cell)?;
+            d.set_item("text", &comment.text)?;
+            d.set_item("author", &comment.author)?;
+            d.set_item("threaded", comment.threaded)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
+    }
+
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         self.read_bounds_1based(sheet)
     }
