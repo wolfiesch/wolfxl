@@ -10,8 +10,8 @@ use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
     HeaderFooterInfo, Hyperlink, ImageInfo, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables,
-    Table, WorksheetData, XfEntry,
+    RowHeight, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo,
+    StyleTables, Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -277,13 +277,35 @@ fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
 
 fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetData> {
     let mut cells = Vec::new();
+    let mut dimension = None;
+    let mut row_heights = HashMap::new();
+    let mut column_widths = Vec::new();
+    let mut merged_ranges = Vec::new();
+    let mut hidden_rows = Vec::new();
+    let mut hidden_columns = Vec::new();
+    let mut row_outline_levels = Vec::new();
+    let mut column_outline_levels = Vec::new();
     let mut row = 0u32;
     for record in Records::new(data) {
         let record = record?;
         match record.typ {
+            0x0094 => {
+                dimension = parse_ws_dimension(record.payload);
+            }
             0x0000 => {
                 if record.payload.len() >= 4 {
                     row = le_u32(&record.payload[0..4]);
+                }
+                if let Some(info) = parse_row_header(record.payload) {
+                    if info.hidden {
+                        hidden_rows.push(info.row);
+                    }
+                    if info.outline_level > 0 {
+                        row_outline_levels.push((info.row, info.outline_level));
+                    }
+                    if let Some(height) = info.height {
+                        row_heights.insert(info.row, height);
+                    }
                 }
             }
             0x0001 => {
@@ -383,11 +405,139 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
                     ));
                 }
             }
+            0x003c => {
+                if let Some(info) = parse_column_info(record.payload) {
+                    if info.width.custom_width {
+                        column_widths.push(info.width);
+                    }
+                    for col in info.width.min..=info.width.max {
+                        if info.hidden {
+                            hidden_columns.push(col);
+                        }
+                        if info.outline_level > 0 {
+                            column_outline_levels.push((col, info.outline_level));
+                        }
+                    }
+                }
+            }
+            0x00b0 => {
+                if let Some(range) = parse_merged_range(record.payload) {
+                    merged_ranges.push(range);
+                }
+            }
             _ => {}
         }
     }
-    let dimension = cells_dimension(&cells);
-    Ok(empty_worksheet_data(dimension, cells))
+    hidden_rows.sort_unstable();
+    hidden_rows.dedup();
+    hidden_columns.sort_unstable();
+    hidden_columns.dedup();
+    row_outline_levels.sort_unstable_by_key(|(row, _)| *row);
+    column_outline_levels.sort_unstable_by_key(|(col, _)| *col);
+    Ok(worksheet_data(
+        dimension.or_else(|| cells_dimension(&cells)),
+        row_heights,
+        column_widths,
+        hidden_rows,
+        hidden_columns,
+        row_outline_levels,
+        column_outline_levels,
+        merged_ranges,
+        cells,
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RowHeaderInfo {
+    row: u32,
+    hidden: bool,
+    outline_level: u8,
+    height: Option<RowHeight>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ColumnInfo {
+    width: ColumnWidth,
+    hidden: bool,
+    outline_level: u8,
+}
+
+fn parse_ws_dimension(payload: &[u8]) -> Option<String> {
+    if payload.len() < 16 {
+        return None;
+    }
+    let min_row = le_u32(&payload[0..4]) + 1;
+    let max_row = le_u32(&payload[4..8]) + 1;
+    let min_col = le_u32(&payload[8..12]) + 1;
+    let max_col = le_u32(&payload[12..16]) + 1;
+    if max_row < min_row || max_col < min_col {
+        return None;
+    }
+    Some(format!(
+        "{}:{}",
+        row_col_to_a1(min_row, min_col),
+        row_col_to_a1(max_row, max_col)
+    ))
+}
+
+fn parse_row_header(payload: &[u8]) -> Option<RowHeaderInfo> {
+    if payload.len() < 12 {
+        return None;
+    }
+    let row = le_u32(&payload[0..4]) + 1;
+    let height_twips = le_u16(&payload[8..10]);
+    let flags = le_u16(&payload[10..12]);
+    let outline_level = ((flags >> 8) & 0x07) as u8;
+    let hidden = flags & 0x1000 != 0;
+    let custom_height = flags & 0x2000 != 0;
+    let height = custom_height.then_some(RowHeight {
+        height: height_twips as f64 / 20.0,
+        custom_height: true,
+    });
+    Some(RowHeaderInfo {
+        row,
+        hidden,
+        outline_level,
+        height,
+    })
+}
+
+fn parse_column_info(payload: &[u8]) -> Option<ColumnInfo> {
+    if payload.len() < 18 {
+        return None;
+    }
+    let min = le_u32(&payload[0..4]) + 1;
+    let max = le_u32(&payload[4..8]) + 1;
+    let width_raw = le_u32(&payload[8..12]);
+    let flags = le_u16(&payload[16..18]);
+    Some(ColumnInfo {
+        width: ColumnWidth {
+            min,
+            max,
+            width: width_raw as f64 / 256.0,
+            custom_width: flags & 0x0002 != 0,
+        },
+        hidden: flags & 0x0001 != 0,
+        outline_level: ((flags >> 8) & 0x07) as u8,
+    })
+}
+
+fn parse_merged_range(payload: &[u8]) -> Option<String> {
+    if payload.len() < 16 {
+        return None;
+    }
+    let first_row = le_u32(&payload[0..4]) + 1;
+    let last_row = le_u32(&payload[4..8]) + 1;
+    let first_col = le_u32(&payload[8..12]) + 1;
+    let last_col = le_u32(&payload[12..16]) + 1;
+    if last_row < first_row || last_col < first_col {
+        return None;
+    }
+    Some(format!(
+        "{}:{}",
+        row_col_to_a1(first_row, first_col),
+        row_col_to_a1(last_row, last_col)
+    ))
 }
 
 fn parse_cell_header(payload: &[u8]) -> Option<(u32, Option<u32>)> {
@@ -424,17 +574,27 @@ fn make_cell(
     }
 }
 
-fn empty_worksheet_data(dimension: Option<String>, cells: Vec<Cell>) -> WorksheetData {
+fn worksheet_data(
+    dimension: Option<String>,
+    row_heights: HashMap<u32, RowHeight>,
+    column_widths: Vec<ColumnWidth>,
+    hidden_rows: Vec<u32>,
+    hidden_columns: Vec<u32>,
+    row_outline_levels: Vec<(u32, u8)>,
+    column_outline_levels: Vec<(u32, u8)>,
+    merged_ranges: Vec<String>,
+    cells: Vec<Cell>,
+) -> WorksheetData {
     WorksheetData {
         dimension,
-        merged_ranges: Vec::new(),
+        merged_ranges,
         hyperlinks: Vec::<Hyperlink>::new(),
         freeze_panes: None::<FreezePane>,
         sheet_properties: None::<SheetPropertiesInfo>,
         sheet_view: None::<SheetViewInfo>,
         comments: Vec::<Comment>::new(),
-        row_heights: HashMap::new(),
-        column_widths: Vec::<ColumnWidth>::new(),
+        row_heights,
+        column_widths,
         data_validations: Vec::<DataValidation>::new(),
         sheet_protection: None::<SheetProtection>,
         auto_filter: None::<AutoFilterInfo>,
@@ -448,10 +608,10 @@ fn empty_worksheet_data(dimension: Option<String>, cells: Vec<Cell>) -> Workshee
         charts: Vec::new(),
         tables: Vec::<Table>::new(),
         conditional_formats: Vec::<ConditionalFormatRule>::new(),
-        hidden_rows: Vec::new(),
-        hidden_columns: Vec::new(),
-        row_outline_levels: Vec::new(),
-        column_outline_levels: Vec::new(),
+        hidden_rows,
+        hidden_columns,
+        row_outline_levels,
+        column_outline_levels,
         array_formulas: HashMap::new(),
         cells,
     }
@@ -690,4 +850,147 @@ fn read_byte(bytes: &[u8], offset: &mut usize) -> Result<u8> {
     };
     *offset += 1;
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn put_u16(out: &mut Vec<u8>, value: u16) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_u32(out: &mut Vec<u8>, value: u32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_record(out: &mut Vec<u8>, typ: u16, payload: &[u8]) {
+        if typ < 0x80 {
+            out.push(typ as u8);
+        } else {
+            out.push(((typ & 0x7f) as u8) | 0x80);
+            out.push((typ >> 7) as u8);
+        }
+        out.push(payload.len() as u8);
+        out.extend_from_slice(payload);
+    }
+
+    #[test]
+    fn parses_xlsb_row_header_visibility_outline_and_height() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 4); // zero-based row 5
+        put_u32(&mut payload, 0);
+        put_u16(&mut payload, 420); // 21pt
+        put_u16(&mut payload, (3 << 8) | 0x1000 | 0x2000);
+
+        assert_eq!(
+            parse_row_header(&payload),
+            Some(RowHeaderInfo {
+                row: 5,
+                hidden: true,
+                outline_level: 3,
+                height: Some(RowHeight {
+                    height: 21.0,
+                    custom_height: true,
+                }),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_column_info_visibility_outline_and_width() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 1); // zero-based B
+        put_u32(&mut payload, 2); // zero-based C
+        put_u32(&mut payload, 12 * 256);
+        put_u32(&mut payload, 0);
+        put_u16(&mut payload, 0x0001 | 0x0002 | (2 << 8));
+
+        assert_eq!(
+            parse_column_info(&payload),
+            Some(ColumnInfo {
+                width: ColumnWidth {
+                    min: 2,
+                    max: 3,
+                    width: 12.0,
+                    custom_width: true,
+                },
+                hidden: true,
+                outline_level: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_worksheet_dimension_and_merged_range_as_inclusive_bounds() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 3); // B4
+        put_u32(&mut payload, 6); // B7
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        assert_eq!(parse_ws_dimension(&payload), Some("B4:B7".to_string()));
+
+        let mut merge = Vec::new();
+        put_u32(&mut merge, 0); // A1
+        put_u32(&mut merge, 1); // B2
+        put_u32(&mut merge, 0);
+        put_u32(&mut merge, 1);
+        assert_eq!(parse_merged_range(&merge), Some("A1:B2".to_string()));
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_sheet_structure_metadata() {
+        let mut data = Vec::new();
+        let mut row = Vec::new();
+        put_u32(&mut row, 4);
+        put_u32(&mut row, 0);
+        put_u16(&mut row, 420);
+        put_u16(&mut row, (1 << 8) | 0x1000 | 0x2000);
+        put_u32(&mut row, 0);
+        push_record(&mut data, 0x0000, &row);
+
+        let mut cell = Vec::new();
+        put_u32(&mut cell, 1);
+        put_u32(&mut cell, 0);
+        cell.extend_from_slice(&42.0f64.to_le_bytes());
+        push_record(&mut data, 0x0005, &cell);
+
+        let mut col = Vec::new();
+        put_u32(&mut col, 1);
+        put_u32(&mut col, 1);
+        put_u32(&mut col, 20 * 256);
+        put_u32(&mut col, 0);
+        put_u16(&mut col, 0x0001 | 0x0002 | (2 << 8));
+        push_record(&mut data, 0x003c, &col);
+
+        let mut merge = Vec::new();
+        put_u32(&mut merge, 4);
+        put_u32(&mut merge, 4);
+        put_u32(&mut merge, 1);
+        put_u32(&mut merge, 2);
+        push_record(&mut data, 0x00b0, &merge);
+
+        let sheet = parse_worksheet(&data, &[]).expect("parse synthetic worksheet");
+        assert_eq!(sheet.merged_ranges, vec!["B5:C5"]);
+        assert_eq!(sheet.hidden_rows, vec![5]);
+        assert_eq!(sheet.row_outline_levels, vec![(5, 1)]);
+        assert_eq!(
+            sheet.row_heights.get(&5),
+            Some(&RowHeight {
+                height: 21.0,
+                custom_height: true,
+            })
+        );
+        assert_eq!(sheet.hidden_columns, vec![2]);
+        assert_eq!(sheet.column_outline_levels, vec![(2, 2)]);
+        assert_eq!(
+            sheet.column_widths,
+            vec![ColumnWidth {
+                min: 2,
+                max: 2,
+                width: 20.0,
+                custom_width: true,
+            }]
+        );
+    }
 }
