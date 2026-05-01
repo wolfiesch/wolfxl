@@ -302,7 +302,11 @@ impl Workbook {
     pub fn named_ranges(&self) -> Vec<(String, String)> {
         match &self.inner {
             Backend::Sheets(s) => s.defined_names().to_vec(),
-            Backend::NativeXlsb(_) => Vec::new(),
+            Backend::NativeXlsb(book) => book
+                .named_ranges()
+                .iter()
+                .map(|range| (range.name.clone(), range.refers_to.clone()))
+                .collect(),
             Backend::Csv(_) => Vec::new(),
         }
     }

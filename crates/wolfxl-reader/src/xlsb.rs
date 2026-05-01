@@ -9,9 +9,9 @@ use zip::ZipArchive;
 use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
-    HeaderFooterInfo, Hyperlink, ImageInfo, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    RowHeight, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo,
-    StyleTables, Table, WorksheetData, XfEntry,
+    HeaderFooterInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo,
+    PageSetupInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
+    SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -55,6 +55,7 @@ impl From<zip::result::ZipError> for XlsbError {
 pub struct NativeXlsbBook {
     bytes: Vec<u8>,
     sheets: Vec<XlsbSheet>,
+    named_ranges: Vec<NamedRange>,
     shared_strings: Vec<String>,
     styles: StyleTables,
     date1904: bool,
@@ -65,6 +66,19 @@ struct XlsbSheet {
     name: String,
     path: String,
     state: SheetState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XtiRef {
+    first_sheet: i32,
+    last_sheet: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RawNamedRange {
+    name: String,
+    local_id: Option<usize>,
+    refers_to: String,
 }
 
 #[derive(Debug)]
@@ -83,10 +97,11 @@ impl NativeXlsbBook {
         let workbook_rels = read_rels(&mut zip, "xl/_rels/workbook.bin.rels")?;
         let shared_strings = read_shared_strings(&mut zip)?;
         let styles = read_styles(&mut zip)?;
-        let (sheets, date1904) = read_workbook(&mut zip, &workbook_rels)?;
+        let (sheets, named_ranges, date1904) = read_workbook(&mut zip, &workbook_rels)?;
         Ok(Self {
             bytes,
             sheets,
+            named_ranges,
             shared_strings,
             styles,
             date1904,
@@ -107,6 +122,10 @@ impl NativeXlsbBook {
 
     pub fn date1904(&self) -> bool {
         self.date1904
+    }
+
+    pub fn named_ranges(&self) -> &[NamedRange] {
+        &self.named_ranges
     }
 
     pub fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
@@ -185,9 +204,11 @@ fn zip_part_name(zip: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Option<St
 fn read_workbook(
     zip: &mut ZipArchive<Cursor<Vec<u8>>>,
     rels: &RelsGraph,
-) -> Result<(Vec<XlsbSheet>, bool)> {
+) -> Result<(Vec<XlsbSheet>, Vec<NamedRange>, bool)> {
     let data = read_zip_part(zip, "xl/workbook.bin")?;
     let mut sheets = Vec::new();
+    let mut raw_names = Vec::new();
+    let mut extern_sheets = Vec::new();
     let mut date1904 = false;
     for record in Records::new(&data) {
         let record = record?;
@@ -222,10 +243,20 @@ fn read_workbook(
                 let path = join_xl_target(&target.target);
                 sheets.push(XlsbSheet { name, path, state });
             }
+            0x016a => {
+                extern_sheets = parse_extern_sheet(record.payload);
+            }
+            0x0027 => {
+                if let Some(raw_name) = parse_defined_name(record.payload, &sheets, &extern_sheets)
+                {
+                    raw_names.push(raw_name);
+                }
+            }
             _ => {}
         }
     }
-    Ok((sheets, date1904))
+    let named_ranges = resolve_xlsb_named_ranges(&sheets, raw_names);
+    Ok((sheets, named_ranges, date1904))
 }
 
 fn read_shared_strings(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<Vec<String>> {
@@ -241,6 +272,97 @@ fn read_shared_strings(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<Vec<Stri
         }
     }
     Ok(strings)
+}
+
+fn parse_extern_sheet(payload: &[u8]) -> Vec<XtiRef> {
+    let Some(count) = payload.get(0..4).map(le_u32) else {
+        return Vec::new();
+    };
+    payload
+        .get(4..)
+        .unwrap_or_default()
+        .chunks_exact(12)
+        .take(count as usize)
+        .map(|xti| XtiRef {
+            first_sheet: le_i32(&xti[4..8]),
+            last_sheet: le_i32(&xti[8..12]),
+        })
+        .collect()
+}
+
+fn parse_defined_name(
+    payload: &[u8],
+    sheets: &[XlsbSheet],
+    extern_sheets: &[XtiRef],
+) -> Option<RawNamedRange> {
+    if payload.len() < 13 {
+        return None;
+    }
+    let flags = le_u32(&payload[0..4]);
+    let is_builtin = flags & (1 << 5) != 0;
+    let itab = le_u32(&payload[5..9]);
+    let local_id = (itab != u32::MAX).then_some(itab as usize);
+    let mut name_len = 0;
+    let name = wide_string(&payload[9..], &mut name_len).ok()?;
+    if is_builtin || name.starts_with("_xlnm.") {
+        return None;
+    }
+    let formula_offset = 9 + name_len;
+    let refers_to = parse_name_formula(payload.get(formula_offset..)?, sheets, extern_sheets)?;
+    if refers_to.is_empty() {
+        return None;
+    }
+    Some(RawNamedRange {
+        name,
+        local_id,
+        refers_to,
+    })
+}
+
+fn parse_name_formula(
+    payload: &[u8],
+    sheets: &[XlsbSheet],
+    extern_sheets: &[XtiRef],
+) -> Option<String> {
+    let rgce_len = payload.get(0..4).map(le_u32)? as usize;
+    let rgce = payload.get(4..4 + rgce_len)?;
+    let context = FormulaContext {
+        sheets,
+        extern_sheets,
+    };
+    parse_formula_rgce_with_context(rgce, Some(&context))
+}
+
+fn resolve_xlsb_named_ranges(
+    sheets: &[XlsbSheet],
+    raw_names: Vec<RawNamedRange>,
+) -> Vec<NamedRange> {
+    raw_names
+        .into_iter()
+        .map(|raw| {
+            let (scope, sheet_name) = match raw.local_id {
+                Some(index) => (
+                    "sheet".to_string(),
+                    sheets.get(index).map(|sheet| sheet.name.clone()),
+                ),
+                None => ("workbook".to_string(), None),
+            };
+            let refers_to = if scope == "sheet" && !raw.refers_to.contains('!') {
+                if let Some(sheet_name) = sheet_name {
+                    format!("{sheet_name}!{}", raw.refers_to)
+                } else {
+                    raw.refers_to
+                }
+            } else {
+                raw.refers_to
+            };
+            NamedRange {
+                name: raw.name,
+                scope,
+                refers_to,
+            }
+        })
+        .collect()
 }
 
 fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
@@ -559,7 +681,19 @@ fn parse_formula_from_cell_record(record_type: u16, payload: &[u8]) -> Option<St
     parse_formula_rgce(rgce)
 }
 
-fn parse_formula_rgce(mut rgce: &[u8]) -> Option<String> {
+struct FormulaContext<'a> {
+    sheets: &'a [XlsbSheet],
+    extern_sheets: &'a [XtiRef],
+}
+
+fn parse_formula_rgce(rgce: &[u8]) -> Option<String> {
+    parse_formula_rgce_with_context(rgce, None)
+}
+
+fn parse_formula_rgce_with_context(
+    mut rgce: &[u8],
+    context: Option<&FormulaContext<'_>>,
+) -> Option<String> {
     if rgce.is_empty() {
         return Some(String::new());
     }
@@ -658,6 +792,18 @@ fn parse_formula_rgce(mut rgce: &[u8]) -> Option<String> {
                 stack.push(formula.len());
                 formula.push_str(&area);
                 rgce = rgce.get(12..)?;
+            }
+            0x3a | 0x5a | 0x7a => {
+                let reference = parse_formula_ref3d(rgce.get(0..8)?, context?)?;
+                stack.push(formula.len());
+                formula.push_str(&reference);
+                rgce = rgce.get(8..)?;
+            }
+            0x3b | 0x5b | 0x7b => {
+                let area = parse_formula_area3d(rgce.get(0..14)?, context?)?;
+                stack.push(formula.len());
+                formula.push_str(&area);
+                rgce = rgce.get(14..)?;
             }
             0x2a | 0x4a | 0x6a => {
                 stack.push(formula.len());
@@ -894,6 +1040,47 @@ fn parse_formula_area(payload: &[u8]) -> Option<String> {
             last_col_flags & 0x8000 == 0,
         )
     ))
+}
+
+fn parse_formula_ref3d(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
+    let sheet = formula_sheet_prefix(le_u16(&payload[0..2]) as usize, context)?;
+    let reference = parse_formula_ref(payload.get(2..8)?)?;
+    Some(format!("{sheet}!{reference}"))
+}
+
+fn parse_formula_area3d(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
+    let sheet = formula_sheet_prefix(le_u16(&payload[0..2]) as usize, context)?;
+    let area = parse_formula_area(payload.get(2..14)?)?;
+    Some(format!("{sheet}!{area}"))
+}
+
+fn formula_sheet_prefix(ixti: usize, context: &FormulaContext<'_>) -> Option<String> {
+    let xti = context.extern_sheets.get(ixti)?;
+    if xti.first_sheet < 0 || xti.last_sheet < 0 {
+        return None;
+    }
+    let first = context.sheets.get(xti.first_sheet as usize)?;
+    let last = context.sheets.get(xti.last_sheet as usize)?;
+    if xti.first_sheet == xti.last_sheet {
+        Some(quote_sheet_name(&first.name))
+    } else {
+        Some(format!(
+            "{}:{}",
+            quote_sheet_name(&first.name),
+            quote_sheet_name(&last.name)
+        ))
+    }
+}
+
+fn quote_sheet_name(name: &str) -> String {
+    if name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return name.to_string();
+    }
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
 }
 
 fn format_cell_reference(row: u32, col: u32, row_abs: bool, col_abs: bool) -> String {
@@ -1160,6 +1347,10 @@ fn le_u32(bytes: &[u8]) -> u32 {
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
 
+fn le_i32(bytes: &[u8]) -> i32 {
+    i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
 fn le_f64(bytes: &[u8]) -> f64 {
     f64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
@@ -1251,6 +1442,18 @@ mod tests {
 
     fn put_u32(out: &mut Vec<u8>, value: u32) {
         out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_i32(out: &mut Vec<u8>, value: i32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_wide_string(out: &mut Vec<u8>, value: &str) {
+        let units: Vec<u16> = value.encode_utf16().collect();
+        put_u32(out, units.len() as u32);
+        for unit in units {
+            put_u16(out, unit);
+        }
     }
 
     fn push_record(out: &mut Vec<u8>, typ: u16, payload: &[u8]) {
@@ -1441,5 +1644,107 @@ mod tests {
         assert_eq!(sheet.cells.len(), 1);
         assert_eq!(sheet.cells[0].value, CellValue::Number(42.0));
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("40+2"));
+    }
+
+    #[test]
+    fn parses_xlsb_extern_sheet_records() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 0);
+        put_i32(&mut payload, 0);
+        put_i32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_i32(&mut payload, -2);
+        put_i32(&mut payload, -2);
+
+        let refs = parse_extern_sheet(&payload);
+
+        assert_eq!(
+            refs,
+            vec![
+                XtiRef {
+                    first_sheet: 0,
+                    last_sheet: 0
+                },
+                XtiRef {
+                    first_sheet: -2,
+                    last_sheet: -2
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_defined_name_area3d_formula() {
+        let sheets = vec![XlsbSheet {
+            name: "Data".to_string(),
+            path: "xl/worksheets/sheet1.bin".to_string(),
+            state: SheetState::Visible,
+        }];
+        let extern_sheets = vec![XtiRef {
+            first_sheet: 0,
+            last_sheet: 0,
+        }];
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0);
+        payload.push(0);
+        put_u32(&mut payload, u32::MAX);
+        put_wide_string(&mut payload, "GlobalRange");
+
+        let mut rgce = Vec::new();
+        rgce.push(0x3b);
+        put_u16(&mut rgce, 0);
+        put_u32(&mut rgce, 0);
+        put_u32(&mut rgce, 1);
+        put_u16(&mut rgce, 0);
+        put_u16(&mut rgce, 0);
+        put_u32(&mut payload, rgce.len() as u32);
+        payload.extend_from_slice(&rgce);
+        put_u32(&mut payload, 0);
+
+        let raw = parse_defined_name(&payload, &sheets, &extern_sheets).unwrap();
+        let ranges = resolve_xlsb_named_ranges(&sheets, vec![raw]);
+
+        assert_eq!(
+            ranges,
+            vec![NamedRange {
+                name: "GlobalRange".to_string(),
+                scope: "workbook".to_string(),
+                refers_to: "Data!$A$1:$A$2".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn resolves_xlsb_sheet_scoped_defined_name_without_sheet_prefix() {
+        let sheets = vec![XlsbSheet {
+            name: "Other".to_string(),
+            path: "xl/worksheets/sheet1.bin".to_string(),
+            state: SheetState::Visible,
+        }];
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0);
+        payload.push(0);
+        put_u32(&mut payload, 0);
+        put_wide_string(&mut payload, "LocalConstant");
+
+        let mut rgce = Vec::new();
+        rgce.push(0x1e);
+        put_u16(&mut rgce, 7);
+        put_u32(&mut payload, rgce.len() as u32);
+        payload.extend_from_slice(&rgce);
+        put_u32(&mut payload, 0);
+
+        let raw = parse_defined_name(&payload, &sheets, &[]).unwrap();
+        let ranges = resolve_xlsb_named_ranges(&sheets, vec![raw]);
+
+        assert_eq!(
+            ranges[0],
+            NamedRange {
+                name: "LocalConstant".to_string(),
+                scope: "sheet".to_string(),
+                refers_to: "Other!7".to_string(),
+            }
+        );
     }
 }

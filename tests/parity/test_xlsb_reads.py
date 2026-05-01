@@ -119,6 +119,13 @@ def test_xlsb_cell_styles_are_readable() -> None:
     pytest.fail("no non-empty cells in fixture")
 
 
+def test_xlsb_defined_names_are_readable() -> None:
+    """Native xlsb exposes the defined-names reader surface."""
+    fixture = _FIXTURES[0]
+    wb = wolfxl.load_workbook(str(fixture))
+    assert isinstance(wb.defined_names, dict)
+
+
 def test_xlsb_from_bytes() -> None:
     fixture = _FIXTURES[0]
     data = fixture.read_bytes()
