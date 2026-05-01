@@ -14,3 +14,4 @@ calamine-styles.workspace = true
 chrono.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
+wolfxl-reader = { path = "../wolfxl-reader", version = "0.1" }

@@ -1398,6 +1398,7 @@ dependencies = [
  "calamine-styles",
  "chrono",
  "quick-xml 0.37.5",
+ "wolfxl-reader",
  "zip 2.4.2",
 ]
 

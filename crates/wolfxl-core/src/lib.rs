@@ -1,8 +1,8 @@
 //! wolfxl-core: pure-Rust spreadsheet reader with Excel number-format-aware rendering.
 //!
 //! This crate carries no PyO3 / Python coupling. It opens spreadsheets via
-//! [`calamine-styles`] for xlsx / xls / xlsb / ods and a built-in reader
-//! for CSV, exposes a `Workbook → Sheet → Cell` API, and renders cell
+//! [`calamine-styles`] for xlsx / xls / ods, WolfXL's native BIFF12 reader
+//! for xlsb, and a built-in reader for CSV. It exposes a `Workbook → Sheet → Cell` API and renders cell
 //! values with awareness of common Excel number formats (currency,
 //! percentage, scientific, date, time).
 //!
@@ -19,7 +19,7 @@
 //! ## Scope
 //!
 //! - **In scope today:** read xlsx / xls / xlsb / ods / csv values + best-effort
-//!   number-format strings (xlsx only — calamine leaves xls/xlsb/ods style ranges
+//!   number-format strings (xlsx and native xlsb; xls/ods style ranges remain
 //!   empty and CSV has no style concept), classify formats into
 //!   [`FormatCategory`], render via [`format_cell`], map workbook structure,
 //!   infer per-column schema/cardinality summaries (reads through

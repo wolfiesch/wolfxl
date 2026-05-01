@@ -421,9 +421,9 @@ fn schema_unknown_sheet_errors() {
 
 // ---- multi-format smoke tests (sprint-2 task #21) ----
 //
-// These don't lock goldens: xls/xlsb/ods backends can return empty styles
-// so the boxed renderer's column-width math can legitimately differ from
-// xlsx output, and CSV has no number formats to drive the styled path. The
+// These don't lock goldens: xls/ods backends can return empty styles so the
+// boxed renderer's column-width math can legitimately differ from xlsx/xlsb
+// output, and CSV has no number formats to drive the styled path. The
 // contract being tested is "Workbook::open dispatches and every CLI surface
 // renders something sensible" - the per-format value/schema correctness is
 // asserted in `wolfxl-core`'s integration tests.

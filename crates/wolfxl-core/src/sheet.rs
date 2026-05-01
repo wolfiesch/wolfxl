@@ -6,13 +6,16 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
 use crate::cell::{Cell, CellValue};
 use crate::error::{Error, Result};
+use crate::format::{classify_format, FormatCategory};
 use crate::workbook::WorkbookStyles;
+use wolfxl_reader::{
+    Cell as NativeCell, CellValue as NativeCellValue, NativeXlsbBook, WorksheetData,
+};
 
-/// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Xlsb/Ods
-/// behind a single enum. All four implement the `Reader` trait, so
-/// `worksheet_range` and `worksheet_style` work uniformly — xls/xlsb/ods
-/// return an empty `StyleRange` (styles walker is xlsx-only), which
-/// is the expected behavior.
+/// The calamine-styles reader bundle dispatch-wraps Xlsx/Xls/Ods behind a
+/// single enum. All three implement the `Reader` trait, so `worksheet_range`
+/// and `worksheet_style` work uniformly; xls/ods return an empty `StyleRange`
+/// (styles walker is xlsx-only), which is the expected behavior.
 pub(crate) type SheetsReader = Sheets<BufReader<File>>;
 
 pub struct Sheet {
@@ -79,6 +82,57 @@ impl Sheet {
         })
     }
 
+    pub(crate) fn load_native_xlsb(book: &NativeXlsbBook, name: &str) -> Result<Self> {
+        let data = book
+            .worksheet(name)
+            .map_err(|e| Error::Xlsx(format!("read native xlsb sheet {name:?}: {e}")))?;
+        Ok(Self::from_native_xlsb_data(
+            name.to_string(),
+            data,
+            book,
+            book.date1904(),
+        ))
+    }
+
+    fn from_native_xlsb_data(
+        name: String,
+        data: WorksheetData,
+        book: &NativeXlsbBook,
+        date1904: bool,
+    ) -> Self {
+        let Some((min_row, min_col, max_row, max_col)) = native_bounds(&data.cells) else {
+            return Self {
+                name,
+                rows: Vec::new(),
+            };
+        };
+        let height = (max_row - min_row + 1) as usize;
+        let width = (max_col - min_col + 1) as usize;
+        let mut rows = vec![
+            vec![
+                Cell {
+                    value: CellValue::Empty,
+                    number_format: None,
+                };
+                width
+            ];
+            height
+        ];
+        for native in &data.cells {
+            let row = (native.row - min_row) as usize;
+            let col = (native.col - min_col) as usize;
+            let number_format = native
+                .style_id
+                .and_then(|style_id| book.number_format_for_style_id(style_id))
+                .map(str::to_string);
+            rows[row][col] = Cell {
+                value: native_to_cell_value(native, number_format.as_deref(), date1904),
+                number_format,
+            };
+        }
+        Self { name, rows }
+    }
+
     pub fn dimensions(&self) -> (usize, usize) {
         let h = self.rows.len();
         let w = self.rows.first().map(|r| r.len()).unwrap_or(0);
@@ -131,6 +185,52 @@ impl Sheet {
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+fn native_bounds(cells: &[NativeCell]) -> Option<(u32, u32, u32, u32)> {
+    let mut iter = cells.iter();
+    let first = iter.next()?;
+    let mut min_row = first.row;
+    let mut min_col = first.col;
+    let mut max_row = first.row;
+    let mut max_col = first.col;
+    for cell in iter {
+        min_row = min_row.min(cell.row);
+        min_col = min_col.min(cell.col);
+        max_row = max_row.max(cell.row);
+        max_col = max_col.max(cell.col);
+    }
+    Some((min_row, min_col, max_row, max_col))
+}
+
+fn native_to_cell_value(
+    cell: &NativeCell,
+    number_format: Option<&str>,
+    date1904: bool,
+) -> CellValue {
+    match &cell.value {
+        NativeCellValue::Empty => CellValue::Empty,
+        NativeCellValue::String(s) => CellValue::String(s.clone()),
+        NativeCellValue::Bool(b) => CellValue::Bool(*b),
+        NativeCellValue::Error(e) => CellValue::Error(e.clone()),
+        NativeCellValue::Number(n) => native_number_to_cell_value(*n, number_format, date1904),
+    }
+}
+
+fn native_number_to_cell_value(
+    value: f64,
+    number_format: Option<&str>,
+    date1904: bool,
+) -> CellValue {
+    match number_format.map(classify_format) {
+        Some(FormatCategory::Date | FormatCategory::Time | FormatCategory::DateTime) => {
+            excel_serial_to_datetime_with_epoch(value, date1904)
+        }
+        _ if value.fract() == 0.0 && value.abs() < (i64::MAX as f64) => {
+            CellValue::Int(value as i64)
+        }
+        _ => CellValue::Float(value),
     }
 }
 
@@ -199,6 +299,10 @@ fn data_to_cell_value(d: &Data) -> CellValue {
 /// epoch but for time-formatted cells means midnight; route it to Time(0,0,0)
 /// to match openpyxl rather than returning the epoch date.
 fn excel_serial_to_datetime(serial: f64) -> CellValue {
+    excel_serial_to_datetime_with_epoch(serial, false)
+}
+
+fn excel_serial_to_datetime_with_epoch(serial: f64, date1904: bool) -> CellValue {
     if serial < 1.0 && serial >= 0.0 {
         let mut secs = (serial * 86_400.0).round() as u32;
         // 0.99999999 rounds to 86_400, which makes h=24 and `from_hms_opt`
@@ -224,11 +328,11 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
     // dodge the bug for serials >= 60, but that leaves serials 1..59 off by
     // one day. The +1 correction restores serial 1 -> 1900-01-01 etc., which
     // matches openpyxl.utils.datetime.from_excel.
-    if serial > 0.0 && serial < 60.0 {
+    if !date1904 && serial > 0.0 && serial < 60.0 {
         days += 1;
     }
     if frac.abs() < f64::EPSILON {
-        return CellValue::Date(days_to_date_from_excel_base(days));
+        return CellValue::Date(days_to_date_from_excel_base(days, date1904));
     }
     // Keep the day-fraction arithmetic signed until normalized into
     // [0, 86_400) — a negative serial like -0.5 produces frac = -0.5 here,
@@ -248,7 +352,7 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
         days += carry_days;
     }
     let secs = secs_signed as u32; // now in [0, 86_400)
-    let date = days_to_date_from_excel_base(days);
+    let date = days_to_date_from_excel_base(days, date1904);
     let h = secs / 3600;
     let m = (secs % 3600) / 60;
     let s = secs % 60;
@@ -257,8 +361,12 @@ fn excel_serial_to_datetime(serial: f64) -> CellValue {
     CellValue::DateTime(NaiveDateTime::new(date, time))
 }
 
-fn days_to_date_from_excel_base(days: i64) -> NaiveDate {
-    let base = NaiveDate::from_ymd_opt(1899, 12, 30).expect("static date");
+fn days_to_date_from_excel_base(days: i64, date1904: bool) -> NaiveDate {
+    let base = if date1904 {
+        NaiveDate::from_ymd_opt(1904, 1, 1).expect("static date")
+    } else {
+        NaiveDate::from_ymd_opt(1899, 12, 30).expect("static date")
+    };
     if days >= 0 {
         base.checked_add_days(chrono::Days::new(days as u64))
     } else {

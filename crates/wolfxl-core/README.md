@@ -24,10 +24,11 @@ println!("{} rows x {} columns", rows, cols);
 ## Scope
 
 - **In scope today**: read xlsx / xls / xlsb / ods / csv values, extract
-  best-effort number-format strings for primary OOXML paths via
-  [`calamine-styles`] and the `xl/styles.xml` cellXfs walker fallback,
-  classify formats into `FormatCategory`, render via `format_cell`, map
-  workbook structure, and infer per-column schema/cardinality summaries.
+  best-effort number-format strings for xlsx and native xlsb paths via
+  [`calamine-styles`], WolfXL's native reader, and the `xl/styles.xml`
+  cellXfs walker fallback, classify formats into `FormatCategory`, render
+  via `format_cell`, map workbook structure, and infer per-column
+  schema/cardinality summaries.
 - **Not yet**: write side.
 
 The PyO3 layer in the sibling [`wolfxl`](https://pypi.org/project/wolfxl/)

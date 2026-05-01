@@ -1,18 +1,16 @@
-//! Sprint Κ Pod-α — `.xlsb` / `.xls` value-only read backends.
+//! Sprint Κ Pod-α — Calamine-backed legacy `.xls` value-only reads.
 //!
-//! Two new pyclasses, [`CalamineXlsbBook`] and [`CalamineXlsBook`],
-//! present the same Python-facing value-read API as the native `.xlsx`
-//! reader for **values + cached formula results + sheet names +
-//! dimensions + bulk cell records**.  All style-related accessors strictly raise
+//! [`CalamineXlsBook`] presents the same Python-facing value-read API as
+//! the native readers for **values + cached formula results + sheet names +
+//! dimensions + bulk cell records**. All style-related accessors strictly raise
 //! `NotImplementedError` with the message
-//! `"styles not supported for .{xlsb|xls} files; use .xlsx for
+//! `"styles not supported for .xls files; use .xlsx for
 //! style-aware reads"`.
 //!
-//! Both backends accept paths *and* raw bytes (via
-//! `open_from_bytes`).  Reader inputs are wrapped in a small
-//! `XlsbSource` / `XlsSource` enum that delegates `Read + Seek` to
-//! either a `BufReader<File>` or a `Cursor<Vec<u8>>`, sidestepping
-//! the non-object-safe `calamine_styles::Reader` trait.
+//! The backend accepts paths *and* raw bytes (via `open_from_bytes`).
+//! Reader inputs are wrapped in a small `XlsSource` enum that delegates
+//! `Read + Seek` to either a `BufReader<File>` or a `Cursor<Vec<u8>>`,
+//! sidestepping the non-object-safe `calamine_styles::Reader` trait.
 //!
 //! This module also provides [`classify_file_format_bytes`] /
 //! [`classify_file_format_path`] for magic-byte sniffing — exposed
@@ -29,14 +27,12 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
 
-use calamine_styles::{Data, Range, Reader, Xls, Xlsb};
+use calamine_styles::{Data, Range, Reader, Xls};
 use chrono::NaiveTime;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
 
-pub use wolfxl_classify::{
-    classify_file_format_bytes, classify_file_format_path, XlsSource, XlsbSource,
-};
+pub use wolfxl_classify::{classify_file_format_bytes, classify_file_format_path, XlsSource};
 // `FileFormat` and `XlsxSource` are re-exported by `wolfxl_classify`
 // for downstream consumers; the cdylib doesn't reference them
 // directly, but keeping the dependency surface small avoids
@@ -481,18 +477,6 @@ macro_rules! define_calamine_book {
             }
         }
     };
-}
-
-define_calamine_book! {
-    struct_name = CalamineXlsbBook,
-    reader_ty   = Xlsb<XlsbSource>,
-    source_ty   = XlsbSource,
-    format_name = "xlsb",
-    new_impl    = (|src: XlsbSource| -> PyResult<Xlsb<XlsbSource>> {
-        Xlsb::new(src).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Failed to parse xlsb: {e:?}"))
-        })
-    }),
 }
 
 define_calamine_book! {

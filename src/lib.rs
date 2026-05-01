@@ -45,7 +45,6 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_class::<native_reader_backend::NativeXlsxBook>()?;
     m.add_class::<native_reader_backend::NativeXlsbBook>()?;
-    m.add_class::<calamine_xlsb_xls_backend::CalamineXlsbBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsBook>()?;
     m.add_function(wrap_pyfunction!(
         calamine_xlsb_xls_backend::classify_file_format,

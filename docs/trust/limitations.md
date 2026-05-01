@@ -24,7 +24,7 @@ These openpyxl APIs are still incomplete or intentionally narrower:
 
 - `ws.add_image()` and `ws.add_chart()` support construction, but not public replace/delete operations.
 - `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
-- `.xlsb` / `.xls` workbooks expose value reads only; style accessors raise by design.
+- `.xlsb` workbooks expose read-side style metadata; `.xls` workbooks remain value-only and style accessors raise by design.
 - Existing pivot-table mutation is narrower than construction and copy support.
 
 ## Performance claim guardrails
