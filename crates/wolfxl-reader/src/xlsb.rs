@@ -603,6 +603,7 @@ fn parse_worksheet(
     let mut freeze_panes = None;
     let mut sheet_view = None;
     let mut sheet_protection = None;
+    let mut page_margins = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -789,6 +790,9 @@ fn parse_worksheet(
             0x0217 => {
                 sheet_protection = parse_sheet_protection(record.payload);
             }
+            0x01dc => {
+                page_margins = parse_page_margins(record.payload);
+            }
             _ => {}
         }
     }
@@ -812,6 +816,7 @@ fn parse_worksheet(
         resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         comments,
         sheet_protection,
+        page_margins,
         cells,
     ))
 }
@@ -1199,6 +1204,20 @@ fn parse_sheet_protection(payload: &[u8]) -> Option<SheetProtection> {
         pivot_tables: flag(58),
         select_unlocked_cells: flag(62),
         password_hash: (password != 0).then(|| format!("{password:04X}")),
+    })
+}
+
+fn parse_page_margins(payload: &[u8]) -> Option<PageMarginsInfo> {
+    if payload.len() < 48 {
+        return None;
+    }
+    Some(PageMarginsInfo {
+        left: le_f64(&payload[0..8]),
+        right: le_f64(&payload[8..16]),
+        top: le_f64(&payload[16..24]),
+        bottom: le_f64(&payload[24..32]),
+        header: le_f64(&payload[32..40]),
+        footer: le_f64(&payload[40..48]),
     })
 }
 
@@ -1723,6 +1742,7 @@ fn worksheet_data(
     hyperlinks: Vec<Hyperlink>,
     comments: Vec<Comment>,
     sheet_protection: Option<SheetProtection>,
+    page_margins: Option<PageMarginsInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1738,7 +1758,7 @@ fn worksheet_data(
         data_validations: Vec::<DataValidation>::new(),
         sheet_protection,
         auto_filter: None::<AutoFilterInfo>,
-        page_margins: None::<PageMarginsInfo>,
+        page_margins,
         page_setup: None::<PageSetupInfo>,
         header_footer: None::<HeaderFooterInfo>,
         row_breaks: None::<PageBreakListInfo>,
@@ -2009,6 +2029,10 @@ mod tests {
     }
 
     fn put_i32(out: &mut Vec<u8>, value: i32) {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_f64(out: &mut Vec<u8>, value: f64) {
         out.extend_from_slice(&value.to_le_bytes());
     }
 
@@ -2481,6 +2505,51 @@ mod tests {
 
         assert!(protection.sheet);
         assert_eq!(protection.password_hash, None);
+    }
+
+    #[test]
+    fn parses_xlsb_page_margins_record() {
+        let mut payload = Vec::new();
+        for value in [0.7, 0.7, 0.75, 0.75, 0.3, 0.3] {
+            put_f64(&mut payload, value);
+        }
+
+        assert_eq!(
+            parse_page_margins(&payload),
+            Some(PageMarginsInfo {
+                left: 0.7,
+                right: 0.7,
+                top: 0.75,
+                bottom: 0.75,
+                header: 0.3,
+                footer: 0.3,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_page_margins() {
+        let mut data = Vec::new();
+        let mut margins = Vec::new();
+        for value in [0.5, 0.6, 0.7, 0.8, 0.2, 0.25] {
+            put_f64(&mut margins, value);
+        }
+        push_record(&mut data, 0x01dc, &margins);
+
+        let sheet =
+            parse_worksheet(&data, &[], None, Vec::new(), None).expect("parse margins worksheet");
+
+        assert_eq!(
+            sheet.page_margins,
+            Some(PageMarginsInfo {
+                left: 0.5,
+                right: 0.6,
+                top: 0.7,
+                bottom: 0.8,
+                header: 0.2,
+                footer: 0.25,
+            })
+        );
     }
 
     #[test]

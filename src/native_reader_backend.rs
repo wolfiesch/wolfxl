@@ -1168,6 +1168,13 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_page_margins(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match self.ensure_sheet(sheet)?.page_margins {
+            Some(margins) => page_margins_to_py(py, &margins),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         self.read_bounds_1based(sheet)
     }
