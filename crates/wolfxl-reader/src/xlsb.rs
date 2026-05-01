@@ -10,7 +10,7 @@ use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
     HeaderFooterInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, PrintTitlesInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo,
+    PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo,
     SheetProtection, SheetState, SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
 };
 
@@ -535,6 +535,7 @@ fn parse_worksheet(
     let mut hidden_columns = Vec::new();
     let mut row_outline_levels = Vec::new();
     let mut column_outline_levels = Vec::new();
+    let mut freeze_panes = None;
     let mut row = 0u32;
     for record in Records::new(data) {
         let record = record?;
@@ -683,6 +684,9 @@ fn parse_worksheet(
                     merged_ranges.push(range);
                 }
             }
+            0x0097 => {
+                freeze_panes = parse_pane(record.payload);
+            }
             _ => {}
         }
     }
@@ -701,6 +705,7 @@ fn parse_worksheet(
         row_outline_levels,
         column_outline_levels,
         merged_ranges,
+        freeze_panes,
         cells,
     ))
 }
@@ -796,6 +801,41 @@ fn parse_merged_range(payload: &[u8]) -> Option<String> {
         row_col_to_a1(first_row, first_col),
         row_col_to_a1(last_row, last_col)
     ))
+}
+
+fn parse_pane(payload: &[u8]) -> Option<FreezePane> {
+    if payload.len() < 29 {
+        return None;
+    }
+    let x_split = le_f64(&payload[0..8]);
+    let y_split = le_f64(&payload[8..16]);
+    let top_row = le_u32(&payload[16..20]) + 1;
+    let left_col = le_u32(&payload[20..24]) + 1;
+    let active_pane = active_pane_name(le_u32(&payload[24..28]));
+    let flags = payload[28];
+    let frozen = flags & 0x03 != 0;
+    Some(FreezePane {
+        mode: if frozen {
+            PaneMode::Freeze
+        } else {
+            PaneMode::Split
+        },
+        top_left_cell: Some(row_col_to_a1(top_row, left_col)),
+        x_split: Some(x_split.round() as i64),
+        y_split: Some(y_split.round() as i64),
+        active_pane,
+    })
+}
+
+fn active_pane_name(pnn: u32) -> Option<String> {
+    let name = match pnn {
+        0 => "bottomRight",
+        1 => "topRight",
+        2 => "bottomLeft",
+        3 => "topLeft",
+        _ => return None,
+    };
+    Some(name.to_string())
 }
 
 fn parse_formula_from_cell_record(
@@ -1314,13 +1354,14 @@ fn worksheet_data(
     row_outline_levels: Vec<(u32, u8)>,
     column_outline_levels: Vec<(u32, u8)>,
     merged_ranges: Vec<String>,
+    freeze_panes: Option<FreezePane>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
         dimension,
         merged_ranges,
         hyperlinks: Vec::<Hyperlink>::new(),
-        freeze_panes: None::<FreezePane>,
+        freeze_panes,
         sheet_properties: None::<SheetPropertiesInfo>,
         sheet_view: None::<SheetViewInfo>,
         comments: Vec::<Comment>::new(),
@@ -1738,6 +1779,54 @@ mod tests {
                 width: 20.0,
                 custom_width: true,
             }]
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_freeze_pane_record() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1.0f64.to_le_bytes());
+        payload.extend_from_slice(&1.0f64.to_le_bytes());
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 0);
+        payload.push(0x02);
+
+        assert_eq!(
+            parse_pane(&payload),
+            Some(FreezePane {
+                mode: PaneMode::Freeze,
+                top_left_cell: Some("B2".to_string()),
+                x_split: Some(1),
+                y_split: Some(1),
+                active_pane: Some("bottomRight".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_freeze_panes() {
+        let mut data = Vec::new();
+        let mut pane = Vec::new();
+        pane.extend_from_slice(&1.0f64.to_le_bytes());
+        pane.extend_from_slice(&0.0f64.to_le_bytes());
+        put_u32(&mut pane, 1);
+        put_u32(&mut pane, 0);
+        put_u32(&mut pane, 2);
+        pane.push(0x02);
+        push_record(&mut data, 0x0097, &pane);
+
+        let sheet = parse_worksheet(&data, &[], None).expect("parse freeze worksheet");
+
+        assert_eq!(
+            sheet.freeze_panes,
+            Some(FreezePane {
+                mode: PaneMode::Freeze,
+                top_left_cell: Some("A2".to_string()),
+                x_split: Some(1),
+                y_split: Some(0),
+                active_pane: Some("bottomLeft".to_string()),
+            })
         );
     }
 
