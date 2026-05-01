@@ -1175,6 +1175,13 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_page_setup(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.page_setup {
+            Some(setup) => page_setup_to_py(py, setup),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         self.read_bounds_1based(sheet)
     }

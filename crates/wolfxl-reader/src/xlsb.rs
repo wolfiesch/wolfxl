@@ -604,6 +604,7 @@ fn parse_worksheet(
     let mut sheet_view = None;
     let mut sheet_protection = None;
     let mut page_margins = None;
+    let mut page_setup = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -793,6 +794,9 @@ fn parse_worksheet(
             0x01dc => {
                 page_margins = parse_page_margins(record.payload);
             }
+            0x01de => {
+                page_setup = parse_page_setup(record.payload);
+            }
             _ => {}
         }
     }
@@ -817,6 +821,7 @@ fn parse_worksheet(
         comments,
         sheet_protection,
         page_margins,
+        page_setup,
         cells,
     ))
 }
@@ -1219,6 +1224,66 @@ fn parse_page_margins(payload: &[u8]) -> Option<PageMarginsInfo> {
         header: le_f64(&payload[32..40]),
         footer: le_f64(&payload[40..48]),
     })
+}
+
+fn parse_page_setup(payload: &[u8]) -> Option<PageSetupInfo> {
+    if payload.len() < 34 {
+        return None;
+    }
+    let paper_size = le_u32(&payload[0..4]);
+    let scale = le_u32(&payload[4..8]);
+    let horizontal_dpi = le_u32(&payload[8..12]);
+    let vertical_dpi = le_u32(&payload[12..16]);
+    let first_page_number = le_i32(&payload[20..24]);
+    let fit_to_width = le_u32(&payload[24..28]);
+    let fit_to_height = le_u32(&payload[28..32]);
+    let flags = le_u16(&payload[32..34]);
+    let no_orientation = flags & (1 << 6) != 0;
+    let print_comments = flags & (1 << 5) != 0;
+    let comments_at_end = flags & (1 << 8) != 0;
+    Some(PageSetupInfo {
+        orientation: if no_orientation {
+            None
+        } else if flags & (1 << 1) != 0 {
+            Some("landscape".to_string())
+        } else {
+            Some("portrait".to_string())
+        },
+        paper_size: (paper_size != 0).then_some(paper_size),
+        fit_to_width: Some(fit_to_width),
+        fit_to_height: Some(fit_to_height),
+        scale: (scale != 0).then_some(scale),
+        first_page_number: (flags & (1 << 7) != 0 && first_page_number >= 0)
+            .then_some(first_page_number as u32),
+        horizontal_dpi: (horizontal_dpi != 0).then_some(horizontal_dpi),
+        vertical_dpi: (vertical_dpi != 0).then_some(vertical_dpi),
+        cell_comments: Some(
+            if print_comments {
+                if comments_at_end {
+                    "atEnd"
+                } else {
+                    "asDisplayed"
+                }
+            } else {
+                "none"
+            }
+            .to_string(),
+        ),
+        errors: Some(print_errors_as((flags >> 9) & 0x03).to_string()),
+        use_first_page_number: Some(flags & (1 << 7) != 0),
+        use_printer_defaults: Some(no_orientation),
+        black_and_white: Some(flags & (1 << 3) != 0),
+        draft: Some(flags & (1 << 4) != 0),
+    })
+}
+
+fn print_errors_as(value: u16) -> &'static str {
+    match value {
+        1 => "blank",
+        2 => "dash",
+        3 => "NA",
+        _ => "displayed",
+    }
 }
 
 fn parse_formula_from_cell_record(
@@ -1743,6 +1808,7 @@ fn worksheet_data(
     comments: Vec<Comment>,
     sheet_protection: Option<SheetProtection>,
     page_margins: Option<PageMarginsInfo>,
+    page_setup: Option<PageSetupInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1759,7 +1825,7 @@ fn worksheet_data(
         sheet_protection,
         auto_filter: None::<AutoFilterInfo>,
         page_margins,
-        page_setup: None::<PageSetupInfo>,
+        page_setup,
         header_footer: None::<HeaderFooterInfo>,
         row_breaks: None::<PageBreakListInfo>,
         column_breaks: None::<PageBreakListInfo>,
@@ -2549,6 +2615,68 @@ mod tests {
                 header: 0.2,
                 footer: 0.25,
             })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_page_setup_record() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 9);
+        put_u32(&mut payload, 150);
+        put_u32(&mut payload, 300);
+        put_u32(&mut payload, 600);
+        put_u32(&mut payload, 2);
+        put_i32(&mut payload, 4);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 2);
+        put_u16(
+            &mut payload,
+            (1 << 1) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 8) | (3 << 9),
+        );
+        put_wide_string(&mut payload, "rIdPrinter");
+
+        assert_eq!(
+            parse_page_setup(&payload),
+            Some(PageSetupInfo {
+                orientation: Some("landscape".to_string()),
+                paper_size: Some(9),
+                fit_to_width: Some(1),
+                fit_to_height: Some(2),
+                scale: Some(150),
+                first_page_number: Some(4),
+                horizontal_dpi: Some(300),
+                vertical_dpi: Some(600),
+                cell_comments: Some("atEnd".to_string()),
+                errors: Some("NA".to_string()),
+                use_first_page_number: Some(true),
+                use_printer_defaults: Some(false),
+                black_and_white: Some(true),
+                draft: Some(false),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_page_setup() {
+        let mut data = Vec::new();
+        let mut setup = Vec::new();
+        put_u32(&mut setup, 1);
+        put_u32(&mut setup, 100);
+        put_u32(&mut setup, 0);
+        put_u32(&mut setup, 0);
+        put_u32(&mut setup, 1);
+        put_i32(&mut setup, 1);
+        put_u32(&mut setup, 0);
+        put_u32(&mut setup, 0);
+        put_u16(&mut setup, 0);
+        push_record(&mut data, 0x01de, &setup);
+
+        let sheet =
+            parse_worksheet(&data, &[], None, Vec::new(), None).expect("parse setup worksheet");
+
+        assert_eq!(
+            sheet.page_setup.unwrap().orientation.as_deref(),
+            Some("portrait")
         );
     }
 
