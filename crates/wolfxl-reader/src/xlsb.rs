@@ -9,10 +9,10 @@ use zip::ZipArchive;
 use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
-    HeaderFooterInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SelectionInfo, SheetFormatInfo,
-    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables, Table,
-    WorksheetData, XfEntry,
+    HeaderFooterInfo, HeaderFooterItemInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo,
+    PageMarginsInfo, PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SelectionInfo,
+    SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables,
+    Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -605,6 +605,7 @@ fn parse_worksheet(
     let mut sheet_protection = None;
     let mut page_margins = None;
     let mut page_setup = None;
+    let mut header_footer = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -797,6 +798,9 @@ fn parse_worksheet(
             0x01de => {
                 page_setup = parse_page_setup(record.payload);
             }
+            0x01df => {
+                header_footer = parse_header_footer(record.payload);
+            }
             _ => {}
         }
     }
@@ -822,6 +826,7 @@ fn parse_worksheet(
         sheet_protection,
         page_margins,
         page_setup,
+        header_footer,
         cells,
     ))
 }
@@ -1283,6 +1288,97 @@ fn print_errors_as(value: u16) -> &'static str {
         2 => "dash",
         3 => "NA",
         _ => "displayed",
+    }
+}
+
+fn parse_header_footer(payload: &[u8]) -> Option<HeaderFooterInfo> {
+    if payload.len() < 2 {
+        return None;
+    }
+    let flags = le_u16(&payload[0..2]);
+    let mut offset = 2;
+    let odd_header = read_nullable_wide_string_at(payload, &mut offset)?;
+    let odd_footer = read_nullable_wide_string_at(payload, &mut offset)?;
+    let even_header = read_nullable_wide_string_at(payload, &mut offset)?;
+    let even_footer = read_nullable_wide_string_at(payload, &mut offset)?;
+    let first_header = read_nullable_wide_string_at(payload, &mut offset)?;
+    let first_footer = read_nullable_wide_string_at(payload, &mut offset)?;
+    Some(HeaderFooterInfo {
+        odd_header: odd_header
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        odd_footer: odd_footer
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        even_header: even_header
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        even_footer: even_footer
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        first_header: first_header
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        first_footer: first_footer
+            .as_deref()
+            .map(parse_header_footer_item_text)
+            .unwrap_or_default(),
+        different_odd_even: flags & 0x0001 != 0,
+        different_first: flags & 0x0002 != 0,
+        scale_with_doc: flags & 0x0004 != 0,
+        align_with_margins: flags & 0x0008 != 0,
+    })
+}
+
+fn read_nullable_wide_string_at(payload: &[u8], offset: &mut usize) -> Option<Option<String>> {
+    let raw_len = payload.get(*offset..*offset + 4).map(le_i32)?;
+    if raw_len < 0 {
+        *offset += 4;
+        return Some(None);
+    }
+    read_wide_string_at(payload, offset).map(Some)
+}
+
+fn parse_header_footer_item_text(text: &str) -> HeaderFooterItemInfo {
+    let mut item = HeaderFooterItemInfo::default();
+    let mut current: Option<u8> = None;
+    let mut buf = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '&' {
+            match chars.peek().copied() {
+                Some('L') | Some('C') | Some('R') => {
+                    assign_header_footer_segment(&mut item, current, std::mem::take(&mut buf));
+                    current = chars.next().map(|marker| marker as u8);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        buf.push(ch);
+    }
+    assign_header_footer_segment(&mut item, current, buf);
+    item
+}
+
+fn assign_header_footer_segment(
+    item: &mut HeaderFooterItemInfo,
+    segment: Option<u8>,
+    value: String,
+) {
+    if value.is_empty() {
+        return;
+    }
+    match segment.unwrap_or(b'C') {
+        b'L' => item.left = Some(value),
+        b'R' => item.right = Some(value),
+        _ => item.center = Some(value),
     }
 }
 
@@ -1809,6 +1905,7 @@ fn worksheet_data(
     sheet_protection: Option<SheetProtection>,
     page_margins: Option<PageMarginsInfo>,
     page_setup: Option<PageSetupInfo>,
+    header_footer: Option<HeaderFooterInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1826,7 +1923,7 @@ fn worksheet_data(
         auto_filter: None::<AutoFilterInfo>,
         page_margins,
         page_setup,
-        header_footer: None::<HeaderFooterInfo>,
+        header_footer,
         row_breaks: None::<PageBreakListInfo>,
         column_breaks: None::<PageBreakListInfo>,
         sheet_format: None::<SheetFormatInfo>,
@@ -2678,6 +2775,63 @@ mod tests {
             sheet.page_setup.unwrap().orientation.as_deref(),
             Some("portrait")
         );
+    }
+
+    #[test]
+    fn parses_xlsb_header_footer_record() {
+        let mut payload = Vec::new();
+        put_u16(&mut payload, 0x000f);
+        put_wide_string(&mut payload, "&LLeft&CHead&RRight");
+        put_wide_string(&mut payload, "&CPage &P");
+        for _ in 0..4 {
+            put_i32(&mut payload, -1);
+        }
+
+        assert_eq!(
+            parse_header_footer(&payload),
+            Some(HeaderFooterInfo {
+                odd_header: HeaderFooterItemInfo {
+                    left: Some("Left".to_string()),
+                    center: Some("Head".to_string()),
+                    right: Some("Right".to_string()),
+                },
+                odd_footer: HeaderFooterItemInfo {
+                    left: None,
+                    center: Some("Page &P".to_string()),
+                    right: None,
+                },
+                even_header: HeaderFooterItemInfo::default(),
+                even_footer: HeaderFooterItemInfo::default(),
+                first_header: HeaderFooterItemInfo::default(),
+                first_footer: HeaderFooterItemInfo::default(),
+                different_odd_even: true,
+                different_first: true,
+                scale_with_doc: true,
+                align_with_margins: true,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_header_footer() {
+        let mut data = Vec::new();
+        let mut header_footer = Vec::new();
+        put_u16(&mut header_footer, 0x000c);
+        put_wide_string(&mut header_footer, "&C&A");
+        put_wide_string(&mut header_footer, "&CPage &P");
+        for _ in 0..4 {
+            put_i32(&mut header_footer, -1);
+        }
+        push_record(&mut data, 0x01df, &header_footer);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse header/footer worksheet");
+        let header_footer = sheet.header_footer.unwrap();
+
+        assert_eq!(header_footer.odd_header.center.as_deref(), Some("&A"));
+        assert_eq!(header_footer.odd_footer.center.as_deref(), Some("Page &P"));
+        assert!(header_footer.scale_with_doc);
+        assert!(header_footer.align_with_margins);
     }
 
     #[test]

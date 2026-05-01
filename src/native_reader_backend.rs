@@ -1182,6 +1182,13 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_header_footer(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.header_footer {
+            Some(header_footer) => header_footer_to_py(py, header_footer),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         self.read_bounds_1based(sheet)
     }
