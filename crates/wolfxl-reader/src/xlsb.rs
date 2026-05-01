@@ -56,6 +56,7 @@ pub struct NativeXlsbBook {
     bytes: Vec<u8>,
     sheets: Vec<XlsbSheet>,
     named_ranges: Vec<NamedRange>,
+    extern_sheets: Vec<XtiRef>,
     shared_strings: Vec<String>,
     styles: StyleTables,
     date1904: bool,
@@ -97,11 +98,13 @@ impl NativeXlsbBook {
         let workbook_rels = read_rels(&mut zip, "xl/_rels/workbook.bin.rels")?;
         let shared_strings = read_shared_strings(&mut zip)?;
         let styles = read_styles(&mut zip)?;
-        let (sheets, named_ranges, date1904) = read_workbook(&mut zip, &workbook_rels)?;
+        let (sheets, named_ranges, extern_sheets, date1904) =
+            read_workbook(&mut zip, &workbook_rels)?;
         Ok(Self {
             bytes,
             sheets,
             named_ranges,
+            extern_sheets,
             shared_strings,
             styles,
             date1904,
@@ -156,7 +159,15 @@ impl NativeXlsbBook {
             .ok_or_else(|| XlsbError::SheetNotFound(sheet_name.to_string()))?;
         let mut zip = ZipArchive::new(Cursor::new(self.bytes.clone()))?;
         let data = read_zip_part(&mut zip, &sheet.path)?;
-        Ok(parse_worksheet(&data, &self.shared_strings)?)
+        let context = FormulaContext {
+            sheets: &self.sheets,
+            extern_sheets: &self.extern_sheets,
+        };
+        Ok(parse_worksheet(
+            &data,
+            &self.shared_strings,
+            Some(&context),
+        )?)
     }
 }
 
@@ -204,7 +215,7 @@ fn zip_part_name(zip: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Option<St
 fn read_workbook(
     zip: &mut ZipArchive<Cursor<Vec<u8>>>,
     rels: &RelsGraph,
-) -> Result<(Vec<XlsbSheet>, Vec<NamedRange>, bool)> {
+) -> Result<(Vec<XlsbSheet>, Vec<NamedRange>, Vec<XtiRef>, bool)> {
     let data = read_zip_part(zip, "xl/workbook.bin")?;
     let mut sheets = Vec::new();
     let mut raw_names = Vec::new();
@@ -256,7 +267,7 @@ fn read_workbook(
         }
     }
     let named_ranges = resolve_xlsb_named_ranges(&sheets, raw_names);
-    Ok((sheets, named_ranges, date1904))
+    Ok((sheets, named_ranges, extern_sheets, date1904))
 }
 
 fn read_shared_strings(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<Vec<String>> {
@@ -397,7 +408,11 @@ fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
     Ok(styles)
 }
 
-fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetData> {
+fn parse_worksheet(
+    data: &[u8],
+    shared_strings: &[String],
+    formula_context: Option<&FormulaContext<'_>>,
+) -> Result<WorksheetData> {
     let mut cells = Vec::new();
     let mut dimension = None;
     let mut row_heights = HashMap::new();
@@ -463,7 +478,8 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
                         .copied()
                         .map(error_code)
                         .unwrap_or("#ERROR!");
-                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
+                    let formula =
+                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
                     cells.push(make_cell(
                         row,
                         col,
@@ -477,7 +493,8 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
             0x0004 | 0x000a => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8).copied().unwrap_or_default() != 0;
-                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
+                    let formula =
+                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
                     cells.push(make_cell(
                         row,
                         col,
@@ -491,7 +508,8 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
             0x0005 | 0x0009 => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8..16).map(le_f64).unwrap_or_default();
-                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
+                    let formula =
+                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
                     cells.push(make_cell(
                         row,
                         col,
@@ -506,7 +524,8 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let mut consumed = 0;
                     let value = wide_string(record.payload.get(8..).unwrap_or(&[]), &mut consumed)?;
-                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
+                    let formula =
+                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
                     cells.push(make_cell(
                         row,
                         col,
@@ -666,7 +685,11 @@ fn parse_merged_range(payload: &[u8]) -> Option<String> {
     ))
 }
 
-fn parse_formula_from_cell_record(record_type: u16, payload: &[u8]) -> Option<String> {
+fn parse_formula_from_cell_record(
+    record_type: u16,
+    payload: &[u8],
+    context: Option<&FormulaContext<'_>>,
+) -> Option<String> {
     let formula_payload = match record_type {
         0x0008 => {
             let len = payload.get(8..12).map(le_u32)? as usize;
@@ -678,7 +701,7 @@ fn parse_formula_from_cell_record(record_type: u16, payload: &[u8]) -> Option<St
     };
     let rgce_len = formula_payload.get(0..4).map(le_u32)? as usize;
     let rgce = formula_payload.get(4..4 + rgce_len)?;
-    parse_formula_rgce(rgce)
+    parse_formula_rgce_with_context(rgce, context)
 }
 
 struct FormulaContext<'a> {
@@ -686,6 +709,7 @@ struct FormulaContext<'a> {
     extern_sheets: &'a [XtiRef],
 }
 
+#[cfg(test)]
 fn parse_formula_rgce(rgce: &[u8]) -> Option<String> {
     parse_formula_rgce_with_context(rgce, None)
 }
@@ -1562,7 +1586,7 @@ mod tests {
         put_u32(&mut merge, 2);
         push_record(&mut data, 0x00b0, &merge);
 
-        let sheet = parse_worksheet(&data, &[]).expect("parse synthetic worksheet");
+        let sheet = parse_worksheet(&data, &[], None).expect("parse synthetic worksheet");
         assert_eq!(sheet.merged_ranges, vec!["B5:C5"]);
         assert_eq!(sheet.hidden_rows, vec![5]);
         assert_eq!(sheet.row_outline_levels, vec![(5, 1)]);
@@ -1640,10 +1664,61 @@ mod tests {
         push_record(&mut data, 0x0000, &row);
         push_record(&mut data, 0x0009, &payload);
 
-        let sheet = parse_worksheet(&data, &[]).expect("parse formula worksheet");
+        let sheet = parse_worksheet(&data, &[], None).expect("parse formula worksheet");
         assert_eq!(sheet.cells.len(), 1);
         assert_eq!(sheet.cells[0].value, CellValue::Number(42.0));
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("40+2"));
+    }
+
+    #[test]
+    fn parse_worksheet_uses_extern_sheets_for_formula_text() {
+        let sheets = vec![
+            XlsbSheet {
+                name: "Inputs".to_string(),
+                path: "xl/worksheets/sheet1.bin".to_string(),
+                state: SheetState::Visible,
+            },
+            XlsbSheet {
+                name: "Calc".to_string(),
+                path: "xl/worksheets/sheet2.bin".to_string(),
+                state: SheetState::Visible,
+            },
+        ];
+        let extern_sheets = vec![XtiRef {
+            first_sheet: 0,
+            last_sheet: 0,
+        }];
+        let context = FormulaContext {
+            sheets: &sheets,
+            extern_sheets: &extern_sheets,
+        };
+
+        let mut rgce = Vec::new();
+        rgce.push(0x5a);
+        put_u16(&mut rgce, 0);
+        put_u32(&mut rgce, 0);
+        put_u16(&mut rgce, 0);
+
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        payload.extend_from_slice(&42.0f64.to_le_bytes());
+        put_u16(&mut payload, 0);
+        put_u32(&mut payload, rgce.len() as u32);
+        payload.extend_from_slice(&rgce);
+
+        let mut data = Vec::new();
+        let mut row = Vec::new();
+        put_u32(&mut row, 0);
+        put_u32(&mut row, 0);
+        put_u16(&mut row, 0);
+        put_u16(&mut row, 0);
+        push_record(&mut data, 0x0000, &row);
+        push_record(&mut data, 0x0009, &payload);
+
+        let sheet = parse_worksheet(&data, &[], Some(&context)).expect("parse formula worksheet");
+
+        assert_eq!(sheet.cells[0].formula.as_deref(), Some("Inputs!$A$1"));
     }
 
     #[test]
