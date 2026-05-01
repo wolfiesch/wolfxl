@@ -10,8 +10,9 @@ use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
     HeaderFooterInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo,
-    SheetProtection, SheetState, SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
+    PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SelectionInfo, SheetFormatInfo,
+    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables, Table,
+    WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -536,6 +537,8 @@ fn parse_worksheet(
     let mut row_outline_levels = Vec::new();
     let mut column_outline_levels = Vec::new();
     let mut freeze_panes = None;
+    let mut sheet_view = None;
+    let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
         let record = record?;
@@ -684,8 +687,34 @@ fn parse_worksheet(
                     merged_ranges.push(range);
                 }
             }
+            0x0089 => {
+                if sheet_view.is_none() {
+                    current_sheet_view = parse_sheet_view(record.payload);
+                }
+            }
+            0x008a => {
+                if sheet_view.is_none() {
+                    sheet_view = current_sheet_view.take();
+                } else {
+                    current_sheet_view = None;
+                }
+            }
             0x0097 => {
-                freeze_panes = parse_pane(record.payload);
+                if let Some(pane) = parse_pane(record.payload) {
+                    if freeze_panes.is_none() {
+                        freeze_panes = Some(pane.clone());
+                    }
+                    if let Some(view) = current_sheet_view.as_mut() {
+                        view.pane = Some(pane);
+                    }
+                }
+            }
+            0x0098 => {
+                if let (Some(view), Some(selection)) =
+                    (current_sheet_view.as_mut(), parse_selection(record.payload))
+                {
+                    view.selections.push(selection);
+                }
             }
             _ => {}
         }
@@ -706,6 +735,7 @@ fn parse_worksheet(
         column_outline_levels,
         merged_ranges,
         freeze_panes,
+        sheet_view,
         cells,
     ))
 }
@@ -836,6 +866,90 @@ fn active_pane_name(pnn: u32) -> Option<String> {
         _ => return None,
     };
     Some(name.to_string())
+}
+
+fn parse_sheet_view(payload: &[u8]) -> Option<SheetViewInfo> {
+    if payload.len() < 30 {
+        return None;
+    }
+    let flags = le_u16(&payload[0..2]);
+    let view = match le_u32(&payload[2..6]) {
+        1 => "pageBreakPreview",
+        2 => "pageLayout",
+        _ => "normal",
+    };
+    let top_row = le_u32(&payload[6..10]) + 1;
+    let left_col = le_u32(&payload[10..14]) + 1;
+    let top_left_cell = (top_row != 1 || left_col != 1).then(|| row_col_to_a1(top_row, left_col));
+    Some(SheetViewInfo {
+        zoom_scale: le_u16(&payload[18..20]) as u32,
+        zoom_scale_normal: match le_u16(&payload[20..22]) as u32 {
+            0 => 100,
+            value => value,
+        },
+        view: view.to_string(),
+        show_grid_lines: flags & 0x0004 != 0,
+        show_row_col_headers: flags & 0x0008 != 0,
+        show_outline_symbols: flags & 0x0100 != 0,
+        show_zeros: flags & 0x0010 != 0,
+        right_to_left: flags & 0x0020 != 0,
+        tab_selected: flags & 0x0040 != 0,
+        top_left_cell,
+        workbook_view_id: le_u32(&payload[26..30]),
+        pane: None,
+        selections: Vec::new(),
+    })
+}
+
+fn parse_selection(payload: &[u8]) -> Option<SelectionInfo> {
+    if payload.len() < 20 {
+        return None;
+    }
+    let pane = active_pane_name(le_u32(&payload[0..4]));
+    let active_row = le_u32(&payload[4..8]) + 1;
+    let active_col = le_u32(&payload[8..12]) + 1;
+    let active_cell_id = le_u32(&payload[12..16]);
+    let active_cell = row_col_to_a1(active_row, active_col);
+    Some(SelectionInfo {
+        pane,
+        active_cell: Some(active_cell.clone()),
+        sqref: parse_sqref(payload.get(16..)?).or(Some(active_cell)),
+        active_cell_id: Some(active_cell_id),
+    })
+}
+
+fn parse_sqref(payload: &[u8]) -> Option<String> {
+    let count = payload.get(0..4).map(le_u32)? as usize;
+    if count == 0 {
+        return None;
+    }
+    let ranges: Vec<String> = payload
+        .get(4..)?
+        .chunks_exact(16)
+        .take(count)
+        .filter_map(parse_rfx)
+        .collect();
+    (!ranges.is_empty()).then(|| ranges.join(" "))
+}
+
+fn parse_rfx(payload: &[u8]) -> Option<String> {
+    if payload.len() < 16 {
+        return None;
+    }
+    let first_row = le_u32(&payload[0..4]) + 1;
+    let last_row = le_u32(&payload[4..8]) + 1;
+    let first_col = le_u32(&payload[8..12]) + 1;
+    let last_col = le_u32(&payload[12..16]) + 1;
+    if last_row < first_row || last_col < first_col {
+        return None;
+    }
+    let first = row_col_to_a1(first_row, first_col);
+    let last = row_col_to_a1(last_row, last_col);
+    if first == last {
+        Some(first)
+    } else {
+        Some(format!("{first}:{last}"))
+    }
 }
 
 fn parse_formula_from_cell_record(
@@ -1355,6 +1469,7 @@ fn worksheet_data(
     column_outline_levels: Vec<(u32, u8)>,
     merged_ranges: Vec<String>,
     freeze_panes: Option<FreezePane>,
+    sheet_view: Option<SheetViewInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1363,7 +1478,7 @@ fn worksheet_data(
         hyperlinks: Vec::<Hyperlink>::new(),
         freeze_panes,
         sheet_properties: None::<SheetPropertiesInfo>,
-        sheet_view: None::<SheetViewInfo>,
+        sheet_view,
         comments: Vec::<Comment>::new(),
         row_heights,
         column_widths,
@@ -1828,6 +1943,96 @@ mod tests {
                 active_pane: Some("bottomLeft".to_string()),
             })
         );
+    }
+
+    #[test]
+    fn parses_xlsb_sheet_view_record() {
+        let mut payload = Vec::new();
+        put_u16(&mut payload, 0x0004 | 0x0008 | 0x0010 | 0x0040 | 0x0100);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 3);
+        payload.push(0);
+        payload.push(0);
+        put_u16(&mut payload, 0);
+        put_u16(&mut payload, 150);
+        put_u16(&mut payload, 120);
+        put_u16(&mut payload, 80);
+        put_u16(&mut payload, 90);
+        put_u32(&mut payload, 1);
+
+        let view = parse_sheet_view(&payload).unwrap();
+
+        assert_eq!(view.zoom_scale, 150);
+        assert_eq!(view.zoom_scale_normal, 120);
+        assert_eq!(view.view, "pageLayout");
+        assert!(view.show_grid_lines);
+        assert!(view.show_row_col_headers);
+        assert!(view.show_outline_symbols);
+        assert!(view.show_zeros);
+        assert!(view.tab_selected);
+        assert_eq!(view.top_left_cell.as_deref(), Some("D3"));
+        assert_eq!(view.workbook_view_id, 1);
+    }
+
+    #[test]
+    fn parses_xlsb_selection_record() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 3);
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 4);
+        put_u32(&mut payload, 3);
+        put_u32(&mut payload, 5);
+
+        let selection = parse_selection(&payload).unwrap();
+
+        assert_eq!(selection.pane.as_deref(), Some("bottomRight"));
+        assert_eq!(selection.active_cell.as_deref(), Some("D3"));
+        assert_eq!(selection.sqref.as_deref(), Some("D3:F5"));
+        assert_eq!(selection.active_cell_id, Some(0));
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_sheet_view_metadata() {
+        let mut data = Vec::new();
+        let mut view = Vec::new();
+        put_u16(&mut view, 0x0004 | 0x0008 | 0x0010 | 0x0100);
+        put_u32(&mut view, 0);
+        put_u32(&mut view, 0);
+        put_u32(&mut view, 0);
+        view.push(0);
+        view.push(0);
+        put_u16(&mut view, 0);
+        put_u16(&mut view, 100);
+        put_u16(&mut view, 100);
+        put_u16(&mut view, 100);
+        put_u16(&mut view, 100);
+        put_u32(&mut view, 0);
+        push_record(&mut data, 0x0089, &view);
+
+        let mut selection = Vec::new();
+        put_u32(&mut selection, 3);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 1);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 0);
+        put_u32(&mut selection, 0);
+        push_record(&mut data, 0x0098, &selection);
+        push_record(&mut data, 0x008a, &[]);
+
+        let sheet = parse_worksheet(&data, &[], None).expect("parse sheet view worksheet");
+        let view = sheet.sheet_view.unwrap();
+
+        assert_eq!(view.view, "normal");
+        assert_eq!(view.selections.len(), 1);
+        assert_eq!(view.selections[0].active_cell.as_deref(), Some("A1"));
     }
 
     #[test]
