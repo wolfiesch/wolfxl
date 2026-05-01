@@ -172,6 +172,13 @@ impl NativeXlsbBook {
             .ok_or_else(|| XlsbError::SheetNotFound(sheet_name.to_string()))?;
         let mut zip = ZipArchive::new(Cursor::new(self.bytes.clone()))?;
         let data = read_zip_part(&mut zip, &sheet.path)?;
+        let rels = read_zip_part_optional(&mut zip, &sheet_rels_path(&sheet.path))?
+            .map(|xml| {
+                RelsGraph::parse(&xml).map_err(|e| {
+                    XlsbError::Xml(format!("failed to parse sheet rels for {sheet_name}: {e}"))
+                })
+            })
+            .transpose()?;
         let context = FormulaContext {
             sheets: &self.sheets,
             extern_sheets: &self.extern_sheets,
@@ -180,6 +187,7 @@ impl NativeXlsbBook {
         Ok(parse_worksheet(
             &data,
             &self.shared_strings,
+            rels.as_ref(),
             Some(&context),
         )?)
     }
@@ -224,6 +232,19 @@ fn zip_part_name(zip: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Option<St
     zip.file_names()
         .find(|name| name.to_ascii_lowercase() == needle)
         .map(str::to_string)
+}
+
+fn sheet_rels_path(sheet_path: &str) -> String {
+    let normalized = sheet_path.trim_start_matches('/');
+    let (dir, file) = match normalized.rsplit_once('/') {
+        Some((dir, file)) => (dir, file),
+        None => ("", normalized),
+    };
+    if dir.is_empty() {
+        format!("_rels/{file}.rels")
+    } else {
+        format!("{dir}/_rels/{file}.rels")
+    }
 }
 
 fn read_workbook(
@@ -525,9 +546,11 @@ fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
 fn parse_worksheet(
     data: &[u8],
     shared_strings: &[String],
+    rels: Option<&RelsGraph>,
     formula_context: Option<&FormulaContext<'_>>,
 ) -> Result<WorksheetData> {
     let mut cells = Vec::new();
+    let mut hyperlink_nodes = Vec::new();
     let mut dimension = None;
     let mut row_heights = HashMap::new();
     let mut column_widths = Vec::new();
@@ -687,6 +710,11 @@ fn parse_worksheet(
                     merged_ranges.push(range);
                 }
             }
+            0x01ee => {
+                if let Some(node) = parse_hyperlink(record.payload) {
+                    hyperlink_nodes.push(node);
+                }
+            }
             0x0089 => {
                 if sheet_view.is_none() {
                     current_sheet_view = parse_sheet_view(record.payload);
@@ -736,6 +764,7 @@ fn parse_worksheet(
         merged_ranges,
         freeze_panes,
         sheet_view,
+        resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         cells,
     ))
 }
@@ -949,6 +978,83 @@ fn parse_rfx(payload: &[u8]) -> Option<String> {
         Some(first)
     } else {
         Some(format!("{first}:{last}"))
+    }
+}
+
+#[derive(Debug)]
+struct HyperlinkNode {
+    cell: String,
+    rid: Option<String>,
+    location: Option<String>,
+    display: Option<String>,
+    tooltip: Option<String>,
+}
+
+fn parse_hyperlink(payload: &[u8]) -> Option<HyperlinkNode> {
+    let cell = parse_rfx(payload.get(0..16)?)?;
+    let mut offset = 16;
+    let rid = read_wide_string_at(payload, &mut offset).filter(|value| !value.is_empty());
+    let location = read_wide_string_at(payload, &mut offset).filter(|value| !value.is_empty());
+    let tooltip = read_wide_string_at(payload, &mut offset).filter(|value| !value.is_empty());
+    let display = read_wide_string_at(payload, &mut offset).filter(|value| !value.is_empty());
+    Some(HyperlinkNode {
+        cell,
+        rid,
+        location,
+        display,
+        tooltip,
+    })
+}
+
+fn read_wide_string_at(payload: &[u8], offset: &mut usize) -> Option<String> {
+    let mut consumed = 0;
+    let value = wide_string(payload.get(*offset..)?, &mut consumed).ok()?;
+    *offset += consumed;
+    Some(value)
+}
+
+fn resolve_hyperlinks(
+    nodes: Vec<HyperlinkNode>,
+    rels: Option<&RelsGraph>,
+    cells: &[Cell],
+) -> Vec<Hyperlink> {
+    let mut out = Vec::new();
+    for node in nodes {
+        let internal = node.location.is_some() && node.rid.is_none();
+        let target = if let Some(rid) = &node.rid {
+            rels.and_then(|rels| rels.get(&RelId(rid.clone())))
+                .map(|rel| rel.target.clone())
+                .unwrap_or_default()
+        } else {
+            node.location.clone().unwrap_or_default()
+        };
+        if target.is_empty() {
+            continue;
+        }
+        let display = match node.display {
+            Some(display) if !display.is_empty() => display,
+            _ => cell_display_text(cells, &node.cell),
+        };
+        out.push(Hyperlink {
+            cell: node.cell,
+            target,
+            display,
+            tooltip: node.tooltip,
+            internal,
+        });
+    }
+    out
+}
+
+fn cell_display_text(cells: &[Cell], coordinate: &str) -> String {
+    let Some(cell) = cells.iter().find(|cell| cell.coordinate == coordinate) else {
+        return String::new();
+    };
+    match &cell.value {
+        CellValue::Empty | CellValue::Error(_) => String::new(),
+        CellValue::String(value) => value.clone(),
+        CellValue::Number(value) => value.to_string(),
+        CellValue::Bool(value) => value.to_string(),
     }
 }
 
@@ -1470,12 +1576,13 @@ fn worksheet_data(
     merged_ranges: Vec<String>,
     freeze_panes: Option<FreezePane>,
     sheet_view: Option<SheetViewInfo>,
+    hyperlinks: Vec<Hyperlink>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
         dimension,
         merged_ranges,
-        hyperlinks: Vec::<Hyperlink>::new(),
+        hyperlinks,
         freeze_panes,
         sheet_properties: None::<SheetPropertiesInfo>,
         sheet_view,
@@ -1873,7 +1980,7 @@ mod tests {
         put_u32(&mut merge, 2);
         push_record(&mut data, 0x00b0, &merge);
 
-        let sheet = parse_worksheet(&data, &[], None).expect("parse synthetic worksheet");
+        let sheet = parse_worksheet(&data, &[], None, None).expect("parse synthetic worksheet");
         assert_eq!(sheet.merged_ranges, vec!["B5:C5"]);
         assert_eq!(sheet.hidden_rows, vec![5]);
         assert_eq!(sheet.row_outline_levels, vec![(5, 1)]);
@@ -1931,7 +2038,7 @@ mod tests {
         pane.push(0x02);
         push_record(&mut data, 0x0097, &pane);
 
-        let sheet = parse_worksheet(&data, &[], None).expect("parse freeze worksheet");
+        let sheet = parse_worksheet(&data, &[], None, None).expect("parse freeze worksheet");
 
         assert_eq!(
             sheet.freeze_panes,
@@ -2027,12 +2134,100 @@ mod tests {
         push_record(&mut data, 0x0098, &selection);
         push_record(&mut data, 0x008a, &[]);
 
-        let sheet = parse_worksheet(&data, &[], None).expect("parse sheet view worksheet");
+        let sheet = parse_worksheet(&data, &[], None, None).expect("parse sheet view worksheet");
         let view = sheet.sheet_view.unwrap();
 
         assert_eq!(view.view, "normal");
         assert_eq!(view.selections.len(), 1);
         assert_eq!(view.selections[0].active_cell.as_deref(), Some("A1"));
+    }
+
+    #[test]
+    fn parses_xlsb_hyperlink_record_with_relationship_target() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_wide_string(&mut payload, "rId5");
+        put_wide_string(&mut payload, "");
+        put_wide_string(&mut payload, "tip");
+        put_wide_string(&mut payload, "Example");
+        let rels = RelsGraph::parse(
+            br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+            </Relationships>"#,
+        )
+        .expect("parse rels");
+
+        let node = parse_hyperlink(&payload).unwrap();
+        let links = resolve_hyperlinks(vec![node], Some(&rels), &[]);
+
+        assert_eq!(
+            links,
+            vec![Hyperlink {
+                cell: "A1".to_string(),
+                target: "https://example.com".to_string(),
+                display: "Example".to_string(),
+                tooltip: Some("tip".to_string()),
+                internal: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_internal_hyperlink_record() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_wide_string(&mut payload, "");
+        put_wide_string(&mut payload, "Sheet2!A1");
+        put_wide_string(&mut payload, "");
+        put_wide_string(&mut payload, "");
+
+        let node = parse_hyperlink(&payload).unwrap();
+        let links = resolve_hyperlinks(vec![node], None, &[]);
+
+        assert_eq!(
+            links,
+            vec![Hyperlink {
+                cell: "B2".to_string(),
+                target: "Sheet2!A1".to_string(),
+                display: String::new(),
+                tooltip: None,
+                internal: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_hyperlinks() {
+        let mut data = Vec::new();
+        let mut link = Vec::new();
+        put_u32(&mut link, 0);
+        put_u32(&mut link, 0);
+        put_u32(&mut link, 0);
+        put_u32(&mut link, 0);
+        put_wide_string(&mut link, "rId2");
+        put_wide_string(&mut link, "");
+        put_wide_string(&mut link, "");
+        put_wide_string(&mut link, "Docs");
+        push_record(&mut data, 0x01ee, &link);
+        let rels = RelsGraph::parse(
+            br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://docs.example" TargetMode="External"/>
+            </Relationships>"#,
+        )
+        .expect("parse rels");
+
+        let sheet = parse_worksheet(&data, &[], Some(&rels), None).expect("parse hyperlinks");
+
+        assert_eq!(sheet.hyperlinks.len(), 1);
+        assert_eq!(sheet.hyperlinks[0].cell, "A1");
+        assert_eq!(sheet.hyperlinks[0].target, "https://docs.example");
+        assert_eq!(sheet.hyperlinks[0].display, "Docs");
     }
 
     #[test]
@@ -2111,7 +2306,7 @@ mod tests {
         push_record(&mut data, 0x0000, &row);
         push_record(&mut data, 0x0009, &payload);
 
-        let sheet = parse_worksheet(&data, &[], None).expect("parse formula worksheet");
+        let sheet = parse_worksheet(&data, &[], None, None).expect("parse formula worksheet");
         assert_eq!(sheet.cells.len(), 1);
         assert_eq!(sheet.cells[0].value, CellValue::Number(42.0));
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("40+2"));
@@ -2164,7 +2359,8 @@ mod tests {
         push_record(&mut data, 0x0000, &row);
         push_record(&mut data, 0x0009, &payload);
 
-        let sheet = parse_worksheet(&data, &[], Some(&context)).expect("parse formula worksheet");
+        let sheet =
+            parse_worksheet(&data, &[], None, Some(&context)).expect("parse formula worksheet");
 
         assert_eq!(sheet.cells[0].formula.as_deref(), Some("Inputs!$A$1"));
     }
