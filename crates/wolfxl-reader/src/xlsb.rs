@@ -606,6 +606,7 @@ fn parse_worksheet(
     let mut page_margins = None;
     let mut page_setup = None;
     let mut header_footer = None;
+    let mut sheet_format = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -801,6 +802,9 @@ fn parse_worksheet(
             0x01df => {
                 header_footer = parse_header_footer(record.payload);
             }
+            0x01e5 => {
+                sheet_format = parse_sheet_format(record.payload);
+            }
             _ => {}
         }
     }
@@ -827,6 +831,7 @@ fn parse_worksheet(
         page_margins,
         page_setup,
         header_footer,
+        sheet_format,
         cells,
     ))
 }
@@ -1382,6 +1387,26 @@ fn assign_header_footer_segment(
     }
 }
 
+fn parse_sheet_format(payload: &[u8]) -> Option<SheetFormatInfo> {
+    if payload.len() < 12 {
+        return None;
+    }
+    let default_col_width_raw = le_u32(&payload[0..4]);
+    let flags = le_u32(&payload[8..12]);
+    Some(SheetFormatInfo {
+        base_col_width: le_u16(&payload[4..6]) as u32,
+        default_col_width: (default_col_width_raw != u32::MAX)
+            .then_some(default_col_width_raw as f64 / 256.0),
+        default_row_height: le_u16(&payload[6..8]) as f64 / 20.0,
+        custom_height: flags & 0x0001 != 0,
+        zero_height: flags & 0x0002 != 0,
+        thick_top: flags & 0x0004 != 0,
+        thick_bottom: flags & 0x0008 != 0,
+        outline_level_row: (flags >> 16) & 0xff,
+        outline_level_col: (flags >> 24) & 0xff,
+    })
+}
+
 fn parse_formula_from_cell_record(
     record_type: u16,
     payload: &[u8],
@@ -1906,6 +1931,7 @@ fn worksheet_data(
     page_margins: Option<PageMarginsInfo>,
     page_setup: Option<PageSetupInfo>,
     header_footer: Option<HeaderFooterInfo>,
+    sheet_format: Option<SheetFormatInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1926,7 +1952,7 @@ fn worksheet_data(
         header_footer,
         row_breaks: None::<PageBreakListInfo>,
         column_breaks: None::<PageBreakListInfo>,
-        sheet_format: None::<SheetFormatInfo>,
+        sheet_format,
         images: Vec::<ImageInfo>::new(),
         charts: Vec::new(),
         tables: Vec::<Table>::new(),
@@ -2832,6 +2858,59 @@ mod tests {
         assert_eq!(header_footer.odd_footer.center.as_deref(), Some("Page &P"));
         assert!(header_footer.scale_with_doc);
         assert!(header_footer.align_with_margins);
+    }
+
+    #[test]
+    fn parses_xlsb_sheet_format_record() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 11 * 256);
+        put_u16(&mut payload, 8);
+        put_u16(&mut payload, 300);
+        put_u32(&mut payload, 0x0201000d);
+
+        assert_eq!(
+            parse_sheet_format(&payload),
+            Some(SheetFormatInfo {
+                base_col_width: 8,
+                default_col_width: Some(11.0),
+                default_row_height: 15.0,
+                custom_height: true,
+                zero_height: false,
+                thick_top: true,
+                thick_bottom: true,
+                outline_level_row: 1,
+                outline_level_col: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_sheet_format() {
+        let mut data = Vec::new();
+        let mut format = Vec::new();
+        put_u32(&mut format, u32::MAX);
+        put_u16(&mut format, 8);
+        put_u16(&mut format, 300);
+        put_u32(&mut format, 0);
+        push_record(&mut data, 0x01e5, &format);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse sheet format worksheet");
+
+        assert_eq!(
+            sheet.sheet_format,
+            Some(SheetFormatInfo {
+                base_col_width: 8,
+                default_col_width: None,
+                default_row_height: 15.0,
+                custom_height: false,
+                zero_height: false,
+                thick_top: false,
+                thick_bottom: false,
+                outline_level_row: 0,
+                outline_level_col: 0,
+            })
+        );
     }
 
     #[test]
