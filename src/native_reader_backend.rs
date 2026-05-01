@@ -1160,6 +1160,14 @@ impl NativeXlsbBook {
         Ok(result.into())
     }
 
+    pub fn read_sheet_protection(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let protection = self.ensure_sheet(sheet)?.sheet_protection.clone();
+        match protection {
+            Some(protection) => sheet_protection_to_py(py, &protection),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
         self.read_bounds_1based(sheet)
     }

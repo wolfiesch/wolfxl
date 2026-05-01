@@ -602,6 +602,7 @@ fn parse_worksheet(
     let mut column_outline_levels = Vec::new();
     let mut freeze_panes = None;
     let mut sheet_view = None;
+    let mut sheet_protection = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -785,6 +786,9 @@ fn parse_worksheet(
                     view.selections.push(selection);
                 }
             }
+            0x0217 => {
+                sheet_protection = parse_sheet_protection(record.payload);
+            }
             _ => {}
         }
     }
@@ -807,6 +811,7 @@ fn parse_worksheet(
         sheet_view,
         resolve_hyperlinks(hyperlink_nodes, rels, &cells),
         comments,
+        sheet_protection,
         cells,
     ))
 }
@@ -1168,6 +1173,33 @@ fn parse_rich_string(payload: &[u8]) -> Result<String> {
         }
     }
     wide_string(payload, &mut consumed)
+}
+
+fn parse_sheet_protection(payload: &[u8]) -> Option<SheetProtection> {
+    if payload.len() < 66 {
+        return None;
+    }
+    let password = le_u16(&payload[0..2]);
+    let flag = |idx: usize| le_u32(&payload[idx..idx + 4]) != 0;
+    Some(SheetProtection {
+        sheet: flag(2),
+        objects: flag(6),
+        scenarios: flag(10),
+        format_cells: flag(14),
+        format_columns: flag(18),
+        format_rows: flag(22),
+        insert_columns: flag(26),
+        insert_rows: flag(30),
+        insert_hyperlinks: flag(34),
+        delete_columns: flag(38),
+        delete_rows: flag(42),
+        select_locked_cells: flag(46),
+        sort: flag(50),
+        auto_filter: flag(54),
+        pivot_tables: flag(58),
+        select_unlocked_cells: flag(62),
+        password_hash: (password != 0).then(|| format!("{password:04X}")),
+    })
 }
 
 fn parse_formula_from_cell_record(
@@ -1690,6 +1722,7 @@ fn worksheet_data(
     sheet_view: Option<SheetViewInfo>,
     hyperlinks: Vec<Hyperlink>,
     comments: Vec<Comment>,
+    sheet_protection: Option<SheetProtection>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1703,7 +1736,7 @@ fn worksheet_data(
         row_heights,
         column_widths,
         data_validations: Vec::<DataValidation>::new(),
-        sheet_protection: None::<SheetProtection>,
+        sheet_protection,
         auto_filter: None::<AutoFilterInfo>,
         page_margins: None::<PageMarginsInfo>,
         page_setup: None::<PageSetupInfo>,
@@ -2392,6 +2425,62 @@ mod tests {
             parse_worksheet(&[], &[], None, comments.clone(), None).expect("parse comments");
 
         assert_eq!(sheet.comments, comments);
+    }
+
+    #[test]
+    fn parses_xlsb_sheet_protection_record() {
+        let mut payload = Vec::new();
+        put_u16(&mut payload, 0xc258);
+        for value in [
+            true, true, false, false, true, true, true, true, true, true, true, false, false, true,
+            true, false,
+        ] {
+            put_u32(&mut payload, u32::from(value));
+        }
+
+        assert_eq!(
+            parse_sheet_protection(&payload),
+            Some(SheetProtection {
+                sheet: true,
+                objects: true,
+                scenarios: false,
+                format_cells: false,
+                format_columns: true,
+                format_rows: true,
+                insert_columns: true,
+                insert_rows: true,
+                insert_hyperlinks: true,
+                delete_columns: true,
+                delete_rows: true,
+                select_locked_cells: false,
+                sort: false,
+                auto_filter: true,
+                pivot_tables: true,
+                select_unlocked_cells: false,
+                password_hash: Some("C258".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_sheet_protection() {
+        let mut data = Vec::new();
+        let mut protection = Vec::new();
+        put_u16(&mut protection, 0);
+        for value in [
+            true, false, false, true, true, true, true, true, true, true, true, false, true, true,
+            true, false,
+        ] {
+            put_u32(&mut protection, u32::from(value));
+        }
+        push_record(&mut data, 0x0217, &protection);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse sheet protection worksheet");
+        let protection = sheet.sheet_protection.unwrap();
+
+        assert!(protection.sheet);
+        assert_eq!(protection.password_hash, None);
     }
 
     #[test]
