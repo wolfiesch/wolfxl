@@ -136,7 +136,12 @@ def is_binary_part(name: str) -> bool:
 
 def inventory(path: Path) -> dict[str, collections.Counter[int]]:
     result: dict[str, collections.Counter[int]] = {}
-    with zipfile.ZipFile(path) as archive:
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        print(f"{path}: skipped: not an OOXML zip package")
+        return result
+    with archive:
         for name in sorted(archive.namelist()):
             if not is_binary_part(name):
                 continue
