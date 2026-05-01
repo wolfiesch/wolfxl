@@ -341,39 +341,42 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
                         .copied()
                         .map(error_code)
                         .unwrap_or("#ERROR!");
+                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
                     cells.push(make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Error(err.to_string()),
                         CellDataType::Error,
-                        None,
+                        formula,
                     ));
                 }
             }
             0x0004 | 0x000a => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8).copied().unwrap_or_default() != 0;
+                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
                     cells.push(make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Bool(value),
                         CellDataType::Bool,
-                        None,
+                        formula,
                     ));
                 }
             }
             0x0005 | 0x0009 => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8..16).map(le_f64).unwrap_or_default();
+                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
                     cells.push(make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Number(value),
                         CellDataType::Number,
-                        None,
+                        formula,
                     ));
                 }
             }
@@ -381,13 +384,14 @@ fn parse_worksheet(data: &[u8], shared_strings: &[String]) -> Result<WorksheetDa
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let mut consumed = 0;
                     let value = wide_string(record.payload.get(8..).unwrap_or(&[]), &mut consumed)?;
+                    let formula = parse_formula_from_cell_record(record.typ, record.payload);
                     cells.push(make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::String(value),
                         CellDataType::InlineString,
-                        None,
+                        formula,
                     ));
                 }
             }
@@ -538,6 +542,391 @@ fn parse_merged_range(payload: &[u8]) -> Option<String> {
         row_col_to_a1(first_row, first_col),
         row_col_to_a1(last_row, last_col)
     ))
+}
+
+fn parse_formula_from_cell_record(record_type: u16, payload: &[u8]) -> Option<String> {
+    let formula_payload = match record_type {
+        0x0008 => {
+            let len = payload.get(8..12).map(le_u32)? as usize;
+            payload.get(14 + len * 2..)?
+        }
+        0x0009 => payload.get(18..)?,
+        0x000a | 0x000b => payload.get(11..)?,
+        _ => return None,
+    };
+    let rgce_len = formula_payload.get(0..4).map(le_u32)? as usize;
+    let rgce = formula_payload.get(4..4 + rgce_len)?;
+    parse_formula_rgce(rgce)
+}
+
+fn parse_formula_rgce(mut rgce: &[u8]) -> Option<String> {
+    if rgce.is_empty() {
+        return Some(String::new());
+    }
+    let mut formula = String::with_capacity(rgce.len());
+    let mut stack: Vec<usize> = Vec::new();
+    while !rgce.is_empty() {
+        let ptg = rgce[0];
+        rgce = &rgce[1..];
+        match ptg {
+            0x03..=0x11 => apply_binary_formula_op(ptg, &mut formula, &mut stack)?,
+            0x12 => {
+                let start = *stack.last()?;
+                formula.insert(start, '+');
+            }
+            0x13 => {
+                let start = *stack.last()?;
+                formula.insert(start, '-');
+            }
+            0x14 => formula.push('%'),
+            0x15 => {
+                let start = *stack.last()?;
+                formula.insert(start, '(');
+                formula.push(')');
+            }
+            0x16 => stack.push(formula.len()),
+            0x17 => {
+                let len = rgce.get(0..2).map(le_u16)? as usize;
+                let text = utf16_string(rgce.get(2..2 + len * 2)?);
+                stack.push(formula.len());
+                formula.push('"');
+                formula.push_str(&text);
+                formula.push('"');
+                rgce = rgce.get(2 + len * 2..)?;
+            }
+            0x19 => {
+                let eptg = *rgce.first()?;
+                rgce = rgce.get(1..)?;
+                match eptg {
+                    0x01 | 0x02 | 0x08 | 0x20 | 0x21 | 0x40 | 0x41 | 0x80 => {
+                        rgce = rgce.get(2..)?;
+                    }
+                    0x04 => rgce = rgce.get(10..)?,
+                    0x10 => {
+                        let start = *stack.last()?;
+                        let args = formula.split_off(start);
+                        formula.push_str("SUM(");
+                        formula.push_str(&args);
+                        formula.push(')');
+                    }
+                    _ => return None,
+                }
+            }
+            0x1c => {
+                let err = error_code(*rgce.first()?);
+                stack.push(formula.len());
+                formula.push_str(err);
+                rgce = rgce.get(1..)?;
+            }
+            0x1d => {
+                stack.push(formula.len());
+                formula.push_str(if *rgce.first()? == 0 { "FALSE" } else { "TRUE" });
+                rgce = rgce.get(1..)?;
+            }
+            0x1e => {
+                let value = rgce.get(0..2).map(le_u16)?;
+                stack.push(formula.len());
+                formula.push_str(&value.to_string());
+                rgce = rgce.get(2..)?;
+            }
+            0x1f => {
+                let value = rgce.get(0..8).map(le_f64)?;
+                stack.push(formula.len());
+                formula.push_str(&format_formula_number(value));
+                rgce = rgce.get(8..)?;
+            }
+            0x21 | 0x41 | 0x61 => {
+                let iftab = rgce.get(0..2).map(le_u16)? as usize;
+                let argc = fixed_formula_arg_count(iftab)?;
+                rgce = rgce.get(2..)?;
+                apply_formula_function(iftab, argc, &mut formula, &mut stack)?;
+            }
+            0x22 | 0x42 | 0x62 => {
+                let argc = *rgce.first()? as usize;
+                let iftab = rgce.get(1..3).map(le_u16)? as usize;
+                rgce = rgce.get(3..)?;
+                apply_formula_function(iftab, argc, &mut formula, &mut stack)?;
+            }
+            0x24 | 0x44 | 0x64 => {
+                let reference = parse_formula_ref(rgce.get(0..6)?)?;
+                stack.push(formula.len());
+                formula.push_str(&reference);
+                rgce = rgce.get(6..)?;
+            }
+            0x25 | 0x45 | 0x65 => {
+                let area = parse_formula_area(rgce.get(0..12)?)?;
+                stack.push(formula.len());
+                formula.push_str(&area);
+                rgce = rgce.get(12..)?;
+            }
+            0x2a | 0x4a | 0x6a => {
+                stack.push(formula.len());
+                formula.push_str("#REF!");
+                rgce = rgce.get(6..)?;
+            }
+            0x2b | 0x4b | 0x6b => {
+                stack.push(formula.len());
+                formula.push_str("#REF!");
+                rgce = rgce.get(12..)?;
+            }
+            _ => return None,
+        }
+    }
+    (stack.len() == 1).then_some(formula)
+}
+
+fn apply_binary_formula_op(ptg: u8, formula: &mut String, stack: &mut Vec<usize>) -> Option<()> {
+    let right_start = stack.pop()?;
+    let right = formula.split_off(right_start);
+    let op = match ptg {
+        0x03 => "+",
+        0x04 => "-",
+        0x05 => "*",
+        0x06 => "/",
+        0x07 => "^",
+        0x08 => "&",
+        0x09 => "<",
+        0x0a => "<=",
+        0x0b => "=",
+        0x0c => ">",
+        0x0d => ">=",
+        0x0e => "<>",
+        0x0f => " ",
+        0x10 => ",",
+        0x11 => ":",
+        _ => return None,
+    };
+    formula.push_str(op);
+    formula.push_str(&right);
+    Some(())
+}
+
+fn apply_formula_function(
+    iftab: usize,
+    argc: usize,
+    formula: &mut String,
+    stack: &mut Vec<usize>,
+) -> Option<()> {
+    let name = formula_function_name(iftab)?;
+    if stack.len() < argc {
+        return None;
+    }
+    if argc == 0 {
+        stack.push(formula.len());
+        formula.push_str(name);
+        formula.push_str("()");
+        return Some(());
+    }
+    let args_start = stack.len() - argc;
+    let mut arg_offsets = stack.split_off(args_start);
+    let start = *arg_offsets.first()?;
+    for offset in &mut arg_offsets {
+        *offset -= start;
+    }
+    let args = formula.split_off(start);
+    stack.push(formula.len());
+    arg_offsets.push(args.len());
+    formula.push_str(name);
+    formula.push('(');
+    for window in arg_offsets.windows(2) {
+        formula.push_str(&args[window[0]..window[1]]);
+        formula.push(',');
+    }
+    formula.pop();
+    formula.push(')');
+    Some(())
+}
+
+fn fixed_formula_arg_count(iftab: usize) -> Option<usize> {
+    match iftab {
+        1 => Some(3), // IF
+        2 | 3 | 8 | 9 | 15..=18 | 20..=26 | 32 | 33 | 38 => Some(1),
+        10 | 19 | 34 | 35 => Some(0),
+        13 | 27 | 30 | 39 | 48 => Some(2),
+        14 | 31 | 40..=45 => Some(3),
+        29 | 49..=52 => Some(4),
+        _ => None,
+    }
+}
+
+fn formula_function_name(iftab: usize) -> Option<&'static str> {
+    match iftab {
+        0 => Some("COUNT"),
+        1 => Some("IF"),
+        2 => Some("ISNA"),
+        3 => Some("ISERROR"),
+        4 => Some("SUM"),
+        5 => Some("AVERAGE"),
+        6 => Some("MIN"),
+        7 => Some("MAX"),
+        8 => Some("ROW"),
+        9 => Some("COLUMN"),
+        10 => Some("NA"),
+        15 => Some("SIN"),
+        16 => Some("COS"),
+        17 => Some("TAN"),
+        19 => Some("PI"),
+        20 => Some("SQRT"),
+        21 => Some("EXP"),
+        22 => Some("LN"),
+        23 => Some("LOG10"),
+        24 => Some("ABS"),
+        25 => Some("INT"),
+        26 => Some("SIGN"),
+        27 => Some("ROUND"),
+        30 => Some("REPT"),
+        31 => Some("MID"),
+        32 => Some("LEN"),
+        33 => Some("VALUE"),
+        34 => Some("TRUE"),
+        35 => Some("FALSE"),
+        36 => Some("AND"),
+        37 => Some("OR"),
+        38 => Some("NOT"),
+        39 => Some("MOD"),
+        48 => Some("TEXT"),
+        61 => Some("MIRR"),
+        63 => Some("RAND"),
+        65 => Some("DATE"),
+        66 => Some("TIME"),
+        67 => Some("DAY"),
+        68 => Some("MONTH"),
+        69 => Some("YEAR"),
+        70 => Some("WEEKDAY"),
+        97 => Some("ATAN2"),
+        98 => Some("ASIN"),
+        99 => Some("ACOS"),
+        100 => Some("CHOOSE"),
+        101 => Some("HLOOKUP"),
+        102 => Some("VLOOKUP"),
+        109 => Some("LOG"),
+        111 => Some("CHAR"),
+        112 => Some("LOWER"),
+        113 => Some("UPPER"),
+        115 => Some("LEFT"),
+        116 => Some("RIGHT"),
+        117 => Some("EXACT"),
+        118 => Some("TRIM"),
+        119 => Some("REPLACE"),
+        120 => Some("SUBSTITUTE"),
+        124 => Some("FIND"),
+        125 => Some("CELL"),
+        148 => Some("INDIRECT"),
+        162 => Some("CLEAN"),
+        163 => Some("MDETERM"),
+        164 => Some("MINVERSE"),
+        165 => Some("MMULT"),
+        167 => Some("IPMT"),
+        168 => Some("PPMT"),
+        169 => Some("COUNTA"),
+        183 => Some("PRODUCT"),
+        184 => Some("FACT"),
+        193 => Some("DPRODUCT"),
+        194 => Some("ISNONTEXT"),
+        195 => Some("STDEVP"),
+        196 => Some("VARP"),
+        197 => Some("DSTDEVP"),
+        198 => Some("DVARP"),
+        212 => Some("ROUNDUP"),
+        213 => Some("ROUNDDOWN"),
+        216 => Some("RANK"),
+        219 => Some("ADDRESS"),
+        220 => Some("DAYS360"),
+        221 => Some("TODAY"),
+        227 => Some("MEDIAN"),
+        228 => Some("SUMPRODUCT"),
+        229 => Some("SINH"),
+        230 => Some("COSH"),
+        231 => Some("TANH"),
+        244 => Some("INFO"),
+        247 => Some("DB"),
+        255 => Some("GETPIVOTDATA"),
+        269 => Some("AVEDEV"),
+        270 => Some("BETADIST"),
+        271 => Some("GAMMALN"),
+        276 => Some("COMBIN"),
+        279 => Some("CEILING"),
+        280 => Some("FLOOR"),
+        285 => Some("EVEN"),
+        286 => Some("ODD"),
+        300 => Some("CEILING"),
+        303 => Some("SUMIFS"),
+        304 => Some("COUNTIFS"),
+        345 => Some("SUMIF"),
+        346 => Some("COUNTIF"),
+        347 => Some("AVERAGEIF"),
+        350 => Some("IFERROR"),
+        _ => None,
+    }
+}
+
+fn parse_formula_ref(payload: &[u8]) -> Option<String> {
+    let row = le_u32(&payload[0..4]) + 1;
+    let col_flags = le_u16(&payload[4..6]);
+    let col = (col_flags & 0x3fff) as u32 + 1;
+    Some(format_cell_reference(
+        row,
+        col,
+        col_flags & 0x4000 == 0,
+        col_flags & 0x8000 == 0,
+    ))
+}
+
+fn parse_formula_area(payload: &[u8]) -> Option<String> {
+    let first_row = le_u32(&payload[0..4]) + 1;
+    let last_row = le_u32(&payload[4..8]) + 1;
+    let first_col_flags = le_u16(&payload[8..10]);
+    let last_col_flags = le_u16(&payload[10..12]);
+    let first_col = (first_col_flags & 0x3fff) as u32 + 1;
+    let last_col = (last_col_flags & 0x3fff) as u32 + 1;
+    Some(format!(
+        "{}:{}",
+        format_cell_reference(
+            first_row,
+            first_col,
+            first_col_flags & 0x4000 == 0,
+            first_col_flags & 0x8000 == 0,
+        ),
+        format_cell_reference(
+            last_row,
+            last_col,
+            last_col_flags & 0x4000 == 0,
+            last_col_flags & 0x8000 == 0,
+        )
+    ))
+}
+
+fn format_cell_reference(row: u32, col: u32, row_abs: bool, col_abs: bool) -> String {
+    let mut out = String::new();
+    if col_abs {
+        out.push('$');
+    }
+    push_column_label(col, &mut out);
+    if row_abs {
+        out.push('$');
+    }
+    out.push_str(&row.to_string());
+    out
+}
+
+fn push_column_label(mut col: u32, out: &mut String) {
+    let mut buf = Vec::new();
+    while col > 0 {
+        col -= 1;
+        buf.push((b'A' + (col % 26) as u8) as char);
+        col /= 26;
+    }
+    for ch in buf.iter().rev() {
+        out.push(*ch);
+    }
+}
+
+fn format_formula_number(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < (i64::MAX as f64) {
+        (value as i64).to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn parse_cell_header(payload: &[u8]) -> Option<(u32, Option<u32>)> {
@@ -992,5 +1381,65 @@ mod tests {
                 custom_width: true,
             }]
         );
+    }
+
+    #[test]
+    fn parses_basic_formula_rgce_tokens() {
+        let mut rgce = Vec::new();
+        rgce.push(0x44); // PtgRef relative B5
+        put_u32(&mut rgce, 4);
+        put_u16(&mut rgce, 0xc001);
+        rgce.push(0x1e); // PtgInt 2
+        put_u16(&mut rgce, 2);
+        rgce.push(0x03); // PtgAdd
+
+        assert_eq!(parse_formula_rgce(&rgce), Some("B5+2".to_string()));
+    }
+
+    #[test]
+    fn parses_variable_function_formula_rgce_tokens() {
+        let mut rgce = Vec::new();
+        rgce.push(0x45); // PtgArea relative A1:B2
+        put_u32(&mut rgce, 0);
+        put_u32(&mut rgce, 1);
+        put_u16(&mut rgce, 0xc000);
+        put_u16(&mut rgce, 0xc001);
+        rgce.push(0x22); // PtgFuncVar SUM(argc=1)
+        rgce.push(1);
+        put_u16(&mut rgce, 4);
+
+        assert_eq!(parse_formula_rgce(&rgce), Some("SUM(A1:B2)".to_string()));
+    }
+
+    #[test]
+    fn parse_worksheet_attaches_formula_text_to_formula_cells() {
+        let mut rgce = Vec::new();
+        rgce.push(0x1e);
+        put_u16(&mut rgce, 40);
+        rgce.push(0x1e);
+        put_u16(&mut rgce, 2);
+        rgce.push(0x03);
+
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0); // A
+        put_u32(&mut payload, 0);
+        payload.extend_from_slice(&42.0f64.to_le_bytes());
+        put_u16(&mut payload, 0);
+        put_u32(&mut payload, rgce.len() as u32);
+        payload.extend_from_slice(&rgce);
+
+        let mut data = Vec::new();
+        let mut row = Vec::new();
+        put_u32(&mut row, 0);
+        put_u32(&mut row, 0);
+        put_u16(&mut row, 0);
+        put_u16(&mut row, 0);
+        push_record(&mut data, 0x0000, &row);
+        push_record(&mut data, 0x0009, &payload);
+
+        let sheet = parse_worksheet(&data, &[]).expect("parse formula worksheet");
+        assert_eq!(sheet.cells.len(), 1);
+        assert_eq!(sheet.cells[0].value, CellValue::Number(42.0));
+        assert_eq!(sheet.cells[0].formula.as_deref(), Some("40+2"));
     }
 }
