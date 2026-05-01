@@ -162,6 +162,7 @@ impl NativeXlsbBook {
         let context = FormulaContext {
             sheets: &self.sheets,
             extern_sheets: &self.extern_sheets,
+            named_ranges: &self.named_ranges,
         };
         Ok(parse_worksheet(
             &data,
@@ -340,6 +341,7 @@ fn parse_name_formula(
     let context = FormulaContext {
         sheets,
         extern_sheets,
+        named_ranges: &[],
     };
     parse_formula_rgce_with_context(rgce, Some(&context))
 }
@@ -707,6 +709,7 @@ fn parse_formula_from_cell_record(
 struct FormulaContext<'a> {
     sheets: &'a [XlsbSheet],
     extern_sheets: &'a [XtiRef],
+    named_ranges: &'a [NamedRange],
 }
 
 #[cfg(test)]
@@ -816,6 +819,12 @@ fn parse_formula_rgce_with_context(
                 stack.push(formula.len());
                 formula.push_str(&area);
                 rgce = rgce.get(12..)?;
+            }
+            0x23 | 0x43 | 0x63 => {
+                let name = parse_formula_name(rgce.get(0..4)?, context?)?;
+                stack.push(formula.len());
+                formula.push_str(&name);
+                rgce = rgce.get(4..)?;
             }
             0x3a | 0x5a | 0x7a => {
                 let reference = parse_formula_ref3d(rgce.get(0..8)?, context?)?;
@@ -1064,6 +1073,17 @@ fn parse_formula_area(payload: &[u8]) -> Option<String> {
             last_col_flags & 0x8000 == 0,
         )
     ))
+}
+
+fn parse_formula_name(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
+    let name_index = le_u32(payload);
+    if name_index == 0 {
+        return None;
+    }
+    context
+        .named_ranges
+        .get(name_index as usize - 1)
+        .map(|range| range.name.clone())
 }
 
 fn parse_formula_ref3d(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
@@ -1639,6 +1659,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_defined_name_formula_rgce_tokens() {
+        let named_ranges = vec![NamedRange {
+            name: "Revenue".to_string(),
+            scope: "workbook".to_string(),
+            refers_to: "Data!$A$1".to_string(),
+        }];
+        let context = FormulaContext {
+            sheets: &[],
+            extern_sheets: &[],
+            named_ranges: &named_ranges,
+        };
+        let mut rgce = Vec::new();
+        rgce.push(0x43);
+        put_u32(&mut rgce, 1);
+
+        assert_eq!(
+            parse_formula_rgce_with_context(&rgce, Some(&context)),
+            Some("Revenue".to_string())
+        );
+    }
+
+    #[test]
     fn parse_worksheet_attaches_formula_text_to_formula_cells() {
         let mut rgce = Vec::new();
         rgce.push(0x1e);
@@ -1691,6 +1733,7 @@ mod tests {
         let context = FormulaContext {
             sheets: &sheets,
             extern_sheets: &extern_sheets,
+            named_ranges: &[],
         };
 
         let mut rgce = Vec::new();
