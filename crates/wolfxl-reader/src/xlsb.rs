@@ -10,8 +10,8 @@ use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
     HeaderFooterInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo,
-    PageSetupInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
+    PageSetupInfo, PrintTitlesInfo, RowHeight, SheetFormatInfo, SheetPropertiesInfo,
+    SheetProtection, SheetState, SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -56,6 +56,8 @@ pub struct NativeXlsbBook {
     bytes: Vec<u8>,
     sheets: Vec<XlsbSheet>,
     named_ranges: Vec<NamedRange>,
+    print_areas: HashMap<String, String>,
+    print_titles: HashMap<String, PrintTitlesInfo>,
     extern_sheets: Vec<XtiRef>,
     shared_strings: Vec<String>,
     styles: StyleTables,
@@ -98,12 +100,14 @@ impl NativeXlsbBook {
         let workbook_rels = read_rels(&mut zip, "xl/_rels/workbook.bin.rels")?;
         let shared_strings = read_shared_strings(&mut zip)?;
         let styles = read_styles(&mut zip)?;
-        let (sheets, named_ranges, extern_sheets, date1904) =
+        let (sheets, named_ranges, print_areas, print_titles, extern_sheets, date1904) =
             read_workbook(&mut zip, &workbook_rels)?;
         Ok(Self {
             bytes,
             sheets,
             named_ranges,
+            print_areas,
+            print_titles,
             extern_sheets,
             shared_strings,
             styles,
@@ -129,6 +133,14 @@ impl NativeXlsbBook {
 
     pub fn named_ranges(&self) -> &[NamedRange] {
         &self.named_ranges
+    }
+
+    pub fn print_area(&self, sheet_name: &str) -> Option<&str> {
+        self.print_areas.get(sheet_name).map(String::as_str)
+    }
+
+    pub fn print_titles(&self, sheet_name: &str) -> Option<&PrintTitlesInfo> {
+        self.print_titles.get(sheet_name)
     }
 
     pub fn number_format_for_style_id(&self, style_id: u32) -> Option<&str> {
@@ -216,10 +228,19 @@ fn zip_part_name(zip: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Option<St
 fn read_workbook(
     zip: &mut ZipArchive<Cursor<Vec<u8>>>,
     rels: &RelsGraph,
-) -> Result<(Vec<XlsbSheet>, Vec<NamedRange>, Vec<XtiRef>, bool)> {
+) -> Result<(
+    Vec<XlsbSheet>,
+    Vec<NamedRange>,
+    HashMap<String, String>,
+    HashMap<String, PrintTitlesInfo>,
+    Vec<XtiRef>,
+    bool,
+)> {
     let data = read_zip_part(zip, "xl/workbook.bin")?;
     let mut sheets = Vec::new();
     let mut raw_names = Vec::new();
+    let mut raw_print_areas = Vec::new();
+    let mut raw_print_titles = Vec::new();
     let mut extern_sheets = Vec::new();
     let mut date1904 = false;
     for record in Records::new(&data) {
@@ -261,14 +282,29 @@ fn read_workbook(
             0x0027 => {
                 if let Some(raw_name) = parse_defined_name(record.payload, &sheets, &extern_sheets)
                 {
-                    raw_names.push(raw_name);
+                    if raw_name.name == "_xlnm.Print_Area" {
+                        raw_print_areas.push(raw_name);
+                    } else if raw_name.name == "_xlnm.Print_Titles" {
+                        raw_print_titles.push(raw_name);
+                    } else if !raw_name.name.starts_with("_xlnm.") {
+                        raw_names.push(raw_name);
+                    }
                 }
             }
             _ => {}
         }
     }
     let named_ranges = resolve_xlsb_named_ranges(&sheets, raw_names);
-    Ok((sheets, named_ranges, extern_sheets, date1904))
+    let print_areas = resolve_xlsb_print_areas(&sheets, raw_print_areas);
+    let print_titles = resolve_xlsb_print_titles(&sheets, raw_print_titles);
+    Ok((
+        sheets,
+        named_ranges,
+        print_areas,
+        print_titles,
+        extern_sheets,
+        date1904,
+    ))
 }
 
 fn read_shared_strings(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<Vec<String>> {
@@ -310,15 +346,10 @@ fn parse_defined_name(
     if payload.len() < 13 {
         return None;
     }
-    let flags = le_u32(&payload[0..4]);
-    let is_builtin = flags & (1 << 5) != 0;
     let itab = le_u32(&payload[5..9]);
     let local_id = (itab != u32::MAX).then_some(itab as usize);
     let mut name_len = 0;
     let name = wide_string(&payload[9..], &mut name_len).ok()?;
-    if is_builtin || name.starts_with("_xlnm.") {
-        return None;
-    }
     let formula_offset = 9 + name_len;
     let refers_to = parse_name_formula(payload.get(formula_offset..)?, sheets, extern_sheets)?;
     if refers_to.is_empty() {
@@ -376,6 +407,86 @@ fn resolve_xlsb_named_ranges(
             }
         })
         .collect()
+}
+
+fn resolve_xlsb_print_areas(
+    sheets: &[XlsbSheet],
+    raw_print_areas: Vec<RawNamedRange>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for raw in raw_print_areas {
+        let sheet_name = raw
+            .local_id
+            .and_then(|index| sheets.get(index).map(|sheet| sheet.name.clone()))
+            .or_else(|| sheet_name_from_ref(&raw.refers_to));
+        let Some(sheet_name) = sheet_name else {
+            continue;
+        };
+        let refers_to = if raw.refers_to.contains('!') {
+            raw.refers_to
+        } else {
+            format!("{sheet_name}!{}", raw.refers_to)
+        };
+        out.insert(sheet_name, refers_to);
+    }
+    out
+}
+
+fn resolve_xlsb_print_titles(
+    sheets: &[XlsbSheet],
+    raw_print_titles: Vec<RawNamedRange>,
+) -> HashMap<String, PrintTitlesInfo> {
+    let mut out = HashMap::new();
+    for raw in raw_print_titles {
+        let sheet_name = raw
+            .local_id
+            .and_then(|index| sheets.get(index).map(|sheet| sheet.name.clone()))
+            .or_else(|| sheet_name_from_ref(&raw.refers_to));
+        let Some(sheet_name) = sheet_name else {
+            continue;
+        };
+        let titles = parse_print_titles_ref(&raw.refers_to);
+        if titles.rows.is_some() || titles.cols.is_some() {
+            out.insert(sheet_name, titles);
+        }
+    }
+    out
+}
+
+fn parse_print_titles_ref(refers_to: &str) -> PrintTitlesInfo {
+    let mut info = PrintTitlesInfo::default();
+    for part in refers_to.split(',') {
+        let range = part
+            .split_once('!')
+            .map(|(_, range)| range)
+            .unwrap_or(part)
+            .replace('$', "");
+        let Some((start, end)) = range.split_once(':') else {
+            continue;
+        };
+        if start.chars().all(|ch| ch.is_ascii_digit()) && end.chars().all(|ch| ch.is_ascii_digit())
+        {
+            info.rows = Some(format!("{start}:{end}"));
+        } else if start.chars().all(|ch| ch.is_ascii_alphabetic())
+            && end.chars().all(|ch| ch.is_ascii_alphabetic())
+        {
+            info.cols = Some(format!(
+                "{}:{}",
+                start.to_ascii_uppercase(),
+                end.to_ascii_uppercase()
+            ));
+        }
+    }
+    info
+}
+
+fn sheet_name_from_ref(refers_to: &str) -> Option<String> {
+    let (sheet, _) = refers_to.split_once('!')?;
+    let unquoted = sheet
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+        .unwrap_or(sheet);
+    Some(unquoted.replace("''", "'"))
 }
 
 fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
@@ -1863,6 +1974,40 @@ mod tests {
                 scope: "sheet".to_string(),
                 refers_to: "Other!7".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn resolves_xlsb_print_area_and_titles_from_builtin_names() {
+        let sheets = vec![XlsbSheet {
+            name: "Data".to_string(),
+            path: "xl/worksheets/sheet1.bin".to_string(),
+            state: SheetState::Visible,
+        }];
+        let print_area = RawNamedRange {
+            name: "_xlnm.Print_Area".to_string(),
+            local_id: Some(0),
+            refers_to: "Data!$A$1:$C$10".to_string(),
+        };
+        let print_titles = RawNamedRange {
+            name: "_xlnm.Print_Titles".to_string(),
+            local_id: Some(0),
+            refers_to: "Data!$1:$2,Data!$A:$B".to_string(),
+        };
+
+        let areas = resolve_xlsb_print_areas(&sheets, vec![print_area]);
+        let titles = resolve_xlsb_print_titles(&sheets, vec![print_titles]);
+
+        assert_eq!(
+            areas.get("Data").map(String::as_str),
+            Some("Data!$A$1:$C$10")
+        );
+        assert_eq!(
+            titles.get("Data"),
+            Some(&PrintTitlesInfo {
+                rows: Some("1:2".to_string()),
+                cols: Some("A:B".to_string()),
+            })
         );
     }
 }
