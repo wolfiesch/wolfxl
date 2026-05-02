@@ -1182,6 +1182,29 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_auto_filter(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let auto_filter = self.ensure_sheet(sheet)?.auto_filter.clone();
+        match auto_filter {
+            Some(auto_filter) => {
+                let d = PyDict::new(py);
+                d.set_item("ref", auto_filter.ref_range)?;
+                let columns = PyList::empty(py);
+                for column in &auto_filter.filter_columns {
+                    columns.append(filter_column_to_py(py, column)?)?;
+                }
+                d.set_item("filter_columns", columns)?;
+                match &auto_filter.sort_state {
+                    Some(sort_state) => {
+                        d.set_item("sort_state", sort_state_to_py(py, sort_state)?)?
+                    }
+                    None => d.set_item("sort_state", py.None())?,
+                }
+                Ok(d.into())
+            }
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_page_margins(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match self.ensure_sheet(sheet)?.page_margins {
             Some(margins) => page_margins_to_py(py, &margins),

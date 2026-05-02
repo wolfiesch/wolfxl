@@ -8,11 +8,11 @@ use zip::ZipArchive;
 
 use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
-    ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
-    HeaderFooterInfo, HeaderFooterItemInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo,
-    PageMarginsInfo, PageSetupInfo, PaneMode, PrintOptionsInfo, PrintTitlesInfo, RowHeight,
-    SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
+    ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FilterColumnInfo,
+    FilterInfo, FontInfo, FreezePane, HeaderFooterInfo, HeaderFooterItemInfo, Hyperlink, ImageInfo,
+    NamedRange, PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, PrintOptionsInfo,
+    PrintTitlesInfo, RowHeight, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo,
+    SheetProtection, SheetState, SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -609,6 +609,9 @@ fn parse_worksheet(
     let mut header_footer = None;
     let mut sheet_format = None;
     let mut sheet_properties = None;
+    let mut auto_filter = None;
+    let mut current_filter_column: Option<FilterColumnInfo> = None;
+    let mut current_filter_values: Option<(bool, Vec<String>)> = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -813,6 +816,52 @@ fn parse_worksheet(
             0x0093 => {
                 sheet_properties = parse_sheet_properties(record.payload);
             }
+            0x00a1 => {
+                auto_filter = parse_auto_filter_begin(record.payload);
+            }
+            0x00a2 => {
+                if let (Some(filter), Some(column)) =
+                    (auto_filter.as_mut(), current_filter_column.take())
+                {
+                    filter.filter_columns.push(column);
+                }
+                current_filter_values = None;
+            }
+            0x00a3 => {
+                current_filter_column = parse_filter_column(record.payload);
+            }
+            0x00a4 => {
+                if let (Some(filter), Some(column)) =
+                    (auto_filter.as_mut(), current_filter_column.take())
+                {
+                    filter.filter_columns.push(column);
+                }
+                current_filter_values = None;
+            }
+            0x00a5 => {
+                current_filter_values = Some((
+                    record.payload.get(0..4).is_some_and(|v| le_u32(v) != 0),
+                    Vec::new(),
+                ));
+            }
+            0x00a6 => {
+                if let (Some(column), Some((blank, values))) =
+                    (current_filter_column.as_mut(), current_filter_values.take())
+                {
+                    column.filter = if !values.is_empty() {
+                        Some(FilterInfo::String { values })
+                    } else {
+                        blank.then_some(FilterInfo::Blank)
+                    };
+                }
+            }
+            0x00a7 => {
+                if let Some((_, values)) = current_filter_values.as_mut() {
+                    if let Some(value) = parse_filter_value(record.payload) {
+                        values.push(value);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -842,6 +891,7 @@ fn parse_worksheet(
         header_footer,
         sheet_format,
         sheet_properties,
+        auto_filter,
         cells,
     ))
 }
@@ -1437,6 +1487,33 @@ fn parse_sheet_properties(payload: &[u8]) -> Option<SheetPropertiesInfo> {
     })
 }
 
+fn parse_auto_filter_begin(payload: &[u8]) -> Option<AutoFilterInfo> {
+    parse_rfx(payload).map(|ref_range| AutoFilterInfo {
+        ref_range,
+        filter_columns: Vec::new(),
+        sort_state: None,
+    })
+}
+
+fn parse_filter_column(payload: &[u8]) -> Option<FilterColumnInfo> {
+    if payload.len() < 6 {
+        return None;
+    }
+    let flags = le_u16(&payload[4..6]);
+    Some(FilterColumnInfo {
+        col_id: le_u32(&payload[0..4]),
+        hidden_button: flags & 0x0001 != 0,
+        show_button: flags & 0x0002 == 0,
+        filter: None,
+        date_group_items: Vec::new(),
+    })
+}
+
+fn parse_filter_value(payload: &[u8]) -> Option<String> {
+    let mut consumed = 0;
+    wide_string(payload, &mut consumed).ok()
+}
+
 fn parse_formula_from_cell_record(
     record_type: u16,
     payload: &[u8],
@@ -1964,6 +2041,7 @@ fn worksheet_data(
     header_footer: Option<HeaderFooterInfo>,
     sheet_format: Option<SheetFormatInfo>,
     sheet_properties: Option<SheetPropertiesInfo>,
+    auto_filter: Option<AutoFilterInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1978,7 +2056,7 @@ fn worksheet_data(
         column_widths,
         data_validations: Vec::<DataValidation>::new(),
         sheet_protection,
-        auto_filter: None::<AutoFilterInfo>,
+        auto_filter,
         page_margins,
         page_setup,
         print_options,
@@ -3024,6 +3102,83 @@ mod tests {
                 .sheet_properties
                 .and_then(|properties| properties.code_name),
             Some("NativeSheet".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_auto_filter_range() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 3);
+        put_u32(&mut payload, 7);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 2);
+
+        assert_eq!(
+            parse_auto_filter_begin(&payload),
+            Some(AutoFilterInfo {
+                ref_range: "C4:C8".to_string(),
+                filter_columns: Vec::new(),
+                sort_state: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_filter_column_flags() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 1);
+        put_u16(&mut payload, 0x0003);
+
+        assert_eq!(
+            parse_filter_column(&payload),
+            Some(FilterColumnInfo {
+                col_id: 1,
+                hidden_button: true,
+                show_button: false,
+                filter: None,
+                date_group_items: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_auto_filter_with_string_values() {
+        let mut data = Vec::new();
+        let mut range = Vec::new();
+        put_u32(&mut range, 0);
+        put_u32(&mut range, 3);
+        put_u32(&mut range, 0);
+        put_u32(&mut range, 2);
+        push_record(&mut data, 0x00a1, &range);
+
+        let mut column = Vec::new();
+        put_u32(&mut column, 2);
+        put_u16(&mut column, 0);
+        push_record(&mut data, 0x00a3, &column);
+
+        let mut filters = Vec::new();
+        put_u32(&mut filters, 0);
+        push_record(&mut data, 0x00a5, &filters);
+
+        let mut value = Vec::new();
+        put_wide_string(&mut value, "Open");
+        push_record(&mut data, 0x00a7, &value);
+        push_record(&mut data, 0x00a6, &[]);
+        push_record(&mut data, 0x00a4, &[]);
+        push_record(&mut data, 0x00a2, &[]);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse auto filter worksheet");
+        let auto_filter = sheet.auto_filter.expect("auto filter");
+
+        assert_eq!(auto_filter.ref_range, "A1:C4");
+        assert_eq!(auto_filter.filter_columns.len(), 1);
+        assert_eq!(auto_filter.filter_columns[0].col_id, 2);
+        assert_eq!(
+            auto_filter.filter_columns[0].filter,
+            Some(FilterInfo::String {
+                values: vec!["Open".to_string()],
+            })
         );
     }
 
