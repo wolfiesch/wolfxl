@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,15 @@ def _cell_style_signature(cell: object) -> dict[str, object]:
             "italic": bool(font.italic),
         },
     }
+
+
+def _excelgen_sample_root() -> Path | None:
+    """Return the optional upstream ExcelGen sample root for paired oracles."""
+    raw = os.environ.get("WOLFXL_EXCELGEN_SAMPLES")
+    if not raw:
+        return None
+    root = Path(raw)
+    return root if root.exists() else None
 
 
 @pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda p: p.name)
@@ -177,6 +187,34 @@ def test_xlsb_classify_format() -> None:
     assert fmt_path == "xlsb", f"path -> {fmt_path!r}"
     fmt_bytes = wolfxl.classify_file_format(fixture.read_bytes())
     assert fmt_bytes == "xlsb", f"bytes -> {fmt_bytes!r}"
+
+
+@pytest.mark.parametrize(
+    "sample_name",
+    ["test-formula", "test-image-1", "test-links"],
+)
+def test_xlsb_excelgen_formulas_match_xlsx_twin(sample_name: str) -> None:
+    """Optionally compare formula text against ExcelGen's paired xlsx files."""
+    root = _excelgen_sample_root()
+    if root is None:
+        pytest.skip("set WOLFXL_EXCELGEN_SAMPLES=/path/to/ExcelGen/samples")
+
+    openpyxl = pytest.importorskip("openpyxl")
+    xlsx_path = root / f"{sample_name}.xlsx"
+    xlsb_path = root / f"{sample_name}.xlsb"
+    if not xlsx_path.exists() or not xlsb_path.exists():
+        pytest.skip(f"missing ExcelGen paired sample {sample_name}")
+
+    expected_wb = openpyxl.load_workbook(xlsx_path, data_only=False)
+    actual_wb = wolfxl.load_workbook(xlsb_path, data_only=False)
+    for sheet_name in expected_wb.sheetnames:
+        expected_ws = expected_wb[sheet_name]
+        actual_ws = actual_wb[sheet_name]
+        for row in expected_ws.iter_rows():
+            for expected_cell in row:
+                expected_value = expected_cell.value
+                if isinstance(expected_value, str) and expected_value.startswith("="):
+                    assert actual_ws[expected_cell.coordinate].value == expected_value
 
 
 def test_xlsb_excelgen_data_validations_and_tables() -> None:
@@ -359,6 +397,33 @@ def test_xlsb_excelgen_hyperlink_formulas() -> None:
     assert cached_values["B2"] == "#N/A"
     assert cached_values["C2"] == "#N/A"
     assert cached_values["C102"] == "#N/A"
+
+
+def test_xlsb_excelgen_lookup_formulas_and_table() -> None:
+    """ExcelGen's selector workbook covers lookup formulas and table metadata."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "lookup-formulas-and-table.xlsb")
+
+    selector = wb["selector"]
+    assert selector["C2"].value == "FR"
+    assert selector["B3"].value == '=VLOOKUP($C$2,INDIRECT("FlagList"),4,FALSE)'
+    assert selector["B16"].value == '=VLOOKUP($C$2,INDIRECT("FlagList"),3,FALSE)'
+    assert [str(cell_range) for cell_range in selector.merged_cells.ranges] == [
+        "B3:C15",
+        "B16:C16",
+    ]
+    assert selector.cached_formula_values()["B3"] == "#N/A"
+    assert selector.cached_formula_values()["B16"] == "#N/A"
+
+    data = wb["data"]
+    assert list(data.tables) == ["FlagList"]
+    table = data.tables["FlagList"]
+    assert table.ref == "A1:D230"
+    assert [column.name for column in table.tableColumns] == [
+        "ISO2_CODE",
+        "UN_CODE",
+        "LABEL_EN",
+        "IMAGE_PNG",
+    ]
 
 
 def test_xlsb_chart_drawing() -> None:

@@ -21,8 +21,8 @@ Two-phase generation:
 3. Optional long-tail ``.xlsb`` fixtures are vendored from ExcelGen's
    MIT-licensed ``samples/*.xlsb`` corpus. These cover features that the
    compact calamine set does not, including tables, data validations,
-   conditional formatting, merged ranges, drawing-backed images, and shared
-   formulas that reference defined names.
+   conditional formatting, merged ranges, drawing-backed images, shared
+   formulas that reference defined names, and lookup / hyperlink formulas.
 
 Usage::
 
@@ -75,6 +75,7 @@ EXCELGEN_XLSB_PICKS: tuple[tuple[str, str], ...] = (
     ("test-image-2.xlsb", "image-drawing.xlsb"),
     ("test-formula.xlsb", "formulas-and-names.xlsb"),
     ("test-links.xlsb", "links-and-hyperlink-formulas.xlsb"),
+    ("test-image-1.xlsb", "lookup-formulas-and-table.xlsb"),
 )
 
 

@@ -25,6 +25,7 @@ large visual feature matrices:
 | `excelgen/image-drawing.xlsb`                  | ExcelGen `samples/test-image-2.xlsb`  | drawing relationship and image payload |
 | `excelgen/formulas-and-names.xlsb`             | ExcelGen `samples/test-formula.xlsb`  | shared formulas and defined-name refs  |
 | `excelgen/links-and-hyperlink-formulas.xlsb`   | ExcelGen `samples/test-links.xlsb`    | HYPERLINK formulas and relative refs    |
+| `excelgen/lookup-formulas-and-table.xlsb`      | ExcelGen `samples/test-image-1.xlsb`  | VLOOKUP/INDIRECT formulas and table     |
 
 ## License & attribution
 
