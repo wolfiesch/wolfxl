@@ -196,6 +196,14 @@ def get_page_setup(ws: Worksheet) -> Any:
     return ws._page_setup  # noqa: SLF001
 
 
+def get_print_options(ws: Worksheet) -> Any:
+    """Return the lazy print options object."""
+    if ws._print_options is None:  # noqa: SLF001
+        payload = _reader_payload(ws, "read_print_options")
+        ws._print_options = _print_options_from_payload(payload)  # noqa: SLF001
+    return ws._print_options  # noqa: SLF001
+
+
 def get_page_margins(ws: Worksheet) -> Any:
     """Return the lazy page margins object."""
     if ws._page_margins is None:  # noqa: SLF001
@@ -247,6 +255,20 @@ def _page_setup_from_payload(payload: Any) -> Any:
         usePrinterDefaults=payload.get("use_printer_defaults"),
         blackAndWhite=payload.get("black_and_white"),
         draft=payload.get("draft"),
+    )
+
+
+def _print_options_from_payload(payload: Any) -> Any:
+    from wolfxl.worksheet.page import PrintOptions
+
+    if not isinstance(payload, dict):
+        return PrintOptions()
+    return PrintOptions(
+        horizontalCentered=bool(payload.get("horizontal_centered", False)),
+        verticalCentered=bool(payload.get("vertical_centered", False)),
+        headings=bool(payload.get("headings", False)),
+        gridLines=bool(payload.get("grid_lines", False)),
+        gridLinesSet=bool(payload.get("grid_lines_set", True)),
     )
 
 

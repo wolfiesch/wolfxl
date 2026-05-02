@@ -78,6 +78,7 @@ from wolfxl._worksheet_setup import (
     get_header_footer,
     get_page_margins,
     get_page_setup,
+    get_print_options,
     get_protection,
     get_row_breaks,
     get_sheet_format,
@@ -170,7 +171,7 @@ class Worksheet:
         # Pending pivot table queue.
         "_pending_pivot_tables",
         # Print/view/protection lazy slots.
-        "_page_setup", "_page_margins", "_header_footer",
+        "_page_setup", "_page_margins", "_print_options", "_header_footer",
         "_sheet_properties", "_sheet_view", "_protection",
         "_print_title_rows", "_print_title_cols",
         # Pending slicer presentations.
@@ -408,9 +409,7 @@ class Worksheet:
     @property
     def print_options(self) -> Any:
         """Return worksheet print options."""
-        from wolfxl.worksheet.page import PrintOptions
-
-        return PrintOptions()
+        return get_print_options(self)
 
     @property
     def print_titles(self) -> str:

@@ -151,6 +151,7 @@ pub struct WorksheetData {
     pub auto_filter: Option<AutoFilterInfo>,
     pub page_margins: Option<PageMarginsInfo>,
     pub page_setup: Option<PageSetupInfo>,
+    pub print_options: Option<PrintOptionsInfo>,
     pub header_footer: Option<HeaderFooterInfo>,
     pub row_breaks: Option<PageBreakListInfo>,
     pub column_breaks: Option<PageBreakListInfo>,
@@ -433,6 +434,16 @@ pub struct PageSetupInfo {
     pub use_printer_defaults: Option<bool>,
     pub black_and_white: Option<bool>,
     pub draft: Option<bool>,
+}
+
+/// Parsed worksheet print options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrintOptionsInfo {
+    pub horizontal_centered: bool,
+    pub vertical_centered: bool,
+    pub headings: bool,
+    pub grid_lines: bool,
+    pub grid_lines_set: bool,
 }
 
 /// Parsed worksheet header/footer settings.
@@ -2863,6 +2874,7 @@ fn parse_worksheet(
         auto_filter,
         page_margins,
         page_setup,
+        print_options: None::<PrintOptionsInfo>,
         header_footer,
         row_breaks,
         column_breaks,

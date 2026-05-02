@@ -10,9 +10,9 @@ use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
     ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FontInfo, FreezePane,
     HeaderFooterInfo, HeaderFooterItemInfo, Hyperlink, ImageInfo, NamedRange, PageBreakListInfo,
-    PageMarginsInfo, PageSetupInfo, PaneMode, PrintTitlesInfo, RowHeight, SelectionInfo,
-    SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables,
-    Table, WorksheetData, XfEntry,
+    PageMarginsInfo, PageSetupInfo, PaneMode, PrintOptionsInfo, PrintTitlesInfo, RowHeight,
+    SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
+    SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -605,6 +605,7 @@ fn parse_worksheet(
     let mut sheet_protection = None;
     let mut page_margins = None;
     let mut page_setup = None;
+    let mut print_options = None;
     let mut header_footer = None;
     let mut sheet_format = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
@@ -799,6 +800,9 @@ fn parse_worksheet(
             0x01de => {
                 page_setup = parse_page_setup(record.payload);
             }
+            0x01dd => {
+                print_options = parse_print_options(record.payload);
+            }
             0x01df => {
                 header_footer = parse_header_footer(record.payload);
             }
@@ -830,6 +834,7 @@ fn parse_worksheet(
         sheet_protection,
         page_margins,
         page_setup,
+        print_options,
         header_footer,
         sheet_format,
         cells,
@@ -1294,6 +1299,17 @@ fn print_errors_as(value: u16) -> &'static str {
         3 => "NA",
         _ => "displayed",
     }
+}
+
+fn parse_print_options(payload: &[u8]) -> Option<PrintOptionsInfo> {
+    let flags = payload.get(0..2).map(le_u16)?;
+    Some(PrintOptionsInfo {
+        horizontal_centered: flags & 0x0001 != 0,
+        vertical_centered: flags & 0x0002 != 0,
+        headings: flags & 0x0008 != 0,
+        grid_lines: flags & 0x0004 != 0,
+        grid_lines_set: flags & 0x0010 != 0,
+    })
 }
 
 fn parse_header_footer(payload: &[u8]) -> Option<HeaderFooterInfo> {
@@ -1930,6 +1946,7 @@ fn worksheet_data(
     sheet_protection: Option<SheetProtection>,
     page_margins: Option<PageMarginsInfo>,
     page_setup: Option<PageSetupInfo>,
+    print_options: Option<PrintOptionsInfo>,
     header_footer: Option<HeaderFooterInfo>,
     sheet_format: Option<SheetFormatInfo>,
     cells: Vec<Cell>,
@@ -1949,6 +1966,7 @@ fn worksheet_data(
         auto_filter: None::<AutoFilterInfo>,
         page_margins,
         page_setup,
+        print_options,
         header_footer,
         row_breaks: None::<PageBreakListInfo>,
         column_breaks: None::<PageBreakListInfo>,
@@ -2800,6 +2818,40 @@ mod tests {
         assert_eq!(
             sheet.page_setup.unwrap().orientation.as_deref(),
             Some("portrait")
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_print_options_record() {
+        assert_eq!(
+            parse_print_options(&[0x1f, 0x00]),
+            Some(PrintOptionsInfo {
+                horizontal_centered: true,
+                vertical_centered: true,
+                headings: true,
+                grid_lines: true,
+                grid_lines_set: true,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_print_options() {
+        let mut data = Vec::new();
+        push_record(&mut data, 0x01dd, &[0x10, 0x00]);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse print options worksheet");
+
+        assert_eq!(
+            sheet.print_options,
+            Some(PrintOptionsInfo {
+                horizontal_centered: false,
+                vertical_centered: false,
+                headings: false,
+                grid_lines: false,
+                grid_lines_set: true,
+            })
         );
     }
 

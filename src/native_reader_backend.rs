@@ -26,9 +26,9 @@ use wolfxl_reader::{
     FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
     ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsbBook as NativeXlsbReaderBook,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    PaneMode, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo, SheetProtection, SheetState,
-    SheetViewInfo, SortConditionInfo, SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity,
-    WorksheetData,
+    PaneMode, PrintOptionsInfo, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo,
+    SheetProtection, SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo,
+    WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
 };
 
 trait NativeStyleResolver {
@@ -681,6 +681,13 @@ impl NativeXlsxBook {
     pub fn read_page_setup(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match &self.ensure_sheet(sheet)?.page_setup {
             Some(setup) => page_setup_to_py(py, setup),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_print_options(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.print_options {
+            Some(options) => print_options_to_py(py, options),
             None => Ok(py.None()),
         }
     }
@@ -2311,6 +2318,16 @@ fn page_setup_to_py(py: Python<'_>, setup: &PageSetupInfo) -> PyResult<PyObject>
     d.set_item("use_printer_defaults", setup.use_printer_defaults)?;
     d.set_item("black_and_white", setup.black_and_white)?;
     d.set_item("draft", setup.draft)?;
+    Ok(d.into())
+}
+
+fn print_options_to_py(py: Python<'_>, options: &PrintOptionsInfo) -> PyResult<PyObject> {
+    let d = PyDict::new(py);
+    d.set_item("horizontal_centered", options.horizontal_centered)?;
+    d.set_item("vertical_centered", options.vertical_centered)?;
+    d.set_item("headings", options.headings)?;
+    d.set_item("grid_lines", options.grid_lines)?;
+    d.set_item("grid_lines_set", options.grid_lines_set)?;
     Ok(d.into())
 }
 
