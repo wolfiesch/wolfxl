@@ -18,17 +18,25 @@ Two-phase generation:
    license. We copy 5 of calamine's ``tests/*.xlsb`` files with attribution,
    chosen to roughly span numbers / dates / multi-sheet / mixed content.
 
+3. Optional long-tail ``.xlsb`` fixtures are vendored from ExcelGen's
+   MIT-licensed ``samples/*.xlsb`` corpus. These cover features that the
+   compact calamine set does not, including tables, data validations,
+   conditional formatting, and merged ranges.
+
 Usage::
 
     # one-time clone of upstream calamine for its xlsb test corpus
     git clone https://github.com/tafia/calamine.git /tmp/calamine
-    python3 scripts/sprint_kappa_build_fixtures.py /tmp/calamine
+    git clone https://github.com/mbleron/ExcelGen.git /tmp/ExcelGen
+    python3 scripts/sprint_kappa_build_fixtures.py /tmp/calamine /tmp/ExcelGen
 
 Requires:
     - openpyxl (writes the source xlsx for the xls path)
     - LibreOffice (``soffice`` on PATH, or ``/Applications/...``)
     - The path to a local clone of https://github.com/tafia/calamine, passed
-      as the first arg, supplying the xlsb corpus.
+      as the first arg, supplying the compact xlsb corpus.
+    - Optional path to https://github.com/mbleron/ExcelGen, passed as the
+      second arg, supplying long-tail xlsb samples.
 """
 
 from __future__ import annotations
@@ -56,6 +64,13 @@ CALAMINE_XLSB_PICKS: tuple[tuple[str, str], ...] = (
     ("issue_419.xlsb", "numbers.xlsb"),
     ("issue_186.xlsb", "strings.xlsb"),
     ("issue127.xlsb", "formulas.xlsb"),
+)
+
+EXCELGEN_XLSB_PICKS: tuple[tuple[str, str], ...] = (
+    ("test-dataval.xlsb", "data-validations-and-tables.xlsb"),
+    ("cond-formatting.xlsb", "conditional-formatting.xlsb"),
+    ("merged-cells.xlsb", "merged-cells.xlsb"),
+    ("style-showcase.xlsb", "style-showcase.xlsb"),
 )
 
 
@@ -189,6 +204,29 @@ def _copy_xlsb_from_calamine(calamine_root: Path) -> None:
         print(f"  {src.name} -> xlsb/{dst.name} ({dst.stat().st_size} bytes)")
 
 
+def _copy_xlsb_from_excelgen(excelgen_root: Path) -> None:
+    """Vendor long-tail xlsb fixtures from ExcelGen's MIT-licensed samples."""
+    src_dir = excelgen_root / "samples"
+    if not src_dir.exists():
+        raise SystemExit(
+            f"ExcelGen samples/ dir not found at {src_dir}. "
+            f"Pass the path to a local clone of github.com/mbleron/ExcelGen "
+            f"as argv[2]."
+        )
+    dst_dir = XLSB_DIR / "excelgen"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for src_name, dst_name in EXCELGEN_XLSB_PICKS:
+        src = src_dir / src_name
+        if not src.exists():
+            raise SystemExit(f"missing upstream ExcelGen fixture {src}")
+        dst = dst_dir / dst_name
+        shutil.copy2(src, dst)
+        print(
+            f"  {src.name} -> xlsb/excelgen/{dst.name} "
+            f"({dst.stat().st_size} bytes)"
+        )
+
+
 def main(argv: list[str]) -> int:
     soffice = _soffice()
     XLSB_DIR.mkdir(parents=True, exist_ok=True)
@@ -216,9 +254,19 @@ def main(argv: list[str]) -> int:
             "disk will not be replaced. Pass /path/to/calamine to refresh."
         )
 
+    if len(argv) > 2:
+        excelgen_root = Path(argv[2]).expanduser().resolve()
+        print(f"\n== Vendoring long-tail .xlsb fixtures from {excelgen_root} ==")
+        _copy_xlsb_from_excelgen(excelgen_root)
+    else:
+        print(
+            "\n[skip] no ExcelGen path passed; long-tail xlsb fixtures already "
+            "on disk will not be replaced. Pass /path/to/ExcelGen to refresh."
+        )
+
     total = sum(
         p.stat().st_size
-        for p in (*XLSB_DIR.glob("*.xlsb"), *XLS_DIR.glob("*.xls"))
+        for p in (*XLSB_DIR.rglob("*.xlsb"), *XLS_DIR.glob("*.xls"))
     )
     print(f"\nTotal fixture bytes: {total}")
     return 0

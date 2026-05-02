@@ -10,6 +10,7 @@ import pytest
 import wolfxl
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "xlsb"
+EXCELGEN_DIR = FIXTURES_DIR / "excelgen"
 
 
 def _all_fixtures() -> list[Path]:
@@ -176,3 +177,114 @@ def test_xlsb_classify_format() -> None:
     assert fmt_path == "xlsb", f"path -> {fmt_path!r}"
     fmt_bytes = wolfxl.classify_file_format(fixture.read_bytes())
     assert fmt_bytes == "xlsb", f"bytes -> {fmt_bytes!r}"
+
+
+def test_xlsb_excelgen_data_validations_and_tables() -> None:
+    """ExcelGen's xlsb sample exposes table and validation metadata."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "data-validations-and-tables.xlsb")
+
+    assert wb.sheetnames == ["sheet1", "sheet2", "sheet3"]
+
+    sheet1_validations = list(wb["sheet1"].data_validations)
+    assert [
+        (validation.type, validation.operator, str(validation.sqref))
+        for validation in sheet1_validations
+    ] == [
+        ("list", None, "B1"),
+        ("whole", "between", "B2"),
+        ("date", "between", "B3"),
+    ]
+
+    sheet2 = wb["sheet2"]
+    assert list(sheet2.tables) == ["Table1"]
+    table = sheet2.tables["Table1"]
+    assert table.ref == "A1:E15"
+    assert table.tableStyleInfo.name == "TableStyleLight1"
+    assert [column.name for column in table.tableColumns[:5]] == [
+        "EMPNO",
+        "ENAME",
+        "JOB",
+        "SAL",
+        "COMM",
+    ]
+    assert {
+        (validation.type, validation.operator, str(validation.sqref))
+        for validation in sheet2.data_validations
+    } == {
+        ("list", None, "C2:C15"),
+        ("decimal", "lessThanOrEqual", "E2:E15"),
+    }
+
+    sheet3 = wb["sheet3"]
+    assert list(sheet3.tables) == ["JobList"]
+    assert sheet3.tables["JobList"].ref == "A1:A5"
+    assert [column.name for column in sheet3.tables["JobList"].tableColumns] == ["JOB"]
+
+
+def test_xlsb_excelgen_conditional_formatting_matrix() -> None:
+    """ExcelGen's xlsb CF workbook covers the main rule container shapes."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "conditional-formatting.xlsb")
+
+    assert wb.sheetnames == ["Misc.", "Chessboard", "Colorscale", "Employees"]
+
+    misc_entries = list(wb["Misc."].conditional_formatting)
+    assert len(misc_entries) == 9
+    rule_types = {rule.type for entry in misc_entries for rule in entry.rules}
+    assert {
+        "cellIs",
+        "colorScale",
+        "dataBar",
+        "expression",
+        "iconSet",
+        "top10",
+    } <= rule_types
+
+    chessboard_entries = list(wb["Chessboard"].conditional_formatting)
+    assert len(chessboard_entries) == 1
+    assert str(chessboard_entries[0].sqref) == "B2:I9"
+    assert chessboard_entries[0].rules[0].type == "expression"
+
+    assert len(list(wb["Colorscale"].conditional_formatting)) == 606
+    assert len(list(wb["Employees"].conditional_formatting)) == 2
+
+
+def test_xlsb_excelgen_merged_ranges() -> None:
+    """ExcelGen's xlsb merged-cell sample round-trips all ranges."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "merged-cells.xlsb")
+    ws = wb["sheet1"]
+
+    assert [str(cell_range) for cell_range in ws.merged_cells.ranges] == [
+        "A1:D1",
+        "A2:B3",
+        "C2:D3",
+        "A4:B5",
+        "C4:D5",
+    ]
+
+
+def test_xlsb_excelgen_style_showcase_tables() -> None:
+    """ExcelGen's style showcase gives us dense table/merge metadata coverage."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "style-showcase.xlsb")
+
+    tables_sheet = wb["Tables"]
+    assert len(tables_sheet.tables) == 60
+    first_table = tables_sheet.tables["Table1"]
+    assert first_table.ref == "B4:B7"
+    assert first_table.tableStyleInfo.name == "TableStyleLight1"
+    assert [column.name for column in first_table.tableColumns] == ["C1"]
+
+    alignments = {
+        str(cell_range) for cell_range in wb["Alignments"].merged_cells.ranges
+    }
+    assert {
+        "B1:B2",
+        "C1:C2",
+        "D1:D2",
+        "E1:E2",
+        "F1:F2",
+        "G1:G2",
+        "H1:H2",
+    } <= alignments
+
+    orientation = {str(cell_range) for cell_range in wb["Orientation"].merged_cells.ranges}
+    assert "B2:B16" in orientation
