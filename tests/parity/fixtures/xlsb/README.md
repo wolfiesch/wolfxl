@@ -23,6 +23,7 @@ large visual feature matrices:
 | `excelgen/merged-cells.xlsb`                   | ExcelGen `samples/merged-cells.xlsb`  | merged range coverage                  |
 | `excelgen/style-showcase.xlsb`                 | ExcelGen `samples/style-showcase.xlsb` | table styles, merges, style matrices   |
 | `excelgen/image-drawing.xlsb`                  | ExcelGen `samples/test-image-2.xlsb`  | drawing relationship and image payload |
+| `excelgen/formulas-and-names.xlsb`             | ExcelGen `samples/test-formula.xlsb`  | shared formulas and defined-name refs  |
 
 ## License & attribution
 

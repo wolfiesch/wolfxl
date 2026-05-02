@@ -61,6 +61,7 @@ pub struct NativeXlsbBook {
     print_areas: HashMap<String, String>,
     print_titles: HashMap<String, PrintTitlesInfo>,
     extern_sheets: Vec<XtiRef>,
+    formula_names: Vec<String>,
     shared_strings: Vec<String>,
     styles: StyleTables,
     date1904: bool,
@@ -102,8 +103,15 @@ impl NativeXlsbBook {
         let workbook_rels = read_rels(&mut zip, "xl/_rels/workbook.bin.rels")?;
         let shared_strings = read_shared_strings(&mut zip)?;
         let styles = read_styles(&mut zip)?;
-        let (sheets, named_ranges, print_areas, print_titles, extern_sheets, date1904) =
-            read_workbook(&mut zip, &workbook_rels)?;
+        let (
+            sheets,
+            named_ranges,
+            print_areas,
+            print_titles,
+            extern_sheets,
+            formula_names,
+            date1904,
+        ) = read_workbook(&mut zip, &workbook_rels)?;
         Ok(Self {
             bytes,
             sheets,
@@ -111,6 +119,7 @@ impl NativeXlsbBook {
             print_areas,
             print_titles,
             extern_sheets,
+            formula_names,
             shared_strings,
             styles,
             date1904,
@@ -194,6 +203,7 @@ impl NativeXlsbBook {
             sheets: &self.sheets,
             extern_sheets: &self.extern_sheets,
             named_ranges: &self.named_ranges,
+            formula_names: &self.formula_names,
         };
         let tables = read_tables_bin(&mut zip, &sheet.path, &data, rels.as_ref())?;
         let images = read_images_xml(&mut zip, &sheet.path, rels.as_ref())?;
@@ -322,6 +332,7 @@ fn read_workbook(
     HashMap<String, String>,
     HashMap<String, PrintTitlesInfo>,
     Vec<XtiRef>,
+    Vec<String>,
     bool,
 )> {
     let data = read_zip_part(zip, "xl/workbook.bin")?;
@@ -330,6 +341,7 @@ fn read_workbook(
     let mut raw_print_areas = Vec::new();
     let mut raw_print_titles = Vec::new();
     let mut extern_sheets = Vec::new();
+    let mut formula_names = Vec::new();
     let mut date1904 = false;
     for record in Records::new(&data) {
         let record = record?;
@@ -368,6 +380,9 @@ fn read_workbook(
                 extern_sheets = parse_extern_sheet(record.payload);
             }
             0x0027 => {
+                if let Some(name) = parse_defined_name_name(record.payload) {
+                    formula_names.push(name);
+                }
                 if let Some(raw_name) = parse_defined_name(record.payload, &sheets, &extern_sheets)
                 {
                     if raw_name.name == "_xlnm.Print_Area" {
@@ -391,6 +406,7 @@ fn read_workbook(
         print_areas,
         print_titles,
         extern_sheets,
+        formula_names,
         date1904,
     ))
 }
@@ -450,6 +466,14 @@ fn parse_defined_name(
     })
 }
 
+fn parse_defined_name_name(payload: &[u8]) -> Option<String> {
+    if payload.len() < 13 {
+        return None;
+    }
+    let mut name_len = 0;
+    wide_string(&payload[9..], &mut name_len).ok()
+}
+
 fn parse_name_formula(
     payload: &[u8],
     sheets: &[XlsbSheet],
@@ -461,6 +485,7 @@ fn parse_name_formula(
         sheets,
         extern_sheets,
         named_ranges: &[],
+        formula_names: &[],
     };
     parse_formula_rgce_with_context(rgce, Some(&context))
 }
@@ -710,6 +735,8 @@ fn parse_worksheet_with_tables(
     let mut conditional_formats = Vec::new();
     let mut current_conditional_range: Option<String> = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
+    let mut shared_formula_masters = Vec::new();
+    let mut last_formula_cell_index: Option<usize> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
         let record = record?;
@@ -766,62 +793,102 @@ fn parse_worksheet_with_tables(
                         .copied()
                         .map(error_code)
                         .unwrap_or("#ERROR!");
-                    let formula =
-                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
-                    cells.push(make_cell(
+                    let formula = parse_formula_from_cell_record(
+                        record.typ,
+                        record.payload,
+                        formula_context,
+                        row,
+                        col,
+                    );
+                    let shared_anchor = parse_shared_formula_anchor(record.typ, record.payload)
+                        .filter(|_| formula.is_none());
+                    let mut cell = make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Error(err.to_string()),
                         CellDataType::Error,
                         formula,
-                    ));
+                    );
+                    apply_shared_formula_anchor(&mut cell, shared_anchor);
+                    last_formula_cell_index = Some(cells.len());
+                    cells.push(cell);
                 }
             }
             0x0004 | 0x000a => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8).copied().unwrap_or_default() != 0;
-                    let formula =
-                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
-                    cells.push(make_cell(
+                    let formula = parse_formula_from_cell_record(
+                        record.typ,
+                        record.payload,
+                        formula_context,
+                        row,
+                        col,
+                    );
+                    let shared_anchor = parse_shared_formula_anchor(record.typ, record.payload)
+                        .filter(|_| formula.is_none());
+                    let mut cell = make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Bool(value),
                         CellDataType::Bool,
                         formula,
-                    ));
+                    );
+                    apply_shared_formula_anchor(&mut cell, shared_anchor);
+                    last_formula_cell_index = Some(cells.len());
+                    cells.push(cell);
                 }
             }
             0x0005 | 0x0009 => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let value = record.payload.get(8..16).map(le_f64).unwrap_or_default();
-                    let formula =
-                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
-                    cells.push(make_cell(
+                    let formula = parse_formula_from_cell_record(
+                        record.typ,
+                        record.payload,
+                        formula_context,
+                        row,
+                        col,
+                    );
+                    let shared_anchor = parse_shared_formula_anchor(record.typ, record.payload)
+                        .filter(|_| formula.is_none());
+                    let mut cell = make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::Number(value),
                         CellDataType::Number,
                         formula,
-                    ));
+                    );
+                    apply_shared_formula_anchor(&mut cell, shared_anchor);
+                    last_formula_cell_index = Some(cells.len());
+                    cells.push(cell);
                 }
             }
             0x0006 | 0x0008 => {
                 if let Some((col, style_id)) = parse_cell_header(record.payload) {
                     let mut consumed = 0;
                     let value = wide_string(record.payload.get(8..).unwrap_or(&[]), &mut consumed)?;
-                    let formula =
-                        parse_formula_from_cell_record(record.typ, record.payload, formula_context);
-                    cells.push(make_cell(
+                    let formula = parse_formula_from_cell_record(
+                        record.typ,
+                        record.payload,
+                        formula_context,
+                        row,
+                        col,
+                    );
+                    let shared_anchor = parse_shared_formula_anchor(record.typ, record.payload)
+                        .filter(|_| formula.is_none());
+                    let mut cell = make_cell(
                         row,
                         col,
                         style_id,
                         CellValue::String(value),
                         CellDataType::InlineString,
                         formula,
-                    ));
+                    );
+                    apply_shared_formula_anchor(&mut cell, shared_anchor);
+                    last_formula_cell_index = Some(cells.len());
+                    cells.push(cell);
                 }
             }
             0x0007 => {
@@ -985,12 +1052,28 @@ fn parse_worksheet_with_tables(
                     }
                 }
             }
+            0x01ab => {
+                if let Some(master) = parse_shared_formula_record(record.payload, formula_context) {
+                    if let Some(cell) = last_formula_cell_index.and_then(|idx| cells.get_mut(idx)) {
+                        cell.formula = Some(master.formula.clone());
+                        cell.formula_kind = Some("shared".to_string());
+                        cell.formula_shared_index = Some(shared_formula_anchor_key(
+                            master.master_row,
+                            master.master_col,
+                        ));
+                    }
+                    shared_formula_masters.push(master);
+                }
+            }
             0x01ce => {
                 current_conditional_range = None;
             }
-            _ => {}
+            _ => {
+                last_formula_cell_index = None;
+            }
         }
     }
+    resolve_xlsb_shared_formulas(&mut cells, &shared_formula_masters);
     hidden_rows.sort_unstable();
     hidden_rows.dedup();
     hidden_columns.sort_unstable();
@@ -1932,7 +2015,57 @@ fn parse_formula_from_cell_record(
     record_type: u16,
     payload: &[u8],
     context: Option<&FormulaContext<'_>>,
+    base_row: u32,
+    base_col: u32,
 ) -> Option<String> {
+    let formula_payload = match record_type {
+        0x0008 => {
+            let len = payload.get(8..12).map(le_u32)? as usize;
+            payload.get(14 + len * 2..)?
+        }
+        0x0009 => payload.get(18..)?,
+        0x000a | 0x000b => payload.get(11..)?,
+        _ => return None,
+    };
+    parse_cell_parsed_formula(formula_payload, context, base_row, base_col)
+}
+
+fn parse_cell_parsed_formula(
+    formula_payload: &[u8],
+    context: Option<&FormulaContext<'_>>,
+    base_row: u32,
+    base_col: u32,
+) -> Option<String> {
+    let rgce_len = formula_payload.get(0..4).map(le_u32)? as usize;
+    let rgce = formula_payload.get(4..4 + rgce_len)?;
+    parse_formula_rgce_with_base(rgce, context, Some((base_row, base_col)))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SharedFormulaMasterBin {
+    master_row: u32,
+    master_col: u32,
+    formula: String,
+}
+
+fn parse_shared_formula_record(
+    payload: &[u8],
+    context: Option<&FormulaContext<'_>>,
+) -> Option<SharedFormulaMasterBin> {
+    if payload.len() < 20 {
+        return None;
+    }
+    let master_row = le_u32(&payload[0..4]);
+    let master_col = le_u32(&payload[8..12]);
+    let formula = parse_cell_parsed_formula(payload.get(16..)?, context, master_row, master_col)?;
+    Some(SharedFormulaMasterBin {
+        master_row,
+        master_col,
+        formula,
+    })
+}
+
+fn parse_shared_formula_anchor(record_type: u16, payload: &[u8]) -> Option<(u32, u32)> {
     let formula_payload = match record_type {
         0x0008 => {
             let len = payload.get(8..12).map(le_u32)? as usize;
@@ -1944,13 +2077,60 @@ fn parse_formula_from_cell_record(
     };
     let rgce_len = formula_payload.get(0..4).map(le_u32)? as usize;
     let rgce = formula_payload.get(4..4 + rgce_len)?;
-    parse_formula_rgce_with_context(rgce, context)
+    if rgce.len() != 5 || rgce.first().copied()? != 0x01 {
+        return None;
+    }
+    let extra_len_offset = 4 + rgce_len;
+    let extra_len = formula_payload
+        .get(extra_len_offset..extra_len_offset + 4)
+        .map(le_u32)? as usize;
+    let extra = formula_payload.get(extra_len_offset + 4..extra_len_offset + 4 + extra_len)?;
+    let master_row = le_u32(rgce.get(1..5)?);
+    let master_col = extra.get(0..4).map(le_u32)?;
+    Some((master_row, master_col))
+}
+
+fn apply_shared_formula_anchor(cell: &mut Cell, anchor: Option<(u32, u32)>) {
+    let Some((row, col)) = anchor else {
+        return;
+    };
+    cell.formula_kind = Some("shared".to_string());
+    cell.formula_shared_index = Some(shared_formula_anchor_key(row, col));
+}
+
+fn resolve_xlsb_shared_formulas(cells: &mut [Cell], masters: &[SharedFormulaMasterBin]) {
+    for cell in cells {
+        if cell.formula.is_some() || cell.formula_kind.as_deref() != Some("shared") {
+            continue;
+        }
+        let Some(key) = cell.formula_shared_index.as_deref() else {
+            continue;
+        };
+        let Some(master) = masters
+            .iter()
+            .find(|master| shared_formula_anchor_key(master.master_row, master.master_col) == key)
+        else {
+            continue;
+        };
+        let row_delta = cell.row as i32 - (master.master_row + 1) as i32;
+        let col_delta = cell.col as i32 - (master.master_col + 1) as i32;
+        cell.formula = Some(crate::translate_shared_formula(
+            &master.formula,
+            row_delta,
+            col_delta,
+        ));
+    }
+}
+
+fn shared_formula_anchor_key(row: u32, col: u32) -> String {
+    format!("{row}:{col}")
 }
 
 struct FormulaContext<'a> {
     sheets: &'a [XlsbSheet],
     extern_sheets: &'a [XtiRef],
     named_ranges: &'a [NamedRange],
+    formula_names: &'a [String],
 }
 
 #[cfg(test)]
@@ -1959,8 +2139,16 @@ fn parse_formula_rgce(rgce: &[u8]) -> Option<String> {
 }
 
 fn parse_formula_rgce_with_context(
+    rgce: &[u8],
+    context: Option<&FormulaContext<'_>>,
+) -> Option<String> {
+    parse_formula_rgce_with_base(rgce, context, None)
+}
+
+fn parse_formula_rgce_with_base(
     mut rgce: &[u8],
     context: Option<&FormulaContext<'_>>,
+    base: Option<(u32, u32)>,
 ) -> Option<String> {
     if rgce.is_empty() {
         return Some(String::new());
@@ -2010,6 +2198,7 @@ fn parse_formula_rgce_with_context(
                         formula.push_str("SUM(");
                         formula.push_str(&args);
                         formula.push(')');
+                        rgce = rgce.get(2..)?;
                     }
                     _ => return None,
                 }
@@ -2055,8 +2244,20 @@ fn parse_formula_rgce_with_context(
                 formula.push_str(&reference);
                 rgce = rgce.get(6..)?;
             }
+            0x2c | 0x4c | 0x6c => {
+                let reference = parse_formula_ref_relative(rgce.get(0..6)?, base?)?;
+                stack.push(formula.len());
+                formula.push_str(&reference);
+                rgce = rgce.get(6..)?;
+            }
             0x25 | 0x45 | 0x65 => {
                 let area = parse_formula_area(rgce.get(0..12)?)?;
+                stack.push(formula.len());
+                formula.push_str(&area);
+                rgce = rgce.get(12..)?;
+            }
+            0x2d | 0x4d | 0x6d => {
+                let area = parse_formula_area_relative(rgce.get(0..12)?, base?)?;
                 stack.push(formula.len());
                 formula.push_str(&area);
                 rgce = rgce.get(12..)?;
@@ -2316,15 +2517,44 @@ fn parse_formula_area(payload: &[u8]) -> Option<String> {
     ))
 }
 
+fn parse_formula_ref_relative(payload: &[u8], base: (u32, u32)) -> Option<String> {
+    let row = relative_axis(base.0, le_i32(payload.get(0..4)?))? + 1;
+    let col = relative_axis(base.1, le_i16(payload.get(4..6)?) as i32)? + 1;
+    Some(row_col_to_a1(row, col))
+}
+
+fn parse_formula_area_relative(payload: &[u8], base: (u32, u32)) -> Option<String> {
+    let first_row = relative_axis(base.0, le_i32(payload.get(0..4)?))? + 1;
+    let last_row = relative_axis(base.0, le_i32(payload.get(4..8)?))? + 1;
+    let first_col = relative_axis(base.1, le_i16(payload.get(8..10)?) as i32)? + 1;
+    let last_col = relative_axis(base.1, le_i16(payload.get(10..12)?) as i32)? + 1;
+    Some(format!(
+        "{}:{}",
+        row_col_to_a1(first_row, first_col),
+        row_col_to_a1(last_row, last_col)
+    ))
+}
+
+fn relative_axis(base: u32, delta: i32) -> Option<u32> {
+    let value = base as i64 + delta as i64;
+    (value >= 0).then_some(value as u32)
+}
+
 fn parse_formula_name(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
     let name_index = le_u32(payload);
     if name_index == 0 {
         return None;
     }
     context
-        .named_ranges
+        .formula_names
         .get(name_index as usize - 1)
-        .map(|range| range.name.clone())
+        .cloned()
+        .or_else(|| {
+            context
+                .named_ranges
+                .get(name_index as usize - 1)
+                .map(|range| range.name.clone())
+        })
 }
 
 fn parse_formula_ref3d(payload: &[u8], context: &FormulaContext<'_>) -> Option<String> {
@@ -2642,6 +2872,10 @@ fn error_code(code: u8) -> &'static str {
 
 fn le_u16(bytes: &[u8]) -> u16 {
     u16::from_le_bytes([bytes[0], bytes[1]])
+}
+
+fn le_i16(bytes: &[u8]) -> i16 {
+    i16::from_le_bytes([bytes[0], bytes[1]])
 }
 
 fn le_u32(bytes: &[u8]) -> u32 {
@@ -3887,6 +4121,7 @@ mod tests {
             sheets: &[],
             extern_sheets: &[],
             named_ranges: &named_ranges,
+            formula_names: &[],
         };
         let mut rgce = Vec::new();
         rgce.push(0x43);
@@ -3953,6 +4188,7 @@ mod tests {
             sheets: &sheets,
             extern_sheets: &extern_sheets,
             named_ranges: &[],
+            formula_names: &[],
         };
 
         let mut rgce = Vec::new();

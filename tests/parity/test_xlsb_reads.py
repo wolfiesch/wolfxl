@@ -305,6 +305,39 @@ def test_xlsb_excelgen_image_drawing() -> None:
     assert image.anchor.ext is None
 
 
+def test_xlsb_excelgen_shared_formulas_and_names() -> None:
+    """Shared xlsb formulas hydrate with relative refs and defined names."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "formulas-and-names.xlsb")
+    ws = wb["sheet1"]
+
+    expected_formulas = {
+        "B2": "=2*A2+1",
+        "B3": "=2*A3+1",
+        "B6": "=2*A6+1",
+        "C2": "=TEST1",
+        "C6": "=TEST1",
+        "C7": '="Total="&SUM($C2:C6)',
+    }
+    for coordinate, formula in expected_formulas.items():
+        assert ws[coordinate].value == formula
+
+    cached_values = ws.cached_formula_values()
+    assert cached_values["B2"] == "#N/A"
+    assert cached_values["C6"] == "#N/A"
+    assert cached_values["C7"] == "#N/A"
+
+    records = {
+        record["coordinate"]: record
+        for record in ws.cell_records(include_cached_formula_value=True)
+        if record["coordinate"] in expected_formulas
+    }
+    assert set(records) == set(expected_formulas)
+    assert records["B2"]["formula"] == "=2*A2+1"
+    assert records["B2"]["cached_value"] == "#N/A"
+    assert records["C7"]["formula"] == '="Total="&SUM($C2:C6)'
+    assert records["C7"]["data_type"] == "formula"
+
+
 def test_xlsb_chart_drawing() -> None:
     """Drawing-backed charts in xlsb hydrate through the worksheet chart API."""
     wb = wolfxl.load_workbook(FIXTURES_DIR / "multisheet.xlsb")

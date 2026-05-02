@@ -3103,7 +3103,7 @@ fn resolve_shared_formulas(cells: &mut [Cell]) {
     }
 }
 
-fn translate_shared_formula(formula: &str, rows: i32, cols: i32) -> String {
+pub(crate) fn translate_shared_formula(formula: &str, rows: i32, cols: i32) -> String {
     if rows == 0 && cols == 0 {
         return formula.to_string();
     }
