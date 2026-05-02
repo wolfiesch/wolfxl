@@ -683,6 +683,8 @@ fn parse_worksheet_with_tables(
     let mut current_filter_values: Option<(bool, Vec<String>)> = None;
     let mut data_validations = Vec::new();
     let mut pending_data_validation_list = None;
+    let mut conditional_formats = Vec::new();
+    let mut current_conditional_range: Option<String> = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -943,6 +945,25 @@ fn parse_worksheet_with_tables(
                     data_validations.push(validation);
                 }
             }
+            0x01cd => {
+                current_conditional_range = parse_conditional_formatting_begin(record.payload);
+            }
+            0x01cf => {
+                if let (Some(range), Some(rule)) = (
+                    current_conditional_range.as_deref(),
+                    parse_conditional_format_rule(
+                        record.payload,
+                        current_conditional_range.as_deref(),
+                    ),
+                ) {
+                    if rule.range == range {
+                        conditional_formats.push(rule);
+                    }
+                }
+            }
+            0x01ce => {
+                current_conditional_range = None;
+            }
             _ => {}
         }
     }
@@ -975,6 +996,7 @@ fn parse_worksheet_with_tables(
         auto_filter,
         data_validations,
         tables,
+        conditional_formats,
         cells,
     ))
 }
@@ -1624,6 +1646,89 @@ fn parse_data_validation(payload: &[u8], list_formula: Option<String>) -> Option
         error_title: error_title.filter(|value| !value.is_empty()),
         error: error.filter(|value| !value.is_empty()),
     })
+}
+
+fn parse_conditional_formatting_begin(payload: &[u8]) -> Option<String> {
+    if payload.len() < 8 {
+        return None;
+    }
+    parse_sqref_with_consumed(payload.get(8..)?).map(|(range, _)| range)
+}
+
+fn parse_conditional_format_rule(
+    payload: &[u8],
+    current_range: Option<&str>,
+) -> Option<ConditionalFormatRule> {
+    if payload.len() < 42 {
+        return None;
+    }
+    let rule_type = conditional_format_rule_type(le_u32(&payload[0..4]), le_u32(&payload[4..8]));
+    let operator = conditional_format_operator(le_i32(&payload[16..20]));
+    let priority = Some(le_i32(&payload[12..16]) as i64).filter(|priority| *priority > 0);
+    let flags = le_u16(&payload[28..30]);
+    let formula1_len = le_u32(&payload[30..34]) as usize;
+    let formula2_len = le_u32(&payload[34..38]) as usize;
+    let formula3_len = le_u32(&payload[38..42]) as usize;
+    let mut offset = 42;
+    let str_param = read_nullable_string_value(payload, &mut offset);
+    let formula1 = read_conditional_formula(payload, &mut offset, formula1_len);
+    let formula2 = read_conditional_formula(payload, &mut offset, formula2_len);
+    let _formula3 = read_conditional_formula(payload, &mut offset, formula3_len);
+    let formula = formula1
+        .or(formula2)
+        .or_else(|| str_param.filter(|value| !value.is_empty()))
+        .map(|value| ensure_formula_prefix_bin(&value));
+    Some(ConditionalFormatRule {
+        range: current_range.unwrap_or_default().to_string(),
+        rule_type: rule_type.to_string(),
+        operator: operator.map(str::to_string),
+        formula,
+        priority,
+        stop_if_true: Some(flags & 0x0002 != 0),
+    })
+}
+
+fn read_conditional_formula(payload: &[u8], offset: &mut usize, len: usize) -> Option<String> {
+    if len == 0 {
+        return None;
+    }
+    let rgce = payload.get(*offset..offset.checked_add(len)?)?;
+    *offset += len;
+    parse_formula_rgce_with_context(rgce, None)
+}
+
+fn conditional_format_rule_type(raw_type: u32, raw_template: u32) -> &'static str {
+    match (raw_type, raw_template) {
+        (1, _) => "cellIs",
+        (2, _) => "expression",
+        (3, _) => "colorScale",
+        (4, _) => "dataBar",
+        (5, _) => "top10",
+        (6, _) => "iconSet",
+        _ => "expression",
+    }
+}
+
+fn conditional_format_operator(raw: i32) -> Option<&'static str> {
+    match raw {
+        1 => Some("between"),
+        2 => Some("notBetween"),
+        3 => Some("equal"),
+        4 => Some("notEqual"),
+        5 => Some("greaterThan"),
+        6 => Some("lessThan"),
+        7 => Some("greaterThanOrEqual"),
+        8 => Some("lessThanOrEqual"),
+        _ => None,
+    }
+}
+
+fn ensure_formula_prefix_bin(formula: &str) -> String {
+    if formula.starts_with('=') {
+        formula.to_string()
+    } else {
+        format!("={formula}")
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2329,6 +2434,7 @@ fn worksheet_data(
     auto_filter: Option<AutoFilterInfo>,
     data_validations: Vec<DataValidation>,
     tables: Vec<Table>,
+    conditional_formats: Vec<ConditionalFormatRule>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -2354,7 +2460,7 @@ fn worksheet_data(
         images: Vec::<ImageInfo>::new(),
         charts: Vec::new(),
         tables,
-        conditional_formats: Vec::<ConditionalFormatRule>::new(),
+        conditional_formats,
         hidden_rows,
         hidden_columns,
         row_outline_levels,
@@ -3542,6 +3648,95 @@ mod tests {
                 allow_blank: true,
                 error_title: None,
                 error: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_conditional_format_rule() {
+        let mut rgce = Vec::new();
+        rgce.push(0x1e);
+        put_u16(&mut rgce, 50);
+
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_i32(&mut payload, 1);
+        put_i32(&mut payload, 5);
+        put_i32(&mut payload, 0);
+        put_i32(&mut payload, 0);
+        put_u16(&mut payload, 0x0002);
+        put_u32(&mut payload, rgce.len() as u32);
+        put_u32(&mut payload, 0);
+        put_u32(&mut payload, 0);
+        put_i32(&mut payload, -1);
+        payload.extend_from_slice(&rgce);
+
+        assert_eq!(
+            parse_conditional_format_rule(&payload, Some("C2:C5")),
+            Some(ConditionalFormatRule {
+                range: "C2:C5".to_string(),
+                rule_type: "cellIs".to_string(),
+                operator: Some("greaterThan".to_string()),
+                formula: Some("=50".to_string()),
+                priority: Some(1),
+                stop_if_true: Some(true),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_conditional_formats() {
+        let mut data = Vec::new();
+        let mut begin = Vec::new();
+        put_u32(&mut begin, 1);
+        put_u32(&mut begin, 0);
+        put_u32(&mut begin, 1);
+        put_u32(&mut begin, 1);
+        put_u32(&mut begin, 4);
+        put_u32(&mut begin, 2);
+        put_u32(&mut begin, 2);
+        push_record(&mut data, 0x01cd, &begin);
+
+        let mut rgce = Vec::new();
+        rgce.push(0x44);
+        put_u32(&mut rgce, 1);
+        put_u16(&mut rgce, 0xc001);
+        rgce.push(0x1e);
+        put_u16(&mut rgce, 0);
+        rgce.push(0x0c);
+
+        let mut rule = Vec::new();
+        put_u32(&mut rule, 2);
+        put_u32(&mut rule, 1);
+        put_u32(&mut rule, 0);
+        put_i32(&mut rule, 3);
+        put_i32(&mut rule, 0);
+        put_i32(&mut rule, 0);
+        put_i32(&mut rule, 0);
+        put_u16(&mut rule, 0);
+        put_u32(&mut rule, rgce.len() as u32);
+        put_u32(&mut rule, 0);
+        put_u32(&mut rule, 0);
+        put_i32(&mut rule, -1);
+        rule.extend_from_slice(&rgce);
+        push_record(&mut data, 0x01cf, &rule);
+        push_record(&mut data, 0x01d0, &[]);
+        push_record(&mut data, 0x01ce, &[]);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse conditional formatting worksheet");
+
+        assert_eq!(
+            sheet.conditional_formats,
+            vec![ConditionalFormatRule {
+                range: "C2:C5".to_string(),
+                rule_type: "expression".to_string(),
+                operator: None,
+                formula: Some("=B2>0".to_string()),
+                priority: Some(3),
+                stop_if_true: Some(false),
             }]
         );
     }
