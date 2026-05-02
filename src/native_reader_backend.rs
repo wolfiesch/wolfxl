@@ -1305,9 +1305,41 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_images(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let images = self.ensure_sheet(sheet)?.images.clone();
+        let result = PyList::empty(py);
+        for image in &images {
+            result.append(image_to_py(py, image)?)?;
+        }
+        Ok(result.into())
+    }
+
+    pub fn read_charts(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let charts = self.ensure_sheet(sheet)?.charts.clone();
+        let result = PyList::empty(py);
+        for chart in &charts {
+            result.append(chart_to_py(py, chart)?)?;
+        }
+        Ok(result.into())
+    }
+
     pub fn read_header_footer(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match &self.ensure_sheet(sheet)?.header_footer {
             Some(header_footer) => header_footer_to_py(py, header_footer),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_row_breaks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.row_breaks {
+            Some(breaks) => page_breaks_to_py(py, breaks),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_column_breaks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.column_breaks {
+            Some(breaks) => page_breaks_to_py(py, breaks),
             None => Ok(py.None()),
         }
     }
@@ -1647,6 +1679,53 @@ impl NativeXlsbBook {
             out.append(item)?;
         }
         Ok(out.into())
+    }
+
+    pub fn read_cell_array_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let Some(info) = self
+            .ensure_sheet(sheet)?
+            .array_formulas
+            .get(&(row, col))
+            .cloned()
+        else {
+            return Ok(py.None());
+        };
+        let d = PyDict::new(py);
+        match info {
+            ArrayFormulaInfo::Array { ref_range, text } => {
+                d.set_item("kind", "array")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("text", ensure_formula_prefix(&text))?;
+            }
+            ArrayFormulaInfo::DataTable {
+                ref_range,
+                ca,
+                dt2_d,
+                dtr,
+                r1,
+                r2,
+            } => {
+                d.set_item("kind", "data_table")?;
+                d.set_item("ref", ref_range)?;
+                d.set_item("ca", ca)?;
+                d.set_item("dt2D", dt2_d)?;
+                d.set_item("dtr", dtr)?;
+                d.set_item("r1", r1)?;
+                d.set_item("r2", r2)?;
+            }
+            ArrayFormulaInfo::SpillChild => {
+                d.set_item("kind", "spill_child")?;
+            }
+        }
+        Ok(d.into())
     }
 
     pub fn read_cell_format(

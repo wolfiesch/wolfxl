@@ -140,6 +140,10 @@ def test_xlsb_public_metadata_surfaces_do_not_raise(fixture: Path) -> None:
         assert ws.print_options is not None
         assert ws.page_margins is not None
         assert ws.page_setup is not None
+        assert ws.row_breaks is not None
+        assert ws.col_breaks is not None
+        assert isinstance(ws._images, list)
+        assert isinstance(ws._charts, list)
         assert ws.row_dimensions[1].height is None or isinstance(
             ws.row_dimensions[1].height, float
         )
