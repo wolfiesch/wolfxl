@@ -34,6 +34,7 @@ RECORD_NAMES = {
     0x002E: "BrtBorder",
     0x002F: "BrtXF",
     0x003C: "BrtColInfo",
+    0x0040: "BrtDVal",
     0x0093: "BrtWsProp",
     0x0094: "BrtWsDim",
     0x0097: "BrtPane",
@@ -85,6 +86,7 @@ RECORD_NAMES = {
     0x0294: "BrtBeginListParts",
     0x0295: "BrtListPart",
     0x0296: "BrtEndListParts",
+    0x02A9: "BrtDValList",
     0x0400: "BrtArrFmla",
     0x0415: "BrtWsProp14",
 }

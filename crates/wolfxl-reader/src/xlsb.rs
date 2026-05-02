@@ -612,6 +612,8 @@ fn parse_worksheet(
     let mut auto_filter = None;
     let mut current_filter_column: Option<FilterColumnInfo> = None;
     let mut current_filter_values: Option<(bool, Vec<String>)> = None;
+    let mut data_validations = Vec::new();
+    let mut pending_data_validation_list = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -862,6 +864,16 @@ fn parse_worksheet(
                     }
                 }
             }
+            0x02a9 => {
+                pending_data_validation_list = parse_filter_value(record.payload);
+            }
+            0x0040 => {
+                if let Some(validation) =
+                    parse_data_validation(record.payload, pending_data_validation_list.take())
+                {
+                    data_validations.push(validation);
+                }
+            }
             _ => {}
         }
     }
@@ -892,6 +904,7 @@ fn parse_worksheet(
         sheet_format,
         sheet_properties,
         auto_filter,
+        data_validations,
         cells,
     ))
 }
@@ -1514,6 +1527,80 @@ fn parse_filter_value(payload: &[u8]) -> Option<String> {
     wide_string(payload, &mut consumed).ok()
 }
 
+fn parse_data_validation(payload: &[u8], list_formula: Option<String>) -> Option<DataValidation> {
+    if payload.len() < 8 {
+        return None;
+    }
+    let flags = le_u32(&payload[0..4]);
+    let (range, consumed) = parse_sqref_with_consumed(payload.get(4..)?)?;
+    let mut offset = 4 + consumed;
+    let error_title = parse_optional_wide_string(payload, &mut offset);
+    let error = parse_optional_wide_string(payload, &mut offset);
+    let _prompt_title = parse_optional_wide_string(payload, &mut offset);
+    let _prompt = parse_optional_wide_string(payload, &mut offset);
+    let validation_type = data_validation_type(flags & 0x0f);
+    let operator = if matches!(validation_type, "any" | "list" | "custom") {
+        None
+    } else {
+        data_validation_operator((flags >> 20) & 0x0f).map(str::to_string)
+    };
+    Some(DataValidation {
+        range,
+        validation_type: validation_type.to_string(),
+        operator,
+        formula1: list_formula,
+        formula2: None,
+        allow_blank: flags & (1 << 8) != 0,
+        error_title: error_title.filter(|value| !value.is_empty()),
+        error: error.filter(|value| !value.is_empty()),
+    })
+}
+
+fn parse_sqref_with_consumed(payload: &[u8]) -> Option<(String, usize)> {
+    let count = payload.get(0..4).map(le_u32)? as usize;
+    if count == 0 {
+        return None;
+    }
+    let range_bytes = payload.get(4..4 + count.checked_mul(16)?)?;
+    let ranges: Vec<String> = range_bytes.chunks_exact(16).filter_map(parse_rfx).collect();
+    (!ranges.is_empty()).then(|| (ranges.join(" "), 4 + count * 16))
+}
+
+fn parse_optional_wide_string(payload: &[u8], offset: &mut usize) -> Option<String> {
+    let start = *offset;
+    let mut consumed = 0;
+    let value = wide_string(payload.get(start..)?, &mut consumed).ok()?;
+    *offset = start + consumed;
+    Some(value)
+}
+
+fn data_validation_type(raw: u32) -> &'static str {
+    match raw {
+        1 => "whole",
+        2 => "decimal",
+        3 => "list",
+        4 => "date",
+        5 => "time",
+        6 => "textLength",
+        7 => "custom",
+        _ => "any",
+    }
+}
+
+fn data_validation_operator(raw: u32) -> Option<&'static str> {
+    match raw {
+        0 => Some("between"),
+        1 => Some("notBetween"),
+        2 => Some("equal"),
+        3 => Some("notEqual"),
+        4 => Some("greaterThan"),
+        5 => Some("lessThan"),
+        6 => Some("greaterThanOrEqual"),
+        7 => Some("lessThanOrEqual"),
+        _ => None,
+    }
+}
+
 fn parse_formula_from_cell_record(
     record_type: u16,
     payload: &[u8],
@@ -2042,6 +2129,7 @@ fn worksheet_data(
     sheet_format: Option<SheetFormatInfo>,
     sheet_properties: Option<SheetPropertiesInfo>,
     auto_filter: Option<AutoFilterInfo>,
+    data_validations: Vec<DataValidation>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -2054,7 +2142,7 @@ fn worksheet_data(
         comments,
         row_heights,
         column_widths,
-        data_validations: Vec::<DataValidation>::new(),
+        data_validations,
         sheet_protection,
         auto_filter,
         page_margins,
@@ -3179,6 +3267,72 @@ mod tests {
             Some(FilterInfo::String {
                 values: vec!["Open".to_string()],
             })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_list_data_validation() {
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0x0000_0103);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 3);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 2);
+        put_wide_string(&mut payload, "Status error");
+        put_wide_string(&mut payload, "Choose a valid status");
+        put_wide_string(&mut payload, "");
+        put_wide_string(&mut payload, "");
+
+        assert_eq!(
+            parse_data_validation(&payload, Some("\"Open,Closed\"".to_string())),
+            Some(DataValidation {
+                range: "C2:C4".to_string(),
+                validation_type: "list".to_string(),
+                operator: None,
+                formula1: Some("\"Open,Closed\"".to_string()),
+                formula2: None,
+                allow_blank: true,
+                error_title: Some("Status error".to_string()),
+                error: Some("Choose a valid status".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_data_validations() {
+        let mut data = Vec::new();
+        let mut list = Vec::new();
+        put_wide_string(&mut list, "\"Open,Closed\"");
+        push_record(&mut data, 0x02a9, &list);
+
+        let mut payload = Vec::new();
+        put_u32(&mut payload, 0x0000_0103);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 1);
+        put_u32(&mut payload, 3);
+        put_u32(&mut payload, 2);
+        put_u32(&mut payload, 2);
+        for _ in 0..4 {
+            put_wide_string(&mut payload, "");
+        }
+        push_record(&mut data, 0x0040, &payload);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse data validations worksheet");
+
+        assert_eq!(
+            sheet.data_validations,
+            vec![DataValidation {
+                range: "C2:C4".to_string(),
+                validation_type: "list".to_string(),
+                operator: None,
+                formula1: Some("\"Open,Closed\"".to_string()),
+                formula2: None,
+                allow_blank: true,
+                error_title: None,
+                error: None,
+            }]
         );
     }
 
