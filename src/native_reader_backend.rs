@@ -1233,6 +1233,57 @@ impl NativeXlsbBook {
         Ok(result.into())
     }
 
+    pub fn read_conditional_formats(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let rules = self.ensure_sheet(sheet)?.conditional_formats.clone();
+        let result = PyList::empty(py);
+        for rule in &rules {
+            let d = PyDict::new(py);
+            d.set_item("range", &rule.range)?;
+            d.set_item("rule_type", &rule.rule_type)?;
+            if let Some(operator) = &rule.operator {
+                d.set_item("operator", operator)?;
+            }
+            if let Some(formula) = &rule.formula {
+                d.set_item("formula", formula)?;
+            }
+            if let Some(priority) = rule.priority {
+                d.set_item("priority", priority)?;
+            }
+            if let Some(stop_if_true) = rule.stop_if_true {
+                d.set_item("stop_if_true", stop_if_true)?;
+            }
+            result.append(d)?;
+        }
+        Ok(result.into())
+    }
+
+    pub fn read_tables(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let tables = self.ensure_sheet(sheet)?.tables.clone();
+        let result = PyList::empty(py);
+        for table in &tables {
+            let d = PyDict::new(py);
+            d.set_item("name", &table.name)?;
+            d.set_item("ref", &table.ref_range)?;
+            d.set_item("header_row", table.header_row)?;
+            d.set_item("totals_row", table.totals_row)?;
+            d.set_item("comment", table.comment.clone())?;
+            d.set_item("table_type", table.table_type.clone())?;
+            d.set_item("totals_row_shown", table.totals_row_shown)?;
+            match &table.style {
+                Some(style) => d.set_item("style", style)?,
+                None => d.set_item("style", py.None())?,
+            }
+            d.set_item("show_first_column", table.show_first_column)?;
+            d.set_item("show_last_column", table.show_last_column)?;
+            d.set_item("show_row_stripes", table.show_row_stripes)?;
+            d.set_item("show_column_stripes", table.show_column_stripes)?;
+            d.set_item("columns", table.columns.clone())?;
+            d.set_item("autofilter", table.autofilter)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
+    }
+
     pub fn read_page_margins(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match self.ensure_sheet(sheet)?.page_margins {
             Some(margins) => page_margins_to_py(py, &margins),
@@ -1243,6 +1294,13 @@ impl NativeXlsbBook {
     pub fn read_page_setup(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         match &self.ensure_sheet(sheet)?.page_setup {
             Some(setup) => page_setup_to_py(py, setup),
+            None => Ok(py.None()),
+        }
+    }
+
+    pub fn read_print_options(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.print_options {
+            Some(options) => print_options_to_py(py, options),
             None => Ok(py.None()),
         }
     }
@@ -1259,6 +1317,28 @@ impl NativeXlsbBook {
             Some(format) => sheet_format_to_py(py, format),
             None => Ok(py.None()),
         }
+    }
+
+    pub fn read_merged_ranges(&mut self, sheet: &str) -> PyResult<Vec<String>> {
+        Ok(self.ensure_sheet(sheet)?.merged_ranges.clone())
+    }
+
+    pub fn read_sheet_visibility(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let data = self.ensure_sheet(sheet)?;
+        let d = PyDict::new(py);
+        d.set_item("hidden_rows", data.hidden_rows.clone())?;
+        d.set_item("hidden_columns", data.hidden_columns.clone())?;
+        let row_levels = PyDict::new(py);
+        for (row, level) in &data.row_outline_levels {
+            row_levels.set_item(*row, *level)?;
+        }
+        d.set_item("row_outline_levels", row_levels)?;
+        let column_levels = PyDict::new(py);
+        for (col, level) in &data.column_outline_levels {
+            column_levels.set_item(*col, *level)?;
+        }
+        d.set_item("column_outline_levels", column_levels)?;
+        Ok(d.into())
     }
 
     pub fn read_sheet_bounds(&mut self, sheet: &str) -> PyResult<Option<(u32, u32, u32, u32)>> {
@@ -1495,6 +1575,80 @@ impl NativeXlsbBook {
             .collect())
     }
 
+    pub fn read_cached_formula_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+    ) -> PyResult<PyObject> {
+        let cells = self.ensure_sheet(sheet)?.cells.clone();
+        let date1904 = self.book.date1904();
+        let out = PyDict::new(py);
+        for cell in &cells {
+            if cell.formula.is_some() {
+                let number_format = self.number_format_for_cell(cell);
+                out.set_item(
+                    &cell.coordinate,
+                    cell_to_plain(py, cell, true, number_format, date1904)?,
+                )?;
+            }
+        }
+        Ok(out.into())
+    }
+
+    pub fn read_row_height(&mut self, sheet: &str, row: i64) -> PyResult<Option<f64>> {
+        if row < 1 {
+            return Ok(None);
+        }
+        Ok(self
+            .ensure_sheet(sheet)?
+            .row_heights
+            .get(&(row as u32))
+            .filter(|height| height.custom_height)
+            .map(|height| height.height))
+    }
+
+    pub fn read_column_width(&mut self, sheet: &str, col_letter: &str) -> PyResult<Option<f64>> {
+        let col = col_letter_to_index_1based(col_letter)?;
+        Ok(self
+            .ensure_sheet(sheet)?
+            .column_widths
+            .iter()
+            .find(|width| width.custom_width && col >= width.min && col <= width.max)
+            .map(|width| strip_excel_padding(width.width)))
+    }
+
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
+        let (row0, col0) = a1_to_row_col(a1).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+        let row = row0 + 1;
+        let col = col0 + 1;
+        let runs = {
+            let data = self.ensure_sheet(sheet)?;
+            data.cells
+                .iter()
+                .find(|c| c.row == row && c.col == col)
+                .and_then(|cell| cell.rich_text.clone())
+        };
+        let Some(runs) = runs else {
+            return Ok(py.None());
+        };
+        let out = PyList::empty(py);
+        for run in runs {
+            let item = PyList::empty(py);
+            item.append(run.text)?;
+            match run.font {
+                Some(font) => item.append(rich_font_to_py(py, &font)?)?,
+                None => item.append(py.None())?,
+            }
+            out.append(item)?;
+        }
+        Ok(out.into())
+    }
+
     pub fn read_cell_format(
         &mut self,
         py: Python<'_>,
@@ -1657,6 +1811,15 @@ impl NativeXlsbBook {
         let mut bounds: Option<(u32, u32, u32, u32)> = None;
         for cell in &data.cells {
             update_bounds(&mut bounds, cell.row, cell.col);
+        }
+        for range in &data.merged_ranges {
+            if let Some((min_row, min_col, max_row, max_col)) = parse_range_1based(range) {
+                update_bounds(&mut bounds, min_row, min_col);
+                update_bounds(&mut bounds, max_row, max_col);
+            }
+        }
+        if bounds.is_none() {
+            bounds = data.dimension.as_deref().and_then(parse_range_1based);
         }
         Ok(bounds)
     }

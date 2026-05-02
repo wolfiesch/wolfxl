@@ -126,6 +126,29 @@ def test_xlsb_defined_names_are_readable() -> None:
     assert isinstance(wb.defined_names, dict)
 
 
+@pytest.mark.parametrize("fixture", _FIXTURES, ids=lambda p: p.name)
+def test_xlsb_public_metadata_surfaces_do_not_raise(fixture: Path) -> None:
+    """Native xlsb exposes the same lazy worksheet metadata APIs as xlsx."""
+    wb = wolfxl.load_workbook(str(fixture))
+    for ws in wb.worksheets:
+        assert isinstance(list(ws.merged_cells.ranges), list)
+        assert isinstance(ws.sheet_visibility(), dict)
+        assert isinstance(ws.cached_formula_values(), dict)
+        assert isinstance(ws.tables, dict)
+        assert isinstance(list(ws.data_validations), list)
+        assert isinstance(list(ws.conditional_formatting), list)
+        assert ws.print_options is not None
+        assert ws.page_margins is not None
+        assert ws.page_setup is not None
+        assert ws.row_dimensions[1].height is None or isinstance(
+            ws.row_dimensions[1].height, float
+        )
+        assert ws.column_dimensions["A"].width is None or isinstance(
+            ws.column_dimensions["A"].width, float
+        )
+        assert ws["A1"].rich_text is None
+
+
 def test_xlsb_from_bytes() -> None:
     fixture = _FIXTURES[0]
     data = fixture.read_bytes()
