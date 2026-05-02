@@ -194,11 +194,13 @@ impl NativeXlsbBook {
             extern_sheets: &self.extern_sheets,
             named_ranges: &self.named_ranges,
         };
-        Ok(parse_worksheet(
+        let tables = read_tables_bin(&mut zip, &sheet.path, &data, rels.as_ref())?;
+        Ok(parse_worksheet_with_tables(
             &data,
             &self.shared_strings,
             rels.as_ref(),
             comments,
+            tables,
             Some(&context),
         )?)
     }
@@ -439,6 +441,54 @@ fn parse_name_formula(
     parse_formula_rgce_with_context(rgce, Some(&context))
 }
 
+fn read_tables_bin(
+    zip: &mut ZipArchive<Cursor<Vec<u8>>>,
+    sheet_path: &str,
+    sheet_data: &[u8],
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<Table>> {
+    let Some(rels) = rels else {
+        return Ok(Vec::new());
+    };
+    let table_rids = parse_table_part_rids(sheet_data)?;
+    if table_rids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let sheet_dir = part_dir(sheet_path);
+    let mut out = Vec::new();
+    for rid in table_rids {
+        let Some(rel) = rels.get(&RelId(rid)) else {
+            continue;
+        };
+        let table_path = join_and_normalize(&sheet_dir, &rel.target);
+        let Some(table_data) = read_zip_part_optional(zip, &table_path)? else {
+            continue;
+        };
+        if let Some(table) = parse_table_bin(&table_data) {
+            out.push(table);
+        }
+    }
+    Ok(out)
+}
+
+fn parse_table_part_rids(data: &[u8]) -> Result<Vec<String>> {
+    let mut rids = Vec::new();
+    for record in Records::new(data) {
+        let record = record?;
+        if record.typ != 0x0295 {
+            continue;
+        }
+        let mut offset = 0;
+        if let Some(rid) =
+            read_wide_string_at(record.payload, &mut offset).filter(|value| !value.is_empty())
+        {
+            rids.push(rid);
+        }
+    }
+    Ok(rids)
+}
+
 fn resolve_xlsb_named_ranges(
     sheets: &[XlsbSheet],
     raw_names: Vec<RawNamedRange>,
@@ -583,11 +633,30 @@ fn read_styles(zip: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<StyleTables> {
     Ok(styles)
 }
 
+#[cfg(test)]
 fn parse_worksheet(
     data: &[u8],
     shared_strings: &[String],
     rels: Option<&RelsGraph>,
     comments: Vec<Comment>,
+    formula_context: Option<&FormulaContext<'_>>,
+) -> Result<WorksheetData> {
+    parse_worksheet_with_tables(
+        data,
+        shared_strings,
+        rels,
+        comments,
+        Vec::new(),
+        formula_context,
+    )
+}
+
+fn parse_worksheet_with_tables(
+    data: &[u8],
+    shared_strings: &[String],
+    rels: Option<&RelsGraph>,
+    comments: Vec<Comment>,
+    tables: Vec<Table>,
     formula_context: Option<&FormulaContext<'_>>,
 ) -> Result<WorksheetData> {
     let mut cells = Vec::new();
@@ -905,6 +974,7 @@ fn parse_worksheet(
         sheet_properties,
         auto_filter,
         data_validations,
+        tables,
         cells,
     ))
 }
@@ -1556,6 +1626,134 @@ fn parse_data_validation(payload: &[u8], list_formula: Option<String>) -> Option
     })
 }
 
+#[derive(Debug, Default)]
+struct TableBuilderBin {
+    name: String,
+    ref_range: String,
+    header_row: bool,
+    totals_row: bool,
+    comment: Option<String>,
+    table_type: Option<String>,
+    totals_row_shown: Option<bool>,
+    style: Option<String>,
+    show_first_column: bool,
+    show_last_column: bool,
+    show_row_stripes: bool,
+    show_column_stripes: bool,
+    columns: Vec<String>,
+    autofilter: bool,
+}
+
+impl TableBuilderBin {
+    fn finish(self) -> Option<Table> {
+        if self.name.is_empty() || self.ref_range.is_empty() {
+            return None;
+        }
+        Some(Table {
+            name: self.name,
+            ref_range: self.ref_range,
+            header_row: self.header_row,
+            totals_row: self.totals_row,
+            comment: self.comment,
+            table_type: self.table_type,
+            totals_row_shown: self.totals_row_shown,
+            style: self.style,
+            show_first_column: self.show_first_column,
+            show_last_column: self.show_last_column,
+            show_row_stripes: self.show_row_stripes,
+            show_column_stripes: self.show_column_stripes,
+            columns: self.columns,
+            autofilter: self.autofilter,
+        })
+    }
+}
+
+fn parse_table_bin(data: &[u8]) -> Option<Table> {
+    let mut table = TableBuilderBin::default();
+    for record in Records::new(data).filter_map(Result::ok) {
+        match record.typ {
+            0x0157 => {
+                table = parse_table_begin(record.payload)?;
+            }
+            0x015b => {
+                if let Some(column) = parse_table_column(record.payload) {
+                    table.columns.push(column);
+                }
+            }
+            0x00a1 => {
+                table.autofilter = true;
+            }
+            0x0201 => {
+                apply_table_style(record.payload, &mut table);
+            }
+            _ => {}
+        }
+    }
+    table.finish()
+}
+
+fn parse_table_begin(payload: &[u8]) -> Option<TableBuilderBin> {
+    if payload.len() < 64 {
+        return None;
+    }
+    let ref_range = parse_rfx(&payload[0..16])?;
+    let list_type = le_u32(&payload[16..20]);
+    let header_row = le_u32(&payload[24..28]) != 0;
+    let totals_row = le_u32(&payload[28..32]) != 0;
+    let flags = le_u32(&payload[32..36]);
+    let mut offset = 64;
+    let name = read_nullable_string_value(payload, &mut offset);
+    let display_name = read_nullable_string_value(payload, &mut offset);
+    let comment =
+        read_nullable_string_value(payload, &mut offset).filter(|value| !value.is_empty());
+    let _style_header = read_nullable_string_value(payload, &mut offset);
+    let _style_data = read_nullable_string_value(payload, &mut offset);
+    let _style_agg = read_nullable_string_value(payload, &mut offset);
+    let table_name = name
+        .filter(|value| !value.is_empty())
+        .or_else(|| display_name.filter(|value| !value.is_empty()))?;
+    Some(TableBuilderBin {
+        name: table_name,
+        ref_range,
+        header_row,
+        totals_row,
+        comment,
+        table_type: (list_type != 0).then_some("worksheet".to_string()),
+        totals_row_shown: Some(flags & 0x0001 != 0),
+        ..TableBuilderBin::default()
+    })
+}
+
+fn parse_table_column(payload: &[u8]) -> Option<String> {
+    if payload.len() < 24 {
+        return None;
+    }
+    let mut offset = 24;
+    let name = read_nullable_string_value(payload, &mut offset);
+    let caption = read_nullable_string_value(payload, &mut offset);
+    caption
+        .filter(|value| !value.is_empty())
+        .or_else(|| name.filter(|value| !value.is_empty()))
+}
+
+fn apply_table_style(payload: &[u8], table: &mut TableBuilderBin) {
+    if payload.len() < 2 {
+        return;
+    }
+    let flags = le_u16(&payload[0..2]);
+    table.show_first_column = flags & 0x0001 != 0;
+    table.show_last_column = flags & 0x0002 != 0;
+    table.show_row_stripes = flags & 0x0004 != 0;
+    table.show_column_stripes = flags & 0x0008 != 0;
+    let mut offset = 2;
+    table.style =
+        read_nullable_string_value(payload, &mut offset).filter(|value| !value.is_empty());
+}
+
+fn read_nullable_string_value(payload: &[u8], offset: &mut usize) -> Option<String> {
+    read_nullable_wide_string_at(payload, offset).flatten()
+}
+
 fn parse_sqref_with_consumed(payload: &[u8]) -> Option<(String, usize)> {
     let count = payload.get(0..4).map(le_u32)? as usize;
     if count == 0 {
@@ -2130,6 +2328,7 @@ fn worksheet_data(
     sheet_properties: Option<SheetPropertiesInfo>,
     auto_filter: Option<AutoFilterInfo>,
     data_validations: Vec<DataValidation>,
+    tables: Vec<Table>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -2154,7 +2353,7 @@ fn worksheet_data(
         sheet_format,
         images: Vec::<ImageInfo>::new(),
         charts: Vec::new(),
-        tables: Vec::<Table>::new(),
+        tables,
         conditional_formats: Vec::<ConditionalFormatRule>::new(),
         hidden_rows,
         hidden_columns,
@@ -2439,7 +2638,18 @@ mod tests {
             out.push(((typ & 0x7f) as u8) | 0x80);
             out.push((typ >> 7) as u8);
         }
-        out.push(payload.len() as u8);
+        let mut len = payload.len();
+        loop {
+            let mut byte = (len & 0x7f) as u8;
+            len >>= 7;
+            if len != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if len == 0 {
+                break;
+            }
+        }
         out.extend_from_slice(payload);
     }
 
@@ -3333,6 +3543,89 @@ mod tests {
                 error_title: None,
                 error: None,
             }]
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_table_part_relationship_ids() {
+        let mut data = Vec::new();
+        let mut payload = Vec::new();
+        put_wide_string(&mut payload, "rId3");
+        push_record(&mut data, 0x0295, &payload);
+
+        assert_eq!(parse_table_part_rids(&data).unwrap(), vec!["rId3"]);
+    }
+
+    #[test]
+    fn parses_xlsb_table_part_metadata() {
+        let mut data = Vec::new();
+        let mut table = Vec::new();
+        put_u32(&mut table, 0);
+        put_u32(&mut table, 3);
+        put_u32(&mut table, 0);
+        put_u32(&mut table, 2);
+        put_u32(&mut table, 1);
+        put_u32(&mut table, 7);
+        put_u32(&mut table, 1);
+        put_u32(&mut table, 0);
+        put_u32(&mut table, 1);
+        for _ in 0..6 {
+            put_u32(&mut table, u32::MAX);
+        }
+        put_u32(&mut table, 0);
+        put_wide_string(&mut table, "SalesTable");
+        put_wide_string(&mut table, "SalesTable");
+        put_wide_string(&mut table, "table comment");
+        put_wide_string(&mut table, "");
+        put_wide_string(&mut table, "");
+        put_wide_string(&mut table, "");
+        push_record(&mut data, 0x0157, &table);
+
+        let mut style = Vec::new();
+        put_u16(&mut style, 0x0005);
+        put_wide_string(&mut style, "TableStyleMedium2");
+        push_record(&mut data, 0x0201, &style);
+
+        for (id, name) in [(1, "Region"), (2, "Amount"), (3, "Status")] {
+            let mut column = Vec::new();
+            put_u32(&mut column, id);
+            put_u32(&mut column, 0);
+            put_u32(&mut column, u32::MAX);
+            put_u32(&mut column, u32::MAX);
+            put_u32(&mut column, u32::MAX);
+            put_u32(&mut column, 0);
+            put_wide_string(&mut column, name);
+            put_wide_string(&mut column, name);
+            put_wide_string(&mut column, "");
+            put_wide_string(&mut column, "");
+            put_wide_string(&mut column, "");
+            put_wide_string(&mut column, "");
+            push_record(&mut data, 0x015b, &column);
+        }
+        push_record(&mut data, 0x00a1, &[0; 16]);
+
+        assert_eq!(
+            parse_table_bin(&data),
+            Some(Table {
+                name: "SalesTable".to_string(),
+                ref_range: "A1:C4".to_string(),
+                header_row: true,
+                totals_row: false,
+                comment: Some("table comment".to_string()),
+                table_type: Some("worksheet".to_string()),
+                totals_row_shown: Some(true),
+                style: Some("TableStyleMedium2".to_string()),
+                show_first_column: true,
+                show_last_column: false,
+                show_row_stripes: true,
+                show_column_stripes: false,
+                columns: vec![
+                    "Region".to_string(),
+                    "Amount".to_string(),
+                    "Status".to_string()
+                ],
+                autofilter: true,
+            })
         );
     }
 

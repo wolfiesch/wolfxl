@@ -72,6 +72,7 @@ RECORD_NAMES = {
     0x01E0: "BrtEndHeaderFooter",
     0x01E5: "BrtWsFmtInfo",
     0x01EE: "BrtHLink",
+    0x0201: "BrtTableStyleClient",
     0x0217: "BrtSheetProtection",
     0x0274: "BrtBeginComments",
     0x0275: "BrtEndComments",
