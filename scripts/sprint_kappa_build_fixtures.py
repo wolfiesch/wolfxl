@@ -74,6 +74,7 @@ EXCELGEN_XLSB_PICKS: tuple[tuple[str, str], ...] = (
     ("style-showcase.xlsb", "style-showcase.xlsb"),
     ("test-image-2.xlsb", "image-drawing.xlsb"),
     ("test-formula.xlsb", "formulas-and-names.xlsb"),
+    ("test-links.xlsb", "links-and-hyperlink-formulas.xlsb"),
 )
 
 

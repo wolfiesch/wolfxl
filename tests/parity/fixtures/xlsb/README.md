@@ -24,6 +24,7 @@ large visual feature matrices:
 | `excelgen/style-showcase.xlsb`                 | ExcelGen `samples/style-showcase.xlsb` | table styles, merges, style matrices   |
 | `excelgen/image-drawing.xlsb`                  | ExcelGen `samples/test-image-2.xlsb`  | drawing relationship and image payload |
 | `excelgen/formulas-and-names.xlsb`             | ExcelGen `samples/test-formula.xlsb`  | shared formulas and defined-name refs  |
+| `excelgen/links-and-hyperlink-formulas.xlsb`   | ExcelGen `samples/test-links.xlsb`    | HYPERLINK formulas and relative refs    |
 
 ## License & attribution
 
