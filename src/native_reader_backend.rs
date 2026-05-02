@@ -1135,6 +1135,13 @@ impl NativeXlsbBook {
         }
     }
 
+    pub fn read_sheet_properties(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        match &self.ensure_sheet(sheet)?.sheet_properties {
+            Some(properties) => sheet_properties_to_py(py, properties),
+            None => Ok(py.None()),
+        }
+    }
+
     pub fn read_hyperlinks(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         let links = self.ensure_sheet(sheet)?.hyperlinks.clone();
         let result = PyList::empty(py);

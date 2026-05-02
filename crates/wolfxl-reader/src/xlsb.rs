@@ -608,6 +608,7 @@ fn parse_worksheet(
     let mut print_options = None;
     let mut header_footer = None;
     let mut sheet_format = None;
+    let mut sheet_properties = None;
     let mut current_sheet_view: Option<SheetViewInfo> = None;
     let mut row = 0u32;
     for record in Records::new(data) {
@@ -809,6 +810,9 @@ fn parse_worksheet(
             0x01e5 => {
                 sheet_format = parse_sheet_format(record.payload);
             }
+            0x0093 => {
+                sheet_properties = parse_sheet_properties(record.payload);
+            }
             _ => {}
         }
     }
@@ -837,6 +841,7 @@ fn parse_worksheet(
         print_options,
         header_footer,
         sheet_format,
+        sheet_properties,
         cells,
     ))
 }
@@ -1423,6 +1428,15 @@ fn parse_sheet_format(payload: &[u8]) -> Option<SheetFormatInfo> {
     })
 }
 
+fn parse_sheet_properties(payload: &[u8]) -> Option<SheetPropertiesInfo> {
+    let code_name = find_trailing_wide_string(payload)
+        .and_then(|(offset, value)| (offset >= 23 && !value.is_empty()).then_some(value));
+    code_name.map(|code_name| SheetPropertiesInfo {
+        code_name: Some(code_name),
+        ..SheetPropertiesInfo::default()
+    })
+}
+
 fn parse_formula_from_cell_record(
     record_type: u16,
     payload: &[u8],
@@ -1949,6 +1963,7 @@ fn worksheet_data(
     print_options: Option<PrintOptionsInfo>,
     header_footer: Option<HeaderFooterInfo>,
     sheet_format: Option<SheetFormatInfo>,
+    sheet_properties: Option<SheetPropertiesInfo>,
     cells: Vec<Cell>,
 ) -> WorksheetData {
     WorksheetData {
@@ -1956,7 +1971,7 @@ fn worksheet_data(
         merged_ranges,
         hyperlinks,
         freeze_panes,
-        sheet_properties: None::<SheetPropertiesInfo>,
+        sheet_properties,
         sheet_view,
         comments,
         row_heights,
@@ -2962,6 +2977,53 @@ mod tests {
                 outline_level_row: 0,
                 outline_level_col: 0,
             })
+        );
+    }
+
+    #[test]
+    fn parses_xlsb_sheet_properties_code_name() {
+        let mut payload = vec![
+            0xc9, 0x04, 0x02, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+        ];
+        put_wide_string(&mut payload, "NativeSheet");
+
+        let properties = parse_sheet_properties(&payload).expect("sheet properties");
+        let defaults = SheetPropertiesInfo::default();
+
+        assert_eq!(properties.code_name.as_deref(), Some("NativeSheet"));
+        assert_eq!(properties.outline, defaults.outline);
+        assert_eq!(properties.page_setup, defaults.page_setup);
+    }
+
+    #[test]
+    fn ignores_xlsb_sheet_properties_without_code_name() {
+        let payload = [
+            0xc9, 0x04, 0x02, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(parse_sheet_properties(&payload), None);
+    }
+
+    #[test]
+    fn parse_worksheet_collects_xlsb_sheet_properties() {
+        let mut data = Vec::new();
+        let mut properties = vec![
+            0xc9, 0x04, 0x02, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+        ];
+        put_wide_string(&mut properties, "NativeSheet");
+        push_record(&mut data, 0x0093, &properties);
+
+        let sheet = parse_worksheet(&data, &[], None, Vec::new(), None)
+            .expect("parse sheet properties worksheet");
+
+        assert_eq!(
+            sheet
+                .sheet_properties
+                .and_then(|properties| properties.code_name),
+            Some("NativeSheet".to_string())
         );
     }
 
