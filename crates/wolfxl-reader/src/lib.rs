@@ -3964,7 +3964,7 @@ fn read_tables<R: Read + std::io::Seek>(
     Ok(out)
 }
 
-fn read_images<R: Read + std::io::Seek>(
+pub(crate) fn read_images<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     sheet_path: &str,
     rels: Option<&RelsGraph>,
@@ -4016,7 +4016,7 @@ fn read_images<R: Read + std::io::Seek>(
     Ok(out)
 }
 
-fn read_charts<R: Read + std::io::Seek>(
+pub(crate) fn read_charts<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     sheet_path: &str,
     rels: Option<&RelsGraph>,

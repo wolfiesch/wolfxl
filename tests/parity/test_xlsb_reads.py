@@ -288,3 +288,18 @@ def test_xlsb_excelgen_style_showcase_tables() -> None:
 
     orientation = {str(cell_range) for cell_range in wb["Orientation"].merged_cells.ranges}
     assert "B2:B16" in orientation
+
+
+def test_xlsb_excelgen_image_drawing() -> None:
+    """Drawing-backed images in xlsb hydrate through the worksheet image API."""
+    wb = wolfxl.load_workbook(EXCELGEN_DIR / "image-drawing.xlsb")
+    ws = wb["sheet1"]
+
+    assert len(ws._images) == 1
+    image = ws._images[0]
+    assert image.format == "png"
+    assert image.width == 400
+    assert image.height == 200
+    assert image.anchor._from.col == 1
+    assert image.anchor._from.row == 3
+    assert image.anchor.ext is None

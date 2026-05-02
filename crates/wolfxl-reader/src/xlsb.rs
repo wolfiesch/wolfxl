@@ -8,11 +8,12 @@ use zip::ZipArchive;
 
 use crate::{
     row_col_to_a1, AlignmentInfo, AutoFilterInfo, BorderInfo, Cell, CellDataType, CellValue,
-    ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo, FilterColumnInfo,
-    FilterInfo, FontInfo, FreezePane, HeaderFooterInfo, HeaderFooterItemInfo, Hyperlink, ImageInfo,
-    NamedRange, PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode, PrintOptionsInfo,
-    PrintTitlesInfo, RowHeight, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo,
-    SheetProtection, SheetState, SheetViewInfo, StyleTables, Table, WorksheetData, XfEntry,
+    ChartInfo, ColumnWidth, Comment, ConditionalFormatRule, DataValidation, FillInfo,
+    FilterColumnInfo, FilterInfo, FontInfo, FreezePane, HeaderFooterInfo, HeaderFooterItemInfo,
+    Hyperlink, ImageInfo, NamedRange, PageBreakListInfo, PageMarginsInfo, PageSetupInfo, PaneMode,
+    PrintOptionsInfo, PrintTitlesInfo, RowHeight, SelectionInfo, SheetFormatInfo,
+    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, StyleTables, Table,
+    WorksheetData, XfEntry,
 };
 
 type Result<T> = std::result::Result<T, XlsbError>;
@@ -195,15 +196,38 @@ impl NativeXlsbBook {
             named_ranges: &self.named_ranges,
         };
         let tables = read_tables_bin(&mut zip, &sheet.path, &data, rels.as_ref())?;
-        Ok(parse_worksheet_with_tables(
+        let images = read_images_xml(&mut zip, &sheet.path, rels.as_ref())?;
+        let charts = read_charts_xml(&mut zip, &sheet.path, rels.as_ref())?;
+        let mut data = parse_worksheet_with_tables(
             &data,
             &self.shared_strings,
             rels.as_ref(),
             comments,
             tables,
             Some(&context),
-        )?)
+        )?;
+        data.images = images;
+        data.charts = charts;
+        Ok(data)
     }
+}
+
+fn read_images_xml(
+    zip: &mut ZipArchive<Cursor<Vec<u8>>>,
+    sheet_path: &str,
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<ImageInfo>> {
+    crate::read_images(zip, sheet_path, rels)
+        .map_err(|e| XlsbError::Xml(format!("failed to read sheet drawings: {e}")))
+}
+
+fn read_charts_xml(
+    zip: &mut ZipArchive<Cursor<Vec<u8>>>,
+    sheet_path: &str,
+    rels: Option<&RelsGraph>,
+) -> Result<Vec<ChartInfo>> {
+    crate::read_charts(zip, sheet_path, rels)
+        .map_err(|e| XlsbError::Xml(format!("failed to read sheet charts: {e}")))
 }
 
 fn read_rels(zip: &mut ZipArchive<Cursor<Vec<u8>>>, path: &str) -> Result<RelsGraph> {

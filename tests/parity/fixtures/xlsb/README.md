@@ -22,6 +22,7 @@ large visual feature matrices:
 | `excelgen/conditional-formatting.xlsb`         | ExcelGen `samples/cond-formatting.xlsb` | conditional-formatting record coverage |
 | `excelgen/merged-cells.xlsb`                   | ExcelGen `samples/merged-cells.xlsb`  | merged range coverage                  |
 | `excelgen/style-showcase.xlsb`                 | ExcelGen `samples/style-showcase.xlsb` | table styles, merges, style matrices   |
+| `excelgen/image-drawing.xlsb`                  | ExcelGen `samples/test-image-2.xlsb`  | drawing relationship and image payload |
 
 ## License & attribution
 
@@ -54,5 +55,5 @@ python3 scripts/sprint_kappa_build_fixtures.py /tmp/calamine /tmp/ExcelGen
 ```
 
 The script copies five calamine `tests/*.xlsb` files into this directory and,
-when the ExcelGen path is passed, the four ExcelGen samples into `excelgen/`
+when the ExcelGen path is passed, the ExcelGen samples into `excelgen/`
 under stable wolfxl-side names (see the tables above).
