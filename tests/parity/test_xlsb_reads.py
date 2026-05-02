@@ -303,3 +303,15 @@ def test_xlsb_excelgen_image_drawing() -> None:
     assert image.anchor._from.col == 1
     assert image.anchor._from.row == 3
     assert image.anchor.ext is None
+
+
+def test_xlsb_chart_drawing() -> None:
+    """Drawing-backed charts in xlsb hydrate through the worksheet chart API."""
+    wb = wolfxl.load_workbook(FIXTURES_DIR / "multisheet.xlsb")
+    ws = wb["Chart"]
+
+    assert len(ws._charts) == 1
+    chart = ws._charts[0]
+    assert type(chart).__name__ == "BarChart"
+    assert len(chart.series) == 2
+    assert chart.anchor == "E15"
