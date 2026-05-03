@@ -195,6 +195,66 @@ pub(crate) fn dict_to_threaded_comment(
     }))
 }
 
+/// Resolve a cfvo (`start_type` / `end_type` + value) into a
+/// `ConditionalThreshold`. Falls back to `default_threshold` when the type
+/// is missing or unrecognised — this preserves the original write-mode
+/// behaviour (Min/Max) for callers that don't supply explicit thresholds.
+///
+/// Numeric thresholds (`num`, `percent`, `percentile`) coerce the value into
+/// `f64`: ints, floats, and decimal strings all work; anything else falls
+/// back to `0.0`. Formula thresholds always stringify the value.
+fn build_threshold(
+    cfvo_type: Option<&str>,
+    value: Option<&Bound<'_, PyAny>>,
+    default_threshold: ConditionalThreshold,
+) -> PyResult<ConditionalThreshold> {
+    let Some(t) = cfvo_type else {
+        return Ok(default_threshold);
+    };
+    fn coerce_f64(v: Option<&Bound<'_, PyAny>>) -> f64 {
+        let Some(v) = v else {
+            return 0.0;
+        };
+        if let Ok(f) = v.extract::<f64>() {
+            return f;
+        }
+        if let Ok(i) = v.extract::<i64>() {
+            return i as f64;
+        }
+        if let Ok(s) = v.extract::<String>() {
+            if let Ok(f) = s.parse::<f64>() {
+                return f;
+            }
+        }
+        0.0
+    }
+    fn coerce_string(v: Option<&Bound<'_, PyAny>>) -> String {
+        let Some(v) = v else {
+            return String::new();
+        };
+        if let Ok(s) = v.extract::<String>() {
+            return s;
+        }
+        if let Ok(f) = v.extract::<f64>() {
+            return f.to_string();
+        }
+        if let Ok(i) = v.extract::<i64>() {
+            return i.to_string();
+        }
+        String::new()
+    }
+    let threshold = match t {
+        "min" => ConditionalThreshold::Min,
+        "max" => ConditionalThreshold::Max,
+        "num" | "number" => ConditionalThreshold::Number(coerce_f64(value)),
+        "percent" => ConditionalThreshold::Percent(coerce_f64(value)),
+        "percentile" => ConditionalThreshold::Percentile(coerce_f64(value)),
+        "formula" => ConditionalThreshold::Formula(coerce_string(value)),
+        _ => default_threshold,
+    };
+    Ok(threshold)
+}
+
 /// Build a `ConditionalFormat` from a cfg dict, or `None` for no-op.
 pub(crate) fn dict_to_conditional_format(
     cfg: &Bound<'_, PyDict>,
@@ -288,10 +348,29 @@ pub(crate) fn dict_to_conditional_format(
                 .and_then(|v| v.extract::<String>().ok())
                 .and_then(|s| parse_hex_color(&s))
                 .unwrap_or_else(|| "FF638EC6".to_string());
+            let start_type: Option<String> =
+                cfg.get_item("start_type")?.and_then(|v| v.extract().ok());
+            let end_type: Option<String> =
+                cfg.get_item("end_type")?.and_then(|v| v.extract().ok());
+            let start_value = cfg.get_item("start_value")?;
+            let end_value = cfg.get_item("end_value")?;
+            let show_value: bool = cfg
+                .get_item("show_value")?
+                .and_then(|v| v.extract::<bool>().ok())
+                .unwrap_or(true);
             ConditionalKind::DataBar {
                 color_rgb: color,
-                min: ConditionalThreshold::Min,
-                max: ConditionalThreshold::Max,
+                min: build_threshold(
+                    start_type.as_deref(),
+                    start_value.as_ref(),
+                    ConditionalThreshold::Min,
+                )?,
+                max: build_threshold(
+                    end_type.as_deref(),
+                    end_value.as_ref(),
+                    ConditionalThreshold::Max,
+                )?,
+                show_value,
             }
         }
         "colorScale" | "color_scale" => ConditionalKind::ColorScale {

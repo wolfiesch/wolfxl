@@ -379,11 +379,8 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
-    # G11: forward IconSetRule metadata (icon_style, value_type, values,
-    # show_value) so the Rust writer can produce a real <iconSet> block.
-    # IconSetRule stashes its construction kwargs on `rule.extra`.
+    extra = getattr(rule, "extra", None) or {}
     if rule.type == "iconSet":
-        extra = rule.extra or {}
         if extra.get("icon_style") is not None:
             payload["icon_style"] = extra["icon_style"]
         if extra.get("value_type") is not None:
@@ -392,6 +389,10 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
             payload["values"] = list(extra["values"])
         if extra.get("show_value") is not None:
             payload["show_value"] = bool(extra["show_value"])
+    elif rule.type == "dataBar":
+        for key in ("start_type", "start_value", "end_type", "end_value", "color", "show_value"):
+            if key in extra and extra[key] is not None:
+                payload[key] = extra[key]
     return payload
 
 

@@ -596,6 +596,14 @@ ENTRIES: list[Entry] = [
         "notes": "Round-trips through openpyxl reload (cfvo min/max types preserved). Edge cases like percent / formula cfvo not yet probed.",
     },
     {
+        "id": "cf.data_bars_advanced",
+        "category": "cf",
+        "openpyxl": "DataBarRule with percent / num / formula cfvo + showValue=False",
+        "wolfxl": "DataBarRule with percent / num / formula cfvo + showValue=False",
+        "status": "supported",
+        "probe": "cf_data_bars_advanced",
+    },
+    {
         "id": "cf.color_scales_advanced",
         "category": "cf",
         "openpyxl": "ColorScaleRule with 3-stop, percentile / formula / number cfvo",
