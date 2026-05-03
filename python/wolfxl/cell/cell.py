@@ -99,6 +99,7 @@ class DataTableFormula:
         dtr: bool = False,
         r1: Optional[str] = None,
         r2: Optional[str] = None,
+        t: Optional[str] = None,
     ) -> None:
         """Create a data-table formula value.
 
@@ -109,7 +110,11 @@ class DataTableFormula:
             dtr: Whether the data-table input is a row.
             r1: First input cell reference.
             r2: Second input cell reference for two-variable tables.
+            t: Optional OOXML formula-type discriminator. Accepted for
+                openpyxl API compatibility and ignored.
         """
+        if t is not None and t != "dataTable":
+            raise ValueError(f"Unsupported data-table formula kind: {t!r}")
         self.ref = ref
         self.ca = bool(ca)
         self.dt2D = bool(dt2D)

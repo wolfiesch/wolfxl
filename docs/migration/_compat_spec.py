@@ -672,8 +672,7 @@ ENTRIES: list[Entry] = [
         "category": "array_formulas",
         "openpyxl": "DataTableFormula(...)",
         "wolfxl": "DataTableFormula(...)",
-        "status": "partial",
-        "gap_id": "G07",
+        "status": "supported",
         "probe": "array_formula_data_table",
     },
     {

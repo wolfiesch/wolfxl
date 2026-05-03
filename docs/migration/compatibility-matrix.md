@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **43** / 74
-- 🟡 Partial: **17** / 74
+- ✅ Supported: **44** / 74
+- 🟡 Partial: **16** / 74
 - ❌ Not Yet: **13** / 74
 - ⛔ Out of Scope: **1** / 74
 
@@ -187,7 +187,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `ArrayFormula(ref, text)` | `ArrayFormula(ref, text)` | ✅ Supported |  | Round-trips through openpyxl reload (ref + text preserved as openpyxl ArrayFormula). |
-| `DataTableFormula(...)` | `DataTableFormula(...)` | 🟡 Partial | G07 |  |
+| `DataTableFormula(...)` | `DataTableFormula(...)` | ✅ Supported |  |  |
 | `dynamic-array spill metadata` | `dynamic-array spill metadata` | 🟡 Partial | G07 |  |
 
 ## Calc chain

@@ -116,6 +116,44 @@ def test_round_trip_write_mode(tmp_path: Path) -> None:
     assert val.r2 == "A2"
 
 
+def test_round_trip_preserves_all_data_table_attrs(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    from openpyxl.worksheet.formula import DataTableFormula as _OpxDataTableFormula
+
+    p = tmp_path / "wm_dt_all_attrs.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["C1"] = DataTableFormula(
+        ref="C1:C3",
+        t="dataTable",
+        ca=True,
+        dt2D=False,
+        dtr=True,
+        r1="A1",
+        r2="B1",
+    )
+    wb.save(str(p))
+
+    reloaded = wolfxl.load_workbook(str(p))
+    val = reloaded.active["C1"].value
+    assert isinstance(val, DataTableFormula)
+    assert val.ref == "C1:C3"
+    assert val.ca is True
+    assert val.dt2D is False
+    assert val.dtr is True
+    assert val.r1 == "A1"
+    assert val.r2 == "B1"
+
+    ref_wb = _opx.load_workbook(str(p))
+    ref_val = ref_wb.active["C1"].value
+    assert isinstance(ref_val, _OpxDataTableFormula)
+    assert ref_val.ref == "C1:C3"
+    assert str(ref_val.ca).lower() in {"1", "true"}
+    assert str(ref_val.dt2D).lower() in {"0", "false"}
+    assert str(ref_val.dtr).lower() in {"1", "true"}
+    assert ref_val.r1 == "A1"
+    assert ref_val.r2 == "B1"
+
+
 def test_round_trip_modify_mode(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     dst = tmp_path / "dst.xlsx"
