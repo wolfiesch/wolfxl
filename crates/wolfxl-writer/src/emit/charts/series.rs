@@ -128,6 +128,9 @@ pub(super) fn emit_data_labels(out: &mut String, d: &DataLabels) {
             xml_escape::attr(nf)
         ));
     }
+    if !d.tx_pr_runs.is_empty() {
+        super::text::emit_tx_pr(out, &d.tx_pr_runs);
+    }
     if let Some(p) = &d.position {
         out.push_str(&format!("<c:dLblPos val=\"{}\"/>", xml_escape::attr(p)));
     }

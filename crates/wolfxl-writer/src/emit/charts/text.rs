@@ -48,6 +48,22 @@ pub(super) fn emit_title(out: &mut String, t: &Title) {
     out.push_str("</c:title>");
 }
 
+/// `<c:txPr>` for data labels and axes - wraps run-level rich-text
+/// formatting in the same `<a:bodyPr><a:p>` skeleton chart titles use,
+/// without the surrounding `<c:tx>` container.
+pub(super) fn emit_tx_pr(out: &mut String, runs: &[TitleRun]) {
+    out.push_str("<c:txPr>");
+    out.push_str("<a:bodyPr/>");
+    out.push_str("<a:lstStyle/>");
+    out.push_str("<a:p>");
+    out.push_str("<a:pPr><a:defRPr/></a:pPr>");
+    for run in runs {
+        emit_run(out, run);
+    }
+    out.push_str("</a:p>");
+    out.push_str("</c:txPr>");
+}
+
 fn emit_run(out: &mut String, run: &TitleRun) {
     out.push_str("<a:r>");
     let mut rpr = String::new();

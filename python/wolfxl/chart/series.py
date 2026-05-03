@@ -393,6 +393,58 @@ def _dlbls_to_snake(dl: dict[str, Any]) -> dict[str, Any]:
     for ck, sk in mapping.items():
         if ck in dl and dl[ck] is not None:
             out[sk] = dl[ck]
+    txpr = dl.get("txPr")
+    if isinstance(txpr, dict):
+        runs = _flatten_rich_runs(txpr)
+        if runs:
+            out["tx_pr_runs"] = runs
+    return out
+
+
+def _flatten_rich_runs(rich: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a :class:`RichText.to_dict()` payload into ``[{text, font}]``.
+
+    Mirrors :meth:`Title.to_dict`'s flattening: each ``<a:r>`` becomes a
+    ``{"text": str, "font": {name, size, bold, italic, color, underline}}``
+    dict that the Rust emitter consumes via the ``TitleRun`` shape.
+    """
+    out: list[dict[str, Any]] = []
+    paragraphs = rich.get("p") or []
+    for para in paragraphs:
+        for r in para.get("r", []) or []:
+            text = r.get("t", "") or ""
+            font: dict[str, Any] = {}
+            rpr = r.get("rPr")
+            if isinstance(rpr, dict):
+                if rpr.get("latin") is not None:
+                    font["name"] = rpr["latin"]
+                sz = rpr.get("sz")
+                if sz is not None:
+                    try:
+                        font["size"] = int(sz) // 100
+                    except (TypeError, ValueError):
+                        font["size"] = sz
+                if rpr.get("b") is not None:
+                    font["bold"] = rpr["b"]
+                if rpr.get("i") is not None:
+                    font["italic"] = rpr["i"]
+                if rpr.get("u") is not None:
+                    font["underline"] = rpr["u"] not in (None, "none")
+                sf = rpr.get("solidFill")
+                if sf is not None:
+                    if isinstance(sf, str):
+                        font["color"] = sf
+                    else:
+                        rgb = (
+                            getattr(sf, "srgbClr", None)
+                            or getattr(sf, "value", None)
+                            or getattr(sf, "rgb", None)
+                        )
+                        if rgb is not None and not isinstance(rgb, str):
+                            rgb = getattr(rgb, "val", None) or str(rgb)
+                        if rgb is not None:
+                            font["color"] = rgb
+            out.append({"text": text, "font": font or None})
     return out
 
 

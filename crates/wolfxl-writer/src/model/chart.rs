@@ -630,6 +630,11 @@ pub struct DataLabels {
     pub number_format: Option<String>,
     /// Custom separator between fields (e.g. `","`, `";"`).
     pub separator: Option<String>,
+    /// Optional rich-text runs for `<c:txPr>` so labels render with
+    /// per-run formatting (bold/italic/color/size/font). Each run shares
+    /// the chart-title `TitleRun` shape; an empty vector emits no
+    /// `<c:txPr>` block.
+    pub tx_pr_runs: Vec<TitleRun>,
 }
 
 /// Per-series error bars.
