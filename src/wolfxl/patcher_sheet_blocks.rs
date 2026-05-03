@@ -14,11 +14,11 @@ use super::patcher_workbook::{
 };
 use super::{
     autofilter, autofilter_helpers, comments, content_types, hyperlinks, sheet_patcher, tables,
-    XlsxPatcher,
+    threaded_comments, XlsxPatcher,
 };
 use sheet_patcher::CellPatch;
 use wolfxl_merger::SheetBlock;
-use wolfxl_rels::{PartIdAllocator, RelsGraph};
+use wolfxl_rels::{rt, PartIdAllocator, RelsGraph};
 
 pub(super) fn apply_data_validations_phase(
     patcher: &XlsxPatcher,
@@ -240,6 +240,254 @@ pub(super) fn apply_tables_phase(
     }
 
     Ok(())
+}
+
+/// Drain `queued_threaded_comments` (per sheet) and `queued_persons`
+/// (workbook scope) into fresh `threadedCommentsN.xml` + `personList.xml`
+/// part bytes. RFC-068 G08 step 5.
+///
+/// Runs BEFORE [`apply_comments_phase`] so it can synthesize legacy
+/// `tc={topId}` placeholder comments into `patcher.queued_comments`,
+/// matching the writer-side behavior in
+/// `crates/wolfxl-writer/src/emit/threaded_comments_xml.rs::synthesize_legacy_placeholders`.
+///
+/// Returns `(file_writes, file_deletes)` for the threaded-comments and
+/// person-list parts. Mutates `patcher.rels_patches` for the affected
+/// sheet rels and (if persons were queued or already present)
+/// `xl/_rels/workbook.xml.rels`. Mutates `patcher.queued_content_type_ops`
+/// for new `Override` entries on threaded-comments / person-list parts.
+pub(super) fn apply_threaded_comments_phase(
+    patcher: &mut XlsxPatcher,
+    zip: &mut ZipArchive<File>,
+    part_id_allocator: &mut PartIdAllocator,
+) -> PyResult<(HashMap<String, Vec<u8>>, HashSet<String>)> {
+    let sheet_order_local: Vec<String> = patcher.sheet_order.clone();
+    let mut file_writes: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut file_deletes: HashSet<String> = HashSet::new();
+    let mut content_type_ops: Vec<content_types::ContentTypeOp> = Vec::new();
+
+    // ----- Phase A: per-sheet threadedCommentsN.xml + synthetic placeholders.
+    for sheet_name in &sheet_order_local {
+        let ops_for_sheet = match patcher.queued_threaded_comments.get(sheet_name) {
+            Some(o) if !o.is_empty() => o.clone(),
+            _ => continue,
+        };
+        let sheet_path = match patcher.sheet_paths.get(sheet_name).cloned() {
+            Some(p) => p,
+            None => continue,
+        };
+        let rels_path = sheet_rels_path_for(&sheet_path);
+        if !patcher.rels_patches.contains_key(&rels_path) {
+            let graph = load_or_empty_rels(zip, &rels_path)?;
+            patcher.rels_patches.insert(rels_path.clone(), graph);
+        }
+
+        // Find existing threadedCommentsN.xml (if any) by walking the
+        // sheet rels for the THREADED_COMMENTS rel-type. Targets are
+        // stored as `../threadedComments/threadedCommentsN.xml`; resolve
+        // relative to `xl/worksheets/`.
+        let existing_path: Option<String> = {
+            let rels = patcher
+                .rels_patches
+                .get(&rels_path)
+                .expect("just inserted above");
+            rels.find_by_type(rt::THREADED_COMMENTS).first().map(|r| {
+                ooxml_util::join_and_normalize(parent_dir_of(&sheet_path), &r.target)
+            })
+        };
+
+        let existing_xml: Option<Vec<u8>> = match &existing_path {
+            Some(path) => {
+                let exists = zip.index_for_name(path).is_some();
+                if exists {
+                    Some(ooxml_util::zip_read_to_string(zip, path)?.into_bytes())
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
+        let threaded_n = match &existing_path {
+            Some(path) => parse_n_from_part_path(
+                path,
+                "xl/threadedComments/threadedComments",
+                ".xml",
+            )
+            .unwrap_or_else(|| part_id_allocator.alloc_threaded_comments()),
+            None => part_id_allocator.alloc_threaded_comments(),
+        };
+
+        let rels = patcher
+            .rels_patches
+            .get_mut(&rels_path)
+            .expect("just inserted above");
+        let (bytes, _rid) = threaded_comments::build_threaded_for_sheet(
+            existing_xml.as_deref(),
+            &ops_for_sheet,
+            rels,
+            threaded_n,
+        );
+
+        let part_path = existing_path
+            .clone()
+            .unwrap_or_else(|| format!("xl/threadedComments/threadedComments{threaded_n}.xml"));
+        if bytes.is_empty() {
+            if existing_path.is_some() {
+                file_deletes.insert(part_path.clone());
+            }
+        } else {
+            file_writes.insert(part_path.clone(), bytes);
+            if existing_path.is_none() {
+                content_type_ops.push(content_types::ContentTypeOp::AddOverride(
+                    format!("/{}", part_path),
+                    threaded_comments::CT_THREADED.to_string(),
+                ));
+            }
+        }
+
+        // Synthesize legacy `tc={topId}` placeholders into
+        // `patcher.queued_comments` so the comments phase emits them.
+        // This matches the writer's `synthesize_legacy_placeholders`.
+        synthesize_legacy_placeholders_into_queue(
+            patcher,
+            sheet_name,
+            &ops_for_sheet,
+        );
+    }
+
+    // ----- Phase B: workbook-scope personList.xml.
+    let persons_queue = patcher.queued_persons.clone();
+    if !persons_queue.is_empty() || any_threaded_payload_exists(&file_writes, &file_deletes) {
+        let wb_rels_path = "xl/_rels/workbook.xml.rels".to_string();
+        if !patcher.rels_patches.contains_key(&wb_rels_path) {
+            let graph = load_or_empty_rels(zip, &wb_rels_path)?;
+            patcher.rels_patches.insert(wb_rels_path.clone(), graph);
+        }
+
+        let existing_path: Option<String> = {
+            let rels = patcher
+                .rels_patches
+                .get(&wb_rels_path)
+                .expect("just inserted above");
+            rels.find_by_type(rt::PERSON_LIST)
+                .first()
+                .map(|r| ooxml_util::join_and_normalize("xl/", &r.target))
+        };
+
+        let existing_xml: Option<Vec<u8>> = match &existing_path {
+            Some(path) => {
+                let exists = zip.index_for_name(path).is_some();
+                if exists {
+                    Some(ooxml_util::zip_read_to_string(zip, path)?.into_bytes())
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
+        let wb_rels = patcher
+            .rels_patches
+            .get_mut(&wb_rels_path)
+            .expect("just inserted above");
+        let (bytes, _rid) = threaded_comments::build_persons_for_workbook(
+            existing_xml.as_deref(),
+            &persons_queue,
+            wb_rels,
+        );
+
+        let part_path = existing_path
+            .clone()
+            .unwrap_or_else(|| "xl/persons/personList.xml".to_string());
+        if bytes.is_empty() {
+            if existing_path.is_some() {
+                file_deletes.insert(part_path);
+            }
+        } else {
+            file_writes.insert(part_path.clone(), bytes);
+            if existing_path.is_none() {
+                content_type_ops.push(content_types::ContentTypeOp::AddOverride(
+                    format!("/{}", part_path),
+                    threaded_comments::CT_PERSON_LIST.to_string(),
+                ));
+            }
+        }
+    }
+
+    if !content_type_ops.is_empty() {
+        patcher
+            .queued_content_type_ops
+            .entry("__rfc068_threaded__".to_string())
+            .or_default()
+            .extend(content_type_ops);
+    }
+
+    Ok((file_writes, file_deletes))
+}
+
+fn parent_dir_of(sheet_path: &str) -> &str {
+    match sheet_path.rfind('/') {
+        Some(idx) => &sheet_path[..=idx],
+        None => "",
+    }
+}
+
+fn any_threaded_payload_exists(
+    file_writes: &HashMap<String, Vec<u8>>,
+    file_deletes: &HashSet<String>,
+) -> bool {
+    file_writes
+        .keys()
+        .any(|p| p.starts_with("xl/threadedComments/"))
+        || file_deletes
+            .iter()
+            .any(|p| p.starts_with("xl/threadedComments/"))
+}
+
+/// For each `Set` op, push a synthetic `CommentOp::Set` with author
+/// `tc={topId}` and body `[Threaded comment]` into `patcher.queued_comments`
+/// so the existing comments phase emits a legacy placeholder for Excel < 365.
+/// For each `Delete`, queue a matching `CommentOp::Delete`.
+///
+/// Idempotent: if the user already queued a real `CommentOp::Set` at the
+/// same coord (e.g. they want to override the placeholder body), we leave
+/// it alone — matching the writer's `synthesize_legacy_placeholders`.
+fn synthesize_legacy_placeholders_into_queue(
+    patcher: &mut XlsxPatcher,
+    sheet_name: &str,
+    ops: &std::collections::BTreeMap<String, threaded_comments::ThreadedCommentOp>,
+) {
+    let entry = patcher
+        .queued_comments
+        .entry(sheet_name.to_string())
+        .or_default();
+    for (cell, op) in ops {
+        match op {
+            threaded_comments::ThreadedCommentOp::Set(patch) => {
+                if entry.contains_key(cell) {
+                    continue;
+                }
+                let synthetic_author = format!("tc={}", patch.top.id);
+                entry.insert(
+                    cell.clone(),
+                    comments::CommentOp::Set(comments::CommentPatch {
+                        coordinate: cell.clone(),
+                        author: synthetic_author,
+                        text: "[Threaded comment]".to_string(),
+                        width_pt: None,
+                        height_pt: None,
+                    }),
+                );
+            }
+            threaded_comments::ThreadedCommentOp::Delete => {
+                if entry.contains_key(cell) {
+                    continue;
+                }
+                entry.insert(cell.clone(), comments::CommentOp::Delete);
+            }
+        }
+    }
 }
 
 pub(super) fn apply_comments_phase(

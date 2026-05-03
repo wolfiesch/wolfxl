@@ -1065,6 +1065,25 @@ class Workbook:
         """
         _workbook_patcher_flush.flush_pending_comments_to_patcher(self)
 
+    def _flush_pending_threaded_comments_to_patcher(self) -> None:
+        """Drain each sheet's pending threaded comments into the patcher.
+
+        Modify-mode counterpart to the writer-side flush. Top-level threads
+        are bundled with their replies into one ``queue_threaded_comment``
+        call keyed by cell coordinate. The ``None`` sentinel routes to
+        ``queue_threaded_comment_delete``.
+        """
+        _workbook_patcher_flush.flush_pending_threaded_comments_to_patcher(self)
+
+    def _flush_pending_persons_to_patcher(self) -> None:
+        """Drain ``wb.persons`` into the patcher's personList queue.
+
+        Idempotent on Person ``id``: re-running the flush is safe and the
+        patcher's ``queue_person`` skips duplicates against both the
+        existing personList and the queued additions.
+        """
+        _workbook_patcher_flush.flush_pending_persons_to_patcher(self)
+
     def _flush_pending_data_validations_to_patcher(self) -> None:
         """Drain ``_pending_data_validations`` on every sheet into the patcher.
 

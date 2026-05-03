@@ -129,6 +129,97 @@ def _comment_payload(comment: Any) -> dict[str, Any]:
     return payload
 
 
+def flush_pending_threaded_comments_to_patcher(wb: Any) -> None:
+    """Drain pending worksheet threaded comments into the Rust patcher.
+
+    Mirrors :func:`flush_pending_comments_to_patcher` but bundles the
+    full top + replies payload per coordinate into one
+    ``queue_threaded_comment`` call. ``None`` sentinel routes through
+    ``queue_threaded_comment_delete``.
+
+    Workbook-scope persons flush separately via
+    :func:`flush_pending_persons_to_patcher` so the patcher can keep the
+    personList registry in lockstep with the threaded payload.
+    """
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    if not hasattr(patcher, "queue_threaded_comment"):
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        pending = ws._pending_threaded_comments  # noqa: SLF001
+        if not pending:
+            continue
+        for coord, top in pending.items():
+            if top is None:
+                patcher.queue_threaded_comment_delete(ws.title, coord)
+                continue
+            top.ensure_id()
+            top.ensure_created()
+            replies_payload: list[dict[str, Any]] = []
+            for reply in top.replies:
+                reply.ensure_id()
+                reply.ensure_created()
+                replies_payload.append(
+                    _threaded_comment_payload(coord, reply, parent_id=top.id)
+                )
+            patcher.queue_threaded_comment(
+                ws.title,
+                coord,
+                {
+                    "top": _threaded_comment_payload(coord, top, parent_id=None),
+                    "replies": replies_payload,
+                },
+            )
+        pending.clear()
+
+
+def flush_pending_persons_to_patcher(wb: Any) -> None:
+    """Drain the workbook-scope person registry into the Rust patcher.
+
+    The patcher's ``queue_person`` is idempotent on ``id`` so re-running
+    the flush is safe; calling it lets the modify-mode personList stay
+    in lockstep with any newly-added :class:`Person` instances.
+    """
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None or not hasattr(patcher, "queue_person"):
+        return
+    registry = getattr(wb, "_persons_registry", None)  # noqa: SLF001
+    if registry is None or len(registry) == 0:
+        return
+    for person in registry:
+        if person.id is None:
+            continue
+        patcher.queue_person(
+            {
+                "id": person.id,
+                "name": person.name,
+                "user_id": person.user_id,
+                "provider_id": person.provider_id,
+            }
+        )
+
+
+def _threaded_comment_payload(
+    coord: str, tc: Any, *, parent_id: str | None
+) -> dict[str, Any]:
+    """Build the patcher payload for one ThreadedComment.
+
+    Mirrors :func:`wolfxl._worksheet_flush._threaded_comment_payload` so
+    write-mode and modify-mode hand the Rust side identical shapes.
+    """
+    person_id = tc.person.id if tc.person is not None else ""
+    return {
+        "id": tc.id,
+        "cell": coord,
+        "person_id": person_id,
+        "created": tc.created.isoformat(timespec="milliseconds"),
+        "parent_id": parent_id,
+        "text": tc.text,
+        "done": tc.done,
+    }
+
+
 def flush_pending_data_validations_to_patcher(wb: Any) -> None:
     """Drain pending worksheet data validations into the Rust patcher."""
     from wolfxl.worksheet.datavalidation import _dv_to_patcher_dict

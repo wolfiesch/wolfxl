@@ -360,6 +360,40 @@ pub(crate) fn extract_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f
     d.get_item(key)?.map(|v| v.extract::<f64>()).transpose()
 }
 
+/// Build one [`super::threaded_comments::ThreadedCommentEntry`] from a
+/// Python dict (RFC-068 G08 step 5). Required keys: `id`, `cell`,
+/// `person_id`, `created`, `text`. Optional: `parent_id`, `done`.
+pub(crate) fn dict_to_threaded_entry(
+    d: &Bound<'_, PyDict>,
+) -> PyResult<super::threaded_comments::ThreadedCommentEntry> {
+    use super::threaded_comments::ThreadedCommentEntry;
+    let id = extract_str(d, "id")?
+        .ok_or_else(|| PyValueError::new_err("threaded entry: 'id' required"))?;
+    let cell_ref = extract_str(d, "cell")?
+        .ok_or_else(|| PyValueError::new_err("threaded entry: 'cell' required"))?;
+    let person_id = extract_str(d, "person_id")?
+        .ok_or_else(|| PyValueError::new_err("threaded entry: 'person_id' required"))?;
+    let created = extract_str(d, "created")?
+        .ok_or_else(|| PyValueError::new_err("threaded entry: 'created' required"))?;
+    let text = extract_str(d, "text")?.unwrap_or_default();
+    // parent_id is `None` for top-level threads — treat the Python literal
+    // `None` as absence rather than letting `extract::<String>` reject it.
+    let parent_id = match d.get_item("parent_id")? {
+        Some(v) if !v.is_none() => Some(v.extract::<String>()?),
+        _ => None,
+    };
+    let done = extract_bool(d, "done")?.unwrap_or(false);
+    Ok(ThreadedCommentEntry {
+        id,
+        cell_ref,
+        person_id,
+        created,
+        parent_id,
+        text,
+        done,
+    })
+}
+
 fn normalize_color(color: &str) -> String {
     let hex = color.trim_start_matches('#');
     if hex.len() == 6 {

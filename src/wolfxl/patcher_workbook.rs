@@ -433,6 +433,8 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
         || !patcher.queued_autofilters.is_empty()
         || patcher.queued_workbook_security.is_some()
         || !patcher.queued_slicers.is_empty()
+        || !patcher.queued_threaded_comments.is_empty()
+        || !patcher.queued_persons.is_empty()
 }
 
 pub(super) fn copy_source_file_phase(patcher: &XlsxPatcher, output_path: &str) -> PyResult<()> {

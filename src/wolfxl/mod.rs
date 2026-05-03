@@ -58,6 +58,8 @@ pub mod sheet_setup;
 // Sprint Π Pod Π-α (RFC-062): Phase 2.5r drains queued
 // rowBreaks / colBreaks / sheetFormatPr mutations.
 pub mod page_breaks;
+// RFC-068 G08 step 5: modify-mode threaded comments + persons.
+pub mod threaded_comments;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -73,8 +75,9 @@ use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
 use patcher_drawing::parse_queued_image_anchor;
 use patcher_models::{AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp};
 use patcher_payload::{
-    dict_to_border_spec, dict_to_format_spec, extract_bool, extract_cf_rule, extract_f64,
-    extract_str, extract_u32, parse_workbook_security_payload, py_runs_to_rust,
+    dict_to_border_spec, dict_to_format_spec, dict_to_threaded_entry, extract_bool,
+    extract_cf_rule, extract_f64, extract_str, extract_u32, parse_workbook_security_payload,
+    py_runs_to_rust,
 };
 use patcher_save::{open_source_zip, SaveWorkspace};
 use patcher_workbook::{
@@ -218,6 +221,16 @@ pub struct XlsxPatcher {
     /// happens in `comments::CommentAuthorTable`, shared across all
     /// sheets touched in a single save.
     queued_comments: HashMap<String, BTreeMap<String, comments::CommentOp>>,
+    /// Queued threaded-comment ops per sheet (RFC-068 G08 step 5). Keyed
+    /// by cell coordinate. Drained by `apply_threaded_comments_phase`
+    /// before the legacy comments phase, which then picks up the
+    /// synthesized `tc={topId}` placeholders.
+    queued_threaded_comments:
+        HashMap<String, BTreeMap<String, threaded_comments::ThreadedCommentOp>>,
+    /// Queued workbook-scope person additions (RFC-068 G08 step 5).
+    /// Idempotent on `id` against both existing personList entries and
+    /// previously queued additions.
+    queued_persons: Vec<threaded_comments::PersonPatch>,
     /// Sheet-reorder operations pending flush (RFC-036). Insertion-
     /// ordered list of `(sheet_name, offset)` moves. Drained by
     /// Phase 2.5h, which sequences BEFORE Phase 2.5f (defined-names)
@@ -478,6 +491,8 @@ impl XlsxPatcher {
             queued_defined_names: Vec::new(),
             queued_tables: HashMap::new(),
             queued_comments: HashMap::new(),
+            queued_threaded_comments: HashMap::new(),
+            queued_persons: Vec::new(),
             queued_sheet_moves: Vec::new(),
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
@@ -1339,6 +1354,91 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// Queue a threaded-comment set for `sheet[cell]` (RFC-068 G08
+    /// step 5). The payload carries the top-level entry plus a flat
+    /// list of replies; both are pre-resolved by the Python flush
+    /// layer (GUIDs allocated, person ids resolved, ISO timestamps
+    /// formatted).
+    ///
+    /// Payload schema (top-level):
+    /// ```text
+    /// {
+    ///   "top": {id, cell, person_id, created, text, done},
+    ///   "replies": [{id, cell, person_id, created, parent_id, text, done}, ...]
+    /// }
+    /// ```
+    ///
+    /// Set replaces every existing thread at this coordinate. To delete
+    /// all threads on a cell use `queue_threaded_comment_delete`.
+    fn queue_threaded_comment(
+        &mut self,
+        sheet: &str,
+        cell: &str,
+        payload: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        let top_dict = payload
+            .get_item("top")?
+            .ok_or_else(|| PyValueError::new_err("queue_threaded_comment: missing 'top'"))?;
+        let top_bound = top_dict.cast::<PyDict>()?;
+        let top = dict_to_threaded_entry(top_bound)?;
+
+        let mut replies: Vec<threaded_comments::ThreadedCommentEntry> = Vec::new();
+        if let Some(replies_obj) = payload.get_item("replies")? {
+            if let Ok(list) = replies_obj.cast::<pyo3::types::PyList>() {
+                for item in list.iter() {
+                    let dict = item.cast::<PyDict>()?;
+                    replies.push(dict_to_threaded_entry(dict)?);
+                }
+            }
+        }
+
+        let op = threaded_comments::ThreadedCommentOp::Set(
+            threaded_comments::ThreadedCommentPatch { top, replies },
+        );
+        self.queued_threaded_comments
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), op);
+        Ok(())
+    }
+
+    /// Queue a threaded-comment delete for `sheet[cell]` (RFC-068 G08
+    /// step 5). Drops the top-level thread and every reply on that
+    /// cell. Idempotent on cells with no existing threads.
+    fn queue_threaded_comment_delete(&mut self, sheet: &str, cell: &str) -> PyResult<()> {
+        self.queued_threaded_comments
+            .entry(sheet.to_string())
+            .or_default()
+            .insert(cell.to_string(), threaded_comments::ThreadedCommentOp::Delete);
+        Ok(())
+    }
+
+    /// Queue a workbook-scope person addition for the personList
+    /// (RFC-068 G08 step 5). Idempotent on `id`: the patcher merges
+    /// against existing persons + the queue and skips duplicates.
+    ///
+    /// Payload: `{id, name, user_id?, provider_id?}`. The `id` GUID is
+    /// allocated by the Python `PersonRegistry`; `provider_id` defaults
+    /// to `"None"` when omitted to match Excel.
+    fn queue_person(&mut self, payload: &Bound<'_, PyDict>) -> PyResult<()> {
+        let id = extract_str(payload, "id")?
+            .ok_or_else(|| PyValueError::new_err("queue_person: missing 'id'"))?;
+        if id.is_empty() {
+            return Err(PyValueError::new_err("queue_person: 'id' must be non-empty"));
+        }
+        let display_name = extract_str(payload, "name")?.unwrap_or_default();
+        let user_id = extract_str(payload, "user_id")?.unwrap_or_default();
+        let provider_id =
+            extract_str(payload, "provider_id")?.unwrap_or_else(|| "None".to_string());
+        self.queued_persons.push(threaded_comments::PersonPatch {
+            id,
+            display_name,
+            user_id,
+            provider_id,
+        });
+        Ok(())
+    }
+
     /// Queue a structural axis shift for `sheet` (RFC-030 / RFC-031).
     ///
     /// `axis` must be `"row"` or `"col"`. `idx` is 1-based; `n` is
@@ -1892,6 +1992,21 @@ impl XlsxPatcher {
         // a single pass over the source ZIP listing earlier in
         // Phase 2.5, so this loop only needs to populate the
         // ancillary registry for path-lookup purposes.
+        // --- Phase 2.5g0: Threaded comments + person list (RFC-068 G08). ---
+        //
+        // Runs BEFORE the legacy comments phase so it can synthesize
+        // `tc={topId}` placeholder comments into `queued_comments`, matching
+        // the writer-side `synthesize_legacy_placeholders`. Drains
+        // `queued_threaded_comments` (per sheet) and `queued_persons`
+        // (workbook scope) into fresh `threadedCommentsN.xml` and
+        // `personList.xml` part bytes.
+        let (threaded_file_writes, threaded_file_deletes) =
+            patcher_sheet_blocks::apply_threaded_comments_phase(
+                self,
+                &mut zip,
+                &mut save.part_id_allocator,
+            )?;
+
         let (comments_file_writes, comments_file_deletes) =
             patcher_sheet_blocks::apply_comments_phase(
                 self,
@@ -2163,15 +2278,19 @@ impl XlsxPatcher {
         // matches the workbook's tab order.
         self.apply_document_properties_phase(&mut save.file_patches, &mut zip)?;
 
-        // Route RFC-023 comments/vml part bytes into the right
-        // primitive (in-place patch vs. new add) and delete dropped
-        // parts. Done after Phase 2.5d so we already know which paths
-        // exist in the source ZIP.
+        // Route RFC-023 comments/vml + RFC-068 threaded-comments/persons
+        // part bytes into the right primitive (in-place patch vs. new
+        // add) and delete dropped parts. Done after Phase 2.5d so we
+        // already know which paths exist in the source ZIP.
+        let mut combined_writes = comments_file_writes;
+        combined_writes.extend(threaded_file_writes);
+        let mut combined_deletes = comments_file_deletes;
+        combined_deletes.extend(threaded_file_deletes);
         self.route_part_writes_and_deletes_phase(
             &mut save.file_patches,
             &mut zip,
-            comments_file_writes,
-            comments_file_deletes,
+            combined_writes,
+            combined_deletes,
         );
 
         // --- Phase 2.5i: Structural axis shifts (RFC-030 / RFC-031) ---

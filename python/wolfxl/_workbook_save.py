@@ -62,6 +62,12 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     # Tables also touch the rels graph, add ZIP parts, and add content-type
     # overrides. Flush after hyperlinks so external-hyperlink rIds are stable.
     wb._flush_pending_tables_to_patcher()  # noqa: SLF001
+    # Threaded comments + person list (RFC-068 G08). Drained BEFORE the
+    # legacy comments flush so the Rust patcher's threaded-comments phase
+    # (which synthesizes `tc={topId}` placeholders) can pre-populate
+    # queued_comments before apply_comments_phase runs.
+    wb._flush_pending_threaded_comments_to_patcher()  # noqa: SLF001
+    wb._flush_pending_persons_to_patcher()  # noqa: SLF001
     # Comments and VML drawings.
     wb._flush_pending_comments_to_patcher()  # noqa: SLF001
     # Worksheet-level data validation setters.
