@@ -1380,6 +1380,28 @@ pub struct FontInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FillInfo {
     pub bg_color: Option<String>,
+    /// Set when this `<fill>` was a `<gradientFill>` rather than a
+    /// `<patternFill>`. Mutually exclusive with `bg_color` per OOXML.
+    pub gradient: Option<GradientInfo>,
+}
+
+/// Parsed `<gradientFill>` payload (G05 follow-up).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GradientInfo {
+    pub gradient_type: String,
+    pub degree: String,
+    pub left: String,
+    pub right: String,
+    pub top: String,
+    pub bottom: String,
+    pub stops: Vec<GradientStopInfo>,
+}
+
+/// One `<stop position="..."><color rgb="..."/></stop>` entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GradientStopInfo {
+    pub position: String,
+    pub color: Option<String>,
 }
 
 /// Parsed cell alignment.
@@ -1992,6 +2014,7 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
     let mut current_font: Option<FontBuilder> = None;
     let mut current_fill: Option<FillBuilder> = None;
     let mut in_pattern_fill = false;
+    let mut in_gradient_fill = false;
     let mut current_border: Option<BorderBuilder> = None;
     let mut current_border_edge: Option<BorderEdgeKind> = None;
 
@@ -2018,6 +2041,22 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                     in_pattern_fill = true;
                     if let Some(fill) = current_fill.as_mut() {
                         fill.pattern_type = attr_value(&e, b"patternType");
+                    }
+                }
+                b"gradientFill" if in_fills && current_fill.is_some() => {
+                    in_gradient_fill = true;
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.start_gradient(&e);
+                    }
+                }
+                b"stop" if in_gradient_fill && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.open_stop(&e);
+                    }
+                }
+                b"color" if in_gradient_fill && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.apply_stop_color(&e);
                     }
                 }
                 tag if in_pattern_fill && current_fill.is_some() => {
@@ -2077,6 +2116,11 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                         fill.pattern_type = attr_value(&e, b"patternType");
                     }
                 }
+                b"color" if in_gradient_fill && current_fill.is_some() => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.apply_stop_color(&e);
+                    }
+                }
                 tag if in_pattern_fill && current_fill.is_some() => {
                     if let Some(fill) = current_fill.as_mut() {
                         fill.apply_color_tag(tag, &e);
@@ -2126,8 +2170,15 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                         styles.fills.push(fill.finish());
                     }
                     in_pattern_fill = false;
+                    in_gradient_fill = false;
                 }
                 b"patternFill" => in_pattern_fill = false,
+                b"gradientFill" => in_gradient_fill = false,
+                b"stop" => {
+                    if let Some(fill) = current_fill.as_mut() {
+                        fill.close_stop();
+                    }
+                }
                 b"border" => {
                     if let Some(border) = current_border.take() {
                         styles.borders.push(border.finish());
@@ -2241,6 +2292,9 @@ struct FillBuilder {
     pattern_type: Option<String>,
     fg_color: Option<String>,
     bg_color: Option<String>,
+    gradient: Option<GradientInfo>,
+    /// Index into `gradient.stops` of the currently-open `<stop>` element.
+    pending_stop: Option<usize>,
 }
 
 impl FillBuilder {
@@ -2252,7 +2306,51 @@ impl FillBuilder {
         }
     }
 
+    fn start_gradient(&mut self, e: &BytesStart<'_>) {
+        let mut gi = GradientInfo {
+            gradient_type: attr_value(e, b"type").unwrap_or_else(|| "linear".to_string()),
+            degree: attr_value(e, b"degree").unwrap_or_default(),
+            left: attr_value(e, b"left").unwrap_or_default(),
+            right: attr_value(e, b"right").unwrap_or_default(),
+            top: attr_value(e, b"top").unwrap_or_default(),
+            bottom: attr_value(e, b"bottom").unwrap_or_default(),
+            stops: Vec::new(),
+        };
+        if gi.gradient_type.is_empty() {
+            gi.gradient_type = "linear".to_string();
+        }
+        self.gradient = Some(gi);
+    }
+
+    fn open_stop(&mut self, e: &BytesStart<'_>) {
+        if let Some(grad) = self.gradient.as_mut() {
+            grad.stops.push(GradientStopInfo {
+                position: attr_value(e, b"position").unwrap_or_default(),
+                color: None,
+            });
+            self.pending_stop = Some(grad.stops.len() - 1);
+        }
+    }
+
+    fn close_stop(&mut self) {
+        self.pending_stop = None;
+    }
+
+    fn apply_stop_color(&mut self, e: &BytesStart<'_>) {
+        if let (Some(grad), Some(idx)) = (self.gradient.as_mut(), self.pending_stop) {
+            if let Some(stop) = grad.stops.get_mut(idx) {
+                stop.color = parse_ooxml_color(e);
+            }
+        }
+    }
+
     fn finish(self) -> FillInfo {
+        if let Some(grad) = self.gradient {
+            return FillInfo {
+                bg_color: None,
+                gradient: Some(grad),
+            };
+        }
         let is_none = self
             .pattern_type
             .as_deref()
@@ -2261,6 +2359,7 @@ impl FillBuilder {
             bg_color: (!is_none)
                 .then(|| self.fg_color.or(self.bg_color))
                 .flatten(),
+            gradient: None,
         }
     }
 }

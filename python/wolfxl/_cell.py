@@ -26,6 +26,7 @@ from wolfxl._cell_payloads import (
     python_value_to_payload as python_value_to_payload,
 )
 from wolfxl._styles import Alignment, Border, Font, PatternFill
+from wolfxl.styles.fills import GradientFill
 from wolfxl.styles.protection import Protection
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
@@ -94,7 +95,7 @@ class Cell:
         # Sentinel — None is a valid value so we use a special marker.
         self._value: Any = _UNSET
         self._font: Font | None | _Sentinel = _UNSET
-        self._fill: PatternFill | None | _Sentinel = _UNSET
+        self._fill: PatternFill | GradientFill | None | _Sentinel = _UNSET
         self._border: Border | None | _Sentinel = _UNSET
         self._alignment: Alignment | None | _Sentinel = _UNSET
         self._number_format: str | None | _Sentinel = _UNSET
@@ -826,7 +827,7 @@ class Cell:
         )
         return _format_to_font(payload)
 
-    def _read_fill(self) -> PatternFill:
+    def _read_fill(self) -> PatternFill | GradientFill:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return PatternFill()

@@ -62,7 +62,7 @@ structural effort, decision-gated.
 | G02 | Public compatibility matrix (spec-driven, scannable)                | P0  | ⊥ 🧠  | S0     | landed      | Claude  | main   | 2026-05-03 | 2026-05-03 | Spec-driven (Python module not YAML; pyyaml not vendored); replaces prose in `docs/migration/compatibility-matrix.md` |
 | G03 | Diagonal borders Python bridge (writer model exists)                | P1  | ∥ 🧠  | S1     | blocked     | Claude  | feat/parity-G03-diagonal-borders | 2026-05-03 |           | Codex pod returned POD-BLOCKED 02:59 PDT — scope wider than handoff: modify-mode `BorderSpec` (`src/wolfxl/styles.rs:61`) has no diagonal fields and `border_to_xml:269` hardcodes `<diagonal/>`. Reclassified 🤖→🧠. Claude takeover after S1 sibling pods land. |
 | G04 | Protection (sheet/workbook) Python flow-through                     | P1  | ∥ 🟨  | S1     | partial     | Codex   | main | 2026-05-03 | 2026-05-03 | Workbook half landed (a694bbc): WorkbookProtection camelCase aliases, 15 tests pass, closes `protection.workbook` probe. Cell half deferred to Claude takeover (native_writer_formats lacks Protection emit). |
-| G05 | NamedStyle / GradientFill / DifferentialStyle flow                  | P1  | ∥ 🧠  | S1     | partial     | Claude  | main | 2026-05-03 | 2026-05-03 | NamedStyle cellStyleXfs infra landed: writer stamps `xfId` on `<xf>`, reader walks `cellXfs[s].xf_id -> cellStyles[xf_id]` and exposes `cell.style`. `cell.named_style` probe flips `partial -> supported` (oracle 36/50 -> 37/50). GradientFill + DifferentialStyle still tracked for follow-up. |
+| G05 | NamedStyle / GradientFill / DifferentialStyle flow                  | P1  | ∥ 🧠  | S1     | partial     | Claude  | main | 2026-05-03 | 2026-05-03 | NamedStyle cellStyleXfs infra landed: writer stamps `xfId` on `<xf>`, reader walks `cellXfs[s].xf_id -> cellStyles[xf_id]` and exposes `cell.style`. GradientFill writer + reader landed: writer emits `<gradientFill>` (type/degree/path attrs + ordered stops); reader parses gradient block back into Python `GradientFill` via the format dict's `gradient` sub-dict. Both `cell.named_style` and `cell.gradient_fill` probes flipped `partial -> supported` (oracle 36/50 -> 38/50). DifferentialStyle still tracked for follow-up. |
 | G06 | Image replace/delete public API                                     | P1  | ∥ 🤖  | S1     | landed      | Codex   | main | 2026-05-03 | 2026-05-03 | POD-DONE (b01a447 → cherry-picked to main). 528 lines: `_worksheet_media.py`, `patcher_drawing.rs`. Closes `images.replace_remove` probe. 2286 passed, no regressions. |
 | G07 | Array/DataTable/spill formula coverage audit + tests                | P1  | ∥ 🤖  | S1     | landed      | Codex   | main | 2026-05-03 | 2026-05-03 | Cherry-picked (792d14d). Closes `array_formulas.data_table` probe. Pod hit -k filter mismatch in handoff; work re-verified clean (2285 passed). |
 | G08 | Threaded comments write+modify                                      | P1  | ∥ 🧠  | S2     | rfc-drafted | Claude  |        | 2026-05-03 |           | RFC-068 drafted; impl pod is Claude-led with codex assist on emit + reader |
@@ -140,15 +140,15 @@ out-of-scope native-Rust changes; both await Claude takeover.
 | Date       | Metric                                                  |        Value | Delta vs S0 baseline |
 |------------|---------------------------------------------------------|-------------:|:---------------------|
 | 2026-05-03 | Compat-oracle total probes                              |           50 | unchanged |
-| 2026-05-03 | Compat-oracle passed (green)                            |           33 | +3 (data_table, protection.workbook, images.replace_remove) |
-| 2026-05-03 | Compat-oracle xfailed                                   |           17 | -3 (gaps closed) |
+| 2026-05-03 | Compat-oracle passed (green)                            |           38 | +8 (data_table, protection.workbook, images.replace_remove, protection.cell, diagonal_borders, named_style, gradient_fill, +1) |
+| 2026-05-03 | Compat-oracle xfailed                                   |           12 | -8 (gaps closed) |
 | 2026-05-03 | Compat-oracle failed                                    |            0 | unchanged |
-| 2026-05-03 | Compat-oracle pass rate                                 |        66.0% | +6.0 pp |
-| 2026-05-03 | Matrix rows ✅ Supported                                |    46 / 74   | +3 |
-| 2026-05-03 | Matrix rows 🟡 Partial                                  |    15 / 74   | -2 |
+| 2026-05-03 | Compat-oracle pass rate                                 |        76.0% | +16.0 pp |
+| 2026-05-03 | Matrix rows ✅ Supported                                |    51 / 74   | +8 |
+| 2026-05-03 | Matrix rows 🟡 Partial                                  |    10 / 74   | -7 |
 | 2026-05-03 | Matrix rows ❌ Not Yet                                  |    12 / 74   | -1 |
 | 2026-05-03 | Matrix rows ⛔ Out of Scope                             |     1 / 74   | unchanged |
-| 2026-05-03 | Full Python suite (``pytest -q``)                       | 2348 / 17 xf | -3 xfailed (gap closures); 0 failed |
+| 2026-05-03 | Full Python suite (``pytest -q``)                       | 2333 / 12 xf | -8 xfailed (gap closures); 0 failed |
 
 S1 sprint gate: pass rate moved 60.0% → 66.0% with zero regressions in
 ``cargo test --workspace`` or ``pytest -q``. Two pods (G03, G05) deferred to

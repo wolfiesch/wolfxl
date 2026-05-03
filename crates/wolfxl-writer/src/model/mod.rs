@@ -34,7 +34,7 @@ pub use date::to_excel_serial;
 pub use defined_name::{BuiltinName, DefinedName};
 pub use format::{
     AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, FormatSpec,
-    ProtectionSpec, StylesBuilder,
+    GradientFillSpec, GradientStopSpec, ProtectionSpec, StylesBuilder,
 };
 pub use image::{ImageAnchor, SheetImage};
 pub use table::{Table, TableColumn, TableStyle};

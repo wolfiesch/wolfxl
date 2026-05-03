@@ -40,6 +40,35 @@ pub struct FillSpec {
     pub pattern_type: String,
     pub fg_color_rgb: Option<String>,
     pub bg_color_rgb: Option<String>,
+    /// When `Some`, this fill is a `<gradientFill>` and the pattern
+    /// fields above are ignored on emit. OOXML allows exactly one of
+    /// `<patternFill>` / `<gradientFill>` per `<fill>`.
+    pub gradient: Option<GradientFillSpec>,
+}
+
+/// Gradient fill payload mirroring OOXML's `<gradientFill>` element.
+///
+/// All numeric fields are stored as canonical decimal strings so the
+/// builder can dedup via `Hash + Eq`. Two cells with the same gradient
+/// share one `<fill>` slot exactly like pattern fills.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct GradientFillSpec {
+    /// `"linear"` (default) or `"path"`. Linear uses `degree`; path uses
+    /// `left`/`right`/`top`/`bottom` to position a focus rectangle.
+    pub gradient_type: String,
+    pub degree: String,
+    pub left: String,
+    pub right: String,
+    pub top: String,
+    pub bottom: String,
+    pub stops: Vec<GradientStopSpec>,
+}
+
+/// One `<stop position="..."><color .../></stop>` inside a `<gradientFill>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct GradientStopSpec {
+    pub position: String,
+    pub color_rgb: Option<String>,
 }
 
 /// One side of a cell border.

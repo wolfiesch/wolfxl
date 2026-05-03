@@ -214,9 +214,9 @@ ENTRIES: list[Entry] = [
         "category": "cell_styles",
         "openpyxl": "GradientFill(stop=(...))",
         "wolfxl": "GradientFill(stop=(...))",
-        "status": "partial",
-        "gap_id": "G05",
+        "status": "supported",
         "probe": "cell_gradient_fill",
+        "notes": "GradientFill round-trips: writer emits <gradientFill> with type/degree/path attrs and ordered stops; reader parses gradient back into Python GradientFill via the format dict's `gradient` sub-dict.",
     },
     # --- Charts ------------------------------------------------------------
     {

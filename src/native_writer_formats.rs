@@ -4,8 +4,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use wolfxl_writer::model::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, ProtectionSpec,
-    Worksheet, WriteCell, WriteCellValue,
+    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, GradientFillSpec,
+    GradientStopSpec, ProtectionSpec, Worksheet, WriteCell, WriteCellValue,
 };
 use wolfxl_writer::Workbook;
 
@@ -32,6 +32,90 @@ pub(crate) fn parse_hex_color(input: &str) -> Option<String> {
         8 => Some(upper),
         _ => None,
     }
+}
+
+/// Format a finite f64 as a canonical decimal string. We can't store f64s
+/// in `GradientFillSpec` directly because the writer's interner needs `Hash
+/// + Eq`; storing a canonical string round-trips through dedup correctly.
+fn format_grad_number(value: f64) -> String {
+    if !value.is_finite() {
+        return String::from("0");
+    }
+    // Trim trailing zeroes so e.g. 0.5 stays "0.5", 90.0 becomes "90".
+    let s = format!("{value}");
+    if let Some(stripped) = s.strip_suffix(".0") {
+        stripped.to_string()
+    } else {
+        s
+    }
+}
+
+fn parse_gradient_dict(gd: &Bound<'_, PyDict>) -> PyResult<Option<GradientFillSpec>> {
+    let gradient_type: String = gd
+        .get_item("type")?
+        .and_then(|v| v.extract().ok())
+        .unwrap_or_else(|| "linear".to_string());
+
+    let degree = gd
+        .get_item("degree")?
+        .and_then(|v| v.extract::<f64>().ok())
+        .unwrap_or(0.0);
+    let left = gd
+        .get_item("left")?
+        .and_then(|v| v.extract::<f64>().ok())
+        .unwrap_or(0.0);
+    let right = gd
+        .get_item("right")?
+        .and_then(|v| v.extract::<f64>().ok())
+        .unwrap_or(0.0);
+    let top = gd
+        .get_item("top")?
+        .and_then(|v| v.extract::<f64>().ok())
+        .unwrap_or(0.0);
+    let bottom = gd
+        .get_item("bottom")?
+        .and_then(|v| v.extract::<f64>().ok())
+        .unwrap_or(0.0);
+
+    // Stops: accept either "stops" (preferred wolfxl shape) or "stop"
+    // (openpyxl-compatible alias). Each entry is a dict {position, color}.
+    let stops_any = gd
+        .get_item("stops")?
+        .or(gd.get_item("stop")?);
+    let mut stops: Vec<GradientStopSpec> = Vec::new();
+    if let Some(seq) = stops_any {
+        for item in seq.try_iter()? {
+            let item = item?;
+            if let Ok(d) = item.cast::<PyDict>() {
+                let position = d
+                    .get_item("position")?
+                    .and_then(|v| v.extract::<f64>().ok())
+                    .unwrap_or(0.0);
+                let color: Option<String> = d
+                    .get_item("color")?
+                    .and_then(|v| v.extract::<String>().ok())
+                    .and_then(|s| parse_hex_color(&s));
+                stops.push(GradientStopSpec {
+                    position: format_grad_number(position),
+                    color_rgb: color,
+                });
+            }
+        }
+    }
+
+    if stops.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(GradientFillSpec {
+        gradient_type,
+        degree: format_grad_number(degree),
+        left: format_grad_number(left),
+        right: format_grad_number(right),
+        top: format_grad_number(top),
+        bottom: format_grad_number(bottom),
+        stops,
+    }))
 }
 
 fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
@@ -104,6 +188,22 @@ fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
                     pattern_type: "solid".to_string(),
                     fg_color_rgb: Some(rgb.clone()),
                     bg_color_rgb: Some(rgb),
+                    gradient: None,
+                });
+            }
+        }
+    }
+
+    // Gradient fill takes precedence over `bg_color` when both present;
+    // OOXML only allows one of <patternFill>/<gradientFill> per <fill>.
+    if let Some(v) = dict.get_item("gradient")? {
+        if let Ok(gd) = v.cast::<PyDict>() {
+            if let Some(grad) = parse_gradient_dict(&gd)? {
+                spec.fill = Some(FillSpec {
+                    pattern_type: String::new(),
+                    fg_color_rgb: None,
+                    bg_color_rgb: None,
+                    gradient: Some(grad),
                 });
             }
         }

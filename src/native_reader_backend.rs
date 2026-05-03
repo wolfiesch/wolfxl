@@ -23,8 +23,9 @@ use wolfxl_reader::{
     BookViewInfo, BorderInfo, BreakInfo, CalcPropertiesInfo, Cell, CellDataType, CellValue,
     ChartAxisInfo, ChartDataLabelsInfo, ChartErrorBarsInfo, ChartGraphicalPropertiesInfo,
     ChartInfo, ChartSeriesInfo, ChartTrendlineInfo, CustomPropertyInfo, DateGroupItemInfo,
-    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
-    ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsbBook as NativeXlsbReaderBook,
+    FillInfo, FilterColumnInfo, FilterInfo, FontInfo, GradientInfo, HeaderFooterInfo,
+    HeaderFooterItemInfo, ImageAnchorInfo, ImageInfo, InlineFontProps,
+    NativeXlsbBook as NativeXlsbReaderBook,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
     PaneMode, PrintOptionsInfo, ProtectionInfo, SelectionInfo, SheetFormatInfo,
     SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
@@ -2111,6 +2112,9 @@ fn populate_record_format<B: NativeStyleResolver>(
             if let Some(value) = &fill.bg_color {
                 record.set_item("bg_color", value)?;
             }
+            if let Some(grad) = &fill.gradient {
+                record.set_item("gradient", gradient_to_pydict(record.py(), grad)?)?;
+            }
         }
         if let Some(alignment) = book.alignment_for_style_id(style_id) {
             if let Some(value) = &alignment.horizontal {
@@ -3026,7 +3030,43 @@ fn populate_fill(d: &Bound<'_, PyDict>, fill: &FillInfo) -> PyResult<()> {
     if let Some(value) = &fill.bg_color {
         d.set_item("bg_color", value)?;
     }
+    if let Some(grad) = &fill.gradient {
+        d.set_item("gradient", gradient_to_pydict(d.py(), grad)?)?;
+    }
     Ok(())
+}
+
+fn gradient_to_pydict<'py>(py: Python<'py>, grad: &GradientInfo) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("type", &grad.gradient_type)?;
+    if let Ok(v) = grad.degree.parse::<f64>() {
+        d.set_item("degree", v)?;
+    }
+    if let Ok(v) = grad.left.parse::<f64>() {
+        d.set_item("left", v)?;
+    }
+    if let Ok(v) = grad.right.parse::<f64>() {
+        d.set_item("right", v)?;
+    }
+    if let Ok(v) = grad.top.parse::<f64>() {
+        d.set_item("top", v)?;
+    }
+    if let Ok(v) = grad.bottom.parse::<f64>() {
+        d.set_item("bottom", v)?;
+    }
+    let stops = pyo3::types::PyList::empty(py);
+    for stop in &grad.stops {
+        let s = PyDict::new(py);
+        if let Ok(v) = stop.position.parse::<f64>() {
+            s.set_item("position", v)?;
+        }
+        if let Some(color) = &stop.color {
+            s.set_item("color", color)?;
+        }
+        stops.append(s)?;
+    }
+    d.set_item("stops", stops)?;
+    Ok(d)
 }
 
 fn populate_alignment(d: &Bound<'_, PyDict>, alignment: &AlignmentInfo) -> PyResult<()> {

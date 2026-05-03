@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **49** / 74
-- 🟡 Partial: **12** / 74
+- ✅ Supported: **51** / 74
+- 🟡 Partial: **10** / 74
 - ❌ Not Yet: **12** / 74
 - ⛔ Out of Scope: **1** / 74
 
@@ -43,7 +43,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `Border(diagonal=Side(...), diagonalUp=True)` | `Border(diagonal=Side(...), diagonalUp=True)` | ✅ Supported |  | Round-trips through both write mode and modify mode; diagonalUp/diagonalDown attrs and the <diagonal> child of <border> persist via the patcher's BorderSpec and the writer's intern path. |
 | `cell.protection = Protection(...)` | `cell.protection = Protection(...)` | ✅ Supported |  | Round-trips through wolfxl reload; locked/hidden flags persist via <protection> child of <xf> with applyProtection="1". |
 | `NamedStyle(name=...) + wb.add_named_style(...)` | `NamedStyle(name=...) + wb.add_named_style(...)` | ✅ Supported |  | cell.style binds a registered NamedStyle and round-trips through cellStyleXfs/cellStyles + the xfId attr on <xf>; reader resurfaces the name via cell.style. |
-| `GradientFill(stop=(...))` | `GradientFill(stop=(...))` | 🟡 Partial | G05 |  |
+| `GradientFill(stop=(...))` | `GradientFill(stop=(...))` | ✅ Supported |  | GradientFill round-trips: writer emits <gradientFill> with type/degree/path attrs and ordered stops; reader parses gradient back into Python GradientFill via the format dict's `gradient` sub-dict. |
 
 ## Charts
 

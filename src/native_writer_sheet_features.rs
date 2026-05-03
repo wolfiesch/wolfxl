@@ -139,6 +139,7 @@ pub(crate) fn dict_to_conditional_format(
                     pattern_type: "solid".to_string(),
                     fg_color_rgb: Some(rgb.clone()),
                     bg_color_rgb: Some(rgb),
+                    gradient: None,
                 }),
                 border: None,
             };

@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
+from wolfxl.styles.fills import GradientFill
 from wolfxl.styles.protection import Protection
 
 
@@ -59,10 +60,32 @@ def format_to_font(payload: Any) -> Font:
     )
 
 
-def format_to_fill(payload: Any) -> PatternFill:
-    """Extract PatternFill fields from a Rust format dict."""
+def format_to_fill(payload: Any) -> PatternFill | GradientFill:
+    """Extract Fill fields from a Rust format dict.
+
+    Returns a ``GradientFill`` when the format dict carries a ``gradient``
+    sub-dict (round-tripped from the writer), otherwise a ``PatternFill``.
+    """
     if not isinstance(payload, dict) or not payload:
         return PatternFill()
+    grad = payload.get("gradient")
+    if isinstance(grad, dict):
+        stops_raw = grad.get("stops") or grad.get("stop") or []
+        stops: list[Any] = []
+        for entry in stops_raw:
+            if isinstance(entry, dict):
+                pos = entry.get("position", 0.0)
+                color = entry.get("color")
+                stops.append((float(pos), color))
+        return GradientFill(
+            type=str(grad.get("type", "linear")),
+            degree=float(grad.get("degree", 0.0)),
+            left=float(grad.get("left", 0.0)),
+            right=float(grad.get("right", 0.0)),
+            top=float(grad.get("top", 0.0)),
+            bottom=float(grad.get("bottom", 0.0)),
+            stop=stops,
+        )
     bg = payload.get("bg_color")
     if bg:
         return PatternFill(patternType="solid", fgColor=bg)
@@ -162,12 +185,57 @@ def font_to_format_dict(font: Font) -> dict[str, Any]:
     return d
 
 
-def fill_to_format_dict(fill: PatternFill) -> dict[str, Any]:
-    """Convert a PatternFill to a Rust format dict."""
+def fill_to_format_dict(fill: Any) -> dict[str, Any]:
+    """Convert a Fill (PatternFill or GradientFill) to a Rust format dict.
+
+    GradientFill round-trips as a nested ``gradient`` sub-dict so the Rust
+    bridge can route it into ``GradientFillSpec`` without disturbing the
+    pattern-fill path. Stops are normalized to ``[{position, color}, ...]``.
+    """
+    if isinstance(fill, GradientFill):
+        stops: list[dict[str, Any]] = []
+        # openpyxl's ``stop`` accepts heterogeneous entries; normalize.
+        for idx, entry in enumerate(fill.stop):
+            position: float = float(idx)
+            color: str | None = None
+            if isinstance(entry, tuple) and len(entry) == 2:
+                position = float(entry[0])
+                color = str(entry[1])
+            elif isinstance(entry, dict):
+                position = float(entry.get("position", idx))
+                color = entry.get("color")
+            elif isinstance(entry, str):
+                color = entry
+            else:
+                # openpyxl ``Stop`` / ``Color`` objects — best-effort.
+                pos_attr = getattr(entry, "position", None)
+                if pos_attr is not None:
+                    position = float(pos_attr)
+                col_attr = (
+                    getattr(entry, "color", None)
+                    or getattr(entry, "rgb", None)
+                    or getattr(entry, "value", None)
+                )
+                if col_attr is not None:
+                    color = str(col_attr)
+            stops.append({"position": position, "color": color})
+        return {
+            "gradient": {
+                "type": fill.type,
+                "degree": float(fill.degree),
+                "left": float(fill.left),
+                "right": float(fill.right),
+                "top": float(fill.top),
+                "bottom": float(fill.bottom),
+                "stops": stops,
+            }
+        }
     d: dict[str, Any] = {}
-    fg = fill._fg_hex()  # noqa: SLF001
-    if fg:
-        d["bg_color"] = fg
+    fg_getter = getattr(fill, "_fg_hex", None)
+    if callable(fg_getter):
+        fg = fg_getter()
+        if fg:
+            d["bg_color"] = fg
     return d
 
 

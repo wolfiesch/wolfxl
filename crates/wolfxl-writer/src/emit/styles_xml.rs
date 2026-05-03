@@ -1,8 +1,8 @@
 //! `xl/styles.xml` emitter — full styles file assembled from [`StylesBuilder`]. Wave 2A.
 
 use crate::model::format::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, StylesBuilder,
-    XfRecord,
+    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, GradientFillSpec,
+    StylesBuilder, XfRecord,
 };
 use crate::xml_escape;
 
@@ -162,9 +162,14 @@ fn font_to_xml(spec: &FontSpec) -> String {
 }
 
 fn fill_to_xml(spec: &FillSpec) -> String {
-    // OOXML schema: `<patternFill>` may carry `<fgColor>` and/or `<bgColor>`
-    // children. Emit both when present, in spec order (fg before bg). When
-    // neither is present, self-close the element to match Excel's style.
+    // OOXML schema: `<fill>` carries EITHER `<patternFill>` or `<gradientFill>`,
+    // never both. When `spec.gradient` is set the pattern fields are ignored.
+    if let Some(ref grad) = spec.gradient {
+        return gradient_fill_to_xml(grad);
+    }
+    // `<patternFill>` may carry `<fgColor>` and/or `<bgColor>` children.
+    // Emit both when present, in spec order (fg before bg). When neither
+    // is present, self-close the element to match Excel's style.
     let pattern_attr = xml_escape::attr(&spec.pattern_type);
     let has_fg = spec.fg_color_rgb.is_some();
     let has_bg = spec.bg_color_rgb.is_some();
@@ -181,6 +186,45 @@ fn fill_to_xml(spec: &FillSpec) -> String {
         inner.push_str(&format!("<bgColor rgb=\"{}\"/>", xml_escape::attr(rgb)));
     }
     inner.push_str("</patternFill>");
+    format!("<fill>{inner}</fill>")
+}
+
+fn gradient_fill_to_xml(grad: &GradientFillSpec) -> String {
+    // `<gradientFill>` attribute set differs between linear and path types:
+    // - linear: `type` (default linear, may be omitted) + `degree`
+    // - path: `type="path"` + `left`/`right`/`top`/`bottom`
+    // We always emit `type` when not "linear" so Excel parses correctly.
+    let mut attrs = String::new();
+    if !grad.gradient_type.is_empty() && grad.gradient_type != "linear" {
+        attrs.push_str(&format!(" type=\"{}\"", xml_escape::attr(&grad.gradient_type)));
+    }
+    if grad.gradient_type == "path" {
+        for (name, val) in [
+            ("left", &grad.left),
+            ("right", &grad.right),
+            ("top", &grad.top),
+            ("bottom", &grad.bottom),
+        ] {
+            if !val.is_empty() {
+                attrs.push_str(&format!(" {name}=\"{}\"", xml_escape::attr(val)));
+            }
+        }
+    } else if !grad.degree.is_empty() && grad.degree != "0" {
+        attrs.push_str(&format!(" degree=\"{}\"", xml_escape::attr(&grad.degree)));
+    }
+
+    let mut inner = format!("<gradientFill{attrs}>");
+    for stop in &grad.stops {
+        inner.push_str(&format!(
+            "<stop position=\"{}\">",
+            xml_escape::attr(&stop.position)
+        ));
+        if let Some(ref rgb) = stop.color_rgb {
+            inner.push_str(&format!("<color rgb=\"{}\"/>", xml_escape::attr(rgb)));
+        }
+        inner.push_str("</stop>");
+    }
+    inner.push_str("</gradientFill>");
     format!("<fill>{inner}</fill>")
 }
 
@@ -321,7 +365,8 @@ fn xf_to_xml(xf: &XfRecord) -> String {
 mod tests {
     use super::*;
     use crate::model::format::{
-        AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, StylesBuilder,
+        AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec,
+        GradientFillSpec, GradientStopSpec, StylesBuilder,
     };
     use quick_xml::events::Event;
     use quick_xml::Reader;
@@ -915,6 +960,7 @@ mod tests {
             pattern_type: "darkHorizontal".into(),
             fg_color_rgb: None,
             bg_color_rgb: Some("FFAABBCC".into()),
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
         assert!(
@@ -933,6 +979,7 @@ mod tests {
             pattern_type: "darkHorizontal".into(),
             fg_color_rgb: Some("FF111111".into()),
             bg_color_rgb: Some("FF222222".into()),
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
         let fg_pos = text
@@ -954,11 +1001,101 @@ mod tests {
             pattern_type: "gray0625".into(),
             fg_color_rgb: None,
             bg_color_rgb: None,
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
         assert!(
             text.contains("<patternFill patternType=\"gray0625\"/>"),
             "empty pattern fill must self-close; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // G05 follow-up: linear `<gradientFill>` emits with `degree` and stops
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_linear_gradient_emits_gradient_fill() {
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: String::new(),
+            fg_color_rgb: None,
+            bg_color_rgb: None,
+            gradient: Some(GradientFillSpec {
+                gradient_type: "linear".into(),
+                degree: "90".into(),
+                stops: vec![
+                    GradientStopSpec {
+                        position: "0".into(),
+                        color_rgb: Some("FFFF0000".into()),
+                    },
+                    GradientStopSpec {
+                        position: "1".into(),
+                        color_rgb: Some("FF0000FF".into()),
+                    },
+                ],
+                ..Default::default()
+            }),
+        });
+        let bytes = emit(&styles);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<gradientFill degree=\"90\">"),
+            "linear gradient must emit degree attr; got:\n{text}"
+        );
+        assert!(
+            text.contains("<stop position=\"0\"><color rgb=\"FFFF0000\"/></stop>"),
+            "first stop must round-trip; got:\n{text}"
+        );
+        assert!(
+            text.contains("<stop position=\"1\"><color rgb=\"FF0000FF\"/></stop>"),
+            "second stop must round-trip; got:\n{text}"
+        );
+        // The reserved fills (none, gray125) always emit <patternFill>; the
+        // gradient fill itself must not — assert only inside the gradient block.
+        let grad_open = text.find("<gradientFill").expect("gradientFill present");
+        let grad_close = text[grad_open..]
+            .find("</gradientFill>")
+            .expect("gradientFill close present");
+        let grad_block = &text[grad_open..grad_open + grad_close];
+        assert!(
+            !grad_block.contains("<patternFill"),
+            "gradient fill must NOT also emit patternFill; got:\n{grad_block}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // G05 follow-up: path `<gradientFill>` emits left/right/top/bottom
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_path_gradient_emits_corner_attrs() {
+        use crate::model::format::{GradientFillSpec, GradientStopSpec};
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: String::new(),
+            fg_color_rgb: None,
+            bg_color_rgb: None,
+            gradient: Some(GradientFillSpec {
+                gradient_type: "path".into(),
+                degree: String::new(),
+                left: "0.5".into(),
+                right: "0.5".into(),
+                top: "0.5".into(),
+                bottom: "0.5".into(),
+                stops: vec![GradientStopSpec {
+                    position: "0".into(),
+                    color_rgb: Some("FF112233".into()),
+                }],
+            }),
+        });
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        assert!(
+            text.contains(r#"type="path""#)
+                && text.contains(r#"left="0.5""#)
+                && text.contains(r#"right="0.5""#)
+                && text.contains(r#"top="0.5""#)
+                && text.contains(r#"bottom="0.5""#),
+            "path gradient must emit corner attrs; got:\n{text}"
         );
     }
 
