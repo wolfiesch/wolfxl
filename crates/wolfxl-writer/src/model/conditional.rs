@@ -66,6 +66,10 @@ pub enum ConditionalKind {
         color_rgb: String,
         min: ConditionalThreshold,
         max: ConditionalThreshold,
+        /// Whether to render the cell value next to the bar.
+        /// OOXML default is `true`; when `false` we emit `showValue="0"` on
+        /// the `<dataBar>` element. Added in G12 (Sprint 3).
+        show_value: bool,
     },
     IconSet {
         /// e.g. `"3TrafficLights1"`, `"5Arrows"`, `"4Rating"`.

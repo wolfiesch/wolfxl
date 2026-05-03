@@ -372,13 +372,23 @@ def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -
 def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
     """Build the native writer payload for a worksheet conditional format."""
     formula = rule.formula[0] if rule.formula else None
-    return {
+    payload: dict[str, Any] = {
         "range": range_string,
         "rule_type": rule.type,
         "operator": rule.operator,
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    # G12 (Sprint 3): forward dataBar's `extra` fields so the Rust side can
+    # honour percent / num / percentile / formula cfvo and showValue=False.
+    # Other rule kinds keep their existing path; their `extra` is still
+    # consumed elsewhere.
+    extra = getattr(rule, "extra", None) or {}
+    if rule.type == "dataBar":
+        for key in ("start_type", "start_value", "end_type", "end_value", "color", "show_value"):
+            if key in extra and extra[key] is not None:
+                payload[key] = extra[key]
+    return payload
 
 
 def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:

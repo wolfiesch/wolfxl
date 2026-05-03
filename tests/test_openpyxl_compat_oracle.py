@@ -989,6 +989,48 @@ def _probe_cf_data_bars(tmp_path: Path) -> None:
     )
 
 
+@_register("cf_data_bars_advanced")
+def _probe_cf_data_bars_advanced(tmp_path: Path) -> None:
+    """Data-bar with percent / formula cfvo + showValue=False. G12 (S3)."""
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.formatting.rule import DataBarRule
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for i in range(1, 11):
+        ws.cell(row=i, column=1, value=i * 10)
+    rule = DataBarRule(
+        start_type="percent",
+        start_value=10,
+        end_type="num",
+        end_value=90,
+        color="FF638EC6",
+        showValue=False,
+    )
+    ws.conditional_formatting.add("A1:A10", rule)
+    out = tmp_path / "databar_adv.xlsx"
+    wb.save(out)
+
+    ref_wb = _opx.load_workbook(out)
+    ref_ws = ref_wb[ref_wb.sheetnames[0]]
+    ref_rules = []
+    for cf_range in ref_ws.conditional_formatting:
+        ref_rules.extend(ref_ws.conditional_formatting[cf_range])
+    bar_rules = [r for r in ref_rules if getattr(r, "type", "") == "dataBar"]
+    assert bar_rules, "openpyxl saw no dataBar rule"
+    bar = bar_rules[0].dataBar
+    assert bar is not None and bar.cfvo
+    types = {c.type for c in bar.cfvo}
+    assert types == {"percent", "num"}, f"cfvo types lost: {types}"
+    # Locate min/max by index — openpyxl reads val as a float, so 10 -> 10.0.
+    cfvo_min, cfvo_max = bar.cfvo[0], bar.cfvo[1]
+    assert float(cfvo_min.val) == 10.0
+    assert float(cfvo_max.val) == 90.0
+    # showValue=False round-trip
+    assert bar.showValue is False
+
+
 @_register("cf_color_scales_advanced")
 def _probe_cf_color_scales_advanced(tmp_path: Path) -> None:
     """3-stop color scale. Tracked under G13 (S3)."""

@@ -89,12 +89,19 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     color_rgb,
                     min,
                     max,
+                    show_value,
                 } => {
                     rules_buf.push_str(&format!(
                         "<cfRule type=\"dataBar\" priority=\"{}\">",
                         priority
                     ));
-                    rules_buf.push_str("<dataBar>");
+                    // OOXML default for showValue is true; only emit the
+                    // attribute when it's been explicitly turned off (G12).
+                    if *show_value {
+                        rules_buf.push_str("<dataBar>");
+                    } else {
+                        rules_buf.push_str("<dataBar showValue=\"0\">");
+                    }
                     emit_cfvo(&mut rules_buf, min);
                     emit_cfvo(&mut rules_buf, max);
                     rules_buf.push_str(&format!("<color rgb=\"{}\"/>", color_rgb));
@@ -388,6 +395,7 @@ mod tests {
                 color_rgb: "FFFF0000".into(),
                 min: ConditionalThreshold::Min,
                 max: ConditionalThreshold::Max,
+                show_value: true,
             },
             Some(99),
             false,
@@ -525,6 +533,7 @@ mod tests {
                     color_rgb: "FF0070C0".into(),
                     min: ConditionalThreshold::Min,
                     max: ConditionalThreshold::Max,
+                    show_value: true,
                 }),
                 rule(ConditionalKind::ColorScale {
                     stops: vec![
