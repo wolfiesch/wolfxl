@@ -90,6 +90,7 @@ def flush_compat_properties(ws: Worksheet, writer: Any) -> None:
     _flush_page_breaks(ws, writer, sheet)
     _flush_pending_hyperlinks(ws, writer, sheet)
     _flush_pending_comments(ws, writer, sheet)
+    _flush_pending_threaded_comments(ws, writer, sheet)
     _flush_pending_tables(ws, writer, sheet)
     _flush_pending_data_validations(ws, writer, sheet)
     _flush_pending_conditional_formats(ws, writer, sheet)
@@ -250,6 +251,64 @@ def _comment_payload(coord: str, comment: Any) -> dict[str, Any]:
         "cell": coord,
         "text": comment.text,
         "author": comment.author,
+    }
+
+
+def _flush_pending_threaded_comments(ws: Worksheet, writer: Any, sheet: str) -> None:
+    """Flush queued write-mode threaded comments (RFC-068 / G08).
+
+    Walks every top-level thread and emits one ``add_threaded_comment`` call
+    per top-level + reply, with parent_id resolved to the parent's GUID.
+    Person GUIDs are emitted via the workbook-level person flush; this helper
+    only references them.
+    """
+    pending = ws._pending_threaded_comments  # noqa: SLF001
+    if not pending:
+        return
+    if not hasattr(writer, "add_threaded_comment"):
+        # Older native backend (or modify-mode patcher) does not yet expose
+        # the entry point. Drop silently — Step 5 lights up modify mode.
+        return
+
+    for coord, top in pending.items():
+        if top is None:
+            continue
+        # Ensure GUID + timestamp on the top-level thread before emitting.
+        top.ensure_id()
+        top.ensure_created()
+        writer.add_threaded_comment(
+            sheet,
+            _threaded_comment_payload(coord, top, parent_id=None),
+        )
+        for reply in top.replies:
+            reply.ensure_id()
+            reply.ensure_created()
+            writer.add_threaded_comment(
+                sheet,
+                _threaded_comment_payload(coord, reply, parent_id=top.id),
+            )
+    pending.clear()
+
+
+def _threaded_comment_payload(
+    coord: str, tc: Any, *, parent_id: str | None
+) -> dict[str, Any]:
+    """Build the native writer payload for one ThreadedComment.
+
+    The Rust backend wants `created` as an ISO 8601 string (Excel writes
+    millisecond precision, e.g. ``2024-09-12T15:31:01.42``). The
+    ``ensure_created()`` call on the caller side guarantees we never see
+    None here.
+    """
+    person_id = tc.person.id if tc.person is not None else ""
+    return {
+        "id": tc.id,
+        "cell": coord,
+        "person_id": person_id,
+        "created": tc.created.isoformat(timespec="milliseconds"),
+        "parent_id": parent_id,
+        "text": tc.text,
+        "done": tc.done,
     }
 
 

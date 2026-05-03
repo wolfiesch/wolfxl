@@ -5,8 +5,8 @@ use pyo3::types::PyDict;
 use wolfxl_writer::model::{
     CellIsOperator, ColorScaleStop, Comment, CommentAuthorTable, ConditionalFormat,
     ConditionalKind, ConditionalRule, ConditionalThreshold, DataValidation, DxfRecord, ErrorStyle,
-    FillSpec, Hyperlink, StylesBuilder, Table, TableColumn, TableStyle, ValidationOperator,
-    ValidationType,
+    FillSpec, Hyperlink, Person, StylesBuilder, Table, TableColumn, TableStyle, ThreadedComment,
+    ValidationOperator, ValidationType,
 };
 
 use crate::native_writer_formats::parse_hex_color;
@@ -104,6 +104,95 @@ pub(crate) fn dict_to_comment(
             visible: false,
         },
     )))
+}
+
+/// Build a `Person` from a cfg dict, or `None` for no-op.
+///
+/// RFC-068 / G08. The Python `PersonRegistry` allocates GUIDs eagerly so this
+/// always sees an `id`; the dict-based contract keeps the Rust side
+/// agnostic to Python's `Person` class shape.
+pub(crate) fn dict_to_person(cfg: &Bound<'_, PyDict>) -> PyResult<Option<Person>> {
+    let id: Option<String> = cfg
+        .get_item("id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let display_name: Option<String> = cfg
+        .get_item("name")?
+        .and_then(|v| v.extract::<String>().ok());
+
+    let (Some(id), Some(display_name)) = (id, display_name) else {
+        return Ok(None);
+    };
+
+    let user_id: String = cfg
+        .get_item("user_id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .unwrap_or_default();
+    let provider_id: String = cfg
+        .get_item("provider_id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "None".to_string());
+
+    Ok(Some(Person {
+        display_name,
+        id,
+        user_id,
+        provider_id,
+    }))
+}
+
+/// Build a `ThreadedComment` from a cfg dict, or `None` for no-op.
+///
+/// RFC-068 / G08. Required keys: `id`, `cell`, `person_id`, `created`, `text`.
+/// Optional: `parent_id`, `done`. The Python flush layer is responsible for
+/// resolving Python `Person`/`ThreadedComment` references to their GUID
+/// strings before calling.
+pub(crate) fn dict_to_threaded_comment(
+    cfg: &Bound<'_, PyDict>,
+) -> PyResult<Option<ThreadedComment>> {
+    let id: Option<String> = cfg
+        .get_item("id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let cell_ref: Option<String> = cfg
+        .get_item("cell")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let person_id: Option<String> = cfg
+        .get_item("person_id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let created: Option<String> = cfg
+        .get_item("created")?
+        .and_then(|v| v.extract::<String>().ok())
+        .and_then(|s| if s.is_empty() { None } else { Some(s) });
+    let text: Option<String> = cfg.get_item("text")?.and_then(|v| v.extract::<String>().ok());
+
+    let (Some(id), Some(cell_ref), Some(person_id), Some(created), Some(text)) =
+        (id, cell_ref, person_id, created, text)
+    else {
+        return Ok(None);
+    };
+
+    let parent_id: Option<String> = cfg
+        .get_item("parent_id")?
+        .and_then(|v| v.extract::<String>().ok())
+        .filter(|s| !s.is_empty());
+    let done: bool = cfg
+        .get_item("done")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(false);
+
+    Ok(Some(ThreadedComment {
+        id,
+        cell_ref,
+        person_id,
+        created,
+        parent_id,
+        text,
+        done,
+    }))
 }
 
 /// Build a `ConditionalFormat` from a cfg dict, or `None` for no-op.

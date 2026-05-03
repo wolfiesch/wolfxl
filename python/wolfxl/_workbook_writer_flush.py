@@ -15,6 +15,7 @@ def flush_workbook_writes(wb: Any) -> None:
     _flush_defined_names(wb, writer)
     _flush_named_styles(wb, writer)
     _flush_security(wb, writer)
+    _flush_persons(wb, writer)
 
 
 def _flush_properties(wb: Any, writer: Any) -> None:
@@ -87,3 +88,31 @@ def _flush_security(wb: Any, writer: Any) -> None:
         if hasattr(writer, "set_workbook_security"):
             writer.set_workbook_security(payload)
         wb._pending_security_update = False  # noqa: SLF001
+
+
+def _flush_persons(wb: Any, writer: Any) -> None:
+    """Push the workbook-scope threaded-comment person registry (RFC-068).
+
+    The Rust ``add_person`` entry point is idempotent on Person ``id`` so
+    repeated flush calls produce a stable personList. The registry is only
+    seeded lazily; if the user never accessed ``wb.persons`` there is
+    nothing to flush.
+    """
+    if not hasattr(writer, "add_person"):
+        return
+    registry = getattr(wb, "_persons_registry", None)  # noqa: SLF001
+    if registry is None or len(registry) == 0:
+        return
+    for person in registry:
+        if person.id is None:
+            # PersonRegistry should always allocate a GUID, but guard the
+            # contract so a misbehaving caller can't poison the save path.
+            continue
+        writer.add_person(
+            {
+                "id": person.id,
+                "name": person.name,
+                "user_id": person.user_id,
+                "provider_id": person.provider_id,
+            }
+        )

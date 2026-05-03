@@ -47,7 +47,7 @@ use crate::native_writer_formats::{
 use crate::native_writer_images::dict_to_sheet_image;
 use crate::native_writer_sheet_features::{
     dict_to_comment, dict_to_conditional_format, dict_to_data_validation, dict_to_hyperlink,
-    dict_to_table, unwrap_optional_wrapper,
+    dict_to_person, dict_to_table, dict_to_threaded_comment, unwrap_optional_wrapper,
 };
 use crate::native_writer_sheet_state::{
     apply_column_width, apply_freeze_panes, apply_merged_range, apply_page_breaks,
@@ -257,6 +257,42 @@ impl NativeWorkbook {
         };
         let ws = require_sheet(&mut self.inner, sheet)?;
         ws.comments.insert(a1, comment);
+        Ok(())
+    }
+
+    /// Append one threaded comment payload (top-level or reply) to a sheet.
+    /// RFC-068 / G08. Idempotency on the Python side ensures we don't double-add.
+    pub fn add_threaded_comment(
+        &mut self,
+        sheet: &str,
+        payload: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        let dict = payload
+            .cast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("threaded_comment payload must be a dict"))?;
+        let Some(tc) = dict_to_threaded_comment(&dict)? else {
+            return Ok(()); // silent no-op — caller didn't supply required keys
+        };
+        let ws = require_sheet(&mut self.inner, sheet)?;
+        ws.threaded_comments.push(tc);
+        Ok(())
+    }
+
+    /// Register one Person in the workbook-scope person table. RFC-068 / G08.
+    pub fn add_person(&mut self, payload: &Bound<'_, PyAny>) -> PyResult<()> {
+        let dict = payload
+            .cast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("person payload must be a dict"))?;
+        let Some(person) = dict_to_person(&dict)? else {
+            return Ok(()); // silent no-op
+        };
+        // Idempotency on the Rust side: skip if a Person with the same id is
+        // already present. The Python registry already enforces this, but a
+        // defensive check keeps the personList byte-stable on repeated flush.
+        if self.inner.persons.contains_id(&person.id) {
+            return Ok(());
+        }
+        self.inner.persons.push(person);
         Ok(())
     }
 
