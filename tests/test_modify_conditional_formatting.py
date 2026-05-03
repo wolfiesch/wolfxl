@@ -484,14 +484,22 @@ def test_cf_no_pending_no_op(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_unsupported_rule_kind_raises(tmp_path: Path) -> None:
-    """IconSet (and other stubbed kinds) raise NotImplementedError pointing at §10."""
+    """Stub CF kinds (containsText, beginsWith, etc.) raise pointing at §10.
+
+    G11 promoted ``iconSet`` to a supported kind, so this test now uses
+    a still-stubbed openpyxl rule type instead.
+    """
+    from wolfxl.formatting.rule import Rule
+
     src = tmp_path / "src.xlsx"
     _make_clean_fixture(src)
 
     wb = Workbook._from_patcher(str(src))
     ws = wb["Sheet1"]
     with pytest.raises(NotImplementedError, match="026-conditional-formatting"):
-        ws.conditional_formatting.add("A1:A10", IconSetRule(icon_style="3Arrows"))
+        ws.conditional_formatting.add(
+            "A1:A10", Rule(type="containsText", formula=["foo"])
+        )
     wb.close()
 
 

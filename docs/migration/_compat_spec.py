@@ -583,8 +583,7 @@ ENTRIES: list[Entry] = [
         "category": "cf",
         "openpyxl": "IconSetRule (3 / 4 / 5 icons + percentile / number ladders)",
         "wolfxl": "IconSetRule (3 / 4 / 5 icons + percentile / number ladders)",
-        "status": "not_yet",
-        "gap_id": "G11",
+        "status": "supported",
         "probe": "cf_icon_sets",
     },
     {
