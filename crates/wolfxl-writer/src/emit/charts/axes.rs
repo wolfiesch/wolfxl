@@ -1,7 +1,8 @@
 //! Chart axis id selection and axis XML emission.
 
 use crate::model::chart::{
-    Axis, AxisCommon, CategoryAxis, Chart, DateAxis, DisplayUnits, Gridlines, SeriesAxis, ValueAxis,
+    Axis, AxisCommon, AxisPos, CategoryAxis, Chart, DateAxis, DisplayUnits, Gridlines, SeriesAxis,
+    ValueAxis,
 };
 use crate::xml_escape;
 
@@ -20,7 +21,7 @@ pub(super) fn pick_axis_ids(chart: &Chart) -> (u32, u32) {
     }
 }
 
-fn axis_common(a: &Axis) -> &AxisCommon {
+pub(super) fn axis_common(a: &Axis) -> &AxisCommon {
     match a {
         Axis::Category(c) => &c.common,
         Axis::Value(c) => &c.common,
@@ -36,6 +37,23 @@ pub(super) fn emit_axis(out: &mut String, axis: &Axis) {
         Axis::Date(d) => emit_date_axis(out, d),
         Axis::Series(s) => emit_series_axis(out, s),
     }
+}
+
+/// RFC-069 §5.2 — emit a value axis as a *secondary* axis on the right
+/// side of the plot. Forces `<c:axPos val="r"/>` and `<c:crosses
+/// val="max"/>` (when not explicitly set) to match Excel's convention
+/// for the second `<c:valAx>` sibling in a combination chart.
+///
+/// This is called only for value axes that the secondary chart owns
+/// (i.e. the secondary's y_axis ax_id differs from the primary's). When
+/// the secondary shares the primary y-axis, no extra axis is emitted.
+pub(super) fn emit_axis_as_secondary(out: &mut String, v: &ValueAxis) {
+    let mut adjusted = v.clone();
+    adjusted.common.ax_pos = AxisPos::Right;
+    if adjusted.crosses.is_none() {
+        adjusted.crosses = Some("max".to_string());
+    }
+    emit_value_axis(out, &adjusted);
 }
 
 fn emit_gridlines(out: &mut String, tag: &str, flag: bool, obj: Option<&Gridlines>) {

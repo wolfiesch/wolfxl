@@ -1023,6 +1023,15 @@ pub struct Chart {
     /// open and the title) and injects a `<c:fmtId val="0"/>` element on
     /// every series.
     pub pivot_source: Option<PivotSource>,
+
+    /// Sibling chart families to emit inside the same `<plotArea>`
+    /// (RFC-069 / G15 — combination charts). Each entry is a fully-formed
+    /// `Chart` whose outer-frame fields (title, legend, anchor, dimensions)
+    /// are ignored by the combination-chart emit path; only per-family
+    /// fields (`kind`, `series`, type-specific knobs, `y_axis`) are
+    /// consumed. Default is an empty vec — every existing single-family
+    /// caller is unaffected.
+    pub secondary_charts: Vec<Chart>,
 }
 
 impl Chart {
@@ -1100,6 +1109,7 @@ impl Chart {
             split_pos: None,
             second_pie_size: None,
             pivot_source: None,
+            secondary_charts: Vec::new(),
         }
     }
 

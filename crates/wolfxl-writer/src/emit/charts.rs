@@ -50,9 +50,9 @@ mod series;
 mod style;
 mod text;
 
-use crate::model::chart::Chart;
+use crate::model::chart::{Axis, Chart, ValueAxis};
 
-use axes::{emit_axis, pick_axis_ids};
+use axes::{axis_common, emit_axis, emit_axis_as_secondary, pick_axis_ids};
 use layout::{emit_layout, emit_legend, emit_view_3d};
 use pivot::emit_pivot_source;
 use plot::emit_plot_chart;
@@ -104,8 +104,21 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
         emit_layout(&mut out, layout);
     }
 
-    // Per-type chart element.
-    emit_plot_chart(&mut out, chart, ax_id_a, ax_id_b);
+    // Primary chart family.
+    let primary_axes = (ax_id_a, ax_id_b);
+    emit_plot_chart(&mut out, chart, primary_axes.0, primary_axes.1);
+
+    // RFC-069 §5.2 — secondary chart families. Each sibling chart
+    // shares the primary category axis (`primary_axes.0`); its value
+    // axis is either shared with the primary or — when the secondary's
+    // `y_axis.ax_id` is distinct — a brand-new value axis emitted as a
+    // second `<c:valAx>` sibling on the right of the plot.
+    let mut secondary_value_axes: Vec<&ValueAxis> = Vec::new();
+    for secondary in &chart.secondary_charts {
+        let (sec_cat, sec_val) =
+            secondary_axis_pair(secondary, primary_axes, &mut secondary_value_axes);
+        emit_plot_chart(&mut out, secondary, sec_cat, sec_val);
+    }
 
     // Axes (after the chart-type element).
     if !chart.kind.is_axis_free() {
@@ -114,6 +127,9 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
         }
         if let Some(y) = &chart.y_axis {
             emit_axis(&mut out, y);
+        }
+        for sv in &secondary_value_axes {
+            emit_axis_as_secondary(&mut out, sv);
         }
     }
 
@@ -134,6 +150,37 @@ pub fn emit_chart_xml(chart: &Chart) -> Vec<u8> {
     out.push_str("</c:chart>");
     out.push_str("</c:chartSpace>");
     out.into_bytes()
+}
+
+/// RFC-069 §5.2 — choose the `(cat_id, val_id)` pair for a secondary
+/// chart family inside a combination chart's `<plotArea>`.
+///
+/// The category axis is always shared with the primary
+/// (`primary_axes.0`). The value axis is the secondary's own
+/// `y_axis.ax_id` when distinct from the primary's; otherwise the
+/// primary value axis is reused. When a new value axis id is allocated,
+/// the secondary's `&ValueAxis` is pushed into `secondary_value_axes`
+/// so the caller emits a second `<c:valAx>` sibling.
+fn secondary_axis_pair<'a>(
+    secondary: &'a Chart,
+    primary_axes: (u32, u32),
+    secondary_value_axes: &mut Vec<&'a ValueAxis>,
+) -> (u32, u32) {
+    let sec_y_id = secondary
+        .y_axis
+        .as_ref()
+        .map(axis_common)
+        .map(|c| c.ax_id);
+
+    match sec_y_id {
+        Some(id) if id != primary_axes.1 => {
+            if let Some(Axis::Value(v)) = secondary.y_axis.as_ref() {
+                secondary_value_axes.push(v);
+            }
+            (primary_axes.0, id)
+        }
+        _ => primary_axes,
+    }
 }
 
 #[cfg(test)]
@@ -474,5 +521,119 @@ mod tests {
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains("<c:name>Sheet &amp; Co</c:name>"));
         assert!(text.contains("<c:fmtId val=\"7\"/>"));
+    }
+
+    // ----------------------------------------------------------------
+    // RFC-069 / G15 — combination charts (multi-family <plotArea>).
+    // ----------------------------------------------------------------
+
+    fn line_secondary_with_axid(ax_id: u32, cross_ax: u32) -> Chart {
+        let mut c = Chart::new(ChartKind::Line, ImageAnchor::one_cell(0, 0));
+        let mut s = Series::new(0);
+        s.title = Some(SeriesTitle::StrRef(Reference::new("Sheet", "C1")));
+        s.values = Some(Reference::new("Sheet", "C2:C6"));
+        c.add_series(s);
+        // Secondary line owns its own value axis (right side) when ax_id != primary.
+        c.y_axis = Some(Axis::Value(ValueAxis {
+            common: AxisCommon::new(ax_id, cross_ax, AxisPos::Left),
+            min: None,
+            max: None,
+            major_unit: None,
+            minor_unit: None,
+            display_units: None,
+            crosses: Some("max".to_string()),
+        }));
+        // Same category axis as primary (shared).
+        c.x_axis = Some(Axis::Category(CategoryAxis {
+            common: AxisCommon::new(10, ax_id, AxisPos::Bottom),
+            lbl_offset: None,
+            lbl_algn: None,
+        }));
+        c
+    }
+
+    #[test]
+    fn combination_chart_emits_multi_family_plot_area() {
+        let mut bar = bar_chart_with_one_series();
+        bar.secondary_charts
+            .push(line_secondary_with_axid(200, 10));
+        let bytes = emit_chart_xml(&bar);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        // Both family elements in one plotArea.
+        let bar_pos = text.find("<c:barChart>").expect("barChart");
+        let line_pos = text.find("<c:lineChart>").expect("lineChart");
+        let plot_open = text.find("<c:plotArea>").expect("plotArea");
+        let plot_close = text.find("</c:plotArea>").expect("plotArea close");
+        assert!(plot_open < bar_pos && bar_pos < line_pos && line_pos < plot_close);
+        // Two value axes — primary (axId=100) + secondary (axId=200).
+        assert!(text.contains("<c:axId val=\"100\"/>"));
+        assert!(text.contains("<c:axId val=\"200\"/>"));
+        assert_eq!(text.matches("<c:valAx>").count(), 2);
+    }
+
+    #[test]
+    fn combination_chart_secondary_axis_renders_on_right_with_crosses_max() {
+        let mut bar = bar_chart_with_one_series();
+        bar.secondary_charts
+            .push(line_secondary_with_axid(200, 10));
+        let bytes = emit_chart_xml(&bar);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        // Locate the secondary <c:valAx> block (the second valAx in the XML).
+        let first_valax = text.find("<c:valAx>").expect("first valAx");
+        let secondary_start = text[first_valax + 1..]
+            .find("<c:valAx>")
+            .map(|i| first_valax + 1 + i)
+            .expect("second valAx (secondary)");
+        let secondary_end = text[secondary_start..]
+            .find("</c:valAx>")
+            .map(|i| secondary_start + i)
+            .expect("secondary valAx close");
+        let secondary_block = &text[secondary_start..secondary_end];
+        assert!(
+            secondary_block.contains("<c:axId val=\"200\"/>"),
+            "secondary block missing axId=200: {secondary_block}"
+        );
+        assert!(
+            secondary_block.contains("<c:axPos val=\"r\"/>"),
+            "secondary block missing axPos=r: {secondary_block}"
+        );
+        assert!(
+            secondary_block.contains("<c:crosses val=\"max\"/>"),
+            "secondary block missing crosses=max: {secondary_block}"
+        );
+    }
+
+    #[test]
+    fn combination_chart_shared_y_axis_emits_single_val_ax() {
+        // Secondary y_axis.ax_id == primary.y_axis.ax_id → no extra axis.
+        let mut bar = bar_chart_with_one_series();
+        let mut shared = Chart::new(ChartKind::Line, ImageAnchor::one_cell(0, 0));
+        let mut s = Series::new(0);
+        s.values = Some(Reference::new("Sheet", "C2:C6"));
+        shared.add_series(s);
+        shared.y_axis = Some(Axis::Value(ValueAxis {
+            // Reuse the primary's y axId=100 from `bar_chart_with_one_series`.
+            common: AxisCommon::new(100, 10, AxisPos::Left),
+            min: None,
+            max: None,
+            major_unit: None,
+            minor_unit: None,
+            display_units: None,
+            crosses: None,
+        }));
+        bar.secondary_charts.push(shared);
+
+        let bytes = emit_chart_xml(&bar);
+        parse_ok(&bytes);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("<c:lineChart>"));
+        // Exactly one valAx — secondary shares the primary y axis.
+        assert_eq!(
+            text.matches("<c:valAx>").count(),
+            1,
+            "shared y-axis must not emit a second valAx; got: {text}"
+        );
     }
 }

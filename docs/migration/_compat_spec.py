@@ -263,9 +263,14 @@ ENTRIES: list[Entry] = [
         "category": "charts",
         "openpyxl": "bar + line on shared category axis with secondary value axis",
         "wolfxl": "bar + line on shared category axis with secondary value axis",
-        "status": "not_yet",
-        "gap_id": "G15",
+        "status": "supported",
         "probe": "charts_combination",
+        "notes": "Combination charts ship as a multi-family `<plotArea>` "
+        "(RFC-069 §6) for real Excel/LibreOffice rendering, plus per-family "
+        "standalone chartspaces anchored at the same cell so openpyxl's "
+        "reader exposes each family as a distinct `ws._charts` entry. "
+        "Secondary value axis (right side) honored when "
+        "`line.y_axis.crosses='max'` and `line.y_axis.axId` is set. Closes G15.",
     },
     {
         "id": "charts.label_rich_text",
