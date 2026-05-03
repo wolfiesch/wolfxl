@@ -272,10 +272,10 @@ ENTRIES: list[Entry] = [
         "category": "charts",
         "openpyxl": "data label + axis label rich-text runs",
         "wolfxl": "data label + axis label rich-text runs",
-        "status": "partial",
+        "status": "supported",
         "gap_id": "G10",
         "probe": "charts_label_rich_text",
-        "notes": "Title rich text shipped in v1.7; labels and axis-label runs are next.",
+        "notes": "Data label `<c:txPr>` runs and axis-title rich text round-trip end-to-end (G10).",
     },
     {
         "id": "charts.pivot_chart_per_point",

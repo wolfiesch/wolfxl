@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **52** / 74
-- 🟡 Partial: **10** / 74
+- ✅ Supported: **53** / 74
+- 🟡 Partial: **9** / 74
 - ❌ Not Yet: **11** / 74
 - ⛔ Out of Scope: **1** / 74
 
@@ -55,7 +55,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart` | `SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart` | ✅ Supported |  |  |
 | `ws.add_chart / remove_chart / replace_chart` | `ws.add_chart / remove_chart / replace_chart` | ✅ Supported |  | remove/replace shipped in v1.7. |
 | `bar + line on shared category axis with secondary value axis` | `bar + line on shared category axis with secondary value axis` | ❌ Not Yet | G15 |  |
-| `data label + axis label rich-text runs` | `data label + axis label rich-text runs` | 🟡 Partial | G10 | Title rich text shipped in v1.7; labels and axis-label runs are next. |
+| `data label + axis label rich-text runs` | `data label + axis label rich-text runs` | ✅ Supported | G10 | Data label `<c:txPr>` runs and axis-title rich text round-trip end-to-end (G10). |
 | `pivot chart with per-point overrides` | `pivot chart with per-point overrides` | 🟡 Partial | G16 |  |
 
 ## Pivot tables

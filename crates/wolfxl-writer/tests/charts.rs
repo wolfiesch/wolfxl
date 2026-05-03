@@ -455,6 +455,7 @@ fn data_labels_show_val_cat_position() {
         position: Some("outEnd".to_string()),
         number_format: Some("0.00".to_string()),
         separator: Some(", ".to_string()),
+        tx_pr_runs: Vec::new(),
     });
     c.add_series(s);
     let (x, y) = cat_value_pair();

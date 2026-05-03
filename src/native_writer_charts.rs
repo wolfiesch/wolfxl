@@ -1074,6 +1074,7 @@ fn parse_data_point(d: &Bound<'_, PyDict>) -> PyResult<DataPoint> {
 }
 
 fn parse_data_labels(d: &Bound<'_, PyDict>) -> PyResult<DataLabels> {
+    let tx_pr_runs = parse_optional_runs(d, "tx_pr_runs")?;
     Ok(DataLabels {
         show_val: py_opt_bool(d, "show_val")?,
         show_cat_name: py_opt_bool(d, "show_cat_name")?,
@@ -1084,7 +1085,73 @@ fn parse_data_labels(d: &Bound<'_, PyDict>) -> PyResult<DataLabels> {
         position: py_opt_str(d, "position")?,
         number_format: py_opt_str(d, "number_format")?,
         separator: py_opt_str(d, "separator")?,
+        tx_pr_runs,
     })
+}
+
+fn parse_optional_runs(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<TitleRun>> {
+    let Some(v) = d.get_item(key)? else {
+        return Ok(Vec::new());
+    };
+    if v.is_none() {
+        return Ok(Vec::new());
+    }
+    let list: Vec<Bound<'_, PyAny>> = v.extract()?;
+    let mut out = Vec::with_capacity(list.len());
+    for rv in list.iter() {
+        let rd = rv
+            .cast::<PyDict>()
+            .map_err(|_| PyValueError::new_err(format!("{key} entry must be a dict")))?;
+        let text: String = rd
+            .get_item("text")?
+            .ok_or_else(|| PyValueError::new_err(format!("{key} run missing 'text'")))?
+            .extract()?;
+        let mut bold = py_opt_bool(rd, "bold")?;
+        let mut italic = py_opt_bool(rd, "italic")?;
+        let mut underline = py_opt_bool(rd, "underline")?;
+        let mut size_pt = py_opt_u32(rd, "size_pt")?;
+        let mut color = py_opt_str(rd, "color")?;
+        let mut font_name = py_opt_str(rd, "font_name")?;
+        if let Some(fv) = rd.get_item("font")? {
+            if !fv.is_none() {
+                let fd = fv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key} run 'font' must be a dict")))?;
+                if let Some(b) = py_opt_bool(fd, "bold")? {
+                    bold = Some(b);
+                }
+                if let Some(i) = py_opt_bool(fd, "italic")? {
+                    italic = Some(i);
+                }
+                if let Some(u) = py_opt_bool(fd, "underline")? {
+                    underline = Some(u);
+                }
+                if let Some(s) = py_opt_u32(fd, "size")? {
+                    size_pt = Some(s);
+                } else if let Some(s) = py_opt_u32(fd, "size_pt")? {
+                    size_pt = Some(s);
+                }
+                if let Some(c) = py_opt_str(fd, "color")? {
+                    color = Some(c);
+                }
+                if let Some(n) = py_opt_str(fd, "name")? {
+                    font_name = Some(n);
+                } else if let Some(n) = py_opt_str(fd, "font_name")? {
+                    font_name = Some(n);
+                }
+            }
+        }
+        out.push(TitleRun {
+            text,
+            bold,
+            italic,
+            underline,
+            size_pt,
+            color,
+            font_name,
+        });
+    }
+    Ok(out)
 }
 
 fn parse_error_bars(d: &Bound<'_, PyDict>) -> PyResult<ErrorBars> {
