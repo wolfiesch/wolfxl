@@ -129,6 +129,33 @@ denominator up).
 The pass-% number must monotonically rise sprint-over-sprint; any regression
 fails the per-sprint gate and blocks the sprint from being marked landed.
 
+## Sprint 1 metrics (post-merge)
+
+Recorded 2026-05-03 after cherry-picking the three S1 winners onto main
+(``792d14d`` G07 DataTableFormula, ``a694bbc`` G04 WorkbookProtection
+camelCase aliases, ``da51897`` G06 image remove/replace). G03 and G05 were
+reclassified from 🤖 to 🧠 after their pods correctly POD-BLOCKED on
+out-of-scope native-Rust changes; both await Claude takeover.
+
+| Date       | Metric                                                  |        Value | Delta vs S0 baseline |
+|------------|---------------------------------------------------------|-------------:|:---------------------|
+| 2026-05-03 | Compat-oracle total probes                              |           50 | unchanged |
+| 2026-05-03 | Compat-oracle passed (green)                            |           33 | +3 (data_table, protection.workbook, images.replace_remove) |
+| 2026-05-03 | Compat-oracle xfailed                                   |           17 | -3 (gaps closed) |
+| 2026-05-03 | Compat-oracle failed                                    |            0 | unchanged |
+| 2026-05-03 | Compat-oracle pass rate                                 |        66.0% | +6.0 pp |
+| 2026-05-03 | Matrix rows ✅ Supported                                |    46 / 74   | +3 |
+| 2026-05-03 | Matrix rows 🟡 Partial                                  |    15 / 74   | -2 |
+| 2026-05-03 | Matrix rows ❌ Not Yet                                  |    12 / 74   | -1 |
+| 2026-05-03 | Matrix rows ⛔ Out of Scope                             |     1 / 74   | unchanged |
+| 2026-05-03 | Full Python suite (``pytest -q``)                       | 2348 / 17 xf | -3 xfailed (gap closures); 0 failed |
+
+S1 sprint gate: pass rate moved 60.0% → 66.0% with zero regressions in
+``cargo test --workspace`` or ``pytest -q``. Two pods (G03, G05) deferred to
+Claude with no LOC merged; one pod (G04) had its cell-half reverted and the
+workbook-half kept. Matrix renderer regenerated from merged spec; row counts
+verified via ``status_totals()``.
+
 ## Sprint sequence
 
 ### Sprint 0 - Foundation (CRITICAL FIRST, ~1 session, Claude-led)
