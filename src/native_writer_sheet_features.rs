@@ -294,22 +294,11 @@ pub(crate) fn dict_to_conditional_format(
                 max: ConditionalThreshold::Max,
             }
         }
-        "colorScale" | "color_scale" => ConditionalKind::ColorScale {
-            stops: vec![
-                ColorScaleStop {
-                    threshold: ConditionalThreshold::Min,
-                    color_rgb: "FFAA0000".to_string(),
-                },
-                ColorScaleStop {
-                    threshold: ConditionalThreshold::Percentile(50.0),
-                    color_rgb: "FFFFFF00".to_string(),
-                },
-                ColorScaleStop {
-                    threshold: ConditionalThreshold::Max,
-                    color_rgb: "FF00AA00".to_string(),
-                },
-            ],
-        },
+        "colorScale" | "color_scale" => {
+            ConditionalKind::ColorScale {
+                stops: build_color_scale_stops(cfg)?,
+            }
+        }
         _ => ConditionalKind::Expression {
             formula: "FALSE()".to_string(),
         },
@@ -325,6 +314,148 @@ pub(crate) fn dict_to_conditional_format(
         sqref: range,
         rules: vec![rule],
     }))
+}
+
+/// Map a cfvo type string + optional value into a `ConditionalThreshold`.
+///
+/// Mirrors the openpyxl naming surface: ``min`` / ``max`` / ``num`` /
+/// ``percent`` / ``percentile`` / ``formula``. Unknown types fall back to
+/// ``Min``/``Max`` based on the position-implied ``fallback`` argument so
+/// the Vec we return still has the right shape.
+fn cfvo_to_threshold(
+    cfvo_type: Option<&str>,
+    value: Option<&str>,
+    fallback: ConditionalThreshold,
+) -> ConditionalThreshold {
+    let Some(cfvo_type) = cfvo_type else {
+        return fallback;
+    };
+    match cfvo_type {
+        "min" => ConditionalThreshold::Min,
+        "max" => ConditionalThreshold::Max,
+        "num" | "number" => value
+            .and_then(|s| s.parse::<f64>().ok())
+            .map(ConditionalThreshold::Number)
+            .unwrap_or(fallback),
+        "percent" => value
+            .and_then(|s| s.parse::<f64>().ok())
+            .map(ConditionalThreshold::Percent)
+            .unwrap_or(fallback),
+        "percentile" => value
+            .and_then(|s| s.parse::<f64>().ok())
+            .map(ConditionalThreshold::Percentile)
+            .unwrap_or(fallback),
+        "formula" => value
+            .map(|s| ConditionalThreshold::Formula(s.to_string()))
+            .unwrap_or(fallback),
+        _ => fallback,
+    }
+}
+
+/// Pull a string out of the cfg dict, treating empty strings as absent.
+fn dict_get_string(
+    cfg: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<String>> {
+    let value: Option<String> = cfg.get_item(key)?.and_then(|v| {
+        // Accept str directly or coerce numeric values via PyAny.
+        if let Ok(s) = v.extract::<String>() {
+            Some(s)
+        } else if let Ok(f) = v.extract::<f64>() {
+            // Drop trailing ``.0`` for whole numbers so ``50`` round-trips
+            // instead of becoming ``50.0`` in the OOXML attribute.
+            if f.fract() == 0.0 && f.abs() < 1e15 {
+                Some(format!("{}", f as i64))
+            } else {
+                Some(format!("{}", f))
+            }
+        } else if let Ok(i) = v.extract::<i64>() {
+            Some(format!("{}", i))
+        } else {
+            None
+        }
+    });
+    Ok(value.filter(|s| !s.is_empty()))
+}
+
+/// Build the `Vec<ColorScaleStop>` for a colorScale rule from cfg keys.
+///
+/// Honours up to nine user-supplied keys (``start_type`` / ``start_value`` /
+/// ``start_color`` and the ``mid_*`` / ``end_*`` siblings). A 2-stop scale is
+/// emitted when no ``mid_*`` keys are present; otherwise a 3-stop. Missing
+/// colors fall back to Excel's defaults (`F8696B` red, `FFEB84` yellow,
+/// `63BE7B` green) so partial input still produces a valid gradient.
+fn build_color_scale_stops(cfg: &Bound<'_, PyDict>) -> PyResult<Vec<ColorScaleStop>> {
+    // Defaults match Excel's "Red - Yellow - Green" 3-color scale preset so
+    // a bare ``ColorScaleRule()`` round-trips without surprising the user.
+    const DEFAULT_START_COLOR: &str = "FFF8696B";
+    const DEFAULT_MID_COLOR: &str = "FFFFEB84";
+    const DEFAULT_END_COLOR: &str = "FF63BE7B";
+
+    let start_type = dict_get_string(cfg, "start_type")?;
+    let start_value = dict_get_string(cfg, "start_value")?;
+    let start_color = dict_get_string(cfg, "start_color")?;
+    let mid_type = dict_get_string(cfg, "mid_type")?;
+    let mid_value = dict_get_string(cfg, "mid_value")?;
+    let mid_color = dict_get_string(cfg, "mid_color")?;
+    let end_type = dict_get_string(cfg, "end_type")?;
+    let end_value = dict_get_string(cfg, "end_value")?;
+    let end_color = dict_get_string(cfg, "end_color")?;
+
+    // 3-stop iff any mid_* key is non-None; otherwise 2-stop. This mirrors
+    // openpyxl's ColorScaleRule semantics where omitting mid_* gives a 2-stop.
+    let has_mid = mid_type.is_some() || mid_value.is_some() || mid_color.is_some();
+
+    // Backwards-compat default: a bare ``ColorScaleRule()`` with no kwargs
+    // forwards no start/mid/end keys at all, so produce the hardcoded
+    // 3-stop "Red - Yellow - Green" gradient that older callers relied on.
+    let any_user_input = start_type.is_some()
+        || start_value.is_some()
+        || start_color.is_some()
+        || has_mid
+        || end_type.is_some()
+        || end_value.is_some()
+        || end_color.is_some();
+    let has_mid = has_mid || !any_user_input;
+
+    let normalize = |c: Option<String>, fallback: &str| -> String {
+        c.as_deref()
+            .and_then(parse_hex_color)
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
+    let mut stops: Vec<ColorScaleStop> = Vec::with_capacity(if has_mid { 3 } else { 2 });
+
+    stops.push(ColorScaleStop {
+        threshold: cfvo_to_threshold(
+            start_type.as_deref(),
+            start_value.as_deref(),
+            ConditionalThreshold::Min,
+        ),
+        color_rgb: normalize(start_color, DEFAULT_START_COLOR),
+    });
+
+    if has_mid {
+        stops.push(ColorScaleStop {
+            threshold: cfvo_to_threshold(
+                mid_type.as_deref(),
+                mid_value.as_deref(),
+                ConditionalThreshold::Percentile(50.0),
+            ),
+            color_rgb: normalize(mid_color, DEFAULT_MID_COLOR),
+        });
+    }
+
+    stops.push(ColorScaleStop {
+        threshold: cfvo_to_threshold(
+            end_type.as_deref(),
+            end_value.as_deref(),
+            ConditionalThreshold::Max,
+        ),
+        color_rgb: normalize(end_color, DEFAULT_END_COLOR),
+    });
+
+    Ok(stops)
 }
 
 /// Build a `DataValidation` from a cfg dict, or `None` for no-op.

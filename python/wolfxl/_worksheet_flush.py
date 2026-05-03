@@ -370,15 +370,38 @@ def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -
 
 
 def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
-    """Build the native writer payload for a worksheet conditional format."""
+    """Build the native writer payload for a worksheet conditional format.
+
+    For ``colorScale`` rules the user-supplied 9-tuple of cfvo/color anchors
+    (``start_type`` / ``start_value`` / ``start_color`` / ``mid_*`` / ``end_*``)
+    rides on ``rule.extra``; we forward those so the Rust writer can build a
+    matching ``Vec<ColorScaleStop>`` instead of the hardcoded 3-stop fallback.
+    """
     formula = rule.formula[0] if rule.formula else None
-    return {
+    payload: dict[str, Any] = {
         "range": range_string,
         "rule_type": rule.type,
         "operator": rule.operator,
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    if rule.type == "colorScale":
+        extra = getattr(rule, "extra", None) or {}
+        for key in (
+            "start_type",
+            "start_value",
+            "start_color",
+            "mid_type",
+            "mid_value",
+            "mid_color",
+            "end_type",
+            "end_value",
+            "end_color",
+        ):
+            value = extra.get(key)
+            if value is not None:
+                payload[key] = value
+    return payload
 
 
 def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:

@@ -1007,6 +1007,25 @@ pub struct ConditionalFormatRule {
     pub formula: Option<String>,
     pub priority: Option<i64>,
     pub stop_if_true: Option<bool>,
+    /// Populated for ``colorScale`` rules so callers can reconstruct the
+    /// gradient anchors (cfvo type / val) and per-stop color. Empty for
+    /// every other rule kind.
+    pub color_scale: Option<ColorScaleInfo>,
+}
+
+/// Parsed `<colorScale>` block: ordered cfvo anchors paired with colors.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ColorScaleInfo {
+    pub cfvo: Vec<CfvoInfo>,
+    pub colors: Vec<String>,
+}
+
+/// One `<cfvo>` anchor: type plus optional literal value (for num / percent
+/// / percentile / formula thresholds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CfvoInfo {
+    pub cfvo_type: String,
+    pub val: Option<String>,
 }
 
 /// Array/data-table formula metadata for a cell.
@@ -2787,6 +2806,36 @@ fn parse_worksheet(
                         current_conditional_range.clone().unwrap_or_default(),
                     ));
                 }
+                b"colorScale" => {
+                    if let Some(rule) = current_conditional_rule.as_mut() {
+                        rule.start_color_scale();
+                    }
+                }
+                b"cfvo" => {
+                    if let Some(rule) = current_conditional_rule
+                        .as_mut()
+                        .filter(|r| r.color_scale.is_some())
+                    {
+                        rule.push_cfvo(&e);
+                    }
+                }
+                b"color" => {
+                    // Only consume <color> when it's a child of <colorScale>
+                    // inside the current cfRule. Otherwise fall through so
+                    // inline rich-text (<rPr><color/></rPr>) is handled by
+                    // the inline-string fallback below.
+                    if let Some(rule) = current_conditional_rule
+                        .as_mut()
+                        .filter(|r| r.color_scale.is_some())
+                    {
+                        rule.push_color(&e);
+                    } else if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.apply_inline_font_tag(b"color", e.attributes());
+                    }
+                }
                 b"formula" => {
                     if current_conditional_rule.is_some() {
                         in_conditional_formula = true;
@@ -2953,6 +3002,30 @@ fn parse_worksheet(
                     .finish();
                     if !rule.range.trim().is_empty() && !rule.rule_type.trim().is_empty() {
                         conditional_formats.push(rule);
+                    }
+                }
+                b"cfvo" => {
+                    if let Some(rule) = current_conditional_rule
+                        .as_mut()
+                        .filter(|r| r.color_scale.is_some())
+                    {
+                        rule.push_cfvo(&e);
+                    }
+                }
+                b"color" => {
+                    // Only consume <color/> when inside a <colorScale> in
+                    // the current cfRule; otherwise treat as an inline-font
+                    // tag for rich-text inline strings.
+                    if let Some(rule) = current_conditional_rule
+                        .as_mut()
+                        .filter(|r| r.color_scale.is_some())
+                    {
+                        rule.push_color(&e);
+                    } else if let Some(cell) = current
+                        .as_mut()
+                        .filter(|c| c.data_type == CellDataType::InlineString)
+                    {
+                        cell.apply_inline_font_tag(b"color", e.attributes());
                     }
                 }
                 other => {
@@ -3810,6 +3883,7 @@ struct ConditionalFormatBuilder {
     formula_text: String,
     priority: Option<i64>,
     stop_if_true: Option<bool>,
+    color_scale: Option<ColorScaleInfo>,
 }
 
 impl ConditionalFormatBuilder {
@@ -3822,6 +3896,7 @@ impl ConditionalFormatBuilder {
             formula_text: String::new(),
             priority: attr_value(e, b"priority").and_then(|value| value.parse::<i64>().ok()),
             stop_if_true: attr_value(e, b"stopIfTrue").map(|value| attr_truthy(Some(&value))),
+            color_scale: None,
         }
     }
 
@@ -3834,6 +3909,32 @@ impl ConditionalFormatBuilder {
         if !formula.is_empty() && self.formula.is_none() {
             self.formula = Some(ensure_formula_prefix(formula));
         }
+        self.formula_text.clear();
+    }
+
+    fn start_color_scale(&mut self) {
+        if self.color_scale.is_none() {
+            self.color_scale = Some(ColorScaleInfo::default());
+        }
+    }
+
+    fn push_cfvo(&mut self, e: &BytesStart<'_>) {
+        if let Some(cs) = self.color_scale.as_mut() {
+            cs.cfvo.push(CfvoInfo {
+                cfvo_type: attr_value(e, b"type").unwrap_or_default(),
+                val: attr_value(e, b"val"),
+            });
+        }
+    }
+
+    fn push_color(&mut self, e: &BytesStart<'_>) {
+        if let Some(cs) = self.color_scale.as_mut() {
+            // Prefer rgb attribute; theme/indexed colors are out of scope
+            // here (round-tripped only when explicit ARGB is present).
+            if let Some(rgb) = attr_value(e, b"rgb") {
+                cs.colors.push(rgb);
+            }
+        }
     }
 
     fn finish(self) -> ConditionalFormatRule {
@@ -3844,6 +3945,7 @@ impl ConditionalFormatBuilder {
             formula: self.formula,
             priority: self.priority,
             stop_if_true: self.stop_if_true,
+            color_scale: self.color_scale,
         }
     }
 }
@@ -6125,6 +6227,7 @@ mod tests {
                 formula: Some("=50".to_string()),
                 priority: Some(1),
                 stop_if_true: Some(true),
+                color_scale: None,
             }]
         );
         assert_eq!(

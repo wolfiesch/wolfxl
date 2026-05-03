@@ -2361,6 +2361,7 @@ mod tests {
                 formula: Some("=50".to_string()),
                 priority: Some(1),
                 stop_if_true: Some(true),
+                color_scale: None,
             })
         );
     }
@@ -2416,6 +2417,7 @@ mod tests {
                 formula: Some("=B2>0".to_string()),
                 priority: Some(3),
                 stop_if_true: Some(false),
+                color_scale: None,
             }]
         );
     }

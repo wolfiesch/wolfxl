@@ -601,8 +601,7 @@ ENTRIES: list[Entry] = [
         "category": "cf",
         "openpyxl": "ColorScaleRule with 3-stop, percentile / formula / number cfvo",
         "wolfxl": "ColorScaleRule with 3-stop, percentile / formula / number cfvo",
-        "status": "partial",
-        "gap_id": "G13",
+        "status": "supported",
         "probe": "cf_color_scales_advanced",
     },
     {
