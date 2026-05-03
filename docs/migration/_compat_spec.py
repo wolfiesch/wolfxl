@@ -282,8 +282,15 @@ ENTRIES: list[Entry] = [
         "category": "charts",
         "openpyxl": "pivot chart with per-point overrides",
         "wolfxl": "pivot chart with per-point overrides",
-        "status": "partial",
-        "gap_id": "G16",
+        "status": "supported",
+        "probe": "charts_pivot_chart_per_point",
+        "notes": (
+            "Per-point `<c:dPt>` overrides round-trip through openpyxl on "
+            "pivot-source charts (G16). Bar/line/scatter all share the same "
+            "dict bridge: `Series.dPt` -> `data_points` -> Rust `DataPoint` -> "
+            "`<c:dPt>` with `<c:spPr>`. Pivot vs non-pivot only differ in the "
+            "chart-level `<c:pivotSource>` block."
+        ),
     },
     # --- Pivot tables ------------------------------------------------------
     {
