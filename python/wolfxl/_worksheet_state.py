@@ -48,6 +48,12 @@ def initialize_worksheet_state(
     ws._charts_cache: list[Any] | None = None  # noqa: SLF001
 
     ws._pending_comments: dict[str, Any] = {}  # noqa: SLF001
+    # Threaded comments (G08) live in their own pending bag so the
+    # legacy comment slot can carry an unmodified ``Comment`` while
+    # the threaded payload is queued for a separate part. ``None``
+    # means "user explicitly cleared". Each entry is the top-level
+    # ``ThreadedComment``; replies are reachable via ``.replies``.
+    ws._pending_threaded_comments: dict[str, Any] = {}  # noqa: SLF001
     ws._pending_hyperlinks: dict[str, Any] = {}  # noqa: SLF001
     ws._pending_rich_text: dict[tuple[int, int], Any] = {}  # noqa: SLF001
     ws._pending_array_formulas: dict[  # noqa: SLF001

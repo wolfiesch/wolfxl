@@ -353,7 +353,70 @@ class Cell:
             value: ``Comment`` instance, or ``None`` to delete the comment on
                 the next save.
         """
+        if value is not None:
+            ws = self._ws
+            pending_t = ws._pending_threaded_comments.get(self.coordinate)  # noqa: SLF001
+            if pending_t is not None:
+                raise ValueError(
+                    f"cell {self.coordinate} already has a threaded comment; "
+                    "remove it before adding a legacy comment"
+                )
         set_comment(self, value)
+
+    @property
+    def threaded_comment(self) -> Any:
+        """Return the cell's top-level threaded comment, or ``None`` (G08).
+
+        Pending unsaved edits take precedence over reader state, matching
+        the legacy ``comment`` property's contract.
+        """
+        ws = self._ws
+        pending = ws._pending_threaded_comments.get(self.coordinate, _UNSET)  # noqa: SLF001
+        if pending is None:
+            return None
+        if pending is not _UNSET:
+            return pending
+        # Reader-side hydration lands in step 4; for now return None when
+        # there is no pending payload.
+        return None
+
+    @threaded_comment.setter
+    def threaded_comment(self, value: Any) -> None:
+        """Attach or clear the cell's top-level threaded comment.
+
+        Setting to ``None`` deletes the threaded comment (and replies) on
+        the next save. Assigning a reply (one whose ``parent`` is non-None)
+        raises — replies belong on the top-level's ``replies`` list.
+        Assigning to a cell that already carries a legacy ``Comment``
+        raises with a precise message; remove the legacy comment first.
+        """
+        from wolfxl.comments import ThreadedComment
+
+        ws = self._ws
+        wb = ws._workbook  # noqa: SLF001
+        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+            raise RuntimeError("cell.threaded_comment requires write or modify mode")
+
+        coord = self.coordinate
+        if value is None:
+            ws._pending_threaded_comments[coord] = None  # noqa: SLF001
+            return
+        if not isinstance(value, ThreadedComment):
+            raise TypeError(
+                f"threaded_comment must be a ThreadedComment, got {type(value).__name__}"
+            )
+        if value.parent is not None:
+            raise ValueError(
+                "threaded_comment must be a top-level comment; "
+                "reply via threaded_comment.replies.append(...)"
+            )
+        legacy = ws._pending_comments.get(coord)  # noqa: SLF001
+        if legacy is not None and legacy is not _UNSET:
+            raise ValueError(
+                f"cell {coord} already has a legacy comment; "
+                "remove it before adding a threaded comment"
+            )
+        ws._pending_threaded_comments[coord] = value  # noqa: SLF001
 
     @property
     def protection(self) -> Protection:

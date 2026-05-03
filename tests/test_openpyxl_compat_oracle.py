@@ -818,18 +818,33 @@ def _probe_comments_basic(tmp_path: Path) -> None:
 
 @_register("comments_threaded")
 def _probe_comments_threaded(tmp_path: Path) -> None:
-    """Threaded comments (xl/threadedComments). Tracked under G08 (S2)."""
+    """Threaded comments (xl/threadedComments). Tracked under G08 (S2).
+
+    Probe asserts the full round-trip: add a top-level threaded comment +
+    one reply, save, reload, and confirm both texts survive. Class-existence
+    alone is not enough — that lets the probe XPASS on partial work.
+    """
     import wolfxl
+    from wolfxl.comments import ThreadedComment
 
     wb = wolfxl.Workbook()
     ws = wb.active
     ws["A1"] = "anchor"
-    threaded = getattr(wb, "ThreadedComment", None) or getattr(
-        __import__("wolfxl.comments", fromlist=["ThreadedComment"]),
-        "ThreadedComment",
-        None,
+    alice = wb.persons.add(name="Alice", user_id="alice@example.com")
+    top = ThreadedComment(text="Looks wrong", person=alice)
+    top.replies.append(
+        ThreadedComment(text="Agreed; investigating", person=alice, parent=top)
     )
-    assert threaded is not None, "ThreadedComment public class missing"
+    ws["A1"].threaded_comment = top
+    out = tmp_path / "tc.xlsx"
+    wb.save(out)
+
+    wb2 = wolfxl.load_workbook(out)
+    got = wb2.active["A1"].threaded_comment
+    assert got is not None, "threaded comment lost across save+load"
+    assert got.text == "Looks wrong"
+    assert len(got.replies) == 1
+    assert got.replies[0].text == "Agreed; investigating"
 
 
 # --------------------------------------------------------------------------

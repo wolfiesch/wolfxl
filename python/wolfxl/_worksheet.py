@@ -155,7 +155,7 @@ class Worksheet:
         "_tables_cache", "_data_validations_cache",
         "_conditional_formatting_cache", "_images_cache", "_charts_cache",
         # Write-mode pending queues flushed in _flush() on save().
-        "_pending_comments", "_pending_hyperlinks",
+        "_pending_comments", "_pending_threaded_comments", "_pending_hyperlinks",
         "_pending_tables", "_pending_data_validations",
         "_pending_conditional_formats",
         # Pending rich-text values keyed by sparse (row, col) coordinate.

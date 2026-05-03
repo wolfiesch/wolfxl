@@ -45,4 +45,7 @@ class Comment:
         self.parent = None
 
 
-__all__ = ["Comment"]
+from wolfxl.comments._person import Person, PersonRegistry
+from wolfxl.comments._threaded_comment import ThreadedComment
+
+__all__ = ["Comment", "Person", "PersonRegistry", "ThreadedComment"]

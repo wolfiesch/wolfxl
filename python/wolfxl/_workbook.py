@@ -430,6 +430,20 @@ class Workbook:
             self._named_styles_registry = _NamedStyleList()
         return self._named_styles_registry
 
+    @property
+    def persons(self) -> Any:
+        """Workbook-scoped threaded-comment author registry (G08).
+
+        Lazily seeded on first access. ``wb.persons.add(name=..., user_id=...)``
+        returns a ``Person`` whose GUID is auto-allocated and which is
+        idempotent on ``(user_id, provider_id)`` when both are non-empty.
+        """
+        if getattr(self, "_persons_registry", None) is None:
+            from wolfxl.comments._person import PersonRegistry
+
+            self._persons_registry: Any = PersonRegistry()
+        return self._persons_registry
+
     def __getitem__(self, name: str) -> Worksheet:
         """Return a worksheet by title."""
         if name not in self._sheets:
