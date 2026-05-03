@@ -85,6 +85,17 @@ pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
             "calcChain.xml",
             TargetMode::Internal,
         );
+        next_rid += 1;
+    }
+    // RFC-068 / G08: workbook-scoped personList rel, only when the workbook
+    // has at least one threaded-comment person.
+    if !wb.persons.is_empty() {
+        g.add_with_id(
+            RelId(format!("rId{next_rid}")),
+            rt::PERSON_LIST,
+            "persons/personList.xml",
+            TargetMode::Internal,
+        );
     }
     g.serialize()
 }
@@ -184,6 +195,22 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
             RelId(rel_ids.drawing().expect("drawing relationship id")),
             rt::DRAWING,
             &format!("../drawings/drawing{drawing_n}.xml"),
+            TargetMode::Internal,
+        );
+    }
+
+    // RFC-068 / G08: threadedCommentsN rel — sheet-numbered (matches
+    // commentsN.xml). Only emitted when this sheet has threaded comments.
+    if !sheet.threaded_comments.is_empty() {
+        let n = sheet_idx + 1;
+        g.add_with_id(
+            RelId(
+                rel_ids
+                    .threaded_comments()
+                    .expect("threadedComments relationship id"),
+            ),
+            rt::THREADED_COMMENTS,
+            &format!("../threadedComments/threadedComments{n}.xml"),
             TargetMode::Internal,
         );
     }

@@ -13,6 +13,7 @@ pub mod defined_name;
 pub mod format;
 pub mod image;
 pub mod table;
+pub mod threaded_comment;
 pub mod validation;
 pub mod workbook;
 pub mod worksheet;
@@ -38,6 +39,7 @@ pub use format::{
 };
 pub use image::{ImageAnchor, SheetImage};
 pub use table::{Table, TableColumn, TableStyle};
+pub use threaded_comment::{Person, PersonTable, ThreadedComment};
 pub use validation::{DataValidation, ErrorStyle, ValidationOperator, ValidationType};
 pub use workbook::{DocProperties, Workbook};
 pub use worksheet::{Column, FreezePane, Hyperlink, Row, SheetVisibility, SplitPane, Worksheet};

@@ -3,6 +3,7 @@
 use super::comment::CommentAuthorTable;
 use super::defined_name::DefinedName;
 use super::format::StylesBuilder;
+use super::threaded_comment::PersonTable;
 use super::worksheet::Worksheet;
 use crate::intern::SstBuilder;
 use crate::parse::workbook_security::WorkbookSecurity;
@@ -41,6 +42,11 @@ pub struct Workbook {
     /// `<fileSharing>`). Both are optional; when both are `None` the
     /// emitter writes neither element.
     pub security: WorkbookSecurity,
+
+    /// Workbook-scope threaded-comment person registry (RFC-068 / G08).
+    /// Empty by default — `xl/persons/personList.xml` is only emitted when
+    /// at least one threaded comment exists.
+    pub persons: PersonTable,
 }
 
 impl Workbook {

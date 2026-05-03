@@ -8,6 +8,7 @@ use super::comment::Comment;
 use super::conditional::ConditionalFormat;
 use super::image::SheetImage;
 use super::table::Table;
+use super::threaded_comment::ThreadedComment;
 use super::validation::DataValidation;
 use crate::refs;
 
@@ -44,6 +45,12 @@ pub struct Worksheet {
     /// Cell comments. Keyed by A1 reference. Author insertion order
     /// is preserved by the `IndexMap` inside the workbook-level emitter.
     pub comments: BTreeMap<String, Comment>,
+
+    /// Threaded comments (RFC-068 / G08). Flat OOXML-shaped list — replies
+    /// are siblings of their parent linked via [`ThreadedComment::parent_id`].
+    /// Order is the on-disk emit order: top-level first, then replies in
+    /// chronological order. Empty by default.
+    pub threaded_comments: Vec<ThreadedComment>,
 
     /// Conditional formatting blocks. Order is preserved (Excel honors
     /// first-matching priority).
@@ -125,6 +132,7 @@ impl Worksheet {
             columns: BTreeMap::new(),
             hyperlinks: BTreeMap::new(),
             comments: BTreeMap::new(),
+            threaded_comments: Vec::new(),
             conditional_formats: Vec::new(),
             validations: Vec::new(),
             tables: Vec::new(),

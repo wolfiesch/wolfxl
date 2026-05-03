@@ -62,9 +62,16 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
     use crate::emit::drawings::DrawingItem;
     use crate::emit::{
         calc_chain_xml, charts, comments_xml, content_types, doc_props, drawings, drawings_vml,
-        rels, shared_strings_xml, sheet_xml, styles_xml, tables_xml, workbook_xml,
+        persons_xml, rels, shared_strings_xml, sheet_xml, styles_xml, tables_xml,
+        threaded_comments_xml, workbook_xml,
     };
     use crate::zip::{package, ZipEntry};
+
+    // RFC-068: synthesize legacy comment placeholders + tc= authors before
+    // any sheet emit runs, so each top-level threaded comment has a paired
+    // legacy `<comment>` and the workbook author table contains the
+    // `tc={guid}` synthetic author entries.
+    threaded_comments_xml::synthesize_legacy_placeholders(wb);
 
     // Sheet emission mutates the SST — must run before the SST emitter.
     let mut sheet_parts: Vec<(String, Vec<u8>)> = Vec::new();
@@ -117,6 +124,12 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             entries.push(ZipEntry {
                 path: format!("xl/drawings/vmlDrawing{}.vml", idx + 1),
                 bytes: drawings_vml::emit(sheet),
+            });
+        }
+        if !sheet.threaded_comments.is_empty() {
+            entries.push(ZipEntry {
+                path: format!("xl/threadedComments/threadedComments{}.xml", idx + 1),
+                bytes: threaded_comments_xml::emit(&sheet.threaded_comments),
             });
         }
         for table in &sheet.tables {
@@ -241,6 +254,15 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
             bytes: doc_props::emit_app(wb),
         },
     ]);
+
+    // RFC-068: workbook-scoped personList — only emit when at least one
+    // person is registered. Excel always uses the singular file name.
+    if !wb.persons.is_empty() {
+        entries.push(ZipEntry {
+            path: "xl/persons/personList.xml".to_string(),
+            bytes: persons_xml::emit(&wb.persons),
+        });
+    }
 
     // Sprint Θ Pod-C3: write-mode calcChain. Only emit when the
     // workbook has at least one formula cell — Excel transparently

@@ -30,6 +30,9 @@ const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
+const CT_THREADED_COMMENTS: &str =
+    "application/vnd.ms-excel.threadedcomments+xml";
+const CT_PERSON_LIST: &str = "application/vnd.ms-excel.person+xml";
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
@@ -109,6 +112,28 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
                  ContentType=\"{CT_COMMENTS}\"/>"
             ));
         }
+    }
+
+    // Per-sheet threadedCommentsN.xml overrides (RFC-068 / G08). Numbering
+    // matches the sheet index for parity with `commentsN.xml`.
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if !sheet.threaded_comments.is_empty() {
+            let n = idx + 1;
+            out.push_str(&format!(
+                "<Override PartName=\"/xl/threadedComments/threadedComments{n}.xml\" \
+                 ContentType=\"{CT_THREADED_COMMENTS}\"/>"
+            ));
+        }
+    }
+
+    // Workbook-scoped personList.xml override (singular filename — there is
+    // exactly one personList per workbook, regardless of how many sheets
+    // carry threaded comments).
+    if !wb.persons.is_empty() {
+        out.push_str(&format!(
+            "<Override PartName=\"/xl/persons/personList.xml\" \
+             ContentType=\"{CT_PERSON_LIST}\"/>"
+        ));
     }
 
     // Per-table overrides — tables are numbered globally (1..N) across

@@ -8,6 +8,7 @@ pub(crate) struct SheetRelIdPlan {
     table_count: u32,
     external_hyperlink_count: u32,
     has_drawing: bool,
+    has_threaded_comments: bool,
 }
 
 impl SheetRelIdPlan {
@@ -19,6 +20,7 @@ impl SheetRelIdPlan {
             external_hyperlink_count: sheet.hyperlinks.values().filter(|h| !h.is_internal).count()
                 as u32,
             has_drawing: !sheet.images.is_empty() || !sheet.charts.is_empty(),
+            has_threaded_comments: !sheet.threaded_comments.is_empty(),
         }
     }
 
@@ -28,6 +30,7 @@ impl SheetRelIdPlan {
             || self.table_count > 0
             || self.external_hyperlink_count > 0
             || self.has_drawing
+            || self.has_threaded_comments
     }
 
     /// Return the comments relationship id when comments exist.
@@ -54,6 +57,23 @@ impl SheetRelIdPlan {
     pub(crate) fn drawing(&self) -> Option<String> {
         self.has_drawing.then(|| {
             rel_id(self.comments_offset() + self.table_count + self.external_hyperlink_count + 1)
+        })
+    }
+
+    /// Return the threadedComments relationship id when threaded comments
+    /// exist on this sheet (RFC-068). Allocated *after* the drawing slot so
+    /// existing rId numbering stays stable for sheets that don't use
+    /// threaded comments.
+    pub(crate) fn threaded_comments(&self) -> Option<String> {
+        self.has_threaded_comments.then(|| {
+            let drawing_slot = if self.has_drawing { 1 } else { 0 };
+            rel_id(
+                self.comments_offset()
+                    + self.table_count
+                    + self.external_hyperlink_count
+                    + drawing_slot
+                    + 1,
+            )
         })
     }
 

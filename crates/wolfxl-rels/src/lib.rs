@@ -96,6 +96,12 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vbaProject";
     pub const PRINTER_SETTINGS: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings";
+
+    // RFC-068 / G08 — threaded comments. Microsoft's `/2018/...` namespace.
+    pub const THREADED_COMMENTS: &str =
+        "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
+    pub const PERSON_LIST: &str =
+        "http://schemas.microsoft.com/office/2017/10/relationships/person";
 }
 
 const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
