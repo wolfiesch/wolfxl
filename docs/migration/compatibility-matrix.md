@@ -15,9 +15,9 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **44** / 74
-- 🟡 Partial: **16** / 74
-- ❌ Not Yet: **13** / 74
+- ✅ Supported: **46** / 74
+- 🟡 Partial: **15** / 74
+- ❌ Not Yet: **12** / 74
 - ⛔ Out of Scope: **1** / 74
 
 ## Workbook + Worksheet
@@ -72,7 +72,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `Image("logo.png") + ws.add_image(img, "B5")` | `Image("logo.png") + ws.add_image(img, "B5")` | ✅ Supported |  |  |
-| `ws.replace_image / remove_image` | `ws.replace_image / remove_image` | ❌ Not Yet | G06 |  |
+| `ws.replace_image / remove_image` | `ws.replace_image / remove_image` | ✅ Supported |  |  |
 
 ## Worksheet structural ops
 

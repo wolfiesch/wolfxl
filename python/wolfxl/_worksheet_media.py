@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
 
+_PENDING_IMAGE_DELETIONS: dict[int, list[int]] = {}
+
 
 def add_chart(ws: Worksheet, chart: Any, anchor: Any = None) -> None:
     """Queue a chart for write-mode or modify-mode save processing."""
@@ -406,6 +408,57 @@ def add_image(ws: Worksheet, image: Any, anchor: Any = None) -> None:
         ws._images_cache.append(image)  # noqa: SLF001
 
 
+def remove_image(ws: Worksheet, index_or_image: int | Any) -> None:
+    """Remove one image from this worksheet by index or object identity."""
+    images = get_images(ws)
+    index = _resolve_image_index(images, index_or_image)
+    target = images[index]
+
+    pending_index = _find_identity_index(ws._pending_images, target)  # noqa: SLF001
+    if pending_index is not None:
+        del ws._pending_images[pending_index]  # noqa: SLF001
+    else:
+        source_index = _source_image_index_for_cache_position(ws, index, images)
+        _pending_image_deletions(ws).append(source_index)
+
+    if ws._images_cache is not None:  # noqa: SLF001
+        del ws._images_cache[index]  # noqa: SLF001
+
+
+def replace_image(ws: Worksheet, index_or_image: int | Any, new_image: Any) -> None:
+    """Replace one attached image using remove + add semantics."""
+    from wolfxl.drawing.image import Image as _Image
+
+    if not isinstance(new_image, _Image):
+        raise TypeError(
+            "replace_image expected wolfxl.drawing.image.Image for new_image, "
+            f"got {type(new_image).__name__}"
+        )
+
+    images = get_images(ws)
+    index = _resolve_image_index(images, index_or_image)
+    old_image = images[index]
+
+    anchor = new_image.anchor if new_image.anchor is not None else old_image.anchor
+    if anchor is None:
+        anchor = "A1"
+    if isinstance(anchor, str):
+        validate_a1_anchor(anchor)
+    new_image.anchor = anchor
+
+    remove_image(ws, index)
+
+    ws._pending_images.append(new_image)  # noqa: SLF001
+    if ws._images_cache is not None:  # noqa: SLF001
+        ws._images_cache.insert(index, new_image)  # noqa: SLF001
+
+
+def pop_pending_image_deletions(ws: Worksheet) -> list[int]:
+    """Drain queued source-image deletions for *ws* in append order."""
+    pending = _PENDING_IMAGE_DELETIONS.pop(id(ws), [])
+    return list(pending)
+
+
 def get_images(ws: Worksheet) -> list[Any]:
     """Return images attached to this worksheet, hydrating read-mode drawings."""
     workbook = ws._workbook  # noqa: SLF001
@@ -422,6 +475,50 @@ def get_images(ws: Worksheet) -> list[Any]:
         images.extend(ws._pending_images)  # noqa: SLF001
         ws._images_cache = images  # noqa: SLF001
     return ws._images_cache  # noqa: SLF001
+
+
+def _pending_image_deletions(ws: Worksheet) -> list[int]:
+    return _PENDING_IMAGE_DELETIONS.setdefault(id(ws), [])
+
+
+def _resolve_image_index(images: list[Any], index_or_image: int | Any) -> int:
+    if isinstance(index_or_image, int):
+        index = index_or_image
+        if index < 0:
+            index += len(images)
+        if index < 0 or index >= len(images):
+            raise ValueError(
+                f"image index {index_or_image} out of range for {len(images)} images"
+            )
+        return index
+
+    index = _find_identity_index(images, index_or_image)
+    if index is None:
+        raise ValueError("image is not attached to this worksheet")
+    return index
+
+
+def _find_identity_index(items: list[Any], needle: Any) -> int | None:
+    for idx, item in enumerate(items):
+        if item is needle:
+            return idx
+    return None
+
+
+def _source_image_index_for_cache_position(
+    ws: Worksheet,
+    cache_index: int,
+    images: list[Any],
+) -> int:
+    pending_ids = {id(image) for image in ws._pending_images}  # noqa: SLF001
+    source_index = 0
+    for idx, image in enumerate(images):
+        if id(image) in pending_ids:
+            continue
+        if idx == cache_index:
+            return source_index
+        source_index += 1
+    raise ValueError("image selection does not resolve to a source workbook image")
 
 
 def _image_from_payload(payload: dict[str, Any]) -> Any:

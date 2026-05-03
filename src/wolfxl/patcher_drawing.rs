@@ -259,6 +259,133 @@ pub(crate) fn resolve_relative_path(base_dir: &str, target: &str) -> String {
     parts.join("/")
 }
 
+fn remove_image_anchor_by_index(
+    drawing_xml: &[u8],
+    remove_index: usize,
+) -> Result<(Vec<u8>, String, usize), String> {
+    let source = std::str::from_utf8(drawing_xml).map_err(|e| e.to_string())?;
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    let mut image_index: usize = 0;
+    let mut removed_rid: Option<String> = None;
+    let mut kept_anchor_count: usize = 0;
+
+    while let Some((start, end, anchor_xml)) = next_anchor_segment(source, cursor)? {
+        out.push_str(&source[cursor..start]);
+        let anchor_rid = extract_r_embed(anchor_xml);
+        if anchor_rid.is_some() {
+            if image_index == remove_index {
+                removed_rid = anchor_rid;
+            } else {
+                out.push_str(anchor_xml);
+                kept_anchor_count += 1;
+            }
+            image_index += 1;
+        } else {
+            out.push_str(anchor_xml);
+            kept_anchor_count += 1;
+        }
+        cursor = end;
+    }
+    out.push_str(&source[cursor..]);
+
+    let rid = removed_rid.ok_or_else(|| {
+        format!("image index {remove_index} out of range for drawing image count {image_index}")
+    })?;
+    Ok((out.into_bytes(), rid, kept_anchor_count))
+}
+
+fn next_anchor_segment<'a>(
+    source: &'a str,
+    from: usize,
+) -> Result<Option<(usize, usize, &'a str)>, String> {
+    let patterns = [
+        "<xdr:oneCellAnchor",
+        "<xdr:twoCellAnchor",
+        "<xdr:absoluteAnchor",
+        "<oneCellAnchor",
+        "<twoCellAnchor",
+        "<absoluteAnchor",
+    ];
+    let mut best: Option<usize> = None;
+    for pattern in patterns {
+        if let Some(rel) = source[from..].find(pattern) {
+            let abs = from + rel;
+            if best.map(|current| abs < current).unwrap_or(true) {
+                best = Some(abs);
+            }
+        }
+    }
+    let Some(start) = best else {
+        return Ok(None);
+    };
+
+    let tag_end = source[start..]
+        .find('>')
+        .ok_or_else(|| "drawing anchor start tag missing '>'".to_string())?
+        + start;
+    let start_tag = &source[start + 1..tag_end];
+    let tag_name = start_tag
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| "drawing anchor tag name missing".to_string())?;
+    if start_tag.trim_end().ends_with('/') {
+        let end = tag_end + 1;
+        return Ok(Some((start, end, &source[start..end])));
+    }
+    let close_token = format!("</{tag_name}>");
+    let close_rel = source[tag_end + 1..]
+        .find(&close_token)
+        .ok_or_else(|| format!("closing token {close_token} not found"))?;
+    let end = tag_end + 1 + close_rel + close_token.len();
+    Ok(Some((start, end, &source[start..end])))
+}
+
+fn extract_r_embed(anchor_xml: &str) -> Option<String> {
+    let token = "r:embed=\"";
+    if let Some(start) = anchor_xml.find(token) {
+        let value_start = start + token.len();
+        let value_end = anchor_xml[value_start..].find('"')? + value_start;
+        return Some(anchor_xml[value_start..value_end].to_string());
+    }
+    let token_plain = "embed=\"";
+    if let Some(start) = anchor_xml.find(token_plain) {
+        let value_start = start + token_plain.len();
+        let value_end = anchor_xml[value_start..].find('"')? + value_start;
+        return Some(anchor_xml[value_start..value_end].to_string());
+    }
+    None
+}
+
+fn drawing_rels_path_for_part(drawing_path: &str) -> Result<String, String> {
+    let (dir, filename) = drawing_path
+        .rsplit_once('/')
+        .ok_or_else(|| format!("invalid drawing path: {drawing_path}"))?;
+    Ok(format!("{dir}/_rels/{filename}.rels"))
+}
+
+fn remove_sheet_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, String> {
+    let rid_token = format!("r:id=\"{rid}\"");
+    let rid_pos = sheet_xml
+        .find(&rid_token)
+        .ok_or_else(|| format!("sheet drawing ref {rid} not found"))?;
+    let start = sheet_xml[..rid_pos]
+        .rfind("<drawing")
+        .ok_or_else(|| "sheet drawing tag start not found".to_string())?;
+    let tail = &sheet_xml[rid_pos..];
+    let end = if let Some(rel) = tail.find("/>") {
+        rid_pos + rel + 2
+    } else if let Some(rel) = tail.find("</drawing>") {
+        rid_pos + rel + "</drawing>".len()
+    } else {
+        return Err("sheet drawing tag end not found".into());
+    };
+    let mut out = String::with_capacity(sheet_xml.len());
+    out.push_str(&sheet_xml[..start]);
+    out.push_str(&sheet_xml[end..]);
+    Ok(out)
+}
+
 /// Best-effort extract `N` from `xl/drawings/drawingN.xml`.
 pub(crate) fn drawing_n_from_path(path: &str) -> Option<u32> {
     let fname = path.rsplit('/').next()?;
@@ -383,6 +510,146 @@ fn render_graphic_frame_anchor_styled(
     out.push_str(&format!("<{p}clientData/>"));
     out.push_str(&format!("</{p}oneCellAnchor>"));
     out
+}
+
+pub(super) fn apply_image_removes_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    let drained: Vec<(String, Vec<usize>)> = patcher
+        .sheet_order
+        .iter()
+        .filter_map(|s| patcher.queued_image_removes.remove(s).map(|v| (s.clone(), v)))
+        .collect();
+    if drained.is_empty() {
+        patcher.queued_image_removes.clear();
+        return Ok(());
+    }
+
+    for (sheet_name, remove_ops) in drained {
+        if remove_ops.is_empty() {
+            continue;
+        }
+
+        let sheet_path = patcher
+            .sheet_paths
+            .get(&sheet_name)
+            .cloned()
+            .ok_or_else(|| {
+                PyValueError::new_err(format!("queue_image_remove: no such sheet: {sheet_name}"))
+            })?;
+
+        let sheet_rels_path = format!(
+            "{}/_rels/{}.rels",
+            sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
+            sheet_path.rsplit('/').next().unwrap_or("")
+        );
+        let mut sheet_rels: wolfxl_rels::RelsGraph =
+            if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
+                g.clone()
+            } else if let Some(bytes) = patcher.file_adds.get(&sheet_rels_path) {
+                wolfxl_rels::RelsGraph::parse(bytes)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
+            } else {
+                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
+                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
+                    None => wolfxl_rels::RelsGraph::new(),
+                }
+            };
+
+        for remove_index in remove_ops {
+            let drawing_rel = sheet_rels
+                .iter()
+                .find(|r| r.rel_type == wolfxl_rels::rt::DRAWING)
+                .cloned()
+                .ok_or_else(|| {
+                    PyErr::new::<PyValueError, _>(format!(
+                        "queue_image_remove on sheet {sheet_name:?}: sheet has no drawing rel"
+                    ))
+                })?;
+
+            let sheet_dir = sheet_path
+                .rsplit_once('/')
+                .map(|(d, _)| d)
+                .unwrap_or("")
+                .to_string();
+            let drawing_path = resolve_relative_path(&sheet_dir, &drawing_rel.target);
+            let drawing_rels_path = drawing_rels_path_for_part(&drawing_path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels path: {e}")))?;
+
+            let mut drawing_rels: wolfxl_rels::RelsGraph =
+                if let Some(g) = patcher.rels_patches.get(&drawing_rels_path) {
+                    g.clone()
+                } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
+                    wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
+                    })?
+                } else {
+                    match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
+                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
+                            PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
+                        })?,
+                        None => wolfxl_rels::RelsGraph::new(),
+                    }
+                };
+
+            let drawing_xml: Vec<u8> = if let Some(bytes) = file_patches.get(&drawing_path) {
+                bytes.clone()
+            } else if let Some(bytes) = patcher.file_adds.get(&drawing_path) {
+                bytes.clone()
+            } else {
+                ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
+                    .ok_or_else(|| {
+                        PyErr::new::<PyIOError, _>(format!(
+                            "queue_image_remove: drawing part missing at {drawing_path}"
+                        ))
+                    })?
+                    .into_bytes()
+            };
+
+            let (updated_xml, removed_rid, kept_anchor_count) =
+                remove_image_anchor_by_index(&drawing_xml, remove_index).map_err(|e| {
+                    PyErr::new::<PyValueError, _>(format!("queue_image_remove: {e}"))
+                })?;
+            drawing_rels.remove(&wolfxl_rels::RelId(removed_rid));
+
+            if kept_anchor_count == 0 {
+                sheet_rels.remove(&drawing_rel.id);
+                let sheet_xml = if let Some(bytes) = file_patches.get(&sheet_path) {
+                    String::from_utf8_lossy(bytes).into_owned()
+                } else if let Some(bytes) = patcher.file_adds.get(&sheet_path) {
+                    String::from_utf8_lossy(bytes).into_owned()
+                } else {
+                    ooxml_util::zip_read_to_string(zip, &sheet_path)?
+                };
+                let stripped_sheet_xml =
+                    remove_sheet_drawing_ref(&sheet_xml, &drawing_rel.id.0).map_err(|e| {
+                        PyErr::new::<PyIOError, _>(format!("remove sheet drawing ref: {e}"))
+                    })?;
+                file_patches.insert(sheet_path.clone(), stripped_sheet_xml.into_bytes());
+                patcher.file_deletes.insert(drawing_path.clone());
+                patcher.file_deletes.insert(drawing_rels_path.clone());
+                file_patches.remove(&drawing_path);
+                file_patches.remove(&drawing_rels_path);
+                patcher.file_adds.remove(&drawing_path);
+                patcher.file_adds.remove(&drawing_rels_path);
+                patcher.rels_patches.remove(&drawing_rels_path);
+            } else {
+                if zip.by_name(&drawing_path).is_ok() {
+                    file_patches.insert(drawing_path.clone(), updated_xml);
+                } else {
+                    patcher.file_adds.insert(drawing_path.clone(), updated_xml);
+                }
+                patcher.rels_patches.insert(drawing_rels_path, drawing_rels);
+            }
+        }
+
+        patcher.rels_patches.insert(sheet_rels_path, sheet_rels);
+    }
+
+    Ok(())
 }
 
 pub(super) fn apply_image_adds_phase(
@@ -847,5 +1114,32 @@ mod tests {
         assert!(s.contains("<xdr:graphicFrame"));
         assert!(s.contains("r:id=\"rId7\""));
         assert!(s.ends_with("</xdr:wsDr>"));
+    }
+
+    #[test]
+    fn remove_image_anchor_by_index_removes_expected_rid() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:oneCellAnchor>
+    <xdr:pic><xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic><xdr:clientData/>
+  </xdr:oneCellAnchor>
+  <xdr:oneCellAnchor>
+    <xdr:pic><xdr:blipFill><a:blip r:embed="rId2"/></xdr:blipFill></xdr:pic><xdr:clientData/>
+  </xdr:oneCellAnchor>
+</xdr:wsDr>"#;
+        let (updated, removed_rid, kept_anchor_count) = remove_image_anchor_by_index(xml, 1).unwrap();
+        let s = String::from_utf8(updated).unwrap();
+        assert_eq!(removed_rid, "rId2");
+        assert_eq!(kept_anchor_count, 1);
+        assert!(s.contains("r:embed=\"rId1\""));
+        assert!(!s.contains("r:embed=\"rId2\""));
+    }
+
+    #[test]
+    fn remove_sheet_drawing_ref_drops_exact_tag() {
+        let xml = r#"<?xml version="1.0"?><worksheet><sheetData/><drawing r:id="rId7"/><legacyDrawing r:id="rId9"/></worksheet>"#;
+        let out = remove_sheet_drawing_ref(xml, "rId7").unwrap();
+        assert!(!out.contains("rId7"));
+        assert!(out.contains("<legacyDrawing r:id=\"rId9\"/>"));
     }
 }

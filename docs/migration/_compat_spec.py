@@ -332,12 +332,11 @@ ENTRIES: list[Entry] = [
         "probe": "images_basic",
     },
     {
-        "id": "images.replace_remove",
+        "id": "images_replace_remove",
         "category": "images",
         "openpyxl": "ws.replace_image / remove_image",
         "wolfxl": "ws.replace_image / remove_image",
-        "status": "not_yet",
-        "gap_id": "G06",
+        "status": "supported",
         "probe": "images_replace_remove",
     },
     # --- Structural ops ----------------------------------------------------

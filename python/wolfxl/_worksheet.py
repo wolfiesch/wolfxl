@@ -54,7 +54,9 @@ from wolfxl._worksheet_media import (
     get_images as _get_images,
     add_slicer as _add_slicer,
     remove_chart as _remove_chart,
+    remove_image as _remove_image,
     replace_chart as _replace_chart,
+    replace_image as _replace_image,
     validate_a1_anchor as _validate_a1_anchor,
 )
 from wolfxl._worksheet_pending import collect_pending_overlay, pending_writes_bounds
@@ -1264,6 +1266,11 @@ class Worksheet:
         """
         return _get_images(self)
 
+    @property
+    def images(self) -> list[Any]:
+        """Public alias for :attr:`_images`."""
+        return _get_images(self)
+
     def add_image(self, img: Any, anchor: Any = None) -> None:
         """Attach an image to this worksheet.
 
@@ -1280,6 +1287,34 @@ class Worksheet:
             ValueError: If an A1-style ``anchor`` is malformed.
         """
         _add_image(self, img, anchor)
+
+    def remove_image(self, index_or_image: int | Any) -> None:
+        """Remove one image attached to this worksheet.
+
+        Args:
+            index_or_image: Zero-based index into ``ws.images`` (or ``ws._images``)
+                or a concrete image object from that list.
+
+        Raises:
+            ValueError: If the index is out of range or the image is not attached.
+        """
+        _remove_image(self, index_or_image)
+
+    def replace_image(self, index_or_image: int | Any, new_image: Any) -> None:
+        """Replace one attached image with a new image object.
+
+        Replacement is implemented as remove + add at flush time.
+
+        Args:
+            index_or_image: Zero-based index into ``ws.images`` (or ``ws._images``)
+                or a concrete image object from that list.
+            new_image: Replacement image object.
+
+        Raises:
+            TypeError: If ``new_image`` is not a supported image object.
+            ValueError: If the selected image is not attached to this worksheet.
+        """
+        _replace_image(self, index_or_image, new_image)
 
     @property
     def merged_cells(self) -> _MergedCellsProxy:

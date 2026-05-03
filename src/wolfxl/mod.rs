@@ -260,6 +260,9 @@ pub struct XlsxPatcher {
     /// "fresh drawing" case only — sheets that already have a
     /// drawing rel raise NotImplementedError (v1.5 follow-up).
     queued_images: HashMap<String, Vec<QueuedImageAdd>>,
+    /// Sprint S1 G06 — per-sheet pending image removals by index.
+    /// Drained by Phase 2.5k during `do_save`, before image adds.
+    queued_image_removes: HashMap<String, Vec<usize>>,
     /// Sprint Μ Pod-γ (RFC-046) — per-sheet pending chart adds.
     /// Each entry carries pre-serialized chart XML bytes plus an
     /// A1-style anchor cell. Drained by Phase 2.5l during
@@ -481,6 +484,7 @@ impl XlsxPatcher {
             queued_sheet_copies: Vec::new(),
             permissive_seed_file_patches: file_patches,
             queued_images: HashMap::new(),
+            queued_image_removes: HashMap::new(),
             queued_charts: HashMap::new(),
             queued_pivot_caches: Vec::new(),
             queued_pivot_tables: HashMap::new(),
@@ -1148,6 +1152,18 @@ impl XlsxPatcher {
                 height_px: height,
                 anchor,
             });
+        Ok(())
+    }
+
+    /// Sprint S1 G06 — queue an image removal for `sheet`.
+    ///
+    /// `index` is a zero-based image index in the source drawing state,
+    /// evaluated in queue order.
+    fn queue_image_remove(&mut self, sheet: &str, index: usize) -> PyResult<()> {
+        self.queued_image_removes
+            .entry(sheet.to_string())
+            .or_default()
+            .push(index);
         Ok(())
     }
 
@@ -1884,10 +1900,20 @@ impl XlsxPatcher {
                 &mut save.part_id_allocator,
             )?;
 
-        // --- Phase 2.5k: Image adds (Sprint Λ Pod-β / RFC-045) ---
+        // --- Phase 2.5k: Image remove/add (Sprint Λ Pod-β / RFC-045 + G06) ---
         //
-        // Drains `queued_images` per sheet. For each sheet that has
-        // queued images:
+        // Drain order is remove first, then add:
+        //   * removals mutate existing drawingN.xml + drawing rels
+        //   * adds keep the original RFC-045 "fresh drawing only" path
+        //
+        // Removals are sequenced first so `replace_image` on a sheet that
+        // starts with exactly one image can remove the old drawing ref and
+        // then create a fresh drawing for the replacement add.
+        if !self.queued_image_removes.is_empty() {
+            self.apply_image_removes_phase(&mut save.file_patches, &mut zip)?;
+        }
+        //
+        // Drains `queued_images` per sheet. For each sheet that has queued images:
         //   1. Read the existing sheet rels (if any) — error if a
         //      `drawing` rel is already present (v1.5 limit:
         //      append-to-existing is a follow-up).
@@ -2238,6 +2264,15 @@ impl XlsxPatcher {
         patcher_drawing::apply_image_adds_phase(self, file_patches, zip, part_id_allocator)
     }
 
+    /// Sprint S1 G06 — drain `self.queued_image_removes`.
+    fn apply_image_removes_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_drawing::apply_image_removes_phase(self, file_patches, zip)
+    }
+
     /// Sprint Μ Pod-γ (RFC-046) — drain `self.queued_charts`.
     ///
     /// For each sheet that has queued charts:
@@ -2400,7 +2435,7 @@ impl XlsxPatcher {
     }
 
     fn has_pending_save_work(&self) -> bool {
-        patcher_workbook::has_pending_save_work(self)
+        !self.queued_image_removes.is_empty() || patcher_workbook::has_pending_save_work(self)
     }
 
     fn copy_source_file_phase(&self, output_path: &str) -> PyResult<()> {
