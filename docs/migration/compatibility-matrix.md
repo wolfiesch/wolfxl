@@ -120,7 +120,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `ws.protection = SheetProtection(...)` | `ws.protection = SheetProtection(...)` | ✅ Supported |  | Round-trips through openpyxl reload (sheet flag, formatCells override, password hash). |
-| `wb.security = WorkbookProtection(...)` | `wb.security = WorkbookProtection(...)` | 🟡 Partial | G04 |  |
+| `wb.security = WorkbookProtection(...)` | `wb.security = WorkbookProtection(...)` | ✅ Supported |  | camelCase aliases (lockStructure, workbookPassword, etc.) accepted alongside snake_case; round-trips through openpyxl reload. |
 
 ## External links
 

@@ -473,9 +473,9 @@ ENTRIES: list[Entry] = [
         "category": "protection",
         "openpyxl": "wb.security = WorkbookProtection(...)",
         "wolfxl": "wb.security = WorkbookProtection(...)",
-        "status": "partial",
-        "gap_id": "G04",
+        "status": "supported",
         "probe": "protection_workbook",
+        "notes": "camelCase aliases (lockStructure, workbookPassword, etc.) accepted alongside snake_case; round-trips through openpyxl reload.",
     },
     # --- External links ---------------------------------------------------
     {

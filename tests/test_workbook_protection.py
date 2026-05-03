@@ -41,6 +41,35 @@ def test_kwargs_set_lock_flags() -> None:
     assert wp.lock_revision is True
 
 
+def test_camel_case_kwargs_match_snake_case() -> None:
+    snake = WorkbookProtection(
+        workbook_password="seekrit",
+        lock_structure=True,
+        lock_windows=True,
+        lock_revision=True,
+    )
+    camel = WorkbookProtection(
+        workbookPassword="seekrit",
+        lockStructure=True,
+        lockWindows=True,
+        lockRevision=True,
+    )
+    assert snake.lock_structure is camel.lock_structure is True
+    assert snake.lock_windows is camel.lock_windows is True
+    assert snake.lock_revision is camel.lock_revision is True
+    assert snake.check_workbook_password("seekrit") is True
+    assert camel.check_workbook_password("seekrit") is True
+
+
+def test_camel_case_properties_alias_snake_case() -> None:
+    wp = WorkbookProtection(lock_structure=True)
+    assert wp.lockStructure is True
+    wp.lockStructure = False
+    assert wp.lock_structure is False
+    wp.workbookPassword = "ABCD"
+    assert wp.workbook_password == "ABCD"
+
+
 # ---------------------------------------------------------------------------
 # Workbook password
 # ---------------------------------------------------------------------------
