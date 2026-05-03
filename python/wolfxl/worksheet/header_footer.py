@@ -1,10 +1,14 @@
-"""Header / footer classes for worksheets (RFC-055 §2.3).
+"""Header / footer classes for worksheets (RFC-055 §2.3, G09).
 
 Backs ``ws.header_footer``. Includes the OOXML format-code grammar
 validator (``&L`` / ``&C`` / ``&R`` / ``&P`` / ``&N`` / ``&D`` /
 ``&T`` / ``&F`` / ``&A`` / ``&Z`` / ``&K{RRGGBB}`` / ``&"font,style"``
 / ``&NN`` / ``&B`` / ``&I`` / ``&U`` / ``&S`` / ``&X`` / ``&Y`` /
 ``&&``).
+
+Also exposes openpyxl-shaped ``_HeaderFooterPart`` access on each
+segment so ``ws.oddHeader.center.text``, ``.font``, ``.size``, and
+``.color`` round-trip through the inline mini-format codes.
 """
 
 from __future__ import annotations
@@ -17,14 +21,8 @@ from typing import Any
 # Recognized single-letter codes (case-sensitive in OOXML).
 _FORMAT_CODES_SINGLE = set("LCRPNDTFAZGBIUSXY")
 
-# Recognized format-code grammar regex — used for validation only;
+# Recognized format-code grammar regex - used for validation only;
 # unknown ``&X`` codes pass through unchanged for forward compat.
-# Pattern explanation:
-#   &&                     -> literal ampersand
-#   &"font,style"          -> font select (anything between quotes)
-#   &K{RRGGBB}             -> color hex
-#   &<digits>              -> font size
-#   &[A-Z]                 -> single-letter code
 _FORMAT_CODE_RE = re.compile(
     r"""
     &&                                  # literal &
@@ -38,12 +36,31 @@ _FORMAT_CODE_RE = re.compile(
 )
 
 
+# Mini-format inline regex for prefix codes. Mirrors openpyxl's
+# FORMAT_REGEX so we parse ``&"Arial,Bold"&14&KFF0000Title`` into
+# (font, color, size, text).
+_PREFIX_FORMAT_RE = re.compile(
+    r'&"(?P<font>[^"]+)"|&K(?P<color>[A-Fa-f0-9]{6})|&(?P<size>\d+\s?)'
+)
+
+# Section split for ``&L...&C...&R...`` form.
+_ITEM_SPLIT_RE = re.compile(
+    r"""
+    (&L(?P<left>.+?))?
+    (&C(?P<center>.+?))?
+    (&R(?P<right>.+?))?
+    $
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+
+
 def validate_header_footer_format(text: str) -> bool:
     """Return True iff ``text`` parses as a valid OOXML header/footer string.
 
     "Valid" means: every ``&`` is followed by a recognized code or is
     a ``&&`` literal escape. Unknown single-letter codes (e.g. invented
-    by a later spec revision) are treated as opaque — they pass through
+    by a later spec revision) are treated as opaque - they pass through
     unchanged for forward compat.
 
     The function never raises; it returns False for clearly malformed
@@ -59,22 +76,19 @@ def validate_header_footer_format(text: str) -> bool:
         if ch != "&":
             i += 1
             continue
-        # Consume an ampersand sequence.
         if i + 1 >= n:
-            return False  # trailing bare '&'
+            return False
         nxt = text[i + 1]
         if nxt == "&":
             i += 2
             continue
         if nxt == '"':
-            # Quoted font: &"font,style"
             close = text.find('"', i + 2)
             if close == -1:
                 return False
             i = close + 1
             continue
         if nxt in ("K", "k"):
-            # &Kxxxxxx or &K{xxxxxx}
             if i + 2 >= n:
                 return False
             if text[i + 2] == "{":
@@ -84,7 +98,6 @@ def validate_header_footer_format(text: str) -> bool:
                     return False
                 i += 10
                 continue
-            # &Kxxxxxx (6-hex form)
             if i + 8 > n:
                 return False
             if not all(c in "0123456789abcdefABCDEF" for c in text[i + 2:i + 8]):
@@ -92,28 +105,273 @@ def validate_header_footer_format(text: str) -> bool:
             i += 8
             continue
         if nxt.isdigit():
-            # &NN (font size — one or more digits)
             j = i + 1
             while j < n and text[j].isdigit():
                 j += 1
             i = j
             continue
         if nxt.isalpha():
-            # Single-letter code (known or forward-compat unknown).
             i += 2
             continue
-        # Bare '&' followed by punctuation/whitespace — not a valid code.
         return False
     return True
 
 
-@dataclass
-class HeaderFooterItem:
-    """One header or footer (left / center / right segments)."""
+_RGB_RE = re.compile(r"^[A-Fa-f0-9]{6}$")
 
-    left: str | None = None
-    center: str | None = None
-    right: str | None = None
+
+class _HeaderFooterPart:
+    """Openpyxl-shaped left/center/right segment.
+
+    Holds an inline mini-format payload for one alignment slot. The
+    ``text`` field is the user-visible plain text; ``font`` /
+    ``size`` / ``color`` are leading format prefixes. Toggle codes
+    (``&B``, ``&I``, ``&U``, ``&S``, ``&X``, ``&Y``) are not lifted
+    onto attributes - they survive opaquely inside ``text``.
+
+    Comparison against a plain ``str`` matches the composed
+    OOXML mini-format string (i.e. what the writer emits). ``bool``
+    returns True iff there is any text content.
+    """
+
+    __slots__ = ("_text", "_font", "_size", "_color")
+
+    def __init__(
+        self,
+        text: str | None = None,
+        font: str | None = None,
+        size: int | None = None,
+        color: str | None = None,
+    ) -> None:
+        self._text: str | None = None
+        self._font: str | None = None
+        self._size: int | None = None
+        self._color: str | None = None
+        self.text = text
+        self.font = font
+        self.size = size
+        self.color = color
+
+    @property
+    def text(self) -> str | None:
+        return self._text
+
+    @text.setter
+    def text(self, value: Any) -> None:
+        if value is None:
+            self._text = None
+            return
+        if not isinstance(value, str):
+            raise TypeError(f"_HeaderFooterPart.text must be str or None; got {type(value).__name__}")
+        self._text = value
+
+    @property
+    def font(self) -> str | None:
+        return self._font
+
+    @font.setter
+    def font(self, value: Any) -> None:
+        if value is None:
+            self._font = None
+            return
+        if not isinstance(value, str):
+            raise TypeError(f"_HeaderFooterPart.font must be str or None; got {type(value).__name__}")
+        self._font = value
+
+    @property
+    def size(self) -> int | None:
+        return self._size
+
+    @size.setter
+    def size(self, value: Any) -> None:
+        if value is None:
+            self._size = None
+            return
+        try:
+            self._size = int(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                f"_HeaderFooterPart.size must be int or None; got {value!r}"
+            ) from exc
+
+    @property
+    def color(self) -> str | None:
+        return self._color
+
+    @color.setter
+    def color(self, value: Any) -> None:
+        if value is None:
+            self._color = None
+            return
+        if not isinstance(value, str) or not _RGB_RE.match(value):
+            raise ValueError(
+                f"_HeaderFooterPart.color must match RRGGBB hex; got {value!r}"
+            )
+        self._color = value.upper()
+
+    def is_empty(self) -> bool:
+        return (
+            self._text is None
+            and self._font is None
+            and self._size is None
+            and self._color is None
+        )
+
+    def to_format_string(self) -> str | None:
+        """Compose this part to its inline mini-format string.
+
+        Returns None when the part is empty so the parent
+        ``HeaderFooterItem`` can treat the slot as absent (matching
+        openpyxl's ``&L``/``&C``/``&R`` suppression).
+        """
+        if self.is_empty():
+            return None
+        parts: list[str] = []
+        if self._font is not None:
+            parts.append(f'&"{self._font}"')
+        if self._size is not None:
+            parts.append(f"&{self._size} ")
+        if self._color is not None:
+            parts.append(f"&K{self._color}")
+        if self._text is not None:
+            parts.append(self._text)
+        return "".join(parts)
+
+    @classmethod
+    def from_format_string(cls, text: str | None) -> "_HeaderFooterPart":
+        """Parse an inline mini-format string into a part.
+
+        Mirrors openpyxl's ``_HeaderFooterPart.from_str`` behavior:
+        leading ``&"font"``, ``&KRRGGBB``, ``&NN`` prefixes are
+        stripped onto attributes; the remaining text is the
+        user-visible payload (which may still contain inline toggle
+        codes like ``&B`` or page-number macros).
+        """
+        if text is None:
+            return cls()
+        font: str | None = None
+        size: int | None = None
+        color: str | None = None
+        for match in _PREFIX_FORMAT_RE.finditer(text):
+            if match.group("font") is not None and font is None:
+                font = match.group("font")
+            elif match.group("color") is not None and color is None:
+                color = match.group("color").upper()
+            elif match.group("size") is not None and size is None:
+                size = int(match.group("size").strip())
+        residual = _PREFIX_FORMAT_RE.sub("", text)
+        return cls(
+            text=residual if residual != "" else (None if (font or size or color) else ""),
+            font=font,
+            size=size,
+            color=color,
+        )
+
+    def __bool__(self) -> bool:
+        return bool(self._text) or self._font is not None or self._size is not None or self._color is not None
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _HeaderFooterPart):
+            return (
+                self._text == other._text
+                and self._font == other._font
+                and self._size == other._size
+                and self._color == other._color
+            )
+        if isinstance(other, str):
+            return (self.to_format_string() or "") == other
+        if other is None:
+            return self.is_empty()
+        return NotImplemented
+
+    def __ne__(self, other: object) -> bool:
+        result = self.__eq__(other)
+        if result is NotImplemented:
+            return result
+        return not result
+
+    def __hash__(self) -> int:
+        return hash((self._text, self._font, self._size, self._color))
+
+    def __str__(self) -> str:
+        return self.to_format_string() or ""
+
+    def __repr__(self) -> str:
+        return (
+            f"_HeaderFooterPart(text={self._text!r}, font={self._font!r}, "
+            f"size={self._size!r}, color={self._color!r})"
+        )
+
+
+def _coerce_part(value: Any) -> _HeaderFooterPart:
+    """Accept ``None`` / ``str`` / ``_HeaderFooterPart`` and return a part."""
+    if value is None:
+        return _HeaderFooterPart()
+    if isinstance(value, _HeaderFooterPart):
+        return value
+    if isinstance(value, str):
+        if not validate_header_footer_format(value):
+            raise ValueError(f"invalid format code in {value!r}")
+        return _HeaderFooterPart.from_format_string(value)
+    raise TypeError(
+        f"HeaderFooterItem segment must be None, str, or _HeaderFooterPart; got {type(value).__name__}"
+    )
+
+
+class HeaderFooterItem:
+    """One header or footer (left / center / right segments).
+
+    Each slot is a :class:`_HeaderFooterPart` instance (always non-None,
+    matching openpyxl). Assigning a plain ``str`` parses the inline
+    mini-format and replaces the slot in place; assigning ``None``
+    clears the slot. Reading the slot returns the
+    :class:`_HeaderFooterPart` object, which compares equal to its
+    composed format string.
+    """
+
+    __slots__ = ("_left", "_center", "_right")
+
+    def __init__(
+        self,
+        left: Any = None,
+        center: Any = None,
+        right: Any = None,
+    ) -> None:
+        self._left = _coerce_part(left)
+        self._center = _coerce_part(center)
+        self._right = _coerce_part(right)
+
+    @property
+    def left(self) -> _HeaderFooterPart:
+        return self._left
+
+    @left.setter
+    def left(self, value: Any) -> None:
+        self._left = _coerce_part(value)
+
+    @property
+    def center(self) -> _HeaderFooterPart:
+        return self._center
+
+    @center.setter
+    def center(self, value: Any) -> None:
+        self._center = _coerce_part(value)
+
+    @property
+    def centre(self) -> _HeaderFooterPart:
+        return self._center
+
+    @centre.setter
+    def centre(self, value: Any) -> None:
+        self._center = _coerce_part(value)
+
+    @property
+    def right(self) -> _HeaderFooterPart:
+        return self._right
+
+    @right.setter
+    def right(self, value: Any) -> None:
+        self._right = _coerce_part(value)
 
     @property
     def text(self) -> str:
@@ -123,33 +381,64 @@ class HeaderFooterItem:
         openpyxl's serialization.
         """
         parts: list[str] = []
-        if self.left is not None:
-            parts.append("&L" + self.left)
-        if self.center is not None:
-            parts.append("&C" + self.center)
-        if self.right is not None:
-            parts.append("&R" + self.right)
+        for marker, part in (("L", self._left), ("C", self._center), ("R", self._right)):
+            payload = part.to_format_string()
+            if payload is not None:
+                parts.append("&" + marker + payload)
         return "".join(parts)
 
     def is_empty(self) -> bool:
-        return self.left is None and self.center is None and self.right is None
+        return (
+            self._left.is_empty()
+            and self._center.is_empty()
+            and self._right.is_empty()
+        )
 
     def to_rust_dict(self) -> dict[str, Any] | None:
         if self.is_empty():
             return None
         return {
-            "left": self.left,
-            "center": self.center,
-            "right": self.right,
+            "left": self._left.to_format_string(),
+            "center": self._center.to_format_string(),
+            "right": self._right.to_format_string(),
         }
 
-    def __post_init__(self) -> None:
-        for name in ("left", "center", "right"):
-            v = getattr(self, name)
-            if v is not None and not validate_header_footer_format(v):
-                raise ValueError(
-                    f"HeaderFooterItem.{name}: invalid format code in {v!r}"
-                )
+    @classmethod
+    def from_str(cls, text: str | None) -> "HeaderFooterItem":
+        """Parse a full ``&L...&C...&R...`` string into segments.
+
+        Mirrors openpyxl's ``HeaderFooterItem`` reconstruction so
+        incoming OOXML can be reflected back through the Python API
+        with full attribute fidelity.
+        """
+        if not text:
+            return cls()
+        match = _ITEM_SPLIT_RE.match(text)
+        if match is None:
+            return cls()
+        return cls(
+            left=match.group("left"),
+            center=match.group("center"),
+            right=match.group("right"),
+        )
+
+    def __bool__(self) -> bool:
+        return not self.is_empty()
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, HeaderFooterItem):
+            return (
+                self._left == other._left
+                and self._center == other._center
+                and self._right == other._right
+            )
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return (
+            f"HeaderFooterItem(left={self._left!r}, center={self._center!r}, "
+            f"right={self._right!r})"
+        )
 
 
 @dataclass
@@ -167,30 +456,53 @@ class HeaderFooter:
     scale_with_doc: bool = True
     align_with_margins: bool = True
 
-    # openpyxl aliases — `oddHeader` etc. (camelCase mirrors)
     @property
     def oddHeader(self) -> HeaderFooterItem:  # noqa: N802
         return self.odd_header
+
+    @oddHeader.setter
+    def oddHeader(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.odd_header = _coerce_item(value)
 
     @property
     def oddFooter(self) -> HeaderFooterItem:  # noqa: N802
         return self.odd_footer
 
+    @oddFooter.setter
+    def oddFooter(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.odd_footer = _coerce_item(value)
+
     @property
     def evenHeader(self) -> HeaderFooterItem:  # noqa: N802
         return self.even_header
+
+    @evenHeader.setter
+    def evenHeader(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.even_header = _coerce_item(value)
 
     @property
     def evenFooter(self) -> HeaderFooterItem:  # noqa: N802
         return self.even_footer
 
+    @evenFooter.setter
+    def evenFooter(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.even_footer = _coerce_item(value)
+
     @property
     def firstHeader(self) -> HeaderFooterItem:  # noqa: N802
         return self.first_header
 
+    @firstHeader.setter
+    def firstHeader(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.first_header = _coerce_item(value)
+
     @property
     def firstFooter(self) -> HeaderFooterItem:  # noqa: N802
         return self.first_footer
+
+    @firstFooter.setter
+    def firstFooter(self, value: HeaderFooterItem) -> None:  # noqa: N802
+        self.first_footer = _coerce_item(value)
 
     def is_default(self) -> bool:
         return (
@@ -221,8 +533,21 @@ class HeaderFooter:
         }
 
 
+def _coerce_item(value: Any) -> HeaderFooterItem:
+    if value is None:
+        return HeaderFooterItem()
+    if isinstance(value, HeaderFooterItem):
+        return value
+    if isinstance(value, str):
+        return HeaderFooterItem.from_str(value)
+    raise TypeError(
+        f"HeaderFooter slot must be None, str, or HeaderFooterItem; got {type(value).__name__}"
+    )
+
+
 __all__ = [
     "HeaderFooter",
     "HeaderFooterItem",
+    "_HeaderFooterPart",
     "validate_header_footer_format",
 ]

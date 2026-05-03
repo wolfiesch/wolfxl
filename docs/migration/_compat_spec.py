@@ -566,8 +566,7 @@ ENTRIES: list[Entry] = [
         "category": "rich_text",
         "openpyxl": "ws.oddHeader / oddFooter rich-text runs",
         "wolfxl": "ws.oddHeader / oddFooter rich-text runs",
-        "status": "not_yet",
-        "gap_id": "G09",
+        "status": "supported",
         "probe": "rich_text_headers_footers",
     },
     # --- Conditional formatting -------------------------------------------
