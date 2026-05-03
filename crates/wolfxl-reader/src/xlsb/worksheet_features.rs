@@ -98,6 +98,7 @@ pub(super) fn parse_conditional_format_rule(
         formula,
         priority,
         stop_if_true: Some(flags & 0x0002 != 0),
+        color_scale: None,
     })
 }
 

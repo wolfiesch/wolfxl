@@ -656,6 +656,25 @@ impl NativeXlsxBook {
             if let Some(stop_if_true) = rule.stop_if_true {
                 d.set_item("stop_if_true", stop_if_true)?;
             }
+            if let Some(cs) = &rule.color_scale {
+                let cs_dict = PyDict::new(py);
+                let cfvo_list = PyList::empty(py);
+                for cfvo in &cs.cfvo {
+                    let entry = PyDict::new(py);
+                    entry.set_item("type", &cfvo.cfvo_type)?;
+                    if let Some(val) = &cfvo.val {
+                        entry.set_item("val", val)?;
+                    }
+                    cfvo_list.append(entry)?;
+                }
+                cs_dict.set_item("cfvo", cfvo_list)?;
+                let colors_list = PyList::empty(py);
+                for color in &cs.colors {
+                    colors_list.append(color)?;
+                }
+                cs_dict.set_item("colors", colors_list)?;
+                d.set_item("color_scale", cs_dict)?;
+            }
             result.append(d)?;
         }
         Ok(result.into())
@@ -1325,6 +1344,25 @@ impl NativeXlsbBook {
             }
             if let Some(stop_if_true) = rule.stop_if_true {
                 d.set_item("stop_if_true", stop_if_true)?;
+            }
+            if let Some(cs) = &rule.color_scale {
+                let cs_dict = PyDict::new(py);
+                let cfvo_list = PyList::empty(py);
+                for cfvo in &cs.cfvo {
+                    let entry = PyDict::new(py);
+                    entry.set_item("type", &cfvo.cfvo_type)?;
+                    if let Some(val) = &cfvo.val {
+                        entry.set_item("val", val)?;
+                    }
+                    cfvo_list.append(entry)?;
+                }
+                cs_dict.set_item("cfvo", cfvo_list)?;
+                let colors_list = PyList::empty(py);
+                for color in &cs.colors {
+                    colors_list.append(color)?;
+                }
+                cs_dict.set_item("colors", colors_list)?;
+                d.set_item("color_scale", cs_dict)?;
             }
             result.append(d)?;
         }

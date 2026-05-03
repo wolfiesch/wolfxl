@@ -70,7 +70,7 @@ structural effort, decision-gated.
 | G10 | Rich text in chart labels (extend existing)                         | P2  | ∥ 🤖  | S2     | landed      | Claude  | main   | 2026-05-03 | 2026-05-03 | `DataLabelList` + `DataLabel` accept a `rich=` kwarg that inflates a `CellRichText` into a wolfxl `RichText` and flows through `_dlbls_to_snake` as `tx_pr_runs`. Rust `DataLabels` carries `Vec<TitleRun>` and `emit_data_labels` drops a `<c:txPr>` block sharing the chart-title run emitter (`crates/wolfxl-writer/src/emit/charts/text.rs::emit_tx_pr`). Axis-title rich text rides the existing `Title.tx.rich` path. 8 tests in `tests/test_chart_label_richtext.py` (write-mode round-trip + openpyxl read-back + modify-mode preservation); full suite 2428 passed; oracle pass rate 80% -> 82% (41/50) post-merge with `charts.label_rich_text` flipping `not_yet -> supported`. |
 | G11 | CF icon sets (Python builder + writer emitter)                      | P1  | ∥ 🤖  | S3     | landed      | Claude  | parity/g11-cf-icon-sets | 2026-05-03 | 2026-05-03 | Icon sets emit; round-trip via writer + reader; oracle probe green. |
 | G12 | CF data bars (Python builder + writer emitter)                      | P1  | ∥ 🤖  | S3     | landed      | Claude  | parity/g12-cf-data-bars | 2026-05-03 | 2026-05-03 | DataBar honours percent/num/formula cfvo + showValue=False; oracle cf_data_bars_advanced green. |
-| G13 | CF color scales beyond basic                                        | P2  | ∥ 🤖  | S3     | proposed    |         |        |            |           | Exemplar: RFC-026 |
+| G13 | CF color scales beyond basic                                        | P2  | ∥ 🤖  | S3     | landed      | Claude  | parity/g13-cf-color-scales | 2026-05-03 | 2026-05-03 | `ColorScaleRule(start_*, mid_*, end_*)` round-trips user cfvo types/values + colors through write+read. `_conditional_format_payload` forwards 9 colorScale fields from `rule.extra`; `build_color_scale_stops` (`src/native_writer_sheet_features.rs`) builds 2-stop or 3-stop emit config with 6→8-hex normalization. Reader extended: `ConditionalFormatRule.color_scale: Option<ColorScaleInfo>` with parser dispatch gated on `b"colorScale"` context (avoids clobbering inline-rich-text `<rPr><color/></rPr>`). Python `_ColorScaleProxy`+`_Cfvo` shim attaches `rule.colorScale` openpyxl-shaped. Bare `ColorScaleRule()` still emits the legacy 3-stop default for back-compat. 7 tests in `tests/test_cf_color_scales.py`; oracle probe `cf.color_scales_advanced` flipped `partial -> supported`. Full suite 2459 passed; cargo workspace clean. |
 | G14 | CF stop-if-true, priority ordering, dxf integration                 | P2  | ⊥ 🤖  | S3     | proposed    |         |        |            |           | Serialized after G11-G13 (shared module) |
 | G15 | Combination charts (mixed types, secondary axis)                    | P1  | ⊥ 🧠  | S4     | rfc-drafted | Claude  |        | 2026-05-03 |           | RFC-069 drafted; awaiting impl pod (S4 cohort) |
 | G16 | Pivot chart per-point overrides                                     | P2  | ⊥ 🤖  | S4     | proposed    |         |        |            |           | Exemplar: RFC-046 chart overrides |
@@ -470,3 +470,12 @@ not on the calendar until decision-required signals fire.
 
 - 2026-05-03 — Plan file created (this session). S0 in progress: tracker +
   matrix spec + oracle harness skeleton landing under one Claude session.
+- 2026-05-03 — G13 landed (parity/g13-cf-color-scales). `ColorScaleRule`
+  honours user `cfvo` types/values and colors end-to-end (write+read).
+  Touched: `_worksheet_flush.py` (forward 9 colorScale kwargs),
+  `native_writer_sheet_features.rs` (`build_color_scale_stops`),
+  `crates/wolfxl-reader/src/lib.rs` (new `ColorScaleInfo`/`CfvoInfo`,
+  context-gated `<color>`/`<cfvo>` dispatch), `_worksheet_features.py`
+  (`_ColorScaleProxy` shim). Oracle probe `cf.color_scales_advanced`
+  flipped `partial -> supported`. 7 new tests; 2459 passed. Bare
+  `ColorScaleRule()` preserves the legacy hardcoded 3-stop default.

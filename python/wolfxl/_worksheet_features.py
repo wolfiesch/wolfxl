@@ -288,6 +288,57 @@ def get_data_validations(ws: Worksheet) -> Any:
     return validation_list
 
 
+class _Cfvo:
+    """openpyxl-shaped cfvo anchor — ``type`` / ``val`` attributes only.
+
+    The reader produces a flat dict (``{"type": ..., "val": ...}``) per
+    cfvo and we pivot that into an attribute object so callers can mirror
+    openpyxl's ``rule.colorScale.cfvo[i].type`` access shape.
+    """
+
+    __slots__ = ("type", "val")
+
+    def __init__(self, cfvo_type: str, val: Any = None) -> None:
+        self.type = cfvo_type
+        self.val = val
+
+
+class _ColorScaleProxy:
+    """Round-tripped ``<colorScale>`` block exposing ``.cfvo`` + ``.color``.
+
+    Mirrors the openpyxl ``ColorScale`` value object on the loaded
+    :class:`~wolfxl.formatting.rule.Rule` so probes can poke
+    ``rule.colorScale.cfvo[i].type`` after a save+load cycle.
+    """
+
+    __slots__ = ("cfvo", "color")
+
+    def __init__(self, cfvo: list[_Cfvo], color: list[str]) -> None:
+        self.cfvo = cfvo
+        self.color = color
+
+
+def _build_color_scale_proxy(payload: Any) -> _ColorScaleProxy | None:
+    """Build a :class:`_ColorScaleProxy` from a Rust-side dict, or ``None``.
+
+    The Rust reader hands us ``{"cfvo": [...], "colors": [...]}`` when a
+    rule had a ``<colorScale>`` block; everything else is omitted.
+    """
+    if not isinstance(payload, dict):
+        return None
+    raw_cfvo = payload.get("cfvo") or []
+    raw_colors = payload.get("colors") or []
+    cfvo = [
+        _Cfvo(
+            cfvo_type=str(entry.get("type", "")) if isinstance(entry, dict) else "",
+            val=entry.get("val") if isinstance(entry, dict) else None,
+        )
+        for entry in raw_cfvo
+    ]
+    colors = [str(c) for c in raw_colors]
+    return _ColorScaleProxy(cfvo=cfvo, color=colors)
+
+
 def get_conditional_formatting(ws: Worksheet) -> Any:
     """Return the ``ConditionalFormattingList`` for ``ws``, cached on the worksheet."""
     if ws._conditional_formatting_cache is not None:  # noqa: SLF001
@@ -318,15 +369,41 @@ def get_conditional_formatting(ws: Worksheet) -> Any:
             formula_list = [str(item) for item in formula]
         else:
             formula_list = [str(formula)]
-        grouped[sqref].append(
-            Rule(
-                type=entry.get("rule_type") or entry.get("type") or "expression",
-                operator=entry.get("operator"),
-                formula=formula_list,
-                stopIfTrue=bool(entry.get("stop_if_true", False)),
-                priority=int(entry.get("priority", 1)),
-            )
+        rule = Rule(
+            type=entry.get("rule_type") or entry.get("type") or "expression",
+            operator=entry.get("operator"),
+            formula=formula_list,
+            stopIfTrue=bool(entry.get("stop_if_true", False)),
+            priority=int(entry.get("priority", 1)),
         )
+        # Attach openpyxl-shaped colorScale shim when the Rust reader
+        # surfaced any cfvo/color pairs (G13).
+        color_scale_payload = entry.get("color_scale")
+        proxy = _build_color_scale_proxy(color_scale_payload)
+        if proxy is not None:
+            rule.colorScale = proxy  # type: ignore[attr-defined]
+            # Also stash the round-trippable form into ``extra`` so a
+            # save-time payload can rebuild the gradient without consulting
+            # the proxy. Keeps the patch -> save path symmetrical.
+            #
+            # 2-stop maps (start, end) -> cfvo[0..2]; 3-stop maps
+            # (start, mid, end) -> cfvo[0..3]. Anything else (rare) is
+            # treated as the 3-stop case for the first three entries.
+            extra = dict(rule.extra or {})
+            n = len(proxy.cfvo)
+            if n <= 2:
+                index_map = (("start", 0), ("end", 1))
+            else:
+                index_map = (("start", 0), ("mid", 1), ("end", 2))
+            for prefix, idx in index_map:
+                if idx < len(proxy.cfvo):
+                    cfvo_entry = proxy.cfvo[idx]
+                    extra[f"{prefix}_type"] = cfvo_entry.type or None
+                    extra[f"{prefix}_value"] = cfvo_entry.val
+                if idx < len(proxy.color):
+                    extra[f"{prefix}_color"] = proxy.color[idx]
+            rule.extra = extra
+        grouped[sqref].append(rule)
     for sqref in order:
         formatting_list._append_entry(  # noqa: SLF001
             ConditionalFormatting(sqref=sqref, rules=grouped[sqref])
