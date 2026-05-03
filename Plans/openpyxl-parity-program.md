@@ -65,7 +65,7 @@ structural effort, decision-gated.
 | G05 | NamedStyle / GradientFill / DifferentialStyle flow                  | P1  | ∥ 🤖  | S1     | proposed    |         |        |            |           | Exemplar: RFC-064 styles |
 | G06 | Image replace/delete public API                                     | P1  | ∥ 🤖  | S1     | proposed    |         |        |            |           | Exemplar: chart remove/replace v1.7 |
 | G07 | Array/DataTable/spill formula coverage audit + tests                | P1  | ∥ 🤖  | S1     | proposed    |         |        |            |           | Exemplar: RFC-057 array formulas |
-| G08 | Threaded comments write+modify                                      | P1  | ∥ 🧠  | S2     | proposed    |         |        |            |           | OOXML semantics non-trivial |
+| G08 | Threaded comments write+modify                                      | P1  | ∥ 🧠  | S2     | rfc-drafted | Claude  |        | 2026-05-03 |           | RFC-068 drafted; impl pod is Claude-led with codex assist on emit + reader |
 | G09 | Rich text in headers/footers                                        | P1  | ∥ 🤖  | S2     | proposed    |         |        |            |           | Exemplar: RFC-040 rich text |
 | G10 | Rich text in chart labels (extend existing)                         | P2  | ∥ 🤖  | S2     | proposed    |         |        |            |           | Exemplar: chart title rich text v1.7 |
 | G11 | CF icon sets (Python builder + writer emitter)                      | P1  | ∥ 🤖  | S3     | proposed    |         |        |            |           | Exemplar: RFC-026 conditional formatting |
@@ -348,7 +348,7 @@ Next free RFC number at S0 kickoff: **RFC-068**. Each 🧠 gap gets an RFC.
 
 | Gap | RFC                | Status     | Title (proposed)                                  |
 |-----|--------------------|------------|---------------------------------------------------|
-| G08 | RFC-068            | proposed   | Threaded comments write+modify                    |
+| G08 | RFC-068            | drafted    | Threaded comments write+modify                    |
 | G15 | RFC-069            | drafted    | Combination charts (multi-family plotArea + secondary axis) |
 | G17 | RFC-070            | proposed   | Pivot table mutation in modify mode               |
 | G18 | RFC-071            | proposed   | External links - workbook-scoped collection + rels |
