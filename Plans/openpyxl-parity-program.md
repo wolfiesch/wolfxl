@@ -72,7 +72,7 @@ structural effort, decision-gated.
 | G12 | CF data bars (Python builder + writer emitter)                      | P1  | ∥ 🤖  | S3     | proposed    |         |        |            |           | Exemplar: RFC-026 |
 | G13 | CF color scales beyond basic                                        | P2  | ∥ 🤖  | S3     | proposed    |         |        |            |           | Exemplar: RFC-026 |
 | G14 | CF stop-if-true, priority ordering, dxf integration                 | P2  | ⊥ 🤖  | S3     | proposed    |         |        |            |           | Serialized after G11-G13 (shared module) |
-| G15 | Combination charts (mixed types, secondary axis)                    | P1  | ⊥ 🧠  | S4     | proposed    |         |        |            |           | Axis-id allocation needs RFC |
+| G15 | Combination charts (mixed types, secondary axis)                    | P1  | ⊥ 🧠  | S4     | rfc-drafted | Claude  |        | 2026-05-03 |           | RFC-069 drafted; awaiting impl pod (S4 cohort) |
 | G16 | Pivot chart per-point overrides                                     | P2  | ⊥ 🤖  | S4     | proposed    |         |        |            |           | Exemplar: RFC-046 chart overrides |
 | G17 | Pivot table mutation of existing pivots                             | P1  | ⊥ 🧠  | S5     | proposed    |         |        |            |           | RFC required; cache refresh consistency |
 | G18 | External links (workbook-level collection + rels)                   | P1  | ⊥ 🧠  | S6     | proposed    |         |        |            |           | RFC required |
@@ -346,18 +346,18 @@ Next free RFC number at S0 kickoff: **RFC-068**. Each 🧠 gap gets an RFC.
 🤖 gaps can skip RFC and go straight to a codex handoff spec under
 `Plans/rfcs/handoffs/`.
 
-| Gap | RFC                | Title (proposed)                                  |
-|-----|--------------------|---------------------------------------------------|
-| G08 | RFC-068            | Threaded comments write+modify                    |
-| G15 | RFC-069            | Combination charts (axis-id allocation, mixed plots) |
-| G17 | RFC-070            | Pivot table mutation in modify mode               |
-| G18 | RFC-071            | External links - workbook-scoped collection + rels |
-| G19 | RFC-072            | VBA inspection API (read-only)                    |
-| G20 | RFC-073            | `write_only=True` streaming write mode            |
-| G25 | RFC-074 (gated)    | `.xlsb` write support                             |
-| G26 | RFC-075 (gated)    | `.xls` write support                              |
-| G27 | RFC-076 (gated)    | `.ods` read+write                                 |
-| G28 | RFC-077 (gated)    | VBA generation                                    |
+| Gap | RFC                | Status     | Title (proposed)                                  |
+|-----|--------------------|------------|---------------------------------------------------|
+| G08 | RFC-068            | proposed   | Threaded comments write+modify                    |
+| G15 | RFC-069            | drafted    | Combination charts (multi-family plotArea + secondary axis) |
+| G17 | RFC-070            | proposed   | Pivot table mutation in modify mode               |
+| G18 | RFC-071            | proposed   | External links - workbook-scoped collection + rels |
+| G19 | RFC-072            | proposed   | VBA inspection API (read-only)                    |
+| G20 | RFC-073            | proposed   | `write_only=True` streaming write mode            |
+| G25 | RFC-074 (gated)    | proposed   | `.xlsb` write support                             |
+| G26 | RFC-075 (gated)    | proposed   | `.xls` write support                              |
+| G27 | RFC-076 (gated)    | proposed   | `.ods` read+write                                 |
+| G28 | RFC-077 (gated)    | proposed   | VBA generation                                    |
 
 ## Cross-session pickup protocol
 
