@@ -38,6 +38,7 @@ trait NativeStyleResolver {
     fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo>;
     fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo>;
     fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo>;
+    fn named_style_for_style_id(&self, style_id: u32) -> Option<&str>;
     fn date1904(&self) -> bool;
 }
 
@@ -64,6 +65,10 @@ impl NativeStyleResolver for NativeReaderBook {
 
     fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo> {
         self.protection_for_style_id(style_id)
+    }
+
+    fn named_style_for_style_id(&self, style_id: u32) -> Option<&str> {
+        self.named_style_for_style_id(style_id)
     }
 
     fn date1904(&self) -> bool {
@@ -93,6 +98,12 @@ impl NativeStyleResolver for NativeXlsbReaderBook {
     }
 
     fn protection_for_style_id(&self, _style_id: u32) -> Option<&ProtectionInfo> {
+        None
+    }
+
+    fn named_style_for_style_id(&self, _style_id: u32) -> Option<&str> {
+        // XLSB does not yet plumb cellStyles through; return None until the
+        // BIFF12 parser learns BrtBeginStyles + BrtBeginStyleSheet.
         None
     }
 
@@ -974,6 +985,9 @@ impl NativeXlsxBook {
             if let Some(protection) = self.book.protection_for_style_id(style_id) {
                 d.set_item("locked", protection.locked)?;
                 d.set_item("hidden", protection.hidden)?;
+            }
+            if let Some(name) = self.book.named_style_for_style_id(style_id) {
+                d.set_item("named_style", name)?;
             }
         }
         Ok(d.into())
@@ -2127,6 +2141,9 @@ fn populate_record_format<B: NativeStyleResolver>(
     }
     if let Some(number_format) = book.number_format_for_style_id(style_id) {
         record.set_item("number_format", number_format)?;
+    }
+    if let Some(name) = book.named_style_for_style_id(style_id) {
+        record.set_item("named_style", name)?;
     }
     Ok(())
 }

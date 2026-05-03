@@ -63,6 +63,12 @@ class Cell:
         "_alignment",
         "_number_format",
         "_protection",
+        # Workbook-level named-style binding ("Highlight", "Heading 1", ...).
+        # ``_UNSET`` means the cell has never been touched; ``None`` means
+        # the cell was explicitly cleared. The flush layer threads the name
+        # through `_named_style` in the format dict so the native writer can
+        # look up the cellStyleXfs slot.
+        "_named_style",
         "_value_dirty",
         "_format_dirty",
         # Array / data-table formula metadata. Populated when ``cell.value`` is
@@ -93,6 +99,7 @@ class Cell:
         self._alignment: Alignment | None | _Sentinel = _UNSET
         self._number_format: str | None | _Sentinel = _UNSET
         self._protection: Protection | None | _Sentinel = _UNSET
+        self._named_style: str | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
         # None until the cell is identified as array / data-table either via
@@ -267,28 +274,45 @@ class Cell:
         return is_date_format(self.number_format)
 
     @property
-    def style(self) -> None:
-        """Return the named style assigned to this cell, if any.
+    def style(self) -> str | None:
+        """Return the workbook-level named style bound to this cell.
 
-        WolfXL currently preserves many style attributes through the
-        explicit ``font``, ``fill``, ``border``, ``alignment``, and
-        ``number_format`` accessors. Named-style objects are not exposed
-        through this compatibility property, so the getter returns ``None``.
+        Pending in-memory writes win over the on-disk binding so a cell
+        whose style has just been assigned reads back the same name even
+        before the workbook is saved. ``None`` is returned for cells using
+        the implicit Normal style.
         """
-        return None
+        if self._named_style is not _UNSET:
+            return self._named_style  # type: ignore[return-value]
+        return self._read_named_style()
 
     @style.setter
-    def style(self, value: Any) -> None:  # noqa: ARG002
-        """Reject named-style assignment.
+    def style(self, value: str | None) -> None:
+        """Bind this cell to a workbook-level named cell style.
 
         Args:
-            value: Named style requested by the caller.
+            value: Name of a previously-registered named style, or ``None``
+                to clear an existing binding.
         """
-        raise NotImplementedError(
-            "Named styles are not yet supported by wolfxl. "
-            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility "
-            "for compatibility notes."
-        )
+        if value is None:
+            self._named_style = None
+            self._format_dirty = True
+            self._ws._dirty.add((self._row, self._col))  # noqa: SLF001
+            return
+        if not isinstance(value, str):
+            raise TypeError(
+                f"cell.style must be a string or None, got {type(value).__name__}"
+            )
+        wb = self._ws._workbook  # noqa: SLF001
+        if not wb._has_named_style(value):  # noqa: SLF001
+            raise ValueError(
+                f"Named style {value!r} is not registered on the workbook. "
+                "Call workbook.add_named_style(...) first or use the explicit "
+                "font/fill/border accessors."
+            )
+        self._named_style = value
+        self._format_dirty = True
+        self._ws._dirty.add((self._row, self._col))  # noqa: SLF001
 
     # ------------------------------------------------------------------
     # T1 PR1: hyperlink / comment read access (write-mode setters land in PR4)
@@ -848,6 +872,19 @@ class Cell:
             self._ws.title, self.coordinate,
         )
         return _format_to_protection(payload)
+
+    def _read_named_style(self) -> str | None:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return None
+        payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
+            self._ws.title, self.coordinate,
+        )
+        if isinstance(payload, dict):
+            name = payload.get("named_style")
+            if isinstance(name, str) and name:
+                return name
+        return None
 
     def _read_style_id(self) -> int:
         wb = self._ws._workbook  # noqa: SLF001

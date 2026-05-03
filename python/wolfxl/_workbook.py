@@ -556,6 +556,23 @@ class Workbook:
         if hasattr(style, "bind"):
             style.bind(self)
 
+    def _has_named_style(self, name: str) -> bool:
+        """Return True if ``name`` is a registered named style.
+
+        ``"Normal"`` always resolves to True (Excel's reserved default,
+        always present in the cellStyles table). Other names must have
+        been registered via :meth:`add_named_style` or read in from the
+        source workbook on load.
+        """
+        if name == "Normal":
+            return True
+        if name in self._named_style_names():
+            return True
+        return any(
+            getattr(style, "name", None) == name
+            for style in self._named_style_registry().user_styles()
+        )
+
     def create_chartsheet(self, title: str | None = None, index: int | None = None) -> Any:
         """Raise clearly for chart-sheet creation, which WolfXL does not write yet."""
         raise NotImplementedError(

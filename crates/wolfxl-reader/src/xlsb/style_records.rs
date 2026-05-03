@@ -45,6 +45,10 @@ fn parse_xf(payload: &[u8]) -> XfEntry {
         font_id: payload.get(4..6).map(le_u16).unwrap_or_default() as u32,
         border_id: payload.get(6..8).map(le_u16).unwrap_or_default() as u32,
         fill_id: payload.get(8..10).map(le_u16).unwrap_or_default() as u32,
+        // XLSB BIFF12 BrtXF carries xfId at bytes 0..2 of the payload, but
+        // we keep it 0 for now: named-style support is XLSX-only at this
+        // stage. Wire this up when XLSB write or modify needs it.
+        xf_id: 0,
         alignment: parse_binary_alignment(payload),
         protection: None,
     }

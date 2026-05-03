@@ -261,7 +261,15 @@ pub(crate) fn intern_format_from_dict(
     dict: &Bound<'_, PyDict>,
 ) -> PyResult<u32> {
     let spec = dict_to_format_spec(dict)?;
-    Ok(wb.styles.intern_format(&spec))
+    let xf_id = match dict.get_item("_named_style")? {
+        Some(v) => v
+            .extract::<String>()
+            .ok()
+            .and_then(|name| wb.styles.xf_id_for_named_style(&name))
+            .unwrap_or(0),
+        None => 0,
+    };
+    Ok(wb.styles.intern_format_with_xf_id(&spec, xf_id))
 }
 
 pub(crate) fn intern_border_only(wb: &mut Workbook, dict: &Bound<'_, PyDict>) -> PyResult<u32> {

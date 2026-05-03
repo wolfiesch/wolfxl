@@ -207,7 +207,16 @@ impl StylesBuilder {
     /// The default `FormatSpec` always returns 0 (the "no style" sentinel),
     /// letting cells emit without the `s` attribute.
     pub fn intern_format(&mut self, spec: &FormatSpec) -> u32 {
-        if spec == &FormatSpec::default() {
+        self.intern_format_with_xf_id(spec, 0)
+    }
+
+    /// Like [`intern_format`], but stamps the resulting XfRecord with a
+    /// non-zero `xfId` so it points to a `<cellStyleXfs>` slot. Used by
+    /// `cell.style = "Highlight"` to bind a cell's xf to a registered
+    /// named style; the resulting `<xf>` element gets `xfId="N"` and
+    /// the reader resurfaces the style's name from `<cellStyles>`.
+    pub fn intern_format_with_xf_id(&mut self, spec: &FormatSpec, xf_id: u32) -> u32 {
+        if xf_id == 0 && spec == &FormatSpec::default() {
             return 0;
         }
         let font_id = spec.font.as_ref().map(|f| self.intern_font(f)).unwrap_or(0);
@@ -228,6 +237,7 @@ impl StylesBuilder {
             fill_id,
             border_id,
             num_fmt_id,
+            xf_id,
             alignment: spec.alignment.clone(),
             protection: spec.protection.clone(),
             apply_font: spec.font.is_some(),
@@ -322,6 +332,22 @@ impl StylesBuilder {
             name: name.to_string(),
         });
     }
+
+    /// Resolve a named-style name to its `<cellStyleXfs>` slot.
+    ///
+    /// `"Normal"` always resolves to slot 0 (Excel's reserved default).
+    /// User-registered styles map to slot `1 + position`. Returns `None`
+    /// for unknown names so callers can decide whether to skip the xfId
+    /// stamp or auto-register first.
+    pub fn xf_id_for_named_style(&self, name: &str) -> Option<u32> {
+        if name == "Normal" {
+            return Some(0);
+        }
+        self.named_styles
+            .iter()
+            .position(|style| style.name == name)
+            .map(|idx| 1 + idx as u32)
+    }
 }
 
 /// One workbook-level named cell style.
@@ -338,6 +364,12 @@ pub struct XfRecord {
     pub fill_id: u32,
     pub border_id: u32,
     pub num_fmt_id: u32,
+    /// `xfId` attr on the `<xf>` element. Points to a `<cellStyleXfs>`
+    /// entry; 0 means the default Normal style. Cells that opt into a
+    /// user-defined named style (via `cell.style = "Highlight"`) carry
+    /// a non-zero `xf_id`, which is what `cell.style` resurfaces on
+    /// load via the reader's `<cellStyles>` lookup.
+    pub xf_id: u32,
     pub alignment: Option<AlignmentSpec>,
     pub protection: Option<ProtectionSpec>,
     pub apply_font: bool,
@@ -448,5 +480,35 @@ mod tests {
         assert_eq!(id, 2);
         // Also should not add a custom entry.
         assert!(b.num_fmts.is_empty());
+    }
+
+    #[test]
+    fn xf_id_for_named_style_resolves_normal_and_custom() {
+        let mut b = StylesBuilder::default();
+        // Normal always maps to slot 0 (Excel's reserved default).
+        assert_eq!(b.xf_id_for_named_style("Normal"), Some(0));
+        // Unknown names return None.
+        assert_eq!(b.xf_id_for_named_style("Highlight"), None);
+        // Registered styles map to 1 + position.
+        b.add_named_style("Highlight");
+        b.add_named_style("Total");
+        assert_eq!(b.xf_id_for_named_style("Highlight"), Some(1));
+        assert_eq!(b.xf_id_for_named_style("Total"), Some(2));
+    }
+
+    #[test]
+    fn intern_format_with_xf_id_threads_xf_id_into_record() {
+        let mut b = StylesBuilder::default();
+        b.add_named_style("Highlight");
+        let spec = FormatSpec {
+            font: Some(FontSpec {
+                bold: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let xf_idx = b.intern_format_with_xf_id(&spec, 1);
+        assert!(xf_idx >= 1, "non-default spec should not collide with slot 0");
+        assert_eq!(b.cell_xfs[xf_idx as usize].xf_id, 1);
     }
 }

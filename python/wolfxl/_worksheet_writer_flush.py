@@ -279,6 +279,15 @@ def _flush_format_cells(
             border = border_to_rust_dict(cell._border)  # noqa: SLF001
             if border:
                 fmt.update(border)
+        if (
+            cell._named_style is not _UNSET  # noqa: SLF001
+            and cell._named_style is not None
+            and cell._named_style != "Normal"
+        ):
+            # Threaded into the same dict so the native writer can stamp
+            # the resulting xf record with the correct cellStyleXfs slot
+            # (xfId attr). Cells using Normal/None stay on slot 0 implicitly.
+            fmt["_named_style"] = cell._named_style  # noqa: SLF001
 
         if fmt:
             format_entries.append((row, col, fmt))

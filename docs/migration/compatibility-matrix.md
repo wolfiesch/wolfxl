@@ -42,7 +42,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `cell.font / fill / border / alignment / number_format` | `cell.font / fill / border / alignment / number_format` | ✅ Supported |  | All five attributes (plus protection and border) round-trip together on one cell. Python flush layer merges format and border keys into a single dict so the native writer interns one combined xf record, instead of minting two ids that overwrite each other. |
 | `Border(diagonal=Side(...), diagonalUp=True)` | `Border(diagonal=Side(...), diagonalUp=True)` | ✅ Supported |  | Round-trips through both write mode and modify mode; diagonalUp/diagonalDown attrs and the <diagonal> child of <border> persist via the patcher's BorderSpec and the writer's intern path. |
 | `cell.protection = Protection(...)` | `cell.protection = Protection(...)` | ✅ Supported |  | Round-trips through wolfxl reload; locked/hidden flags persist via <protection> child of <xf> with applyProtection="1". |
-| `NamedStyle(name=...) + wb.add_named_style(...)` | `NamedStyle(name=...) + wb.add_named_style(...)` | 🟡 Partial | G05 | Bridge for named styles, GradientFill, DifferentialStyle still incomplete. |
+| `NamedStyle(name=...) + wb.add_named_style(...)` | `NamedStyle(name=...) + wb.add_named_style(...)` | ✅ Supported |  | cell.style binds a registered NamedStyle and round-trips through cellStyleXfs/cellStyles + the xfId attr on <xf>; reader resurfaces the name via cell.style. |
 | `GradientFill(stop=(...))` | `GradientFill(stop=(...))` | 🟡 Partial | G05 |  |
 
 ## Charts

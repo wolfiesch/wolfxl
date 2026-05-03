@@ -205,10 +205,9 @@ ENTRIES: list[Entry] = [
         "category": "cell_styles",
         "openpyxl": "NamedStyle(name=...) + wb.add_named_style(...)",
         "wolfxl": "NamedStyle(name=...) + wb.add_named_style(...)",
-        "status": "partial",
-        "gap_id": "G05",
+        "status": "supported",
         "probe": "cell_named_style",
-        "notes": "Bridge for named styles, GradientFill, DifferentialStyle still incomplete.",
+        "notes": "cell.style binds a registered NamedStyle and round-trips through cellStyleXfs/cellStyles + the xfId attr on <xf>; reader resurfaces the name via cell.style.",
     },
     {
         "id": "cell.gradient_fill",

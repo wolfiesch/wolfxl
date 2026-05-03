@@ -265,8 +265,8 @@ fn dxf_to_xml(dxf: &DxfRecord) -> String {
 
 fn xf_to_xml(xf: &XfRecord) -> String {
     let mut attrs = format!(
-        "numFmtId=\"{}\" fontId=\"{}\" fillId=\"{}\" borderId=\"{}\" xfId=\"0\"",
-        xf.num_fmt_id, xf.font_id, xf.fill_id, xf.border_id
+        "numFmtId=\"{}\" fontId=\"{}\" fillId=\"{}\" borderId=\"{}\" xfId=\"{}\"",
+        xf.num_fmt_id, xf.font_id, xf.fill_id, xf.border_id, xf.xf_id
     );
     if xf.apply_font {
         attrs.push_str(" applyFont=\"1\"");
@@ -682,6 +682,37 @@ mod tests {
         assert!(text.contains("<cellStyleXfs count=\"2\">"));
         assert!(text.contains("<cellStyles count=\"2\">"));
         assert!(text.contains("<cellStyle name=\"Metric\" xfId=\"1\"/>"));
+    }
+
+    #[test]
+    fn cell_xf_with_named_style_id_emits_xfid_attr() {
+        // A cell that opts into a named style gets its `<xf>` stamped with
+        // the cellStyleXfs slot. Round-tripping that attr is what surfaces
+        // `cell.style == "Highlight"` on load.
+        let mut styles = StylesBuilder::default();
+        styles.add_named_style("Highlight");
+        let spec = FormatSpec {
+            font: Some(FontSpec {
+                bold: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        styles.intern_format_with_xf_id(&spec, 1);
+        let text = emit_str(&styles);
+
+        // Default xf at index 0 still self-closes with xfId=0.
+        assert!(
+            text.contains(
+                "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
+            ),
+            "default xf must keep xfId=0; got:\n{text}"
+        );
+        // The named-style xf carries xfId=1 so the reader can resolve it.
+        assert!(
+            text.contains("xfId=\"1\""),
+            "named-style xf must emit xfId=\"1\"; got:\n{text}"
+        );
     }
 
     // -------------------------------------------------------------------

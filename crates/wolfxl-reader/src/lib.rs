@@ -1230,6 +1230,15 @@ impl NativeXlsxBook {
         self.styles.protection_for_style_id(style_id)
     }
 
+    /// Resolve a style id to a workbook-level named cell style.
+    ///
+    /// Returns `None` when the cell carries the implicit Normal style or
+    /// the file has no `<cellStyles>` entry for the referenced xfId.
+    /// What openpyxl exposes as `cell.style`.
+    pub fn named_style_for_style_id(&self, style_id: u32) -> Option<&str> {
+        self.styles.named_style_for_style_id(style_id)
+    }
+
     /// Parse a worksheet into sparse decoded cells.
     pub fn worksheet(&self, sheet_name: &str) -> Result<WorksheetData> {
         let Some(info) = self.sheets.iter().find(|s| s.name == sheet_name) else {
@@ -1279,6 +1288,10 @@ pub(crate) struct StyleTables {
     pub(crate) fonts: Vec<FontInfo>,
     pub(crate) fills: Vec<FillInfo>,
     pub(crate) borders: Vec<BorderInfo>,
+    /// `<cellStyles>` map: cellStyleXfs slot id (the `xfId` attr) -> name.
+    /// Populated only for explicitly-named styles. The "Normal" entry is
+    /// stored as well so callers don't need to special-case slot 0.
+    pub(crate) cell_styles: HashMap<u32, String>,
 }
 
 impl StyleTables {
@@ -1321,6 +1334,20 @@ impl StyleTables {
     pub(crate) fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo> {
         self.cell_xfs.get(style_id as usize)?.protection.as_ref()
     }
+
+    /// Resolve a cell's `s` attribute to a workbook-level named style.
+    ///
+    /// Walks `cellXfs[style_id].xf_id` -> `cellStyles[xf_id]`. Returns
+    /// `None` for the implicit "Normal" style (slot 0) so callers can
+    /// keep their default-style logic; non-zero xfIds resolve to the
+    /// explicit name registered in `<cellStyles>`.
+    pub(crate) fn named_style_for_style_id(&self, style_id: u32) -> Option<&str> {
+        let xf = self.cell_xfs.get(style_id as usize)?;
+        if xf.xf_id == 0 {
+            return None;
+        }
+        self.cell_styles.get(&xf.xf_id).map(String::as_str)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1329,6 +1356,10 @@ pub(crate) struct XfEntry {
     pub(crate) font_id: u32,
     pub(crate) fill_id: u32,
     pub(crate) border_id: u32,
+    /// `xfId` attr on `<xf>`. Points into `<cellStyleXfs>` and is what
+    /// `named_style_for_style_id` cross-references against
+    /// `StyleTables::cell_styles`. `0` means the implicit Normal style.
+    pub(crate) xf_id: u32,
     pub(crate) alignment: Option<AlignmentInfo>,
     pub(crate) protection: Option<ProtectionInfo>,
 }
@@ -2027,11 +2058,13 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                         xf.protection = parse_protection(&e);
                     }
                 }
+                b"cellStyle" => push_cell_style(&mut styles, &e),
                 _ => {}
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"numFmt" if in_num_fmts => push_num_fmt(&mut styles, &e),
                 b"xf" if in_cell_xfs => styles.cell_xfs.push(parse_xf_entry(&e)),
+                b"cellStyle" => push_cell_style(&mut styles, &e),
                 b"font" if in_fonts => styles.fonts.push(FontInfo::default()),
                 tag if in_fonts && current_font.is_some() => {
                     if let Some(font) = current_font.as_mut() {
@@ -2128,6 +2161,17 @@ fn push_num_fmt(styles: &mut StyleTables, e: &BytesStart<'_>) {
     }
 }
 
+fn push_cell_style(styles: &mut StyleTables, e: &BytesStart<'_>) {
+    // `<cellStyle name="Foo" xfId="2" builtinId="..."/>` — the xfId is what
+    // cells reference (via cellXfs[s].xf_id). Skip entries missing either
+    // attribute; nothing else in OOXML can resolve them anyway.
+    let xf_id = attr_value(e, b"xfId").and_then(|value| value.parse::<u32>().ok());
+    let name = attr_value(e, b"name");
+    if let (Some(xf_id), Some(name)) = (xf_id, name) {
+        styles.cell_styles.insert(xf_id, name);
+    }
+}
+
 fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
     XfEntry {
         num_fmt_id: attr_value(e, b"numFmtId")
@@ -2140,6 +2184,9 @@ fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
         border_id: attr_value(e, b"borderId")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0),
+        xf_id: attr_value(e, b"xfId")
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
         alignment: None,

@@ -161,8 +161,15 @@ def test_style_getter_returns_none() -> None:
     assert ws["A1"].style is None
 
 
-def test_style_setter_raises() -> None:
+def test_style_setter_rejects_unregistered_names() -> None:
+    """Assigning a style name that wasn't registered raises ValueError.
+
+    Named-style support landed in the G05 follow-up; the previous
+    NotImplementedError was replaced with a registration check so the
+    user sees an actionable error pointing them at add_named_style.
+    """
     wb = wolfxl.Workbook()
     ws = wb.active
-    with pytest.raises(NotImplementedError, match="Named styles"):
+    assert ws is not None
+    with pytest.raises(ValueError, match="not registered"):
         ws["A1"].style = "Good"
