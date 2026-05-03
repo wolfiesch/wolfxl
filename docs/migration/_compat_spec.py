@@ -198,10 +198,9 @@ ENTRIES: list[Entry] = [
         "category": "cell_styles",
         "openpyxl": "cell.protection = Protection(...)",
         "wolfxl": "cell.protection = Protection(...)",
-        "status": "partial",
-        "gap_id": "G04",
+        "status": "supported",
         "probe": "cell_protection",
-        "notes": "Cell.protection getter exists; setter is missing. Sheet-level ws.protection works.",
+        "notes": "Round-trips through wolfxl reload; locked/hidden flags persist via <protection> child of <xf> with applyProtection=\"1\".",
     },
     {
         "id": "cell.named_style",

@@ -4,8 +4,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use wolfxl_writer::model::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, Worksheet,
-    WriteCell, WriteCellValue,
+    AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, ProtectionSpec,
+    Worksheet, WriteCell, WriteCellValue,
 };
 use wolfxl_writer::Workbook;
 
@@ -159,6 +159,24 @@ fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
     }
     if align_touched {
         spec.alignment = Some(align);
+    }
+
+    let mut prot = ProtectionSpec::default();
+    let mut prot_touched = false;
+    if let Some(v) = dict.get_item("locked")? {
+        if let Ok(b) = v.extract::<bool>() {
+            prot.locked = b;
+            prot_touched = true;
+        }
+    }
+    if let Some(v) = dict.get_item("hidden")? {
+        if let Ok(b) = v.extract::<bool>() {
+            prot.hidden = b;
+            prot_touched = true;
+        }
+    }
+    if prot_touched {
+        spec.protection = Some(prot);
     }
 
     Ok(spec)

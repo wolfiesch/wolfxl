@@ -19,6 +19,7 @@ def flush_to_patcher(
     alignment_to_format_dict: Any,
     border_to_rust_dict: Any,
     rich_text_to_runs_payload: Any,
+    protection_to_format_dict: Any,
 ) -> None:
     """Flush dirty worksheet cells to the ``XlsxPatcher`` backend."""
     from wolfxl._cell import _UNSET
@@ -77,6 +78,8 @@ def flush_to_patcher(
                 fmt.update(alignment_to_format_dict(cell._alignment))  # noqa: SLF001
             if cell._number_format is not _UNSET and cell._number_format is not None:  # noqa: SLF001
                 fmt["number_format"] = cell._number_format  # noqa: SLF001
+            if cell._protection is not _UNSET and cell._protection is not None:  # noqa: SLF001
+                fmt.update(protection_to_format_dict(cell._protection))  # noqa: SLF001
 
             if fmt:
                 patcher.queue_format(ws._title, coord, fmt)  # noqa: SLF001

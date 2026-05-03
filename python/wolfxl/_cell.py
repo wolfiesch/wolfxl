@@ -20,10 +20,13 @@ from wolfxl._cell_payloads import (
     format_to_alignment as _format_to_alignment,
     format_to_fill as _format_to_fill,
     format_to_font as _format_to_font,
+    format_to_protection as _format_to_protection,
     payload_to_python as _payload_to_python,
+    protection_to_format_dict as protection_to_format_dict,
     python_value_to_payload as python_value_to_payload,
 )
 from wolfxl._styles import Alignment, Border, Font, PatternFill
+from wolfxl.styles.protection import Protection
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
 from wolfxl._worksheet_rich_text import runs_payload_to_cellrichtext
@@ -59,6 +62,7 @@ class Cell:
         "_border",
         "_alignment",
         "_number_format",
+        "_protection",
         "_value_dirty",
         "_format_dirty",
         # Array / data-table formula metadata. Populated when ``cell.value`` is
@@ -88,6 +92,7 @@ class Cell:
         self._border: Border | None | _Sentinel = _UNSET
         self._alignment: Alignment | None | _Sentinel = _UNSET
         self._number_format: str | None | _Sentinel = _UNSET
+        self._protection: Protection | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
         # None until the cell is identified as array / data-table either via
@@ -232,6 +237,7 @@ class Cell:
         border = self._border if self._border is not _UNSET else None
         align = self._alignment if self._alignment is not _UNSET else None
         nfmt = self._number_format if self._number_format is not _UNSET else None
+        prot = self._protection if self._protection is not _UNSET else None
         if font and font != Font():
             return True
         if fill and fill != PatternFill():
@@ -241,6 +247,8 @@ class Cell:
         if align and align != Alignment():
             return True
         if nfmt and nfmt != "General":
+            return True
+        if prot and prot != Protection():
             return True
         return False
 
@@ -323,9 +331,26 @@ class Cell:
         set_comment(self, value)
 
     @property
-    def protection(self) -> None:
-        """Read-only default (None). Cell protection is not supported."""
-        return None
+    def protection(self) -> Protection:
+        """Return the resolved cell protection flags.
+
+        Falls back to ``Protection()`` (Excel's default of
+        ``locked=True, hidden=False``) when the cell carries no
+        explicit ``<protection>`` override.
+        """
+        self._require_xlsx_for_style("protection")
+        if self._protection is _UNSET:
+            self._protection = self._read_protection()
+        return self._protection if self._protection is not None else Protection()  # type: ignore[return-value]
+
+    @protection.setter
+    def protection(self, val: Protection) -> None:
+        """Set the cell protection flags.
+
+        Args:
+            val: Protection object with ``locked``/``hidden`` flags.
+        """
+        self._set_style_value("protection", "_protection", val)
 
     # ------------------------------------------------------------------
     # Value
@@ -814,6 +839,15 @@ class Cell:
         if isinstance(payload, dict):
             return payload.get("number_format")
         return None
+
+    def _read_protection(self) -> Protection | None:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return None
+        payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
+            self._ws.title, self.coordinate,
+        )
+        return _format_to_protection(payload)
 
     def _read_style_id(self) -> int:
         wb = self._ws._workbook  # noqa: SLF001

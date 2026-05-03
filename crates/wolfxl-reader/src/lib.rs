@@ -1223,6 +1223,13 @@ impl NativeXlsxBook {
         self.styles.alignment_for_style_id(style_id)
     }
 
+    /// Resolve a style id to cell protection metadata. Returns ``None`` when
+    /// the xf has no `<protection>` child (meaning "use Excel defaults":
+    /// ``locked=true``, ``hidden=false``).
+    pub fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo> {
+        self.styles.protection_for_style_id(style_id)
+    }
+
     /// Parse a worksheet into sparse decoded cells.
     pub fn worksheet(&self, sheet_name: &str) -> Result<WorksheetData> {
         let Some(info) = self.sheets.iter().find(|s| s.name == sheet_name) else {
@@ -1310,6 +1317,10 @@ impl StyleTables {
     pub(crate) fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
         self.cell_xfs.get(style_id as usize)?.alignment.as_ref()
     }
+
+    pub(crate) fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo> {
+        self.cell_xfs.get(style_id as usize)?.protection.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1319,6 +1330,7 @@ pub(crate) struct XfEntry {
     pub(crate) fill_id: u32,
     pub(crate) border_id: u32,
     pub(crate) alignment: Option<AlignmentInfo>,
+    pub(crate) protection: Option<ProtectionInfo>,
 }
 
 /// Parsed cell font.
@@ -1347,6 +1359,19 @@ pub struct AlignmentInfo {
     pub wrap_text: bool,
     pub text_rotation: Option<u32>,
     pub indent: Option<u32>,
+}
+
+/// Parsed cell-level protection flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtectionInfo {
+    pub locked: bool,
+    pub hidden: bool,
+}
+
+impl Default for ProtectionInfo {
+    fn default() -> Self {
+        Self { locked: true, hidden: false }
+    }
 }
 
 /// Parsed cell border.
@@ -1997,6 +2022,11 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                         xf.alignment = parse_alignment(&e);
                     }
                 }
+                b"protection" if in_cell_xfs => {
+                    if let Some(xf) = styles.cell_xfs.last_mut() {
+                        xf.protection = parse_protection(&e);
+                    }
+                }
                 _ => {}
             },
             Ok(Event::Empty(e)) => match e.local_name().as_ref() {
@@ -2022,6 +2052,11 @@ fn parse_style_tables(xml: &str) -> Result<StyleTables> {
                 b"alignment" if in_cell_xfs => {
                     if let Some(xf) = styles.cell_xfs.last_mut() {
                         xf.alignment = parse_alignment(&e);
+                    }
+                }
+                b"protection" if in_cell_xfs => {
+                    if let Some(xf) = styles.cell_xfs.last_mut() {
+                        xf.protection = parse_protection(&e);
                     }
                 }
                 b"border" if in_borders => {
@@ -2108,7 +2143,21 @@ fn parse_xf_entry(e: &BytesStart<'_>) -> XfEntry {
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(0),
         alignment: None,
+        protection: None,
     }
+}
+
+fn parse_protection(e: &BytesStart<'_>) -> Option<ProtectionInfo> {
+    let locked_attr = attr_value(e, b"locked");
+    let hidden_attr = attr_value(e, b"hidden");
+    if locked_attr.is_none() && hidden_attr.is_none() {
+        return None;
+    }
+    let parse_bool = |s: &str| !matches!(s, "0" | "false" | "False");
+    Some(ProtectionInfo {
+        locked: locked_attr.as_deref().map(parse_bool).unwrap_or(true),
+        hidden: hidden_attr.as_deref().map(parse_bool).unwrap_or(false),
+    })
 }
 
 #[derive(Debug, Default)]

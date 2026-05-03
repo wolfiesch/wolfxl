@@ -1513,6 +1513,7 @@ class Worksheet:
         self, writer: Any, python_value_to_payload: Any,
         font_to_format_dict: Any, fill_to_format_dict: Any,
         alignment_to_format_dict: Any, border_to_rust_dict: Any,
+        protection_to_format_dict: Any,
     ) -> None:
         """Flush dirty cells to the NativeWorkbook backend (write mode).
 
@@ -1530,6 +1531,7 @@ class Worksheet:
             alignment_to_format_dict,
             border_to_rust_dict,
             cellrichtext_to_runs_payload,
+            protection_to_format_dict,
         )
 
     def _batch_write_dicts(
@@ -1544,6 +1546,7 @@ class Worksheet:
         self, patcher: Any, python_value_to_payload: Any,
         font_to_format_dict: Any, fill_to_format_dict: Any,
         alignment_to_format_dict: Any, border_to_rust_dict: Any,
+        protection_to_format_dict: Any,
     ) -> None:
         """Flush dirty cells to the XlsxPatcher backend (modify mode)."""
         flush_to_patcher(
@@ -1555,6 +1558,7 @@ class Worksheet:
             alignment_to_format_dict,
             border_to_rust_dict,
             cellrichtext_to_runs_payload,
+            protection_to_format_dict,
         )
 
     def _flush_autofilter_post_cells(self, writer: Any) -> None:

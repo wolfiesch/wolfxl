@@ -15,6 +15,7 @@ def flush_worksheet(ws: Worksheet) -> None:
         border_to_rust_dict,
         fill_to_format_dict,
         font_to_format_dict,
+        protection_to_format_dict,
         python_value_to_payload,
     )
 
@@ -37,6 +38,7 @@ def flush_worksheet(ws: Worksheet) -> None:
             fill_to_format_dict,
             alignment_to_format_dict,
             border_to_rust_dict,
+            protection_to_format_dict,
         )
     elif writer is not None:
         ws._flush_to_writer(  # noqa: SLF001
@@ -46,6 +48,7 @@ def flush_worksheet(ws: Worksheet) -> None:
             fill_to_format_dict,
             alignment_to_format_dict,
             border_to_rust_dict,
+            protection_to_format_dict,
         )
         ws._flush_autofilter_post_cells(writer)  # noqa: SLF001
 

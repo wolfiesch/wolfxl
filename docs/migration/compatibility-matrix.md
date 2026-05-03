@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **46** / 74
-- 🟡 Partial: **15** / 74
+- ✅ Supported: **47** / 74
+- 🟡 Partial: **14** / 74
 - ❌ Not Yet: **12** / 74
 - ⛔ Out of Scope: **1** / 74
 
@@ -41,7 +41,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `ws["A1"].value, ws.cell(r, c).value` | `ws["A1"].value, ws.cell(r, c).value` | ✅ Supported |  |  |
 | `cell.font / fill / border / alignment / number_format` | `cell.font / fill / border / alignment / number_format` | 🟡 Partial | G05 | Each style attribute round-trips in isolation, but setting all five on one cell collapses to only the last one written. G05 named-style infrastructure rewrite covers this. |
 | `Border(diagonal=Side(...), diagonalUp=True)` | `Border(diagonal=Side(...), diagonalUp=True)` | 🟡 Partial | G03 | Reading recognises diagonal metadata; Python-side write bridge incomplete. |
-| `cell.protection = Protection(...)` | `cell.protection = Protection(...)` | 🟡 Partial | G04 | Cell.protection getter exists; setter is missing. Sheet-level ws.protection works. |
+| `cell.protection = Protection(...)` | `cell.protection = Protection(...)` | ✅ Supported |  | Round-trips through wolfxl reload; locked/hidden flags persist via <protection> child of <xf> with applyProtection="1". |
 | `NamedStyle(name=...) + wb.add_named_style(...)` | `NamedStyle(name=...) + wb.add_named_style(...)` | 🟡 Partial | G05 | Bridge for named styles, GradientFill, DifferentialStyle still incomplete. |
 | `GradientFill(stop=(...))` | `GradientFill(stop=(...))` | 🟡 Partial | G05 |  |
 

@@ -76,6 +76,20 @@ pub struct AlignmentSpec {
     pub shrink_to_fit: bool,
 }
 
+/// Cell-level protection flags. Lives as a `<protection>` child element of
+/// `<xf>` and is gated on `applyProtection="1"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProtectionSpec {
+    pub locked: bool,
+    pub hidden: bool,
+}
+
+impl Default for ProtectionSpec {
+    fn default() -> Self {
+        Self { locked: true, hidden: false }
+    }
+}
+
 /// Full format description for one cell or named style.
 ///
 /// Every field is optional — a `FormatSpec::default()` means "use the
@@ -91,6 +105,9 @@ pub struct FormatSpec {
     /// A format code like `"0.00"`, `"$#,##0"`, `"yyyy-mm-dd"`, or one of
     /// Excel's 164 built-in format IDs referenced by name.
     pub number_format: Option<String>,
+    /// Cell-level protection flags. `None` means "inherit the default
+    /// (locked=true, hidden=false)" and emit no `<protection>` child.
+    pub protection: Option<ProtectionSpec>,
 }
 
 /// Deduplicating styles builder.
@@ -212,11 +229,13 @@ impl StylesBuilder {
             border_id,
             num_fmt_id,
             alignment: spec.alignment.clone(),
+            protection: spec.protection.clone(),
             apply_font: spec.font.is_some(),
             apply_fill: spec.fill.is_some(),
             apply_border: spec.border.is_some(),
             apply_number_format: spec.number_format.is_some(),
             apply_alignment: spec.alignment.is_some(),
+            apply_protection: spec.protection.is_some(),
         };
         self.intern_xf(record)
     }
@@ -320,11 +339,13 @@ pub struct XfRecord {
     pub border_id: u32,
     pub num_fmt_id: u32,
     pub alignment: Option<AlignmentSpec>,
+    pub protection: Option<ProtectionSpec>,
     pub apply_font: bool,
     pub apply_fill: bool,
     pub apply_border: bool,
     pub apply_number_format: bool,
     pub apply_alignment: bool,
+    pub apply_protection: bool,
 }
 
 /// One entry in `<dxfs>` — differential formatting for conditional

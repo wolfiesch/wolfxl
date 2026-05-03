@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
+from wolfxl.styles.protection import Protection
 
 
 def payload_to_python(payload: Any) -> Any:
@@ -163,6 +164,37 @@ def alignment_to_format_dict(alignment: Alignment) -> dict[str, Any]:
     if alignment.indent:
         d["indent"] = alignment.indent
     return d
+
+
+def format_to_protection(payload: Any) -> Protection | None:
+    """Extract Protection fields from a Rust format dict.
+
+    Returns ``None`` when neither ``locked`` nor ``hidden`` are present so
+    callers can distinguish "no protection emitted" from "default
+    protection". Excel's default is ``locked=True, hidden=False``.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if "locked" not in payload and "hidden" not in payload:
+        return None
+    return Protection(
+        locked=bool(payload.get("locked", True)),
+        hidden=bool(payload.get("hidden", False)),
+    )
+
+
+def protection_to_format_dict(protection: Protection) -> dict[str, Any]:
+    """Convert a Protection to a Rust format dict.
+
+    Always emits both keys so the writer's `applyProtection="1"` gate
+    fires for any non-default Protection (including the default itself
+    after explicit assignment, since the user opting in to the default
+    shouldn't silently lose the override on round-trip).
+    """
+    return {
+        "locked": bool(protection.locked),
+        "hidden": bool(protection.hidden),
+    }
 
 
 def border_to_rust_dict(border: Border) -> dict[str, Any]:

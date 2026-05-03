@@ -46,6 +46,7 @@ fn parse_xf(payload: &[u8]) -> XfEntry {
         border_id: payload.get(6..8).map(le_u16).unwrap_or_default() as u32,
         fill_id: payload.get(8..10).map(le_u16).unwrap_or_default() as u32,
         alignment: parse_binary_alignment(payload),
+        protection: None,
     }
 }
 

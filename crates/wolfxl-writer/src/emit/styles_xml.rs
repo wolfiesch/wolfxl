@@ -281,15 +281,36 @@ fn xf_to_xml(xf: &XfRecord) -> String {
         attrs.push_str(" applyNumberFormat=\"1\"");
     }
 
-    if let Some(ref align) = xf.alignment {
-        if xf.apply_alignment {
-            attrs.push_str(" applyAlignment=\"1\"");
-            let align_xml = alignment_xml(align);
-            return format!("<xf {attrs}>{align_xml}</xf>");
-        }
+    let align_child = xf
+        .alignment
+        .as_ref()
+        .filter(|_| xf.apply_alignment)
+        .map(alignment_xml);
+    if align_child.is_some() {
+        attrs.push_str(" applyAlignment=\"1\"");
     }
 
-    format!("<xf {attrs}/>")
+    let protection_child = xf
+        .protection
+        .as_ref()
+        .filter(|_| xf.apply_protection)
+        .map(|p| {
+            format!(
+                "<protection locked=\"{}\" hidden=\"{}\"/>",
+                if p.locked { 1 } else { 0 },
+                if p.hidden { 1 } else { 0 },
+            )
+        });
+    if protection_child.is_some() {
+        attrs.push_str(" applyProtection=\"1\"");
+    }
+
+    match (align_child, protection_child) {
+        (None, None) => format!("<xf {attrs}/>"),
+        (Some(a), None) => format!("<xf {attrs}>{a}</xf>"),
+        (None, Some(p)) => format!("<xf {attrs}>{p}</xf>"),
+        (Some(a), Some(p)) => format!("<xf {attrs}>{a}{p}</xf>"),
+    }
 }
 
 // ---------------------------------------------------------------------------

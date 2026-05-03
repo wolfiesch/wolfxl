@@ -26,9 +26,9 @@ use wolfxl_reader::{
     FillInfo, FilterColumnInfo, FilterInfo, FontInfo, HeaderFooterInfo, HeaderFooterItemInfo,
     ImageAnchorInfo, ImageInfo, InlineFontProps, NativeXlsbBook as NativeXlsbReaderBook,
     NativeXlsxBook as NativeReaderBook, PageBreakListInfo, PageMarginsInfo, PageSetupInfo,
-    PaneMode, PrintOptionsInfo, SelectionInfo, SheetFormatInfo, SheetPropertiesInfo,
-    SheetProtection, SheetState, SheetViewInfo, SortConditionInfo, SortStateInfo,
-    WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
+    PaneMode, PrintOptionsInfo, ProtectionInfo, SelectionInfo, SheetFormatInfo,
+    SheetPropertiesInfo, SheetProtection, SheetState, SheetViewInfo, SortConditionInfo,
+    SortStateInfo, WorkbookPropertiesInfo, WorkbookSecurity, WorksheetData,
 };
 
 trait NativeStyleResolver {
@@ -37,6 +37,7 @@ trait NativeStyleResolver {
     fn font_for_style_id(&self, style_id: u32) -> Option<&FontInfo>;
     fn fill_for_style_id(&self, style_id: u32) -> Option<&FillInfo>;
     fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo>;
+    fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo>;
     fn date1904(&self) -> bool;
 }
 
@@ -59,6 +60,10 @@ impl NativeStyleResolver for NativeReaderBook {
 
     fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
         self.alignment_for_style_id(style_id)
+    }
+
+    fn protection_for_style_id(&self, style_id: u32) -> Option<&ProtectionInfo> {
+        self.protection_for_style_id(style_id)
     }
 
     fn date1904(&self) -> bool {
@@ -85,6 +90,10 @@ impl NativeStyleResolver for NativeXlsbReaderBook {
 
     fn alignment_for_style_id(&self, style_id: u32) -> Option<&AlignmentInfo> {
         self.alignment_for_style_id(style_id)
+    }
+
+    fn protection_for_style_id(&self, _style_id: u32) -> Option<&ProtectionInfo> {
+        None
     }
 
     fn date1904(&self) -> bool {
@@ -962,6 +971,10 @@ impl NativeXlsxBook {
             if let Some(alignment) = self.book.alignment_for_style_id(style_id) {
                 populate_alignment(&d, alignment)?;
             }
+            if let Some(protection) = self.book.protection_for_style_id(style_id) {
+                d.set_item("locked", protection.locked)?;
+                d.set_item("hidden", protection.hidden)?;
+            }
         }
         Ok(d.into())
     }
@@ -1748,6 +1761,10 @@ impl NativeXlsbBook {
             }
             if let Some(alignment) = self.book.alignment_for_style_id(style_id) {
                 populate_alignment(&d, alignment)?;
+            }
+            if let Some(protection) = self.book.protection_for_style_id(style_id) {
+                d.set_item("locked", protection.locked)?;
+                d.set_item("hidden", protection.hidden)?;
             }
         }
         Ok(d.into())

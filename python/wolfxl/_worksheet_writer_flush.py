@@ -19,6 +19,7 @@ def flush_to_writer(
     alignment_to_format_dict: Any,
     border_to_rust_dict: Any,
     rich_text_to_runs_payload: Any,
+    protection_to_format_dict: Any,
 ) -> None:
     """Flush dirty worksheet cells to the native write-mode backend.
 
@@ -53,6 +54,7 @@ def flush_to_writer(
         fill_to_format_dict,
         alignment_to_format_dict,
         border_to_rust_dict,
+        protection_to_format_dict,
     )
 
 
@@ -241,6 +243,7 @@ def _flush_format_cells(
     fill_to_format_dict: Any,
     alignment_to_format_dict: Any,
     border_to_rust_dict: Any,
+    protection_to_format_dict: Any,
 ) -> None:
     """Flush dirty cell format and border payloads."""
     from wolfxl._cell import _UNSET
@@ -264,6 +267,8 @@ def _flush_format_cells(
             fmt.update(alignment_to_format_dict(cell._alignment))  # noqa: SLF001
         if cell._number_format is not _UNSET and cell._number_format is not None:  # noqa: SLF001
             fmt["number_format"] = cell._number_format  # noqa: SLF001
+        if cell._protection is not _UNSET and cell._protection is not None:  # noqa: SLF001
+            fmt.update(protection_to_format_dict(cell._protection))  # noqa: SLF001
 
         if fmt:
             format_entries.append((row, col, fmt))
