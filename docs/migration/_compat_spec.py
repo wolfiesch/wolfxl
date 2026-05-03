@@ -178,10 +178,9 @@ ENTRIES: list[Entry] = [
         "category": "cell_styles",
         "openpyxl": "cell.font / fill / border / alignment / number_format",
         "wolfxl": "cell.font / fill / border / alignment / number_format",
-        "status": "partial",
-        "gap_id": "G05",
+        "status": "supported",
         "probe": "cell_font_fill_border_alignment",
-        "notes": "Each style attribute round-trips in isolation, but setting all five on one cell collapses to only the last one written. G05 named-style infrastructure rewrite covers this.",
+        "notes": "All five attributes (plus protection and border) round-trip together on one cell. Python flush layer merges format and border keys into a single dict so the native writer interns one combined xf record, instead of minting two ids that overwrite each other.",
     },
     {
         "id": "cell.diagonal_borders",

@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **48** / 74
-- 🟡 Partial: **13** / 74
+- ✅ Supported: **49** / 74
+- 🟡 Partial: **12** / 74
 - ❌ Not Yet: **12** / 74
 - ⛔ Out of Scope: **1** / 74
 
@@ -39,7 +39,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `ws["A1"].value, ws.cell(r, c).value` | `ws["A1"].value, ws.cell(r, c).value` | ✅ Supported |  |  |
-| `cell.font / fill / border / alignment / number_format` | `cell.font / fill / border / alignment / number_format` | 🟡 Partial | G05 | Each style attribute round-trips in isolation, but setting all five on one cell collapses to only the last one written. G05 named-style infrastructure rewrite covers this. |
+| `cell.font / fill / border / alignment / number_format` | `cell.font / fill / border / alignment / number_format` | ✅ Supported |  | All five attributes (plus protection and border) round-trip together on one cell. Python flush layer merges format and border keys into a single dict so the native writer interns one combined xf record, instead of minting two ids that overwrite each other. |
 | `Border(diagonal=Side(...), diagonalUp=True)` | `Border(diagonal=Side(...), diagonalUp=True)` | ✅ Supported |  | Round-trips through both write mode and modify mode; diagonalUp/diagonalDown attrs and the <diagonal> child of <border> persist via the patcher's BorderSpec and the writer's intern path. |
 | `cell.protection = Protection(...)` | `cell.protection = Protection(...)` | ✅ Supported |  | Round-trips through wolfxl reload; locked/hidden flags persist via <protection> child of <xf> with applyProtection="1". |
 | `NamedStyle(name=...) + wb.add_named_style(...)` | `NamedStyle(name=...) + wb.add_named_style(...)` | 🟡 Partial | G05 | Bridge for named styles, GradientFill, DifferentialStyle still incomplete. |

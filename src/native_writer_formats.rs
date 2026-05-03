@@ -179,6 +179,15 @@ fn dict_to_format_spec(dict: &Bound<'_, PyDict>) -> PyResult<FormatSpec> {
         spec.protection = Some(prot);
     }
 
+    // Borders may live on the same dict as font / fill / alignment when
+    // the Python flush layer merges format + border before dispatch
+    // (RFC-064 follow-up: prevents apply_cell_format and apply_cell_border
+    // from each minting independent style_ids that overwrite each other).
+    let border = dict_to_border_spec(dict)?;
+    if border != BorderSpec::default() {
+        spec.border = Some(border);
+    }
+
     Ok(spec)
 }
 

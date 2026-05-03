@@ -245,14 +245,20 @@ def _flush_format_cells(
     border_to_rust_dict: Any,
     protection_to_format_dict: Any,
 ) -> None:
-    """Flush dirty cell format and border payloads."""
+    """Flush dirty cell format and border payloads.
+
+    Borders are merged into the same dict as font / fill / alignment so
+    each cell receives exactly one ``write_cell_format`` call. Splitting
+    border into a separate ``write_cell_border`` call would mint a new
+    style_id that overwrites the format-only one (RFC-064 follow-up:
+    native writer interns eagerly per call, so two calls = two ids).
+    """
     from wolfxl._cell import _UNSET
 
     if not format_cells:
         return
 
     format_entries: list[tuple[int, int, dict[str, Any]]] = []
-    border_entries: list[tuple[int, int, dict[str, Any]]] = []
 
     for _row, _col, cell in format_cells:
         row = cell._row  # noqa: SLF001
@@ -269,23 +275,16 @@ def _flush_format_cells(
             fmt["number_format"] = cell._number_format  # noqa: SLF001
         if cell._protection is not _UNSET and cell._protection is not None:  # noqa: SLF001
             fmt.update(protection_to_format_dict(cell._protection))  # noqa: SLF001
-
-        if fmt:
-            format_entries.append((row, col, fmt))
-
         if cell._border is not _UNSET and cell._border is not None:  # noqa: SLF001
             border = border_to_rust_dict(cell._border)  # noqa: SLF001
             if border:
-                border_entries.append((row, col, border))
+                fmt.update(border)
+
+        if fmt:
+            format_entries.append((row, col, fmt))
 
     if len(format_entries) > 1:
         ws._batch_write_dicts(writer.write_sheet_formats, format_entries)  # noqa: SLF001
     else:
         for row, col, fmt in format_entries:
             writer.write_cell_format(ws._title, rowcol_to_a1(row, col), fmt)  # noqa: SLF001
-
-    if len(border_entries) > 1:
-        ws._batch_write_dicts(writer.write_sheet_borders, border_entries)  # noqa: SLF001
-    else:
-        for row, col, border in border_entries:
-            writer.write_cell_border(ws._title, rowcol_to_a1(row, col), border)  # noqa: SLF001
