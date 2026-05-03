@@ -186,19 +186,24 @@ have been a net cost. The renderer imports the module via
 In scope: G03-G07. Each gap is a separate codex handoff on its own git
 worktree. All five touch independent code paths and have existing exemplars.
 
+Codex handoff specs are in [`Plans/rfcs/handoffs/`](rfcs/handoffs/) — one
+file per pod, each self-contained per the program's 6-field contract
+(goal / files / exemplar / acceptance / guards / verification). The
+[handoffs README](rfcs/handoffs/README.md) is the dispatch index.
+
 Pod plan:
 
-| Pod | Branch                         | Deliverable |
-|-----|--------------------------------|-------------|
-| α   | `feat/parity-G03-diagonal-borders` | Diagonal border Python bridge; tests |
-| β   | `feat/parity-G04-protection`       | Sheet/workbook protection Python flow |
-| γ   | `feat/parity-G05-namedstyle`       | NamedStyle / GradientFill / DifferentialStyle bridge |
-| δ   | `feat/parity-G06-image-replace`    | `Worksheet.replace_image` / `remove_image` |
-| ε   | `feat/parity-G07-array-formulas`   | Array / DataTable / spill formula coverage audit |
+| Pod | Branch                                  | Deliverable | Spec |
+|-----|-----------------------------------------|-------------|------|
+| α   | `feat/parity-G03-diagonal-borders`      | Diagonal border Python bridge; tests | [G03](rfcs/handoffs/G03-diagonal-borders.md) |
+| β   | `feat/parity-G04-protection`            | Workbook-protection camelCase aliases + Cell.protection setter (sheet half done in S0) | [G04](rfcs/handoffs/G04-workbook-protection.md) |
+| γ   | `feat/parity-G05-named-style-bridge`    | NamedStyle / GradientFill bridge + combined-style preservation | [G05](rfcs/handoffs/G05-named-style-gradient-differential.md) |
+| δ   | `feat/parity-G06-image-replace-remove`  | `Worksheet.replace_image` / `remove_image` (modify mode) | [G06](rfcs/handoffs/G06-image-replace-remove.md) |
+| ε   | `feat/parity-G07-data-table-formula`    | DataTableFormula round-trip (basic ArrayFormula done in S0) | [G07](rfcs/handoffs/G07-data-table-formula.md) |
 
 Acceptance:
 
-1. Compat oracle pass count rises by ≥5 probes (one per gap closed).
+1. Compat oracle pass count rises by ≥7 probes (G03 +1, G04 +2, G05 +3, G06 +1, G07 +1; cell.protection counts under G04, combined-style counts under G05).
 2. Each pod's existing-feature tests stay green.
 3. `tests/test_external_oracle_preservation.py` stays green when fixtures present.
 4. Compat matrix updated; status table flipped to `landed` for G03-G07.
