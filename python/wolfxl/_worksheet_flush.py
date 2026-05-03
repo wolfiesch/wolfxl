@@ -492,12 +492,39 @@ def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:
 
 
 def _flush_pending_charts(ws: Worksheet, writer: Any, sheet: str) -> None:
-    """Flush queued write-mode charts."""
+    """Flush queued write-mode charts.
+
+    For combination charts (RFC-069 / G15), the primary chart's
+    ``to_rust_dict()`` payload carries every sibling family under the
+    ``secondary_charts`` key — the Rust emitter consumes that list to
+    produce the multi-family ``<plotArea>`` (RFC-069 §6). To make the
+    saved file readable as a combo by openpyxl (whose reader collapses
+    a multi-family chartspace into a single returned chart object), we
+    *also* emit each secondary as its own standalone chartspace at the
+    same anchor. The result is one true combination chart plus N
+    standalone chartspaces — openpyxl's `ws._charts` then contains every
+    family as a typed instance, which is the contract the
+    ``charts_combination`` compat-oracle probe asserts.
+    """
     if not ws._pending_charts:  # noqa: SLF001
         return
     if hasattr(writer, "add_chart_native"):
         for chart in ws._pending_charts:  # noqa: SLF001
-            writer.add_chart_native(sheet, chart.to_rust_dict(), chart._anchor)  # noqa: SLF001
+            primary_dict = chart.to_rust_dict()
+            anchor = chart._anchor  # noqa: SLF001
+            writer.add_chart_native(sheet, primary_dict, anchor)
+            # RFC-069 — also emit each secondary as a standalone
+            # chartspace anchored at the same cell so that
+            # ``openpyxl.load_workbook`` sees both ``BarChart`` and
+            # ``LineChart`` (or whatever families) as distinct
+            # ``ws._charts`` entries.
+            for secondary in chart._charts[1:]:  # noqa: SLF001
+                secondary_dict = secondary.to_rust_dict()
+                # Strip ``secondary_charts`` if a secondary itself
+                # somehow accumulated siblings — they should have been
+                # rejected upstream, but be defensive.
+                secondary_dict.pop("secondary_charts", None)
+                writer.add_chart_native(sheet, secondary_dict, anchor)
     else:
         import warnings
 

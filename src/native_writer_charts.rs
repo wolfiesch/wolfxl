@@ -263,6 +263,27 @@ pub(crate) fn parse_chart_dict(d: &Bound<'_, PyDict>, anchor_a1: &str) -> PyResu
         }
     }
 
+    // RFC-069 / G15 — combination charts. Optional `secondary_charts`
+    // list of fully-formed chart dicts. Each becomes a sibling chart
+    // family inside the same `<plotArea>`. The recursive
+    // `parse_chart_dict` call uses the same `anchor_a1` for nested
+    // anchors; combination-chart emit deliberately ignores secondary
+    // outer-frame fields (anchor, title, legend) so the value is moot.
+    if let Some(v) = d.get_item("secondary_charts")? {
+        if !v.is_none() {
+            let list: Vec<Bound<'_, PyAny>> = v.extract().map_err(|_| {
+                PyValueError::new_err("secondary_charts must be a list of chart dicts")
+            })?;
+            for sv in list.iter() {
+                let sd = sv.cast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err("each secondary_charts entry must be a dict")
+                })?;
+                let secondary = parse_chart_dict(sd, anchor_a1)?;
+                chart.secondary_charts.push(secondary);
+            }
+        }
+    }
+
     Ok(chart)
 }
 

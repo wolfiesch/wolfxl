@@ -337,12 +337,63 @@ class ChartBase:
     # Validation
     # ------------------------------------------------------------------
     def _validate_at_emit(self) -> None:
-        """Per RFC-046 §10.11: raise at ``to_rust_dict`` time on bad state."""
+        """Per RFC-046 §10.11: raise at ``to_rust_dict`` time on bad state.
+
+        For combination charts (RFC-069 / G15), additionally walk
+        ``self._charts[1:]`` and reject:
+        - empty series in any secondary chart family,
+        - Pie / Doughnut secondaries (out-of-scope per RFC §2 / §10),
+        - a secondary whose ``(x_axis.axId, y_axis.axId)`` exactly equals
+          the primary's *and* whose ``kind`` matches the primary's kind
+          (likely a copy-paste bug — fail loudly).
+        """
         if not self.ser:
             raise ValueError(
                 f"{type(self).__name__} requires at least one series "
                 f"(call chart.add_data(...) before saving)."
             )
+
+        # RFC-069 §4.3 / §5.3 — secondary-chart validation. The first
+        # entry of ``self._charts`` is ``self`` (primary); siblings live
+        # at ``[1:]``.
+        secondaries = list(self._charts[1:])
+        if not secondaries:
+            return
+
+        primary_kind = _TAGNAME_TO_KIND.get(self.tagname)
+        primary_x_id = getattr(getattr(self, "x_axis", None), "axId", None)
+        primary_y_id = getattr(getattr(self, "y_axis", None), "axId", None)
+
+        for secondary in secondaries:
+            sec_kind = _TAGNAME_TO_KIND.get(secondary.tagname)
+            # (a) Empty series in a secondary.
+            if not getattr(secondary, "ser", None):
+                raise ValueError(
+                    f"combination chart secondary {type(secondary).__name__} "
+                    f"requires at least one series "
+                    f"(call chart.add_data(...) on the secondary before saving)."
+                )
+            # (b) Pie/Doughnut secondaries — out of scope.
+            if sec_kind in {"pie", "pie3d", "doughnut", "of_pie"}:
+                raise ValueError(
+                    f"combination chart cannot include a "
+                    f"{type(secondary).__name__} secondary "
+                    f"(Pie/Doughnut combos are out of scope; see RFC-069 §2)."
+                )
+            # (c) Same-kind, same-axId secondary: copy-paste smell.
+            sec_x_id = getattr(getattr(secondary, "x_axis", None), "axId", None)
+            sec_y_id = getattr(getattr(secondary, "y_axis", None), "axId", None)
+            if (
+                sec_kind == primary_kind
+                and sec_x_id == primary_x_id
+                and sec_y_id == primary_y_id
+            ):
+                raise ValueError(
+                    f"combination chart secondary {type(secondary).__name__} "
+                    f"has the same kind and axIds as the primary; this is "
+                    f"likely a copy-paste bug. Set a distinct y_axis.axId "
+                    f"on the secondary (or use a different chart kind)."
+                )
 
     # ------------------------------------------------------------------
     # Rust-side serialisation
@@ -427,6 +478,20 @@ class ChartBase:
 
         # Merge in per-type flat keys (snake_case at top level).
         d.update(self._chart_type_specific_keys())
+
+        # RFC-069 §4.1 — combination charts. Each secondary is fully
+        # serialised so the Rust side does not need a half-shape; only
+        # per-family fields (`kind`, `series_type`, `series`,
+        # type-specific keys, `y_axis`) are consumed by the emitter.
+        # The outer-frame fields on a secondary (anchor, dimensions,
+        # title, legend, layout) are intentionally ignored downstream.
+        secondary_dicts = [
+            secondary.to_rust_dict()
+            for secondary in self._charts[1:]
+        ]
+        if secondary_dicts:
+            d["secondary_charts"] = secondary_dicts
+
         return d
 
 
