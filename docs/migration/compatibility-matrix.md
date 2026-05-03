@@ -15,9 +15,9 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **40** / 74
-- 🟡 Partial: **19** / 74
-- ❌ Not Yet: **14** / 74
+- ✅ Supported: **43** / 74
+- 🟡 Partial: **17** / 74
+- ❌ Not Yet: **13** / 74
 - ⛔ Out of Scope: **1** / 74
 
 ## Workbook + Worksheet
@@ -119,7 +119,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `ws.protection = SheetProtection(...)` | `ws.protection = SheetProtection(...)` | 🟡 Partial | G04 | Read-side parity exists; Python-side write flow has gaps. |
+| `ws.protection = SheetProtection(...)` | `ws.protection = SheetProtection(...)` | ✅ Supported |  | Round-trips through openpyxl reload (sheet flag, formatCells override, password hash). |
 | `wb.security = WorkbookProtection(...)` | `wb.security = WorkbookProtection(...)` | 🟡 Partial | G04 |  |
 
 ## External links
@@ -164,7 +164,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `cellIs / containsText / expression / colorScale (basic)` | `cellIs / containsText / expression / colorScale (basic)` | ✅ Supported |  |  |
 | `IconSetRule (3 / 4 / 5 icons + percentile / number ladders)` | `IconSetRule (3 / 4 / 5 icons + percentile / number ladders)` | ❌ Not Yet | G11 |  |
-| `DataBarRule (gradient + solid; min / max / percent / formula)` | `DataBarRule (gradient + solid; min / max / percent / formula)` | ❌ Not Yet | G12 |  |
+| `DataBarRule (gradient + solid; min / max / percent / formula)` | `DataBarRule (gradient + solid; min / max / percent / formula)` | ✅ Supported |  | Round-trips through openpyxl reload (cfvo min/max types preserved). Edge cases like percent / formula cfvo not yet probed. |
 | `ColorScaleRule with 3-stop, percentile / formula / number cfvo` | `ColorScaleRule with 3-stop, percentile / formula / number cfvo` | 🟡 Partial | G13 |  |
 | `stopIfTrue + explicit priority + dxf integration` | `stopIfTrue + explicit priority + dxf integration` | 🟡 Partial | G14 |  |
 
@@ -186,7 +186,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `ArrayFormula(ref, text)` | `ArrayFormula(ref, text)` | 🟡 Partial | G07 |  |
+| `ArrayFormula(ref, text)` | `ArrayFormula(ref, text)` | ✅ Supported |  | Round-trips through openpyxl reload (ref + text preserved as openpyxl ArrayFormula). |
 | `DataTableFormula(...)` | `DataTableFormula(...)` | 🟡 Partial | G07 |  |
 | `dynamic-array spill metadata` | `dynamic-array spill metadata` | 🟡 Partial | G07 |  |
 

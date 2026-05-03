@@ -93,34 +93,36 @@ Recorded 2026-05-03 from a clean ``pytest tests/test_openpyxl_compat_oracle.py``
 run with ``WOLFXL_COMPAT_ORACLE_WRITE_BASELINE=1``. Raw JSON snapshot lives at
 ``.pytest_cache/compat_oracle_baseline.json`` (gitignored).
 
+The numbers below are post-triage. Initial run showed 27 passed / 4 xpassed;
+each xpass was hardened to also reload through openpyxl (the reference
+reader). One flipped to xfailed (real gap), three confirmed already-supported
+and had their spec entries promoted to ``supported``. The harness now sits at
+zero xpasses, so every probe carries an honest signal.
+
 | Date       | Metric                                                  |        Value | Notes |
 |------------|---------------------------------------------------------|-------------:|:------|
 | 2026-05-03 | Compat-oracle total probes                              |           50 | curated baseline; S1+ may grow |
-| 2026-05-03 | Compat-oracle passed (green)                            |           27 | green = ``status=supported`` and probe passes |
-| 2026-05-03 | Compat-oracle xpassed                                   |            4 | tagged ``not_yet``/``partial`` but probe passes; investigate in S1 |
-| 2026-05-03 | Compat-oracle xfailed                                   |           19 | real gaps tracked under G03-G24 |
+| 2026-05-03 | Compat-oracle passed (green)                            |           30 | green = ``status=supported`` and probe passes |
+| 2026-05-03 | Compat-oracle xpassed                                   |            0 | post-triage; spec aligned with reality |
+| 2026-05-03 | Compat-oracle xfailed                                   |           20 | real gaps tracked under G03-G24 |
 | 2026-05-03 | Compat-oracle failed                                    |            0 | hard failures; any non-zero blocks the sprint |
-| 2026-05-03 | Compat-oracle pass rate                                 |        62.0% | (passed + xpassed) / total |
-| 2026-05-03 | Matrix rows ✅ Supported                                |    40 / 74   | Sourced from ``docs/migration/_compat_spec.py`` |
-| 2026-05-03 | Matrix rows 🟡 Partial                                  |    19 / 74   | Each Partial row carries a ``gap_id`` |
-| 2026-05-03 | Matrix rows ❌ Not Yet                                  |    14 / 74   | All tracked under G01-G28 |
+| 2026-05-03 | Compat-oracle pass rate                                 |        60.0% | passed / total |
+| 2026-05-03 | Matrix rows ✅ Supported                                |    43 / 74   | Sourced from ``docs/migration/_compat_spec.py`` |
+| 2026-05-03 | Matrix rows 🟡 Partial                                  |    17 / 74   | Each Partial row carries a ``gap_id`` |
+| 2026-05-03 | Matrix rows ❌ Not Yet                                  |    13 / 74   | All tracked under G01-G28 |
 | 2026-05-03 | Matrix rows ⛔ Out of Scope                             |     1 / 74   | ``.ods`` reads (G27 - decision-gated S10) |
 
-The four xpassed probes are gaps marked ``not_yet`` or ``partial`` in the spec
-that already pass today's harness. They are S1's first action item:
-investigate each, then either flip the spec entry to ``supported`` (gap is
-genuinely closed) or strengthen the probe (probe was too weak to catch the
-real gap).
+Triage outcome (xpass investigation):
 
-| xpass entry                    | Spec status today | Likely action                 |
-|--------------------------------|-------------------|-------------------------------|
-| ``charts.combination``         | ``not_yet`` (G15) | Strengthen - probe just saves; doesn't verify mixed-axis behavior |
-| ``protection.sheet``           | ``partial`` (G04) | Likely flip to supported; sheet protection round-trips |
-| ``cf.data_bars``               | ``not_yet`` (G12) | Investigate - DataBarRule may already round-trip |
-| ``array_formulas.array_formula`` | ``partial`` (G07) | Investigate - basic ArrayFormula may already round-trip |
+| xpass entry                      | Triage action                                                                          |
+|----------------------------------|----------------------------------------------------------------------------------------|
+| ``charts.combination``           | **Hardening exposed real gap** - openpyxl reload sees only one chart family. Stays G15.|
+| ``protection.sheet``             | **Promoted to ``supported``** - sheet flag, formatCells override, password hash all round-trip. G04 retained for ``protection.workbook`` only. |
+| ``cf.data_bars``                 | **Promoted to ``supported``** - openpyxl reload sees DataBar with cfvo min/max preserved. G12 retained for percent / formula cfvo cases (not yet probed). |
+| ``array_formulas.array_formula`` | **Promoted to ``supported``** - openpyxl reload reconstructs ``ArrayFormula(ref, text)``. G07 retained for ``array_formulas.data_table``. |
 
 Program-level gate: pass rate must rise sprint-over-sprint until ≥95%. With a
-50-probe baseline at 62%, that means closing ~17 more gaps' worth of probes
+50-probe baseline at 60%, that means closing ~17 more gaps' worth of probes
 (or strengthening probes and surfacing new gaps - either way moves the
 denominator up).
 

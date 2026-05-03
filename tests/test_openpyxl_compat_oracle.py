@@ -433,6 +433,7 @@ def _probe_charts_add_remove_replace(tmp_path: Path) -> None:
 
 @_register("charts_combination")
 def _probe_charts_combination(tmp_path: Path) -> None:
+    import openpyxl as _opx
     import wolfxl
     from wolfxl.chart import BarChart, LineChart, Reference
 
@@ -451,6 +452,15 @@ def _probe_charts_combination(tmp_path: Path) -> None:
     ws.add_chart(bar, "E2")
     out = tmp_path / "combo.xlsx"
     wb.save(out)
+
+    ref_wb = _opx.load_workbook(out)
+    ref_ws = ref_wb[ref_wb.sheetnames[0]]
+    ref_charts = getattr(ref_ws, "_charts", [])
+    assert ref_charts, "openpyxl found no charts in combo file"
+    types = {type(c).__name__ for c in ref_charts}
+    assert "BarChart" in types and "LineChart" in types, (
+        f"openpyxl saw {types}, expected both BarChart and LineChart"
+    )
 
 
 @_register("charts_label_rich_text")
@@ -721,6 +731,7 @@ def _probe_utils_range_boundaries(tmp_path: Path) -> None:
 
 @_register("protection_sheet")
 def _probe_protection_sheet(tmp_path: Path) -> None:
+    import openpyxl as _opx
     import wolfxl
     from wolfxl.worksheet.protection import SheetProtection
 
@@ -732,6 +743,14 @@ def _probe_protection_sheet(tmp_path: Path) -> None:
 
     wb2 = wolfxl.load_workbook(out)
     assert wb2.active.protection.sheet is True
+
+    ref_wb = _opx.load_workbook(out)
+    ref_prot = ref_wb[ref_wb.sheetnames[0]].protection
+    assert ref_prot.sheet is True, "openpyxl saw protection.sheet=False"
+    assert ref_prot.formatCells is False, (
+        "openpyxl lost the formatCells=False override"
+    )
+    assert ref_prot.password is not None, "openpyxl saw no password hash"
 
 
 @_register("protection_workbook")
@@ -922,6 +941,7 @@ def _probe_cf_icon_sets(tmp_path: Path) -> None:
 @_register("cf_data_bars")
 def _probe_cf_data_bars(tmp_path: Path) -> None:
     """Data-bar rule. Tracked under G12 (S3)."""
+    import openpyxl as _opx
     import wolfxl
     from wolfxl.formatting.rule import DataBarRule
 
@@ -939,6 +959,19 @@ def _probe_cf_data_bars(tmp_path: Path) -> None:
     for cf_range in wb2.active.conditional_formatting:
         rules.extend(cf_range.rules if hasattr(cf_range, "rules") else [])
     assert any(getattr(r, "type", "") == "dataBar" for r in rules)
+
+    ref_wb = _opx.load_workbook(out)
+    ref_ws = ref_wb[ref_wb.sheetnames[0]]
+    ref_rules = []
+    for cf_range in ref_ws.conditional_formatting:
+        ref_rules.extend(ref_ws.conditional_formatting[cf_range])
+    bar_rules = [r for r in ref_rules if getattr(r, "type", "") == "dataBar"]
+    assert bar_rules, "openpyxl saw no dataBar rule in our output"
+    bar = bar_rules[0].dataBar
+    assert bar is not None and bar.cfvo, "dataBar payload empty after openpyxl reload"
+    assert {c.type for c in bar.cfvo} == {"min", "max"}, (
+        f"cfvo types lost: {[c.type for c in bar.cfvo]}"
+    )
 
 
 @_register("cf_color_scales_advanced")
@@ -1106,6 +1139,8 @@ def _probe_print_settings_depth(tmp_path: Path) -> None:
 @_register("array_formula_basic")
 def _probe_array_formula_basic(tmp_path: Path) -> None:
     """Basic ArrayFormula round-trip. G07 (S1)."""
+    import openpyxl as _opx
+    from openpyxl.worksheet.formula import ArrayFormula as _OpxArrayFormula
     import wolfxl
     from wolfxl.worksheet.formula import ArrayFormula
 
@@ -1120,6 +1155,14 @@ def _probe_array_formula_basic(tmp_path: Path) -> None:
     wb2 = wolfxl.load_workbook(out)
     val = wb2.active["B1"].value
     assert isinstance(val, ArrayFormula) or "A1:A2" in str(val)
+
+    ref_wb = _opx.load_workbook(out)
+    ref_val = ref_wb[ref_wb.sheetnames[0]]["B1"].value
+    assert isinstance(ref_val, _OpxArrayFormula), (
+        f"openpyxl saw {type(ref_val).__name__}, expected ArrayFormula"
+    )
+    assert ref_val.ref == "B1:B2", f"ref lost: {ref_val.ref!r}"
+    assert "A1:A2" in (ref_val.text or ""), f"formula lost: {ref_val.text!r}"
 
 
 @_register("array_formula_data_table")
