@@ -188,10 +188,9 @@ ENTRIES: list[Entry] = [
         "category": "cell_styles",
         "openpyxl": "Border(diagonal=Side(...), diagonalUp=True)",
         "wolfxl": "Border(diagonal=Side(...), diagonalUp=True)",
-        "status": "partial",
-        "gap_id": "G03",
+        "status": "supported",
         "probe": "cell_diagonal_borders",
-        "notes": "Reading recognises diagonal metadata; Python-side write bridge incomplete.",
+        "notes": "Round-trips through both write mode and modify mode; diagonalUp/diagonalDown attrs and the <diagonal> child of <border> persist via the patcher's BorderSpec and the writer's intern path.",
     },
     {
         "id": "cell.protection",

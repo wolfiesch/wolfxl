@@ -76,25 +76,49 @@ pub(crate) fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec>
 }
 
 pub(crate) fn dict_to_border_spec(d: &Bound<'_, PyDict>) -> PyResult<styles::BorderSpec> {
-    fn extract_side(d: &Bound<'_, PyDict>, key: &str) -> PyResult<styles::BorderSideSpec> {
+    fn extract_side(
+        d: &Bound<'_, PyDict>,
+        key: &str,
+    ) -> PyResult<(styles::BorderSideSpec, bool)> {
         if let Some(side) = d.get_item(key)? {
             if let Ok(sd) = side.cast::<PyDict>() {
                 let style = extract_str(sd, "style")?;
                 let color = extract_str(sd, "color")?.map(|c| normalize_color(&c));
-                return Ok(styles::BorderSideSpec {
-                    style,
-                    color_rgb: color,
-                });
+                return Ok((
+                    styles::BorderSideSpec {
+                        style,
+                        color_rgb: color,
+                    },
+                    true,
+                ));
             }
         }
-        Ok(styles::BorderSideSpec::default())
+        Ok((styles::BorderSideSpec::default(), false))
     }
 
+    let (left, _) = extract_side(d, "left")?;
+    let (right, _) = extract_side(d, "right")?;
+    let (top, _) = extract_side(d, "top")?;
+    let (bottom, _) = extract_side(d, "bottom")?;
+    let (diag_up, has_up) = extract_side(d, "diagonal_up")?;
+    let (diag_down, has_down) = extract_side(d, "diagonal_down")?;
+
+    let (diagonal, diagonal_up, diagonal_down) = if has_down {
+        (diag_down, has_up, true)
+    } else if has_up {
+        (diag_up, true, false)
+    } else {
+        (styles::BorderSideSpec::default(), false, false)
+    };
+
     Ok(styles::BorderSpec {
-        left: extract_side(d, "left")?,
-        right: extract_side(d, "right")?,
-        top: extract_side(d, "top")?,
-        bottom: extract_side(d, "bottom")?,
+        left,
+        right,
+        top,
+        bottom,
+        diagonal,
+        diagonal_up,
+        diagonal_down,
     })
 }
 

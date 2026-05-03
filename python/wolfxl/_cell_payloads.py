@@ -83,14 +83,35 @@ def format_to_alignment(payload: Any) -> Alignment:
 
 
 def border_payload_to_border(payload: Any) -> Border:
-    """Convert a Rust border dict to a Border dataclass."""
+    """Convert a Rust border dict to a Border dataclass.
+
+    Diagonal direction is encoded as two optional Side dicts
+    (``diagonal_up`` / ``diagonal_down``); the OOXML model has a
+    single ``<diagonal>`` element gated by the ``diagonalUp`` /
+    ``diagonalDown`` bool attrs on the parent ``<border>``. The Side
+    is taken from whichever direction is present (downward wins on
+    conflict, matching the writer's intern logic).
+    """
     if not isinstance(payload, dict) or not payload:
         return Border()
+    diag_up_payload = payload.get("diagonal_up")
+    diag_down_payload = payload.get("diagonal_down")
+    diagonal_up = isinstance(diag_up_payload, dict)
+    diagonal_down = isinstance(diag_down_payload, dict)
+    if diagonal_down:
+        diagonal = _edge_to_side(diag_down_payload)
+    elif diagonal_up:
+        diagonal = _edge_to_side(diag_up_payload)
+    else:
+        diagonal = Side()
     return Border(
         left=_edge_to_side(payload.get("left")),
         right=_edge_to_side(payload.get("right")),
         top=_edge_to_side(payload.get("top")),
         bottom=_edge_to_side(payload.get("bottom")),
+        diagonal=diagonal,
+        diagonalUp=diagonal_up,
+        diagonalDown=diagonal_down,
     )
 
 
@@ -198,7 +219,15 @@ def protection_to_format_dict(protection: Protection) -> dict[str, Any]:
 
 
 def border_to_rust_dict(border: Border) -> dict[str, Any]:
-    """Convert a Border to a Rust border dict."""
+    """Convert a Border to a Rust border dict.
+
+    Diagonal direction is encoded as two optional Side dicts
+    (``diagonal_up`` / ``diagonal_down``). Each is emitted only when
+    the corresponding bool flag on the Border is True AND the shared
+    ``diagonal`` Side has a style; this matches the OOXML semantics
+    where a single ``<diagonal>`` element is gated by ``diagonalUp``
+    / ``diagonalDown`` attrs on the parent ``<border>``.
+    """
     d: dict[str, Any] = {}
     for edge_name in ("left", "right", "top", "bottom"):
         side: Side = getattr(border, edge_name)
@@ -210,4 +239,14 @@ def border_to_rust_dict(border: Border) -> dict[str, Any]:
             else:
                 edge["color"] = "#000000"
             d[edge_name] = edge
+
+    diagonal: Side = border.diagonal
+    if diagonal.style and (border.diagonalUp or border.diagonalDown):
+        diag_edge: dict[str, str] = {"style": diagonal.style}
+        diag_color = diagonal._color_hex()  # noqa: SLF001
+        diag_edge["color"] = diag_color if diag_color else "#000000"
+        if border.diagonalUp:
+            d["diagonal_up"] = dict(diag_edge)
+        if border.diagonalDown:
+            d["diagonal_down"] = dict(diag_edge)
     return d
