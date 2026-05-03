@@ -150,9 +150,40 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     dropped.insert("AboveAverage");
                     continue;
                 }
-                ConditionalKind::IconSet { .. } => {
-                    dropped.insert("IconSet");
-                    continue;
+                ConditionalKind::IconSet {
+                    set_name,
+                    thresholds,
+                    show_value,
+                } => {
+                    // G11: emit `<cfRule type="iconSet">` with an inner
+                    // `<iconSet iconSet="..." [showValue="0"]>` element
+                    // wrapping one `<cfvo>` per icon band. Unlike
+                    // dataBar/colorScale, iconSet does NOT carry inline
+                    // `<color>` elements.
+                    rules_buf.push_str(&format!(
+                        "<cfRule type=\"iconSet\" priority=\"{}\"",
+                        priority
+                    ));
+                    if rule.stop_if_true {
+                        rules_buf.push_str(" stopIfTrue=\"1\"");
+                    }
+                    rules_buf.push('>');
+
+                    rules_buf.push_str(&format!(
+                        "<iconSet iconSet=\"{}\"",
+                        xml_escape::attr(set_name)
+                    ));
+                    if !*show_value {
+                        // OOXML default is showValue="1" — only emit when
+                        // explicitly false.
+                        rules_buf.push_str(" showValue=\"0\"");
+                    }
+                    rules_buf.push('>');
+                    for threshold in thresholds {
+                        emit_cfvo(&mut rules_buf, threshold);
+                    }
+                    rules_buf.push_str("</iconSet>");
+                    rules_buf.push_str("</cfRule>");
                 }
             }
         }
@@ -171,7 +202,7 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
         let names: Vec<&str> = dropped.iter().copied().collect();
         eprintln!(
             "wolfxl-writer: dropped {} conditional-format rule kind{} on sheet {:?} \
-             (variants: {}). Wave 3 ships only CellIs/Expression/DataBar/ColorScale; \
+             (variants: {}). wolfxl currently emits CellIs/Expression/DataBar/ColorScale/IconSet; \
              other kinds are pending a future CF expansion wave.",
             names.len(),
             if names.len() == 1 { "" } else { "s" },
@@ -471,10 +502,7 @@ mod tests {
                 rule(ConditionalKind::Expression {
                     formula: "A1>0".into(),
                 }),
-                rule(ConditionalKind::IconSet {
-                    set_name: "3TrafficLights1".into(),
-                    thresholds: vec![ConditionalThreshold::Percent(33.0)],
-                }),
+                rule(ConditionalKind::Duplicate),
             ],
         ));
 
@@ -485,7 +513,86 @@ mod tests {
         assert_eq!(out.matches("<cfRule").count(), 1);
         assert!(out.contains("<cfRule type=\"expression\" priority=\"2\">"));
         assert!(!out.contains("containsText"));
-        assert!(!out.contains("iconSet"));
+        assert!(!out.contains("type=\"duplicate\""));
+    }
+
+    #[test]
+    fn icon_set_three_traffic_lights_emits_inner_iconset_with_cfvos() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::IconSet {
+            set_name: "3TrafficLights1".into(),
+            thresholds: vec![
+                ConditionalThreshold::Percent(0.0),
+                ConditionalThreshold::Percent(33.0),
+                ConditionalThreshold::Percent(67.0),
+            ],
+            show_value: true,
+        })]);
+
+        assert_fragment_parses(&out);
+        let tag = first_cf_rule_tag(&out);
+        assert_eq!(tag, "<cfRule type=\"iconSet\" priority=\"1\">");
+        // Inner iconSet element with default showValue (no attribute emitted).
+        assert!(out.contains("<iconSet iconSet=\"3TrafficLights1\">"));
+        assert!(!out.contains("showValue"));
+        // One cfvo per icon band; no color elements (unlike dataBar/colorScale).
+        assert_eq!(out.matches("<cfvo").count(), 3);
+        assert_eq!(out.matches("<color ").count(), 0);
+        assert!(out.contains("<cfvo type=\"percent\" val=\"0\"/>"));
+        assert!(out.contains("<cfvo type=\"percent\" val=\"33\"/>"));
+        assert!(out.contains("<cfvo type=\"percent\" val=\"67\"/>"));
+        assert!(out.contains("</iconSet></cfRule>"));
+    }
+
+    #[test]
+    fn icon_set_show_value_false_emits_attribute() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::IconSet {
+            set_name: "3TrafficLights1".into(),
+            thresholds: vec![
+                ConditionalThreshold::Percent(0.0),
+                ConditionalThreshold::Percent(33.0),
+                ConditionalThreshold::Percent(67.0),
+            ],
+            show_value: false,
+        })]);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("<iconSet iconSet=\"3TrafficLights1\" showValue=\"0\">"));
+    }
+
+    #[test]
+    fn icon_set_five_arrows_emits_five_cfvos() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::IconSet {
+            set_name: "5Arrows".into(),
+            thresholds: vec![
+                ConditionalThreshold::Percent(0.0),
+                ConditionalThreshold::Percent(20.0),
+                ConditionalThreshold::Percent(40.0),
+                ConditionalThreshold::Percent(60.0),
+                ConditionalThreshold::Percent(80.0),
+            ],
+            show_value: true,
+        })]);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("<iconSet iconSet=\"5Arrows\">"));
+        assert_eq!(out.matches("<cfvo").count(), 5);
+    }
+
+    #[test]
+    fn icon_set_percentile_thresholds_emit_correct_cfvo_type() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::IconSet {
+            set_name: "3Arrows".into(),
+            thresholds: vec![
+                ConditionalThreshold::Percentile(0.0),
+                ConditionalThreshold::Percentile(33.0),
+                ConditionalThreshold::Percentile(67.0),
+            ],
+            show_value: true,
+        })]);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("<cfvo type=\"percentile\" val=\"33\"/>"));
+        assert!(out.contains("<cfvo type=\"percentile\" val=\"67\"/>"));
     }
 
     #[test]

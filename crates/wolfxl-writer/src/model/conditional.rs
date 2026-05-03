@@ -72,6 +72,10 @@ pub enum ConditionalKind {
         set_name: String,
         /// One entry per icon band; length must match the set.
         thresholds: Vec<ConditionalThreshold>,
+        /// OOXML `showValue` attribute. Default is `true` (matches the
+        /// OOXML spec default), so emit `showValue="0"` only when this
+        /// is explicitly `false`.
+        show_value: bool,
     },
 }
 

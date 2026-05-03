@@ -310,6 +310,68 @@ pub(crate) fn dict_to_conditional_format(
                 },
             ],
         },
+        "iconSet" | "icon_set" => {
+            // G11: build IconSet from the Python IconSetRule blob
+            // (icon_style, value_type, values, show_value).
+            let set_name: String = cfg
+                .get_item("icon_style")?
+                .and_then(|v| v.extract::<String>().ok())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "3TrafficLights1".to_string());
+            let value_type: String = cfg
+                .get_item("value_type")?
+                .and_then(|v| v.extract::<String>().ok())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "percent".to_string());
+            // Values may be numeric (f64/i64) or strings (for "formula"
+            // value-type). Try f64 first, fall back to a string vec.
+            let raw_values: Vec<String> = if let Some(v) = cfg.get_item("values")? {
+                if let Ok(nums) = v.extract::<Vec<f64>>() {
+                    nums.into_iter().map(|n| {
+                        // Format whole numbers without trailing decimals so
+                        // OOXML stays tidy.
+                        if n == (n as i64) as f64 && n.abs() < 1e15 {
+                            format!("{}", n as i64)
+                        } else {
+                            format!("{}", n)
+                        }
+                    }).collect()
+                } else if let Ok(strs) = v.extract::<Vec<String>>() {
+                    strs
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+            let thresholds: Vec<ConditionalThreshold> = raw_values
+                .into_iter()
+                .map(|val| match value_type.as_str() {
+                    "percent" => val.parse::<f64>()
+                        .map(ConditionalThreshold::Percent)
+                        .unwrap_or(ConditionalThreshold::Percent(0.0)),
+                    "percentile" => val.parse::<f64>()
+                        .map(ConditionalThreshold::Percentile)
+                        .unwrap_or(ConditionalThreshold::Percentile(0.0)),
+                    "num" | "number" => val.parse::<f64>()
+                        .map(ConditionalThreshold::Number)
+                        .unwrap_or(ConditionalThreshold::Number(0.0)),
+                    "formula" => ConditionalThreshold::Formula(val),
+                    _ => val.parse::<f64>()
+                        .map(ConditionalThreshold::Percent)
+                        .unwrap_or(ConditionalThreshold::Percent(0.0)),
+                })
+                .collect();
+            let show_value: bool = cfg
+                .get_item("show_value")?
+                .and_then(|v| v.extract::<bool>().ok())
+                .unwrap_or(true);
+            ConditionalKind::IconSet {
+                set_name,
+                thresholds,
+                show_value,
+            }
+        }
         _ => ConditionalKind::Expression {
             formula: "FALSE()".to_string(),
         },

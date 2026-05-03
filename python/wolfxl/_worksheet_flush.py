@@ -372,13 +372,27 @@ def _flush_pending_conditional_formats(ws: Worksheet, writer: Any, sheet: str) -
 def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
     """Build the native writer payload for a worksheet conditional format."""
     formula = rule.formula[0] if rule.formula else None
-    return {
+    payload: dict[str, Any] = {
         "range": range_string,
         "rule_type": rule.type,
         "operator": rule.operator,
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    # G11: forward IconSetRule metadata (icon_style, value_type, values,
+    # show_value) so the Rust writer can produce a real <iconSet> block.
+    # IconSetRule stashes its construction kwargs on `rule.extra`.
+    if rule.type == "iconSet":
+        extra = rule.extra or {}
+        if extra.get("icon_style") is not None:
+            payload["icon_style"] = extra["icon_style"]
+        if extra.get("value_type") is not None:
+            payload["value_type"] = extra["value_type"]
+        if extra.get("values") is not None:
+            payload["values"] = list(extra["values"])
+        if extra.get("show_value") is not None:
+            payload["show_value"] = bool(extra["show_value"])
+    return payload
 
 
 def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:

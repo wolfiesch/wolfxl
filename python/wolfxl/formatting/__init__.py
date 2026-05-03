@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 # See ``crates/wolfxl-writer/src/emit/sheet_xml.rs::emit_conditional_formats``
 # stub-variant arm for the same list on the writer side.
 _SUPPORTED_CF_KINDS: frozenset[str] = frozenset(
-    {"cellIs", "expression", "colorScale", "dataBar"}
+    {"cellIs", "expression", "colorScale", "dataBar", "iconSet"}
 )
 
 
