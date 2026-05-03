@@ -484,6 +484,53 @@ def _probe_charts_label_rich_text(tmp_path: Path) -> None:
     wb.save(tmp_path / "rich_chart.xlsx")
 
 
+@_register("charts_pivot_chart_per_point")
+def _probe_charts_pivot_chart_per_point(tmp_path: Path) -> None:
+    """G16 — per-data-point fill override on a pivot-source chart.
+
+    The OOXML per-point override (`<c:dPt>` with `<c:spPr><a:solidFill>`)
+    is identical for pivot and non-pivot charts; the only difference for
+    a pivot chart is the chart-level `<c:pivotSource>` block plus a
+    `<c:fmtId>` on each `<c:ser>`. This probe stamps a pivot-source on
+    the chart (via the (name, fmt_id) tuple form so we don't have to
+    materialise a real PivotTable) and then exercises the per-point
+    override path. After save + openpyxl reload, we assert openpyxl
+    sees the dPt entry on the series — proving the data_points dict
+    bridge survives the pivot emit path.
+    """
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.chart import BarChart, Reference
+    from wolfxl.chart.marker import DataPoint
+    from wolfxl.chart.shapes import GraphicalProperties
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [["x", "y"], [1, 10], [2, 20], [3, 30]]:
+        ws.append(row)
+
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_row=4),
+        titles_from_data=True,
+    )
+    chart.pivot_source = ("MyPivot", 0)
+
+    red = GraphicalProperties(solidFill="FF0000")
+    chart.series[0].dPt = [DataPoint(idx=1, spPr=red)]
+
+    ws.add_chart(chart, "D2")
+    out = tmp_path / "pivot_per_point.xlsx"
+    wb.save(out)
+
+    ref_wb = _opx.load_workbook(out)
+    ref_ws = ref_wb[ref_wb.sheetnames[0]]
+    ref_chart = ref_ws._charts[0]
+    ref_dpt = list(ref_chart.series[0].dPt)
+    assert ref_dpt, "openpyxl saw no per-point overrides on pivot chart"
+    assert any(dp.idx == 1 for dp in ref_dpt), "expected idx=1 override"
+
+
 # --------------------------------------------------------------------------
 # Pivot probes
 # --------------------------------------------------------------------------
