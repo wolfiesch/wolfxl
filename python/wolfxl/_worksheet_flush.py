@@ -376,6 +376,16 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
     (``start_type`` / ``start_value`` / ``start_color`` / ``mid_*`` / ``end_*``)
     rides on ``rule.extra``; we forward those so the Rust writer can build a
     matching ``Vec<ColorScaleStop>`` instead of the hardcoded 3-stop fallback.
+
+    For ``cellIs`` / ``expression`` rules we also forward an openpyxl-shaped
+    ``fill=PatternFill(...)`` (or a flat ``dxf=DifferentialStyle(...)``) into
+    a ``format`` sub-dict with a ``bg_color`` key so the Rust side
+    (``dict_to_conditional_format``) can intern a matching ``DxfRecord`` and
+    stamp the resulting ``dxfId`` on the emitted ``<cfRule>`` (G14).
+
+    A user-supplied explicit ``rule.priority`` rides through too; the
+    emitter prefers it over the positional fallback so multi-rule blocks
+    keep openpyxl-style priority ordering.
     """
     formula = rule.formula[0] if rule.formula else None
     payload: dict[str, Any] = {
@@ -385,7 +395,22 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    # G14: forward explicit user-set priority so multi-rule blocks keep
+    # openpyxl semantics (priority is positional in the wire format, but
+    # users author by explicit number). Only forward when the rule isn't
+    # at the default priority of 1 OR the user has clearly set it (we
+    # can't fully tell, so always forward if it's a non-default value or
+    # the call site asks for it).
+    priority = getattr(rule, "priority", None)
+    if priority is not None:
+        payload["priority"] = int(priority)
     extra = getattr(rule, "extra", None) or {}
+    # G14: forward dxf state from openpyxl-shaped kwargs (fill=/dxf=).
+    # Cellis + expression are the only rule kinds that take a dxfId.
+    if rule.type in ("cellIs", "expression"):
+        bg_hex = _extract_dxf_bg_hex(extra)
+        if bg_hex is not None:
+            payload["format"] = {"bg_color": bg_hex}
     if rule.type == "iconSet":
         if extra.get("icon_style") is not None:
             payload["icon_style"] = extra["icon_style"]
@@ -415,6 +440,44 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
             if value is not None:
                 payload[key] = value
     return payload
+
+
+def _extract_dxf_bg_hex(extra: dict[str, Any]) -> str | None:
+    """Return an ARGB ``"FFRRGGBB"`` string for the rule's fill, or ``None``.
+
+    Accepts the openpyxl-shaped ``fill=PatternFill(...)`` or
+    ``dxf=DifferentialStyle(fill=PatternFill(...))`` carried inside
+    :attr:`Rule.extra`. Returns ``None`` when no fill colour is set so the
+    Rust side falls through to ``dxf_id = None``.
+    """
+    fill = extra.get("fill")
+    dxf_obj = extra.get("dxf")
+    if fill is None and dxf_obj is not None:
+        fill = getattr(dxf_obj, "fill", None)
+    if fill is None:
+        return None
+    color = (
+        getattr(fill, "fgColor", None)
+        or getattr(fill, "start_color", None)
+        or getattr(fill, "color", None)
+    )
+    if color is None:
+        return None
+    if hasattr(color, "rgb") and color.rgb is not None:
+        s = str(color.rgb)
+    elif hasattr(color, "to_hex"):
+        s = color.to_hex() or ""
+    else:
+        s = str(color)
+    s = s.lstrip("#").upper()
+    if not s:
+        return None
+    if len(s) == 6:
+        return f"FF{s}"
+    if len(s) == 8:
+        return s
+    # Defensive: pad/truncate weird values to a sane 8-hex.
+    return f"FF{s[-6:]}"
 
 
 def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:

@@ -295,6 +295,7 @@ mod tests {
             kind,
             dxf_id,
             stop_if_true,
+            priority: None,
         }
     }
 

@@ -22,7 +22,14 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
         let mut rules_buf = String::new();
 
         for (priority_0, rule) in cf.rules.iter().enumerate() {
-            let priority = priority_0 + 1;
+            // G14: prefer the user-supplied priority when set so rule
+            // authors can place high-priority CF rules before lower ones
+            // regardless of insertion order. Falls back to positional
+            // index (1-based) when not set, preserving prior behaviour.
+            let priority = rule
+                .priority
+                .map(|p| p as usize)
+                .unwrap_or(priority_0 + 1);
 
             match &rule.kind {
                 ConditionalKind::CellIs {
@@ -271,6 +278,7 @@ mod tests {
             kind,
             dxf_id: None,
             stop_if_true: false,
+            priority: None,
         }
     }
 
@@ -283,6 +291,19 @@ mod tests {
             kind,
             dxf_id,
             stop_if_true,
+            priority: None,
+        }
+    }
+
+    fn rule_with_priority(
+        kind: ConditionalKind,
+        priority: Option<u32>,
+    ) -> ConditionalRule {
+        ConditionalRule {
+            kind,
+            dxf_id: None,
+            stop_if_true: false,
+            priority,
         }
     }
 
@@ -417,6 +438,45 @@ mod tests {
         assert_fragment_parses(&out);
         assert_eq!(out.matches("stopIfTrue=\"1\"").count(), 1);
         assert!(!out.contains("stopIfTrue=\"0\""));
+    }
+
+    #[test]
+    fn explicit_priority_overrides_positional_index() {
+        // G14: when a rule carries a user-supplied priority, the emitter
+        // writes that value instead of the positional fallback. Two rules
+        // in the same block should keep their authored ordering.
+        let out = emit_one_cf(vec![
+            rule_with_priority(
+                ConditionalKind::Expression {
+                    formula: "A1>0".into(),
+                },
+                Some(7),
+            ),
+            rule_with_priority(
+                ConditionalKind::Expression {
+                    formula: "A1<0".into(),
+                },
+                Some(3),
+            ),
+        ]);
+
+        assert_fragment_parses(&out);
+        assert!(out.contains("priority=\"7\""), "{out}");
+        assert!(out.contains("priority=\"3\""), "{out}");
+        // Positional fallback would have written priority=1, priority=2.
+        assert!(!out.contains("priority=\"1\""), "{out}");
+        assert!(!out.contains("priority=\"2\""), "{out}");
+    }
+
+    #[test]
+    fn missing_priority_falls_back_to_positional_index() {
+        // G14: when no user priority is set, emitter still uses 1-based
+        // positional index for backwards compatibility.
+        let out = emit_one_cf(vec![rule(ConditionalKind::Expression {
+            formula: "A1>0".into(),
+        })]);
+
+        assert!(out.contains("priority=\"1\""), "{out}");
     }
 
     #[test]

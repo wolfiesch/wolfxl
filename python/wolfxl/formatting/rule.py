@@ -45,11 +45,68 @@ class Rule:
     # preserved on round-trip but not decomposed here — T2 territory.
     extra: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def dxf(self) -> "DifferentialStyle | None":
+        """openpyxl-shaped ``DifferentialStyle`` view of this rule's fill /
+        font / border state.
+
+        openpyxl exposes ``rule.dxf`` as a :class:`DifferentialStyle` whose
+        ``font`` / ``fill`` / ``border`` mirror the kwargs the user passed
+        in. Wolfxl stashes those kwargs inside :attr:`extra`; this property
+        reconstructs the shim on demand. Returns ``None`` when no styling
+        was supplied so callers can branch on truthiness.
+        """
+        extra = self.extra or {}
+        if isinstance(extra.get("dxf"), DifferentialStyle):
+            return extra["dxf"]
+        if not any(extra.get(k) is not None for k in ("font", "fill", "border")):
+            return None
+        return DifferentialStyle(
+            font=extra.get("font"),
+            fill=extra.get("fill"),
+            border=extra.get("border"),
+        )
+
+    @dxf.setter
+    def dxf(self, value: "DifferentialStyle | None") -> None:
+        if self.extra is None:
+            self.extra = {}
+        self.extra["dxf"] = value
+
+
+def _absorb_dxf_kwargs(kw: dict[str, Any]) -> dict[str, Any]:
+    """Pull openpyxl-shaped dxf kwargs (``fill=``, ``font=``, ``border=``, ``dxf=``)
+    off ``kw`` and stash them inside ``extra`` so they survive the ``Rule``
+    dataclass constructor (G14).
+
+    openpyxl's ``CellIsRule(fill=PatternFill(...))`` collapses the kwarg into a
+    ``DifferentialStyle`` and the rule grows a ``dxfId`` at write time.
+    Wolfxl mirrors the surface here: the kwargs are recorded inside
+    ``Rule.extra`` and the write-mode payload helper
+    (``_conditional_format_payload``) translates them into the Rust-side cfg
+    dict so ``dict_to_conditional_format`` can intern a ``DxfRecord`` and
+    stamp the resulting ``dxfId`` on the emitted ``<cfRule>``.
+    """
+    if not any(k in kw for k in ("fill", "font", "border", "dxf")):
+        return kw
+    extra = dict(kw.pop("extra", {}) or {})
+    for key in ("fill", "font", "border", "dxf"):
+        if key in kw:
+            extra[key] = kw.pop(key)
+    kw["extra"] = extra
+    return kw
+
 
 class CellIsRule(Rule):
     """Conditional format triggered when a cell value matches an operator+operand.
 
     Example: ``CellIsRule(operator="greaterThan", formula=["50"])``.
+
+    The openpyxl-compatible ``fill=PatternFill(...)`` / ``font=Font(...)`` /
+    ``border=Border(...)`` / ``dxf=DifferentialStyle(...)`` kwargs are accepted
+    and routed through ``Rule.extra`` so the writer can intern a matching
+    ``<dxf>`` record and stamp its index as ``dxfId`` on the emitted
+    ``<cfRule>`` (G14).
     """
 
     def __init__(
@@ -59,6 +116,7 @@ class CellIsRule(Rule):
         stopIfTrue: bool = False,  # noqa: N803
         **kw: Any,
     ) -> None:
+        kw = _absorb_dxf_kwargs(kw)
         super().__init__(
             type="cellIs",
             operator=operator,
@@ -72,6 +130,10 @@ class FormulaRule(Rule):
     """Conditional format triggered when a boolean formula is TRUE.
 
     Example: ``FormulaRule(formula=["$A1>100"])``.
+
+    Accepts the same openpyxl ``fill=`` / ``font=`` / ``border=`` / ``dxf=``
+    kwargs as ``CellIsRule``; they ride on ``Rule.extra`` and feed the dxf
+    intern path on save (G14).
     """
 
     def __init__(
@@ -80,6 +142,7 @@ class FormulaRule(Rule):
         stopIfTrue: bool = False,  # noqa: N803
         **kw: Any,
     ) -> None:
+        kw = _absorb_dxf_kwargs(kw)
         super().__init__(
             type="expression",
             formula=list(formula or []),

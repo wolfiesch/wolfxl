@@ -404,6 +404,7 @@ fn build_wave3_fixture() -> (Workbook, u32) {
             },
             dxf_id: Some(dxf_id),
             stop_if_true: false,
+            priority: None,
         }],
     });
 

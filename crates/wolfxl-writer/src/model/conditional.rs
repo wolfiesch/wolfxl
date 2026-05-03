@@ -9,8 +9,9 @@ pub struct ConditionalFormat {
     pub rules: Vec<ConditionalRule>,
 }
 
-/// One rule within a conditional-formatting block. Priority is set by
-/// order in the parent `Vec` — earlier rules win.
+/// One rule within a conditional-formatting block. Priority defaults to the
+/// rule's positional index inside the parent `Vec` (earlier rules win),
+/// but a user can override it explicitly via [`Self::priority`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConditionalRule {
     pub kind: ConditionalKind,
@@ -18,6 +19,27 @@ pub struct ConditionalRule {
     /// `None` for rule types like icon sets that don't use dxf styling.
     pub dxf_id: Option<u32>,
     pub stop_if_true: bool,
+    /// User-supplied priority (openpyxl: ``rule.priority = N``). When `Some`
+    /// the emitter writes this value verbatim instead of using the
+    /// positional fallback. This matters for multi-rule blocks where the
+    /// author wants explicit ordering rather than insertion-order.
+    /// Added in G14 (Sprint 3).
+    pub priority: Option<u32>,
+}
+
+impl ConditionalRule {
+    /// Convenience constructor preserving the pre-G14 default of "no
+    /// explicit priority, no dxf, don't stop". Existing callers that built
+    /// the struct field-by-field continue to work because the new field is
+    /// `Option<u32>` and old code paths populate it with `None` here.
+    pub fn new(kind: ConditionalKind) -> Self {
+        Self {
+            kind,
+            dxf_id: None,
+            stop_if_true: false,
+            priority: None,
+        }
+    }
 }
 
 /// The large sum type covering every CF rule Excel recognizes.
