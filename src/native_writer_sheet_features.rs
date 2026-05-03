@@ -437,10 +437,17 @@ pub(crate) fn dict_to_conditional_format(
         },
     };
 
+    // G14: forward an explicit user-set priority; emitter prefers this
+    // over the positional fallback so authored ordering survives round-trip.
+    let priority: Option<u32> = cfg
+        .get_item("priority")?
+        .and_then(|v| v.extract::<u32>().ok());
+
     let rule = ConditionalRule {
         kind,
         dxf_id,
         stop_if_true,
+        priority,
     };
 
     Ok(Some(ConditionalFormat {

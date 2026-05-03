@@ -616,8 +616,7 @@ ENTRIES: list[Entry] = [
         "category": "cf",
         "openpyxl": "stopIfTrue + explicit priority + dxf integration",
         "wolfxl": "stopIfTrue + explicit priority + dxf integration",
-        "status": "partial",
-        "gap_id": "G14",
+        "status": "supported",
         "probe": "cf_stop_if_true_priority",
     },
     # --- Defined names ----------------------------------------------------
