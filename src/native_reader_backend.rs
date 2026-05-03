@@ -550,6 +550,52 @@ impl NativeXlsxBook {
         Ok(result.into())
     }
 
+    /// Threaded comments parsed from `xl/threadedComments/threadedCommentsN.xml`
+    /// (RFC-068 / G08). The Python layer reassembles into a tree by GUID.
+    pub fn read_threaded_comments(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let entries = self.ensure_sheet(sheet)?.threaded_comments.clone();
+        let result = PyList::empty(py);
+        for entry in &entries {
+            let d = PyDict::new(py);
+            d.set_item("id", &entry.id)?;
+            d.set_item("cell", &entry.cell)?;
+            d.set_item("person_id", &entry.person_id)?;
+            match &entry.created {
+                Some(value) => d.set_item("created", value)?,
+                None => d.set_item("created", py.None())?,
+            }
+            d.set_item("text", &entry.text)?;
+            match &entry.parent_id {
+                Some(value) => d.set_item("parent_id", value)?,
+                None => d.set_item("parent_id", py.None())?,
+            }
+            d.set_item("done", entry.done)?;
+            result.append(d)?;
+        }
+        Ok(result.into())
+    }
+
+    /// Workbook-scoped person list parsed from `xl/persons/personList.xml`
+    /// (RFC-068 / G08). Insertion-order preserved.
+    pub fn read_persons(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let result = PyList::empty(py);
+        for person in self.book.persons() {
+            let d = PyDict::new(py);
+            d.set_item("id", &person.id)?;
+            d.set_item("display_name", &person.display_name)?;
+            match &person.user_id {
+                Some(value) => d.set_item("user_id", value)?,
+                None => d.set_item("user_id", py.None())?,
+            }
+            match &person.provider_id {
+                Some(value) => d.set_item("provider_id", value)?,
+                None => d.set_item("provider_id", py.None())?,
+            }
+            result.append(d)?;
+        }
+        Ok(result.into())
+    }
+
     pub fn read_freeze_panes(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
         let d = PyDict::new(py);
         let Some(info) = self.ensure_sheet(sheet)?.freeze_panes.clone() else {

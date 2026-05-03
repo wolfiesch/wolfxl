@@ -549,8 +549,7 @@ ENTRIES: list[Entry] = [
         "category": "comments",
         "openpyxl": "threaded comment write + modify (xl/threadedComments)",
         "wolfxl": "threaded comment write + modify (xl/threadedComments)",
-        "status": "not_yet",
-        "gap_id": "G08",
+        "status": "supported",
         "probe": "comments_threaded",
     },
     # --- Rich text --------------------------------------------------------

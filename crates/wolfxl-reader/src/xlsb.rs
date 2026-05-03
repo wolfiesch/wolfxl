@@ -1158,6 +1158,7 @@ fn worksheet_data(
         sheet_properties,
         sheet_view,
         comments,
+        threaded_comments: Vec::new(),
         row_heights,
         column_widths,
         data_validations,

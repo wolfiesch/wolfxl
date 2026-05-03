@@ -82,3 +82,17 @@ class PersonRegistry:
             if p.id == person_id:
                 return p
         return None
+
+    def _seed(self, person: Person) -> None:
+        """Append a ``Person`` with its pre-existing GUID intact.
+
+        Used by the reader hydration path to preserve byte-stable round
+        trips: if the file already has GUIDs, we reuse them rather than
+        allocating fresh ones via ``add()``. Idempotent on ``id`` so a
+        second call with the same ``Person.id`` is a no-op.
+        """
+        if person.id is None:
+            return
+        if any(existing.id == person.id for existing in self._items):
+            return
+        self._items.append(person)

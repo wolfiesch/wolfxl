@@ -437,11 +437,33 @@ class Workbook:
         Lazily seeded on first access. ``wb.persons.add(name=..., user_id=...)``
         returns a ``Person`` whose GUID is auto-allocated and which is
         idempotent on ``(user_id, provider_id)`` when both are non-empty.
+        When the workbook is read from a file with an existing
+        ``personList.xml``, the registry is hydrated from the reader so
+        the original GUIDs round-trip byte-stable.
         """
         if getattr(self, "_persons_registry", None) is None:
-            from wolfxl.comments._person import PersonRegistry
+            from wolfxl.comments._person import Person, PersonRegistry
 
-            self._persons_registry: Any = PersonRegistry()
+            registry = PersonRegistry()
+            reader = getattr(self, "_rust_reader", None)
+            if reader is not None and hasattr(reader, "read_persons"):
+                try:
+                    entries = reader.read_persons()
+                except Exception:
+                    entries = []
+                for entry in entries:
+                    person_id = entry.get("id")
+                    if not person_id:
+                        continue
+                    registry._seed(  # noqa: SLF001
+                        Person(
+                            name=entry.get("display_name") or "",
+                            user_id=entry.get("user_id") or "",
+                            provider_id=entry.get("provider_id") or "None",
+                            id=person_id,
+                        )
+                    )
+            self._persons_registry: Any = registry
         return self._persons_registry
 
     def __getitem__(self, name: str) -> Worksheet:

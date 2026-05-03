@@ -15,9 +15,9 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **51** / 74
+- ✅ Supported: **52** / 74
 - 🟡 Partial: **10** / 74
-- ❌ Not Yet: **12** / 74
+- ❌ Not Yet: **11** / 74
 - ⛔ Out of Scope: **1** / 74
 
 ## Workbook + Worksheet
@@ -149,7 +149,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `cell.comment = Comment(text, author)` | `cell.comment = Comment(text, author)` | ✅ Supported |  |  |
-| `threaded comment write + modify (xl/threadedComments)` | `threaded comment write + modify (xl/threadedComments)` | ❌ Not Yet | G08 |  |
+| `threaded comment write + modify (xl/threadedComments)` | `threaded comment write + modify (xl/threadedComments)` | ✅ Supported |  |  |
 
 ## Rich text
 

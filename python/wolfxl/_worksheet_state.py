@@ -39,6 +39,7 @@ def initialize_worksheet_state(
     ws._sheet_visibility_cache: dict[str, Any] | None = None  # noqa: SLF001
 
     ws._comments_cache: dict[str, Any] | None = None  # noqa: SLF001
+    ws._threaded_comments_cache: dict[str, Any] | None = None  # noqa: SLF001
     ws._hyperlinks_cache: dict[str, Any] | None = None  # noqa: SLF001
     ws._defined_names_cache: dict[str, Any] | None = None  # noqa: SLF001
     ws._tables_cache: dict[str, Any] | None = None  # noqa: SLF001

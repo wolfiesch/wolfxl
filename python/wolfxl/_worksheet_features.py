@@ -76,6 +76,98 @@ def get_comments_map(ws: Worksheet) -> dict[str, Any]:
     return result
 
 
+def get_threaded_comments_map(ws: Worksheet) -> dict[str, Any]:
+    """Return ``{cell_ref: ThreadedComment}`` for ``ws``, cached on the worksheet.
+
+    Reassembles the flat OOXML payload into a tree: top-level threads
+    keyed by ``cell_ref``, each with their replies attached via
+    ``ThreadedComment.replies``. Reply-to-parent links use the GUID
+    chain from ``parentId``. Persons are resolved through
+    ``wb.persons.by_id`` so the same ``Person`` instance appears across
+    threads (matching openpyxl).
+    """
+    if ws._threaded_comments_cache is not None:  # noqa: SLF001
+        return ws._threaded_comments_cache  # noqa: SLF001
+    from datetime import datetime
+
+    from wolfxl.comments import ThreadedComment
+
+    wb = ws._workbook  # noqa: SLF001
+    if wb._rust_reader is None or not hasattr(  # noqa: SLF001
+        wb._rust_reader, "read_threaded_comments"  # noqa: SLF001
+    ):
+        ws._threaded_comments_cache = {}  # noqa: SLF001
+        return ws._threaded_comments_cache  # noqa: SLF001
+    try:
+        entries = wb._rust_reader.read_threaded_comments(ws._title)  # noqa: SLF001
+    except Exception:
+        entries = []
+
+    # First pass: build ``ThreadedComment`` instances keyed by GUID so we
+    # can wire parent->reply links in pass two without worrying about
+    # document order. Persons are resolved via the workbook registry,
+    # which is itself hydrated lazily on first ``wb.persons`` access.
+    persons_registry = wb.persons
+    by_guid: dict[str, Any] = {}
+    raw_by_guid: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        guid = entry.get("id")
+        if not guid:
+            continue
+        person_id = entry.get("person_id") or ""
+        person = persons_registry.by_id(person_id)
+        if person is None:
+            # personList is missing or stale — synthesize a placeholder so
+            # the thread is still legible. Idempotent on the synthetic id.
+            from wolfxl.comments._person import Person
+
+            person = Person(name="", user_id="", provider_id="None", id=person_id or guid)
+            persons_registry._seed(person)  # noqa: SLF001
+
+        created_raw = entry.get("created")
+        created: datetime | None = None
+        if isinstance(created_raw, str) and created_raw:
+            try:
+                # Excel writes UTC ISO; ``fromisoformat`` accepts the wolfxl
+                # canonical ``YYYY-MM-DDTHH:MM:SS.sss`` shape.
+                created = datetime.fromisoformat(created_raw.rstrip("Z"))
+            except ValueError:
+                created = None
+        tc = ThreadedComment(
+            text=entry.get("text", "") or "",
+            person=person,
+            created=created,
+            done=bool(entry.get("done", False)),
+            id=guid,
+        )
+        by_guid[guid] = tc
+        raw_by_guid[guid] = entry
+
+    # Pass two: wire reply chains and pick out top-level threads.
+    result: dict[str, Any] = {}
+    for guid, tc in by_guid.items():
+        raw = raw_by_guid[guid]
+        parent_id = raw.get("parent_id")
+        if parent_id is None:
+            cell_ref = raw.get("cell")
+            if cell_ref:
+                result[cell_ref] = tc
+            continue
+        parent = by_guid.get(parent_id)
+        if parent is None:
+            # Orphan reply — treat it as top-level so the user can still
+            # see the comment text rather than dropping it silently.
+            cell_ref = raw.get("cell")
+            if cell_ref:
+                result[cell_ref] = tc
+            continue
+        tc.parent = parent
+        parent.replies.append(tc)
+
+    ws._threaded_comments_cache = result  # noqa: SLF001
+    return result
+
+
 def get_hyperlinks_map(ws: Worksheet) -> dict[str, Any]:
     """Return ``{cell_ref: Hyperlink}`` for ``ws``, cached on the worksheet."""
     if ws._hyperlinks_cache is not None:  # noqa: SLF001

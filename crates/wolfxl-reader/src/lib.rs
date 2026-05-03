@@ -144,6 +144,7 @@ pub struct WorksheetData {
     pub sheet_properties: Option<SheetPropertiesInfo>,
     pub sheet_view: Option<SheetViewInfo>,
     pub comments: Vec<Comment>,
+    pub threaded_comments: Vec<ParsedThreadedComment>,
     pub row_heights: HashMap<u32, RowHeight>,
     pub column_widths: Vec<ColumnWidth>,
     pub data_validations: Vec<DataValidation>,
@@ -353,6 +354,31 @@ pub struct Comment {
     pub text: String,
     pub author: String,
     pub threaded: bool,
+}
+
+/// Workbook-scoped person record from `xl/persons/personList.xml` (RFC-068).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
+    pub display_name: String,
+    pub id: String,
+    pub user_id: Option<String>,
+    pub provider_id: Option<String>,
+}
+
+/// One threaded-comment entry parsed from `xl/threadedComments/threadedCommentsN.xml`.
+///
+/// Top-level threads have ``parent_id == None``; replies carry the GUID of
+/// their parent thread. Reassembly into a tree is done by callers (the
+/// Python layer surfaces it as `cell.threaded_comment` with `replies`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedThreadedComment {
+    pub id: String,
+    pub cell: String,
+    pub person_id: String,
+    pub created: Option<String>,
+    pub text: String,
+    pub parent_id: Option<String>,
+    pub done: bool,
 }
 
 /// Row dimension metadata from worksheet XML.
@@ -1041,6 +1067,9 @@ pub struct NativeXlsxBook {
     shared_strings: SharedStrings,
     styles: StyleTables,
     date1904: bool,
+    /// Workbook-scoped person registry parsed from `xl/persons/personList.xml`.
+    /// Empty when the workbook has no threaded-comment authorship metadata.
+    persons: Vec<Person>,
 }
 
 impl NativeXlsxBook {
@@ -1106,6 +1135,20 @@ impl NativeXlsxBook {
             None => Vec::new(),
         };
 
+        // RFC-068 / G08: workbook-scoped persons registry. Resolved via the
+        // workbook rels graph so we honor whatever path the writer chose
+        // (canonical wolfxl writes `xl/persons/personList.xml`).
+        let persons = match person_list_target(&rels) {
+            Some(target) => {
+                let path = join_and_normalize("xl/", &target);
+                match read_part_optional(&mut zip, &path)? {
+                    Some(xml) => parse_person_list(&xml)?,
+                    None => Vec::new(),
+                }
+            }
+            None => Vec::new(),
+        };
+
         Ok(Self {
             bytes,
             sheets,
@@ -1121,7 +1164,16 @@ impl NativeXlsxBook {
             shared_strings,
             styles,
             date1904,
+            persons,
         })
+    }
+
+    /// Workbook-scoped persons registry for threaded comments (RFC-068).
+    ///
+    /// Returns an empty slice when the workbook has no threaded-comment
+    /// authorship metadata.
+    pub fn persons(&self) -> &[Person] {
+        &self.persons
     }
 
     /// Workbook sheet names in document order.
@@ -1262,6 +1314,19 @@ impl NativeXlsxBook {
             .unwrap_or_default(),
             None => Vec::new(),
         };
+        let threaded_comments = match rels.as_ref() {
+            Some(graph) => {
+                let mut acc: Vec<ParsedThreadedComment> = Vec::new();
+                for rel in graph.iter().filter(|rel| rel.rel_type == wolfxl_rels::rt::THREADED_COMMENTS) {
+                    let path = join_and_normalize(&part_dir(&info.path), &rel.target);
+                    if let Some(xml) = read_part_optional(&mut zip, &path)? {
+                        acc.extend(parse_threaded_comments(&xml)?);
+                    }
+                }
+                acc
+            }
+            None => Vec::new(),
+        };
         let tables = read_tables(&mut zip, &info.path, &xml, rels.as_ref())?;
         let images = read_images(&mut zip, &info.path, rels.as_ref())?;
         let charts = read_charts(&mut zip, &info.path, rels.as_ref())?;
@@ -1269,6 +1334,7 @@ impl NativeXlsxBook {
             parse_worksheet(&xml, &self.shared_strings, rels.as_ref(), comments, tables)?;
         data.images = images;
         data.charts = charts;
+        data.threaded_comments = threaded_comments;
         Ok(data)
     }
 }
@@ -3062,6 +3128,7 @@ fn parse_worksheet(
         sheet_properties,
         sheet_view,
         comments,
+        threaded_comments: Vec::new(),
         row_heights,
         column_widths,
         data_validations,
@@ -3874,6 +3941,160 @@ fn comments_target(rels: &RelsGraph) -> Option<String> {
     rels.iter()
         .find(|rel| rel.rel_type.ends_with("/comments") || rel.rel_type == "comments")
         .map(|rel| rel.target.clone())
+}
+
+fn person_list_target(rels: &RelsGraph) -> Option<String> {
+    rels.iter()
+        .find(|rel| rel.rel_type == wolfxl_rels::rt::PERSON_LIST)
+        .map(|rel| rel.target.clone())
+}
+
+/// Parse `xl/persons/personList.xml` (RFC-068).
+///
+/// Schema is flat: a `<personList>` root with `<person displayName id userId
+/// providerId/>` children. Insertion order is preserved so the registry
+/// round-trips byte-stable through wolfxl's writer.
+fn parse_person_list(xml: &str) -> Result<Vec<Person>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut persons = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if e.local_name().as_ref() == b"person" {
+                    let display_name = attr_value(&e, b"displayName").unwrap_or_default();
+                    let id = attr_value(&e, b"id").unwrap_or_default();
+                    if id.is_empty() {
+                        // Skip malformed entries — every Person must carry a GUID
+                        // for the threaded-comment cross-link to resolve.
+                        continue;
+                    }
+                    persons.push(Person {
+                        display_name,
+                        id,
+                        user_id: attr_value(&e, b"userId"),
+                        provider_id: attr_value(&e, b"providerId"),
+                    });
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse personList XML: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(persons)
+}
+
+/// Parse one `xl/threadedComments/threadedCommentsN.xml` part.
+///
+/// Top-level threads have no `parentId`; replies carry the parent's GUID.
+/// Caller reassembles into a tree by matching `parent_id` against `id`.
+fn parse_threaded_comments(xml: &str) -> Result<Vec<ParsedThreadedComment>> {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out: Vec<ParsedThreadedComment> = Vec::new();
+
+    let mut current: Option<ParsedThreadedComment> = None;
+    let mut in_text = false;
+    let mut text_buf = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match e.local_name().as_ref() {
+                b"threadedComment" => {
+                    let id = attr_value(&e, b"id").unwrap_or_default();
+                    let cell = attr_value(&e, b"ref").unwrap_or_default();
+                    let person_id = attr_value(&e, b"personId").unwrap_or_default();
+                    let created = attr_value(&e, b"dT");
+                    let parent_id = attr_value(&e, b"parentId");
+                    let done = attr_value(&e, b"done")
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                        .unwrap_or(false);
+                    current = Some(ParsedThreadedComment {
+                        id,
+                        cell,
+                        person_id,
+                        created,
+                        text: String::new(),
+                        parent_id,
+                        done,
+                    });
+                    text_buf.clear();
+                }
+                b"text" => {
+                    in_text = true;
+                    text_buf.clear();
+                }
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => {
+                // Self-closing `<threadedComment ... />` — empty body is valid.
+                if e.local_name().as_ref() == b"threadedComment" {
+                    let id = attr_value(&e, b"id").unwrap_or_default();
+                    let cell = attr_value(&e, b"ref").unwrap_or_default();
+                    let person_id = attr_value(&e, b"personId").unwrap_or_default();
+                    let created = attr_value(&e, b"dT");
+                    let parent_id = attr_value(&e, b"parentId");
+                    let done = attr_value(&e, b"done")
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                        .unwrap_or(false);
+                    out.push(ParsedThreadedComment {
+                        id,
+                        cell,
+                        person_id,
+                        created,
+                        text: String::new(),
+                        parent_id,
+                        done,
+                    });
+                }
+            }
+            Ok(Event::End(e)) => match e.local_name().as_ref() {
+                b"threadedComment" => {
+                    if let Some(mut tc) = current.take() {
+                        tc.text = std::mem::take(&mut text_buf);
+                        out.push(tc);
+                    }
+                }
+                b"text" => {
+                    in_text = false;
+                }
+                _ => {}
+            },
+            Ok(Event::Text(e)) => {
+                if in_text {
+                    let s = e.unescape().map_err(|err| {
+                        ReaderError::Xml(format!("threadedComments text: {err}"))
+                    })?;
+                    text_buf.push_str(&s);
+                }
+            }
+            Ok(Event::CData(e)) => {
+                if in_text {
+                    text_buf.push_str(&String::from_utf8_lossy(e.as_ref()));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(ReaderError::Xml(format!(
+                    "failed to parse threadedComments XML: {e}"
+                )));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
 
 fn parse_comments(xml: &str) -> Result<Vec<Comment>> {
@@ -6274,4 +6495,83 @@ mod tests {
         assert_eq!(props.get("application").map(String::as_str), Some("Excel"));
         assert_eq!(props.get("company").map(String::as_str), Some("SynthGL"));
     }
+
+    #[test]
+    fn parses_person_list_with_optional_fields() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <person displayName="Alice" id="{A}" userId="alice@x.com" providerId="AD"/>
+  <person displayName="Bob" id="{B}"/>
+</personList>"#;
+        let persons = parse_person_list(xml).expect("parses");
+        assert_eq!(persons.len(), 2);
+        assert_eq!(persons[0].display_name, "Alice");
+        assert_eq!(persons[0].id, "{A}");
+        assert_eq!(persons[0].user_id.as_deref(), Some("alice@x.com"));
+        assert_eq!(persons[0].provider_id.as_deref(), Some("AD"));
+        assert_eq!(persons[1].display_name, "Bob");
+        assert_eq!(persons[1].user_id, None);
+        assert_eq!(persons[1].provider_id, None);
+    }
+
+    #[test]
+    fn skips_persons_missing_id() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <person displayName="No GUID"/>
+  <person displayName="Has GUID" id="{C}"/>
+</personList>"#;
+        let persons = parse_person_list(xml).expect("parses");
+        assert_eq!(persons.len(), 1);
+        assert_eq!(persons[0].id, "{C}");
+    }
+
+    #[test]
+    fn parses_threaded_comments_top_level_and_replies() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <threadedComment ref="A1" dT="2026-05-03T12:00:00.000" personId="{A}" id="{T1}">
+    <text>Looks wrong</text>
+  </threadedComment>
+  <threadedComment ref="A1" dT="2026-05-03T12:01:00.000" personId="{B}" id="{T2}" parentId="{T1}">
+    <text>Why?</text>
+  </threadedComment>
+</ThreadedComments>"#;
+        let entries = parse_threaded_comments(xml).expect("parses");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "{T1}");
+        assert_eq!(entries[0].cell, "A1");
+        assert_eq!(entries[0].person_id, "{A}");
+        assert_eq!(entries[0].text, "Looks wrong");
+        assert_eq!(entries[0].parent_id, None);
+        assert_eq!(entries[0].created.as_deref(), Some("2026-05-03T12:00:00.000"));
+        assert_eq!(entries[1].parent_id.as_deref(), Some("{T1}"));
+        assert_eq!(entries[1].text, "Why?");
+    }
+
+    #[test]
+    fn parses_threaded_comment_with_xml_escaped_text() {
+        let xml = r#"<?xml version="1.0"?>
+<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <threadedComment ref="B2" personId="{A}" id="{T1}">
+    <text>&lt;b&gt; &amp; "hi"</text>
+  </threadedComment>
+</ThreadedComments>"#;
+        let entries = parse_threaded_comments(xml).expect("parses");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, "<b> & \"hi\"");
+    }
+
+    #[test]
+    fn parses_threaded_comment_done_flag() {
+        let xml = r#"<?xml version="1.0"?>
+<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">
+  <threadedComment ref="A1" personId="{A}" id="{T1}" done="1"><text>resolved</text></threadedComment>
+  <threadedComment ref="B1" personId="{A}" id="{T2}"><text>open</text></threadedComment>
+</ThreadedComments>"#;
+        let entries = parse_threaded_comments(xml).expect("parses");
+        assert_eq!(entries[0].done, true);
+        assert_eq!(entries[1].done, false);
+    }
+
 }

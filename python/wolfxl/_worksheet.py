@@ -151,7 +151,8 @@ class Worksheet:
         "_row_heights", "_col_widths", "_sheet_state",
         "_merged_ranges", "_print_area", "_sheet_visibility_cache",
         # Read caches populated lazily on first access.
-        "_comments_cache", "_hyperlinks_cache", "_defined_names_cache",
+        "_comments_cache", "_threaded_comments_cache",
+        "_hyperlinks_cache", "_defined_names_cache",
         "_tables_cache", "_data_validations_cache",
         "_conditional_formatting_cache", "_images_cache", "_charts_cache",
         # Write-mode pending queues flushed in _flush() on save().

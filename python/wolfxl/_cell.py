@@ -368,7 +368,10 @@ class Cell:
         """Return the cell's top-level threaded comment, or ``None`` (G08).
 
         Pending unsaved edits take precedence over reader state, matching
-        the legacy ``comment`` property's contract.
+        the legacy ``comment`` property's contract. When no pending edit
+        exists, the workbook's reader-side cache is consulted; that cache
+        is populated lazily on first access from
+        ``xl/threadedComments/threadedCommentsN.xml``.
         """
         ws = self._ws
         pending = ws._pending_threaded_comments.get(self.coordinate, _UNSET)  # noqa: SLF001
@@ -376,9 +379,9 @@ class Cell:
             return None
         if pending is not _UNSET:
             return pending
-        # Reader-side hydration lands in step 4; for now return None when
-        # there is no pending payload.
-        return None
+        from wolfxl._worksheet_features import get_threaded_comments_map
+
+        return get_threaded_comments_map(ws).get(self.coordinate)
 
     @threaded_comment.setter
     def threaded_comment(self, value: Any) -> None:
