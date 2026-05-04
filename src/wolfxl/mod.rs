@@ -1655,6 +1655,42 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    /// RFC-072 (G19): return the raw `xl/vbaProject.bin` bytes from the
+    /// source workbook, or `None` when the workbook contains no VBA
+    /// archive. Read-only inspection — no authoring side effects.
+    ///
+    /// The patcher does not eagerly buffer the payload at `open()` time;
+    /// instead it reopens the source ZIP on demand and reads the
+    /// `xl/vbaProject.bin` entry if present. xlsx files (no VBA) yield
+    /// `None`. This stays true to the modify-mode "preserve untouched
+    /// parts via raw-copy" model — `xl/vbaProject.bin` round-trips
+    /// untouched through `do_save`, and this accessor merely surfaces
+    /// the same bytes for inspection.
+    fn get_vba_archive_bytes<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<pyo3::Bound<'py, pyo3::types::PyBytes>>> {
+        let mut zip = open_source_zip(&self.file_path)?;
+        let buf: Option<Vec<u8>> = match zip.by_name("xl/vbaProject.bin") {
+            Ok(mut f) => {
+                let mut buf = Vec::with_capacity(f.size() as usize);
+                std::io::Read::read_to_end(&mut f, &mut buf).map_err(|e| {
+                    PyErr::new::<PyIOError, _>(format!(
+                        "Failed to read xl/vbaProject.bin: {e}"
+                    ))
+                })?;
+                Some(buf)
+            }
+            Err(zip::result::ZipError::FileNotFound) => None,
+            Err(e) => {
+                return Err(PyErr::new::<PyIOError, _>(format!(
+                    "Zip error reading xl/vbaProject.bin: {e}"
+                )));
+            }
+        };
+        Ok(buf.map(|b| pyo3::types::PyBytes::new(py, &b)))
+    }
+
     // -------------------------------------------------------------------
     // RFC-013 test-only hooks.
     //

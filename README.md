@@ -152,7 +152,7 @@ Features marked **Preserved** are kept verbatim on modify-mode round-trip (open,
 | **Encryption** | Read + write Agile (AES-256 / SHA-512) via `wolfxl[encrypted]` |
 | **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
 | **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
-| **Preserved (read-only)** | Macros (VBA), embedded objects — round-trip cleanly through modify mode |
+| **Preserved (read-only)** | Macros (VBA) — round-trip cleanly through modify mode, with raw `xl/vbaProject.bin` bytes available via `Workbook.vba_archive` for inspection (no authoring API); embedded objects also round-trip |
 
 ### openpyxl compatibility status
 

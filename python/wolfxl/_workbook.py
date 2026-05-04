@@ -303,9 +303,27 @@ class Workbook:
         return None
 
     @property
-    def vba_archive(self) -> Any:
-        """VBA archive payload, when exposed."""
-        return None
+    def vba_archive(self) -> bytes | None:
+        """Raw ``xl/vbaProject.bin`` bytes for ``.xlsm`` workbooks (G19, RFC-072).
+
+        Returns the underlying VBA archive bytes when the workbook was
+        loaded via ``load_workbook(path, modify=True)`` from a macro-
+        bearing file (``.xlsm`` / ``.xlam``). Returns ``None`` for
+        plain ``.xlsx`` inputs (no VBA part), for write-mode workbooks
+        (``Workbook()``), and for non-modify reads (``load_workbook(path)``
+        without ``modify=True``) — those code paths do not retain the
+        bytes in v1.0.
+
+        Read-only inspection — there is no setter. VBA authoring is
+        tracked under G28 and remains decision-gated.
+        """
+        patcher = getattr(self, "_rust_patcher", None)
+        if patcher is None:
+            return None
+        getter = getattr(patcher, "get_vba_archive_bytes", None)
+        if getter is None:
+            return None
+        return getter()
 
     @property
     def chartsheets(self) -> list[Any]:

@@ -512,8 +512,12 @@ ENTRIES: list[Entry] = [
         "category": "vba",
         "openpyxl": "workbook.vba_archive (read-only inspection)",
         "wolfxl": "workbook.vba_archive (read-only inspection)",
-        "status": "not_yet",
-        "gap_id": "G19",
+        "status": "supported",
+        "probe": "vba_inspect",
+        "notes": (
+            "v1.0: modify-mode loads only; returns raw xl/vbaProject.bin "
+            "bytes. No authoring API (tracked under G28)."
+        ),
     },
     {
         "id": "vba.author",
