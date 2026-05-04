@@ -804,12 +804,19 @@ v2.0 ships.
 
 ### What is still load-bearing (concrete next actions)
 
-T0 — **Release freeze remains in effect.** The local-only external oracle
-corpus (Excelize, ClosedXML, NPOI, ExcelJS, POI) is not yet a CI-enforced
-gate. Before v2.0 ships, `tests/test_external_oracle_preservation.py` needs
-a deterministic fixture pack pinned in-tree (or fetched at test-time with
-hash verification) and gated in CI, not just `WOLFXL_EXTERNAL_FIXTURES_DIR`
-opt-in.
+T0 — **Release freeze remains in effect.** External oracle corpus is now
+**pinned in-tree** at `tests/fixtures/external_oracle/` (7 fixtures from
+Excelize, ClosedXML, NPOI, ExcelJS, Apache POI; 76 KB total, manifest
+schema v1 with per-fixture SHA256 + `expected_parts` provenance from
+ExcelBench's 2026-04-28 generation). The strengthened
+`tests/test_external_oracle_preservation.py` parametrizes over the
+manifest, asserts each fixture's `expected_parts` survive modify-save
+(stronger than "no parts lost"), verifies SHA256 pin, marker openpyxl
+roundtrip, and ZIP CRC. All 7 cases pass locally in 0.52 s. CI gating
+is **explicitly deferred** for this v2.0 cycle — the suite runs as part
+of the local pre-release pytest pass but is not yet a GitHub Actions
+required check. `WOLFXL_EXTERNAL_FIXTURES_DIR` env override still works
+for testing freshly regenerated ExcelBench packs before re-pinning.
 
 T1 — **`XlsxPatcher::do_save` phase extraction.** `src/wolfxl/mod.rs` is
 2742 lines (up from 2491 since 2026-04-28). The 23 named save-phases
@@ -849,9 +856,11 @@ gap they cover.
 - Save-phase extraction starting point: `src/wolfxl/patcher_save.rs`'s
   `SaveWorkspace` struct (item 123) is the receiver for the extracted
   phase functions.
-- External oracle fixture corpus: ExcelBench
-  `results_dev_external/fixtures` plus the in-tree
-  `tests/test_external_oracle_preservation.py` opt-in gate.
+- External oracle fixture corpus: in-tree pinned pack at
+  `tests/fixtures/external_oracle/` with `manifest.json` (schema v1).
+  Source-of-truth regeneration lives in ExcelBench
+  `results_dev_external/fixtures`; re-pinning is a manual step (copy +
+  refresh manifest hashes + run the preservation test).
 
 ## Verification gates
 
