@@ -1,4 +1,17 @@
 //! `<sheetData>` row and cell emitter for worksheet XML.
+//!
+//! Two entry points:
+//!
+//! - [`emit`] writes the entire `<sheetData>` block (open tag, every row,
+//!   close tag) into an in-memory `String`. This is the eager-mode path
+//!   used by every regular `Workbook()` save.
+//! - [`emit_row_to`] writes a single `<row r="…">…</row>` element into any
+//!   `fmt::Write` sink. Streaming write-only mode (`Workbook(write_only=True)`)
+//!   wraps a per-sheet temp file with `IoFmtAdapter` and calls this helper
+//!   once per `ws.append(...)`. Sharing the same row encoder is what
+//!   guarantees byte-identical output between the eager and streaming paths.
+
+use core::fmt;
 
 use crate::intern::SstBuilder;
 use crate::model::cell::{FormulaResult, WriteCell, WriteCellValue};
@@ -15,13 +28,26 @@ pub fn emit(out: &mut String, sheet: &Worksheet, sst: &mut SstBuilder) {
     out.push_str("<sheetData>");
 
     for (&row_num, row) in &sheet.rows {
-        emit_row(out, row_num, row, sst);
+        // Infallible: pushing into a String never errors.
+        let _ = emit_row_to(out, row_num, row, sst);
     }
 
     out.push_str("</sheetData>");
 }
 
-fn emit_row(out: &mut String, row_num: u32, row: &Row, sst: &mut SstBuilder) {
+/// Encode a single `<row r="…">…</row>` element into `out`.
+///
+/// Returns `fmt::Result` from the underlying writes — pushing into a
+/// `String` never errors, but the streaming path uses an `io::Write`
+/// adapter that surfaces I/O errors as `fmt::Error`. The streaming
+/// caller checks back the original `io::Error` separately on each
+/// append; the `fmt::Result` here is just the pass-through signal.
+pub(crate) fn emit_row_to<W: fmt::Write>(
+    out: &mut W,
+    row_num: u32,
+    row: &Row,
+    sst: &mut SstBuilder,
+) -> fmt::Result {
     let has_real_cells = row
         .cells
         .values()
@@ -29,144 +55,154 @@ fn emit_row(out: &mut String, row_num: u32, row: &Row, sst: &mut SstBuilder) {
     let has_attrs = row.custom_height.is_some() || row.hidden || row.style_id.is_some();
 
     if row.cells.is_empty() && !has_attrs {
-        return;
+        return Ok(());
     }
 
-    out.push_str(&format!("<row r=\"{}\"", row_num));
+    write!(out, "<row r=\"{}\"", row_num)?;
 
     if let Some(h) = row.custom_height {
-        out.push_str(&format!(" ht=\"{}\" customHeight=\"1\"", format_f64(h)));
+        write!(out, " ht=\"{}\" customHeight=\"1\"", format_f64(h))?;
     }
     if row.hidden {
-        out.push_str(" hidden=\"1\"");
+        out.write_str(" hidden=\"1\"")?;
     }
     if let Some(s) = row.style_id {
-        out.push_str(&format!(" s=\"{}\" customFormat=\"1\"", s));
+        write!(out, " s=\"{}\" customFormat=\"1\"", s)?;
     }
 
-    if row.cells.is_empty() || !has_real_cells {
-        if !has_real_cells {
-            out.push_str("/>");
-            return;
-        }
+    if !has_real_cells {
+        // Either the row is empty (no cells at all) or every cell is an
+        // unstyled blank. Either way the row is self-closing.
+        out.write_str("/>")?;
+        return Ok(());
     }
 
-    out.push('>');
+    out.write_char('>')?;
 
     for (&col_num, cell) in &row.cells {
-        emit_cell(out, row_num, col_num, cell, sst);
+        emit_cell_to(out, row_num, col_num, cell, sst)?;
     }
 
-    out.push_str("</row>");
+    out.write_str("</row>")?;
+    Ok(())
 }
 
-fn emit_cell(out: &mut String, row_num: u32, col_num: u32, cell: &WriteCell, sst: &mut SstBuilder) {
+fn emit_cell_to<W: fmt::Write>(
+    out: &mut W,
+    row_num: u32,
+    col_num: u32,
+    cell: &WriteCell,
+    sst: &mut SstBuilder,
+) -> fmt::Result {
     let cell_ref = refs::format_a1(row_num, col_num);
 
     match &cell.value {
         WriteCellValue::Blank => {
             if let Some(s) = cell.style_id {
-                out.push_str(&format!("<c r=\"{}\" s=\"{}\"/>", cell_ref, s));
+                write!(out, "<c r=\"{}\" s=\"{}\"/>", cell_ref, s)?;
             }
         }
 
         WriteCellValue::Number(n) => {
-            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str(&format!("><v>{}</v></c>", format_number(*n)));
+            write!(out, "><v>{}</v></c>", format_number(*n))?;
         }
 
         WriteCellValue::String(s) => {
             let idx = sst.intern(s);
-            out.push_str(&format!("<c r=\"{}\" t=\"s\"", cell_ref));
+            write!(out, "<c r=\"{}\" t=\"s\"", cell_ref)?;
             if let Some(style) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", style));
+                write!(out, " s=\"{}\"", style)?;
             }
-            out.push_str(&format!("><v>{}</v></c>", idx));
+            write!(out, "><v>{}</v></c>", idx)?;
         }
 
         WriteCellValue::Boolean(b) => {
-            out.push_str(&format!("<c r=\"{}\" t=\"b\"", cell_ref));
+            write!(out, "<c r=\"{}\" t=\"b\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
             let bval = if *b { 1 } else { 0 };
-            out.push_str(&format!("><v>{}</v></c>", bval));
+            write!(out, "><v>{}</v></c>", bval)?;
         }
 
         WriteCellValue::Formula { expr, result } => {
             let escaped_expr = xml_escape::text(expr);
             match result {
                 None => {
-                    out.push_str(&format!("<c r=\"{}\"", cell_ref));
+                    write!(out, "<c r=\"{}\"", cell_ref)?;
                     if let Some(s) = cell.style_id {
-                        out.push_str(&format!(" s=\"{}\"", s));
+                        write!(out, " s=\"{}\"", s)?;
                     }
-                    out.push_str(&format!("><f>{}</f><v>0</v></c>", escaped_expr));
+                    write!(out, "><f>{}</f><v>0</v></c>", escaped_expr)?;
                 }
                 Some(FormulaResult::Number(n)) => {
-                    out.push_str(&format!("<c r=\"{}\"", cell_ref));
+                    write!(out, "<c r=\"{}\"", cell_ref)?;
                     if let Some(s) = cell.style_id {
-                        out.push_str(&format!(" s=\"{}\"", s));
+                        write!(out, " s=\"{}\"", s)?;
                     }
-                    out.push_str(&format!(
+                    write!(
+                        out,
                         "><f>{}</f><v>{}</v></c>",
                         escaped_expr,
                         format_number(*n)
-                    ));
+                    )?;
                 }
                 Some(FormulaResult::String(s)) => {
-                    out.push_str(&format!("<c r=\"{}\" t=\"str\"", cell_ref));
+                    write!(out, "<c r=\"{}\" t=\"str\"", cell_ref)?;
                     if let Some(style) = cell.style_id {
-                        out.push_str(&format!(" s=\"{}\"", style));
+                        write!(out, " s=\"{}\"", style)?;
                     }
-                    out.push_str(&format!(
+                    write!(
+                        out,
                         "><f>{}</f><v>{}</v></c>",
                         escaped_expr,
                         xml_escape::text(s)
-                    ));
+                    )?;
                 }
                 Some(FormulaResult::Boolean(b)) => {
-                    out.push_str(&format!("<c r=\"{}\" t=\"b\"", cell_ref));
+                    write!(out, "<c r=\"{}\" t=\"b\"", cell_ref)?;
                     if let Some(s) = cell.style_id {
-                        out.push_str(&format!(" s=\"{}\"", s));
+                        write!(out, " s=\"{}\"", s)?;
                     }
                     let bval = if *b { 1 } else { 0 };
-                    out.push_str(&format!("><f>{}</f><v>{}</v></c>", escaped_expr, bval));
+                    write!(out, "><f>{}</f><v>{}</v></c>", escaped_expr, bval)?;
                 }
             }
         }
 
         WriteCellValue::DateSerial(f) => {
-            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str(&format!("><v>{}</v></c>", format_number(*f)));
+            write!(out, "><v>{}</v></c>", format_number(*f))?;
         }
 
         WriteCellValue::InlineRichText(runs) => {
-            out.push_str(&format!("<c r=\"{}\" t=\"inlineStr\"", cell_ref));
+            write!(out, "<c r=\"{}\" t=\"inlineStr\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str("><is>");
-            out.push_str(&crate::rich_text::emit_runs(runs));
-            out.push_str("</is></c>");
+            out.write_str("><is>")?;
+            out.write_str(&crate::rich_text::emit_runs(runs))?;
+            out.write_str("</is></c>")?;
         }
 
         WriteCellValue::ArrayFormula { ref_range, text } => {
-            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str(&format!(
+            write!(
+                out,
                 "><f t=\"array\" ref=\"{}\">{}</f></c>",
                 xml_escape::attr(ref_range),
                 xml_escape::text(text),
-            ));
+            )?;
         }
 
         WriteCellValue::DataTableFormula {
@@ -177,38 +213,39 @@ fn emit_cell(out: &mut String, row_num: u32, col_num: u32, cell: &WriteCell, sst
             r1,
             r2,
         } => {
-            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str("><f t=\"dataTable\"");
-            out.push_str(&format!(" ref=\"{}\"", xml_escape::attr(ref_range)));
+            out.write_str("><f t=\"dataTable\"")?;
+            write!(out, " ref=\"{}\"", xml_escape::attr(ref_range))?;
             if *ca {
-                out.push_str(" ca=\"1\"");
+                out.write_str(" ca=\"1\"")?;
             }
             if *dt2_d {
-                out.push_str(" dt2D=\"1\"");
+                out.write_str(" dt2D=\"1\"")?;
             }
             if *dtr {
-                out.push_str(" dtr=\"1\"");
+                out.write_str(" dtr=\"1\"")?;
             }
             if let Some(r1v) = r1 {
-                out.push_str(&format!(" r1=\"{}\"", xml_escape::attr(r1v)));
+                write!(out, " r1=\"{}\"", xml_escape::attr(r1v))?;
             }
             if let Some(r2v) = r2 {
-                out.push_str(&format!(" r2=\"{}\"", xml_escape::attr(r2v)));
+                write!(out, " r2=\"{}\"", xml_escape::attr(r2v))?;
             }
-            out.push_str("/></c>");
+            out.write_str("/></c>")?;
         }
 
         WriteCellValue::SpillChild => {
-            out.push_str(&format!("<c r=\"{}\"", cell_ref));
+            write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
-                out.push_str(&format!(" s=\"{}\"", s));
+                write!(out, " s=\"{}\"", s)?;
             }
-            out.push_str("/>");
+            out.write_str("/>")?;
         }
     }
+    Ok(())
 }
 
 fn format_number(n: f64) -> String {
@@ -413,5 +450,33 @@ mod tests {
         let b1_end = out[b1_start..].find('>').expect(">") + b1_start;
         let tag = &out[b1_start..=b1_end];
         assert!(!tag.contains("s="), "no s attr when no style: {tag}");
+    }
+
+    #[test]
+    fn emit_row_to_matches_eager_byte_for_byte() {
+        // Streaming and eager paths share emit_row_to. This locks the
+        // contract that single-row encoding is identical regardless of
+        // whether the sink is the eager <sheetData> String or a
+        // per-sheet temp file.
+        let mut sheet = Worksheet::new("S");
+        sheet.set_cell(1, 1, WriteCell::new(WriteCellValue::Number(42.0)));
+        sheet.set_cell(1, 2, WriteCell::new(WriteCellValue::String("hi".into())));
+        sheet.set_cell(1, 3, WriteCell::new(WriteCellValue::Boolean(true)));
+
+        let mut eager_sst = SstBuilder::default();
+        let mut eager = String::new();
+        emit(&mut eager, &sheet, &mut eager_sst);
+
+        let mut streaming_sst = SstBuilder::default();
+        let mut streaming = String::new();
+        let row = sheet.rows.get(&1).unwrap();
+        emit_row_to(&mut streaming, 1, row, &mut streaming_sst).unwrap();
+
+        // The eager path wraps with <sheetData>...</sheetData>; strip it
+        // off so the row payload is comparable.
+        let inner = eager
+            .trim_start_matches("<sheetData>")
+            .trim_end_matches("</sheetData>");
+        assert_eq!(inner, streaming);
     }
 }

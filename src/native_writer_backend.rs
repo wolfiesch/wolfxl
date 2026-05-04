@@ -53,6 +53,9 @@ use crate::native_writer_sheet_state::{
     apply_column_width, apply_freeze_panes, apply_merged_range, apply_page_breaks,
     apply_print_area, apply_row_height, apply_sheet_setup,
 };
+use crate::native_writer_streaming::{
+    append_streaming_row, enable_streaming, finalize_all_streaming,
+};
 use crate::native_writer_workbook::{add_sheet_if_missing, move_sheet, rename_sheet, save_once};
 use crate::native_writer_workbook_metadata::{
     dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
@@ -227,6 +230,46 @@ impl NativeWorkbook {
 
     pub fn save(&mut self, path: &str) -> PyResult<()> {
         save_once(&mut self.inner, &mut self.saved, path)
+    }
+
+    // =========================================================================
+    // Sprint 7 / G20 — `Workbook(write_only=True)` streaming write mode.
+    // =========================================================================
+
+    /// Convert an empty existing sheet into streaming write-only mode.
+    /// Idempotent. Errors if the sheet already has eager rows.
+    pub fn enable_streaming_sheet(&mut self, sheet: &str) -> PyResult<()> {
+        enable_streaming(&mut self.inner, sheet)
+    }
+
+    /// Append one row's worth of cell payloads to a streaming sheet's
+    /// temp file. `cells` is a list of `dict | None`, indexed `column - 1`.
+    pub fn append_streaming_row(
+        &mut self,
+        sheet: &str,
+        row_idx: u32,
+        cells: &Bound<'_, pyo3::types::PyList>,
+    ) -> PyResult<()> {
+        append_streaming_row(&mut self.inner, sheet, row_idx, cells)
+    }
+
+    /// Flush every streaming sheet's `BufWriter`. Called automatically
+    /// from `save`, but exposed so the Python `WriteOnlyWorksheet.close()`
+    /// path can release file descriptors before save if needed.
+    pub fn finalize_streaming_sheets(&mut self) -> PyResult<()> {
+        finalize_all_streaming(&mut self.inner)
+    }
+
+    /// Intern a format dict on the workbook's StylesBuilder and return
+    /// the resulting style id. Exposed so the streaming
+    /// `WriteOnlyCell` path can resolve a font/fill/border/alignment/
+    /// number_format combo to one style id once and cache it Python-
+    /// side, instead of paying a write_cell_format hop per cell.
+    pub fn intern_format(&mut self, format_dict: &Bound<'_, pyo3::types::PyAny>) -> PyResult<u32> {
+        let dict = format_dict
+            .cast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("format_dict must be a dict"))?;
+        crate::native_writer_formats::intern_format_from_dict(&mut self.inner, dict)
     }
 
     // =========================================================================

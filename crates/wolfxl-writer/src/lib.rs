@@ -37,6 +37,7 @@ pub mod model;
 pub mod parse;
 pub mod refs;
 pub mod rich_text;
+pub mod streaming;
 pub mod xml_escape;
 pub mod zip;
 
@@ -53,19 +54,43 @@ pub use model::worksheet::Worksheet;
 /// 1+2+3 part, packages them in canonical ZIP order, and returns the raw
 /// bytes — the caller writes them to disk (or hands them to a diff tool).
 ///
+/// Thin wrapper around [`emit_xlsx_to`]: allocates a `Vec<u8>` and writes
+/// the archive into it. Prefer [`emit_xlsx_to`] when you have a destination
+/// `Write + Seek` sink (e.g. `BufWriter<File>`) — it skips the final
+/// in-memory ZIP materialisation (RFC-073 v1.5).
+///
 /// Mutates `wb` because sheet emission interns strings into the workbook's
 /// shared-string table; SST emission has to run AFTER all sheets to see
 /// the final intern set. The mutation is monotonic (only string indices
 /// are added) — calling `emit_xlsx` twice on the same workbook produces
 /// the same archive both times.
 pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
+    let mut buf = std::io::Cursor::new(Vec::<u8>::new());
+    emit_xlsx_to(wb, &mut buf).expect("emit_xlsx_to into Vec");
+    buf.into_inner()
+}
+
+/// Stream a complete `.xlsx` archive directly into `dest`.
+///
+/// Same contract as [`emit_xlsx`] for parts and ordering, but skips the
+/// final in-memory ZIP materialisation. Sheet/styles/SST bodies are still
+/// built up as `Vec<u8>` entries because most emitters build them via
+/// `String` accumulators; only the final ZIP container streams to `dest`.
+///
+/// `dest` must be `Write + Seek` because `ZipWriter` patches local-file-
+/// header sizes after each entry. Production callers pass a
+/// `BufWriter<File>`.
+pub fn emit_xlsx_to<W: std::io::Write + std::io::Seek>(
+    wb: &mut Workbook,
+    dest: &mut W,
+) -> Result<(), std::io::Error> {
     use crate::emit::drawings::DrawingItem;
     use crate::emit::{
         calc_chain_xml, charts, comments_xml, content_types, doc_props, drawings, drawings_vml,
         persons_xml, rels, shared_strings_xml, sheet_xml, styles_xml, tables_xml,
         threaded_comments_xml, workbook_xml,
     };
-    use crate::zip::{package, ZipEntry};
+    use crate::zip::{package_to, ZipEntry};
 
     // RFC-068: synthesize legacy comment placeholders + tc= authors before
     // any sheet emit runs, so each top-level threaded comment has a paired
@@ -275,5 +300,5 @@ pub fn emit_xlsx(wb: &mut Workbook) -> Vec<u8> {
         });
     }
 
-    package(&entries).expect("zip package")
+    package_to(&entries, dest)
 }

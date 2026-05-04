@@ -15,9 +15,9 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **62** / 75
-- 🟡 Partial: **6** / 75
-- ❌ Not Yet: **6** / 75
+- ✅ Supported: **64** / 75
+- 🟡 Partial: **5** / 75
+- ❌ Not Yet: **5** / 75
 - ⛔ Out of Scope: **1** / 75
 
 ## Workbook + Worksheet
@@ -113,7 +113,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `Workbook(write_only=True)` | `wolfxl.Workbook(write_only=True)` | 🟡 Partial | G20 | Accepted today as a kwarg but routes through the standard in-memory writer. S7 introduces a true bounded-memory append-only path. |
+| `Workbook(write_only=True)` | `wolfxl.Workbook(write_only=True)` | ✅ Supported |  | Bounded-memory streaming append-only path (G20 / RFC-073). Per-sheet temp files splice into the `<sheetData>` slot; row data scales O(rows on disk), not O(rows in RAM). SST and styles still grow in-memory as in openpyxl's lxml.xmlfile model. |
 
 ## Protection
 
@@ -126,7 +126,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ❌ Not Yet | G18 |  |
+| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ✅ Supported |  | v1.0 — read-only inspection (ExternalLink dataclass with target / sheet_names / cached_data) + opaque preservation: modify-mode round-trips xl/externalLinks/* and the matching rels byte-for-byte. Authoring (append/remove) is deferred. |
 
 ## VBA macros
 

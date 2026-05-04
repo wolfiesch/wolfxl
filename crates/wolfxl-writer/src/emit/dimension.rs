@@ -10,6 +10,21 @@ use crate::refs;
 /// matching the native writer's cell-emission behavior. Styled blanks do
 /// count because they still materialize as `<c .../>` elements.
 pub fn emit(out: &mut String, sheet: &Worksheet) {
+    // Streaming write_only sheets keep `rows` empty and track the
+    // bounding box on the StreamingSheet itself. Min row is implicitly
+    // 1 because openpyxl's write_only API auto-numbers from row 1.
+    if let Some(stream) = sheet.streaming.as_ref() {
+        let max_row = stream.row_count();
+        let max_col = stream.max_col();
+        if max_row == 0 || max_col == 0 {
+            out.push_str("<dimension ref=\"A1\"/>");
+        } else {
+            let range = refs::format_range((1, 1), (max_row, max_col));
+            out.push_str(&format!("<dimension ref=\"{}\"/>", range));
+        }
+        return;
+    }
+
     let mut min_row = u32::MAX;
     let mut max_row = 0u32;
     let mut min_col = u32::MAX;

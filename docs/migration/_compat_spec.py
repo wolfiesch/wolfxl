@@ -159,10 +159,10 @@ ENTRIES: list[Entry] = [
         "category": "streaming",
         "openpyxl": "Workbook(write_only=True)",
         "wolfxl": "wolfxl.Workbook(write_only=True)",
-        "status": "partial",
-        "gap_id": "G20",
+        "status": "supported",
         "probe": "workbook_write_only_streaming",
-        "notes": "Accepted today as a kwarg but routes through the standard in-memory writer. S7 introduces a true bounded-memory append-only path.",
+        "secondary_probes": ["workbook_write_only_bounded_memory"],
+        "notes": "Bounded-memory streaming append-only path (G20 / RFC-073). Per-sheet temp files splice into the `<sheetData>` slot; row data scales O(rows on disk), not O(rows in RAM). SST and styles still grow in-memory as in openpyxl's lxml.xmlfile model.",
     },
     # --- Cell + style API --------------------------------------------------
     {

@@ -10,6 +10,7 @@ description = "Native xlsx writer for wolfxl — pure-Rust OOXML emitter + ZIP p
 chrono.workspace = true
 indexmap.workspace = true
 quick-xml.workspace = true
+tempfile.workspace = true
 zip.workspace = true
 wolfxl-rels = { path = "../wolfxl-rels", version = "0.1" }
 # Used for the ECMA-376 §18.3.1.99 child-element ordering table referenced

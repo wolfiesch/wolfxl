@@ -210,11 +210,12 @@ def _probe_workbook_copy_worksheet(tmp_path: Path) -> None:
 
 @_register("workbook_write_only_streaming")
 def _probe_workbook_write_only_streaming(tmp_path: Path) -> None:
-    """Bounded-memory append-only path. Today the kwarg is accepted but the
-    save still routes through the in-memory writer, so the probe currently
-    just checks that the kwarg works at construction. S7 (G20) introduces
-    the real streaming path; this probe will then expand to assert RSS
-    bounds on a 10M-row write.
+    """Bounded-memory append-only path (G20 / RFC-073).
+
+    The Rust-side `StreamingSheet` accumulates row XML into a per-sheet
+    temp file; `sheet_xml::emit` splices it into the `<sheetData>` slot
+    at save time. This probe confirms the end-to-end happy path: 1000
+    appends, save, re-read recovers values.
     """
     import wolfxl
 
@@ -230,6 +231,72 @@ def _probe_workbook_write_only_streaming(tmp_path: Path) -> None:
     assert rows[0] == (0, 0)
     assert rows[-1] == (4, 8)
     rb.close()
+
+
+@_register("workbook_write_only_bounded_memory")
+def _probe_workbook_write_only_bounded_memory(tmp_path: Path) -> None:
+    """Peak RSS at 100k rows × 10 cols stays under 80 MiB.
+
+    Runs the writer in a clean subprocess so pytest's accumulated heap
+    (test fixtures, imports, prior probe state) doesn't pollute the
+    sample. The 80 MiB ceiling is calibrated for the
+    100k × 10 numeric-cells workload — SST stays empty (numbers don't
+    intern), styles stays at the default 1 entry, and the only growth
+    should be the BufWriter buffer (64 KiB) plus per-sheet emit String.
+
+    If this probe fails it means streaming has regressed back to the
+    eager BTreeMap accumulation. The actual bytes-on-disk size should
+    be ~6-8 MiB; an 80 MiB peak is the slack budget for transient
+    Python heap growth during the loop.
+
+    Skips if `psutil` is not installed (calibrated only for posix).
+    """
+    import subprocess
+    import sys
+
+    try:
+        import psutil  # noqa: F401  (probed in subprocess, but check first)
+    except ImportError:
+        pytest.skip("psutil not installed; bounded-memory probe needs it")
+
+    out = tmp_path / "bounded.xlsx"
+    script = f"""
+import os, psutil, wolfxl
+proc = psutil.Process(os.getpid())
+baseline_rss = proc.memory_info().rss
+wb = wolfxl.Workbook(write_only=True)
+ws = wb.create_sheet("Stream")
+peak = baseline_rss
+for i in range(100_000):
+    ws.append([i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7, i + 8, i + 9])
+    if i % 10_000 == 0:
+        cur = proc.memory_info().rss
+        if cur > peak:
+            peak = cur
+wb.save({str(out)!r})
+final = proc.memory_info().rss
+if final > peak:
+    peak = final
+delta_mib = (peak - baseline_rss) / (1024 * 1024)
+print(f"BOUNDED_MEMORY_DELTA_MIB={{delta_mib:.2f}}")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, f"subprocess failed: {result.stderr}"
+    delta_line = next(
+        (line for line in result.stdout.splitlines() if line.startswith("BOUNDED_MEMORY_DELTA_MIB=")),
+        None,
+    )
+    assert delta_line is not None, f"missing delta line in: {result.stdout}"
+    delta_mib = float(delta_line.split("=", 1)[1])
+    assert delta_mib < 80.0, (
+        f"peak RSS delta {delta_mib:.2f} MiB exceeds 80 MiB budget — "
+        f"streaming may have regressed to in-memory accumulation"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1318,7 +1385,31 @@ def _probe_array_formula_data_table(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-_PROBE_ENTRIES = [e for e in _SPEC.ENTRIES if e.get("probe")]
+def _expand_probe_entries() -> list[dict[str, Any]]:
+    """Yield one parametrise entry per `probe` plus per `secondary_probes`.
+
+    Secondary probes share the parent's status / gap_id but parametrise
+    under a synthesised id (`{parent}.{secondary}`) so the harness can
+    flip them independently when a follow-up gap closes (e.g. the
+    bounded-memory check arrives one sprint after the basic streaming
+    probe).
+    """
+    expanded: list[dict[str, Any]] = []
+    for entry in _SPEC.ENTRIES:
+        if entry.get("probe"):
+            expanded.append(entry)
+            for secondary in entry.get("secondary_probes", []):
+                expanded.append(
+                    {
+                        **entry,
+                        "id": f"{entry['id']}.{secondary}",
+                        "probe": secondary,
+                    }
+                )
+    return expanded
+
+
+_PROBE_ENTRIES = _expand_probe_entries()
 
 
 def _id_for(entry: dict[str, Any]) -> str:

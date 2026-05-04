@@ -27,6 +27,7 @@ These openpyxl APIs are still incomplete or intentionally narrower:
 - `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
 - `.xlsb` workbooks expose read-side style metadata; `.xls` workbooks remain value-only and style accessors raise by design.
 - Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
+- `Workbook(write_only=True)` streams rows to a per-sheet temp file with bounded peak RSS (SST + styles only). It is append-only — `ws.append(row)` is the single row API; random access (`ws["A1"]`, `ws.cell(...)`, `iter_rows`), `merge_cells`, `add_chart`, `add_image`, `add_table`, `add_data_validation`, `add_pivot_table`, and `conditional_formatting` raise `AttributeError` on a write-only worksheet. Re-saving raises `WorkbookAlreadySaved`. Matches openpyxl's `_write_only.py` contract.
 
 ## Performance claim guardrails
 

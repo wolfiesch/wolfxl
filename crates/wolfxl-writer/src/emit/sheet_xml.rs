@@ -76,7 +76,29 @@ pub fn emit(
     }
 
     // Slot 6: <sheetData>
-    super::sheet_data::emit(&mut out, sheet, sst);
+    //
+    // Streaming write_only mode (G20 / RFC-073): if the sheet has a
+    // finalized [`StreamingSheet`] attached, splice its temp-file
+    // contents straight into the `<sheetData>` body instead of walking
+    // the (always-empty) eager BTreeMap. Identical XML on the wire as
+    // the eager path because both paths share `sheet_data::emit_row_to`.
+    if let Some(stream) = sheet.streaming.as_ref() {
+        if stream.row_count() == 0 {
+            out.push_str("<sheetData/>");
+        } else {
+            out.push_str("<sheetData>");
+            // I/O failure here would corrupt the sheet bytes; surface
+            // it as a panic since the writer crate has no Result
+            // return-channel and the FFI bridge will translate panics
+            // to PyExceptions on save.
+            stream
+                .splice_into(&mut out)
+                .expect("streaming temp file splice");
+            out.push_str("</sheetData>");
+        }
+    } else {
+        super::sheet_data::emit(&mut out, sheet, sst);
+    }
 
     // Slot 8: <sheetProtection>
     super::sheet_setup::emit_sheet_protection(&mut out, sheet);

@@ -43,8 +43,22 @@ class Workbook:
     Excel I/O engine for fast reads, writes, and preserving modify-mode saves.
     """
 
-    def __init__(self) -> None:
-        """Create a new workbook in write mode with a default 'Sheet'."""
+    def __init__(self, *, write_only: bool = False) -> None:
+        """Create a new workbook in write mode.
+
+        Args:
+            write_only: When ``True``, opt into openpyxl-style streaming
+                write-only mode (G20 / RFC-073). Each
+                :meth:`create_sheet` call returns a
+                :class:`WriteOnlyWorksheet` that streams rows directly
+                to a per-sheet temp file; the eager BTreeMap row
+                accumulation is bypassed, so 10M-row exports run with
+                bounded peak memory. The default sheet ``"Sheet"`` is
+                NOT created — callers must explicitly create sheets
+                before appending. A workbook saved in write-only mode
+                is consumed-on-save: a second :meth:`save` raises
+                :class:`WorkbookAlreadySaved`.
+        """
         from wolfxl import _backend, _rust  # noqa: F401  (_rust kept for typing parity)
 
         self._rust_writer: Any = _backend.make_writer()
@@ -57,10 +71,19 @@ class Workbook:
         # Flipped to True via load_workbook(rich_text=True).
         self._rich_text: bool = False
         self._evaluator: Any = None
-        self._sheet_names: list[str] = ["Sheet"]
-        self._sheets: dict[str, Worksheet] = {}
-        self._sheets["Sheet"] = Worksheet(self, "Sheet")
-        self._rust_writer.add_sheet("Sheet")
+        # G20: streaming write-only mode. When set, create_sheet returns
+        # WriteOnlyWorksheet instances and the default sheet is skipped.
+        self._write_only: bool = bool(write_only)
+        # Re-entry guard for openpyxl-shape consumed-on-save semantic.
+        self._saved: bool = False
+        if self._write_only:
+            self._sheet_names: list[str] = []
+            self._sheets: dict[str, Worksheet] = {}
+        else:
+            self._sheet_names = ["Sheet"]
+            self._sheets = {}
+            self._sheets["Sheet"] = Worksheet(self, "Sheet")
+            self._rust_writer.add_sheet("Sheet")
         initialize_pending_state(self)
         # Streaming read flag (write mode never streams).
         self._read_only: bool = False
@@ -274,8 +297,8 @@ class Workbook:
 
     @property
     def write_only(self) -> bool:
-        """Whether this workbook is in openpyxl write-only mode."""
-        return False
+        """Whether this workbook is in openpyxl write-only mode (G20)."""
+        return bool(getattr(self, "_write_only", False))
 
     @property
     def data_only(self) -> bool:

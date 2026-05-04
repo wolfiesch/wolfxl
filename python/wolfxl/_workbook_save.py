@@ -20,6 +20,17 @@ def save_workbook(
 ) -> None:
     """Flush workbook state and save it through the active backend."""
     filename = str(filename)
+    # G20: write-only mode is consumed-on-save. A second save raises
+    # WorkbookAlreadySaved (matches openpyxl's `_write_only.py`).
+    # Eager-mode workbooks remain re-savable.
+    if getattr(wb, "_saved", False) and getattr(wb, "_write_only", False):
+        from wolfxl.utils.exceptions import WorkbookAlreadySaved
+
+        raise WorkbookAlreadySaved(
+            "Workbook(write_only=True) is consumed-on-save; "
+            "open a new workbook to write again"
+        )
+
     if password is not None:
         # Validate password early so we don't write a plaintext tempfile that
         # we'd then have to throw away.
@@ -32,9 +43,41 @@ def save_workbook(
     if wb._rust_patcher is not None:  # noqa: SLF001
         save_modify_mode(wb, filename)
     elif wb._rust_writer is not None:  # noqa: SLF001
-        save_write_mode(wb, filename)
+        if getattr(wb, "_write_only", False):
+            save_write_only_mode(wb, filename)
+        else:
+            save_write_mode(wb, filename)
     else:
         raise RuntimeError("save requires write or modify mode")
+    # Mark consumed AFTER save succeeds so a write failure leaves the
+    # workbook in a re-tryable state for the eager path. Write-only
+    # mode flips this once and never re-saves.
+    wb._saved = True  # noqa: SLF001
+    # Mark every WriteOnlyWorksheet closed so subsequent appends raise
+    # WorkbookAlreadySaved cleanly.
+    if getattr(wb, "_write_only", False):
+        for ws in wb._sheets.values():  # noqa: SLF001
+            close = getattr(ws, "close", None)
+            if close is not None:
+                close()
+
+
+def save_write_only_mode(wb: Any, filename: str) -> None:
+    """Save path for ``Workbook(write_only=True)`` (G20).
+
+    The streaming temp files have been accumulating row XML throughout
+    the session. This flushes each per-sheet ``BufWriter`` then drives
+    the standard ``emit_xlsx`` pipeline — the only difference from
+    eager save is that ``sheet_xml::emit`` splices the temp file into
+    the ``<sheetData>`` slot instead of walking ``Worksheet.rows``.
+    """
+    # Workbook-level metadata flush (defined names, properties) still
+    # composes through the writer-side path; sheet-level flush is a
+    # no-op for write-only sheets because the temp files have been
+    # written incrementally.
+    wb._flush_workbook_writes()  # noqa: SLF001
+    wb._rust_writer.finalize_streaming_sheets()  # noqa: SLF001
+    wb._rust_writer.save(filename)  # noqa: SLF001
 
 
 def save_modify_mode(wb: Any, filename: str) -> None:

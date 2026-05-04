@@ -114,7 +114,7 @@ pub(crate) fn write_value_grid(
 }
 
 /// Convert oracle-shape cell payload dict into a `WriteCellValue`.
-fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
+pub(crate) fn payload_to_write_cell_value(payload: &Bound<'_, PyAny>) -> PyResult<WriteCellValue> {
     let dict = payload
         .cast::<PyDict>()
         .map_err(|_| PyValueError::new_err("payload must be a dict"))?;

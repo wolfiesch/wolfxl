@@ -32,7 +32,7 @@
 //! mtime to the same fixed Unix timestamp. Two calls to `package` with
 //! the same input produce byte-identical output in that mode.
 
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Seek, Write};
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime as ZipDateTime, ZipWriter};
@@ -53,34 +53,51 @@ pub struct ZipEntry {
 /// Package a sequence of entries into a complete xlsx. Returns the
 /// serialized container bytes.
 ///
+/// Thin wrapper around [`package_to`]: allocates a `Vec<u8>` and writes
+/// the archive into it. Prefer [`package_to`] when you have a destination
+/// `Write + Seek` sink (e.g. `BufWriter<File>`) — it skips the final
+/// in-memory materialisation.
+pub fn package(entries: &[ZipEntry]) -> Result<Vec<u8>, std::io::Error> {
+    let mut cursor = Cursor::new(Vec::<u8>::new());
+    package_to(entries, &mut cursor)?;
+    Ok(cursor.into_inner())
+}
+
+/// Stream-package a sequence of entries directly into `dest`.
+///
 /// Entries are written in the order provided. Each entry uses DEFLATE
 /// (level 6) unless its body is under [`DEFLATE_MIN_BYTES`] bytes, in
 /// which case it uses STORE. When `WOLFXL_TEST_EPOCH` is set, every
 /// entry receives that epoch as its mtime.
-pub fn package(entries: &[ZipEntry]) -> Result<Vec<u8>, std::io::Error> {
-    let mut cursor = Cursor::new(Vec::<u8>::new());
-    {
-        let mut writer = ZipWriter::new(&mut cursor);
-        let epoch_override = test_epoch_override().and_then(epoch_to_zip_datetime);
+///
+/// `dest` must be `Write + Seek` because the underlying `ZipWriter`
+/// patches local-file-header sizes after each entry. Production callers
+/// pass a `BufWriter<File>` (which `seek`s into the kernel page cache);
+/// the in-memory wrapper [`package`] passes a `Cursor<Vec<u8>>`.
+pub fn package_to<W: Write + Seek>(
+    entries: &[ZipEntry],
+    dest: &mut W,
+) -> Result<(), std::io::Error> {
+    let mut writer = ZipWriter::new(dest);
+    let epoch_override = test_epoch_override().and_then(epoch_to_zip_datetime);
 
-        for entry in entries {
-            let method = if entry.bytes.len() < DEFLATE_MIN_BYTES {
-                CompressionMethod::Stored
-            } else {
-                CompressionMethod::Deflated
-            };
-            let mut opts = SimpleFileOptions::default().compression_method(method);
-            if let Some(dt) = epoch_override {
-                opts = opts.last_modified_time(dt);
-            }
-            writer
-                .start_file(entry.path.clone(), opts)
-                .map_err(zip_to_io)?;
-            writer.write_all(&entry.bytes)?;
+    for entry in entries {
+        let method = if entry.bytes.len() < DEFLATE_MIN_BYTES {
+            CompressionMethod::Stored
+        } else {
+            CompressionMethod::Deflated
+        };
+        let mut opts = SimpleFileOptions::default().compression_method(method);
+        if let Some(dt) = epoch_override {
+            opts = opts.last_modified_time(dt);
         }
-        writer.finish().map_err(zip_to_io)?;
+        writer
+            .start_file(entry.path.clone(), opts)
+            .map_err(zip_to_io)?;
+        writer.write_all(&entry.bytes)?;
     }
-    Ok(cursor.into_inner())
+    writer.finish().map_err(zip_to_io)?;
+    Ok(())
 }
 
 /// Read the `WOLFXL_TEST_EPOCH` env var; if set (to any value including
@@ -249,5 +266,31 @@ mod tests {
         // 2024-01-01T00:00:00Z = 1704067200
         let dt = epoch_to_zip_datetime(1_704_067_200).expect("2024-01-01");
         assert!(dt.is_valid());
+    }
+
+    #[test]
+    fn package_to_matches_package_byte_for_byte() {
+        // The streaming `package_to` path and the buffered `package` path
+        // must produce identical archives. Test under WOLFXL_TEST_EPOCH so
+        // mtimes are pinned and bytes are deterministic.
+        let _guard = EpochGuard::set("0");
+        let entries = vec![
+            ZipEntry {
+                path: "a.xml".to_string(),
+                bytes: b"<?xml version=\"1.0\"?><root/>".to_vec(),
+            },
+            ZipEntry {
+                path: "xl/worksheets/sheet1.xml".to_string(),
+                bytes: b"<sheet>x</sheet>".repeat(50),
+            },
+        ];
+        let buffered = package(&entries).expect("package");
+        let mut streamed = Cursor::new(Vec::<u8>::new());
+        package_to(&entries, &mut streamed).expect("package_to");
+        assert_eq!(
+            buffered,
+            streamed.into_inner(),
+            "package_to must produce byte-identical output to package"
+        );
     }
 }

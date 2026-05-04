@@ -132,6 +132,7 @@ Existing pivots can be re-pointed at a new source range in modify mode (RFC-070 
 |------|-------|--------|--------------|
 | **Read** | `load_workbook(path)` | NativeXlsxBook | Parse XLSX with values, formulas, styles, metadata, drawings, and tables |
 | **Write** | `Workbook()` | [rust_xlsxwriter](https://github.com/jmcnamara/rust_xlsxwriter) | Create new XLSX files from scratch |
+| **Streaming write** | `Workbook(write_only=True)` | Per-sheet temp file + `<sheetData>` splice | Append-only, bounded-memory ETL exports — peak RSS dominated by SST + styles, not by row data |
 | **Modify** | `load_workbook(path, modify=True)` | XlsxPatcher | Surgical ZIP patch — only changed cells are rewritten |
 
 Modify mode preserves everything it doesn't touch: charts, macros, images, pivot tables, VBA.

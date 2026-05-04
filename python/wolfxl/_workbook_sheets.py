@@ -48,6 +48,17 @@ def create_sheet(wb: Any, title: str) -> Worksheet:
         raise RuntimeError("create_sheet requires write mode")
     if title in wb._sheets:  # noqa: SLF001
         raise ValueError(f"Sheet '{title}' already exists")
+    # G20: streaming write-only mode dispatches to a different sheet
+    # type — the eager Worksheet is materialisation-heavy, while
+    # WriteOnlyWorksheet streams rows straight to a temp file.
+    if getattr(wb, "_write_only", False):
+        from wolfxl._worksheet_write_only import WriteOnlyWorksheet
+
+        wb._rust_writer.add_sheet(title)  # noqa: SLF001
+        wb._sheet_names.append(title)  # noqa: SLF001
+        ws = WriteOnlyWorksheet(wb, title)
+        wb._sheets[title] = ws  # noqa: SLF001
+        return ws  # type: ignore[return-value]
     wb._rust_writer.add_sheet(title)  # noqa: SLF001
     wb._sheet_names.append(title)  # noqa: SLF001
     ws = Worksheet(wb, title)

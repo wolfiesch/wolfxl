@@ -19,7 +19,17 @@ use crate::refs;
 /// `<row>` to be sorted ascending by column letter. Using `BTreeMap`
 /// means the emitter iterates them in the right order without an
 /// explicit pre-sort pass.
-#[derive(Debug, Clone)]
+///
+/// **Streaming mode** ([`Worksheet::streaming`] = `Some`) skips the
+/// `BTreeMap` entirely. Rows are encoded straight into a per-sheet
+/// temp file as they arrive; `<sheetData>` is then spliced from that
+/// file at save time. Streaming and eager are mutually exclusive on a
+/// per-sheet basis — `Workbook(write_only=True)` makes every sheet
+/// streaming. `Worksheet` is intentionally not `Clone` because the
+/// open temp-file handle inside [`StreamingSheet`] cannot be safely
+/// duplicated; in practice nothing in the writer crate clones
+/// worksheets (each pyclass call mutates in place).
+#[derive(Debug)]
 pub struct Worksheet {
     /// Sheet display name. Maximum 31 chars; `/\?*[]:` must be stripped
     /// before reaching here. See [`crate::refs::sanitize_sheet_name`].
@@ -119,6 +129,15 @@ pub struct Worksheet {
     /// `<sheetFormatPr>` slot 4. `None` means the writer keeps the legacy
     /// `<sheetFormatPr defaultRowHeight="15"/>` emit path.
     pub sheet_format: Option<crate::parse::page_breaks::SheetFormatProperties>,
+
+    /// Streaming write_only state (G20 / RFC-073). `None` for normal
+    /// eager-mode sheets — the entire `BTreeMap<u32, Row>` workflow
+    /// applies. `Some(...)` flips this sheet into bounded-memory
+    /// append-only mode: each call to `append_streaming_row` writes
+    /// straight to the per-sheet temp file, and
+    /// [`crate::emit::sheet_xml::emit`] splices that file into the
+    /// `<sheetData>` slot at save time.
+    pub streaming: Option<crate::streaming::StreamingSheet>,
 }
 
 impl Worksheet {
@@ -149,6 +168,7 @@ impl Worksheet {
             row_breaks: None,
             col_breaks: None,
             sheet_format: None,
+            streaming: None,
         }
     }
 

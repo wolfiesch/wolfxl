@@ -1463,6 +1463,7 @@ dependencies = [
  "chrono",
  "indexmap",
  "quick-xml 0.37.5",
+ "tempfile",
  "wolfxl-merger",
  "wolfxl-pivot",
  "wolfxl-rels",
