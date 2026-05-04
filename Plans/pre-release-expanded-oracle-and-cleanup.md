@@ -161,12 +161,15 @@ Current largest WolfXL hotspots:
 
 | Module | Current LOC | Cleanup direction |
 |---|---:|---|
-| `src/wolfxl/mod.rs` | 2491 | Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface. |
-| `src/calamine_styled_backend.rs` | 3927 | Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules. |
-| `src/native_writer_backend.rs` | 527 | Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
-| `python/wolfxl/_worksheet.py` | 1395 | Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
-| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 386 | Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage. |
-| `python/wolfxl/_workbook.py` | 1001 | Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
+| `src/native_reader_backend.rs` | 3370 | Largest hotspot since calamine retirement (commit `f8e7cce`). Split reader extraction into styles, hyperlinks, comments, drawings, tables, conditional formatting, and validations modules; the post-retirement file owns OOXML feature reading directly. |
+| `src/wolfxl/mod.rs` | 2742 | Up from 2491 (2026-04-28) due to G18/G19/G20 additions and pivot/structural extensions. Continue splitting patcher phases and save-path orchestration behind the same PyO3 surface; `XlsxPatcher::do_save` is the next phase-extraction target. |
+| `python/wolfxl/_worksheet.py` | 1682 | Up from 1395 (2026-04-29). Continue extracting pending-flush helpers and feature-specific collections while preserving openpyxl-shaped imports. |
+| `src/native_writer_charts.rs` | 1378 | New hotspot from chart payload-parsing extraction (item 64). Split chart-kind-specific axis/series/data-label parsers into per-kind helpers if/when chart write-mode parity grows further. |
+| `python/wolfxl/_workbook.py` | 1392 | Up from 1001 (2026-04-29). Continue separating workbook orchestration from calculation, lifecycle, feature registration, and save pipeline helpers. |
+| `src/native_writer_sheet_features.rs` | 729 | Sheet-level feature payload parser. Likely fine as one file. |
+| `src/streaming.rs` | 725 | Modify-mode streaming reader/writer plumbing. |
+| `src/native_writer_backend.rs` | 611 | Up from 527 (2026-04-28). Continue splitting the remaining Python-to-writer bridge into focused helper modules while keeping the PyO3 surface stable. |
+| `crates/wolfxl-writer/src/emit/sheet_xml.rs` | 504 | Up from 386 due to G20's `emit_streaming_to` (RFC-073 v2). Keep as the CT_Worksheet coordinator with minimal full-sheet ordering and well-formedness coverage; the streaming-direct path is the only structural addition. |
 
 Suggested sprint sequence:
 
@@ -764,12 +767,91 @@ First no-behavior split target, completed 2026-04-28:
    provide style-cache callbacks and append the completed records.
 134. Base sheet-record PyDict creation moved to `src/calamine_sheet_records.rs`
    on 2026-04-29; only style enrichment remains in the backend record path.
-135. Next helper candidate: continue splitting Rust save orchestration only
+135. Formula cell wrapper dict construction moved to `src/calamine_value_helpers.rs`
+   on 2026-04-29, preserving value-read error classification while keeping
+   `read_cell_formula()` as a formula-only wrapper.
+136. Next helper candidate: continue splitting Rust save orchestration only
    where the state boundary is clean. The next high-value but higher-risk
    targets are `XlsxPatcher::do_save` phase extraction, then
    `src/calamine_styled_backend.rs` record-building / OOXML feature-reader
    extraction. Lower-risk polish remains public API docstrings for chart,
    pivot, protection, and calc surfaces.
+
+## 2026-05-04 review: S6/S7 closures + remaining load-bearing items
+
+This review folds Sprints 6 and 7 (which post-date the 2026-04-28 plan) into
+the pre-release evidence pile and re-surfaces what is still required before
+v2.0 ships.
+
+### Closed since 2026-04-29
+
+- **G18 — external links workbook-level collection** (commit `316e1a5`).
+  Workbook-level read/write of `xl/externalLinks/externalLink*.xml` and
+  associated rels now round-trips. Spec status flipped to supported.
+- **G19 — VBA inspect (read-only)** (commit `e55a0d7`).
+  `Workbook.vba_archive` exposes the embedded `vbaProject.bin` for
+  inspection without altering the macro signing. Read-only by design.
+- **G20 — `Workbook(write_only=True)` streaming write mode** (commits
+  `5702b9d`, `6b343c3`, RFC-073 v1 + v1.5 + v2). Bounded-memory append +
+  save: 1M rows × 5 cols completes with **save-time RSS delta of +12.8
+  MiB** (residual is libdeflate scratch + BufWriter buffer; both `O(1)`
+  in row count). soffice headless converts a 100k-row write_only archive
+  to CSV with row 1 and row 100,000 byte-intact.
+- **Calamine reader retirement** (commit `f8e7cce`). `src/calamine_styled_backend.rs`
+  (3900 LOC, listed here as a Cleanup Sprint F target) was deleted, not
+  split — wolfxl now owns OOXML reading natively in `src/native_reader_backend.rs`
+  (3370 LOC, the new largest single-file hotspot).
+
+### What is still load-bearing (concrete next actions)
+
+T0 — **Release freeze remains in effect.** The local-only external oracle
+corpus (Excelize, ClosedXML, NPOI, ExcelJS, POI) is not yet a CI-enforced
+gate. Before v2.0 ships, `tests/test_external_oracle_preservation.py` needs
+a deterministic fixture pack pinned in-tree (or fetched at test-time with
+hash verification) and gated in CI, not just `WOLFXL_EXTERNAL_FIXTURES_DIR`
+opt-in.
+
+T1 — **`XlsxPatcher::do_save` phase extraction.** `src/wolfxl/mod.rs` is
+2742 lines (up from 2491 since 2026-04-28). The 23 named save-phases
+(2.5a..2.8) inside `do_save` already have natural seams; extracting them
+behind the existing `SaveWorkspace` (item 123) is the next mechanical
+move. Risk: low if PyO3 signatures stay constant and phase ordering is
+preserved.
+
+T2 — **`src/native_reader_backend.rs` reader split.** 3370 LOC. The
+post-calamine-retirement reader has the same internal feature breakdown
+the original calamine plan called out: styles, hyperlinks, comments,
+drawings, tables, conditional formatting, validations. Each is a clean
+extraction target. Risk: medium — reader correctness is verified
+through round-trip parity, so any extraction needs the full pytest pass
+plus a no-op modify-mode round-trip on the external oracle fixture pack.
+
+T3 — **Public API docstring polish for chart, pivot, protection, calc.**
+Items 80-87 cleaned worksheet/workbook/cell facing docs. Charts (1378
+LOC), pivots, protection, and calculation surfaces still carry
+sprint/RFC phrasing in some helper docstrings. Lower-risk than T1/T2.
+
+### Out of scope for v2.0
+
+The 2026-04-28 plan listed several P1/P2 external oracle additions
+(Apache POI deeper, ClosedXML deeper, SheetJS CE). The current Excelize
++ ClosedXML + NPOI + ExcelJS + POI pack is sufficient pre-release
+evidence given the **2472 passed, 0 failed** pytest baseline plus
+soffice headless smoke at 43 cases. Defer additional external oracles
+until a post-v2.0 hardening track unless a reviewer surfaces a specific
+gap they cover.
+
+### Cross-references for the next session
+
+- G20 streaming evidence: `Plans/rfcs/073-write-only-streaming.md` §6
+  documents the v1.0 → v1.5 → v2 progression with the +12.8 MiB save
+  delta measurement.
+- Save-phase extraction starting point: `src/wolfxl/patcher_save.rs`'s
+  `SaveWorkspace` struct (item 123) is the receiver for the extracted
+  phase functions.
+- External oracle fixture corpus: ExcelBench
+  `results_dev_external/fixtures` plus the in-tree
+  `tests/test_external_oracle_preservation.py` opt-in gate.
 
 ## Verification gates
 
