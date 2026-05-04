@@ -9,7 +9,7 @@ WolfXL targets high-impact openpyxl-style workflows, not complete openpyxl API p
 | `.ods` workbooks | No | No | No | OpenDocument is out of scope. |
 | `.xlsb` / `.xls` writes | No | No | No | Binary and legacy formats are read-only; transcribe to `.xlsx` with a new workbook. |
 | Styles on `.xlsb` / `.xls` reads | Partial | No | No | Native `.xlsb` reads expose cell styles; legacy `.xls` remains value-only. |
-| VBA macros | Preserve | No | Preserve | `.xlsm` parts survive modify-mode saves, but WolfXL does not inspect or generate VBA. |
+| VBA macros | Inspect (modify-mode) | No | Preserve | `.xlsm` parts round-trip on modify-save; `Workbook.vba_archive` exposes raw `xl/vbaProject.bin` bytes for read-only inspection. WolfXL does not generate or edit VBA. |
 | In-place pivot-table edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and (v1.0, RFC-070 Option B) mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, and aggregation mutations are deferred. |
 | Image replacement/deletion | Partial | Yes | Partial | `Image(...)` and `ws.add_image(...)` are supported; replacing or deleting existing image media is not a public API yet. |
 | Combination / multi-plot charts | Partial | No | Partial | Single-family chart construction is covered; combination charts are deferred. |

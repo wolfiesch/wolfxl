@@ -842,6 +842,31 @@ def _probe_external_links_collection(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# VBA inspection probes
+# --------------------------------------------------------------------------
+
+
+@_register("vba_inspect")
+def _probe_vba_inspect(tmp_path: Path) -> None:
+    """Read-only VBA archive inspection. Tracked under G19 (S6, RFC-072).
+
+    Loads a vendored ``.xlsm`` fixture in modify-mode and asserts that
+    ``wb.vba_archive`` surfaces the underlying ``xl/vbaProject.bin``
+    bytes. Authoring is out of scope for v1.0 (G28).
+    """
+    import wolfxl
+
+    fixture = Path(__file__).parent / "fixtures" / "macro_basic.xlsm"
+    if not fixture.exists():
+        pytest.skip("vba inspection fixture not vendored")
+    wb = wolfxl.load_workbook(str(fixture), modify=True)
+    archive = wb.vba_archive
+    assert archive is not None, "wb.vba_archive must surface bytes for .xlsm"
+    assert isinstance(archive, (bytes, bytearray, memoryview))
+    assert len(archive) > 0
+
+
+# --------------------------------------------------------------------------
 # Comments probes
 # --------------------------------------------------------------------------
 
