@@ -85,6 +85,10 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     wb._flush_pending_charts_to_patcher()  # noqa: SLF001
     # Pivot caches and tables.
     wb._flush_pending_pivots_to_patcher()  # noqa: SLF001
+    # G17 / RFC-070 — pivot source-range edits on existing pivots.
+    # Sequenced AFTER the adds flush so a session that both adds and
+    # edits goes through the patcher's pivot phases in source order.
+    wb._flush_pending_pivot_source_edits_to_patcher()  # noqa: SLF001
     # Sheet-setup blocks.
     wb._flush_pending_sheet_setup_to_patcher()  # noqa: SLF001
     # Page breaks and sheetFormatPr.
@@ -101,11 +105,99 @@ def save_modify_mode(wb: Any, filename: str) -> None:
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
-    """Flush pending write-mode queues and save through ``NativeWorkbook``."""
+    """Flush pending write-mode queues and save through ``NativeWorkbook``.
+
+    Write-mode pivot construction (G17 / RFC-070 §8.7 reach-extension):
+    when pending pivot caches or pivot tables are queued, a two-phase
+    save runs — the native writer emits cell data + sheet structure
+    to a tempfile, then the same tempfile is reopened in modify mode
+    and the patcher's ``apply_pivot_adds_phase`` stamps in the pivot
+    parts. Final bytes copy onto ``filename``.
+    """
+    has_pending_pivots = bool(getattr(wb, "_pending_pivot_caches", None)) or any(
+        getattr(ws, "_pending_pivot_tables", None) for ws in wb._sheets.values()  # noqa: SLF001
+    )
+    if not has_pending_pivots:
+        wb._flush_workbook_writes()  # noqa: SLF001
+        for ws in wb._sheets.values():  # noqa: SLF001
+            ws._flush()  # noqa: SLF001
+        wb._rust_writer.save(filename)  # noqa: SLF001
+        return
+
+    _save_write_mode_with_pivots(wb, filename)
+
+
+def _save_write_mode_with_pivots(wb: Any, filename: str) -> None:
+    """Two-phase save: writer → tempfile → patcher → final destination.
+
+    This unblocks the openpyxl-shaped pattern used by the G17 oracle
+    probe:
+
+    .. code-block:: python
+
+        wb = wolfxl.Workbook()
+        wb.add_pivot_cache(cache)
+        ws.add_pivot_table(pt, "A1")
+        wb.save(path)
+
+    by emitting cell data through the native writer, then surgically
+    grafting the pivot parts on via the existing modify-mode patcher
+    pipeline. No new pivot emit code is introduced.
+    """
+    import tempfile
+
+    # Stash the pending pivot queues — the writer-side flush would
+    # otherwise observe them and (in some future hardening) try to
+    # double-emit. Re-attach them onto the modify-mode workbook below.
+    pending_caches = list(getattr(wb, "_pending_pivot_caches", []))
+    pending_tables_by_sheet: dict[str, list[Any]] = {}
+    for ws in wb._sheets.values():  # noqa: SLF001
+        title = ws.title
+        pending_tables_by_sheet[title] = list(
+            getattr(ws, "_pending_pivot_tables", [])
+        )
+        ws._pending_pivot_tables = []  # noqa: SLF001
+    wb._pending_pivot_caches = []  # noqa: SLF001
+    # Reset cache id allocator and clear cache._cache_id stamps so the
+    # modify-mode add_pivot_cache call re-allocates cleanly.
+    wb._next_pivot_cache_id = 0  # noqa: SLF001
+    for cache in pending_caches:
+        cache._cache_id = None  # noqa: SLF001
+
+    # Stage 1 — writer emits the workbook (cells, sheets, formats, etc.).
     wb._flush_workbook_writes()  # noqa: SLF001
     for ws in wb._sheets.values():  # noqa: SLF001
         ws._flush()  # noqa: SLF001
-    wb._rust_writer.save(filename)  # noqa: SLF001
+
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=".wolfxl-pivot-", suffix=".xlsx")
+    os.close(tmp_fd)
+    try:
+        wb._rust_writer.save(tmp_name)  # noqa: SLF001
+
+        # Stage 2 — reopen the tempfile in modify mode and replay the
+        # pivot adds.
+        import wolfxl as _wolfxl
+
+        modify_wb = _wolfxl.load_workbook(tmp_name, modify=True)
+        for cache in pending_caches:
+            modify_wb.add_pivot_cache(cache)
+        for sheet_title, pts in pending_tables_by_sheet.items():
+            if not pts:
+                continue
+            target = modify_wb._sheets.get(sheet_title)  # noqa: SLF001
+            if target is None:
+                continue
+            for pt in pts:
+                # add_pivot_table on Worksheet expects a single arg in
+                # write/modify mode; the anchor is captured on the
+                # PivotTable's `location` attr at construction time.
+                target.add_pivot_table(pt)
+        modify_wb.save(filename)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
 
 
 def save_encrypted(wb: Any, filename: str, password: str | bytes) -> None:

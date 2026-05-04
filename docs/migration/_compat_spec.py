@@ -319,10 +319,14 @@ ENTRIES: list[Entry] = [
         "id": "pivots.in_place_edit",
         "category": "pivots",
         "openpyxl": "edit existing pivot's source range, field order, etc.",
-        "wolfxl": "edit existing pivot's source range, field order, etc.",
-        "status": "not_yet",
-        "gap_id": "G17",
+        "wolfxl": "edit existing pivot's source range",
+        "status": "supported",
         "probe": "pivots_in_place_edit",
+        "notes": (
+            "G17 / RFC-070 v1.0: source-range mutation only. Field "
+            "placement, filters, aggregation function changes, and "
+            "live record regeneration remain out of scope."
+        ),
     },
     {
         "id": "pivots.copy_worksheet",

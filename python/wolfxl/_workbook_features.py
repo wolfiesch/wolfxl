@@ -19,10 +19,9 @@ def add_pivot_cache(wb: Any, cache: Any) -> Any:
         RuntimeError: If ``wb`` is not in modify mode.
         ValueError: If the cache is already registered or lacks a worksheet.
     """
-    if wb._rust_patcher is None:  # noqa: SLF001
+    if wb._rust_patcher is None and wb._rust_writer is None:  # noqa: SLF001
         raise RuntimeError(
-            "add_pivot_cache requires modify mode — open the "
-            "workbook with load_workbook(..., modify=True)"
+            "add_pivot_cache requires a Workbook in write or modify mode"
         )
     if getattr(cache, "_cache_id", None) is not None:
         raise ValueError(

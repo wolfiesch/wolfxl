@@ -42,11 +42,10 @@ def add_pivot_table(ws: Worksheet, pivot_table: Any) -> None:
             f"add_pivot_table expected wolfxl.pivot.PivotTable, "
             f"got {type(pivot_table).__name__}"
         )
-    if ws._workbook._rust_patcher is None:  # noqa: SLF001
+    wb_obj = ws._workbook  # noqa: SLF001
+    if wb_obj._rust_patcher is None and wb_obj._rust_writer is None:  # noqa: SLF001
         raise RuntimeError(
-            "add_pivot_table requires modify mode — open the "
-            "workbook with load_workbook(..., modify=True). "
-            "Write-mode pivot table emission is not yet supported."
+            "add_pivot_table requires a Workbook in write or modify mode"
         )
     if pivot_table.cache._cache_id is None:  # noqa: SLF001
         raise ValueError(

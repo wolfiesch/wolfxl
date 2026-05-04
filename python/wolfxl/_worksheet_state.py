@@ -66,6 +66,9 @@ def initialize_worksheet_state(
     ws._pending_images: list[Any] = []  # noqa: SLF001
     ws._pending_charts: list[Any] = []  # noqa: SLF001
     ws._pending_pivot_tables: list[Any] = []  # noqa: SLF001
+    # G17 / RFC-070 — lazily populated on first read of
+    # ``ws.pivot_tables`` in modify mode.
+    ws._pivot_handles_cache: list[Any] | None = None  # noqa: SLF001
     ws._pending_slicers: list[Any] = []  # noqa: SLF001
 
     ws._page_setup: Any = None  # noqa: SLF001

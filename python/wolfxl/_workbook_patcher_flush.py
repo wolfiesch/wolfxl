@@ -726,3 +726,72 @@ def _flush_pending_pivot_tables(
                 cache_id,
             )
         pending.clear()
+
+
+def flush_pending_pivot_source_edits_to_patcher(wb: Any) -> None:
+    """G17 / RFC-070 — drain any dirty :class:`PivotTableHandle`s.
+
+    For each worksheet, walk its lazily-materialised
+    ``_pivot_handles_cache`` and register a source-range edit for
+    every handle whose ``_dirty`` flag is set. The Rust patcher's
+    ``apply_pivot_source_edits_phase`` (Phase 2.5m-edit) consumes the
+    queue at save time and rewrites the linked
+    ``pivotCacheDefinition*.xml`` parts.
+    """
+    patcher = wb._rust_patcher  # noqa: SLF001
+    if patcher is None:
+        return
+    register = getattr(patcher, "register_pivot_source_edit", None)
+    if register is None:
+        # Older Rust extension predates G17 — nothing to do.
+        return
+    for ws in wb._sheets.values():  # noqa: SLF001
+        cache = getattr(ws, "_pivot_handles_cache", None)
+        if not cache:
+            continue
+        for handle in cache:
+            if not getattr(handle, "_dirty", False):
+                continue
+            new_ref = handle._new_source_to_a1()  # noqa: SLF001
+            new_sheet = handle._new_source_sheet_name()  # noqa: SLF001
+            new_cols = handle._column_count()  # noqa: SLF001
+            orig_cols = _orig_column_count(handle)
+            force_refresh = orig_cols is not None and new_cols != orig_cols
+            register(
+                handle._cache_part_path,  # noqa: SLF001
+                new_ref,
+                new_sheet,
+                bool(force_refresh),
+            )
+            # Reset dirty so a subsequent save() on the same workbook
+            # doesn't double-register.
+            handle._dirty = False  # noqa: SLF001
+
+
+def _orig_column_count(handle: Any) -> int | None:
+    """Best-effort: derive the original source column count from the
+    handle's parsed metadata. Returns ``None`` for unparseable
+    ranges."""
+    rng = getattr(handle, "_orig_source_range", "") or ""
+    if ":" in rng:
+        left, right = rng.split(":", 1)
+    else:
+        left = right = rng
+    l_col = _leading_col(left)
+    r_col = _leading_col(right)
+    if l_col is None or r_col is None:
+        return None
+    return r_col - l_col + 1
+
+
+def _leading_col(cell: str) -> int | None:
+    s = cell.lstrip("$")
+    col = 0
+    seen = False
+    for ch in s:
+        if ch.isalpha():
+            seen = True
+            col = col * 26 + (ord(ch.upper()) - ord("A") + 1)
+        else:
+            break
+    return col if seen else None

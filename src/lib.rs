@@ -88,6 +88,15 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(wolfxl::pivot::serialize_slicer_dict, m)?)?;
+    // G17 / RFC-070 — pivot mutation parsers (modify-mode load path).
+    m.add_function(wrap_pyfunction!(
+        wolfxl::patcher_pivot_parse::parse_pivot_table_meta,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::patcher_pivot_parse::parse_pivot_cache_source,
+        m
+    )?)?;
     // Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format serialiser.
     m.add_function(wrap_pyfunction!(
         wolfxl::page_breaks::serialize_page_breaks_dict,

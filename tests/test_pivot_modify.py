@@ -308,30 +308,11 @@ def test_add_pivot_cache_twice_raises(tmp_path: Path) -> None:
         wb.add_pivot_cache(cache)
 
 
-def test_add_pivot_cache_in_write_mode_raises(tmp_path: Path) -> None:
-    from wolfxl import Workbook
-
-    wb = Workbook()
-    # Add a worksheet with the data so the Reference resolves.
-    ws = wb.active
-    ws.title = "Data"
-    for r_idx, row in enumerate(
-        [
-            ("region", "revenue"),
-            ("N", 1.0),
-            ("S", 2.0),
-        ],
-        start=1,
-    ):
-        for c_idx, val in enumerate(row, start=1):
-            ws.cell(r_idx, c_idx, val)
-    refsrc = Reference(worksheet=ws, min_col=1, min_row=1, max_col=2, max_row=3)
-    cache = PivotCache(source=refsrc)
-    with pytest.raises(RuntimeError, match="modify mode"):
-        wb.add_pivot_cache(cache)
-
-
-def test_add_pivot_table_in_write_mode_raises(tmp_path: Path) -> None:
+def test_add_pivot_cache_in_write_mode_succeeds(tmp_path: Path) -> None:
+    """G17 / RFC-070 §8.7 — write-mode pivot construction now routes
+    through a writer→tempfile→patcher save chain so users can build
+    pivots on a fresh ``Workbook()`` without an explicit modify-mode
+    reopen."""
     from wolfxl import Workbook
 
     wb = Workbook()
@@ -349,13 +330,39 @@ def test_add_pivot_table_in_write_mode_raises(tmp_path: Path) -> None:
             ws.cell(r_idx, c_idx, val)
     refsrc = Reference(worksheet=ws, min_col=1, min_row=1, max_col=2, max_row=3)
     cache = PivotCache(source=refsrc)
-    cache._cache_id = 0
-    cache._materialize(ws)
+    # No exception — write mode now accepts pivot caches and defers
+    # the actual emit to save() time.
+    wb.add_pivot_cache(cache)
+    assert cache._cache_id is not None
+
+
+def test_add_pivot_table_in_write_mode_succeeds(tmp_path: Path) -> None:
+    """G17 / RFC-070 §8.7 — write-mode pivot table construction now
+    works; ``Worksheet.add_pivot_table`` queues the table for
+    promotion to the patcher path during ``wb.save()``."""
+    from wolfxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    for r_idx, row in enumerate(
+        [
+            ("region", "revenue"),
+            ("N", 1.0),
+            ("S", 2.0),
+        ],
+        start=1,
+    ):
+        for c_idx, val in enumerate(row, start=1):
+            ws.cell(r_idx, c_idx, val)
+    refsrc = Reference(worksheet=ws, min_col=1, min_row=1, max_col=2, max_row=3)
+    cache = PivotCache(source=refsrc)
+    wb.add_pivot_cache(cache)
     pt = PivotTable(
         cache=cache, location="F2", rows=["region"], data=["revenue"],
     )
-    with pytest.raises(RuntimeError, match="modify mode"):
-        ws.add_pivot_table(pt)
+    ws.add_pivot_table(pt)
+    assert ws._pending_pivot_tables == [pt]
 
 
 # ---------------------------------------------------------------------------

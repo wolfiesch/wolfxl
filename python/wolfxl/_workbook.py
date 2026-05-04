@@ -1021,6 +1021,18 @@ class Workbook:
         """
         _workbook_patcher_flush.flush_pending_pivots_to_patcher(self)
 
+    def _flush_pending_pivot_source_edits_to_patcher(self) -> None:
+        """G17 / RFC-070 — drain pivot source-range mutations.
+
+        For each worksheet, scan the lazily-materialised
+        ``_pivot_handles_cache`` for dirty
+        :class:`~wolfxl.pivot.PivotTableHandle` instances and queue a
+        source-range edit for each via ``patcher.register_pivot_source_edit``.
+        Sequenced after :meth:`_flush_pending_pivots_to_patcher` so adds
+        and edits compose in the same save.
+        """
+        _workbook_patcher_flush.flush_pending_pivot_source_edits_to_patcher(self)
+
     def add_chart_modify_mode(
         self,
         sheet_title: str,

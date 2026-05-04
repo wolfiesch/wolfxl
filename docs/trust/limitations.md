@@ -10,7 +10,7 @@ WolfXL targets high-impact openpyxl-style workflows, not complete openpyxl API p
 | `.xlsb` / `.xls` writes | No | No | No | Binary and legacy formats are read-only; transcribe to `.xlsx` with a new workbook. |
 | Styles on `.xlsb` / `.xls` reads | Partial | No | No | Native `.xlsb` reads expose cell styles; legacy `.xls` remains value-only. |
 | VBA macros | Preserve | No | Preserve | `.xlsm` parts survive modify-mode saves, but WolfXL does not inspect or generate VBA. |
-| In-place pivot-table edits | Partial | Partial | Partial | WolfXL can construct pivot caches/tables/charts and copy pivot-bearing sheets; editing arbitrary existing pivot definitions remains limited. |
+| In-place pivot-table edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and (v1.0, RFC-070 Option B) mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, and aggregation mutations are deferred. |
 | Image replacement/deletion | Partial | Yes | Partial | `Image(...)` and `ws.add_image(...)` are supported; replacing or deleting existing image media is not a public API yet. |
 | Combination / multi-plot charts | Partial | No | Partial | Single-family chart construction is covered; combination charts are deferred. |
 | Diagonal border fidelity | Partial | Yes | Partial | Read recognizes diagonal metadata, but full diagonal style parity is still lower-confidence than top/bottom/left/right borders. |
@@ -25,7 +25,7 @@ These openpyxl APIs are still incomplete or intentionally narrower:
 - `ws.add_image()` and `ws.add_chart()` support construction, but not public replace/delete operations.
 - `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
 - `.xlsb` workbooks expose read-side style metadata; `.xls` workbooks remain value-only and style accessors raise by design.
-- Existing pivot-table mutation is narrower than construction and copy support.
+- Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
 
 ## Performance claim guardrails
 
@@ -41,3 +41,4 @@ These openpyxl APIs are still incomplete or intentionally narrower:
   Apache POI outputs through LibreOffice and WolfXL preservation checks.
 - Review output workbooks in Excel for business-critical templates.
 - WolfXL's fidelity is tracked by [ExcelBench](https://excelbench.vercel.app) — check the dashboard for current scores.
+- When sharing numbers externally, check [Public Evidence Status](public-evidence.md) first so historical snapshots are not presented as current release evidence.

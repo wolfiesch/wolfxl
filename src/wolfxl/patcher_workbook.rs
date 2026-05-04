@@ -428,6 +428,7 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
         || !patcher.queued_charts.is_empty()
         || !patcher.queued_pivot_caches.is_empty()
         || !patcher.queued_pivot_tables.is_empty()
+        || !patcher.queued_pivot_source_edits.is_empty()
         || !patcher.queued_sheet_setup.is_empty()
         || !patcher.queued_page_breaks.is_empty()
         || !patcher.queued_autofilters.is_empty()
