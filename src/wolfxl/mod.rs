@@ -1867,7 +1867,7 @@ impl XlsxPatcher {
 impl XlsxPatcher {
     fn do_save(&mut self, output_path: &str) -> PyResult<()> {
         if !self.has_pending_save_work() {
-            self.copy_source_file_phase(output_path)?;
+            patcher_workbook::copy_source_file_phase(self, output_path)?;
             return Ok(());
         }
 
@@ -1890,7 +1890,7 @@ impl XlsxPatcher {
         // will be REPLACED on emit. Phase 2.7 (RFC-035) is the first
         // phase to write into it (workbook.xml + workbook.xml.rels).
         // Phase 3 mutates it further with per-sheet rewrites.
-        self.drain_permissive_seed_file_patches_phase(&mut save.file_patches);
+        patcher_workbook::drain_permissive_seed_file_patches_phase(self, &mut save.file_patches);
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //
@@ -1917,7 +1917,8 @@ impl XlsxPatcher {
         // comments, axis shifts, range moves) as if they had always
         // been part of the source workbook.
         if !self.queued_sheet_copies.is_empty() {
-            self.apply_sheet_copies_phase(
+            patcher_sheet_copy::apply_sheet_copies_phase(
+                self,
                 &mut save.file_patches,
                 &mut zip,
                 &mut save.part_id_allocator,
@@ -2100,7 +2101,7 @@ impl XlsxPatcher {
         // starts with exactly one image can remove the old drawing ref and
         // then create a fresh drawing for the replacement add.
         if !self.queued_image_removes.is_empty() {
-            self.apply_image_removes_phase(&mut save.file_patches, &mut zip)?;
+            patcher_drawing::apply_image_removes_phase(self, &mut save.file_patches, &mut zip)?;
         }
         //
         // Drains `queued_images` per sheet. For each sheet that has queued images:
@@ -2126,7 +2127,8 @@ impl XlsxPatcher {
         // `save.file_patches`. Sheet rels mutations land in
         // `rels_patches` which is serialized in the final emit pass.
         if !self.queued_images.is_empty() {
-            self.apply_image_adds_phase(
+            patcher_drawing::apply_image_adds_phase(
+                self,
                 &mut save.file_patches,
                 &mut zip,
                 &mut save.part_id_allocator,
@@ -2148,7 +2150,8 @@ impl XlsxPatcher {
         // Phase 2.5l runs BEFORE Phase 3 so cell-range formulas in
         // chart XML can compose with cell rewrites in the same save.
         if !self.queued_charts.is_empty() {
-            self.apply_chart_adds_phase(
+            patcher_drawing::apply_chart_adds_phase(
+                self,
                 &mut save.file_patches,
                 &mut zip,
                 &mut save.part_id_allocator,
@@ -2176,7 +2179,7 @@ impl XlsxPatcher {
         //      * Add a sheet-rel of type PIVOT_TABLE.
         //      * Add a content-type override.
         if !self.queued_pivot_caches.is_empty() || !self.queued_pivot_tables.is_empty() {
-            self.apply_pivot_adds_phase(&mut save.file_patches, &mut zip)?;
+            patcher_pivot::apply_pivot_adds_phase(self, &mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5m-edit: G17 / RFC-070 — pivot source-range
@@ -2185,7 +2188,7 @@ impl XlsxPatcher {
         // session is touched in its post-adds form. The phase is a
         // no-op when no edits have been registered.
         if !self.queued_pivot_source_edits.is_empty() {
-            self.apply_pivot_source_edits_phase(&mut save.file_patches, &mut zip)?;
+            patcher_pivot_edit::apply_pivot_source_edits_phase(self, &mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5n: Sheet setup (Sprint Ο Pod 1A.5 / RFC-055) ---
@@ -2244,7 +2247,7 @@ impl XlsxPatcher {
         //      owner sheet.
         //   8. Add content-type Overrides for both parts.
         if !self.queued_slicers.is_empty() {
-            self.apply_slicer_adds_phase(&mut save.file_patches, &mut zip)?;
+            patcher_pivot::apply_slicer_adds_phase(self, &mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5o: AutoFilter (Sprint Ο Pod 1B / RFC-056) ---
@@ -2288,7 +2291,8 @@ impl XlsxPatcher {
         // can write workbook.xml + workbook.xml.rels into it before the
         // per-sheet phases run.
 
-        self.apply_worksheet_xml_patch_phase(
+        patcher_sheet_blocks::apply_worksheet_xml_patch_phase(
+            self,
             &sheet_cell_patches,
             &save.local_blocks,
             &autofilter_hidden_rows,
@@ -2318,7 +2322,7 @@ impl XlsxPatcher {
         //
         // Empty queue ⇒ identity: workbook.xml flows through
         // unchanged (no extra parse, no extra serialize).
-        self.apply_workbook_xml_phases(&mut save.file_patches, &mut zip)?;
+        patcher_workbook::apply_workbook_xml_phases(self, &mut save.file_patches, &mut zip)?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
         // the path already exists in the source ZIP:
@@ -2326,7 +2330,7 @@ impl XlsxPatcher {
         //   - absent  → `file_adds` appends a brand-new entry (RFC-013)
         // The "absent" branch is the common case for RFC-022 on a clean
         // file that had zero hyperlinks before.
-        self.serialize_rels_patches_phase(&mut save.file_patches, &mut zip)?;
+        patcher_workbook::serialize_rels_patches_phase(self, &mut save.file_patches, &mut zip)?;
 
         // --- Phase 2.5c: Content-types aggregation (RFC-013) ---
         //
@@ -2343,7 +2347,7 @@ impl XlsxPatcher {
         // via new `xl/comments<N>.xml` Overrides + a vml `Default`),
         // and RFC-024 (Tables via new `xl/tables/tableN.xml` Overrides)
         // will be the first volume producers.
-        self.apply_content_types_phase(&mut save.file_patches, &mut zip)?;
+        patcher_workbook::apply_content_types_phase(self, &mut save.file_patches, &mut zip)?;
 
         // --- Phase 2.5d: Document properties (RFC-020) ---
         //
@@ -2360,7 +2364,7 @@ impl XlsxPatcher {
         // If the caller didn't supply `sheet_names`, we thread the
         // patcher's `sheet_order` in so app.xml's `<TitlesOfParts>`
         // matches the workbook's tab order.
-        self.apply_document_properties_phase(&mut save.file_patches, &mut zip)?;
+        patcher_workbook::apply_document_properties_phase(self, &mut save.file_patches, &mut zip)?;
 
         // Route RFC-023 comments/vml + RFC-068 threaded-comments/persons
         // part bytes into the right primitive (in-place patch vs. new
@@ -2370,7 +2374,8 @@ impl XlsxPatcher {
         combined_writes.extend(threaded_file_writes);
         let mut combined_deletes = comments_file_deletes;
         combined_deletes.extend(threaded_file_deletes);
-        self.route_part_writes_and_deletes_phase(
+        patcher_workbook::route_part_writes_and_deletes_phase(
+            self,
             &mut save.file_patches,
             &mut zip,
             combined_writes,
@@ -2398,7 +2403,7 @@ impl XlsxPatcher {
         // handles the global no-op case; this block handles the
         // partial case where some other RFC also queued ops).
         if !self.queued_axis_shifts.is_empty() {
-            self.apply_axis_shifts_phase(&mut save.file_patches, &mut zip)?;
+            patcher_structural::apply_axis_shifts_phase(self, &mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.5j: Range moves (RFC-034) ---
@@ -2411,7 +2416,7 @@ impl XlsxPatcher {
         // mirrors Phase 2.5i: each op runs against the post-previous
         // bytes.
         if !self.queued_range_moves.is_empty() {
-            self.apply_range_moves_phase(&mut save.file_patches, &mut zip)?;
+            patcher_structural::apply_range_moves_phase(self, &mut save.file_patches, &mut zip)?;
         }
 
         // --- Phase 2.8: calcChain.xml rebuild (Sprint Θ Pod-C3) ---
@@ -2429,314 +2434,15 @@ impl XlsxPatcher {
         // The no-op short-circuit at the top of `do_save` already
         // bypasses this whole flush, so byte-identical no-op saves
         // are unaffected.
-        self.rebuild_calc_chain_phase(&mut save.file_patches, &mut zip)?;
+        patcher_workbook::rebuild_calc_chain_phase(self, &mut save.file_patches, &mut zip)?;
 
         drop(zip);
 
         // --- Phase 4: Rewrite ZIP ---
-        self.rewrite_zip_phase(&save.file_patches, output_path)
-    }
-
-    /// Sprint Λ Pod-β (RFC-045) — drain `self.queued_images`.
-    ///
-    /// For each sheet:
-    /// 1. Read the sheet's rels graph (from `rels_patches` if
-    ///    already mutated, else from the source ZIP, else fresh).
-    /// 2. Reject sheets that already have a `drawing` rel — v1.5
-    ///    limit (NotImplementedError to surface the gap).
-    /// 3. Allocate one fresh `drawingN.xml` part + one fresh
-    ///    `imageM.<ext>` per queued image via the shared part-id
-    ///    allocator.
-    /// 4. Synthesize the drawing part XML, the drawing rels XML,
-    ///    and the media bytes — all into `file_adds`.
-    /// 5. Add a `drawing` rel to the sheet's rels graph in
-    ///    `rels_patches`.
-    /// 6. Splice a `<drawing r:id="..."/>` element into the sheet
-    ///    XML in `file_patches` so Phase 3's downstream merger and
-    ///    final emit see it.
-    /// 7. Queue content-type ops: `<Default Extension="<ext>" .../>`
-    ///    once per distinct extension and one
-    ///    `<Override PartName="/xl/drawings/drawingN.xml" .../>`
-    ///    per drawing.
-    fn apply_image_adds_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
-    ) -> PyResult<()> {
-        patcher_drawing::apply_image_adds_phase(self, file_patches, zip, part_id_allocator)
-    }
-
-    /// Sprint S1 G06 — drain `self.queued_image_removes`.
-    fn apply_image_removes_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_drawing::apply_image_removes_phase(self, file_patches, zip)
-    }
-
-    /// Sprint Μ Pod-γ (RFC-046) — drain `self.queued_charts`.
-    ///
-    /// For each sheet that has queued charts:
-    /// 1. Read the sheet's rels graph (from `rels_patches` if
-    ///    already mutated, else from `file_adds`/source ZIP).
-    /// 2. Probe for an existing `drawing` rel:
-    ///    * If absent — allocate a fresh `drawingN.xml`,
-    ///      synthesize its body containing one
-    ///      `<xdr:graphicFrame>` per queued chart, plus a fresh
-    ///      `xl/drawings/_rels/drawingN.xml.rels` with one chart
-    ///      rel per chart. Splice `<drawing r:id="...">` into
-    ///      sheet XML.
-    ///    * If present — load the existing drawing XML + rels,
-    ///      append a `<xdr:graphicFrame>` per queued chart via
-    ///      SAX, append a chart rel per chart to the drawing's
-    ///      rels file. The sheet XML's `<drawing>` ref is left
-    ///      alone (already pointing at the drawing).
-    /// 3. Allocate one fresh `xl/charts/chartN.xml` per queued
-    ///    chart and route the caller-supplied bytes through
-    ///    `file_adds`.
-    /// 4. Queue content-type ops: one `<Override>` per chart, plus
-    ///    a `<Override>` for the drawing if we created one fresh.
-    fn apply_chart_adds_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
-    ) -> PyResult<()> {
-        patcher_drawing::apply_chart_adds_phase(self, file_patches, zip, part_id_allocator)
-    }
-
-    /// Sprint Ν Pod-γ (RFC-047 + RFC-048) — drain pivot caches and
-    /// pivot tables in Phase 2.5m.
-    ///
-    /// Caches drain first (workbook-scope) → tables drain second
-    /// (sheet-scope, with rels back-pointing at the matching cache).
-    /// See `src/wolfxl/pivot.rs` module docs for full step-by-step
-    /// invariants. The phase ordering relative to Phase 2.5l (charts)
-    /// is pinned by `pivot::tests::phase_ordering_pinned`.
-    fn apply_pivot_adds_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_pivot::apply_pivot_adds_phase(self, file_patches, zip)
-    }
-
-    /// G17 / RFC-070 — Phase 2.5m-edit. Drains
-    /// `queued_pivot_source_edits` after the adds phase. Each edit
-    /// rewrites a cache definition's `<worksheetSource>` attributes
-    /// (and optionally the `<pivotCacheDefinition refreshOnLoad>`
-    /// flag) using the byte-level rewriter in `wolfxl_pivot::mutate`.
-    fn apply_pivot_source_edits_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_pivot_edit::apply_pivot_source_edits_phase(self, file_patches, zip)
-    }
-
-    /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — Phase 2.5p drain.
-    ///
-    /// For each queued slicer:
-    ///   * Allocate slicer-cache + slicer-presentation part ids.
-    ///   * Render the cache + presentation XML files.
-    ///   * Build per-cache rels (cache → source pivot cache).
-    ///   * Add workbook-rel of type SLICER_CACHE.
-    ///   * Add sheet-rel of type SLICER.
-    ///   * Splice `<x14:slicerCaches>` into workbook.xml `<extLst>`.
-    ///   * Splice `<x14:slicerList>` into the owner sheet's `<extLst>`.
-    ///   * Add content-type Overrides for both parts.
-    fn apply_slicer_adds_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_pivot::apply_slicer_adds_phase(self, file_patches, zip)
-    }
-
-    /// across every queued op. Reads from `file_patches` when an
-    /// earlier phase already mutated a part; falls back to source ZIP
-    /// otherwise. Writes the result back into `file_patches`.
-    fn apply_axis_shifts_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_structural::apply_axis_shifts_phase(self, file_patches, zip)
-    }
-
-    /// Phase 2.7 — drive `wolfxl_structural::sheet_copy::plan_sheet_copy`
-    /// across every queued sheet-copy op (RFC-035).
-    ///
-    /// For each `(src_title, dst_title)` op:
-    ///   1. Look up the source sheet path; build the source rels graph
-    ///      from the ZIP (or `rels_patches` if already mutated).
-    ///   2. Pre-load the source ZIP parts map for the planner (sheet
-    ///      bytes + every reachable ancillary part + nested rels).
-    ///   3. Read workbook.xml from `file_patches` if already mutated,
-    ///      else from the source ZIP.
-    ///   4. Call `plan_sheet_copy`. Returned `SheetCopyMutations` is
-    ///      pure data; we apply it atomically.
-    ///   5. Allocate a real workbook-rels rId for the new sheet, then
-    ///      string-replace the planner's
-    ///      `__SHEET_RID_PLACEHOLDER_<N>__` token in
-    ///      `workbook_sheets_append` and `workbook_rels_to_add[0].0`.
-    ///   6. Splice the new `<sheet>` element into workbook.xml's
-    ///      `<sheets>` block, persist into `file_patches`.
-    ///   7. Update `xl/_rels/workbook.xml.rels` via `rels_patches`.
-    ///   8. Insert new sheet xml + ancillary parts into `file_adds`.
-    ///   9. Forward content-type ops into `queued_content_type_ops`
-    ///      under a synthetic key so Phase 2.5c picks them up.
-    ///   10. Queue cloned sheet-scoped defined names through
-    ///       `queued_defined_names` so RFC-021's merger handles them.
-    ///   11. Update `self.sheet_order`, `self.sheet_paths`, and the
-    ///       running `cloned_table_names` accumulator.
-    ///
-    /// Phase-ordering invariant: any new per-sheet phase MUST run
-    /// AFTER 2.7 (per RFC-035 §8 risk #7).
-    fn apply_sheet_copies_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-        part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
-        cloned_table_names: &mut HashSet<String>,
-    ) -> PyResult<()> {
-        patcher_sheet_copy::apply_sheet_copies_phase(
-            self,
-            file_patches,
-            zip,
-            part_id_allocator,
-            cloned_table_names,
-        )
-    }
-
-    /// Phase 2.5j — drive `wolfxl_structural::apply_range_move`
-    /// across every queued range-move op. Reads from `file_patches`
-    /// when an earlier phase already mutated a part; falls back to
-    /// source ZIP otherwise. Writes the result back into
-    /// `file_patches` so subsequent ops see the rewritten bytes.
-    fn apply_range_moves_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_structural::apply_range_moves_phase(self, file_patches, zip)
-    }
-
-    fn apply_worksheet_xml_patch_phase(
-        &mut self,
-        sheet_cell_patches: &HashMap<String, Vec<CellPatch>>,
-        local_blocks: &HashMap<String, Vec<SheetBlock>>,
-        autofilter_hidden_rows: &HashMap<String, Vec<u32>>,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_sheet_blocks::apply_worksheet_xml_patch_phase(
-            self,
-            sheet_cell_patches,
-            local_blocks,
-            autofilter_hidden_rows,
-            file_patches,
-            zip,
-        )
-    }
-
-    fn apply_workbook_xml_phases(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_workbook::apply_workbook_xml_phases(self, file_patches, zip)
+        patcher_workbook::rewrite_zip_phase(self, &save.file_patches, output_path)
     }
 
     fn has_pending_save_work(&self) -> bool {
         !self.queued_image_removes.is_empty() || patcher_workbook::has_pending_save_work(self)
-    }
-
-    fn copy_source_file_phase(&self, output_path: &str) -> PyResult<()> {
-        patcher_workbook::copy_source_file_phase(self, output_path)
-    }
-
-    fn drain_permissive_seed_file_patches_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-    ) {
-        patcher_workbook::drain_permissive_seed_file_patches_phase(self, file_patches)
-    }
-
-    fn serialize_rels_patches_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_workbook::serialize_rels_patches_phase(self, file_patches, zip)
-    }
-
-    fn route_part_writes_and_deletes_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-        file_writes: HashMap<String, Vec<u8>>,
-        file_deletes: HashSet<String>,
-    ) {
-        patcher_workbook::route_part_writes_and_deletes_phase(
-            self,
-            file_patches,
-            zip,
-            file_writes,
-            file_deletes,
-        )
-    }
-
-    fn apply_content_types_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_workbook::apply_content_types_phase(self, file_patches, zip)
-    }
-
-    fn apply_document_properties_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_workbook::apply_document_properties_phase(self, file_patches, zip)
-    }
-
-    /// Phase 2.8 — rebuild `xl/calcChain.xml` (Sprint Θ Pod-C3).
-    ///
-    /// Walks every sheet in `sheet_order`, scans the post-mutation XML for
-    /// formula cells, and emits a fresh `xl/calcChain.xml`. The rebuild
-    /// runs unconditionally inside the flush phase — the no-op
-    /// short-circuit at the top of `do_save` already bypasses this phase
-    /// when there are zero queued ops, so byte-identical no-op saves are
-    /// unaffected.
-    ///
-    /// Behaviour:
-    /// - At least one formula across all sheets → emit a fresh
-    ///   `xl/calcChain.xml` (overwriting any source copy in
-    ///   `file_patches` or adding a new entry via `file_adds`).
-    ///   Adds a `[Content_Types].xml` `<Override>` for it if not
-    ///   already present, and adds a workbook→calcChain rel if not
-    ///   already present.
-    /// - Zero formulas across all sheets → if the source contained a
-    ///   `xl/calcChain.xml`, mark it for deletion (`file_deletes`) so
-    ///   the saved file is consistent with the workbook content.
-    fn rebuild_calc_chain_phase(
-        &mut self,
-        file_patches: &mut HashMap<String, Vec<u8>>,
-        zip: &mut ZipArchive<File>,
-    ) -> PyResult<()> {
-        patcher_workbook::rebuild_calc_chain_phase(self, file_patches, zip)
-    }
-
-    fn rewrite_zip_phase(
-        &self,
-        file_patches: &HashMap<String, Vec<u8>>,
-        output_path: &str,
-    ) -> PyResult<()> {
-        patcher_workbook::rewrite_zip_phase(self, file_patches, output_path)
     }
 }
