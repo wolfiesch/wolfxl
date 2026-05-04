@@ -23,7 +23,7 @@ from __future__ import annotations
 import posixpath
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ._handle import PivotTableHandle
 
