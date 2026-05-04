@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **65** / 75
-- 🟡 Partial: **3** / 75
+- ✅ Supported: **66** / 75
+- 🟡 Partial: **2** / 75
 - ❌ Not Yet: **1** / 75
 - ⛔ Out of Scope: **6** / 75
 
@@ -181,7 +181,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `ws.print_options / page_setup / page_margins / print_title_rows` | `ws.print_options / page_setup / page_margins / print_title_rows` | ✅ Supported |  |  |
-| `full PageSetup / PrintOptions surface (~30 attrs)` | `full PageSetup / PrintOptions surface (~30 attrs)` | 🟡 Partial | G24 |  |
+| `full PageSetup / PrintOptions surface (~30 attrs)` | `full PageSetup / PrintOptions surface (~30 attrs)` | ✅ Supported |  |  |
 
 ## Array + data-table formulas
 

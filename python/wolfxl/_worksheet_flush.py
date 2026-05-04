@@ -118,7 +118,7 @@ def _flush_sheet_layout(ws: Worksheet, writer: Any, sheet: str) -> None:
 
 
 def _flush_sheet_setup(ws: Worksheet, writer: Any, sheet: str) -> None:
-    """Flush page setup, margins, headers, views, protection, and titles."""
+    """Flush page setup, margins, headers, views, and protection."""
     if not hasattr(writer, "set_sheet_setup_native"):
         return
     if not _has_sheet_setup(ws):
@@ -131,11 +131,13 @@ def _has_sheet_setup(ws: Worksheet) -> bool:
     return (
         ws._page_setup is not None  # noqa: SLF001
         or ws._page_margins is not None  # noqa: SLF001
+        or (
+            ws._print_options is not None  # noqa: SLF001
+            and not ws._print_options.is_default()  # noqa: SLF001
+        )
         or ws._header_footer is not None  # noqa: SLF001
         or ws._sheet_view is not None  # noqa: SLF001
         or ws._protection is not None  # noqa: SLF001
-        or getattr(ws, "_print_title_rows", None) is not None
-        or getattr(ws, "_print_title_cols", None) is not None
     )
 
 

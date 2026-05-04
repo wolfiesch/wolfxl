@@ -1353,16 +1353,43 @@ def _probe_print_settings_basic(tmp_path: Path) -> None:
 
 @_register("print_settings_depth")
 def _probe_print_settings_depth(tmp_path: Path) -> None:
-    """Deep PageSetup attrs (~30). Tracked under G24 (S8)."""
+    """Deep PageSetup / PrintOptions / PageMargins surface. G24 (S8)."""
+    import openpyxl as _opx
     import wolfxl
 
     wb = wolfxl.Workbook()
     ws = wb.active
+    ws.title = "Report"
     ws.page_setup.paperSize = 9  # A4
     ws.page_setup.scale = 80
     ws.page_setup.firstPageNumber = 7
+    ws.page_setup.fitToWidth = 2
+    ws.page_setup.fitToHeight = 3
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.horizontalDpi = 300
+    ws.page_setup.verticalDpi = 301
+    ws.page_setup.cellComments = "atEnd"
     ws.page_setup.useFirstPageNumber = True
     ws.page_setup.errors = "blank"
+    ws.page_setup.paperHeight = "297mm"
+    ws.page_setup.paperWidth = "210mm"
+    ws.page_setup.pageOrder = "overThenDown"
+    ws.page_setup.usePrinterDefaults = False
+    ws.page_setup.blackAndWhite = True
+    ws.page_setup.draft = True
+    ws.page_setup.copies = 4
+    ws.print_options.horizontalCentered = True
+    ws.print_options.verticalCentered = False
+    ws.print_options.headings = True
+    ws.print_options.gridLines = True
+    ws.print_options.gridLinesSet = False
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.35
+    ws.page_margins.top = 0.45
+    ws.page_margins.bottom = 0.55
+    ws.page_margins.header = 0.65
+    ws.page_margins.footer = 0.75
+    ws.print_area = "B2:C4"
     ws.print_title_rows = "1:1"
     ws.print_title_cols = "A:A"
     out = tmp_path / "page_deep.xlsx"
@@ -1372,9 +1399,70 @@ def _probe_print_settings_depth(tmp_path: Path) -> None:
     ws2 = wb2.active
     assert ws2.page_setup.paperSize == 9
     assert ws2.page_setup.scale == 80
+    assert ws2.page_setup.firstPageNumber == 7
+    assert ws2.page_setup.fitToWidth == 2
+    assert ws2.page_setup.fitToHeight == 3
+    assert ws2.page_setup.orientation == "landscape"
+    assert ws2.page_setup.horizontalDpi == 300
+    assert ws2.page_setup.verticalDpi == 301
+    assert ws2.page_setup.cellComments == "atEnd"
     assert ws2.page_setup.useFirstPageNumber is True
+    assert ws2.page_setup.errors == "blank"
+    assert ws2.page_setup.paperHeight == "297mm"
+    assert ws2.page_setup.paperWidth == "210mm"
+    assert ws2.page_setup.pageOrder == "overThenDown"
+    assert ws2.page_setup.usePrinterDefaults is False
+    assert ws2.page_setup.blackAndWhite is True
+    assert ws2.page_setup.draft is True
+    assert ws2.page_setup.copies == 4
+    assert ws2.print_options.horizontalCentered is True
+    assert ws2.print_options.verticalCentered is False
+    assert ws2.print_options.headings is True
+    assert ws2.print_options.gridLines is True
+    assert ws2.print_options.gridLinesSet is False
+    assert ws2.page_margins.left == 0.25
+    assert ws2.page_margins.right == 0.35
+    assert ws2.page_margins.top == 0.45
+    assert ws2.page_margins.bottom == 0.55
+    assert ws2.page_margins.header == 0.65
+    assert ws2.page_margins.footer == 0.75
+    assert ws2.print_area == "Report!B2:C4"
     assert ws2.print_title_rows == "1:1"
     assert ws2.print_title_cols == "A:A"
+
+    op_ws = _opx.load_workbook(out)["Report"]
+    assert op_ws.page_setup.paperSize == 9
+    assert op_ws.page_setup.scale == 80
+    assert op_ws.page_setup.firstPageNumber == 7
+    assert op_ws.page_setup.fitToWidth == 2
+    assert op_ws.page_setup.fitToHeight == 3
+    assert op_ws.page_setup.orientation == "landscape"
+    assert op_ws.page_setup.horizontalDpi == 300
+    assert op_ws.page_setup.verticalDpi == 301
+    assert op_ws.page_setup.cellComments == "atEnd"
+    assert op_ws.page_setup.useFirstPageNumber is True
+    assert op_ws.page_setup.errors == "blank"
+    assert op_ws.page_setup.paperHeight == "297mm"
+    assert op_ws.page_setup.paperWidth == "210mm"
+    assert op_ws.page_setup.pageOrder == "overThenDown"
+    assert op_ws.page_setup.usePrinterDefaults is False
+    assert op_ws.page_setup.blackAndWhite is True
+    assert op_ws.page_setup.draft is True
+    assert op_ws.page_setup.copies == 4
+    assert op_ws.print_options.horizontalCentered is True
+    assert op_ws.print_options.verticalCentered is False
+    assert op_ws.print_options.headings is True
+    assert op_ws.print_options.gridLines is True
+    assert op_ws.print_options.gridLinesSet is False
+    assert op_ws.page_margins.left == 0.25
+    assert op_ws.page_margins.right == 0.35
+    assert op_ws.page_margins.top == 0.45
+    assert op_ws.page_margins.bottom == 0.55
+    assert op_ws.page_margins.header == 0.65
+    assert op_ws.page_margins.footer == 0.75
+    assert op_ws.print_area == "'Report'!$B$2:$C$4"
+    assert op_ws.print_title_rows == "$1:$1"
+    assert op_ws.print_title_cols == "$A:$A"
 
 
 # --------------------------------------------------------------------------

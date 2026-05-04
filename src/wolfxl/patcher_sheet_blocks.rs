@@ -677,6 +677,15 @@ pub(super) fn apply_sheet_setup_phase(
                     .push(SheetBlock::PageMargins(bytes));
             }
         }
+        if let Some(s) = &specs.print_options {
+            let bytes = wolfxl_writer::parse::sheet_setup::emit_print_options(s);
+            if !bytes.is_empty() {
+                local_blocks
+                    .entry(sheet_path.clone())
+                    .or_default()
+                    .push(SheetBlock::PrintOptions(bytes));
+            }
+        }
         if let Some(s) = &specs.page_setup {
             let bytes = wolfxl_writer::parse::sheet_setup::emit_page_setup(s);
             if !bytes.is_empty() {

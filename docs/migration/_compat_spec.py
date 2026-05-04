@@ -696,8 +696,7 @@ ENTRIES: list[Entry] = [
         "category": "print_settings",
         "openpyxl": "full PageSetup / PrintOptions surface (~30 attrs)",
         "wolfxl": "full PageSetup / PrintOptions surface (~30 attrs)",
-        "status": "partial",
-        "gap_id": "G24",
+        "status": "supported",
         "probe": "print_settings_depth",
     },
     # --- Array + data-table formulas --------------------------------------

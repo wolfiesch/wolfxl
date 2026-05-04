@@ -252,9 +252,13 @@ def _page_setup_from_payload(payload: Any) -> Any:
         cellComments=payload.get("cell_comments"),
         errors=payload.get("errors"),
         useFirstPageNumber=payload.get("use_first_page_number"),
+        paperHeight=payload.get("paper_height"),
+        paperWidth=payload.get("paper_width"),
+        pageOrder=payload.get("page_order"),
         usePrinterDefaults=payload.get("use_printer_defaults"),
         blackAndWhite=payload.get("black_and_white"),
         draft=payload.get("draft"),
+        copies=payload.get("copies"),
     )
 
 
@@ -264,11 +268,11 @@ def _print_options_from_payload(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return PrintOptions()
     return PrintOptions(
-        horizontalCentered=bool(payload.get("horizontal_centered", False)),
-        verticalCentered=bool(payload.get("vertical_centered", False)),
-        headings=bool(payload.get("headings", False)),
-        gridLines=bool(payload.get("grid_lines", False)),
-        gridLinesSet=bool(payload.get("grid_lines_set", True)),
+        horizontalCentered=payload.get("horizontal_centered"),
+        verticalCentered=payload.get("vertical_centered"),
+        headings=payload.get("headings"),
+        gridLines=payload.get("grid_lines"),
+        gridLinesSet=payload.get("grid_lines_set"),
     )
 
 
@@ -605,6 +609,11 @@ def to_rust_setup_dict(ws: Worksheet) -> dict[str, Any]:
     payload["page_margins"] = (
         ws._page_margins.to_rust_dict()  # noqa: SLF001
         if ws._page_margins is not None and not ws._page_margins.is_default()  # noqa: SLF001
+        else None
+    )
+    payload["print_options"] = (
+        ws._print_options.to_rust_dict()  # noqa: SLF001
+        if ws._print_options is not None and not ws._print_options.is_default()  # noqa: SLF001
         else None
     )
     payload["header_footer"] = (

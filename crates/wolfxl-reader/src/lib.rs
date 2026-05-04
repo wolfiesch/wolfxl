@@ -459,19 +459,23 @@ pub struct PageSetupInfo {
     pub cell_comments: Option<String>,
     pub errors: Option<String>,
     pub use_first_page_number: Option<bool>,
+    pub paper_height: Option<String>,
+    pub paper_width: Option<String>,
+    pub page_order: Option<String>,
     pub use_printer_defaults: Option<bool>,
     pub black_and_white: Option<bool>,
     pub draft: Option<bool>,
+    pub copies: Option<u32>,
 }
 
 /// Parsed worksheet print options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrintOptionsInfo {
-    pub horizontal_centered: bool,
-    pub vertical_centered: bool,
-    pub headings: bool,
-    pub grid_lines: bool,
-    pub grid_lines_set: bool,
+    pub horizontal_centered: Option<bool>,
+    pub vertical_centered: Option<bool>,
+    pub headings: Option<bool>,
+    pub grid_lines: Option<bool>,
+    pub grid_lines_set: Option<bool>,
 }
 
 /// Parsed worksheet header/footer settings.
@@ -543,9 +547,25 @@ impl PageSetupInfo {
             cell_comments: attr_value(e, b"cellComments"),
             errors: attr_value(e, b"errors"),
             use_first_page_number: attr_bool(e, b"useFirstPageNumber"),
+            paper_height: attr_value(e, b"paperHeight"),
+            paper_width: attr_value(e, b"paperWidth"),
+            page_order: attr_value(e, b"pageOrder"),
             use_printer_defaults: attr_bool(e, b"usePrinterDefaults"),
             black_and_white: attr_bool(e, b"blackAndWhite"),
             draft: attr_bool(e, b"draft"),
+            copies: attr_u32(e, b"copies"),
+        }
+    }
+}
+
+impl PrintOptionsInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            horizontal_centered: attr_bool(e, b"horizontalCentered"),
+            vertical_centered: attr_bool(e, b"verticalCentered"),
+            headings: attr_bool(e, b"headings"),
+            grid_lines: attr_bool(e, b"gridLines"),
+            grid_lines_set: attr_bool(e, b"gridLinesSet"),
         }
     }
 }
@@ -2772,6 +2792,7 @@ fn parse_worksheet(
     let mut sheet_protection = None;
     let mut page_margins = None;
     let mut page_setup = None;
+    let mut print_options = None;
     let mut header_footer = None;
     let mut row_breaks = None;
     let mut column_breaks = None;
@@ -2867,6 +2888,9 @@ fn parse_worksheet(
                 }
                 b"pageMargins" => {
                     page_margins = parse_page_margins(&e);
+                }
+                b"printOptions" => {
+                    print_options = Some(PrintOptionsInfo::from_start(&e));
                 }
                 b"pageSetup" => {
                     page_setup = Some(PageSetupInfo::from_start(&e));
@@ -3069,6 +3093,9 @@ fn parse_worksheet(
                 }
                 b"pageMargins" => {
                     page_margins = parse_page_margins(&e);
+                }
+                b"printOptions" => {
+                    print_options = Some(PrintOptionsInfo::from_start(&e));
                 }
                 b"pageSetup" => {
                     page_setup = Some(PageSetupInfo::from_start(&e));
@@ -3301,7 +3328,7 @@ fn parse_worksheet(
         auto_filter,
         page_margins,
         page_setup,
-        print_options: None::<PrintOptionsInfo>,
+        print_options,
         header_footer,
         row_breaks,
         column_breaks,

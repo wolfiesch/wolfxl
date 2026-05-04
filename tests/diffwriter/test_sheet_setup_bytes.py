@@ -138,12 +138,13 @@ def test_sheet_protection_password_attr(tmp_path: Path) -> None:
 
 def test_block_ordering_in_sheet_xml(tmp_path: Path) -> None:
     """Verify CT_Worksheet child order: sheetViews(3), sheetProtection(8),
-    pageMargins(21), pageSetup(22), headerFooter(23)."""
+    printOptions(20), pageMargins(21), pageSetup(22), headerFooter(23)."""
     p = tmp_path / "order.xlsx"
     wb = wolfxl.Workbook()
     ws = wb.active
     ws.protection.enable()
     ws.page_setup.orientation = "landscape"
+    ws.print_options.horizontalCentered = True
     ws.page_margins.left = 1.0
     ws.header_footer.odd_header.center = "Title"
     ws.sheet_view.zoom_scale = 150
@@ -152,13 +153,15 @@ def test_block_ordering_in_sheet_xml(tmp_path: Path) -> None:
     pos = {
         "sheetViews": sheet.index("<sheetViews>"),
         "sheetProtection": sheet.index("<sheetProtection"),
+        "printOptions": sheet.index("<printOptions"),
         "pageMargins": sheet.index("<pageMargins"),
         "pageSetup": sheet.index("<pageSetup"),
         "headerFooter": sheet.index("<headerFooter"),
     }
     # Strict ECMA-376 §18.3.1.99 ordering:
     assert pos["sheetViews"] < pos["sheetProtection"]
-    assert pos["sheetProtection"] < pos["pageMargins"]
+    assert pos["sheetProtection"] < pos["printOptions"]
+    assert pos["printOptions"] < pos["pageMargins"]
     assert pos["pageMargins"] < pos["pageSetup"]
     assert pos["pageSetup"] < pos["headerFooter"]
 

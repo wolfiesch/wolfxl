@@ -106,6 +106,8 @@ pub enum SheetBlock {
     DataValidations(Vec<u8>),
     /// `<hyperlinks>…</hyperlinks>` — slot 19.
     Hyperlinks(Vec<u8>),
+    /// `<printOptions .../>` — slot 20 (RFC-055 / G24).
+    PrintOptions(Vec<u8>),
     /// `<pageMargins .../>` — slot 21 (RFC-055 §3.1).
     PageMargins(Vec<u8>),
     /// `<pageSetup .../>` — slot 22 (RFC-055 §3.1).
@@ -137,6 +139,7 @@ impl SheetBlock {
             SheetBlock::ConditionalFormatting(_) => 17,
             SheetBlock::DataValidations(_) => 18,
             SheetBlock::Hyperlinks(_) => 19,
+            SheetBlock::PrintOptions(_) => 20,
             SheetBlock::PageMargins(_) => 21,
             SheetBlock::PageSetup(_) => 22,
             SheetBlock::HeaderFooter(_) => 23,
@@ -159,6 +162,7 @@ impl SheetBlock {
             SheetBlock::ConditionalFormatting(_) => b"conditionalFormatting",
             SheetBlock::DataValidations(_) => b"dataValidations",
             SheetBlock::Hyperlinks(_) => b"hyperlinks",
+            SheetBlock::PrintOptions(_) => b"printOptions",
             SheetBlock::PageMargins(_) => b"pageMargins",
             SheetBlock::PageSetup(_) => b"pageSetup",
             SheetBlock::HeaderFooter(_) => b"headerFooter",
@@ -181,6 +185,7 @@ impl SheetBlock {
             | SheetBlock::ConditionalFormatting(b)
             | SheetBlock::DataValidations(b)
             | SheetBlock::Hyperlinks(b)
+            | SheetBlock::PrintOptions(b)
             | SheetBlock::PageMargins(b)
             | SheetBlock::PageSetup(b)
             | SheetBlock::HeaderFooter(b)
@@ -627,6 +632,7 @@ mod tests {
         );
         assert_eq!(SheetBlock::DataValidations(vec![]).ecma_position(), 18);
         assert_eq!(SheetBlock::Hyperlinks(vec![]).ecma_position(), 19);
+        assert_eq!(SheetBlock::PrintOptions(vec![]).ecma_position(), 20);
         assert_eq!(SheetBlock::PageMargins(vec![]).ecma_position(), 21);
         assert_eq!(SheetBlock::PageSetup(vec![]).ecma_position(), 22);
         assert_eq!(SheetBlock::HeaderFooter(vec![]).ecma_position(), 23);
@@ -663,6 +669,10 @@ mod tests {
         assert_eq!(
             SheetBlock::Hyperlinks(vec![]).root_local_name(),
             b"hyperlinks"
+        );
+        assert_eq!(
+            SheetBlock::PrintOptions(vec![]).root_local_name(),
+            b"printOptions"
         );
         assert_eq!(
             SheetBlock::PageMargins(vec![]).root_local_name(),
@@ -750,6 +760,7 @@ mod tests {
             SheetBlock::ConditionalFormatting(vec![]),
             SheetBlock::DataValidations(vec![]),
             SheetBlock::Hyperlinks(vec![]),
+            SheetBlock::PrintOptions(vec![]),
             SheetBlock::PageMargins(vec![]),
             SheetBlock::PageSetup(vec![]),
             SheetBlock::HeaderFooter(vec![]),

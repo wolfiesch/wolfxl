@@ -46,6 +46,13 @@ pub(crate) fn emit_page_margins(out: &mut String, sheet: &Worksheet) {
     }
 }
 
+pub(crate) fn emit_print_options(out: &mut String, sheet: &Worksheet) {
+    if let Some(spec) = sheet.print_options.as_ref() {
+        let bytes = crate::parse::sheet_setup::emit_print_options(spec);
+        out.push_str(std::str::from_utf8(&bytes).unwrap_or(""));
+    }
+}
+
 pub(crate) fn emit_page_setup(out: &mut String, sheet: &Worksheet) {
     if let Some(spec) = sheet.page_setup.as_ref() {
         let bytes = crate::parse::sheet_setup::emit_page_setup(spec);

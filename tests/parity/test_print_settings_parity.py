@@ -40,6 +40,11 @@ def _read_sheet_xml(p: Path) -> str:
         return zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
 
+def _read_workbook_xml(p: Path) -> str:
+    with zipfile.ZipFile(p) as zf:
+        return zf.read("xl/workbook.xml").decode("utf-8")
+
+
 def test_page_setup_orientation_round_trips(tmp_xlsx: Path) -> None:
     wb = wolfxl.Workbook()
     ws = wb.active
@@ -87,6 +92,134 @@ def test_page_setup_fit_to_width_height(tmp_xlsx: Path) -> None:
         assert int(op.active.page_setup.fitToHeight) == 0
     finally:
         op.close()
+
+
+def test_g24_page_setup_extended_attrs_round_trip(tmp_xlsx: Path) -> None:
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "x"
+    ws.page_setup.paperHeight = "297mm"
+    ws.page_setup.paperWidth = "210mm"
+    ws.page_setup.pageOrder = "overThenDown"
+    ws.page_setup.copies = 3
+    wb.save(tmp_xlsx)
+
+    text = _read_sheet_xml(tmp_xlsx)
+    assert 'paperHeight="297mm"' in text
+    assert 'paperWidth="210mm"' in text
+    assert 'pageOrder="overThenDown"' in text
+    assert 'copies="3"' in text
+
+    op = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        setup = op.active.page_setup
+        assert setup.paperHeight == "297mm"
+        assert setup.paperWidth == "210mm"
+        assert setup.pageOrder == "overThenDown"
+        assert int(setup.copies) == 3
+    finally:
+        op.close()
+
+
+def test_g24_print_options_round_trip(tmp_xlsx: Path) -> None:
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "x"
+    ws.print_options.horizontalCentered = True
+    ws.print_options.verticalCentered = True
+    ws.print_options.headings = True
+    ws.print_options.gridLines = True
+    ws.print_options.gridLinesSet = False
+    wb.save(tmp_xlsx)
+
+    text = _read_sheet_xml(tmp_xlsx)
+    assert "<printOptions " in text
+    assert text.index("<printOptions") < text.index("<pageMargins")
+    assert 'horizontalCentered="1"' in text
+    assert 'verticalCentered="1"' in text
+    assert 'headings="1"' in text
+    assert 'gridLines="1"' in text
+    assert 'gridLinesSet="0"' in text
+
+    op = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        opts = op.active.print_options
+        assert opts.horizontalCentered is True
+        assert opts.verticalCentered is True
+        assert opts.headings is True
+        assert opts.gridLines is True
+        assert opts.gridLinesSet is False
+    finally:
+        op.close()
+
+
+def test_g24_print_titles_emit_reserved_defined_name(tmp_xlsx: Path) -> None:
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws["A1"] = "x"
+    ws.print_title_rows = "1:2"
+    ws.print_title_cols = "A:B"
+    wb.save(tmp_xlsx)
+
+    workbook_xml = _read_workbook_xml(tmp_xlsx)
+    assert 'name="_xlnm.Print_Titles"' in workbook_xml
+    assert 'localSheetId="0"' in workbook_xml
+    assert "Report!$1:$2,Report!$A:$B" in workbook_xml
+
+    op = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        assert op["Report"].print_title_rows == "$1:$2"
+        assert op["Report"].print_title_cols == "$A:$B"
+    finally:
+        op.close()
+
+
+def test_g24_user_defined_print_titles_suppresses_auto_inject(tmp_xlsx: Path) -> None:
+    from wolfxl.workbook.defined_name import DefinedName
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws["A1"] = "x"
+    ws.print_title_rows = "1:2"
+    wb.defined_names["_xlnm.Print_Titles"] = DefinedName(
+        name="_xlnm.Print_Titles",
+        value="Report!$3:$4",
+        localSheetId=0,
+    )
+    wb.save(tmp_xlsx)
+
+    workbook_xml = _read_workbook_xml(tmp_xlsx)
+    assert workbook_xml.count('name="_xlnm.Print_Titles"') == 1
+    assert "Report!$3:$4" in workbook_xml
+    assert "Report!$1:$2" not in workbook_xml
+
+
+def test_g24_print_titles_modify_mode_round_trip(tmp_xlsx: Path, tmp_path: Path) -> None:
+    src = tmp_path / "source.xlsx"
+    op = openpyxl.Workbook()
+    op.active.title = "Report"
+    op.active["A1"] = "x"
+    op.save(src)
+    op.close()
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Report"]
+    ws.print_title_rows = "1:2"
+    ws.print_title_cols = "A:B"
+    wb.save(tmp_xlsx)
+
+    rt = wolfxl.load_workbook(tmp_xlsx)
+    assert rt["Report"].print_title_rows == "1:2"
+    assert rt["Report"].print_title_cols == "A:B"
+
+    op_rt = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        assert op_rt["Report"].print_title_rows == "$1:$2"
+        assert op_rt["Report"].print_title_cols == "$A:$B"
+    finally:
+        op_rt.close()
 
 
 def test_page_margins_round_trip(tmp_xlsx: Path) -> None:

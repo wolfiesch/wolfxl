@@ -1969,6 +1969,7 @@ mod tests {
                 use_printer_defaults: Some(false),
                 black_and_white: Some(true),
                 draft: Some(false),
+                ..PageSetupInfo::default()
             })
         );
     }
@@ -2002,11 +2003,11 @@ mod tests {
         assert_eq!(
             worksheet_meta::parse_print_options(&[0x1f, 0x00]),
             Some(PrintOptionsInfo {
-                horizontal_centered: true,
-                vertical_centered: true,
-                headings: true,
-                grid_lines: true,
-                grid_lines_set: true,
+                horizontal_centered: Some(true),
+                vertical_centered: Some(true),
+                headings: Some(true),
+                grid_lines: Some(true),
+                grid_lines_set: Some(true),
             })
         );
     }
@@ -2022,11 +2023,11 @@ mod tests {
         assert_eq!(
             sheet.print_options,
             Some(PrintOptionsInfo {
-                horizontal_centered: false,
-                vertical_centered: false,
-                headings: false,
-                grid_lines: false,
-                grid_lines_set: true,
+                horizontal_centered: Some(false),
+                vertical_centered: Some(false),
+                headings: Some(false),
+                grid_lines: Some(false),
+                grid_lines_set: Some(true),
             })
         );
     }

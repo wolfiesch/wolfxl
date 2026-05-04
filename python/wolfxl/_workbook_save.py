@@ -86,8 +86,7 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     # composes workbook.xml once, with all pending workbook-scoped edits.
     if wb._properties_dirty:  # noqa: SLF001
         wb._flush_properties_to_patcher()  # noqa: SLF001
-    if wb._pending_defined_names:  # noqa: SLF001
-        wb._flush_defined_names_to_patcher()  # noqa: SLF001
+    wb._flush_defined_names_to_patcher()  # noqa: SLF001
     # Workbook-level security also targets workbook.xml and must precede
     # sheet-scoped patch queues.
     if wb._pending_security_update:  # noqa: SLF001

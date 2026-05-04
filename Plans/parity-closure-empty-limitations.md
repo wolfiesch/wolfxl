@@ -1,19 +1,19 @@
 # Parity Closure — Empty `limitations.md`
 
 Date: 2026-05-04
-Status: Active. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; Phase 1 and Phase 2 of this closure plan landed). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
+Status: Active. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; Phase 1, Phase 2, and Phase 3 of this closure plan landed). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
 
 ## Context
 
 The user has demanded zero openpyxl-parity gaps. The current state, per the 2026-05-04 review:
 
 - Phase 1 recategorized wolfxl-extras (`.xls` writes, `.xlsb` writes, `.ods` read+write, `.xls` style reads, and VBA authoring) as `out_of_scope`, because openpyxl exposes none of those surfaces.
-- Phase 2 closed `defined_names.edge_cases`: `tests/test_openpyxl_compat_oracle.py` now runs 54 probes; 53 pass, 1 xfail. 13 spec entries are still marked `supported` but have no probe — that's hidden coverage debt.
-- `docs/migration/_compat_spec.py`: 65 supported / 3 partial / 1 not_yet / 6 out_of_scope across 75 entries.
+- Phase 2 closed `defined_names.edge_cases`; Phase 3 closed `print_settings.depth`. `tests/test_openpyxl_compat_oracle.py` now runs 54 probes; all currently-registered probes pass. 13 spec entries are still marked `supported` but have no probe — that's hidden coverage debt.
+- `docs/migration/_compat_spec.py`: 66 supported / 2 partial / 1 not_yet / 6 out_of_scope across 75 entries.
 - The dynamic-surface ratchet (`tests/test_openpyxl_dynamic_surface.py`) only compares 3 objects (Workbook, Worksheet, Cell). It does not check Style, Color, Border, Font, Fill, Alignment, Protection, NamedStyle, DefinedName, ExternalLink, Pivot*, Chart*, Slicer, Image, Comment, Table, DataValidation. That's also hidden debt.
 - The openpyxl source-distribution test corpus has never been vendored, even though the parity program plan called for it in S1+.
 
-The remaining parity work is: pivot field/filter/aggregation mutation, external-link authoring, print-settings depth, dynamic-array spill metadata, calc-chain edge cases, standalone table-driven slicers, and the CF/dynamic-surface/probe/corpus measurement debt. Total ~5,120 LOC after Phase 2, ~17 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
+The remaining parity work is: pivot field/filter/aggregation mutation, external-link authoring, dynamic-array spill metadata, calc-chain edge cases, standalone table-driven slicers, and the CF/dynamic-surface/probe/corpus measurement debt. Total ~4,700 LOC after Phase 3, ~15 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
 
 ## Definition of "no gaps with openpyxl"
 
@@ -132,7 +132,14 @@ Each phase is a separate landing on its own branch. Phases are largely independe
 - `uv run --no-sync pytest tests/test_openpyxl_dynamic_surface.py -v` — does not regress (DefinedName not in current ratchet scope, but checking for crash regressions on the workbook-level diff).
 - `python scripts/render_compat_matrix.py` — totals: supported +1, partial -1.
 
-### Phase 3 — G24 Print-settings depth (2 sessions)
+### Phase 3 — G24 Print-settings depth (2 sessions) [LANDED 2026-05-04, branch parity-closure-phase2]
+
+**Outcome:**
+- Full `PageSetup` depth now round-trips across write mode, modify mode, and native read, including the G24 attrs `paperHeight`, `paperWidth`, `pageOrder`, and `copies`.
+- `<printOptions>` is no longer parse-only. All 5 attrs (`horizontalCentered`, `verticalCentered`, `headings`, `gridLines`, `gridLinesSet`) emit in write mode, patch in modify mode, read back through wolfxl, and are accepted by openpyxl.
+- Print titles were confirmed as workbook-scoped `_xlnm.Print_Titles` defined names rather than sheet XML. The save path now emits them through the existing defined-name machinery for both write mode and modify mode.
+- Compat oracle: `print_settings.depth` xfail → pass. The expanded probe covers 18 PageSetup attrs, 5 PrintOptions attrs, 6 PageMargins attrs, plus `print_area`, `print_title_rows`, and `print_title_cols`, with an openpyxl reader cross-check.
+- Spec totals: 66 supported / 2 partial / 1 not_yet / 6 out_of_scope (was 65 / 3 / 1 / 6).
 
 **Goal:** flip `print_settings.depth` to `supported`. Cover the full openpyxl `PageSetup` + `PrintOptions` + `PageMargins` round-trip surface.
 
@@ -370,7 +377,7 @@ Frequently-modified shared files across phases:
 |---|---|---|---|---|
 | 1 — Recategorize wolfxl-extras | 1 | Claude (mechanical) | none | LANDED 2026-05-04 |
 | 2 — G22 defined-name attrs | 1 | Codex 🤖 | Phase 1 | LANDED 2026-05-04 |
-| 3 — G24 print settings depth | 2 | Codex 🤖 | Phase 1 | |
+| 3 — G24 print settings depth | 2 | Codex 🤖 | Phase 1 | LANDED 2026-05-04 |
 | 4 — G07 spill metadata | 2 | Claude 🧠 | Phase 1 | |
 | 5 — G21 standalone slicers | 2 | Claude 🧠 | Phase 1 | |
 | 6 — G23 calc-chain edges | 3 | Claude 🧠 | Phase 1 | |
@@ -403,3 +410,4 @@ Frequently-modified shared files across phases:
 
 - 2026-05-04: Plan created. Phase 1 landed (commit 4825baf).
 - 2026-05-04: Phase 2 landed on branch `parity-closure-phase2`; Codex review tightened the hidden-clear regression and updated stale limitations/tracker text.
+- 2026-05-04: Phase 3 landed on branch `parity-closure-phase2`; G24 print settings depth moved to supported and the limitations row was removed.

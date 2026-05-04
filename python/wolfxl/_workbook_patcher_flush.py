@@ -324,11 +324,53 @@ def queue_sheet_move_to_patcher(wb: Any, name: str, offset: int) -> None:
 def flush_defined_names_to_patcher(wb: Any) -> None:
     """Drain pending workbook defined-name writes into the Rust patcher."""
     patcher = wb._rust_patcher  # noqa: SLF001
-    if patcher is None or not wb._pending_defined_names:  # noqa: SLF001
+    if patcher is None:
+        return
+    _queue_print_titles_to_patcher(wb, patcher)
+    if not wb._pending_defined_names:  # noqa: SLF001
         return
     for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
         patcher.queue_defined_name(_defined_name_payload(defined_name))
     wb._pending_defined_names.clear()  # noqa: SLF001
+
+
+def _queue_print_titles_to_patcher(wb: Any, patcher: Any) -> None:
+    """Queue worksheet repeat-row/column titles as reserved defined names."""
+    from wolfxl.worksheet.print_settings import ColRange, PrintTitles, RowRange
+
+    for sheet_idx, sheet_name in enumerate(wb._sheet_names):  # noqa: SLF001
+        ws = wb._sheets.get(sheet_name)  # noqa: SLF001
+        if ws is None:
+            continue
+        rows = getattr(ws, "_print_title_rows", None)
+        cols = getattr(ws, "_print_title_cols", None)
+        if rows is None and cols is None:
+            continue
+        if _has_pending_print_titles_for_sheet(wb, sheet_idx):
+            continue
+        titles = PrintTitles(
+            rows=RowRange.from_string(rows) if rows is not None else None,
+            cols=ColRange.from_string(cols) if cols is not None else None,
+        )
+        formula = titles.to_definedname_value(sheet_name)
+        if formula is None:
+            continue
+        patcher.queue_defined_name(
+            {
+                "name": "_xlnm.Print_Titles",
+                "formula": formula,
+                "local_sheet_id": sheet_idx,
+            }
+        )
+
+
+def _has_pending_print_titles_for_sheet(wb: Any, sheet_idx: int) -> bool:
+    """Return whether user-defined names already carry this sheet's titles."""
+    return any(
+        defined_name.name == "_xlnm.Print_Titles"
+        and defined_name.localSheetId == sheet_idx
+        for defined_name in wb._pending_defined_names.values()  # noqa: SLF001
+    )
 
 
 def _defined_name_payload(defined_name: Any) -> dict[str, Any]:
@@ -448,11 +490,13 @@ def _has_sheet_setup_updates(ws: Any) -> bool:
     return not (
         ws._page_setup is None  # noqa: SLF001
         and ws._page_margins is None  # noqa: SLF001
+        and (
+            ws._print_options is None  # noqa: SLF001
+            or ws._print_options.is_default()  # noqa: SLF001
+        )
         and ws._header_footer is None  # noqa: SLF001
         and ws._sheet_view is None  # noqa: SLF001
         and ws._protection is None  # noqa: SLF001
-        and getattr(ws, "_print_title_rows", None) is None
-        and getattr(ws, "_print_title_cols", None) is None
     )
 
 

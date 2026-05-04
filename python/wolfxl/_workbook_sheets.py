@@ -300,6 +300,7 @@ def _copy_sheet_setup_state(source: Worksheet, dst: Worksheet) -> None:
     for slot in (
         "_page_setup",
         "_page_margins",
+        "_print_options",
         "_header_footer",
         "_sheet_view",
         "_protection",

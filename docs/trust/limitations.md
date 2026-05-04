@@ -14,7 +14,6 @@ machine-checked source of truth is
 |---------|:----:|:-----:|:------:|-------|
 | In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
 | External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
-| Print settings depth | Partial | Partial | Partial | Basic `page_setup`, `page_margins`, print titles, and print areas work. The remaining gap is full PageSetup/PrintOptions depth, especially `<printOptions>` emission and a few less-common PageSetup attributes. |
 | Dynamic-array spill metadata | Partial | Partial | Partial | Array formulas and data-table formulas round-trip; dynamic-array spill metadata is not fully preserved yet. |
 | Calc-chain edge cases | Partial | Partial | Partial | Basic calc-chain rebuild is supported; cross-sheet ordering, deleted-cell pruning, and `calcChainExtLst` edge cases remain open. |
 | Standalone table-driven slicers | No | No | Preserve | Pivot-backed slicers are supported. Slicers tied directly to tables, outside a pivot context, are still unimplemented. |

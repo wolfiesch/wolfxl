@@ -14,7 +14,8 @@ use pyo3::types::{PyDict, PyList};
 
 use wolfxl_writer::parse::sheet_setup::{
     HeaderFooterItemSpec, HeaderFooterSpec, PageMarginsSpec, PageSetupSpec, PaneSpec,
-    PrintTitlesSpec, SelectionSpec, SheetProtectionSpec, SheetSetupBlocks, SheetViewSpec,
+    PrintOptionsSpec, PrintTitlesSpec, SelectionSpec, SheetProtectionSpec, SheetSetupBlocks,
+    SheetViewSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,14 @@ pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetS
         })?)?),
         _ => None,
     };
+    let print_options = match payload.get_item("print_options")? {
+        Some(v) if !v.is_none() => Some(parse_print_options(v.cast::<PyDict>().map_err(|_| {
+            PyValueError::new_err(
+                "queue_sheet_setup_update: 'print_options' must be a dict or None",
+            )
+        })?)?),
+        _ => None,
+    };
     let header_footer = match payload.get_item("header_footer")? {
         Some(v) if !v.is_none() => {
             Some(parse_header_footer(v.cast::<PyDict>().map_err(|_| {
@@ -89,6 +98,7 @@ pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetS
     Ok(SheetSetupBlocks {
         sheet_view,
         sheet_protection,
+        print_options,
         page_margins,
         page_setup,
         header_footer,
@@ -141,9 +151,23 @@ fn parse_page_setup(d: &Bound<'_, PyDict>) -> PyResult<PageSetupSpec> {
         cell_comments: extract_str(d, "cell_comments")?,
         errors: extract_str(d, "errors")?,
         use_first_page_number: extract_bool(d, "use_first_page_number")?,
+        paper_height: extract_str(d, "paper_height")?,
+        paper_width: extract_str(d, "paper_width")?,
+        page_order: extract_str(d, "page_order")?,
         use_printer_defaults: extract_bool(d, "use_printer_defaults")?,
         black_and_white: extract_bool(d, "black_and_white")?,
         draft: extract_bool(d, "draft")?,
+        copies: extract_u32(d, "copies")?,
+    })
+}
+
+fn parse_print_options(d: &Bound<'_, PyDict>) -> PyResult<PrintOptionsSpec> {
+    Ok(PrintOptionsSpec {
+        horizontal_centered: extract_bool(d, "horizontal_centered")?,
+        vertical_centered: extract_bool(d, "vertical_centered")?,
+        headings: extract_bool(d, "headings")?,
+        grid_lines: extract_bool(d, "grid_lines")?,
+        grid_lines_set: extract_bool(d, "grid_lines_set")?,
     })
 }
 

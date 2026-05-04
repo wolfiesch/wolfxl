@@ -1033,9 +1033,9 @@ class Workbook:
         """Drain each sheet's queued sheet-setup mutations into the patcher.
 
         Sheets whose Worksheet has any of ``_page_setup``,
-        ``_page_margins``, ``_header_footer``, ``_sheet_view``,
-        ``_protection``, ``_print_title_rows``, ``_print_title_cols``
-        non-default get their ``to_rust_setup_dict()`` queued. The
+        ``_page_margins``, ``_print_options``, ``_header_footer``,
+        ``_sheet_view``, or ``_protection`` non-default get their
+        ``to_rust_setup_dict()`` queued. The
         Rust patcher then re-emits the sheet-scope XML blocks and splices
         them into the sheet via wolfxl_merger::merge_blocks.
 
