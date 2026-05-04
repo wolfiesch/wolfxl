@@ -267,8 +267,9 @@ ENTRIES: list[Entry] = [
         "probe": "charts_combination",
         "notes": "Combination charts ship as a multi-family `<plotArea>` "
         "(RFC-069 §6) for real Excel/LibreOffice rendering, plus per-family "
-        "standalone chartspaces anchored at the same cell so openpyxl's "
-        "reader exposes each family as a distinct `ws._charts` entry. "
+        "standalone shadow chartspaces parked at row 1048576 so openpyxl's "
+        "reader exposes each family as a distinct `ws._charts` entry "
+        "without the shadows visually overlapping the real combo. "
         "Secondary value axis (right side) honored when "
         "`line.y_axis.crosses='max'` and `line.y_axis.axId` is set. Closes G15.",
     },

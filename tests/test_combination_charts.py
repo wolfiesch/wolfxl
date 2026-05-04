@@ -234,3 +234,39 @@ def test_secondary_with_empty_series_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="at least one series"):
         wb.save(tmp_path / "empty_secondary.xlsx")
+
+
+def test_secondary_chart_anchored_off_screen(tmp_path: Path) -> None:
+    """The dual-emission shadow chart parks at row 1048576 (Excel's last
+    row) so Excel/LibreOffice render only the real combo from
+    ``chart1.xml`` and never the overlapping standalone secondary.
+    Without this guard, two charts at the same anchor stack on top of
+    each other when the file opens in real spreadsheet apps.
+    """
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    _seed_sheet(ws)
+
+    bar = BarChart()
+    line = LineChart()
+    bar.add_data(Reference(ws, min_col=2, min_row=1, max_row=4), titles_from_data=True)
+    line.add_data(Reference(ws, min_col=3, min_row=1, max_row=4), titles_from_data=True)
+    line.y_axis.crosses = "max"
+    line.y_axis.axId = 200
+    bar += line
+    ws.add_chart(bar, "E2")
+    out = tmp_path / "off_screen.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out) as z:
+        drawing_xml = z.read("xl/drawings/drawing1.xml").decode("utf-8")
+
+    # Two anchors: primary at E2 (col=4 row=1) and shadow at A1048576
+    # (col=0 row=1048575). Both expressed zero-indexed in OOXML.
+    assert "<xdr:col>4</xdr:col>" in drawing_xml, "primary anchor lost"
+    assert "<xdr:col>0</xdr:col>" in drawing_xml, "shadow anchor missing column"
+    assert "<xdr:row>1048575</xdr:row>" in drawing_xml, (
+        "shadow secondary should park at Excel's last row (1048575 zero-indexed) "
+        f"to avoid overlapping the primary combo chart in Excel/LibreOffice. "
+        f"drawing1.xml:\n{drawing_xml}"
+    )

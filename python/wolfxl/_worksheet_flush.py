@@ -491,6 +491,9 @@ def _flush_pending_images(ws: Worksheet, writer: Any, sheet: str) -> None:
     ws._pending_images.clear()  # noqa: SLF001
 
 
+_COMBO_SHADOW_ANCHOR = "A1048576"
+
+
 def _flush_pending_charts(ws: Worksheet, writer: Any, sheet: str) -> None:
     """Flush queued write-mode charts.
 
@@ -500,11 +503,12 @@ def _flush_pending_charts(ws: Worksheet, writer: Any, sheet: str) -> None:
     produce the multi-family ``<plotArea>`` (RFC-069 §6). To make the
     saved file readable as a combo by openpyxl (whose reader collapses
     a multi-family chartspace into a single returned chart object), we
-    *also* emit each secondary as its own standalone chartspace at the
-    same anchor. The result is one true combination chart plus N
-    standalone chartspaces — openpyxl's `ws._charts` then contains every
-    family as a typed instance, which is the contract the
-    ``charts_combination`` compat-oracle probe asserts.
+    *also* emit each secondary as its own standalone chartspace, but
+    parked at the bottom-left shadow anchor (``A1048576`` — Excel's
+    last valid row) so Excel/LibreOffice render only the real combo
+    from ``chart1.xml``. openpyxl's reader iterates every drawing
+    regardless of position, so its ``ws._charts`` still sees every
+    family as a typed instance.
     """
     if not ws._pending_charts:  # noqa: SLF001
         return
@@ -513,18 +517,10 @@ def _flush_pending_charts(ws: Worksheet, writer: Any, sheet: str) -> None:
             primary_dict = chart.to_rust_dict()
             anchor = chart._anchor  # noqa: SLF001
             writer.add_chart_native(sheet, primary_dict, anchor)
-            # RFC-069 — also emit each secondary as a standalone
-            # chartspace anchored at the same cell so that
-            # ``openpyxl.load_workbook`` sees both ``BarChart`` and
-            # ``LineChart`` (or whatever families) as distinct
-            # ``ws._charts`` entries.
             for secondary in chart._charts[1:]:  # noqa: SLF001
                 secondary_dict = secondary.to_rust_dict()
-                # Strip ``secondary_charts`` if a secondary itself
-                # somehow accumulated siblings — they should have been
-                # rejected upstream, but be defensive.
                 secondary_dict.pop("secondary_charts", None)
-                writer.add_chart_native(sheet, secondary_dict, anchor)
+                writer.add_chart_native(sheet, secondary_dict, _COMBO_SHADOW_ANCHOR)
     else:
         import warnings
 
