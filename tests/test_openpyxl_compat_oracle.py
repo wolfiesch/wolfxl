@@ -1256,7 +1256,12 @@ def _probe_defined_names_basic(tmp_path: Path) -> None:
 
 @_register("defined_names_edge_cases")
 def _probe_defined_names_edge_cases(tmp_path: Path) -> None:
-    """Hidden / comment / function-group / shortcut-key edge cases. G22 (S8)."""
+    """Full ECMA-376 §18.2.5 ``definedName`` attribute surface. G22 (Phase 2).
+
+    Round-trips all 13 attributes openpyxl exposes (``hidden``, ``comment``,
+    plus the 11 G22 additions) through wolfxl's reader, and additionally
+    cross-validates that openpyxl reads what wolfxl wrote.
+    """
     import wolfxl
     from wolfxl.workbook.defined_name import DefinedName
 
@@ -1267,16 +1272,62 @@ def _probe_defined_names_edge_cases(tmp_path: Path) -> None:
         value="Data!$A$1",
         hidden=True,
         comment="hidden helper",
+        customMenu="Custom Menu Text",
+        description="A defined name with the full attr surface.",
+        help="Press F1.",
+        statusBar="Status bar prompt",
+        shortcutKey="A",
+        function=True,
+        functionGroupId=2,
+        vbProcedure=True,
+        xlm=True,
+        publishToServer=True,
+        workbookParameter=True,
     )
     wb.defined_names["Hidden"] = dn
 
     out = tmp_path / "dn_edge.xlsx"
     wb.save(out)
 
+    # Sub-probe 1: wolfxl writes -> wolfxl reads.
     wb2 = wolfxl.load_workbook(out)
     rt = wb2.defined_names["Hidden"]
     assert rt.hidden is True
     assert rt.comment == "hidden helper"
+    assert rt.custom_menu == "Custom Menu Text"
+    assert rt.description == "A defined name with the full attr surface."
+    assert rt.help == "Press F1."
+    assert rt.status_bar == "Status bar prompt"
+    assert rt.shortcut_key == "A"
+    assert rt.function is True
+    assert rt.function_group_id == 2
+    assert rt.vb_procedure is True
+    assert rt.xlm is True
+    assert rt.publish_to_server is True
+    assert rt.workbook_parameter is True
+
+    # Sub-probe 2: wolfxl writes -> openpyxl reads (cross-tool oracle).
+    try:
+        import openpyxl as opxl
+    except ImportError:
+        return
+    opwb = opxl.load_workbook(out)
+    op_dn = opwb.defined_names.get("Hidden")
+    if op_dn is None:
+        return
+    assert op_dn.hidden is True or op_dn.hidden == 1
+    assert op_dn.comment == "hidden helper"
+    assert op_dn.customMenu == "Custom Menu Text"
+    assert op_dn.description == "A defined name with the full attr surface."
+    assert op_dn.help == "Press F1."
+    assert op_dn.statusBar == "Status bar prompt"
+    assert op_dn.shortcutKey == "A"
+    assert op_dn.function is True or op_dn.function == 1
+    assert op_dn.functionGroupId == 2
+    assert op_dn.vbProcedure is True or op_dn.vbProcedure == 1
+    assert op_dn.xlm is True or op_dn.xlm == 1
+    assert op_dn.publishToServer is True or op_dn.publishToServer == 1
+    assert op_dn.workbookParameter is True or op_dn.workbookParameter == 1
 
 
 # --------------------------------------------------------------------------

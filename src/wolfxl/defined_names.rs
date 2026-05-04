@@ -43,11 +43,11 @@ use quick_xml::Reader as XmlReader;
 /// sheet name); `None` means workbook-scope.
 ///
 /// On update of an existing name, attributes that the user did NOT provide
-/// (e.g. `comment`) are preserved verbatim from the source XML — this
-/// covers the rare attributes (`customMenu`, `description`, `help`,
-/// `statusBar`, `shortcutKey`, `function`, `vbProcedure`, `xlm`,
-/// `functionGroupId`, `publishToServer`, `workbookParameter`) that the
-/// Python API doesn't expose. RFC-021 §10 documents this scope.
+/// (`Option::None`) are preserved verbatim from the source XML. Phase 2
+/// (G22) extended the explicit field surface to cover every ECMA-376
+/// `definedName` attribute openpyxl exposes; truly unknown attributes
+/// (forward-compat) still fall through the verbatim-passthrough path in
+/// [`serialize_upsert_over_existing`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinedNameMut {
     pub name: String,
@@ -57,6 +57,17 @@ pub struct DefinedNameMut {
     pub local_sheet_id: Option<u32>,
     pub hidden: Option<bool>,
     pub comment: Option<String>,
+    pub custom_menu: Option<String>,
+    pub description: Option<String>,
+    pub help: Option<String>,
+    pub status_bar: Option<String>,
+    pub shortcut_key: Option<String>,
+    pub function: Option<bool>,
+    pub function_group_id: Option<u32>,
+    pub vb_procedure: Option<bool>,
+    pub xlm: Option<bool>,
+    pub publish_to_server: Option<bool>,
+    pub workbook_parameter: Option<bool>,
 }
 
 /// One existing `<definedName>` entry parsed out of the source XML.
@@ -361,17 +372,46 @@ fn serialize_new_defined_name(out: &mut Vec<u8>, dn: &DefinedNameMut) {
     if let Some(idx) = dn.local_sheet_id {
         out.extend_from_slice(format!(" localSheetId=\"{idx}\"").as_bytes());
     }
+    // Attribute order mirrors `wolfxl-writer::emit::workbook_xml::emit_user_defined_names`
+    // so write-mode and modify-mode produce byte-identical `<definedName>` shapes.
+    push_opt_str_attr(out, b"comment", dn.comment.as_deref());
+    push_opt_str_attr(out, b"customMenu", dn.custom_menu.as_deref());
+    push_opt_str_attr(out, b"description", dn.description.as_deref());
+    push_opt_str_attr(out, b"help", dn.help.as_deref());
+    push_opt_str_attr(out, b"statusBar", dn.status_bar.as_deref());
+    push_opt_str_attr(out, b"shortcutKey", dn.shortcut_key.as_deref());
     if dn.hidden == Some(true) {
         out.extend_from_slice(b" hidden=\"1\"");
     }
-    if let Some(c) = &dn.comment {
-        out.extend_from_slice(b" comment=\"");
-        push_xml_attr_escape(out, c);
-        out.push(b'"');
+    push_opt_bool_true_attr(out, b"function", dn.function);
+    push_opt_bool_true_attr(out, b"vbProcedure", dn.vb_procedure);
+    push_opt_bool_true_attr(out, b"xlm", dn.xlm);
+    if let Some(id) = dn.function_group_id {
+        out.extend_from_slice(format!(" functionGroupId=\"{id}\"").as_bytes());
     }
+    push_opt_bool_true_attr(out, b"publishToServer", dn.publish_to_server);
+    push_opt_bool_true_attr(out, b"workbookParameter", dn.workbook_parameter);
     out.push(b'>');
     push_xml_text_escape(out, &dn.formula);
     out.extend_from_slice(b"</definedName>");
+}
+
+fn push_opt_str_attr(out: &mut Vec<u8>, key: &[u8], value: Option<&str>) {
+    if let Some(v) = value {
+        out.push(b' ');
+        out.extend_from_slice(key);
+        out.extend_from_slice(b"=\"");
+        push_xml_attr_escape(out, v);
+        out.push(b'"');
+    }
+}
+
+fn push_opt_bool_true_attr(out: &mut Vec<u8>, key: &[u8], value: Option<bool>) {
+    if value == Some(true) {
+        out.push(b' ');
+        out.extend_from_slice(key);
+        out.extend_from_slice(b"=\"1\"");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +474,27 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         attrs.retain(|(k, _)| k.as_slice() != key);
     }
 
+    fn upsert_opt_str(
+        attrs: &mut Vec<(Vec<u8>, String)>,
+        key: &[u8],
+        value: Option<&str>,
+    ) {
+        if let Some(v) = value {
+            upsert_attr(attrs, key, v.to_string());
+        }
+    }
+    fn upsert_opt_bool_true(
+        attrs: &mut Vec<(Vec<u8>, String)>,
+        key: &[u8],
+        value: Option<bool>,
+    ) {
+        match value {
+            Some(true) => upsert_attr(attrs, key, "1".to_string()),
+            Some(false) => remove_attr(attrs, key),
+            None => { /* preserve source */ }
+        }
+    }
+
     upsert_attr(&mut existing_attrs, b"name", upsert.name.clone());
     match upsert.local_sheet_id {
         Some(idx) => upsert_attr(&mut existing_attrs, b"localSheetId", idx.to_string()),
@@ -446,9 +507,24 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         Some(false) => remove_attr(&mut existing_attrs, b"hidden"),
         None => { /* preserve source */ }
     }
-    if let Some(c) = &upsert.comment {
-        upsert_attr(&mut existing_attrs, b"comment", c.clone());
+    upsert_opt_str(&mut existing_attrs, b"comment", upsert.comment.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"customMenu", upsert.custom_menu.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"description", upsert.description.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"help", upsert.help.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"statusBar", upsert.status_bar.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"shortcutKey", upsert.shortcut_key.as_deref());
+    upsert_opt_bool_true(&mut existing_attrs, b"function", upsert.function);
+    upsert_opt_bool_true(&mut existing_attrs, b"vbProcedure", upsert.vb_procedure);
+    upsert_opt_bool_true(&mut existing_attrs, b"xlm", upsert.xlm);
+    if let Some(id) = upsert.function_group_id {
+        upsert_attr(&mut existing_attrs, b"functionGroupId", id.to_string());
     }
+    upsert_opt_bool_true(&mut existing_attrs, b"publishToServer", upsert.publish_to_server);
+    upsert_opt_bool_true(
+        &mut existing_attrs,
+        b"workbookParameter",
+        upsert.workbook_parameter,
+    );
 
     // Re-emit the element. Attribute order: keep original order for
     // attrs that existed, then append any newly added ones.

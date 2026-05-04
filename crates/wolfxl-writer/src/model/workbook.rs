@@ -237,6 +237,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         wb.defined_names.push(DefinedName {
             name: "OnC".to_string(),
@@ -244,6 +245,7 @@ mod tests {
             scope_sheet_index: Some(2),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
 
         wb.move_sheet("A", 2).unwrap();

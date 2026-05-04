@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **64** / 75
-- 🟡 Partial: **4** / 75
+- ✅ Supported: **65** / 75
+- 🟡 Partial: **3** / 75
 - ❌ Not Yet: **1** / 75
 - ⛔ Out of Scope: **6** / 75
 
@@ -174,7 +174,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
 | `wb.defined_names + DefinedName(name=, value=)` | `wb.defined_names + DefinedName(name=, value=)` | ✅ Supported |  |  |
-| `hidden, comment, custom_menu, function, function_group_id, shortcut_key` | `hidden, comment, custom_menu, function, function_group_id, shortcut_key` | 🟡 Partial | G22 |  |
+| `full ECMA-376 §18.2.5 attribute surface (13 attrs)` | `full ECMA-376 §18.2.5 attribute surface (13 attrs)` | ✅ Supported |  |  |
 
 ## Print settings + page setup
 

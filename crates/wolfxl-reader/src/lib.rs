@@ -884,11 +884,29 @@ pub struct Table {
 }
 
 /// Parsed workbook defined name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Phase 2 (G22) extends the struct to carry the full ECMA-376
+/// `definedName` attribute surface that openpyxl exposes. `comment`
+/// and `hidden` were previously parsed by the writer but never surfaced
+/// from the reader; everything else is new in Phase 2.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamedRange {
     pub name: String,
     pub scope: String,
     pub refers_to: String,
+    pub comment: Option<String>,
+    pub hidden: bool,
+    pub custom_menu: Option<String>,
+    pub description: Option<String>,
+    pub help: Option<String>,
+    pub status_bar: Option<String>,
+    pub shortcut_key: Option<String>,
+    pub function: Option<bool>,
+    pub function_group_id: Option<u32>,
+    pub vb_procedure: Option<bool>,
+    pub xlm: Option<bool>,
+    pub publish_to_server: Option<bool>,
+    pub workbook_parameter: Option<bool>,
 }
 
 /// Parsed worksheet print-title ranges.
@@ -1562,6 +1580,8 @@ fn parse_workbook(
     let mut current_name: Option<String> = None;
     let mut current_local_id: Option<usize> = None;
     let mut current_name_text = String::new();
+    // G22 — accumulate the rest of the ECMA-376 `<definedName>` attrs.
+    let mut current_dn_attrs: RawNamedRangeAttrs = RawNamedRangeAttrs::default();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -1600,6 +1620,21 @@ fn parse_workbook(
                     current_local_id =
                         attr_value(&e, b"localSheetId").and_then(|v| v.parse::<usize>().ok());
                     current_name_text.clear();
+                    current_dn_attrs = RawNamedRangeAttrs {
+                        comment: attr_value(&e, b"comment"),
+                        hidden: attr_bool_default(&e, b"hidden", false),
+                        custom_menu: attr_value(&e, b"customMenu"),
+                        description: attr_value(&e, b"description"),
+                        help: attr_value(&e, b"help"),
+                        status_bar: attr_value(&e, b"statusBar"),
+                        shortcut_key: attr_value(&e, b"shortcutKey"),
+                        function: attr_bool(&e, b"function"),
+                        function_group_id: attr_u32(&e, b"functionGroupId"),
+                        vb_procedure: attr_bool(&e, b"vbProcedure"),
+                        xlm: attr_bool(&e, b"xlm"),
+                        publish_to_server: attr_bool(&e, b"publishToServer"),
+                        workbook_parameter: attr_bool(&e, b"workbookParameter"),
+                    };
                 }
                 _ => {}
             },
@@ -1616,24 +1651,28 @@ fn parse_workbook(
                     in_defined_name = false;
                     if let Some(name) = current_name.take() {
                         let refers_to = current_name_text.trim().to_string();
+                        let attrs = std::mem::take(&mut current_dn_attrs);
                         if name == "_xlnm.Print_Area" && !refers_to.is_empty() {
-                            raw_print_areas.push(RawNamedRange {
+                            raw_print_areas.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         } else if name == "_xlnm.Print_Titles" && !refers_to.is_empty() {
-                            raw_print_titles.push(RawNamedRange {
+                            raw_print_titles.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         } else if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
-                            raw_names.push(RawNamedRange {
+                            raw_names.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         }
                     }
                 }
@@ -1668,11 +1707,49 @@ fn parse_workbook(
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct RawNamedRange {
     name: String,
     local_id: Option<usize>,
     refers_to: String,
+    /// Phase 2 (G22) — extra ECMA-376 attrs preserved through resolve.
+    /// Held as a sub-struct so xlsb.rs can also build raw entries with
+    /// `RawNamedRange { name, local_id, refers_to, attrs: Default::default() }`
+    /// without spelling out the dozen extra fields.
+    attrs: RawNamedRangeAttrs,
+}
+
+impl RawNamedRange {
+    fn from_attrs(
+        name: String,
+        local_id: Option<usize>,
+        refers_to: String,
+        attrs: RawNamedRangeAttrs,
+    ) -> Self {
+        Self {
+            name,
+            local_id,
+            refers_to,
+            attrs,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct RawNamedRangeAttrs {
+    comment: Option<String>,
+    hidden: bool,
+    custom_menu: Option<String>,
+    description: Option<String>,
+    help: Option<String>,
+    status_bar: Option<String>,
+    shortcut_key: Option<String>,
+    function: Option<bool>,
+    function_group_id: Option<u32>,
+    vb_procedure: Option<bool>,
+    xlm: Option<bool>,
+    publish_to_server: Option<bool>,
+    workbook_parameter: Option<bool>,
 }
 
 impl WorkbookProtection {
@@ -1804,6 +1881,19 @@ fn resolve_named_ranges(sheet_refs: &[SheetRef], raw_names: Vec<RawNamedRange>) 
                 name: raw.name,
                 scope,
                 refers_to,
+                comment: raw.attrs.comment,
+                hidden: raw.attrs.hidden,
+                custom_menu: raw.attrs.custom_menu,
+                description: raw.attrs.description,
+                help: raw.attrs.help,
+                status_bar: raw.attrs.status_bar,
+                shortcut_key: raw.attrs.shortcut_key,
+                function: raw.attrs.function,
+                function_group_id: raw.attrs.function_group_id,
+                vb_procedure: raw.attrs.vb_procedure,
+                xlm: raw.attrs.xlm,
+                publish_to_server: raw.attrs.publish_to_server,
+                workbook_parameter: raw.attrs.workbook_parameter,
             }
         })
         .collect()
@@ -6030,11 +6120,13 @@ mod tests {
                     name: "GlobalName".to_string(),
                     scope: "workbook".to_string(),
                     refers_to: "Visible!$A$1".to_string(),
+                    ..Default::default()
                 },
                 NamedRange {
                     name: "LocalName".to_string(),
                     scope: "sheet".to_string(),
                     refers_to: "Hidden!$B$2".to_string(),
+                    ..Default::default()
                 },
             ]
         );

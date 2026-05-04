@@ -342,3 +342,44 @@ def test_rfc021_pending_queue_cleared_after_save(tmp_path: Path) -> None:
     assert dst1_xml.count('name="Once"') == 1
     # Source remains untouched.
     assert src_xml == _read_workbook_xml(src)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (G22) — `hidden=False` in modify mode clears an existing
+# `hidden="1"`. Regression guard for the bug Codex flagged: the Python
+# patcher payload used to omit the key on False, which the Rust upsert
+# treated as "preserve source" instead of "remove the attr".
+# ---------------------------------------------------------------------------
+
+
+def test_g22_modify_mode_clears_hidden_when_set_false(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+
+    # Seed a workbook with a hidden defined name (open + save in
+    # modify mode so the source file genuinely contains hidden="1").
+    wb_seed = openpyxl.Workbook()
+    ws = wb_seed.active
+    ws.title = "Sheet1"
+    ws["A1"] = "x"
+    wb_seed.save(src)
+
+    seed = load_workbook(src, modify=True)
+    seed.defined_names["Helper"] = DefinedName(
+        name="Helper", value="Sheet1!$A$1", hidden=True
+    )
+    seeded = tmp_path / "seeded.xlsx"
+    seed.save(seeded)
+    assert 'hidden="1"' in _read_workbook_xml(seeded)
+
+    # Now clear hidden via modify mode.
+    wb = load_workbook(seeded, modify=True)
+    wb.defined_names["Helper"] = DefinedName(
+        name="Helper", value="Sheet1!$A$1", hidden=False
+    )
+    wb.save(dst)
+
+    xml = _read_workbook_xml(dst)
+    assert 'name="Helper"' in xml
+    # The whole point of this test: hidden="1" must be gone.
+    assert 'hidden="1"' not in xml

@@ -677,10 +677,9 @@ ENTRIES: list[Entry] = [
     {
         "id": "defined_names.edge_cases",
         "category": "defined_names",
-        "openpyxl": "hidden, comment, custom_menu, function, function_group_id, shortcut_key",
-        "wolfxl": "hidden, comment, custom_menu, function, function_group_id, shortcut_key",
-        "status": "partial",
-        "gap_id": "G22",
+        "openpyxl": "full ECMA-376 §18.2.5 attribute surface (13 attrs)",
+        "wolfxl": "full ECMA-376 §18.2.5 attribute surface (13 attrs)",
+        "status": "supported",
         "probe": "defined_names_edge_cases",
     },
     # --- Print settings ---------------------------------------------------

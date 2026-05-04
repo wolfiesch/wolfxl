@@ -108,7 +108,24 @@ def get_defined_names(wb: Any) -> Any:
                 refers_to = entry["refers_to"]
                 if refers_to.startswith("="):
                     refers_to = refers_to[1:]
-                dn = DefinedName(name=name, value=refers_to, localSheetId=None)
+                dn = DefinedName(
+                    name=name,
+                    value=refers_to,
+                    localSheetId=None,
+                    comment=entry.get("comment"),
+                    hidden=bool(entry.get("hidden", False)),
+                    customMenu=entry.get("custom_menu"),
+                    description=entry.get("description"),
+                    help=entry.get("help"),
+                    statusBar=entry.get("status_bar"),
+                    shortcutKey=entry.get("shortcut_key"),
+                    function=entry.get("function"),
+                    functionGroupId=entry.get("function_group_id"),
+                    vbProcedure=entry.get("vb_procedure"),
+                    xlm=entry.get("xlm"),
+                    publishToServer=entry.get("publish_to_server"),
+                    workbookParameter=entry.get("workbook_parameter"),
+                )
                 dict.__setitem__(dnd, name, dn)
     dnd._wb = wb  # noqa: SLF001
     wb._defined_names_cache = dnd  # noqa: SLF001

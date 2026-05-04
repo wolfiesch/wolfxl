@@ -65,6 +65,18 @@ def _flush_defined_names(wb: Any, writer: Any) -> None:
                     "comment": defined_name.comment,
                     "local_sheet_id": defined_name.localSheetId,
                     "hidden": defined_name.hidden,
+                    # G22 — full ECMA-376 attribute surface.
+                    "custom_menu": defined_name.custom_menu,
+                    "description": defined_name.description,
+                    "help": defined_name.help,
+                    "status_bar": defined_name.status_bar,
+                    "shortcut_key": defined_name.shortcut_key,
+                    "function": defined_name.function,
+                    "function_group_id": defined_name.function_group_id,
+                    "vb_procedure": defined_name.vb_procedure,
+                    "xlm": defined_name.xlm,
+                    "publish_to_server": defined_name.publish_to_server,
+                    "workbook_parameter": defined_name.workbook_parameter,
                 },
             )
         wb._pending_defined_names.clear()  # noqa: SLF001

@@ -889,11 +889,23 @@ impl XlsxPatcher {
     /// Queue a defined-name upsert (RFC-021).
     ///
     /// `payload` keys (`name` + `formula` required; rest optional):
-    ///   - `name`            (str)  — defined name. Includes any `_xlnm.` prefix verbatim.
-    ///   - `formula`         (str)  — XML text content (no leading `=`).
-    ///   - `local_sheet_id`  (int?) — `None` = workbook-scope; 0-based sheet position otherwise.
-    ///   - `hidden`          (bool?)— `True` emits `hidden="1"`.
-    ///   - `comment`         (str?) — defined-name `comment` attribute.
+    ///   - `name`               (str)  — defined name. Includes any `_xlnm.` prefix verbatim.
+    ///   - `formula`            (str)  — XML text content (no leading `=`).
+    ///   - `local_sheet_id`     (int?) — `None` = workbook-scope; 0-based sheet position otherwise.
+    ///   - `hidden`             (bool?)— `True` emits `hidden="1"`.
+    ///   - `comment`            (str?) — defined-name `comment` attribute.
+    ///   - Phase 2 (G22) — full ECMA-376 §18.2.5 attribute surface:
+    ///     - `custom_menu`      (str?)
+    ///     - `description`      (str?)
+    ///     - `help`             (str?)
+    ///     - `status_bar`       (str?)
+    ///     - `shortcut_key`     (str?)
+    ///     - `function`         (bool?)
+    ///     - `function_group_id`(int?)
+    ///     - `vb_procedure`     (bool?)
+    ///     - `xlm`              (bool?)
+    ///     - `publish_to_server`(bool?)
+    ///     - `workbook_parameter`(bool?)
     ///
     /// Drained by Phase 2.5f during `do_save`. Upsert key is
     /// `(name, local_sheet_id)` — two entries with the same name but
@@ -909,11 +921,19 @@ impl XlsxPatcher {
             Some(v) if !v.is_none() => Some(v.extract::<u32>()?),
             _ => None,
         };
-        let hidden = match payload.get_item("hidden")? {
-            Some(v) if !v.is_none() => Some(v.extract::<bool>()?),
-            _ => None,
-        };
+        let hidden = extract_bool(payload, "hidden")?;
         let comment = extract_str(payload, "comment")?;
+        let custom_menu = extract_str(payload, "custom_menu")?;
+        let description = extract_str(payload, "description")?;
+        let help = extract_str(payload, "help")?;
+        let status_bar = extract_str(payload, "status_bar")?;
+        let shortcut_key = extract_str(payload, "shortcut_key")?;
+        let function = extract_bool(payload, "function")?;
+        let function_group_id = extract_u32(payload, "function_group_id")?;
+        let vb_procedure = extract_bool(payload, "vb_procedure")?;
+        let xlm = extract_bool(payload, "xlm")?;
+        let publish_to_server = extract_bool(payload, "publish_to_server")?;
+        let workbook_parameter = extract_bool(payload, "workbook_parameter")?;
         self.queued_defined_names
             .push(defined_names::DefinedNameMut {
                 name,
@@ -921,6 +941,17 @@ impl XlsxPatcher {
                 local_sheet_id,
                 hidden,
                 comment,
+                custom_menu,
+                description,
+                help,
+                status_bar,
+                shortcut_key,
+                function,
+                function_group_id,
+                vb_procedure,
+                xlm,
+                publish_to_server,
+                workbook_parameter,
             });
         Ok(())
     }

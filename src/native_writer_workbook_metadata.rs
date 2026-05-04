@@ -41,13 +41,51 @@ pub(crate) fn dict_to_defined_name(
         None
     };
 
+    let hidden: bool = cfg
+        .get_item("hidden")?
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(false);
+
     Ok(Some(DefinedName {
         name,
         formula: refers_to,
         scope_sheet_index,
         builtin: None,
-        hidden: false,
+        hidden,
+        comment: extract_opt_str(cfg, "comment")?,
+        custom_menu: extract_opt_str(cfg, "custom_menu")?,
+        description: extract_opt_str(cfg, "description")?,
+        help: extract_opt_str(cfg, "help")?,
+        status_bar: extract_opt_str(cfg, "status_bar")?,
+        shortcut_key: extract_opt_str(cfg, "shortcut_key")?,
+        function: extract_opt_bool(cfg, "function")?,
+        function_group_id: extract_opt_u32(cfg, "function_group_id")?,
+        vb_procedure: extract_opt_bool(cfg, "vb_procedure")?,
+        xlm: extract_opt_bool(cfg, "xlm")?,
+        publish_to_server: extract_opt_bool(cfg, "publish_to_server")?,
+        workbook_parameter: extract_opt_bool(cfg, "workbook_parameter")?,
     }))
+}
+
+fn extract_opt_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => v.extract::<String>().map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn extract_opt_bool(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => v.extract::<bool>().map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn extract_opt_u32(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<u32>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => v.extract::<u32>().map(Some),
+        _ => Ok(None),
+    }
 }
 
 /// Build a `DocProperties` from a flat props dict.

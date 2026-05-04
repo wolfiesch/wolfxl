@@ -332,17 +332,44 @@ def flush_defined_names_to_patcher(wb: Any) -> None:
 
 
 def _defined_name_payload(defined_name: Any) -> dict[str, Any]:
-    """Build the Rust patcher payload for a workbook defined name."""
+    """Build the Rust patcher payload for a workbook defined name.
+
+    Phase 2 (G22) — full ECMA-376 §18.2.5 attribute surface. ``None``
+    fields are omitted so the Rust patcher's ``serialize_upsert_over_existing``
+    treats them as "preserve source"; an explicit ``False`` for a
+    ``true``-emitted bool attr (e.g. ``vbProcedure``) drives a remove on
+    upsert, matching openpyxl's "absent attr means default".
+    """
     payload: dict[str, Any] = {
         "name": defined_name.name,
         "formula": defined_name.value,
     }
     if defined_name.localSheetId is not None:
         payload["local_sheet_id"] = defined_name.localSheetId
-    if defined_name.hidden:
-        payload["hidden"] = True
+    # `hidden` is always a `bool` on the Python class (default False, never
+    # None), so send it explicitly. The patcher upsert path treats
+    # `Some(false)` as "remove the attr from the source XML" — without an
+    # explicit False here, an existing `hidden="1"` would survive a
+    # `dn.hidden = False` modify-mode write. (Codex review, Phase 2.)
+    payload["hidden"] = bool(defined_name.hidden)
     if defined_name.comment is not None:
         payload["comment"] = defined_name.comment
+    for src_attr, payload_key in (
+        ("custom_menu", "custom_menu"),
+        ("description", "description"),
+        ("help", "help"),
+        ("status_bar", "status_bar"),
+        ("shortcut_key", "shortcut_key"),
+        ("function", "function"),
+        ("function_group_id", "function_group_id"),
+        ("vb_procedure", "vb_procedure"),
+        ("xlm", "xlm"),
+        ("publish_to_server", "publish_to_server"),
+        ("workbook_parameter", "workbook_parameter"),
+    ):
+        v = getattr(defined_name, src_attr, None)
+        if v is not None:
+            payload[payload_key] = v
     return payload
 
 

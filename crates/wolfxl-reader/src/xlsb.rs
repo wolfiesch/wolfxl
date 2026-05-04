@@ -569,6 +569,10 @@ fn resolve_xlsb_named_ranges(
                 name: raw.name,
                 scope,
                 refers_to,
+                // BIFF12 doesn't carry the ECMA-376 extra attrs; G22 fields
+                // default to None/false so the public NamedRange has a
+                // consistent shape across xlsx/xlsb readers.
+                ..Default::default()
             }
         })
         .collect()
@@ -2557,6 +2561,7 @@ mod tests {
             name: "Revenue".to_string(),
             scope: "workbook".to_string(),
             refers_to: "Data!$A$1".to_string(),
+            ..Default::default()
         }];
         let context = formula::FormulaContext {
             sheets: &[],
@@ -2726,6 +2731,7 @@ mod tests {
                 name: "GlobalRange".to_string(),
                 scope: "workbook".to_string(),
                 refers_to: "Data!$A$1:$A$2".to_string(),
+                ..Default::default()
             }]
         );
     }
@@ -2759,6 +2765,7 @@ mod tests {
                 name: "LocalConstant".to_string(),
                 scope: "sheet".to_string(),
                 refers_to: "Other!7".to_string(),
+                ..Default::default()
             }
         );
     }
