@@ -61,6 +61,8 @@ from ._table import (
     PivotTableStyleInfo,
     RowField,
 )
+# G17 / RFC-070 — modify-mode pivot mutation handle.
+from ._handle import PivotTableHandle
 # RFC-061 sub-features.
 from ._slicer import Slicer, SlicerCache, SlicerItem
 from ._calc import CalculatedField, CalculatedItem
@@ -90,6 +92,8 @@ __all__ = [
     "PivotItem",
     "Location",
     "PivotTableStyleInfo",
+    # G17 / RFC-070 — modify-mode mutation
+    "PivotTableHandle",
     # Chart linkage (RFC-049)
     "PivotSource",
     # Shared with charts

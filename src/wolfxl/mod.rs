@@ -21,6 +21,8 @@ pub mod patcher_drawing;
 pub mod patcher_models;
 pub mod patcher_payload;
 pub mod patcher_pivot;
+pub mod patcher_pivot_edit;
+pub mod patcher_pivot_parse;
 mod patcher_save;
 pub mod patcher_sheet_blocks;
 pub mod patcher_sheet_copy;
@@ -294,6 +296,11 @@ pub struct XlsxPatcher {
     /// by sheet title. Drained by Phase 2.5m AFTER all caches are
     /// emitted (so the table → cache rels target is resolvable).
     queued_pivot_tables: HashMap<String, Vec<pivot::QueuedPivotTableAdd>>,
+    /// G17 / RFC-070 — pending source-range edits for existing
+    /// on-disk pivot caches. Drained by Phase 2.5m-edit (sequenced
+    /// immediately AFTER `apply_pivot_adds_phase`). Each edit names a
+    /// cache definition part and the new `<worksheetSource>` values.
+    queued_pivot_source_edits: Vec<patcher_pivot_edit::QueuedPivotSourceEdit>,
     /// Sprint Ν Pod-γ — workbook-scope cache_id allocator. Bumps
     /// monotonically as `queue_pivot_cache_add` is called. The
     /// counter starts at 0 (cache_id = `pivotCache.cacheId` attr;
@@ -503,6 +510,7 @@ impl XlsxPatcher {
             queued_charts: HashMap::new(),
             queued_pivot_caches: Vec::new(),
             queued_pivot_tables: HashMap::new(),
+            queued_pivot_source_edits: Vec::new(),
             next_pivot_cache_id: 0,
             queued_workbook_security: None,
             queued_autofilters: HashMap::new(),
@@ -1261,6 +1269,35 @@ impl XlsxPatcher {
                 sheet: sheet.to_string(),
                 table_xml,
                 cache_id,
+            });
+        Ok(())
+    }
+
+    /// G17 / RFC-070 — register a source-range mutation against an
+    /// existing on-disk pivot cache definition. Drained by Phase
+    /// 2.5m-edit (immediately AFTER `apply_pivot_adds_phase`).
+    ///
+    /// `cache_part_path` is the ZIP entry path of the cache
+    /// definition (e.g. `xl/pivotCache/pivotCacheDefinition1.xml`).
+    /// `new_ref` is the A1 range string. `new_sheet` is optional; pass
+    /// `None` to leave the existing `sheet=` attribute untouched (or
+    /// absent). `force_refresh_on_load` flips the
+    /// `<pivotCacheDefinition refreshOnLoad="1">` flag — caller is
+    /// responsible for setting it when the new range's column count
+    /// differs from the original.
+    fn register_pivot_source_edit(
+        &mut self,
+        cache_part_path: String,
+        new_ref: String,
+        new_sheet: Option<String>,
+        force_refresh_on_load: bool,
+    ) -> PyResult<()> {
+        self.queued_pivot_source_edits
+            .push(patcher_pivot_edit::QueuedPivotSourceEdit {
+                cache_part_path,
+                new_ref,
+                new_sheet,
+                force_refresh_on_load,
             });
         Ok(())
     }
@@ -2104,6 +2141,15 @@ impl XlsxPatcher {
             self.apply_pivot_adds_phase(&mut save.file_patches, &mut zip)?;
         }
 
+        // --- Phase 2.5m-edit: G17 / RFC-070 — pivot source-range
+        // mutation of *existing* pivot caches. Sequenced AFTER the
+        // adds phase so any cache definition just queued in this
+        // session is touched in its post-adds form. The phase is a
+        // no-op when no edits have been registered.
+        if !self.queued_pivot_source_edits.is_empty() {
+            self.apply_pivot_source_edits_phase(&mut save.file_patches, &mut zip)?;
+        }
+
         // --- Phase 2.5n: Sheet setup (Sprint Ο Pod 1A.5 / RFC-055) ---
         //
         // Drains queued sheet-setup mutations (sheetView /
@@ -2437,6 +2483,19 @@ impl XlsxPatcher {
         zip: &mut ZipArchive<File>,
     ) -> PyResult<()> {
         patcher_pivot::apply_pivot_adds_phase(self, file_patches, zip)
+    }
+
+    /// G17 / RFC-070 — Phase 2.5m-edit. Drains
+    /// `queued_pivot_source_edits` after the adds phase. Each edit
+    /// rewrites a cache definition's `<worksheetSource>` attributes
+    /// (and optionally the `<pivotCacheDefinition refreshOnLoad>`
+    /// flag) using the byte-level rewriter in `wolfxl_pivot::mutate`.
+    fn apply_pivot_source_edits_phase(
+        &mut self,
+        file_patches: &mut HashMap<String, Vec<u8>>,
+        zip: &mut ZipArchive<File>,
+    ) -> PyResult<()> {
+        patcher_pivot_edit::apply_pivot_source_edits_phase(self, file_patches, zip)
     }
 
     /// Sprint Ο Pod 3.5 (RFC-061 §3.1) — Phase 2.5p drain.

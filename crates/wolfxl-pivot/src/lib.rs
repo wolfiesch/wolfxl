@@ -20,6 +20,7 @@
 
 pub mod emit;
 pub mod model;
+pub mod mutate;
 pub mod parse;
 pub mod structural;
 

@@ -38,9 +38,17 @@ expect.
 </p>
 
 <p align="center">
-  <sub>ExcelBench-backed performance artifacts are being refreshed for the
-  v2.0 audit before public release claims are made.</sub>
+  <sub>Fresh WolfXL 2.0 release-artifact evidence is available in ExcelBench:
+  wheel-backed rerun, 18/18 green features, and dated performance snapshots.</sub>
 </p>
+
+## Current Evidence
+
+- WolfXL package surface is at `2.0.0`.
+- Current local verification is green: Rust workspace tests, Python package tests, and parity slices all pass in the 2026-04-28 audit.
+- Fresh wheel-backed ExcelBench rerun is now available: WolfXL reached `18/18` green features with `100%` pass rate in the [release snapshot fidelity report](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/README.md).
+- The paired dated evidence includes the [release snapshot dashboard](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/DASHBOARD.md) and the [matching perf snapshot](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/perf/README.md).
+- Use the [Public Evidence Status](docs/trust/public-evidence.md) page to see which claims are current, historical, or still gated.
 
 ## Install
 
@@ -108,6 +116,8 @@ chart.pivot_source = pt          # emits <c:pivotSource> + per-series <c:fmtId>
 ws.add_chart(chart, "F18")
 ```
 
+Existing pivots can be re-pointed at a new source range in modify mode (RFC-070 Option B); v1.0 covers source-range edits only — field placement, filter, and aggregation mutations are deferred.
+
 ## Three Modes
 
 <p align="center">
@@ -174,6 +184,10 @@ and clean install/import smoke from the release artifact. Do not use
 draft `10×-100×` marketing copy or placeholder benchmark rows as
 release evidence.
 
+For historical context and reproducible benchmark commands, see
+[Benchmark Results](docs/performance/benchmark-results.md). For the
+current claim status, see [Public Evidence Status](docs/trust/public-evidence.md).
+
 The implementation goal remains stable throughput as files grow, with
 linear pivot construction over source-row count.
 
@@ -204,7 +218,7 @@ Python-side constructor that emits the `pivotCacheRecords` snapshot.
 WolfXL's public ecosystem claim here is pending the final
 public-launch truth pass.
 
-WolfXL's public `.xlsx` reader is native. The compatibility readers for `.xlsb` and `.xls` still use Calamine-backed value and formula-cache paths.
+WolfXL's public `.xlsx` and `.xlsb` readers are native. `.xlsb` is read-only but exposes values, cached formula results, and cell styles; legacy `.xls` remains on the Calamine-backed value path.
 
 ## Batch APIs for Maximum Speed
 
@@ -303,6 +317,39 @@ Named ranges are resolved automatically. Error values (`#N/A`, `#VALUE!`, `#DIV/
 ## Case Study: SynthGL
 
 [SynthGL](https://github.com/SynthGL) switched from openpyxl to WolfXL for their GL journal exports (14-column financial data, 1K-50K rows). Results: **4x faster writes**, **9x faster reads** at scale. 50K-row exports dropped from 7.6s to 1.3s. [Read the full case study](docs/case-study-synthgl.md).
+
+## Case Study: Finance Template Modify Mode
+
+For a representative finance workflow, see
+[Template-Driven Finance Workbook Updates](docs/case-study-finance-template-modify.md).
+It benchmarks the exact workload where WolfXL is most differentiated:
+open an existing workbook with formulas, charts, comments, validations,
+and large detail sheets, touch three assumption cells, and save.
+
+## Case Study: Styled Report Generation
+
+For a fresh-workbook export path, see
+[Styled Report Generation](docs/case-study-styled-report-generation.md).
+The current local snapshot on a 10k-row reporting workbook came in at
+`0.553s` for `openpyxl` vs `0.380s` for WolfXL, about `1.46x` faster.
+
+## Case Study: Workbook-Preserving ETL
+
+For the "update one data block but keep the workbook" workflow, see
+[Workbook-Preserving ETL Update](docs/case-study-workbook-preserving-etl.md).
+The current local snapshot for replacing a `2,000`-row block inside a
+`20,000`-row reporting workbook came in at `1.064s` for `openpyxl` vs
+`0.496s` for WolfXL, about `2.15x` faster.
+
+## Case Study: Pivot Construction
+
+For a capability-first example, see
+[Pivot Construction From Python](docs/case-study-pivot-construction.md).
+It demonstrates workbook-scoped pivot cache creation, pivot-table emit,
+and pivot-linked chart output through WolfXL modify mode.
+The current local snapshot constructed the full artifact on a `10,000`-row
+source sheet in `0.229s` median with emitted pivot cache, pivot records,
+pivot table, and chart `<c:pivotSource>` parts all validated.
 
 ## How It Works
 

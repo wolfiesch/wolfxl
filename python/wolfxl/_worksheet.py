@@ -173,6 +173,9 @@ class Worksheet:
         "_pending_charts",
         # Pending pivot table queue.
         "_pending_pivot_tables",
+        # G17 / RFC-070 — lazy cache of PivotTableHandle objects
+        # parsed off disk in modify mode. Set on first read.
+        "_pivot_handles_cache",
         # Print/view/protection lazy slots.
         "_page_setup", "_page_margins", "_print_options", "_header_footer",
         "_sheet_properties", "_sheet_view", "_protection",
@@ -1177,7 +1180,7 @@ class Worksheet:
         """
         _add_chart(self, chart, anchor)
 
-    def add_pivot_table(self, pivot_table: Any) -> None:
+    def add_pivot_table(self, pivot_table: Any, anchor: str | None = None) -> None:
         """Attach a pivot table to this worksheet.
 
         The pivot table's cache must already be registered on the owning
@@ -1185,12 +1188,22 @@ class Worksheet:
 
         Args:
             pivot_table: Pivot table object to attach.
+            anchor: Optional A1-style anchor that overrides the pivot
+                table's pre-set location. Matches the openpyxl/G17
+                pattern ``ws.add_pivot_table(pt, "A1")``.
 
         Raises:
             TypeError: If ``pivot_table`` is not a supported pivot table.
             ValueError: If the pivot table cache has not been registered.
             RuntimeError: If the workbook is not in modify mode.
         """
+        if anchor is not None:
+            from wolfxl.pivot._table import Location
+
+            if isinstance(pivot_table.location, Location):
+                pivot_table.location.ref = str(anchor)
+            else:
+                pivot_table.location = str(anchor)
         _add_pivot_table(self, pivot_table)
 
     def add_pivot(self, pivot_table: Any) -> None:
@@ -1474,6 +1487,34 @@ class Worksheet:
         dict starts empty and is populated by ``add_table()``.
         """
         return get_tables_map(self)
+
+    @property
+    def pivot_tables(self) -> list[Any]:
+        """Return the list of pivot tables on this sheet.
+
+        In modify mode the list is populated lazily by walking the
+        sheet's relationship graph and parsing the on-disk pivot
+        table parts. Each entry is a
+        :class:`~wolfxl.pivot.PivotTableHandle` whose ``.source``
+        attribute can be reassigned to mutate the underlying
+        ``<cacheSource><worksheetSource>`` element on save.
+
+        In construction mode the list is empty: pivots queued via
+        :meth:`add_pivot_table` are tracked separately on
+        ``_pending_pivot_tables`` until save.
+
+        Out-of-scope per RFC-070 §3 (Option B): mutating
+        field-placement, filters, or aggregation. Only ``.source``
+        round-trips today.
+        """
+        if self._pivot_handles_cache is not None:
+            return self._pivot_handles_cache
+        from wolfxl.pivot._load import load_pivot_tables_for_sheet
+
+        self._pivot_handles_cache = load_pivot_tables_for_sheet(
+            self._workbook, self
+        )
+        return self._pivot_handles_cache
 
     def add_table(self, table: Any) -> None:
         """Attach a table to this worksheet.
