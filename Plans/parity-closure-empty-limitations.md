@@ -1,19 +1,19 @@
 # Parity Closure — Empty `limitations.md`
 
 Date: 2026-05-04
-Status: Proposed. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; S8-S11 proposed). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
+Status: Active. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; Phase 1 and Phase 2 of this closure plan landed). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
 
 ## Context
 
 The user has demanded zero openpyxl-parity gaps. The current state, per the 2026-05-04 review:
 
-- `docs/trust/limitations.md` lists 8 items, but only 4 are true openpyxl-parity gaps. The other 4 are *wolfxl-extras*: `.xls` writes, `.xlsb` writes, `.ods` read+write, and VBA authoring. Openpyxl supports none of those formats, so wolfxl cannot have a "gap" relative to openpyxl on those rows. They belong in a separate "Beyond openpyxl" section (or removed entirely from a doc whose purpose is comparing wolfxl ↔ openpyxl), not in `limitations.md`.
-- `tests/test_openpyxl_compat_oracle.py` runs 53 probes; 51 pass, 2 xfail. 13 spec entries are marked `supported` but have no probe — that's hidden coverage debt.
-- `docs/migration/_compat_spec.py`: 64 supported / 5 partial / 5 not_yet / 1 out_of_scope across 75 entries.
+- Phase 1 recategorized wolfxl-extras (`.xls` writes, `.xlsb` writes, `.ods` read+write, `.xls` style reads, and VBA authoring) as `out_of_scope`, because openpyxl exposes none of those surfaces.
+- Phase 2 closed `defined_names.edge_cases`: `tests/test_openpyxl_compat_oracle.py` now runs 54 probes; 53 pass, 1 xfail. 13 spec entries are still marked `supported` but have no probe — that's hidden coverage debt.
+- `docs/migration/_compat_spec.py`: 65 supported / 3 partial / 1 not_yet / 6 out_of_scope across 75 entries.
 - The dynamic-surface ratchet (`tests/test_openpyxl_dynamic_surface.py`) only compares 3 objects (Workbook, Worksheet, Cell). It does not check Style, Color, Border, Font, Fill, Alignment, Protection, NamedStyle, DefinedName, ExternalLink, Pivot*, Chart*, Slicer, Image, Comment, Table, DataValidation. That's also hidden debt.
 - The openpyxl source-distribution test corpus has never been vendored, even though the parity program plan called for it in S1+.
 
-The four real parity gaps — pivot field/filter/aggregation mutation, external-link authoring, the four S8 P2s (G07, G21-G24), and CF rare combos — are the work this plan closes. Total ~5,540 LOC, ~18 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
+The remaining parity work is: pivot field/filter/aggregation mutation, external-link authoring, print-settings depth, dynamic-array spill metadata, calc-chain edge cases, standalone table-driven slicers, and the CF/dynamic-surface/probe/corpus measurement debt. Total ~5,120 LOC after Phase 2, ~17 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
 
 ## Definition of "no gaps with openpyxl"
 
@@ -128,7 +128,7 @@ Each phase is a separate landing on its own branch. Phases are largely independe
 **Verification:**
 - `cargo test --workspace` clean.
 - `uv run --no-sync maturin develop --release` rebuilds.
-- `uv run --no-sync pytest tests/test_openpyxl_compat_oracle.py::test_defined_names_edge_cases -v` — passes (no xfail).
+- `uv run --no-sync pytest tests/test_openpyxl_compat_oracle.py -k defined_names_edge_cases -v` — passes (no xfail).
 - `uv run --no-sync pytest tests/test_openpyxl_dynamic_surface.py -v` — does not regress (DefinedName not in current ratchet scope, but checking for crash regressions on the workbook-level diff).
 - `python scripts/render_compat_matrix.py` — totals: supported +1, partial -1.
 
@@ -328,7 +328,7 @@ Each phase is a separate landing on its own branch. Phases are largely independe
 - `docs/index.md` and any other public-facing claim docs: update language.
 - `Plans/openpyxl-parity-program.md`: mark all gaps (incl. G07/G21-G24 and the G17/G18 follow-ups) as landed; flip program status to "complete".
 
-**Verification:** `grep -ri "limitation\|gap\|partial\|not.yet\|deferred" docs/` returns zero results in user-facing docs (excluding the parity-program plan and historical RFCs).
+**Verification:** current user-facing docs (`README.md`, `docs/index.md`, `docs/migration/`, `docs/trust/`) no longer describe openpyxl-supported surfaces as `partial`, `not_yet`, `deferred`, or known limitations, except where historical release notes or the parity-program plan intentionally preserve project history.
 
 ## Critical files (cross-reference)
 
@@ -369,7 +369,7 @@ Frequently-modified shared files across phases:
 | Phase | Sessions | Owner mode | Dependencies | Status |
 |---|---|---|---|---|
 | 1 — Recategorize wolfxl-extras | 1 | Claude (mechanical) | none | LANDED 2026-05-04 |
-| 2 — G22 defined-name attrs | 1 | Codex 🤖 | Phase 1 | IN PROGRESS 2026-05-04 |
+| 2 — G22 defined-name attrs | 1 | Codex 🤖 | Phase 1 | LANDED 2026-05-04 |
 | 3 — G24 print settings depth | 2 | Codex 🤖 | Phase 1 | |
 | 4 — G07 spill metadata | 2 | Claude 🧠 | Phase 1 | |
 | 5 — G21 standalone slicers | 2 | Claude 🧠 | Phase 1 | |
@@ -402,4 +402,4 @@ Frequently-modified shared files across phases:
 ## Changelog
 
 - 2026-05-04: Plan created. Phase 1 landed (commit 4825baf).
-- 2026-05-04: Phase 2 started on branch `parity-closure-phase2`.
+- 2026-05-04: Phase 2 landed on branch `parity-closure-phase2`; Codex review tightened the hidden-clear regression and updated stale limitations/tracker text.

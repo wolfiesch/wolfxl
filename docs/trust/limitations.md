@@ -12,11 +12,12 @@ machine-checked source of truth is
 
 | Feature | Read | Write | Modify | Notes |
 |---------|:----:|:-----:|:------:|-------|
-| In-place pivot-table edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and (v1.0, RFC-070 Option B) mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, and aggregation mutations are deferred. |
-| Image replacement/deletion | Partial | Yes | Partial | `Image(...)` and `ws.add_image(...)` are supported; replacing or deleting existing image media is not a public API yet. |
-| Combination / multi-plot charts | Partial | No | Partial | Single-family chart construction is covered; combination charts are deferred. |
-| External workbook links (`wb._external_links`) | Partial | No | Preserve | v1.0 exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; authoring new external links is deferred. |
-| Diagonal border fidelity | Partial | Yes | Partial | Read recognizes diagonal metadata, but full diagonal style parity is still lower-confidence than top/bottom/left/right borders. |
+| In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
+| External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
+| Print settings depth | Partial | Partial | Partial | Basic `page_setup`, `page_margins`, print titles, and print areas work. The remaining gap is full PageSetup/PrintOptions depth, especially `<printOptions>` emission and a few less-common PageSetup attributes. |
+| Dynamic-array spill metadata | Partial | Partial | Partial | Array formulas and data-table formulas round-trip; dynamic-array spill metadata is not fully preserved yet. |
+| Calc-chain edge cases | Partial | Partial | Partial | Basic calc-chain rebuild is supported; cross-sheet ordering, deleted-cell pruning, and `calcChainExtLst` edge cases remain open. |
+| Standalone table-driven slicers | No | No | Preserve | Pivot-backed slicers are supported. Slicers tied directly to tables, outside a pivot context, are still unimplemented. |
 
 "Preserve" means the feature survives a load-modify-save cycle untouched, even
 though WolfXL does not expose a full authoring API for that surface.
@@ -25,10 +26,8 @@ though WolfXL does not expose a full authoring API for that surface.
 
 These openpyxl APIs are still incomplete or intentionally narrower:
 
-- `ws.add_image()` and `ws.add_chart()` support construction, but not public replace/delete operations.
 - `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
 - Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
-- `Workbook(write_only=True)` streams rows to a per-sheet temp file with bounded peak RSS (SST + styles only). It is append-only — `ws.append(row)` is the single row API; random access (`ws["A1"]`, `ws.cell(...)`, `iter_rows`), `merge_cells`, `add_chart`, `add_image`, `add_table`, `add_data_validation`, `add_pivot_table`, and `conditional_formatting` raise `AttributeError` on a write-only worksheet. Re-saving raises `WorkbookAlreadySaved`. Matches openpyxl's `_write_only.py` contract.
 
 ## Performance claim guardrails
 

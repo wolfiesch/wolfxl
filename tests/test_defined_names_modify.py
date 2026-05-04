@@ -383,3 +383,65 @@ def test_g22_modify_mode_clears_hidden_when_set_false(tmp_path: Path) -> None:
     assert 'name="Helper"' in xml
     # The whole point of this test: hidden="1" must be gone.
     assert 'hidden="1"' not in xml
+
+
+def test_g22_modify_mode_round_trips_full_defined_name_attr_surface(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_plain_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    wb.defined_names["Helper"] = DefinedName(
+        name="Helper",
+        value="Sheet1!$A$1",
+        hidden=True,
+        comment="phase2 helper",
+        customMenu="Custom Menu",
+        description="Full attr surface",
+        help="Press F1",
+        statusBar="Status prompt",
+        shortcutKey="K",
+        function=True,
+        functionGroupId=2,
+        vbProcedure=True,
+        xlm=True,
+        publishToServer=True,
+        workbookParameter=True,
+    )
+    wb.save(dst)
+
+    xml = _read_workbook_xml(dst)
+    for fragment in (
+        'name="Helper"',
+        'comment="phase2 helper"',
+        'customMenu="Custom Menu"',
+        'description="Full attr surface"',
+        'help="Press F1"',
+        'statusBar="Status prompt"',
+        'shortcutKey="K"',
+        'hidden="1"',
+        'function="1"',
+        'vbProcedure="1"',
+        'xlm="1"',
+        'functionGroupId="2"',
+        'publishToServer="1"',
+        'workbookParameter="1"',
+    ):
+        assert fragment in xml
+
+    rt = load_workbook(dst).defined_names["Helper"]
+    assert rt.comment == "phase2 helper"
+    assert rt.custom_menu == "Custom Menu"
+    assert rt.description == "Full attr surface"
+    assert rt.help == "Press F1"
+    assert rt.status_bar == "Status prompt"
+    assert rt.shortcut_key == "K"
+    assert rt.hidden is True
+    assert rt.function is True
+    assert rt.function_group_id == 2
+    assert rt.vb_procedure is True
+    assert rt.xlm is True
+    assert rt.publish_to_server is True
+    assert rt.workbook_parameter is True

@@ -1313,8 +1313,7 @@ def _probe_defined_names_edge_cases(tmp_path: Path) -> None:
         return
     opwb = opxl.load_workbook(out)
     op_dn = opwb.defined_names.get("Hidden")
-    if op_dn is None:
-        return
+    assert op_dn is not None
     assert op_dn.hidden is True or op_dn.hidden == 1
     assert op_dn.comment == "hidden helper"
     assert op_dn.customMenu == "Custom Menu Text"
