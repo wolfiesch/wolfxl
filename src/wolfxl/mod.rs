@@ -62,6 +62,8 @@ pub mod sheet_setup;
 pub mod page_breaks;
 // RFC-068 G08 step 5: modify-mode threaded comments + persons.
 pub mod threaded_comments;
+// RFC-071 / G18 — external link part + rels parsers.
+pub mod external_links;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;

@@ -495,9 +495,14 @@ ENTRIES: list[Entry] = [
         "category": "external_links",
         "openpyxl": "wb._external_links + xl/externalLinks/* parts",
         "wolfxl": "wb._external_links + xl/externalLinks/* parts",
-        "status": "not_yet",
-        "gap_id": "G18",
+        "status": "supported",
         "probe": "external_links_collection",
+        "notes": (
+            "v1.0 — read-only inspection (ExternalLink dataclass with "
+            "target / sheet_names / cached_data) + opaque preservation: "
+            "modify-mode round-trips xl/externalLinks/* and the matching "
+            "rels byte-for-byte. Authoring (append/remove) is deferred."
+        ),
     },
     # --- VBA --------------------------------------------------------------
     {

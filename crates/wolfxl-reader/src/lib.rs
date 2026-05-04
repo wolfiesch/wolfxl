@@ -8,6 +8,8 @@
 
 mod xlsb;
 
+pub mod external_links;
+
 pub use xlsb::NativeXlsbBook;
 
 use std::collections::HashMap;
