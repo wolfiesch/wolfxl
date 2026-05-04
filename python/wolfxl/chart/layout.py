@@ -2,8 +2,6 @@
 
 Mirrors :class:`openpyxl.chart.layout.Layout`. All fields are optional;
 the Rust emitter omits the element entirely when every slot is None.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

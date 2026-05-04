@@ -1,8 +1,6 @@
 """`<c:errBars>` — series error bars.
 
 Mirrors :class:`openpyxl.chart.error_bar.ErrorBars`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

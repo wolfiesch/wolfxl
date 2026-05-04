@@ -1,9 +1,7 @@
-"""`StockChart` — RFC-046 §11.2 — OHLC stock chart.
+"""`StockChart` — OHLC stock chart.
 
 Validates exactly 4 series in fixed Open / High / Low / Close order.
 Emits ``hi_low_lines: True`` and ``up_down_bars: True`` flags by default.
-
-Sprint Μ-prime Pod-β′ (RFC-046 §11.2).
 """
 
 from __future__ import annotations

@@ -1,10 +1,8 @@
-"""`ProjectedPieChart` — pie-of-pie / bar-of-pie (RFC-046 §11.4).
+"""`ProjectedPieChart` — pie-of-pie / bar-of-pie.
 
 Maps to ``<c:ofPieChart>``. Carries an ``of_pie_type`` (``"bar"`` or
 ``"pie"``), ``split_type`` selector, and ``split_pos`` /
 ``second_pie_size`` per the OOXML spec.
-
-Sprint Μ-prime Pod-β′ (RFC-046 §11.4).
 """
 
 from __future__ import annotations

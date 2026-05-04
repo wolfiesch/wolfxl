@@ -1,13 +1,13 @@
-"""``FieldGroup`` — RFC-061 §2.4 (date / range / discrete grouping).
+"""``FieldGroup`` — date / range / discrete grouping for pivot cache fields.
 
 Cache-scoped — when a pivot cache field is grouped (by date or by
 numeric range), the source field gets a ``FieldGroup`` and the
 cache materializes the synthesized group items into the cache's
-shared items per RFC-061 §3.3.
+shared items.
 
 Recursive grouping: a grouped field can be grouped again
 (``parent_index`` points at the parent FieldGroup's cache-field
-index). v2.0 caps recursion depth at 4.
+index). Recursion depth is capped at 4.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _VALID_GROUP_BY = (
 
 @dataclass
 class FieldGroupDate:
-    """Date-grouping spec. Matches RFC-061 §10.5 ``date`` sub-dict."""
+    """Date-grouping spec — emitted as the ``date`` sub-dict."""
 
     group_by: str
     start_date: str  # ISO 8601 'YYYY-MM-DDTHH:MM:SS'
@@ -53,8 +53,7 @@ class FieldGroupDate:
 
 @dataclass
 class FieldGroupRange:
-    """Numeric-range grouping spec. Matches RFC-061 §10.5 ``range``
-    sub-dict."""
+    """Numeric-range grouping spec — emitted as the ``range`` sub-dict."""
 
     start: float
     end: float
@@ -82,7 +81,7 @@ class FieldGroupRange:
 
 @dataclass
 class FieldGroup:
-    """Cache-scoped field-group. Matches RFC-061 §10.5 top-level dict.
+    """Cache-scoped field-group — top-level dict for the Rust emitter.
 
     ``kind`` is one of ``"date"``, ``"range"``, ``"discrete"``.
     Mutually exclusive with the per-kind sub-blocks: a date group
@@ -139,9 +138,9 @@ def synthesize_date_group_items(
 ) -> tuple[list[str], str, str]:
     """Build the synthesized group-item names for a date group.
 
-    Returns ``(items, start_iso, end_iso)``. Mirrors the example in
-    RFC-061 §3.3 — leading ``"<MM/DD/YYYY"`` sentinel, then per-bucket
-    labels, then trailing ``">MM/DD/YYYY"`` sentinel.
+    Returns ``(items, start_iso, end_iso)``. The shape Excel expects:
+    leading ``"<MM/DD/YYYY"`` sentinel, then per-bucket labels, then
+    trailing ``">MM/DD/YYYY"`` sentinel.
     """
     if isinstance(start, datetime):
         start_dt = start
@@ -194,9 +193,9 @@ def synthesize_range_group_items(
     end: float,
     interval: float,
 ) -> list[str]:
-    """Build numeric-range group items per RFC-061 §3.3 example.
+    """Build numeric-range group items in the shape Excel emits.
 
-    Format mirrors Excel: leading ``"<start"`` sentinel, then
+    Format: leading ``"<start"`` sentinel, then
     ``"start-(start+interval-1)"`` buckets, then trailing
     ``">end"`` sentinel.
     """

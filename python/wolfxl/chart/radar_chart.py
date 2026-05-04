@@ -1,8 +1,6 @@
 """`RadarChart` — radial / spider plots.
 
 Mirrors :class:`openpyxl.chart.radar_chart.RadarChart`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -70,7 +68,7 @@ class RadarChart(ChartBase):
         self.vary_colors = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {"radar_style": self.radarStyle}
         if self.dLbls is not None:
             from .series import _dlbls_to_snake

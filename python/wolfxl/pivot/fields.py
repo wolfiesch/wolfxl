@@ -1,7 +1,4 @@
-"""``openpyxl.pivot.fields`` — re-export shim for pivot-axis builders.
-
-Pod 2 (RFC-060).
-"""
+"""``openpyxl.pivot.fields`` — re-export shim for pivot-axis builders."""
 
 from __future__ import annotations
 

@@ -1,9 +1,6 @@
 """`PieChart`, `DoughnutChart`, and 3D / projected variants.
 
-Mirrors :class:`openpyxl.chart.pie_chart`. Pie + Doughnut are first-class;
-``PieChart3D`` and ``ProjectedPieChart`` are deferred to v1.6.1.
-
-Sprint Μ Pod-β (RFC-046).
+Mirrors :class:`openpyxl.chart.pie_chart`.
 """
 
 from __future__ import annotations
@@ -62,7 +59,7 @@ class PieChart(_PieChartBase):
         self.firstSliceAng = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {"first_slice_ang": self.firstSliceAng}
         if self.dLbls is not None:
             from .series import _dlbls_to_snake
@@ -100,7 +97,7 @@ class DoughnutChart(_PieChartBase):
         self.holeSize = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {"first_slice_ang": self.firstSliceAng}
         if self.holeSize is not None:
             d["hole_size"] = self.holeSize
@@ -111,7 +108,7 @@ class DoughnutChart(_PieChartBase):
 
 
 class PieChart3D(_PieChartBase):
-    """3D pie chart — RFC-046 §11.1.
+    """3D pie chart.
 
     Defaults: rot_x=30, rot_y=0, perspective=30.
     """

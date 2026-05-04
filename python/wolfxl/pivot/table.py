@@ -4,8 +4,6 @@ Wolfxl's pivot-table classes live in :mod:`wolfxl.pivot._table`; the
 package init re-exports them.  This module surfaces the same surface
 under the openpyxl-shaped explicit-module path so
 ``from openpyxl.pivot.table import PivotTable`` ports mechanically.
-
-Pod 2 (RFC-060).
 """
 
 from __future__ import annotations

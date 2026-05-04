@@ -1,12 +1,12 @@
-"""``CalculatedField`` / ``CalculatedItem`` — RFC-061 §2.2 / §2.3.
+"""``CalculatedField`` / ``CalculatedItem`` — pivot calc support.
 
 Calculated fields live on the cache; calculated items live on the
 pivot table. Excel evaluates the formulas on open — wolfxl does NOT
-pre-compute calc-field values into cache records (per RFC-061 §8).
+pre-compute calc-field values into cache records.
 
 The formulas are validated for parse-correctness via the
-``wolfxl-formula`` crate (RFC-012) at construction time when the
-crate is available; otherwise we accept any string.
+``wolfxl-formula`` crate at construction time when the crate is
+available; otherwise we accept any string.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ _VALID_DATA_TYPES = ("string", "number", "boolean", "date")
 
 @dataclass
 class CalculatedField:
-    """RFC-061 §10.3.
+    """Calculated field, scoped to the pivot cache.
 
     Lives in :class:`PivotCache.calculated_fields`; emitted as
     ``<calculatedField>`` and a companion entry in
@@ -60,7 +60,7 @@ class CalculatedField:
 
 @dataclass
 class CalculatedItem:
-    """RFC-061 §10.4.
+    """Calculated item, scoped to a pivot table.
 
     Lives on the pivot table; emitted as a `<calculatedItem>` inside
     the table XML (NOT cache XML).

@@ -10,8 +10,6 @@ the Rust emitter can serialise it.
   literal values, used for charts not backed by a sheet.
 * ``NumDataSource`` / ``AxDataSource`` — wrappers chosen by
   ``Series.val`` / ``Series.cat`` / etc.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

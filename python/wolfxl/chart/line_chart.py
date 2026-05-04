@@ -1,9 +1,6 @@
 """`LineChart` and `LineChart3D` — line plots.
 
-Mirrors :class:`openpyxl.chart.line_chart.LineChart`. ``LineChart3D`` is
-deferred to v1.6.1.
-
-Sprint Μ Pod-β (RFC-046).
+Mirrors :class:`openpyxl.chart.line_chart.LineChart`.
 """
 
 from __future__ import annotations
@@ -72,7 +69,7 @@ class LineChart(_LineChartBase):
         self.y_axis = NumericAxis()
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {"grouping": self.grouping}
         if self.dropLines is not None:
             d["drop_lines"] = self.dropLines.to_dict()
@@ -95,7 +92,7 @@ class LineChart(_LineChartBase):
 
 
 class LineChart3D(_LineChartBase):
-    """3D line chart — RFC-046 §11.1.
+    """3D line chart.
 
     Defaults: rot_x=15, rot_y=20, perspective=30, depth_percent=100.
     """

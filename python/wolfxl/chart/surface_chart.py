@@ -1,11 +1,9 @@
-"""`SurfaceChart` and `SurfaceChart3D` — RFC-046 §11.3.
+"""`SurfaceChart` and `SurfaceChart3D`.
 
 Both surface variants emit ``<c:surfaceChart>`` (2D) or
 ``<c:surface3DChart>`` (3D). The 2D form is a contour-style heatmap
 projection; the 3D form is a perspective-rendered surface. Both
 expose a ``wireframe: bool`` toggle.
-
-Sprint Μ-prime Pod-β′ (RFC-046 §11.3).
 """
 
 from __future__ import annotations
@@ -52,7 +50,7 @@ class SurfaceChart(_SurfaceChartBase):
 
 
 class SurfaceChart3D(_SurfaceChartBase):
-    """A 3-D surface chart — RFC-046 §11.1.
+    """A 3-D surface chart.
 
     Defaults: rot_x=15, rot_y=20, perspective=30, depth_percent=100.
     """

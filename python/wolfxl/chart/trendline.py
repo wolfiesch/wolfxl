@@ -1,8 +1,6 @@
 """`<c:trendline>` — series trendlines.
 
 Mirrors :class:`openpyxl.chart.trendline.Trendline`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

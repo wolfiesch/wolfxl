@@ -7,8 +7,6 @@ chart-context serialisation.
 
 Properties are stored as plain attributes; the ``to_dict()`` method emits
 the camelCase XML names that the Rust emitter expects.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -106,7 +104,7 @@ class GraphicalProperties:
             d["noFill"] = True
         if self.solidFill is not None:
             # Accept either a raw hex/scheme string OR a ColorChoice
-            # (or any object with __str__) — Pod-α's emitter takes a str.
+            # (or any object with __str__); the Rust emitter expects a str.
             d["solidFill"] = (
                 self.solidFill
                 if isinstance(self.solidFill, str)

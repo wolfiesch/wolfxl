@@ -1,8 +1,6 @@
 """`<c:marker>` and `<c:dPt>` — series markers + per-point overrides.
 
 Mirrors :mod:`openpyxl.chart.marker`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

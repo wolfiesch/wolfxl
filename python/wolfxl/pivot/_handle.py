@@ -1,8 +1,8 @@
-"""G17 / RFC-070 — :class:`PivotTableHandle`.
+""":class:`PivotTableHandle` — modify-mode proxy for an existing pivot table.
 
-Modify-mode proxy returned from ``Worksheet.pivot_tables`` for an
-existing pivot table parsed off disk. Carries the minimal metadata
-required by :ref:`RFC-070 §4.2`:
+Returned from ``Worksheet.pivot_tables`` for a pivot table that was
+parsed off disk. Carries the minimal metadata required to round-trip
+a source-range edit:
 
 - ``name`` (read-only) — the ``<pivotTableDefinition name="...">``.
 - ``location`` (read-only) — the ``<location ref="A1:E20">`` string.
@@ -13,8 +13,7 @@ required by :ref:`RFC-070 §4.2`:
   :meth:`Workbook.save` time via ``apply_pivot_source_edits_phase``.
 
 The handle is intentionally thin: full pivot mutation
-(field placement, filters, aggregation) is deferred to a future RFC
-per §3 (Option B scope).
+(field placement, filters, aggregation) is out of scope.
 """
 
 from __future__ import annotations

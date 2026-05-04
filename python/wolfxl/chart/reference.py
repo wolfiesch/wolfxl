@@ -8,8 +8,6 @@ Mirrors :class:`openpyxl.chart.reference.Reference`. Accepts either:
   used).
 
 The class is iterable over rows / cols (consumed by ``ChartBase.add_data``).
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -88,9 +86,9 @@ class Reference:
         if min_col is None or min_row is None:
             raise ValueError("Reference requires worksheet + min_col/min_row")
 
-        # RFC-046 §10.11.3 — explicit None worksheet is invalid (only a
-        # range_string-parsed Reference may carry a synthetic _DummyWorksheet
-        # in lieu of a real sheet handle).
+        # An explicit ``None`` worksheet is invalid: only a range_string-parsed
+        # Reference may carry a synthetic _DummyWorksheet in lieu of a real
+        # sheet handle.
         if worksheet is None:
             raise ValueError(
                 "Reference requires a worksheet handle (got None); "
@@ -104,7 +102,7 @@ class Reference:
         self.max_row = int(max_row) if max_row is not None else self.min_row
         self.range_string = range_string
 
-        # RFC-046 §10.11.3 — validate at construction time.
+        # Validate the bounds at construction time.
         if self.min_col < 1:
             raise ValueError(
                 f"Reference.min_col={self.min_col} must be >= 1 (1-based)"

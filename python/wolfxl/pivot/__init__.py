@@ -1,4 +1,4 @@
-"""``wolfxl.pivot`` — pivot-table construction (Sprint Ν, v2.0.0).
+"""``wolfxl.pivot`` — pivot-table construction.
 
 Mirrors :mod:`openpyxl.pivot`. The public surface is:
 
@@ -15,27 +15,28 @@ Mirrors :mod:`openpyxl.pivot`. The public surface is:
   :class:`ColumnField` / :class:`PageField` — explicit builders for
   pivot-table axes when the bare-string convenience form
   (``rows=["region"]``) doesn't fit.
+- :class:`PivotTableHandle` — modify-mode handle returned by
+  :meth:`Workbook.pivot_tables` for mutating pivot tables in an
+  existing workbook without rebuilding the cache.
 - :class:`Reference` — re-exported from :mod:`wolfxl.chart.reference`
   for source-range construction (the OOXML cache uses the exact same
   shape).
 
-See the §10 contracts in
-``Plans/rfcs/047-pivot-caches.md`` and
-``Plans/rfcs/048-pivot-tables.md`` for the authoritative dict shape
-emitted by ``to_rust_dict()``.
+Capabilities
+------------
 
-# Sprint Ν status
+Cache + records construction, layout serialization, slicers,
+calculated fields and items, field grouping (range, date, items),
+and pivot styling (formats, pivot areas, conditional formatting).
+Source-data ranges currently restricted to in-workbook
+``WorksheetSource``; external connections are not yet wired.
 
-This module replaces the v0.5.0+ ``_make_stub`` with real
-construction. The Rust emit functions live in ``crates/wolfxl-pivot``
-(PyO3-free) and are reached via the ``wolfxl._rust`` bindings:
+The Rust emit functions live in ``crates/wolfxl-pivot`` (PyO3-free)
+and are reached via the ``wolfxl._rust`` bindings:
 
 - ``serialize_pivot_cache_dict(d) -> bytes``
 - ``serialize_pivot_records_dict(d) -> bytes``
 - ``serialize_pivot_table_dict(d) -> bytes``
-
-Pod-γ wires those bindings during patcher Phase 2.5m and into the
-native writer.
 """
 
 from __future__ import annotations
@@ -61,9 +62,7 @@ from ._table import (
     PivotTableStyleInfo,
     RowField,
 )
-# G17 / RFC-070 — modify-mode pivot mutation handle.
 from ._handle import PivotTableHandle
-# RFC-061 sub-features.
 from ._slicer import Slicer, SlicerCache, SlicerItem
 from ._calc import CalculatedField, CalculatedItem
 from ._group import FieldGroup, FieldGroupRange, FieldGroupDate
@@ -75,13 +74,13 @@ from ._styling import (
 )
 
 __all__ = [
-    # Cache layer (RFC-047)
+    # Cache layer
     "PivotCache",
     "CacheField",
     "SharedItems",
     "CacheValue",
     "WorksheetSource",
-    # Table layer (RFC-048)
+    # Table layer
     "PivotTable",
     "PivotField",
     "DataField",
@@ -92,24 +91,24 @@ __all__ = [
     "PivotItem",
     "Location",
     "PivotTableStyleInfo",
-    # G17 / RFC-070 — modify-mode mutation
+    # Modify-mode mutation
     "PivotTableHandle",
-    # Chart linkage (RFC-049)
+    # Chart linkage
     "PivotSource",
     # Shared with charts
     "Reference",
-    # RFC-061 — Slicers (§2.1)
+    # Slicers
     "Slicer",
     "SlicerCache",
     "SlicerItem",
-    # RFC-061 — Calculated fields/items (§2.2 / §2.3)
+    # Calculated fields and items
     "CalculatedField",
     "CalculatedItem",
-    # RFC-061 — Group items (§2.4)
+    # Group items
     "FieldGroup",
     "FieldGroupRange",
     "FieldGroupDate",
-    # RFC-061 — Pivot styling (§2.5)
+    # Pivot styling
     "Format",
     "PivotArea",
     "PivotConditionalFormat",

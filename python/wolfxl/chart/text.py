@@ -5,8 +5,6 @@ surface (``RichText``, ``Text``, ``Paragraph``, ``RegularTextRun``,
 ``CharacterProperties``, ``ParagraphProperties``) but implement them as
 plain attribute carriers so the Rust emitter can serialise them with
 minimal Python side-validation.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

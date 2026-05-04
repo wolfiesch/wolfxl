@@ -1,4 +1,4 @@
-"""Sheet protection (RFC-055 §2.6).
+"""Sheet protection.
 
 Backs ``ws.protection``. Mirrors openpyxl's
 ``openpyxl.worksheet.protection.SheetProtection`` field surface

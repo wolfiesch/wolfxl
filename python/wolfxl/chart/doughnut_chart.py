@@ -3,8 +3,6 @@
 openpyxl keeps ``DoughnutChart`` in ``pie_chart.py`` because it shares the
 ``_PieChartBase`` ancestor; we follow that layout but expose it under its
 own module path too so users importing from either location keep working.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from .pie_chart import DoughnutChart

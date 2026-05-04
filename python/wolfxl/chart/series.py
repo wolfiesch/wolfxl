@@ -7,8 +7,6 @@ are already on the parent class); we keep it as a separate name purely so
 
 The ``attribute_mapping`` dict mirrors openpyxl's: it tells each chart type
 which slot subset of ``Series`` actually round-trips for its kind.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -206,7 +204,7 @@ class Series:
     def to_rust_dict(self, series_type: str = "bar") -> dict[str, Any]:
         """Serialise this series for a chart of the given ``series_type``.
 
-        Emits the RFC-046 §10.6 shape (snake_case, flat fields):
+        Emits a flat snake_case dict for the Rust emitter:
         ``{idx, order, title_ref|title_text, values_ref, categories_ref,
         x_values_ref, y_values_ref, bubble_size_ref, graphical_properties,
         marker, smooth, invert_if_negative, data_labels, err_bars,

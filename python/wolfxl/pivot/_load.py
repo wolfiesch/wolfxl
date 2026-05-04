@@ -1,5 +1,4 @@
-"""G17 / RFC-070 — load-time materialisation of existing pivot tables
-in modify mode.
+"""Load-time materialisation of existing pivot tables in modify mode.
 
 The patcher's source ZIP contains zero or more
 ``xl/pivotTables/pivotTable*.xml`` parts. Each is reachable from a
@@ -75,7 +74,7 @@ def load_pivot_tables_for_sheet(
     parse_table = getattr(_rust, "parse_pivot_table_meta", None)
     parse_cache = getattr(_rust, "parse_pivot_cache_source", None)
     if parse_table is None or parse_cache is None:
-        # Rust extension predates G17 — return empty rather than crash.
+        # Rust extension predates pivot-handle support — return empty rather than crash.
         return []
 
     handles: list[PivotTableHandle] = []

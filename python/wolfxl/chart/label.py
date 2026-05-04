@@ -1,8 +1,6 @@
 """`<c:dLbl>` and `<c:dLbls>` — data labels (per-point + series-level).
 
 Mirrors :mod:`openpyxl.chart.label`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

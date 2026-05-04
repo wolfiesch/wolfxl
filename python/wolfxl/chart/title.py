@@ -3,8 +3,6 @@
 Mirrors :class:`openpyxl.chart.title.Title`. The convenience descriptor
 ``TitleDescriptor`` accepts a string and inflates it into a
 single-paragraph rich-text title (matching openpyxl's ``title_maker``).
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -113,7 +111,7 @@ class Title:
                         if r.rPr.i is not None:
                             font["italic"] = r.rPr.i
                         if r.rPr.solidFill is not None:
-                            # Sprint Ξ: coerce openpyxl ColorChoice
+                            # Coerce openpyxl ColorChoice
                             # (e.g. ``ColorChoice(srgbClr="FF0000")``) to
                             # the hex string the Rust emitter wants.
                             sf = r.rPr.solidFill
@@ -195,16 +193,16 @@ class TitleDescriptor:
         if isinstance(value, str):
             value = title_maker(value)
         elif isinstance(value, RichText):
-            # Sprint Ξ (RFC-050): wolfxl-typed RichText.
+            # wolfxl-typed RichText.
             value = Title(tx=Text(rich=value))
         elif not isinstance(value, Title) and (
             type(value).__name__ == "RichText"
             and hasattr(value, "p")
         ):
-            # Sprint Ξ (RFC-050): openpyxl-typed RichText (or any
-            # duck-typed object with a ``.p`` attribute holding a
-            # paragraph list). Convert to wolfxl's RichText so the
-            # downstream ``to_dict`` path picks up the runs.
+            # openpyxl-typed RichText (or any duck-typed object with a
+            # ``.p`` attribute holding a paragraph list). Convert to
+            # wolfxl's RichText so the downstream ``to_dict`` path picks
+            # up the runs.
             value = Title(tx=Text(rich=_coerce_openpyxl_richtext(value)))
         if not isinstance(value, Title):
             raise TypeError(
@@ -216,8 +214,8 @@ class TitleDescriptor:
 def _coerce_openpyxl_richtext(value: Any) -> RichText:
     """Convert an openpyxl ``chart.text.RichText`` into wolfxl's.
 
-    Sprint Ξ helper. Reads ``value.bodyPr`` and ``value.p`` (a list of
-    openpyxl ``Paragraph`` objects) and rebuilds a wolfxl
+    Reads ``value.bodyPr`` and ``value.p`` (a list of openpyxl
+    ``Paragraph`` objects) and rebuilds a wolfxl
     :class:`RichText`. Run-level properties (``Paragraph.r[i].rPr``)
     are duck-typed; only the attributes wolfxl's ``CharacterProperties``
     understands are copied (``b``, ``i``, ``u``, ``sz``, ``solidFill``,
