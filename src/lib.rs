@@ -97,6 +97,15 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wolfxl::patcher_pivot_parse::parse_pivot_cache_source,
         m
     )?)?;
+    // G18 / RFC-071 — external link parsers (modify-mode load path).
+    m.add_function(wrap_pyfunction!(
+        wolfxl::external_links::parse_external_link_part,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::external_links::parse_external_link_rels,
+        m
+    )?)?;
     // Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format serialiser.
     m.add_function(wrap_pyfunction!(
         wolfxl::page_breaks::serialize_page_breaks_dict,

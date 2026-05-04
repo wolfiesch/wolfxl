@@ -13,6 +13,7 @@ WolfXL targets high-impact openpyxl-style workflows, not complete openpyxl API p
 | In-place pivot-table edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and (v1.0, RFC-070 Option B) mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, and aggregation mutations are deferred. |
 | Image replacement/deletion | Partial | Yes | Partial | `Image(...)` and `ws.add_image(...)` are supported; replacing or deleting existing image media is not a public API yet. |
 | Combination / multi-plot charts | Partial | No | Partial | Single-family chart construction is covered; combination charts are deferred. |
+| External workbook links (`wb._external_links`) | Partial | No | Preserve | v1.0 exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; authoring new external links is deferred. |
 | Diagonal border fidelity | Partial | Yes | Partial | Read recognizes diagonal metadata, but full diagonal style parity is still lower-confidence than top/bottom/left/right borders. |
 
 "Preserve" means the feature survives a load-modify-save cycle untouched, even

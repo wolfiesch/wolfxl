@@ -97,6 +97,12 @@ pub mod rt {
     pub const PRINTER_SETTINGS: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings";
 
+    // RFC-071 / G18 — external workbook links.
+    pub const EXTERNAL_LINK: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink";
+    pub const EXTERNAL_LINK_PATH: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath";
+
     // RFC-068 / G08 — threaded comments. Microsoft's `/2018/...` namespace.
     pub const THREADED_COMMENTS: &str =
         "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";

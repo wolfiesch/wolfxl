@@ -308,6 +308,39 @@ class Workbook:
         return None
 
     @property
+    def _external_links(self) -> list[Any]:
+        """Workbook-level external-link collection (RFC-071 / G18).
+
+        Lazily loaded the first time the property is read. For
+        write-mode workbooks (``Workbook()``) and bytes-backed reads
+        with no source path the list is empty by definition. Modify-mode
+        and path-backed read mode parse ``xl/externalLinks/`` parts on
+        first access.
+
+        v1.0 contract: read-only. The patcher preserves these parts
+        byte-for-byte on save; authoring is deferred to a follow-up RFC.
+        """
+        cached = getattr(self, "_external_links_cache", None)
+        if cached is not None:
+            return cached
+
+        from wolfxl import _external_links as _el
+
+        source_path = getattr(self, "_source_path", None)
+        # Write mode: no source ZIP exists yet, return an empty list.
+        if self._rust_writer is not None or not source_path:
+            cached = []
+        else:
+            cached = _el.load_external_links(source_path)
+        self._external_links_cache = cached
+        return cached
+
+    @property
+    def external_links(self) -> list[Any]:
+        """Alias for :attr:`_external_links` (openpyxl-shape compat)."""
+        return self._external_links
+
+    @property
     def chartsheets(self) -> list[Any]:
         """Return chart sheets in this workbook.
 
