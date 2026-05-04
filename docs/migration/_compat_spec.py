@@ -427,8 +427,12 @@ ENTRIES: list[Entry] = [
         "category": "read",
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "calamine; value-only, styles raise",
-        "status": "partial",
-        "notes": "Style accessors raise; values + formulas read.",
+        "status": "out_of_scope",
+        "notes": (
+            "Style accessors raise; values + formulas read. openpyxl does "
+            "not support this surface; tracked as a wolfxl-extra roadmap "
+            "item, not an openpyxl-parity gap."
+        ),
     },
     {
         "id": "read.ods",
@@ -529,9 +533,13 @@ ENTRIES: list[Entry] = [
         "category": "vba",
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "macro authoring from Python",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G28",
-        "notes": "Decision-gated (S11).",
+        "notes": (
+            "Decision-gated (S11). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     # --- Legacy formats ---------------------------------------------------
     {
@@ -539,27 +547,39 @@ ENTRIES: list[Entry] = [
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "write `.xlsb`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G25",
-        "notes": "Decision-gated (S9).",
+        "notes": (
+            "Decision-gated (S9). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     {
         "id": "legacy_formats.xls_write",
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "write `.xls`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G26",
-        "notes": "Decision-gated (S9).",
+        "notes": (
+            "Decision-gated (S9). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     {
         "id": "legacy_formats.ods_read_write",
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "read+write `.ods`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G27",
-        "notes": "Decision-gated (S10).",
+        "notes": (
+            "Decision-gated (S10). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     # --- Comments ---------------------------------------------------------
     {

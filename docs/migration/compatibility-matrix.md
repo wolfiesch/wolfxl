@@ -16,9 +16,9 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 ## Totals
 
 - ✅ Supported: **64** / 75
-- 🟡 Partial: **5** / 75
-- ❌ Not Yet: **5** / 75
-- ⛔ Out of Scope: **1** / 75
+- 🟡 Partial: **4** / 75
+- ❌ Not Yet: **1** / 75
+- ⛔ Out of Scope: **6** / 75
 
 ## Workbook + Worksheet
 
@@ -97,7 +97,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `load_workbook(path)` | `load_workbook(path)` | ✅ Supported |  |  |
 | `not supported in openpyxl` | `native BIFF12; values, cached formulas, read-side styles` | ✅ Supported |  |  |
-| `not supported in openpyxl` | `calamine; value-only, styles raise` | 🟡 Partial |  | Style accessors raise; values + formulas read. |
+| `not supported in openpyxl` | `calamine; value-only, styles raise` | ⛔ Out of Scope |  | Style accessors raise; values + formulas read. openpyxl does not support this surface; tracked as a wolfxl-extra roadmap item, not an openpyxl-parity gap. |
 | `not supported in openpyxl` | `not supported (out of scope)` | ⛔ Out of Scope | G27 |  |
 
 ## Utility functions
@@ -134,15 +134,15 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `.xlsm preserved on read+write` | `.xlsm preserved on modify-mode save` | ✅ Supported |  |  |
 | `workbook.vba_archive (read-only inspection)` | `workbook.vba_archive (read-only inspection)` | ✅ Supported |  | v1.0: modify-mode loads only; returns raw xl/vbaProject.bin bytes. No authoring API (tracked under G28). |
-| `not supported in openpyxl` | `macro authoring from Python` | ❌ Not Yet | G28 | Decision-gated (S11). |
+| `not supported in openpyxl` | `macro authoring from Python` | ⛔ Out of Scope | G28 | Decision-gated (S11). openpyxl does not support this surface; tracked as a wolfxl-extra roadmap item, not an openpyxl-parity gap. |
 
 ## Legacy formats (`.xlsb` / `.xls` / `.ods`)
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `not supported` | `write `.xlsb`` | ❌ Not Yet | G25 | Decision-gated (S9). |
-| `not supported` | `write `.xls`` | ❌ Not Yet | G26 | Decision-gated (S9). |
-| `not supported` | `read+write `.ods`` | ❌ Not Yet | G27 | Decision-gated (S10). |
+| `not supported` | `write `.xlsb`` | ⛔ Out of Scope | G25 | Decision-gated (S9). openpyxl does not support this surface; tracked as a wolfxl-extra roadmap item, not an openpyxl-parity gap. |
+| `not supported` | `write `.xls`` | ⛔ Out of Scope | G26 | Decision-gated (S9). openpyxl does not support this surface; tracked as a wolfxl-extra roadmap item, not an openpyxl-parity gap. |
+| `not supported` | `read+write `.ods`` | ⛔ Out of Scope | G27 | Decision-gated (S10). openpyxl does not support this surface; tracked as a wolfxl-extra roadmap item, not an openpyxl-parity gap. |
 
 ## Comments
 
