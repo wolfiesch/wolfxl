@@ -293,3 +293,108 @@ fn extract_sheet_data(s: &str) -> &str {
     let close = s.find("</sheetData>").expect("sheetData close");
     &s[after_open..close]
 }
+
+#[test]
+fn streaming_save_emits_byte_identical_sheet_to_eager() {
+    // RFC-073 v2: the streaming-direct save path (`emit_streaming_to`)
+    // bypasses the eager [`sheet_xml::emit`] String accumulator and writes
+    // straight into the ZipWriter. The two paths must still produce the
+    // same `xl/worksheets/sheet1.xml` bytes — both call the same per-slot
+    // emitters; only the slot-6 body assembly differs.
+    //
+    // We pin `WOLFXL_TEST_EPOCH=0` so the surrounding ZIP container's
+    // mtimes are identical; without it, the per-entry mtime differs and
+    // the archive bytes diverge.
+    let _epoch = EpochGuard::set("0");
+
+    let make_rows = || {
+        (1..=20u32)
+            .map(|r| {
+                row_with(&[
+                    (1, WriteCellValue::Number(r as f64)),
+                    (2, WriteCellValue::Boolean(r % 2 == 0)),
+                    (3, WriteCellValue::String(format!("row-{}", r))),
+                ])
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // -- Eager path: build a regular Worksheet, save, extract sheet1.xml --
+    let mut eager_wb = Workbook::new();
+    let mut eager_sheet = Worksheet::new("Streamed");
+    for (i, row) in make_rows().into_iter().enumerate() {
+        let r = (i as u32) + 1;
+        for (col, cell) in row.cells {
+            eager_sheet.set_cell(r, col, cell);
+        }
+    }
+    eager_wb.add_sheet(eager_sheet);
+    let eager_archive = wolfxl_writer::emit_xlsx(&mut eager_wb);
+    let eager_sheet_bytes = read_zip_entry(&eager_archive, "xl/worksheets/sheet1.xml");
+
+    // -- Streaming path: same data via StreamingSheet, save, extract sheet1.xml --
+    let mut stream_wb = Workbook::new();
+    let mut stream_sheet = Worksheet::new("Streamed");
+    let mut stream_obj = StreamingSheet::new(0).expect("temp file");
+    for (i, row) in make_rows().into_iter().enumerate() {
+        let r = (i as u32) + 1;
+        stream_obj
+            .append_row(r, &row, &mut stream_wb.sst)
+            .expect("append");
+    }
+    stream_obj.finalize().expect("finalize");
+    stream_sheet.streaming = Some(stream_obj);
+    stream_wb.add_sheet(stream_sheet);
+    let stream_archive = wolfxl_writer::emit_xlsx(&mut stream_wb);
+    let stream_sheet_bytes = read_zip_entry(&stream_archive, "xl/worksheets/sheet1.xml");
+
+    assert_eq!(
+        eager_sheet_bytes, stream_sheet_bytes,
+        "streaming-direct save path must produce byte-identical sheet1.xml to eager"
+    );
+
+    // SST is also identical (same strings interned in the same order).
+    let eager_sst = read_zip_entry(&eager_archive, "xl/sharedStrings.xml");
+    let stream_sst = read_zip_entry(&stream_archive, "xl/sharedStrings.xml");
+    assert_eq!(
+        eager_sst, stream_sst,
+        "streaming-direct save path must produce byte-identical sharedStrings.xml to eager"
+    );
+}
+
+fn read_zip_entry(archive_bytes: &[u8], path: &str) -> Vec<u8> {
+    let cursor = std::io::Cursor::new(archive_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).expect("zip open");
+    let mut entry = zip.by_name(path).expect("entry");
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).expect("read");
+    buf
+}
+
+/// Restores the previous `WOLFXL_TEST_EPOCH` value when dropped.
+struct EpochGuard {
+    prev: Option<String>,
+}
+
+impl EpochGuard {
+    fn set(value: &str) -> Self {
+        let prev = std::env::var("WOLFXL_TEST_EPOCH").ok();
+        // SAFETY: tests in this module never run concurrently with other
+        // tests that read this env var (cargo test does run tests in
+        // parallel by default, but this var is only read inside the
+        // package_to / emit_xlsx_to dispatch — the guard is per-test).
+        // Use the unsafe API consistent with the rest of the writer's
+        // test harness.
+        unsafe { std::env::set_var("WOLFXL_TEST_EPOCH", value) };
+        Self { prev }
+    }
+}
+
+impl Drop for EpochGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => unsafe { std::env::set_var("WOLFXL_TEST_EPOCH", v) },
+            None => unsafe { std::env::remove_var("WOLFXL_TEST_EPOCH") },
+        }
+    }
+}

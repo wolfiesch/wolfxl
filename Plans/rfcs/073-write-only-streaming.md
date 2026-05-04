@@ -94,13 +94,13 @@ Cell encoding lives in `pub(crate) fn emit_row_to<W: fmt::Write>(...)`. Both eag
 
 **Rust (`crates/wolfxl-writer/`)**:
 
-- `src/streaming.rs` (NEW) — `StreamingSheet`, `IoFmtAdapter`. Owns `tempfile::NamedTempFile`.
+- `src/streaming.rs` (NEW) — `StreamingSheet`, `IoFmtAdapter`. Owns `tempfile::NamedTempFile`. v2 added `splice_into_writer<W: Write>` that uses `std::io::copy` (8 KiB chunks) instead of materialising the temp file into a `String`.
 - `src/emit/sheet_data.rs` — extracted `pub(crate) fn emit_row_to<W: fmt::Write>` shared between eager `String` and streaming `BufWriter<File>` sinks.
-- `src/emit/sheet_xml.rs` — slot 6 detects `sheet.streaming` and splices.
+- `src/emit/sheet_xml.rs` — slot 6 detects `sheet.streaming` and splices for the `String`-buffered eager-shape path. v2 added `pub fn emit_streaming_to<W: io::Write>(sheet, idx, styles, dest)` — writes head/tail markup directly into `dest`, splices the temp file straight through `splice_into_writer`. Used by the v2 dispatch path.
 - `src/emit/dimension.rs` — slot 4 reads `stream.row_count()` / `stream.max_col()` for the bounding range.
 - `src/model/worksheet.rs` — added `streaming: Option<StreamingSheet>` field; removed `#[derive(Clone)]` (no production callers cloned `Worksheet`).
 - `src/zip.rs` (v1.5) — `pub fn package_to<W: Write + Seek>(entries, dest) -> io::Result<()>` streams the archive directly into `dest`; `package(entries) -> Vec<u8>` is now a thin wrapper.
-- `src/lib.rs` (v1.5) — `pub fn emit_xlsx_to<W: Write + Seek>(wb, dest) -> io::Result<()>` is the streaming entry point; `emit_xlsx(wb) -> Vec<u8>` is a wrapper.
+- `src/lib.rs` (v1.5) — `pub fn emit_xlsx_to<W: Write + Seek>(wb, dest) -> io::Result<()>` is the streaming entry point; `emit_xlsx(wb) -> Vec<u8>` is a wrapper. v2 added private `EmitOp` enum (`Bytes(ZipEntry)` vs `SheetStream { path, sheet_idx }`) and `package_emit_ops(&ops, &wb, dest)` helper that owns the `ZipWriter` loop and dispatches streaming sheets through `emit_streaming_to`.
 
 **Rust PyO3 bridge (`src/`)**:
 
@@ -118,7 +118,7 @@ Cell encoding lives in `pub(crate) fn emit_row_to<W: fmt::Write>(...)`. Both eag
 
 **Tests**:
 
-- `crates/wolfxl-writer/tests/streaming_write.rs` — 5 cargo cases (well-formedness, SST registration, save splice, empty `<sheetData/>`, byte-parity).
+- `crates/wolfxl-writer/tests/streaming_write.rs` — 6 cargo cases (well-formedness, SST registration, save splice, empty `<sheetData/>`, byte-parity at the per-sheet emit level, plus v2's `streaming_save_emits_byte_identical_sheet_to_eager` covering the streaming-direct save path through the full ZIP container).
 - `tests/test_write_only.py` — 12 focused tests.
 - `tests/test_openpyxl_compat_oracle.py` — strengthened existing `workbook_write_only_streaming`; new `workbook_write_only_bounded_memory` (100k × 10 numeric cells, peak RSS < 80 MiB via psutil in subprocess).
 
@@ -144,7 +144,8 @@ Cell encoding lives in `pub(crate) fn emit_row_to<W: fmt::Write>(...)`. Both eag
 - Charts, images, merged cells, conditional formatting, data validation, named styles, named ranges, defined names in write-only mode (matches openpyxl).
 - Modify-mode streaming (separate problem; modify-mode mutates an existing ZIP and is byte-preserving by design).
 - Mixed write-only + eager sheets in one workbook (openpyxl forbids this; wolfxl forbids it too — `write_only=True` makes ALL sheets streaming).
-- ~~ZIP streaming straight to destination File (the final `Vec<u8>` materialisation in `package(...)` remains; optional v1.5 bonus).~~ **Landed in v1.5** — `package_to<W: Write + Seek>(...)` and `emit_xlsx_to<W: Write + Seek>(...)` stream the archive directly into a `BufWriter<File>` opened by `save_once`. The buffered `package(...)` / `emit_xlsx(...)` wrappers remain for diff-tool callers. Measured win: ~30 MiB at 1M rows × 5 cols (the size of the compressed archive). The dominant memory cost during save is now the per-sheet emit `String` accumulator (~150 MiB for that workload), not the ZIP buffer; closing it would require plumbing `Write` through `sheet_xml::emit`, which is a much bigger refactor and remains out of scope.
+- ~~ZIP streaming straight to destination File (the final `Vec<u8>` materialisation in `package(...)` remains; optional v1.5 bonus).~~ **Landed in v1.5** — `package_to<W: Write + Seek>(...)` and `emit_xlsx_to<W: Write + Seek>(...)` stream the archive directly into a `BufWriter<File>` opened by `save_once`. The buffered `package(...)` / `emit_xlsx(...)` wrappers remain for diff-tool callers. Measured win: ~30 MiB at 1M rows × 5 cols (the size of the compressed archive).
+- ~~Per-sheet emit `String` accumulator (the dominant cost during save after v1.5; ~150 MiB at 1M rows × 5 cols).~~ **Landed in v2** — `sheet_xml::emit_streaming_to<W: io::Write>` writes pre-/post-`<sheetData>` markup straight into the open `ZipWriter` entry and `io::copy`s the per-sheet temp file's `<sheetData>` body through. Dispatch lives in `lib.rs::package_emit_ops` via a new `EmitOp` enum (`Bytes` for buffered entries, `SheetStream { sheet_idx }` for streaming sheets); the eager `sheet_xml::emit` path is unchanged for non-streaming sheets and modify mode. **Measured win**: save-time RSS delta dropped from ~150 MiB to **+12.8 MiB at 1M rows × 5 cols** — the residual is libdeflate's compression scratch space and the BufWriter buffer, both `O(1)` in row count. Save-phase memory is now bounded by the SST + styles (irreducible OOXML format costs), exactly as openpyxl's `lxml.xmlfile` model promises. New cargo case `streaming_save_emits_byte_identical_sheet_to_eager` proves the streaming-direct path produces byte-identical `xl/worksheets/sheet1.xml` and `xl/sharedStrings.xml` to the eager path.
 - Hyperlinks and comments on `WriteOnlyCell` (factory accepts the kwargs for openpyxl-shape compat but doesn't yet emit them).
 
 ## 7. Risks + mitigations

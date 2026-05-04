@@ -165,17 +165,13 @@ impl StreamingSheet {
     }
 
     /// Splice this sheet's `<sheetData>` body into `out` by reading the
-    /// finalized temp file from disk. Called once during
-    /// [`crate::emit::sheet_xml::emit`] at the slot-6 position.
+    /// finalized temp file from disk. Called by the buffered eager-shape
+    /// emitter at the slot-6 position when the surrounding sheet is
+    /// being built up as a single `String`.
     ///
-    /// Reads the file into a `String` rather than streaming it out a
-    /// chunk at a time because the surrounding sheet emit
-    /// builds up its own `String` (the rest of the 38-slot sequence
-    /// stays in memory). One sheet's worth of XML is the irreducible
-    /// peak — saturating with row count, not with cell count, because
-    /// numbers are rendered inline. Future-work bonus: thread an
-    /// `io::Write` sink through `sheet_xml::emit` so we can `io::copy`
-    /// straight into the ZIP entry instead.
+    /// Prefer [`splice_into_writer`] when emitting straight into a ZIP
+    /// entry — it `io::copy`s the temp file in 8 KiB chunks instead of
+    /// loading the whole body into memory.
     pub fn splice_into(&self, out: &mut String) -> io::Result<()> {
         // The writer must have been finalized — we can't read past the
         // end of an unflushed buffered stream and get correct bytes.
@@ -190,6 +186,31 @@ impl StreamingSheet {
         let mut buf = String::new();
         std::fs::File::open(path)?.read_to_string(&mut buf)?;
         out.push_str(&buf);
+        Ok(())
+    }
+
+    /// Splice this sheet's `<sheetData>` body straight into a streaming
+    /// `io::Write` sink (e.g. a `ZipWriter` opened on a `BufWriter<File>`).
+    ///
+    /// Uses `std::io::copy`, which buffers in 8 KiB chunks — peak in-flight
+    /// memory is bounded by that chunk regardless of sheet size. This is
+    /// the path that closes the per-sheet `String` accumulator: at 1M
+    /// rows × 5 cols the accumulator is ~150 MiB; the 8 KiB chunk leaves
+    /// it at a few KiB.
+    pub fn splice_into_writer<W: Write>(&self, dest: &mut W) -> io::Result<()> {
+        debug_assert!(
+            self.writer.is_none(),
+            "splice_into_writer called before finalize",
+        );
+
+        let path = self
+            .file
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "streaming temp file dropped"))?
+            .path();
+
+        let mut src = std::fs::File::open(path)?;
+        std::io::copy(&mut src, dest)?;
         Ok(())
     }
 

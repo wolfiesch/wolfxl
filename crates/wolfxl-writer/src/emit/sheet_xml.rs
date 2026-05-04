@@ -160,6 +160,111 @@ pub fn emit(
     out.into_bytes()
 }
 
+/// Streaming variant of [`emit`] for write_only worksheets (G20 / RFC-073 v2).
+///
+/// Writes `xl/worksheets/sheet{N}.xml` straight into a streaming `io::Write`
+/// sink (typically a `ZipWriter` opened on `BufWriter<File>`) without ever
+/// holding the full sheet body in a single `String`. Closes the per-sheet
+/// emit-time peak: at 1M rows × 5 cols the eager [`emit`] path holds ~150 MiB
+/// in `out`; this path holds a few KiB of pre-/post-sheetData markup plus an
+/// 8 KiB chunk for the temp-file splice.
+///
+/// Slot ordering is identical to [`emit`] — the same per-slot emitters write
+/// into a small `String` for the head (slots 1-5) and tail (slots 8-37);
+/// only the slot 6 `<sheetData>` body is `io::copy`d straight from the
+/// per-sheet temp file managed by [`crate::streaming::StreamingSheet`].
+///
+/// Requires `sheet.streaming.is_some()`. The eager `[emit]` function
+/// continues to handle non-streaming sheets and remains the path used by
+/// modify-mode and the diff harness.
+///
+/// SST is not mutated here — streaming sheets intern strings during
+/// `append_row`, so by the time we get to emit the SST is already final.
+pub fn emit_streaming_to<W: std::io::Write>(
+    sheet: &Worksheet,
+    sheet_idx: u32,
+    _styles: &StylesBuilder,
+    dest: &mut W,
+) -> std::io::Result<()> {
+    let stream = sheet
+        .streaming
+        .as_ref()
+        .expect("emit_streaming_to requires sheet.streaming = Some");
+
+    // --- Head (XML decl, root, slots 2-5, opening <sheetData>) ---
+    //
+    // Tiny by construction: dimension + sheetViews + sheetFormatPr + cols
+    // total a few hundred bytes for typical sheets, ~few KiB even with
+    // many columns. Buffered into a String so the per-slot emitters
+    // (which all take `&mut String`) work unchanged.
+    let mut head = String::with_capacity(2048);
+    head.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+    head.push_str("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
+    super::dimension::emit(&mut head, sheet);
+    super::sheet_setup::emit_sheet_views(&mut head, sheet, sheet_idx);
+    super::sheet_setup::emit_sheet_format(&mut head, sheet);
+    if !sheet.columns.is_empty() {
+        super::columns::emit(&mut head, sheet);
+    }
+
+    // Slot 6: <sheetData>. Empty streaming sheet → self-closing tag,
+    // single small write. Otherwise: write the head ending with the
+    // opening tag, splice the temp file, then write `</sheetData>`.
+    if stream.row_count() == 0 {
+        head.push_str("<sheetData/>");
+        dest.write_all(head.as_bytes())?;
+    } else {
+        head.push_str("<sheetData>");
+        dest.write_all(head.as_bytes())?;
+        // Free the head buffer before the splice so peak memory stays
+        // bounded by the larger of head and tail, not their sum.
+        drop(head);
+        stream.splice_into_writer(dest)?;
+        dest.write_all(b"</sheetData>")?;
+    }
+
+    // --- Tail (slots 8-37 + closing </worksheet>) ---
+    //
+    // In write_only mode most slots are no-ops:
+    //   - merges, hyperlinks, drawing, legacy_drawing, tableParts,
+    //     conditional_formats, data_validations, autoFilter — all
+    //     forbidden by `_FORBIDDEN_ATTRS` in
+    //     `python/wolfxl/_worksheet_write_only.py`.
+    //   - sheet_protection only fires if the user set `ws.protection`,
+    //     which the WriteOnlyWorksheet API doesn't expose.
+    //   - page_setup, header_footer, page_breaks default to empty.
+    // pageMargins always emits (typed override or default), so the
+    // tail is dominated by that single ~80-byte element.
+    //
+    // We still call every emitter to preserve byte-parity with the
+    // eager path: if a future write_only feature flips one of these
+    // on, this path emits it without code changes.
+    let mut tail = String::with_capacity(512);
+    super::sheet_setup::emit_sheet_protection(&mut tail, sheet);
+    if let Some(bytes) = &sheet.auto_filter_xml {
+        tail.push_str(std::str::from_utf8(bytes).unwrap_or(""));
+    }
+    if !sheet.merges.is_empty() {
+        super::merges::emit(&mut tail, sheet);
+    }
+    super::conditional_formats::emit(&mut tail, sheet);
+    super::data_validations::emit(&mut tail, sheet);
+    if !sheet.hyperlinks.is_empty() {
+        super::hyperlinks::emit(&mut tail, sheet);
+    }
+    super::sheet_setup::emit_page_margins(&mut tail, sheet);
+    super::sheet_setup::emit_page_setup(&mut tail, sheet);
+    super::sheet_setup::emit_header_footer(&mut tail, sheet);
+    super::page_breaks::emit(&mut tail, sheet);
+    super::drawing_refs::emit_drawing(&mut tail, sheet);
+    super::drawing_refs::emit_legacy(&mut tail, sheet);
+    super::table_parts::emit(&mut tail, sheet);
+    tail.push_str("</worksheet>");
+    dest.write_all(tail.as_bytes())?;
+
+    Ok(())
+}
+
 /// Compile-time assertion that the slot numbers cited in `emit`'s section
 /// comments match `wolfxl_merger::ct_worksheet_order::ECMA_ORDER`. If a
 /// future ECMA extension renumbers a slot, this fails to compile until both
