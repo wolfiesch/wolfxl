@@ -39,6 +39,7 @@ class _EntryRequired(TypedDict):
 class Entry(_EntryRequired, total=False):
     gap_id: str  # G01..G28
     probe: str  # probe id wired into the oracle harness
+    secondary_probes: list[str]
     notes: str
 
 
@@ -636,6 +637,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "cellIs / containsText / expression / colorScale (basic)",
         "status": "supported",
         "probe": "cf_basic_rules",
+        "secondary_probes": ["cf_cellis_operator_matrix"],
     },
     {
         "id": "cf.icon_sets",
@@ -644,6 +646,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "IconSetRule (3 / 4 / 5 icons + percentile / number ladders)",
         "status": "supported",
         "probe": "cf_icon_sets",
+        "secondary_probes": ["cf_iconset_extended_attrs"],
     },
     {
         "id": "cf.data_bars",
@@ -652,7 +655,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "DataBarRule (gradient + solid; min / max / percent / formula)",
         "status": "supported",
         "probe": "cf_data_bars",
-        "notes": "Round-trips through openpyxl reload (cfvo min/max types preserved). Edge cases like percent / formula cfvo not yet probed.",
+        "notes": "Round-trips through openpyxl reload; secondary probes cover cfvo edge cases and minLength/maxLength.",
     },
     {
         "id": "cf.data_bars_advanced",
@@ -661,6 +664,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "DataBarRule with percent / num / formula cfvo + showValue=False",
         "status": "supported",
         "probe": "cf_data_bars_advanced",
+        "secondary_probes": ["cf_databar_length_attrs"],
     },
     {
         "id": "cf.color_scales_advanced",

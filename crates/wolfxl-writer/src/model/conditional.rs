@@ -92,6 +92,9 @@ pub enum ConditionalKind {
         /// OOXML default is `true`; when `false` we emit `showValue="0"` on
         /// the `<dataBar>` element. Added in G12 (Sprint 3).
         show_value: bool,
+        /// Optional OOXML minLength / maxLength display bounds.
+        min_length: Option<u32>,
+        max_length: Option<u32>,
     },
     IconSet {
         /// e.g. `"3TrafficLights1"`, `"5Arrows"`, `"4Rating"`.
@@ -102,6 +105,10 @@ pub enum ConditionalKind {
         /// OOXML spec default), so emit `showValue="0"` only when this
         /// is explicitly `false`.
         show_value: bool,
+        /// Optional OOXML flags for absolute/percent threshold semantics and
+        /// reversed icon ordering.
+        percent: Option<bool>,
+        reverse: Option<bool>,
     },
 }
 

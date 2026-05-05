@@ -167,7 +167,9 @@ pub(crate) fn dict_to_threaded_comment(
         .get_item("created")?
         .and_then(|v| v.extract::<String>().ok())
         .and_then(|s| if s.is_empty() { None } else { Some(s) });
-    let text: Option<String> = cfg.get_item("text")?.and_then(|v| v.extract::<String>().ok());
+    let text: Option<String> = cfg
+        .get_item("text")?
+        .and_then(|v| v.extract::<String>().ok());
 
     let (Some(id), Some(cell_ref), Some(person_id), Some(created), Some(text)) =
         (id, cell_ref, person_id, created, text)
@@ -269,6 +271,8 @@ pub(crate) fn dict_to_conditional_format(
 
     let operator: Option<String> = cfg.get_item("operator")?.and_then(|v| v.extract().ok());
     let formula: Option<String> = cfg.get_item("formula")?.and_then(|v| v.extract().ok());
+    let formula_a: Option<String> = cfg.get_item("formula_a")?.and_then(|v| v.extract().ok());
+    let formula_b: Option<String> = cfg.get_item("formula_b")?.and_then(|v| v.extract().ok());
     let stop_if_true: bool = cfg
         .get_item("stop_if_true")?
         .and_then(|v| v.extract::<bool>().ok())
@@ -313,20 +317,25 @@ pub(crate) fn dict_to_conditional_format(
                 _ => CellIsOperator::Equal,
             };
 
-            let fstr = formula.as_deref().unwrap_or("").trim_start_matches('=');
-            let (formula_a, formula_b) =
-                if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
-                    if let Some(idx) = fstr.find(',') {
-                        (
-                            fstr[..idx].trim().to_string(),
-                            Some(fstr[idx + 1..].trim().to_string()),
-                        )
-                    } else {
-                        (fstr.to_string(), None)
-                    }
+            let formula_a = formula_a.or(formula);
+            let fstr = formula_a.as_deref().unwrap_or("").trim_start_matches('=');
+            let (formula_a, formula_b) = if let Some(formula_b) = formula_b {
+                (
+                    fstr.to_string(),
+                    Some(formula_b.trim_start_matches('=').to_string()),
+                )
+            } else if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
+                if let Some(idx) = fstr.find(',') {
+                    (
+                        fstr[..idx].trim().to_string(),
+                        Some(fstr[idx + 1..].trim().to_string()),
+                    )
                 } else {
                     (fstr.to_string(), None)
-                };
+                }
+            } else {
+                (fstr.to_string(), None)
+            };
 
             ConditionalKind::CellIs {
                 operator: op,
@@ -350,14 +359,17 @@ pub(crate) fn dict_to_conditional_format(
                 .unwrap_or_else(|| "FF638EC6".to_string());
             let start_type: Option<String> =
                 cfg.get_item("start_type")?.and_then(|v| v.extract().ok());
-            let end_type: Option<String> =
-                cfg.get_item("end_type")?.and_then(|v| v.extract().ok());
+            let end_type: Option<String> = cfg.get_item("end_type")?.and_then(|v| v.extract().ok());
             let start_value = cfg.get_item("start_value")?;
             let end_value = cfg.get_item("end_value")?;
             let show_value: bool = cfg
                 .get_item("show_value")?
                 .and_then(|v| v.extract::<bool>().ok())
                 .unwrap_or(true);
+            let min_length: Option<u32> =
+                cfg.get_item("min_length")?.and_then(|v| v.extract().ok());
+            let max_length: Option<u32> =
+                cfg.get_item("max_length")?.and_then(|v| v.extract().ok());
             ConditionalKind::DataBar {
                 color_rgb: color,
                 min: build_threshold(
@@ -371,6 +383,8 @@ pub(crate) fn dict_to_conditional_format(
                     ConditionalThreshold::Max,
                 )?,
                 show_value,
+                min_length,
+                max_length,
             }
         }
         "colorScale" | "color_scale" => ConditionalKind::ColorScale {
@@ -389,13 +403,15 @@ pub(crate) fn dict_to_conditional_format(
                 .unwrap_or_else(|| "percent".to_string());
             let raw_values: Vec<String> = if let Some(v) = cfg.get_item("values")? {
                 if let Ok(nums) = v.extract::<Vec<f64>>() {
-                    nums.into_iter().map(|n| {
-                        if n == (n as i64) as f64 && n.abs() < 1e15 {
-                            format!("{}", n as i64)
-                        } else {
-                            format!("{}", n)
-                        }
-                    }).collect()
+                    nums.into_iter()
+                        .map(|n| {
+                            if n == (n as i64) as f64 && n.abs() < 1e15 {
+                                format!("{}", n as i64)
+                            } else {
+                                format!("{}", n)
+                            }
+                        })
+                        .collect()
                 } else if let Ok(strs) = v.extract::<Vec<String>>() {
                     strs
                 } else {
@@ -407,17 +423,21 @@ pub(crate) fn dict_to_conditional_format(
             let thresholds: Vec<ConditionalThreshold> = raw_values
                 .into_iter()
                 .map(|val| match value_type.as_str() {
-                    "percent" => val.parse::<f64>()
+                    "percent" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percent)
                         .unwrap_or(ConditionalThreshold::Percent(0.0)),
-                    "percentile" => val.parse::<f64>()
+                    "percentile" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percentile)
                         .unwrap_or(ConditionalThreshold::Percentile(0.0)),
-                    "num" | "number" => val.parse::<f64>()
+                    "num" | "number" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Number)
                         .unwrap_or(ConditionalThreshold::Number(0.0)),
                     "formula" => ConditionalThreshold::Formula(val),
-                    _ => val.parse::<f64>()
+                    _ => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percent)
                         .unwrap_or(ConditionalThreshold::Percent(0.0)),
                 })
@@ -426,10 +446,14 @@ pub(crate) fn dict_to_conditional_format(
                 .get_item("show_value")?
                 .and_then(|v| v.extract::<bool>().ok())
                 .unwrap_or(true);
+            let percent: Option<bool> = cfg.get_item("percent")?.and_then(|v| v.extract().ok());
+            let reverse: Option<bool> = cfg.get_item("reverse")?.and_then(|v| v.extract().ok());
             ConditionalKind::IconSet {
                 set_name,
                 thresholds,
                 show_value,
+                percent,
+                reverse,
             }
         }
         _ => ConditionalKind::Expression {
@@ -493,10 +517,7 @@ fn cfvo_to_threshold(
 }
 
 /// Pull a string out of the cfg dict, treating empty strings as absent.
-fn dict_get_string(
-    cfg: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<Option<String>> {
+fn dict_get_string(cfg: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
     let value: Option<String> = cfg.get_item(key)?.and_then(|v| {
         // Accept str directly or coerce numeric values via PyAny.
         if let Ok(s) = v.extract::<String>() {

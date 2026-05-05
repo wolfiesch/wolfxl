@@ -25,7 +25,6 @@ though WolfXL does not expose a full authoring API for that surface.
 
 These openpyxl APIs are still incomplete or intentionally narrower:
 
-- `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
 - Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
 
 ## Performance claim guardrails

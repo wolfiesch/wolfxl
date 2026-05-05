@@ -1398,6 +1398,46 @@ def _probe_cf_basic_rules(tmp_path: Path) -> None:
     assert len(rules) >= 1
 
 
+@_register("cf_cellis_operator_matrix")
+def _probe_cf_cellis_operator_matrix(tmp_path: Path) -> None:
+    """CellIsRule operator matrix, including two-formula operators."""
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.formatting.rule import CellIsRule
+
+    cases = [
+        ("A1:A5", "equal", ["3"]),
+        ("B1:B5", "notEqual", ["3"]),
+        ("C1:C5", "greaterThan", ["3"]),
+        ("D1:D5", "greaterThanOrEqual", ["3"]),
+        ("E1:E5", "lessThan", ["3"]),
+        ("F1:F5", "lessThanOrEqual", ["3"]),
+        ("G1:G5", "between", ["2", "4"]),
+        ("H1:H5", "notBetween", ["2", "4"]),
+        ("I1:I5", "between", ["SUM(A1,A2)", "10"]),
+    ]
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in range(1, 6):
+        for col in range(1, 10):
+            ws.cell(row=row, column=col, value=row)
+    for sqref, operator, formula in cases:
+        ws.conditional_formatting.add(sqref, CellIsRule(operator=operator, formula=formula))
+    out = tmp_path / "cf_cellis_ops.xlsx"
+    wb.save(out)
+
+    ref_ws = _opx.load_workbook(out).active
+    by_range = {
+        str(cf_range.sqref): ref_ws.conditional_formatting[cf_range][0]
+        for cf_range in ref_ws.conditional_formatting
+    }
+    for sqref, operator, formula in cases:
+        rule = by_range[sqref]
+        assert rule.type == "cellIs"
+        assert rule.operator == operator
+        assert [str(part) for part in rule.formula] == formula
+
+
 @_register("cf_icon_sets")
 def _probe_cf_icon_sets(tmp_path: Path) -> None:
     """Icon set rule. Tracked under G11 (S3)."""
@@ -1418,6 +1458,44 @@ def _probe_cf_icon_sets(tmp_path: Path) -> None:
     for cf_range in wb2.active.conditional_formatting:
         rules.extend(cf_range.rules if hasattr(cf_range, "rules") else [])
     assert any(getattr(r, "type", "") == "iconSet" for r in rules)
+
+
+@_register("cf_iconset_extended_attrs")
+def _probe_cf_iconset_extended_attrs(tmp_path: Path) -> None:
+    """4-icon, number-threshold icon set with percent/reverse flags."""
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.formatting.rule import IconSetRule
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for i in range(1, 9):
+        ws.cell(row=i, column=1, value=i)
+    rule = IconSetRule(
+        "4Rating",
+        "num",
+        [1, 3, 5, 7],
+        showValue=False,
+        percent=False,
+        reverse=True,
+    )
+    ws.conditional_formatting.add("A1:A8", rule)
+    out = tmp_path / "iconset_extended.xlsx"
+    wb.save(out)
+
+    ref_ws = _opx.load_workbook(out).active
+    ref_rules = []
+    for cf_range in ref_ws.conditional_formatting:
+        ref_rules.extend(ref_ws.conditional_formatting[cf_range])
+    icon_rules = [r for r in ref_rules if getattr(r, "type", "") == "iconSet"]
+    assert icon_rules, "openpyxl saw no iconSet rule"
+    icon_set = icon_rules[0].iconSet
+    assert icon_set.iconSet == "4Rating"
+    assert icon_set.showValue is False
+    assert icon_set.percent is False
+    assert icon_set.reverse is True
+    assert [cfvo.type for cfvo in icon_set.cfvo] == ["num", "num", "num", "num"]
+    assert [float(cfvo.val) for cfvo in icon_set.cfvo] == [1.0, 3.0, 5.0, 7.0]
 
 
 @_register("cf_data_bars")
@@ -1496,6 +1574,43 @@ def _probe_cf_data_bars_advanced(tmp_path: Path) -> None:
     assert float(cfvo_max.val) == 90.0
     # showValue=False round-trip
     assert bar.showValue is False
+
+
+@_register("cf_databar_length_attrs")
+def _probe_cf_databar_length_attrs(tmp_path: Path) -> None:
+    """DataBarRule minLength/maxLength flags survive openpyxl reload."""
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.formatting.rule import DataBarRule
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for i in range(1, 11):
+        ws.cell(row=i, column=1, value=i)
+    rule = DataBarRule(
+        start_type="formula",
+        start_value="$A$1",
+        end_type="formula",
+        end_value="$A$10",
+        color="FF4472C4",
+        minLength=5,
+        maxLength=90,
+    )
+    ws.conditional_formatting.add("A1:A10", rule)
+    out = tmp_path / "databar_lengths.xlsx"
+    wb.save(out)
+
+    ref_ws = _opx.load_workbook(out).active
+    ref_rules = []
+    for cf_range in ref_ws.conditional_formatting:
+        ref_rules.extend(ref_ws.conditional_formatting[cf_range])
+    bar_rules = [r for r in ref_rules if getattr(r, "type", "") == "dataBar"]
+    assert bar_rules, "openpyxl saw no dataBar rule"
+    bar = bar_rules[0].dataBar
+    assert bar.minLength == 5
+    assert bar.maxLength == 90
+    assert [cfvo.type for cfvo in bar.cfvo] == ["formula", "formula"]
+    assert [cfvo.val for cfvo in bar.cfvo] == ["$A$1", "$A$10"]
 
 
 @_register("cf_color_scales_advanced")

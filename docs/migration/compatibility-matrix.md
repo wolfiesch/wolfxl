@@ -164,7 +164,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `cellIs / containsText / expression / colorScale (basic)` | `cellIs / containsText / expression / colorScale (basic)` | ✅ Supported |  |  |
 | `IconSetRule (3 / 4 / 5 icons + percentile / number ladders)` | `IconSetRule (3 / 4 / 5 icons + percentile / number ladders)` | ✅ Supported |  |  |
-| `DataBarRule (gradient + solid; min / max / percent / formula)` | `DataBarRule (gradient + solid; min / max / percent / formula)` | ✅ Supported |  | Round-trips through openpyxl reload (cfvo min/max types preserved). Edge cases like percent / formula cfvo not yet probed. |
+| `DataBarRule (gradient + solid; min / max / percent / formula)` | `DataBarRule (gradient + solid; min / max / percent / formula)` | ✅ Supported |  | Round-trips through openpyxl reload; secondary probes cover cfvo edge cases and minLength/maxLength. |
 | `DataBarRule with percent / num / formula cfvo + showValue=False` | `DataBarRule with percent / num / formula cfvo + showValue=False` | ✅ Supported |  |  |
 | `ColorScaleRule with 3-stop, percentile / formula / number cfvo` | `ColorScaleRule with 3-stop, percentile / formula / number cfvo` | ✅ Supported |  |  |
 | `stopIfTrue + explicit priority + dxf integration` | `stopIfTrue + explicit priority + dxf integration` | ✅ Supported |  |  |

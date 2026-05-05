@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from wolfxl.formatting.rule import Rule
+from wolfxl.worksheet.cell_range import MultiCellRange
 
 if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
@@ -37,6 +38,11 @@ class ConditionalFormatting:
 
     sqref: str
     rules: list[Rule] = field(default_factory=list)
+    pivot: bool | None = None
+
+    @property
+    def cells(self) -> MultiCellRange:
+        return MultiCellRange(self.sqref)
 
     @property
     def cfRule(self) -> list[Rule]:  # noqa: N802 - openpyxl alias
@@ -65,6 +71,17 @@ class ConditionalFormattingList:
 
     def __bool__(self) -> bool:
         return bool(self._entries)
+
+    @property
+    def max_priority(self) -> int:
+        """Highest explicit rule priority, matching openpyxl's helper."""
+        priorities = [
+            int(priority)
+            for entry in self._entries
+            for rule in entry.rules
+            if (priority := getattr(rule, "priority", None)) is not None
+        ]
+        return max(priorities, default=0)
 
     def _append_entry(self, entry: ConditionalFormatting) -> None:
         """Internal: used by the lazy reader to populate the container."""
@@ -169,6 +186,26 @@ def _cf_to_patcher_dict(sqref: str, rules: list[Rule]) -> dict[str, Any]:
             color = extra.get("color")
             if color is not None:
                 rd["color_rgb"] = _normalize_color(color)
+            if extra.get("show_value") is not None:
+                rd["show_value"] = bool(extra["show_value"])
+            if extra.get("min_length") is not None:
+                rd["min_length"] = int(extra["min_length"])
+            if extra.get("max_length") is not None:
+                rd["max_length"] = int(extra["max_length"])
+        elif rule.type == "iconSet":
+            extra = rule.extra or {}
+            if extra.get("icon_style") is not None:
+                rd["icon_style"] = extra["icon_style"]
+            if extra.get("value_type") is not None:
+                rd["value_type"] = extra["value_type"]
+            if extra.get("values") is not None:
+                rd["values"] = list(extra["values"])
+            if extra.get("show_value") is not None:
+                rd["show_value"] = bool(extra["show_value"])
+            if extra.get("percent") is not None:
+                rd["percent"] = bool(extra["percent"])
+            if extra.get("reverse") is not None:
+                rd["reverse"] = bool(extra["reverse"])
         rule_dicts.append({k: v for k, v in rd.items() if v is not None})
 
     return {"sqref": sqref, "rules": rule_dicts}

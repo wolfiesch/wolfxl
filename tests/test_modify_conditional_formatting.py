@@ -26,6 +26,7 @@ from wolfxl.formatting.rule import (
     ColorScaleRule,
     DataBarRule,
     FormulaRule,
+    IconSetRule,
 )
 
 from wolfxl import Workbook
@@ -351,6 +352,88 @@ def test_databar_no_dxf(tmp_path: Path) -> None:
     src_dxf = _count_dxfs_in_styles(_read_styles_xml(src))
     out_dxf = _count_dxfs_in_styles(_read_styles_xml(out))
     assert out_dxf == src_dxf, f"dataBar must not allocate dxf: {src_dxf} → {out_dxf}"
+
+
+def test_databar_modify_round_trip_extended_attrs(tmp_path: Path) -> None:
+    """DataBar min/max length attrs survive modify-save and openpyxl reload."""
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        DataBarRule(
+            start_type="formula",
+            start_value="$A$1",
+            end_type="formula",
+            end_value="$A$10",
+            color="FF4472C4",
+            minLength=5,
+            maxLength=90,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    block = _cf_block_for_sqref(sheet_xml, "A1:A10")
+    assert block is not None
+    assert 'type="dataBar"' in block
+    assert 'minLength="5"' in block
+    assert 'maxLength="90"' in block
+
+    reopened = openpyxl.load_workbook(out)
+    rules = list(reopened.active.conditional_formatting)[0].rules
+    data_bar = rules[0].dataBar
+    assert data_bar.minLength == 5
+    assert data_bar.maxLength == 90
+    assert [cfvo.type for cfvo in data_bar.cfvo] == ["formula", "formula"]
+    assert [cfvo.val for cfvo in data_bar.cfvo] == ["$A$1", "$A$10"]
+
+
+def test_iconset_modify_round_trip_extended_attrs(tmp_path: Path) -> None:
+    """IconSet rules survive modify-save with openpyxl-shaped attrs."""
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        IconSetRule(
+            "4Rating",
+            "num",
+            [1, 3, 5, 7],
+            showValue=False,
+            percent=False,
+            reverse=True,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    block = _cf_block_for_sqref(sheet_xml, "A1:A10")
+    assert block is not None
+    assert 'type="iconSet"' in block
+    assert 'iconSet="4Rating"' in block
+    assert 'showValue="0"' in block
+    assert 'percent="0"' in block
+    assert 'reverse="1"' in block
+    assert "dxfId" not in block, f"iconSet must not carry dxfId: {block}"
+
+    reopened = openpyxl.load_workbook(out)
+    rules = list(reopened.active.conditional_formatting)[0].rules
+    icon_set = rules[0].iconSet
+    assert icon_set.iconSet == "4Rating"
+    assert icon_set.showValue is False
+    assert icon_set.percent is False
+    assert icon_set.reverse is True
+    assert [cfvo.type for cfvo in icon_set.cfvo] == ["num"] * 4
+    assert [cfvo.val for cfvo in icon_set.cfvo] == [1.0, 3.0, 5.0, 7.0]
 
 
 def test_expression_rule_escapes_formula(tmp_path: Path) -> None:

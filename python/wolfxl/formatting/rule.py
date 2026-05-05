@@ -198,7 +198,9 @@ class DataBarRule(Rule):
         end_type: str | None = None,
         end_value: Any = None,
         color: str | None = None,
-        showValue: bool = True,  # noqa: N803
+        showValue: bool | None = None,  # noqa: N803
+        minLength: int | None = None,  # noqa: N803
+        maxLength: int | None = None,  # noqa: N803
         **kw: Any,
     ) -> None:
         extra = {
@@ -207,7 +209,9 @@ class DataBarRule(Rule):
             "end_type": end_type,
             "end_value": end_value,
             "color": color,
-            "show_value": showValue,
+            "show_value": True if showValue is None else showValue,
+            "min_length": minLength,
+            "max_length": maxLength,
         }
         super().__init__(type="dataBar", extra=extra, **kw)
 
@@ -220,7 +224,9 @@ class IconSetRule(Rule):
         icon_style: str | None = None,
         type: str | None = None,  # noqa: A002 - keyword openpyxl uses
         values: list[Any] | None = None,
-        showValue: bool = True,  # noqa: N803
+        showValue: bool | None = None,  # noqa: N803
+        percent: bool | None = None,
+        reverse: bool | None = None,
         **kw: Any,
     ) -> None:
         # openpyxl's IconSetRule positional ``type`` ("percent", "percentile",
@@ -229,7 +235,9 @@ class IconSetRule(Rule):
             "icon_style": icon_style,
             "value_type": type,
             "values": list(values or []),
-            "show_value": showValue,
+            "show_value": True if showValue is None else showValue,
+            "percent": percent,
+            "reverse": reverse,
         }
         super().__init__(type="iconSet", extra=extra, **kw)
 

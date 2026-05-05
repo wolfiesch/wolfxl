@@ -83,6 +83,16 @@ pub enum CfRuleKind {
         min: CfvoPatch,
         max: CfvoPatch,
         color_rgb: String,
+        show_value: bool,
+        min_length: Option<u32>,
+        max_length: Option<u32>,
+    },
+    IconSet {
+        set_name: String,
+        thresholds: Vec<CfvoPatch>,
+        show_value: bool,
+        percent: Option<bool>,
+        reverse: Option<bool>,
     },
 }
 
@@ -402,6 +412,9 @@ pub fn build_cf_blocks(
                     min,
                     max,
                     color_rgb,
+                    show_value,
+                    min_length,
+                    max_length,
                 } => {
                     rules_buf.extend_from_slice(
                         format!("<cfRule type=\"dataBar\" priority=\"{}\"", priority).as_bytes(),
@@ -410,13 +423,64 @@ pub fn build_cf_blocks(
                         rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
                     }
                     rules_buf.push(b'>');
-                    rules_buf.extend_from_slice(b"<dataBar>");
+                    rules_buf.extend_from_slice(b"<dataBar");
+                    if !*show_value {
+                        rules_buf.extend_from_slice(b" showValue=\"0\"");
+                    }
+                    if let Some(value) = min_length {
+                        rules_buf.extend_from_slice(format!(" minLength=\"{}\"", value).as_bytes());
+                    }
+                    if let Some(value) = max_length {
+                        rules_buf.extend_from_slice(format!(" maxLength=\"{}\"", value).as_bytes());
+                    }
+                    rules_buf.push(b'>');
                     emit_cfvo(&mut rules_buf, min);
                     emit_cfvo(&mut rules_buf, max);
                     rules_buf.extend_from_slice(
                         format!("<color rgb=\"{}\"/>", attr_escape(color_rgb)).as_bytes(),
                     );
                     rules_buf.extend_from_slice(b"</dataBar>");
+                    rules_buf.extend_from_slice(b"</cfRule>");
+                }
+                CfRuleKind::IconSet {
+                    set_name,
+                    thresholds,
+                    show_value,
+                    percent,
+                    reverse,
+                } => {
+                    rules_buf.extend_from_slice(
+                        format!("<cfRule type=\"iconSet\" priority=\"{}\"", priority).as_bytes(),
+                    );
+                    if rule.stop_if_true {
+                        rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
+                    }
+                    rules_buf.push(b'>');
+                    rules_buf.extend_from_slice(
+                        format!("<iconSet iconSet=\"{}\"", attr_escape(set_name)).as_bytes(),
+                    );
+                    if !*show_value {
+                        rules_buf.extend_from_slice(b" showValue=\"0\"");
+                    }
+                    if let Some(value) = percent {
+                        rules_buf.extend_from_slice(if *value {
+                            b" percent=\"1\""
+                        } else {
+                            b" percent=\"0\""
+                        });
+                    }
+                    if let Some(value) = reverse {
+                        rules_buf.extend_from_slice(if *value {
+                            b" reverse=\"1\""
+                        } else {
+                            b" reverse=\"0\""
+                        });
+                    }
+                    rules_buf.push(b'>');
+                    for threshold in thresholds {
+                        emit_cfvo(&mut rules_buf, threshold);
+                    }
+                    rules_buf.extend_from_slice(b"</iconSet>");
                     rules_buf.extend_from_slice(b"</cfRule>");
                 }
             }
@@ -909,6 +973,9 @@ mod tests {
                         val: None,
                     },
                     color_rgb: "FF638EC6".to_string(),
+                    show_value: true,
+                    min_length: None,
+                    max_length: None,
                 },
                 dxf: None,
                 stop_if_true: false,

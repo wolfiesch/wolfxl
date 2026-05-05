@@ -26,10 +26,7 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
             // authors can place high-priority CF rules before lower ones
             // regardless of insertion order. Falls back to positional
             // index (1-based) when not set, preserving prior behaviour.
-            let priority = rule
-                .priority
-                .map(|p| p as usize)
-                .unwrap_or(priority_0 + 1);
+            let priority = rule.priority.map(|p| p as usize).unwrap_or(priority_0 + 1);
 
             match &rule.kind {
                 ConditionalKind::CellIs {
@@ -97,6 +94,8 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     min,
                     max,
                     show_value,
+                    min_length,
+                    max_length,
                 } => {
                     rules_buf.push_str(&format!(
                         "<cfRule type=\"dataBar\" priority=\"{}\">",
@@ -104,11 +103,17 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     ));
                     // OOXML default for showValue is true; only emit the
                     // attribute when it's been explicitly turned off (G12).
-                    if *show_value {
-                        rules_buf.push_str("<dataBar>");
-                    } else {
-                        rules_buf.push_str("<dataBar showValue=\"0\">");
+                    rules_buf.push_str("<dataBar");
+                    if !*show_value {
+                        rules_buf.push_str(" showValue=\"0\"");
                     }
+                    if let Some(value) = min_length {
+                        rules_buf.push_str(&format!(" minLength=\"{}\"", value));
+                    }
+                    if let Some(value) = max_length {
+                        rules_buf.push_str(&format!(" maxLength=\"{}\"", value));
+                    }
+                    rules_buf.push('>');
                     emit_cfvo(&mut rules_buf, min);
                     emit_cfvo(&mut rules_buf, max);
                     rules_buf.push_str(&format!("<color rgb=\"{}\"/>", color_rgb));
@@ -168,6 +173,8 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     set_name,
                     thresholds,
                     show_value,
+                    percent,
+                    reverse,
                 } => {
                     // G11: emit `<cfRule type="iconSet">` with an inner
                     // `<iconSet iconSet="..." [showValue="0"]>` element
@@ -191,6 +198,20 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                         // OOXML default is showValue="1" — only emit when
                         // explicitly false.
                         rules_buf.push_str(" showValue=\"0\"");
+                    }
+                    if let Some(value) = percent {
+                        rules_buf.push_str(if *value {
+                            " percent=\"1\""
+                        } else {
+                            " percent=\"0\""
+                        });
+                    }
+                    if let Some(value) = reverse {
+                        rules_buf.push_str(if *value {
+                            " reverse=\"1\""
+                        } else {
+                            " reverse=\"0\""
+                        });
                     }
                     rules_buf.push('>');
                     for threshold in thresholds {
@@ -295,10 +316,7 @@ mod tests {
         }
     }
 
-    fn rule_with_priority(
-        kind: ConditionalKind,
-        priority: Option<u32>,
-    ) -> ConditionalRule {
+    fn rule_with_priority(kind: ConditionalKind, priority: Option<u32>) -> ConditionalRule {
         ConditionalRule {
             kind,
             dxf_id: None,
@@ -487,6 +505,8 @@ mod tests {
                 min: ConditionalThreshold::Min,
                 max: ConditionalThreshold::Max,
                 show_value: true,
+                min_length: None,
+                max_length: None,
             },
             Some(99),
             false,
@@ -499,6 +519,24 @@ mod tests {
         assert!(out.contains(
             "<dataBar><cfvo type=\"min\"/><cfvo type=\"max\"/><color rgb=\"FFFF0000\"/></dataBar>"
         ));
+    }
+
+    #[test]
+    fn data_bar_emits_length_attrs_when_supplied() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::DataBar {
+            color_rgb: "FFFF0000".into(),
+            min: ConditionalThreshold::Min,
+            max: ConditionalThreshold::Max,
+            show_value: false,
+            min_length: Some(5),
+            max_length: Some(90),
+        })]);
+
+        assert_fragment_parses(&out);
+        assert!(
+            out.contains("<dataBar showValue=\"0\" minLength=\"5\" maxLength=\"90\">"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -594,6 +632,8 @@ mod tests {
                 ConditionalThreshold::Percent(67.0),
             ],
             show_value: true,
+            percent: None,
+            reverse: None,
         })]);
 
         assert_fragment_parses(&out);
@@ -621,10 +661,32 @@ mod tests {
                 ConditionalThreshold::Percent(67.0),
             ],
             show_value: false,
+            percent: None,
+            reverse: None,
         })]);
 
         assert_fragment_parses(&out);
         assert!(out.contains("<iconSet iconSet=\"3TrafficLights1\" showValue=\"0\">"));
+    }
+
+    #[test]
+    fn icon_set_emits_percent_and_reverse_flags() {
+        let out = emit_one_cf(vec![rule(ConditionalKind::IconSet {
+            set_name: "4Rating".into(),
+            thresholds: vec![
+                ConditionalThreshold::Number(1.0),
+                ConditionalThreshold::Number(3.0),
+                ConditionalThreshold::Number(5.0),
+                ConditionalThreshold::Number(7.0),
+            ],
+            show_value: false,
+            percent: Some(false),
+            reverse: Some(true),
+        })]);
+
+        assert_fragment_parses(&out);
+        assert!(out
+            .contains("<iconSet iconSet=\"4Rating\" showValue=\"0\" percent=\"0\" reverse=\"1\">"));
     }
 
     #[test]
@@ -639,6 +701,8 @@ mod tests {
                 ConditionalThreshold::Percent(80.0),
             ],
             show_value: true,
+            percent: None,
+            reverse: None,
         })]);
 
         assert_fragment_parses(&out);
@@ -656,6 +720,8 @@ mod tests {
                 ConditionalThreshold::Percentile(67.0),
             ],
             show_value: true,
+            percent: None,
+            reverse: None,
         })]);
 
         assert_fragment_parses(&out);
@@ -701,6 +767,8 @@ mod tests {
                     min: ConditionalThreshold::Min,
                     max: ConditionalThreshold::Max,
                     show_value: true,
+                    min_length: None,
+                    max_length: None,
                 }),
                 rule(ConditionalKind::ColorScale {
                     stops: vec![

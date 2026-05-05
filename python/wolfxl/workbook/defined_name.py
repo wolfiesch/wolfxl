@@ -25,6 +25,7 @@ spelling AND the wolfxl snake_case spelling.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -79,6 +80,9 @@ class DefinedName:
         "xlm",
         "publish_to_server",
         "workbook_parameter",
+        "idx_base",
+        "namespace",
+        "tagname",
     )
 
     def __init__(
@@ -151,6 +155,9 @@ class DefinedName:
             "workbookParameter",
             workbookParameter,
         )
+        self.idx_base = 0
+        self.namespace = None
+        self.tagname = "definedName"
 
     @property
     def attr_text(self) -> str:
@@ -160,6 +167,54 @@ class DefinedName:
     @attr_text.setter
     def attr_text(self, v: str) -> None:
         self.value = v
+
+    @property
+    def type(self) -> str:  # noqa: A003 - openpyxl public API
+        """Best-effort openpyxl-compatible defined-name value category."""
+        text = self.value or ""
+        if text.startswith("#"):
+            return "ERROR"
+        if text.startswith('"') and text.endswith('"'):
+            return "TEXT"
+        try:
+            float(text)
+        except ValueError:
+            pass
+        else:
+            return "NUMBER"
+        return "RANGE"
+
+    @property
+    def is_external(self) -> bool:
+        return self.value.startswith("[")
+
+    @property
+    def is_reserved(self) -> str | None:
+        prefix = "_xlnm."
+        if self.name.startswith(prefix):
+            return self.name[len(prefix):]
+        return None
+
+    @property
+    def destinations(self) -> Any:
+        """Yield ``(sheet_name, range)`` pairs for range-like names."""
+        if self.type != "RANGE":
+            return iter(())
+        pattern = re.compile(r"^(.+?)!(.+)$")
+        match = pattern.match(self.value)
+        if match is None:
+            return iter(())
+        sheet, cells = match.groups()
+        if sheet.startswith("'") and sheet.endswith("'"):
+            sheet = sheet[1:-1].replace("''", "'")
+        return iter(((sheet, cells),))
+
+    @classmethod
+    def from_tree(cls, _node: Any) -> "DefinedName":
+        raise NotImplementedError("DefinedName.from_tree is not implemented in wolfxl")
+
+    def to_tree(self, _tagname: str | None = None, _idx: int | None = None) -> Any:
+        raise NotImplementedError("DefinedName.to_tree is not implemented in wolfxl")
 
     @property
     def customMenu(self) -> str | None:  # noqa: N802 - openpyxl alias

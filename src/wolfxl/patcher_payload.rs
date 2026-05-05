@@ -76,10 +76,7 @@ pub(crate) fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec>
 }
 
 pub(crate) fn dict_to_border_spec(d: &Bound<'_, PyDict>) -> PyResult<styles::BorderSpec> {
-    fn extract_side(
-        d: &Bound<'_, PyDict>,
-        key: &str,
-    ) -> PyResult<(styles::BorderSideSpec, bool)> {
+    fn extract_side(d: &Bound<'_, PyDict>, key: &str) -> PyResult<(styles::BorderSideSpec, bool)> {
         if let Some(side) = d.get_item(key)? {
             if let Ok(sd) = side.cast::<PyDict>() {
                 let style = extract_str(sd, "style")?;
@@ -168,7 +165,38 @@ pub(crate) fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
                 val: extract_str(d, "max_val")?,
             },
             color_rgb: extract_str(d, "color_rgb")?.unwrap_or_default(),
+            show_value: extract_bool(d, "show_value")?.unwrap_or(true),
+            min_length: extract_u32(d, "min_length")?,
+            max_length: extract_u32(d, "max_length")?,
         },
+        "iconSet" => {
+            let set_name = extract_str(d, "icon_style")?
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "3TrafficLights1".to_string());
+            let value_type = extract_str(d, "value_type")?
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "percent".to_string());
+            let values_obj = d.get_item("values")?;
+            let mut thresholds = Vec::new();
+            if let Some(values) = values_obj {
+                let values_list = values
+                    .cast::<PyList>()
+                    .map_err(|_| PyValueError::new_err("'values' must be a list"))?;
+                for value in values_list.iter() {
+                    thresholds.push(CfvoPatch {
+                        cfvo_type: value_type.clone(),
+                        val: Some(value.str()?.to_string()),
+                    });
+                }
+            }
+            CfRuleKind::IconSet {
+                set_name,
+                thresholds,
+                show_value: extract_bool(d, "show_value")?.unwrap_or(true),
+                percent: extract_bool(d, "percent")?,
+                reverse: extract_bool(d, "reverse")?,
+            }
+        }
         other => {
             return Err(PyValueError::new_err(format!(
                 "unsupported CF rule kind: '{other}'"

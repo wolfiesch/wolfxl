@@ -1,16 +1,16 @@
 # Parity Closure — Empty `limitations.md`
 
 Date: 2026-05-04
-Status: Active. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; Phase 1, Phase 2, and Phase 3 of this closure plan landed). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
+Status: Active. Sequel to `Plans/openpyxl-parity-program.md` (S0-S7 landed; Phases 1-4 and Phase 10 have landed; Phase 9 is implemented locally on `parity-closure-phase9-cf-ratchet`). This plan commits to closing every remaining openpyxl-parity gap so that `docs/trust/limitations.md` becomes empty (deleted) and the `_compat_spec.py` totals reach `supported=100%, partial=0, not_yet=0` for everything openpyxl itself supports.
 
 ## Context
 
 The user has demanded zero openpyxl-parity gaps. The current state, per the 2026-05-04 review:
 
 - Phase 1 recategorized wolfxl-extras (`.xls` writes, `.xlsb` writes, `.ods` read+write, `.xls` style reads, and VBA authoring) as `out_of_scope`, because openpyxl exposes none of those surfaces.
-- Phase 2 closed `defined_names.edge_cases`; Phase 3 closed `print_settings.depth`. `tests/test_openpyxl_compat_oracle.py` now runs 54 probes; all currently-registered probes pass. 13 spec entries are still marked `supported` but have no probe — that's hidden coverage debt.
+- Phase 2 closed `defined_names.edge_cases`; Phase 3 closed `print_settings.depth`; Phase 4 closed `array_formulas.spill`. Phase 10 added compatibility-oracle probes and exposed one intentional `coordinate_to_tuple` strictness delta. Phase 9 is now adding CF secondary probes plus a broader dynamic-surface ratchet.
 - `docs/migration/_compat_spec.py`: 66 supported / 2 partial / 1 not_yet / 6 out_of_scope across 75 entries.
-- The dynamic-surface ratchet (`tests/test_openpyxl_dynamic_surface.py`) only compares 3 objects (Workbook, Worksheet, Cell). It does not check Style, Color, Border, Font, Fill, Alignment, Protection, NamedStyle, DefinedName, ExternalLink, Pivot*, Chart*, Slicer, Image, Comment, Table, DataValidation. That's also hidden debt.
+- The dynamic-surface ratchet (`tests/test_openpyxl_dynamic_surface.py`) now compares 22 representative objects: Workbook, Worksheet, Cell, Font, Fill, PatternFill, GradientFill, Border, Alignment, Protection, NamedStyle, DefinedName, ExternalLink, BarChart, Image, Comment, Table, DataValidation, ConditionalFormatting, ConditionalFormattingList, AutoFilter, and PageSetup. Pivot and slicer internals remain intentionally behavioral-oracle-first because their openpyxl construction surface is mostly internal state rather than stable end-user API.
 - The openpyxl source-distribution test corpus has never been vendored, even though the parity program plan called for it in S1+.
 
 The remaining parity work is: pivot field/filter/aggregation mutation, external-link authoring, dynamic-array spill metadata, calc-chain edge cases, standalone table-driven slicers, and the CF/dynamic-surface/probe/corpus measurement debt. Total ~4,700 LOC after Phase 3, ~15 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
@@ -285,7 +285,7 @@ Each phase is a separate landing on its own branch. Phases are largely independe
 
 ### Phase 9 — CF rare combos audit + dynamic-surface ratchet expansion (2 sessions)
 
-**Goal:** retire the `limitations.md` clause "rare builder combinations may need a manual probe" and expand the dynamic-surface test from 3 classes to ~23.
+**Goal:** retire the `limitations.md` clause "rare builder combinations may need a manual probe" and expand the dynamic-surface test from 3 classes to ~23. [IMPLEMENTED LOCALLY 2026-05-04, branch `parity-closure-phase9-cf-ratchet`]
 
 **Subtask 9a — CF audit:**
 - Inventory openpyxl's CF rule constructors and operator combinations.
@@ -411,3 +411,6 @@ Frequently-modified shared files across phases:
 - 2026-05-04: Plan created. Phase 1 landed (commit 4825baf).
 - 2026-05-04: Phase 2 landed on branch `parity-closure-phase2`; Codex review tightened the hidden-clear regression and updated stale limitations/tracker text.
 - 2026-05-04: Phase 3 landed on branch `parity-closure-phase2`; G24 print settings depth moved to supported and the limitations row was removed.
+- 2026-05-04: Phase 4 landed via PR #27; array formula and data-table formula surface moved to supported, with openpyxl 3.1.5 `Worksheet.array_formulae` treated as the reference surface.
+- 2026-05-04: Phase 10 landed via PR #28; compatibility-oracle coverage expanded, leaving `coordinate_to_tuple` strictness as the remaining probe-discovered partial.
+- 2026-05-04: Phase 9 implemented locally on `parity-closure-phase9-cf-ratchet`; CF rare-combo probes, modify-mode CF attr tests, and a 22-object dynamic-surface ratchet are green locally.
