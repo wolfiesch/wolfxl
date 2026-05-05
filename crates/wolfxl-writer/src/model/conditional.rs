@@ -80,6 +80,16 @@ pub enum ConditionalKind {
         /// 0 means "exactly average"; 1 = "one std dev", etc.
         std_dev: u32,
     },
+    Generic {
+        /// Openpyxl/OOXML cfRule type name (for example "containsText",
+        /// "top10", "duplicateValues", or "timePeriod").
+        type_name: String,
+        /// Additional cfRule attributes beyond type / priority / dxfId /
+        /// stopIfTrue. Values are already stringified for OOXML.
+        attrs: Vec<(String, String)>,
+        /// Optional `<formula>` children in wire order.
+        formulas: Vec<String>,
+    },
     /// Gradient color scale (2-stop or 3-stop).
     ColorScale {
         stops: Vec<ColorScaleStop>,
@@ -92,6 +102,9 @@ pub enum ConditionalKind {
         /// OOXML default is `true`; when `false` we emit `showValue="0"` on
         /// the `<dataBar>` element. Added in G12 (Sprint 3).
         show_value: bool,
+        /// Optional OOXML minLength / maxLength display bounds.
+        min_length: Option<u32>,
+        max_length: Option<u32>,
     },
     IconSet {
         /// e.g. `"3TrafficLights1"`, `"5Arrows"`, `"4Rating"`.
@@ -102,6 +115,10 @@ pub enum ConditionalKind {
         /// OOXML spec default), so emit `showValue="0"` only when this
         /// is explicitly `false`.
         show_value: bool,
+        /// Optional OOXML flags for absolute/percent threshold semantics and
+        /// reversed icon ordering.
+        percent: Option<bool>,
+        reverse: Option<bool>,
     },
 }
 

@@ -8,9 +8,7 @@ use pyo3::types::{PyDict, PyList};
 use wolfxl_reader::{Cell, CellValue};
 
 use crate::native_reader_backend::{NativeXlsbBook, NativeXlsxBook};
-use crate::native_reader_cell_helpers::{
-    cell_to_plain, ensure_formula_prefix, native_data_type,
-};
+use crate::native_reader_cell_helpers::{cell_to_plain, ensure_formula_prefix, native_data_type};
 use crate::native_reader_dimensions::{is_merged_subordinate, row_col_to_a1_1based};
 use crate::native_reader_styles::gradient_to_pydict;
 use crate::native_reader_traits::NativeStyleResolver;
@@ -91,10 +89,7 @@ pub(crate) fn read_sheet_records_xlsx(
 
     for cell in &data.cells {
         if let Some((min_row, min_col, max_row, max_col)) = window {
-            if cell.row < min_row
-                || cell.row > max_row
-                || cell.col < min_col
-                || cell.col > max_col
+            if cell.row < min_row || cell.row > max_row || cell.col < min_col || cell.col > max_col
             {
                 continue;
             }
@@ -171,10 +166,7 @@ pub(crate) fn read_sheet_records_xlsb(
     }
     for cell in &data.cells {
         if let Some((min_row, min_col, max_row, max_col)) = window {
-            if cell.row < min_row
-                || cell.row > max_row
-                || cell.col < min_col
-                || cell.col > max_col
+            if cell.row < min_row || cell.row > max_row || cell.col < min_col || cell.col > max_col
             {
                 continue;
             }

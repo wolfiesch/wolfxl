@@ -47,28 +47,29 @@ pub(super) fn apply_pivot_source_edits_phase(
     file_patches: &mut HashMap<String, Vec<u8>>,
     zip: &mut ZipArchive<File>,
 ) -> PyResult<()> {
-    let drained: Vec<QueuedPivotSourceEdit> = std::mem::take(&mut patcher.queued_pivot_source_edits);
+    let drained: Vec<QueuedPivotSourceEdit> =
+        std::mem::take(&mut patcher.queued_pivot_source_edits);
     if drained.is_empty() {
         return Ok(());
     }
 
     for edit in drained {
         // Source priority: file_patches → file_adds → ZIP.
-        let (xml_bytes, write_to_adds) =
-            if let Some(b) = file_patches.get(&edit.cache_part_path).cloned() {
-                (b, false)
-            } else if let Some(b) = patcher.file_adds.get(&edit.cache_part_path).cloned() {
-                (b, true)
-            } else {
-                let s = ooxml_util::zip_read_to_string(zip, &edit.cache_part_path)
-                    .map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!(
-                            "pivot source edit: cannot read {}: {}",
-                            edit.cache_part_path, e
-                        ))
-                    })?;
-                (s.into_bytes(), false)
-            };
+        let (xml_bytes, write_to_adds) = if let Some(b) =
+            file_patches.get(&edit.cache_part_path).cloned()
+        {
+            (b, false)
+        } else if let Some(b) = patcher.file_adds.get(&edit.cache_part_path).cloned() {
+            (b, true)
+        } else {
+            let s = ooxml_util::zip_read_to_string(zip, &edit.cache_part_path).map_err(|e| {
+                PyErr::new::<PyIOError, _>(format!(
+                    "pivot source edit: cannot read {}: {}",
+                    edit.cache_part_path, e
+                ))
+            })?;
+            (s.into_bytes(), false)
+        };
 
         let new_xml = wolfxl_pivot::mutate::rewrite_cache_source(
             &xml_bytes,

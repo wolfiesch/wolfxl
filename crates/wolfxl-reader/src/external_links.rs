@@ -219,7 +219,8 @@ mod tests {
     #[test]
     fn parse_part_no_external_book() {
         // Pathological but well-formed: the part is empty.
-        let xml = br#"<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+        let xml =
+            br#"<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
         let p = parse_part(xml).unwrap();
         assert!(p.book_rid.is_none());
         assert!(p.sheet_names.is_empty());

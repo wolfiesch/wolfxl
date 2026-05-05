@@ -1,32 +1,30 @@
-# Known Limitations
+# Openpyxl Parity Limitations
 
-This page lists concrete openpyxl-parity gaps in WolfXL so you can evaluate
-fit before migrating. Surfaces that openpyxl itself does not expose
-(`.xlsb`/`.xls` writes, `.ods`, VBA authoring) are wolfxl-extras tracked in
-[`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md)
-under G25-G28; they are not parity gaps and are not listed here. The
-machine-checked source of truth is
+This page lists the current openpyxl-parity truth in WolfXL so you can
+evaluate fit before migrating. There are no known `partial` or `not_yet`
+rows for the tracked openpyxl-supported API surface in the generated
+compatibility matrix. Surfaces that openpyxl itself does not expose
+(`.xlsb`/`.xls` writes, `.ods`, VBA authoring, standalone table-driven
+slicer authoring) are wolfxl-extras tracked in
+[`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md);
+they are not openpyxl parity gaps. The machine-checked source of truth is
 [`compatibility-matrix.md`](../migration/compatibility-matrix.md).
 
-## Current hard limits
+## Current caveat
 
 | Feature | Read | Write | Modify | Notes |
 |---------|:----:|:-----:|:------:|-------|
-| In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
-| External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
-| Dynamic-array spill metadata | Partial | Partial | Partial | Array formulas and data-table formulas round-trip; dynamic-array spill metadata is not fully preserved yet. |
-| Calc-chain edge cases | Partial | Partial | Partial | Basic calc-chain rebuild is supported; cross-sheet ordering, deleted-cell pruning, and `calcChainExtLst` edge cases remain open. |
-| Standalone table-driven slicers | No | No | Preserve | Pivot-backed slicers are supported. Slicers tied directly to tables, outside a pivot context, are still unimplemented. |
+| Pivot cache record regeneration after layout edits | Yes | Excel refresh | Refresh | WolfXL can mutate existing pivot source ranges, row/column/page field placement, page-field selection, and data-field aggregation. Layout edits stamp `refreshOnLoad="1"` and let Excel regenerate derived cache records on open rather than recalculating `pivotCacheRecords` inside WolfXL. This is not an openpyxl advantage: openpyxl preserves existing pivot parts but does not provide a public cache-record regeneration engine either. |
 
-"Preserve" means the feature survives a load-modify-save cycle untouched, even
-though WolfXL does not expose a full authoring API for that surface.
+"Refresh" means the edited workbook opens cleanly and Excel refreshes derived
+cache data when needed.
 
 ## API surface gaps vs openpyxl
 
-These openpyxl APIs are still incomplete or intentionally narrower:
-
-- `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
-- Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
+None known in the tracked matrix/oracle. Any future claim of an
+openpyxl-supported gap should be added to
+[`_compat_spec.py`](../migration/_compat_spec.py) as `partial` or `not_yet`
+with a failing oracle probe before being documented here.
 
 ## Performance claim guardrails
 

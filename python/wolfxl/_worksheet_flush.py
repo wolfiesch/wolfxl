@@ -389,7 +389,8 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
     emitter prefers it over the positional fallback so multi-rule blocks
     keep openpyxl-style priority ordering.
     """
-    formula = rule.formula[0] if rule.formula else None
+    formulas = [str(part) for part in rule.formula] if rule.formula else []
+    formula = formulas[0] if formulas else None
     payload: dict[str, Any] = {
         "range": range_string,
         "rule_type": rule.type,
@@ -397,6 +398,7 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    _add_generic_cf_attrs(payload, rule, formulas)
     # G14: forward explicit user-set priority so multi-rule blocks keep
     # openpyxl semantics (priority is positional in the wire format, but
     # users author by explicit number). Only forward when the rule isn't
@@ -410,6 +412,15 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
     # G14: forward dxf state from openpyxl-shaped kwargs (fill=/dxf=).
     # Cellis + expression are the only rule kinds that take a dxfId.
     if rule.type in ("cellIs", "expression"):
+        if rule.type == "cellIs":
+            if formulas:
+                payload["formula_a"] = formulas[0]
+            if len(formulas) > 1:
+                payload["formula_b"] = formulas[1]
+        bg_hex = _extract_dxf_bg_hex(extra)
+        if bg_hex is not None:
+            payload["format"] = {"bg_color": bg_hex}
+    elif rule.type not in ("colorScale", "dataBar", "iconSet"):
         bg_hex = _extract_dxf_bg_hex(extra)
         if bg_hex is not None:
             payload["format"] = {"bg_color": bg_hex}
@@ -422,8 +433,21 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
             payload["values"] = list(extra["values"])
         if extra.get("show_value") is not None:
             payload["show_value"] = bool(extra["show_value"])
+        if extra.get("percent") is not None:
+            payload["percent"] = bool(extra["percent"])
+        if extra.get("reverse") is not None:
+            payload["reverse"] = bool(extra["reverse"])
     elif rule.type == "dataBar":
-        for key in ("start_type", "start_value", "end_type", "end_value", "color", "show_value"):
+        for key in (
+            "start_type",
+            "start_value",
+            "end_type",
+            "end_value",
+            "color",
+            "show_value",
+            "min_length",
+            "max_length",
+        ):
             if key in extra and extra[key] is not None:
                 payload[key] = extra[key]
     elif rule.type == "colorScale":
@@ -442,6 +466,30 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
             if value is not None:
                 payload[key] = value
     return payload
+
+
+def _add_generic_cf_attrs(
+    payload: dict[str, Any],
+    rule: Any,
+    formulas: list[str],
+) -> None:
+    """Forward openpyxl's generic ``Rule`` attrs for non-special CF kinds."""
+    if formulas:
+        payload["formulas"] = formulas
+    attr_map = {
+        "aboveAverage": "above_average",
+        "percent": "percent",
+        "bottom": "bottom",
+        "text": "text",
+        "timePeriod": "time_period",
+        "rank": "rank",
+        "stdDev": "std_dev",
+        "equalAverage": "equal_average",
+    }
+    for public_name, payload_name in attr_map.items():
+        value = getattr(rule, public_name, None)
+        if value is not None:
+            payload[payload_name] = value
 
 
 def _extract_dxf_bg_hex(extra: dict[str, Any]) -> str | None:

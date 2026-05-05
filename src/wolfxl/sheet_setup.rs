@@ -56,11 +56,13 @@ pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetS
         _ => None,
     };
     let print_options = match payload.get_item("print_options")? {
-        Some(v) if !v.is_none() => Some(parse_print_options(v.cast::<PyDict>().map_err(|_| {
-            PyValueError::new_err(
-                "queue_sheet_setup_update: 'print_options' must be a dict or None",
-            )
-        })?)?),
+        Some(v) if !v.is_none() => {
+            Some(parse_print_options(v.cast::<PyDict>().map_err(|_| {
+                PyValueError::new_err(
+                    "queue_sheet_setup_update: 'print_options' must be a dict or None",
+                )
+            })?)?)
+        }
         _ => None,
     };
     let header_footer = match payload.get_item("header_footer")? {

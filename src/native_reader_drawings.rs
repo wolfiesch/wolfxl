@@ -104,10 +104,7 @@ pub(crate) fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObjec
     Ok(d.into())
 }
 
-pub(crate) fn chart_axis_to_py(
-    py: Python<'_>,
-    axis: Option<&ChartAxisInfo>,
-) -> PyResult<PyObject> {
+pub(crate) fn chart_axis_to_py(py: Python<'_>, axis: Option<&ChartAxisInfo>) -> PyResult<PyObject> {
     let Some(axis) = axis else {
         return Ok(py.None());
     };
@@ -134,10 +131,7 @@ pub(crate) fn chart_axis_to_py(
     Ok(d.into())
 }
 
-pub(crate) fn chart_series_to_py(
-    py: Python<'_>,
-    series: &ChartSeriesInfo,
-) -> PyResult<PyObject> {
+pub(crate) fn chart_series_to_py(py: Python<'_>, series: &ChartSeriesInfo) -> PyResult<PyObject> {
     let d = PyDict::new(py);
     d.set_item("idx", series.idx)?;
     d.set_item("order", series.order)?;
@@ -240,10 +234,7 @@ pub(crate) fn chart_error_bars_to_py(
     Ok(d.into())
 }
 
-pub(crate) fn image_anchor_to_py(
-    py: Python<'_>,
-    anchor: &ImageAnchorInfo,
-) -> PyResult<PyObject> {
+pub(crate) fn image_anchor_to_py(py: Python<'_>, anchor: &ImageAnchorInfo) -> PyResult<PyObject> {
     let d = PyDict::new(py);
     match anchor {
         ImageAnchorInfo::OneCell { from, ext } => {
@@ -284,10 +275,7 @@ pub(crate) fn populate_marker(
     Ok(())
 }
 
-pub(crate) fn populate_position(
-    d: &Bound<'_, PyDict>,
-    pos: &AnchorPositionInfo,
-) -> PyResult<()> {
+pub(crate) fn populate_position(d: &Bound<'_, PyDict>, pos: &AnchorPositionInfo) -> PyResult<()> {
     d.set_item("x_emu", pos.x)?;
     d.set_item("y_emu", pos.y)?;
     Ok(())

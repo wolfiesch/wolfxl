@@ -59,6 +59,20 @@ def _calc_chain_present(path: Path) -> bool:
         return "xl/calcChain.xml" in z.namelist()
 
 
+def _inject_calc_chain(path: Path, calc_chain_xml: str) -> None:
+    """Add or replace ``xl/calcChain.xml`` in an existing workbook zip."""
+    rewritten = path.with_suffix(".rewritten.xlsx")
+    with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
+        rewritten, "w", compression=zipfile.ZIP_DEFLATED
+    ) as dst:
+        for info in src.infolist():
+            if info.filename == "xl/calcChain.xml":
+                continue
+            dst.writestr(info, src.read(info.filename))
+        dst.writestr("xl/calcChain.xml", calc_chain_xml)
+    rewritten.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # Helpers — fixtures.
 # ---------------------------------------------------------------------------
@@ -240,6 +254,47 @@ def test_insert_rows_then_save_shifts_calc_chain_refs(tmp_path: Path) -> None:
     assert "B5" not in refs, (
         f"insert_rows must NOT leave the unshifted ref; got {refs}"
     )
+
+
+def test_modify_mode_prunes_stale_calc_chain_and_preserves_ext_lst(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+
+    fwb = openpyxl.Workbook()
+    first = fwb.active
+    first.title = "First"
+    first["A1"] = 1
+    first["A2"] = 2
+    first["B1"] = "=SUM(A1:A2)"
+    first["B4"] = "=Second!A1"
+    second = fwb.create_sheet("Second")
+    second["A1"] = 10
+    second["B2"] = "=First!B1+A1"
+    fwb.save(src)
+    _inject_calc_chain(
+        src,
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <c r="B1" i="1"/>
+  <c r="B4" i="1"/>
+  <c r="X99" i="2"/>
+  <extLst><ext uri="{wolfxl-test-calcchain-ext}"><x:test xmlns:x="urn:wolfxl:test">keep</x:test></ext></extLst>
+</calcChain>""",
+    )
+
+    wb = load_workbook(src, modify=True)
+    wb["First"].delete_rows(4)
+    wb.save(dst)
+
+    entries = _read_calc_chain(dst)
+    assert ("B1", 1) in entries, f"same-sheet formula missing: {entries}"
+    assert ("B2", 2) in entries, f"cross-sheet formula missing: {entries}"
+    assert ("B4", 1) not in entries, f"deleted formula leaked into calcChain: {entries}"
+    assert ("X99", 2) not in entries, f"stale source calcChain ref leaked: {entries}"
+    with zipfile.ZipFile(dst, "r") as z:
+        calc_xml = z.read("xl/calcChain.xml").decode("utf-8")
+    assert "{wolfxl-test-calcchain-ext}" in calc_xml
+    assert "urn:wolfxl:test" in calc_xml
 
 
 # ---------------------------------------------------------------------------

@@ -83,6 +83,21 @@ pub enum CfRuleKind {
         min: CfvoPatch,
         max: CfvoPatch,
         color_rgb: String,
+        show_value: bool,
+        min_length: Option<u32>,
+        max_length: Option<u32>,
+    },
+    IconSet {
+        set_name: String,
+        thresholds: Vec<CfvoPatch>,
+        show_value: bool,
+        percent: Option<bool>,
+        reverse: Option<bool>,
+    },
+    Generic {
+        type_name: String,
+        attrs: Vec<(String, String)>,
+        formulas: Vec<String>,
     },
 }
 
@@ -402,6 +417,9 @@ pub fn build_cf_blocks(
                     min,
                     max,
                     color_rgb,
+                    show_value,
+                    min_length,
+                    max_length,
                 } => {
                     rules_buf.extend_from_slice(
                         format!("<cfRule type=\"dataBar\" priority=\"{}\"", priority).as_bytes(),
@@ -410,7 +428,17 @@ pub fn build_cf_blocks(
                         rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
                     }
                     rules_buf.push(b'>');
-                    rules_buf.extend_from_slice(b"<dataBar>");
+                    rules_buf.extend_from_slice(b"<dataBar");
+                    if !*show_value {
+                        rules_buf.extend_from_slice(b" showValue=\"0\"");
+                    }
+                    if let Some(value) = min_length {
+                        rules_buf.extend_from_slice(format!(" minLength=\"{}\"", value).as_bytes());
+                    }
+                    if let Some(value) = max_length {
+                        rules_buf.extend_from_slice(format!(" maxLength=\"{}\"", value).as_bytes());
+                    }
+                    rules_buf.push(b'>');
                     emit_cfvo(&mut rules_buf, min);
                     emit_cfvo(&mut rules_buf, max);
                     rules_buf.extend_from_slice(
@@ -418,6 +446,86 @@ pub fn build_cf_blocks(
                     );
                     rules_buf.extend_from_slice(b"</dataBar>");
                     rules_buf.extend_from_slice(b"</cfRule>");
+                }
+                CfRuleKind::IconSet {
+                    set_name,
+                    thresholds,
+                    show_value,
+                    percent,
+                    reverse,
+                } => {
+                    rules_buf.extend_from_slice(
+                        format!("<cfRule type=\"iconSet\" priority=\"{}\"", priority).as_bytes(),
+                    );
+                    if rule.stop_if_true {
+                        rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
+                    }
+                    rules_buf.push(b'>');
+                    rules_buf.extend_from_slice(
+                        format!("<iconSet iconSet=\"{}\"", attr_escape(set_name)).as_bytes(),
+                    );
+                    if !*show_value {
+                        rules_buf.extend_from_slice(b" showValue=\"0\"");
+                    }
+                    if let Some(value) = percent {
+                        rules_buf.extend_from_slice(if *value {
+                            b" percent=\"1\""
+                        } else {
+                            b" percent=\"0\""
+                        });
+                    }
+                    if let Some(value) = reverse {
+                        rules_buf.extend_from_slice(if *value {
+                            b" reverse=\"1\""
+                        } else {
+                            b" reverse=\"0\""
+                        });
+                    }
+                    rules_buf.push(b'>');
+                    for threshold in thresholds {
+                        emit_cfvo(&mut rules_buf, threshold);
+                    }
+                    rules_buf.extend_from_slice(b"</iconSet>");
+                    rules_buf.extend_from_slice(b"</cfRule>");
+                }
+                CfRuleKind::Generic {
+                    type_name,
+                    attrs,
+                    formulas,
+                } => {
+                    rules_buf.extend_from_slice(
+                        format!(
+                            "<cfRule type=\"{}\" priority=\"{}\"",
+                            attr_escape(type_name),
+                            priority
+                        )
+                        .as_bytes(),
+                    );
+                    for (name, value) in attrs {
+                        if value.is_empty() {
+                            continue;
+                        }
+                        rules_buf.extend_from_slice(
+                            format!(" {}=\"{}\"", attr_escape(name), attr_escape(value)).as_bytes(),
+                        );
+                    }
+                    if let Some(id) = dxf_id {
+                        rules_buf.extend_from_slice(format!(" dxfId=\"{}\"", id).as_bytes());
+                    }
+                    if rule.stop_if_true {
+                        rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
+                    }
+                    if formulas.is_empty() {
+                        rules_buf.extend_from_slice(b"/>");
+                    } else {
+                        rules_buf.push(b'>');
+                        for formula in formulas {
+                            rules_buf.extend_from_slice(
+                                format!("<formula>{}</formula>", text_escape(formula)).as_bytes(),
+                            );
+                        }
+                        rules_buf.extend_from_slice(b"</cfRule>");
+                    }
                 }
             }
 
@@ -909,6 +1017,9 @@ mod tests {
                         val: None,
                     },
                     color_rgb: "FF638EC6".to_string(),
+                    show_value: true,
+                    min_length: None,
+                    max_length: None,
                 },
                 dxf: None,
                 stop_if_true: false,

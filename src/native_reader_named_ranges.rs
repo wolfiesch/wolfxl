@@ -1,7 +1,7 @@
 //! Named-range reader logic for native XLSX/XLSB books.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use wolfxl_reader::NamedRange;
 

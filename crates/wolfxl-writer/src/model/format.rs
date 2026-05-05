@@ -115,7 +115,10 @@ pub struct ProtectionSpec {
 
 impl Default for ProtectionSpec {
     fn default() -> Self {
-        Self { locked: true, hidden: false }
+        Self {
+            locked: true,
+            hidden: false,
+        }
     }
 }
 
@@ -537,7 +540,10 @@ mod tests {
             ..Default::default()
         };
         let xf_idx = b.intern_format_with_xf_id(&spec, 1);
-        assert!(xf_idx >= 1, "non-default spec should not collide with slot 0");
+        assert!(
+            xf_idx >= 1,
+            "non-default spec should not collide with slot 0"
+        );
         assert_eq!(b.cell_xfs[xf_idx as usize].xf_id, 1);
     }
 }

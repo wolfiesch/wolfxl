@@ -110,16 +110,10 @@ impl StreamingSheet {
     /// in [`last_io_err`] and re-raised by [`finalize`]. Callers MUST
     /// invoke [`finalize`] before reading [`temp_path`] for the
     /// splice phase.
-    pub fn append_row(
-        &mut self,
-        row_num: u32,
-        row: &Row,
-        sst: &mut SstBuilder,
-    ) -> io::Result<()> {
-        let writer = self
-            .writer
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "streaming sheet already finalized"))?;
+    pub fn append_row(&mut self, row_num: u32, row: &Row, sst: &mut SstBuilder) -> io::Result<()> {
+        let writer = self.writer.as_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "streaming sheet already finalized")
+        })?;
         let mut adapter = IoFmtAdapter {
             inner: writer,
             err: None,
@@ -130,12 +124,7 @@ impl StreamingSheet {
         match emit_row_to(&mut adapter, row_num, row, sst) {
             Ok(()) => {
                 self.row_count = self.row_count.saturating_add(1);
-                let n_cols = row
-                    .cells
-                    .keys()
-                    .copied()
-                    .max()
-                    .unwrap_or(0);
+                let n_cols = row.cells.keys().copied().max().unwrap_or(0);
                 if n_cols > self.max_col {
                     self.max_col = n_cols;
                 }
@@ -262,8 +251,7 @@ mod tests {
     fn row_with(cells: &[(u32, WriteCellValue)]) -> Row {
         let mut row = Row::default();
         for (col, val) in cells {
-            row.cells
-                .insert(*col, WriteCell::new(val.clone()));
+            row.cells.insert(*col, WriteCell::new(val.clone()));
         }
         row
     }
@@ -293,13 +281,25 @@ mod tests {
         let mut sst = SstBuilder::default();
 
         sheet
-            .append_row(1, &row_with(&[(1, WriteCellValue::String("x".into()))]), &mut sst)
+            .append_row(
+                1,
+                &row_with(&[(1, WriteCellValue::String("x".into()))]),
+                &mut sst,
+            )
             .unwrap();
         sheet
-            .append_row(2, &row_with(&[(1, WriteCellValue::String("y".into()))]), &mut sst)
+            .append_row(
+                2,
+                &row_with(&[(1, WriteCellValue::String("y".into()))]),
+                &mut sst,
+            )
             .unwrap();
         sheet
-            .append_row(3, &row_with(&[(1, WriteCellValue::String("x".into()))]), &mut sst)
+            .append_row(
+                3,
+                &row_with(&[(1, WriteCellValue::String("x".into()))]),
+                &mut sst,
+            )
             .unwrap();
         sheet.finalize().unwrap();
 
@@ -323,11 +323,7 @@ mod tests {
             )
             .unwrap();
         sheet
-            .append_row(
-                2,
-                &row_with(&[(7, WriteCellValue::Number(7.0))]),
-                &mut sst,
-            )
+            .append_row(2, &row_with(&[(7, WriteCellValue::Number(7.0))]), &mut sst)
             .unwrap();
         sheet.finalize().unwrap();
 

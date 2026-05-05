@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 import wolfxl
+from wolfxl import ExternalLink
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "external_links_basic.xlsx"
 
@@ -233,3 +234,92 @@ def test_external_links_alias_is_same_list(fixture_path: Path) -> None:
     """
     wb = wolfxl.load_workbook(fixture_path)
     assert wb.external_links is wb._external_links
+
+
+def test_write_mode_append_external_link_authors_parts(tmp_path: Path) -> None:
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "='[linked.xlsx]Sheet1'!$A$1"
+    wb._external_links.append(ExternalLink(target="linked.xlsx", sheet_names=["Sheet1"]))
+    out = tmp_path / "authored.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        wb_xml = zf.read("xl/workbook.xml").decode("utf-8")
+        wb_rels = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        link_xml = zf.read("xl/externalLinks/externalLink1.xml").decode("utf-8")
+        link_rels = zf.read("xl/externalLinks/_rels/externalLink1.xml.rels").decode("utf-8")
+        ct_xml = zf.read("[Content_Types].xml").decode("utf-8")
+
+    assert "xl/externalLinks/externalLink1.xml" in names
+    assert "<externalReferences>" in wb_xml
+    assert "relationships/externalLink" in wb_rels
+    assert "linked.xlsx" in link_rels
+    assert 'sheetName val="Sheet1"' in link_xml
+    assert "/xl/externalLinks/externalLink1.xml" in ct_xml
+
+    wb2 = wolfxl.load_workbook(out)
+    assert len(wb2._external_links) == 1
+    assert wb2._external_links[0].target == "linked.xlsx"
+
+
+def test_modify_mode_append_external_link_preserves_existing_and_adds_new(
+    fixture_path: Path, tmp_path: Path
+) -> None:
+    src = tmp_path / "src.xlsx"
+    src.write_bytes(fixture_path.read_bytes())
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb._external_links.append(ExternalLink(target="other.xlsx", sheet_names=["Other"]))
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        assert "xl/externalLinks/externalLink1.xml" in names
+        assert "xl/externalLinks/externalLink2.xml" in names
+        assert "ext.xlsx" in zf.read(
+            "xl/externalLinks/_rels/externalLink1.xml.rels"
+        ).decode("utf-8")
+        assert "other.xlsx" in zf.read(
+            "xl/externalLinks/_rels/externalLink2.xml.rels"
+        ).decode("utf-8")
+
+    wb2 = wolfxl.load_workbook(out)
+    assert [link.target for link in wb2._external_links] == ["ext.xlsx", "other.xlsx"]
+
+
+def test_remove_external_link_prunes_parts_and_workbook_wiring(
+    fixture_path: Path, tmp_path: Path
+) -> None:
+    wb = wolfxl.load_workbook(fixture_path, modify=True)
+    wb._external_links.clear()
+    out = tmp_path / "removed.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        wb_xml = zf.read("xl/workbook.xml").decode("utf-8")
+        wb_rels = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        ct_xml = zf.read("[Content_Types].xml").decode("utf-8")
+
+    assert not any(name.startswith("xl/externalLinks/") for name in names)
+    assert "<externalReferences>" not in wb_xml
+    assert "relationships/externalLink" not in wb_rels
+    assert "/xl/externalLinks/" not in ct_xml
+
+
+def test_update_external_link_target_rewrites_link_rels(
+    fixture_path: Path, tmp_path: Path
+) -> None:
+    wb = wolfxl.load_workbook(fixture_path, modify=True)
+    wb._external_links[0].update_target("renamed.xlsx")
+    out = tmp_path / "retargeted.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        rels = zf.read("xl/externalLinks/_rels/externalLink1.xml.rels").decode("utf-8")
+
+    assert "renamed.xlsx" in rels
+    assert "ext.xlsx" not in rels
+    wb2 = wolfxl.load_workbook(out)
+    assert wb2._external_links[0].target == "renamed.xlsx"

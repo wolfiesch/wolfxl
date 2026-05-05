@@ -115,8 +115,8 @@ fn threaded_comments_round_trip_through_emit() {
     );
 
     // 4. Sheet rels — threadedComments relationship.
-    let sheet_rels = read_zip_part(&bytes, "xl/worksheets/_rels/sheet1.xml.rels")
-        .expect("sheet1 rels present");
+    let sheet_rels =
+        read_zip_part(&bytes, "xl/worksheets/_rels/sheet1.xml.rels").expect("sheet1 rels present");
     assert!(
         sheet_rels.contains("../threadedComments/threadedComments1.xml"),
         "sheet rels target threadedComments: {sheet_rels}"
@@ -153,8 +153,8 @@ fn threaded_comments_round_trip_through_emit() {
     assert!(pl.contains("userId=\"alice@example.com\""), "{pl}");
 
     // 5c. Legacy placeholder + synthetic author.
-    let legacy = read_zip_part(&bytes, "xl/comments/comments1.xml")
-        .expect("legacy placeholder present");
+    let legacy =
+        read_zip_part(&bytes, "xl/comments/comments1.xml").expect("legacy placeholder present");
     assert!(
         legacy.contains("<author>tc={T-PARENT}</author>"),
         "synthetic tc= author: {legacy}"

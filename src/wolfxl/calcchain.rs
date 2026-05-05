@@ -31,6 +31,7 @@
 
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
+use quick_xml::Writer as XmlWriter;
 
 /// Content type for `xl/calcChain.xml`.
 pub const CT_CALC_CHAIN: &str =
@@ -142,13 +143,69 @@ pub fn scan_sheet_for_formulas(sheet_xml: &[u8], sheet_index_1based: u32) -> Vec
     entries
 }
 
+/// Extract a source calcChain `<extLst>` block so rebuilds can preserve
+/// extension metadata attached to the chain.
+pub fn extract_ext_lst(calc_chain_xml: &[u8]) -> Option<Vec<u8>> {
+    let mut reader = XmlReader::from_reader(calc_chain_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::new());
+    let mut buf: Vec<u8> = Vec::new();
+    let mut in_ext_lst = false;
+    let mut depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.name().local_name().as_ref() == b"extLst" && !in_ext_lst => {
+                in_ext_lst = true;
+                depth = 1;
+                writer.write_event(Event::Start(e.into_owned())).ok()?;
+            }
+            Ok(Event::Empty(e)) if e.name().local_name().as_ref() == b"extLst" && !in_ext_lst => {
+                writer.write_event(Event::Empty(e.into_owned())).ok()?;
+                return Some(writer.into_inner());
+            }
+            Ok(Event::Start(e)) if in_ext_lst => {
+                depth += 1;
+                writer.write_event(Event::Start(e.into_owned())).ok()?;
+            }
+            Ok(Event::Empty(e)) if in_ext_lst => {
+                writer.write_event(Event::Empty(e.into_owned())).ok()?;
+            }
+            Ok(Event::Text(e)) if in_ext_lst => {
+                writer.write_event(Event::Text(e.into_owned())).ok()?;
+            }
+            Ok(Event::CData(e)) if in_ext_lst => {
+                writer.write_event(Event::CData(e.into_owned())).ok()?;
+            }
+            Ok(Event::Comment(e)) if in_ext_lst => {
+                writer.write_event(Event::Comment(e.into_owned())).ok()?;
+            }
+            Ok(Event::End(e)) if in_ext_lst => {
+                writer.write_event(Event::End(e.into_owned())).ok()?;
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(writer.into_inner());
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
+}
+
 /// Render `xl/calcChain.xml` from a flat list of entries. Order is
 /// preserved verbatim — caller is responsible for the iteration order
 /// (typically sheet tab-order, then sheet-XML scan order).
 ///
 /// Returns `None` if there are no entries — the caller should DELETE
 /// the calcChain.xml part instead of writing an empty one.
-pub fn render_calc_chain(entries: &[CalcChainEntry]) -> Option<Vec<u8>> {
+pub fn render_calc_chain_with_ext_lst(
+    entries: &[CalcChainEntry],
+    ext_lst: Option<&[u8]>,
+) -> Option<Vec<u8>> {
     if entries.is_empty() {
         return None;
     }
@@ -165,8 +222,12 @@ pub fn render_calc_chain(entries: &[CalcChainEntry]) -> Option<Vec<u8>> {
             .replace('"', "&quot;");
         out.push_str(&format!("<c r=\"{}\" i=\"{}\"/>", escaped, e.sheet_index));
     }
-    out.push_str("</calcChain>");
-    Some(out.into_bytes())
+    let mut bytes = out.into_bytes();
+    if let Some(ext) = ext_lst {
+        bytes.extend_from_slice(ext);
+    }
+    bytes.extend_from_slice(b"</calcChain>");
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -217,7 +278,7 @@ mod tests {
 
     #[test]
     fn render_empty_returns_none() {
-        assert!(render_calc_chain(&[]).is_none());
+        assert!(render_calc_chain_with_ext_lst(&[], None).is_none());
     }
 
     #[test]
@@ -232,12 +293,39 @@ mod tests {
                 sheet_index: 2,
             },
         ];
-        let bytes = render_calc_chain(&entries).expect("non-empty");
+        let bytes = render_calc_chain_with_ext_lst(&entries, None).expect("non-empty");
         let s = String::from_utf8(bytes).unwrap();
         assert!(s.contains("<?xml"));
         assert!(s.contains("<calcChain"));
         assert!(s.contains("<c r=\"A1\" i=\"1\"/>"));
         assert!(s.contains("<c r=\"B2\" i=\"2\"/>"));
         assert!(s.contains("</calcChain>"));
+    }
+
+    #[test]
+    fn extract_ext_lst_preserves_source_extension_block() {
+        let xml = br#"<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><c r="A1" i="1"/><extLst><ext uri="{wolfxl-test}"><x:test xmlns:x="urn:test">ok</x:test></ext></extLst></calcChain>"#;
+        let ext = extract_ext_lst(xml).expect("extLst present");
+        let s = String::from_utf8(ext).unwrap();
+        assert!(s.starts_with("<extLst>"), "{s}");
+        assert!(s.contains("{wolfxl-test}"), "{s}");
+        assert!(s.contains("urn:test"), "{s}");
+    }
+
+    #[test]
+    fn render_can_append_preserved_ext_lst() {
+        let entries = vec![CalcChainEntry {
+            cell_ref: "A1".into(),
+            sheet_index: 1,
+        }];
+        let bytes =
+            render_calc_chain_with_ext_lst(&entries, Some(b"<extLst><ext uri=\"u\"/></extLst>"))
+                .expect("non-empty");
+        let s = String::from_utf8(bytes).unwrap();
+        assert!(s.contains("<c r=\"A1\" i=\"1\"/>"));
+        assert!(
+            s.contains("<extLst><ext uri=\"u\"/></extLst></calcChain>"),
+            "{s}"
+        );
     }
 }

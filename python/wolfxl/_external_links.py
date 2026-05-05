@@ -16,14 +16,18 @@ the compat oracle and downstream introspection:
   ``target_mode`` so callers can check ``link.file_link.target_mode ==
   "External"``.
 
-The collection is read-only in v1.0 (RFC-071 §5 / §8): we expose the
-parsed list, but the patcher rewrites ``xl/externalLinks/`` parts
-byte-for-byte on save. Authoring is deferred to a follow-up RFC.
+The collection is mutable: callers can append/remove links and update
+targets. Modify-mode saves rewrite the workbook relationship graph,
+content types, external-link parts, and per-link rels when the
+collection is dirty; unchanged collections preserve source bytes.
 """
 
 from __future__ import annotations
 
 import zipfile
+import os
+import re
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -32,9 +36,17 @@ _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _REL_TYPE_EXTERNAL_LINK = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink"
 )
+_REL_TYPE_EXTERNAL_LINK_PATH = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath"
+)
+_REL_TYPE_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_EXTERNAL_LINK_CT = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"
+)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExternalFileLink:
     """Reference to the linked workbook file.
 
@@ -48,22 +60,140 @@ class ExternalFileLink:
     target_mode: str = "External"
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExternalLink:
     """One entry in :attr:`Workbook._external_links`.
 
-    All fields are read-only in v1.0. ``cached_data`` shape is loose by
-    design — see RFC-071 §3.
+    ``cached_data`` shape is loose by design — see RFC-071 §3.
     """
 
-    file_link: ExternalFileLink
-    rid: str
-    target: str
+    file_link: ExternalFileLink | None = None
+    rid: str = ""
+    target: str = ""
     sheet_names: list[str] = field(default_factory=list)
     cached_data: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    _collection: "ExternalLinkCollection | None" = field(
+        default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        if self.file_link is None:
+            self.file_link = ExternalFileLink(target=self.target)
+        if not self.target:
+            self.target = self.file_link.target
+        if self.file_link.target != self.target:
+            self.file_link.target = self.target
+
+    def update_target(self, target: str) -> None:
+        self.target = target
+        if self.file_link is None:
+            self.file_link = ExternalFileLink(target=target)
+        else:
+            self.file_link.target = target
+        self._mark_dirty()
+
+    def _mark_dirty(self) -> None:
+        if self._collection is not None:
+            self._collection._mark_dirty()
+
+    def _signature(self) -> tuple[Any, ...]:
+        return (
+            self.target,
+            self.file_link.target_mode if self.file_link is not None else "External",
+            tuple(self.sheet_names),
+            _freeze_cached_data(self.cached_data),
+        )
 
 
-def load_external_links(source_path: str | None) -> list[ExternalLink]:
+class ExternalLinkCollection(list[ExternalLink]):
+    """Mutable workbook external-link collection with dirty tracking."""
+
+    def __init__(self, links: list[ExternalLink] | None = None) -> None:
+        super().__init__()
+        self._dirty = False
+        self._snapshot: tuple[Any, ...] = ()
+        for link in links or []:
+            self._attach(link)
+            super().append(link)
+        self.mark_clean()
+
+    def append(self, item: ExternalLink) -> None:  # type: ignore[override]
+        self._attach(item)
+        super().append(item)
+        self._mark_dirty()
+
+    def extend(self, items: list[ExternalLink]) -> None:  # type: ignore[override]
+        for item in items:
+            self.append(item)
+
+    def insert(self, index: int, item: ExternalLink) -> None:  # type: ignore[override]
+        self._attach(item)
+        super().insert(index, item)
+        self._mark_dirty()
+
+    def remove(self, item: ExternalLink) -> None:  # type: ignore[override]
+        super().remove(item)
+        item._collection = None
+        self._mark_dirty()
+
+    def pop(self, index: int = -1) -> ExternalLink:  # type: ignore[override]
+        item = super().pop(index)
+        item._collection = None
+        self._mark_dirty()
+        return item
+
+    def clear(self) -> None:  # type: ignore[override]
+        for item in self:
+            item._collection = None
+        super().clear()
+        self._mark_dirty()
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if isinstance(key, slice):
+            values = list(value)
+            for item in values:
+                self._attach(item)
+            for item in self[key]:
+                item._collection = None
+            super().__setitem__(key, values)
+        else:
+            self[key]._collection = None
+            self._attach(value)
+            super().__setitem__(key, value)
+        self._mark_dirty()
+
+    def __delitem__(self, key: Any) -> None:
+        if isinstance(key, slice):
+            for item in self[key]:
+                item._collection = None
+        else:
+            self[key]._collection = None
+        super().__delitem__(key)
+        self._mark_dirty()
+
+    @property
+    def dirty(self) -> bool:
+        return self._dirty or self._signature() != self._snapshot
+
+    def mark_clean(self) -> None:
+        self._snapshot = self._signature()
+        self._dirty = False
+
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+
+    def _attach(self, item: ExternalLink) -> None:
+        if not isinstance(item, ExternalLink):
+            raise TypeError(
+                f"external links collection requires ExternalLink, got {type(item).__name__}"
+            )
+        item._collection = self
+
+    def _signature(self) -> tuple[Any, ...]:
+        return tuple(link._signature() for link in self)
+
+
+def load_external_links(source_path: str | None) -> ExternalLinkCollection:
     """Load external-link parts from an xlsx at ``source_path``.
 
     Returns an empty list when:
@@ -77,18 +207,67 @@ def load_external_links(source_path: str | None) -> list[ExternalLink]:
     ``source_path`` is set but the file is gone.
     """
     if not source_path:
-        return []
+        return ExternalLinkCollection()
 
     try:
         with zipfile.ZipFile(source_path, "r") as zf:
-            return _load_from_zip(zf)
+            return ExternalLinkCollection(_load_from_zip(zf))
     except FileNotFoundError:
         raise
     except (zipfile.BadZipFile, KeyError, OSError):
         # A malformed source ZIP shouldn't kill the whole load. The
         # patcher will surface a clearer error on save if the file is
         # actually unusable.
-        return []
+        return ExternalLinkCollection()
+
+
+def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
+    """Rewrite workbook external-link parts to match ``links``."""
+    if not links.dirty:
+        return
+    with zipfile.ZipFile(path, "r") as src:
+        try:
+            workbook_xml = src.read("xl/workbook.xml").decode("utf-8")
+            workbook_rels_xml = src.read("xl/_rels/workbook.xml.rels")
+            content_types_xml = src.read("[Content_Types].xml")
+        except KeyError as exc:
+            raise ValueError(f"workbook missing required OOXML part: {exc.args[0]}") from exc
+
+    link_list = list(links)
+    rels_xml, rel_ids = _rewrite_workbook_rels(workbook_rels_xml, link_list)
+    workbook_xml_bytes = _rewrite_workbook_external_references(workbook_xml, rel_ids)
+    content_types_bytes = _rewrite_content_types(content_types_xml, len(link_list))
+
+    generated: dict[str, bytes] = {
+        "xl/workbook.xml": workbook_xml_bytes,
+        "xl/_rels/workbook.xml.rels": rels_xml,
+        "[Content_Types].xml": content_types_bytes,
+    }
+    for idx, link in enumerate(link_list, start=1):
+        generated[f"xl/externalLinks/externalLink{idx}.xml"] = _render_external_link_xml(link)
+        generated[f"xl/externalLinks/_rels/externalLink{idx}.xml.rels"] = (
+            _render_external_link_rels_xml(link)
+        )
+
+    fd, tmp_name = tempfile.mkstemp(prefix="wolfxl-extlinks-", suffix=".xlsx")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
+            tmp_name, "w", zipfile.ZIP_DEFLATED
+        ) as dst:
+            for info in src.infolist():
+                name = info.filename
+                if name.startswith("xl/externalLinks/") or name in generated:
+                    continue
+                with src.open(info, "r") as handle:
+                    dst.writestr(info, handle.read())
+            for name in sorted(generated):
+                dst.writestr(name, generated[name])
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+    links.mark_clean()
 
 
 def _load_from_zip(zf: zipfile.ZipFile) -> list[ExternalLink]:
@@ -219,3 +398,158 @@ def _sibling_rels_path(part_path: str) -> str:
         return f"_rels/{part_path}.rels"
     parent, name = part_path.rsplit("/", 1)
     return f"{parent}/_rels/{name}.rels"
+
+
+def _rewrite_workbook_rels(xml: bytes, links: list[ExternalLink]) -> tuple[bytes, list[str]]:
+    ET.register_namespace("", _RELS_NS)
+    root = ET.fromstring(xml)
+    kept = [
+        child
+        for child in list(root)
+        if child.attrib.get("Type") != _REL_TYPE_EXTERNAL_LINK
+    ]
+    for child in list(root):
+        root.remove(child)
+    for child in kept:
+        root.append(child)
+
+    max_rid = 0
+    for child in root:
+        rid = child.attrib.get("Id", "")
+        if rid.startswith("rId") and rid[3:].isdigit():
+            max_rid = max(max_rid, int(rid[3:]))
+
+    rel_ids: list[str] = []
+    for idx, _link in enumerate(links, start=1):
+        max_rid += 1
+        rid = f"rId{max_rid}"
+        rel_ids.append(rid)
+        ET.SubElement(
+            root,
+            f"{{{_RELS_NS}}}Relationship",
+            {
+                "Id": rid,
+                "Type": _REL_TYPE_EXTERNAL_LINK,
+                "Target": f"externalLinks/externalLink{idx}.xml",
+            },
+        )
+    return _xml_bytes(root), rel_ids
+
+
+def _rewrite_content_types(xml: bytes, count: int) -> bytes:
+    ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    ET.register_namespace("", ns)
+    root = ET.fromstring(xml)
+    for child in list(root):
+        part = child.attrib.get("PartName", "")
+        if part.startswith("/xl/externalLinks/externalLink") and part.endswith(".xml"):
+            root.remove(child)
+    for idx in range(1, count + 1):
+        ET.SubElement(
+            root,
+            f"{{{ns}}}Override",
+            {
+                "PartName": f"/xl/externalLinks/externalLink{idx}.xml",
+                "ContentType": _EXTERNAL_LINK_CT,
+            },
+        )
+    return _xml_bytes(root)
+
+
+def _rewrite_workbook_external_references(workbook_xml: str, rel_ids: list[str]) -> bytes:
+    workbook_xml = re.sub(
+        r"<(?:\w+:)?externalReferences\b[^>]*>.*?</(?:\w+:)?externalReferences>",
+        "",
+        workbook_xml,
+        flags=re.DOTALL,
+    )
+    if rel_ids and "xmlns:r=" not in workbook_xml:
+        workbook_xml = workbook_xml.replace(
+            "<workbook ",
+            f'<workbook xmlns:r="{_REL_TYPE_NS}" ',
+            1,
+        )
+    if rel_ids:
+        refs = "<externalReferences>" + "".join(
+            f'<externalReference r:id="{_xml_attr_escape(rid)}"/>' for rid in rel_ids
+        ) + "</externalReferences>"
+        if "</sheets>" in workbook_xml:
+            workbook_xml = workbook_xml.replace("</sheets>", f"</sheets>{refs}", 1)
+        else:
+            workbook_xml = workbook_xml.replace("</workbook>", f"{refs}</workbook>", 1)
+    return workbook_xml.encode("utf-8")
+
+
+def _render_external_link_xml(link: ExternalLink) -> bytes:
+    sheet_names = "".join(
+        f'<sheetName val="{_xml_attr_escape(name)}"/>' for name in link.sheet_names
+    )
+    sheet_names_block = f"<sheetNames>{sheet_names}</sheetNames>" if sheet_names else ""
+    cached_block = _render_cached_data(link.cached_data)
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<externalLink xmlns="{_MAIN_NS}" xmlns:r="{_REL_TYPE_NS}">'
+        f'<externalBook r:id="rId1">{sheet_names_block}{cached_block}</externalBook>'
+        "</externalLink>"
+    ).encode("utf-8")
+
+
+def _render_external_link_rels_xml(link: ExternalLink) -> bytes:
+    target = link.target
+    target_mode = link.file_link.target_mode if link.file_link is not None else "External"
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<Relationships xmlns="{_RELS_NS}">'
+        f'<Relationship Id="rId1" Type="{_REL_TYPE_EXTERNAL_LINK_PATH}" '
+        f'Target="{_xml_attr_escape(target)}" TargetMode="{_xml_attr_escape(target_mode)}"/>'
+        "</Relationships>"
+    ).encode("utf-8")
+
+
+def _render_cached_data(cached_data: dict[str, list[dict[str, str]]]) -> str:
+    if not cached_data:
+        return ""
+    sheets: list[str] = []
+    for sheet_id, cells in cached_data.items():
+        rows: dict[str, list[dict[str, str]]] = {}
+        for cell in cells:
+            ref = str(cell.get("r", ""))
+            row = "".join(ch for ch in ref if ch.isdigit()) or "1"
+            rows.setdefault(row, []).append(cell)
+        row_xml = ""
+        for row_num, row_cells in rows.items():
+            cell_xml = "".join(
+                f'<cell r="{_xml_attr_escape(str(cell.get("r", "")))}"><v>{_xml_text_escape(str(cell.get("v", "")))}</v></cell>'
+                for cell in row_cells
+            )
+            row_xml += f'<row r="{_xml_attr_escape(row_num)}">{cell_xml}</row>'
+        sheets.append(f'<sheetData sheetId="{_xml_attr_escape(str(sheet_id))}">{row_xml}</sheetData>')
+    return "<sheetDataSet>" + "".join(sheets) + "</sheetDataSet>"
+
+
+def _freeze_cached_data(value: Any) -> Any:
+    if isinstance(value, dict):
+        return tuple(sorted((k, _freeze_cached_data(v)) for k, v in value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze_cached_data(v) for v in value)
+    return value
+
+
+def _xml_bytes(root: ET.Element) -> bytes:
+    return (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + ET.tostring(root, encoding="utf-8", short_empty_elements=True)
+    )
+
+
+def _xml_attr_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _xml_text_escape(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

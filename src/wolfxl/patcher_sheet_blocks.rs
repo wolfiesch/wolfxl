@@ -291,9 +291,9 @@ pub(super) fn apply_threaded_comments_phase(
                 .rels_patches
                 .get(&rels_path)
                 .expect("just inserted above");
-            rels.find_by_type(rt::THREADED_COMMENTS).first().map(|r| {
-                ooxml_util::join_and_normalize(parent_dir_of(&sheet_path), &r.target)
-            })
+            rels.find_by_type(rt::THREADED_COMMENTS)
+                .first()
+                .map(|r| ooxml_util::join_and_normalize(parent_dir_of(&sheet_path), &r.target))
         };
 
         let existing_xml: Option<Vec<u8>> = match &existing_path {
@@ -309,12 +309,10 @@ pub(super) fn apply_threaded_comments_phase(
         };
 
         let threaded_n = match &existing_path {
-            Some(path) => parse_n_from_part_path(
-                path,
-                "xl/threadedComments/threadedComments",
-                ".xml",
-            )
-            .unwrap_or_else(|| part_id_allocator.alloc_threaded_comments()),
+            Some(path) => {
+                parse_n_from_part_path(path, "xl/threadedComments/threadedComments", ".xml")
+                    .unwrap_or_else(|| part_id_allocator.alloc_threaded_comments())
+            }
             None => part_id_allocator.alloc_threaded_comments(),
         };
 
@@ -349,11 +347,7 @@ pub(super) fn apply_threaded_comments_phase(
         // Synthesize legacy `tc={topId}` placeholders into
         // `patcher.queued_comments` so the comments phase emits them.
         // This matches the writer's `synthesize_legacy_placeholders`.
-        synthesize_legacy_placeholders_into_queue(
-            patcher,
-            sheet_name,
-            &ops_for_sheet,
-        );
+        synthesize_legacy_placeholders_into_queue(patcher, sheet_name, &ops_for_sheet);
     }
 
     // ----- Phase B: workbook-scope personList.xml.
