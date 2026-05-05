@@ -340,7 +340,9 @@ mod tests {
         let text = std::str::from_utf8(&bytes).expect("utf8");
         let i_a = text.find("<vt:lpstr>Apples</vt:lpstr>").expect("apples");
         let i_b = text.find("<vt:lpstr>Bananas</vt:lpstr>").expect("bananas");
-        let i_c = text.find("<vt:lpstr>Cherries</vt:lpstr>").expect("cherries");
+        let i_c = text
+            .find("<vt:lpstr>Cherries</vt:lpstr>")
+            .expect("cherries");
         assert!(i_a < i_b && i_b < i_c);
         assert!(text.contains("vt:vector size=\"3\" baseType=\"lpstr\""));
         assert!(text.contains("<vt:i4>3</vt:i4>"));

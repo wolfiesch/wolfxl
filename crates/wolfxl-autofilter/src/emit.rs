@@ -604,7 +604,10 @@ mod tests {
     #[test]
     fn dynamic_filter_month() {
         assert_eq!(DynamicFilterType::Month(7).as_xml(), "M7");
-        assert_eq!(DynamicFilterType::parse("M12"), Some(DynamicFilterType::Month(12)));
+        assert_eq!(
+            DynamicFilterType::parse("M12"),
+            Some(DynamicFilterType::Month(12))
+        );
         assert_eq!(DynamicFilterType::parse("M0"), None);
         assert_eq!(DynamicFilterType::parse("M13"), None);
     }

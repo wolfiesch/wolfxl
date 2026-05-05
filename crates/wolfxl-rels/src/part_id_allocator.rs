@@ -65,6 +65,8 @@ pub struct PartIdAllocator {
     // Sprint Ο Pod 3.5 (RFC-061 §3.1) — slicer deep-clone counters.
     next_slicer: u32,
     next_slicer_cache: u32,
+    // Sprint Σ G08 (RFC-068 §5) — threaded-comment counter.
+    next_threaded_comments: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -88,6 +90,7 @@ impl PartIdAllocator {
             next_pivot_cache: 1,
             next_slicer: 1,
             next_slicer_cache: 1,
+            next_threaded_comments: 1,
         }
     }
 
@@ -127,9 +130,7 @@ impl PartIdAllocator {
             self.bump(Counter::Chart, n);
         } else if let Some(n) = parse_n(path, "xl/pivotTables/pivotTable", ".xml") {
             self.bump(Counter::PivotTable, n);
-        } else if let Some(n) =
-            parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml")
-        {
+        } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml") {
             self.bump(Counter::PivotCache, n);
         } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheRecords", ".xml") {
             // Records share the cache counter (cache N = records N).
@@ -138,6 +139,8 @@ impl PartIdAllocator {
             self.bump(Counter::Slicer, n);
         } else if let Some(n) = parse_n(path, "xl/slicerCaches/slicerCache", ".xml") {
             self.bump(Counter::SlicerCache, n);
+        } else if let Some(n) = parse_n(path, "xl/threadedComments/threadedComments", ".xml") {
+            self.bump(Counter::ThreadedComments, n);
         } else if path.starts_with("xl/media/image") {
             // Images use heterogeneous extensions (png/jpeg/gif/...) so a
             // generic strip+parse covers all of them.
@@ -163,6 +166,7 @@ impl PartIdAllocator {
             Counter::PivotCache => &mut self.next_pivot_cache,
             Counter::Slicer => &mut self.next_slicer,
             Counter::SlicerCache => &mut self.next_slicer_cache,
+            Counter::ThreadedComments => &mut self.next_threaded_comments,
         };
         if n + 1 > *slot {
             *slot = n + 1;
@@ -257,6 +261,15 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `threadedComments{N}` suffix; returns `N` (≥1).
+    /// Used by RFC-068 G08 step 5 in modify mode for sheets that gain
+    /// their first threaded-comment part.
+    pub fn alloc_threaded_comments(&mut self) -> u32 {
+        let n = self.next_threaded_comments;
+        self.next_threaded_comments += 1;
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
     fn peek(&self) -> [u32; 7] {
@@ -284,6 +297,7 @@ enum Counter {
     Image,
     PivotTable,
     PivotCache,
+    ThreadedComments,
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn image_seed_from_xl_media_imageN_ext() {
+    fn image_seed_from_xl_media_image_n_ext() {
         let parts = [
             "xl/media/image1.png",
             "xl/media/image2.jpeg",
@@ -384,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn comments_seed_from_xl_commentsN_xml() {
+    fn comments_seed_from_xl_comments_n_xml() {
         let parts = ["xl/comments1.xml", "xl/comments3.xml", "xl/comments7.xml"];
         let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
         assert_eq!(a.alloc_comments(), 8);

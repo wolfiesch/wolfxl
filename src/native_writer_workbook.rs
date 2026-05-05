@@ -1,0 +1,57 @@
+//! Workbook-level helpers for the native writer backend.
+
+use std::fs::File;
+use std::io::BufWriter;
+
+use pyo3::exceptions::{PyIOError, PyValueError};
+use pyo3::prelude::*;
+use wolfxl_writer::model::Worksheet;
+use wolfxl_writer::Workbook;
+
+pub(crate) fn add_sheet_if_missing(wb: &mut Workbook, name: &str) {
+    if wb.sheet_by_name(name).is_some() {
+        return;
+    }
+    wb.add_sheet(Worksheet::new(name));
+}
+
+pub(crate) fn rename_sheet(wb: &mut Workbook, old_name: &str, new_name: &str) -> PyResult<()> {
+    wb.rename_sheet(old_name, new_name.to_string())
+        .map_err(PyValueError::new_err)
+}
+
+pub(crate) fn move_sheet(wb: &mut Workbook, name: &str, offset: isize) -> PyResult<()> {
+    wb.move_sheet(name, offset).map_err(PyValueError::new_err)
+}
+
+pub(crate) fn save_once(wb: &mut Workbook, saved: &mut bool, path: &str) -> PyResult<()> {
+    if *saved {
+        return Err(PyValueError::new_err(
+            "Workbook already saved (NativeWorkbook is consumed-on-save)",
+        ));
+    }
+    // Mark consumed before emit/write so a panic or failed write leaves the
+    // workbook un-retryable on potentially mutated state.
+    *saved = true;
+    // G20: flush per-sheet streaming BufWriters so the splice phase
+    // inside `emit_xlsx → sheet_xml::emit` reads consistent bytes.
+    crate::native_writer_streaming::finalize_all_streaming(wb)?;
+    // RFC-073 v1.5: stream the ZIP container straight into a BufWriter<File>
+    // instead of materialising the whole archive as `Vec<u8>` first. The
+    // dominant memory cost during save is still the per-sheet emit `String`
+    // (~150 MB for 1M-row × 5-col sheets) — `package` itself only cost the
+    // size of the compressed archive (~25 MB at 1M rows). The win is small
+    // but real on the disk-write peak; closing the larger sheet-body
+    // materialisation requires plumbing `Write` all the way through
+    // `sheet_xml::emit`, which is out of scope for v1.5.
+    let file = File::create(path)
+        .map_err(|e| PyIOError::new_err(format!("failed to create {path}: {e}")))?;
+    let mut writer = BufWriter::new(file);
+    wolfxl_writer::emit_xlsx_to(wb, &mut writer)
+        .map_err(|e| PyIOError::new_err(format!("failed to write {path}: {e}")))?;
+    use std::io::Write;
+    writer
+        .flush()
+        .map_err(|e| PyIOError::new_err(format!("failed to flush {path}: {e}")))?;
+    Ok(())
+}

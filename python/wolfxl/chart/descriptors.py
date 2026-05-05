@@ -4,8 +4,6 @@ Mirrors :mod:`openpyxl.chart.descriptors` — these are the bounded numeric
 helpers that openpyxl uses for gap amounts, overlap, and free-form numeric
 formats. We keep the names identical so that openpyxl-shaped client code
 that imports them by name keeps working.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations

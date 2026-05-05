@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Generated 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json). Each entry's expected_parts list comes from the originating tool's authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
+  "source_harness": "ExcelBench results_dev_external/fixtures (2026-04-28 generation)",
+  "fixtures": [
+    {
+      "filename": "apache-poi-table-validation-image-comment.xlsx",
+      "tool": "apache-poi",
+      "fixture_id": "apache_poi_table_validation_image_comment",
+      "sha256": "936446f87806b15370ffc9bf8952ab3ba87f99b4aac96a851130efedbdccd5a5",
+      "size_bytes": 7014,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/sharedStrings.xml",
+        "xl/comments1.xml",
+        "xl/drawings/vmlDrawing0.vml",
+        "xl/drawings/drawing1.xml",
+        "xl/media/image1.png",
+        "xl/tables/table1.xml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "closedxml-pivot-cf-table.xlsx",
+      "tool": "closedxml",
+      "fixture_id": "closedxml_pivot_cf_table",
+      "sha256": "c37a895c6b37084f4b6483978cddafb7ea160974b82225cb57663f5751d2e1d6",
+      "size_bytes": 10951,
+      "expected_parts": [
+        "xl/tables/table1.xml",
+        "xl/pivotTables/pivotTable.xml",
+        "pivotCache/pivotCacheDefinition1.xml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "closedxml-rich-comment-protection.xlsx",
+      "tool": "closedxml",
+      "fixture_id": "closedxml_rich_comment_protection",
+      "sha256": "4a54ebc4997a1b019035c0ab9d18a048714eb6fc9f5e7d4538079664782921db",
+      "size_bytes": 7992,
+      "expected_parts": [
+        "xl/sharedStrings.xml",
+        "xl/comments1.xml",
+        "xl/drawings/vmldrawing.vml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "excelize-chart-points-formula-cf.xlsx",
+      "tool": "excelize",
+      "fixture_id": "excelize_chart_points_formula_cf",
+      "sha256": "f26b2f60f294fadc86cd0cadc072246eff4ac9d3ec7e325809f0b2cfbe0d6571",
+      "size_bytes": 9177,
+      "expected_parts": [
+        "xl/charts/chart1.xml",
+        "xl/drawings/drawing1.xml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "excelize-sales-pivot-slicer-chart.xlsx",
+      "tool": "excelize",
+      "fixture_id": "excelize_sales_pivot_slicer_chart",
+      "sha256": "2e631f2440c0dbd43c0fd829201b52e4091477690be5fa29c4c232a2ee0f5dc0",
+      "size_bytes": 14070,
+      "expected_parts": [
+        "xl/tables/table1.xml",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/slicers/slicer1.xml",
+        "xl/slicerCaches/slicerCache1.xml",
+        "xl/charts/chart1.xml",
+        "xl/drawings/drawing1.xml"
+      ]
+    },
+    {
+      "filename": "exceljs-table-validation-image-comment.xlsx",
+      "tool": "exceljs",
+      "fixture_id": "exceljs_table_validation_image_comment",
+      "sha256": "f0e870b37711be8d4e26e142595e0ed8a54e1c42f7563aa678f719518eb1b6f5",
+      "size_bytes": 11077,
+      "expected_parts": [
+        "xl/sharedStrings.xml",
+        "xl/comments1.xml",
+        "xl/drawings/vmlDrawing1.vml",
+        "xl/drawings/drawing1.xml",
+        "xl/media/image1.png",
+        "xl/tables/table1.xml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "npoi-formula-comment-merge-protection.xlsx",
+      "tool": "npoi",
+      "fixture_id": "npoi_formula_comment_merge_protection",
+      "sha256": "42daf0032203f721140c12eb01ea135079c2c4b8899a87adfe99fb9a3ccfacc7",
+      "size_bytes": 6058,
+      "expected_parts": [
+        "xl/sharedStrings.xml",
+        "xl/comments1.xml",
+        "xl/drawings/vmlDrawing1.vml",
+        "xl/worksheets/sheet1.xml"
+      ]
+    }
+  ]
+}

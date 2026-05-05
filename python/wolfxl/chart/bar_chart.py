@@ -1,10 +1,6 @@
 """`BarChart` and `BarChart3D` — column / bar plots.
 
-Mirrors :class:`openpyxl.chart.bar_chart.BarChart`. ``BarChart3D`` is
-deferred to v1.6.1 (RFC-046 §5) — exposed here as a stub that raises
-``NotImplementedError`` so users discover the gap immediately.
-
-Sprint Μ Pod-β (RFC-046).
+Mirrors :class:`openpyxl.chart.bar_chart.BarChart`.
 """
 
 from __future__ import annotations
@@ -100,7 +96,7 @@ class BarChart(_BarChartBase):
         self.gapWidth = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case, no envelope)."""
+        """Flat per-type keys (snake_case, no envelope)."""
         d: dict[str, Any] = {
             "bar_dir": self.barDir,
             "grouping": self.grouping,
@@ -118,7 +114,7 @@ class BarChart(_BarChartBase):
 
 
 class BarChart3D(_BarChartBase):
-    """3D bar/column chart — RFC-046 §11.1.
+    """3D bar/column chart.
 
     Defaults: rot_x=15, rot_y=20, right_angle_axes=True, depth_percent=100.
     """

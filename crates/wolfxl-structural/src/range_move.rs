@@ -1,10 +1,10 @@
-//! RFC-034 — `Worksheet.move_range` paste-style relocation.
+//! `Worksheet.move_range` paste-style relocation.
 //!
 //! Given a source rectangle `src_lo..=src_hi` and a delta `(d_row,
 //! d_col)`, every cell whose coordinate lies inside the source
 //! rectangle is physically relocated to `(row + d_row, col + d_col)`.
-//! Existing cells at the destination are silently overwritten
-//! (matches openpyxl `worksheet.py:780`).
+//! Existing cells at the destination are silently overwritten, matching
+//! openpyxl's worksheet behavior.
 //!
 //! Formula handling:
 //! - **Inside `src`**: the `<f>` payload is paste-translated via
@@ -22,8 +22,6 @@
 //! - Anchors that straddle the source boundary are left in place.
 //! - Anchors fully outside `src` are left in place.
 //!
-//! See `Plans/rfcs/034-move-range.md` §5 for the full design.
-
 use std::io::Cursor;
 
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -32,7 +30,7 @@ use quick_xml::Writer as XmlWriter;
 
 use wolfxl_formula::{move_range as formula_move_range, Range};
 
-/// Plan for one paste-style range move (RFC-034).
+/// Plan for one paste-style range move.
 ///
 /// Both corners are 1-based, inclusive. `d_row` / `d_col` are signed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +121,7 @@ pub fn apply_range_move(sheet_xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
         Err(_) => return sheet_xml.to_vec(),
     };
 
-    // Phase A: parse + relocate <sheetData>. The result is a fresh
+    // Parse and relocate <sheetData>. The result is a fresh
     // <sheetData> byte block plus the rest of the worksheet XML
     // surrounding it (unchanged at this stage).
     let (head, sheet_data_old, tail) = match split_sheet_data(xml_str) {
@@ -135,8 +133,8 @@ pub fn apply_range_move(sheet_xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
     };
     let sheet_data_new = rewrite_sheet_data(sheet_data_old, plan);
 
-    // Phase B: streaming-splice the surrounding parts (mergeCells,
-    // hyperlinks, DV, CF, dimension) so anchor refs reflect the move.
+    // Streaming-splice the surrounding parts (mergeCells, hyperlinks,
+    // DV, CF, dimension) so anchor refs reflect the move.
     let mut combined = String::with_capacity(head.len() + sheet_data_new.len() + tail.len());
     combined.push_str(head);
     combined.push_str(&sheet_data_new);
@@ -145,7 +143,7 @@ pub fn apply_range_move(sheet_xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase A — sheetData parse / relocate / re-emit
+// sheetData parse / relocate / re-emit
 // ---------------------------------------------------------------------------
 
 /// Split the worksheet XML into `(head, sheet_data_inner, tail)`
@@ -176,7 +174,7 @@ fn split_sheet_data(xml: &str) -> Option<(&str, &str, &str)> {
     let after_name = open + "<sheetData".len();
     let close_tag = xml[after_name..].find('>')?;
     let open_end = after_name + close_tag + 1; // points past the '>'.
-    // Self-closing case: treat inner as empty.
+                                               // Self-closing case: treat inner as empty.
     if xml[open..open_end].ends_with("/>") {
         return Some((&xml[..open_end], "", &xml[open_end..]));
     }
@@ -184,7 +182,11 @@ fn split_sheet_data(xml: &str) -> Option<(&str, &str, &str)> {
     let inner_start = open_end;
     let inner_end = open_end + close;
     let tail_start = inner_end;
-    Some((&xml[..inner_start], &xml[inner_start..inner_end], &xml[tail_start..]))
+    Some((
+        &xml[..inner_start],
+        &xml[inner_start..inner_end],
+        &xml[tail_start..],
+    ))
 }
 
 /// One captured cell from the source `<sheetData>`.
@@ -404,8 +406,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
 
     // Now relocate.
     let mut relocated: Vec<CapturedCell> = Vec::with_capacity(cells.len());
-    let mut overwritten: std::collections::HashSet<(u32, u32)> =
-        std::collections::HashSet::new();
+    let mut overwritten: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
 
     // First pass: cells inside src get relocated and their formulas
     // paste-translated. Track destination keys so we can drop any
@@ -420,15 +421,13 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
         }
     }
 
-    let src_range = plan.formula_src_range();
-    let dst_range = plan.formula_dst_range();
+    let formula_translator = FormulaTranslator::from_plan(plan);
 
     for mut cell in moved.into_iter() {
         let new_row = (cell.row as i64 + plan.d_row as i64) as u32;
         let new_col = (cell.col as i64 + plan.d_col as i64) as u32;
         // Paste-translate formula payload (if any) inside this cell.
-        cell.children =
-            translate_cell_formula(&cell.children, &src_range, &dst_range);
+        cell.children = formula_translator.translate_cell_children(&cell.children);
         // Update the `r=` attribute in raw_attrs.
         let new_r = a1(new_row, new_col);
         for (key, val) in cell.raw_attrs.iter_mut() {
@@ -445,8 +444,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
     for mut cell in external.into_iter() {
         // If translate=true, rewrite refs that point into src.
         if plan.translate {
-            cell.children =
-                translate_cell_formula(&cell.children, &src_range, &dst_range);
+            cell.children = formula_translator.translate_cell_children(&cell.children);
         }
         // Drop external cells that fall on a dst slot we just wrote.
         if overwritten.contains(&(cell.row, cell.col)) {
@@ -583,9 +581,9 @@ fn parse_a1(s: &str) -> Option<(u32, u32)> {
     }
     let mut col_n: u32 = 0;
     for &b in col_str.as_bytes() {
-        col_n = col_n.checked_mul(26)?.checked_add(
-            (b.to_ascii_uppercase() - b'A' + 1) as u32,
-        )?;
+        col_n = col_n
+            .checked_mul(26)?
+            .checked_add((b.to_ascii_uppercase() - b'A' + 1) as u32)?;
     }
     let row_n: u32 = s[row_start..].parse().ok()?;
     if col_n == 0 || row_n == 0 {
@@ -606,104 +604,131 @@ fn a1(row: u32, col: u32) -> String {
     format!("{letters}{row}")
 }
 
-/// Walk the captured cell-children byte stream and rewrite the text
-/// inside any `<f>` element via `wolfxl_formula::move_range`. This is
-/// the paste-style translation: refs inside `src` re-anchor by
-/// `dst.min - src.min`; refs outside are left alone; `$`-marked refs
-/// short-circuit.
-fn translate_cell_formula(children: &[u8], src: &Range, dst: &Range) -> Vec<u8> {
-    if children.is_empty() {
-        return Vec::new();
-    }
-    let s = match std::str::from_utf8(children) {
-        Ok(s) => s,
-        Err(_) => return children.to_vec(),
-    };
-    // The captured children byte stream starts and ends INSIDE a
-    // <c>...</c> block — so it's a sequence of zero or more child
-    // elements. Wrap in a synthetic root for parsing.
-    let wrapped = format!("<__r__>{s}</__r__>");
-    let mut reader = XmlReader::from_str(&wrapped);
-    reader.config_mut().trim_text(false);
-    let mut writer = XmlWriter::new(Cursor::new(Vec::new()));
-    let mut buf: Vec<u8> = Vec::new();
-    let mut in_f: bool = false;
+#[derive(Debug, Clone, Copy)]
+struct FormulaTranslator {
+    src: Range,
+    dst: Range,
+}
 
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                let local = e.local_name().as_ref().to_vec();
-                if local.as_slice() == b"__r__" {
-                    // synthetic root — drop
-                    buf.clear();
-                    continue;
-                }
-                if local.as_slice() == b"f" {
-                    in_f = true;
-                }
-                let _ = writer.write_event(Event::Start(e.to_owned()));
-            }
-            Ok(Event::Empty(ref e)) => {
-                let local = e.local_name().as_ref().to_vec();
-                if local.as_slice() == b"__r__" {
-                    buf.clear();
-                    continue;
-                }
-                let _ = writer.write_event(Event::Empty(e.to_owned()));
-            }
-            Ok(Event::End(ref e)) => {
-                let local = e.local_name().as_ref().to_vec();
-                if local.as_slice() == b"__r__" {
-                    buf.clear();
-                    continue;
-                }
-                if local.as_slice() == b"f" {
-                    in_f = false;
-                }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
-            }
-            Ok(Event::Text(ref t)) => {
-                if in_f {
-                    let raw = match t.unescape() {
-                        Ok(c) => c.into_owned(),
-                        Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
-                    };
-                    let wrapped =
-                        if raw.starts_with('=') { raw.clone() } else { format!("={raw}") };
-                    let translated = formula_move_range(&wrapped, src, dst, true);
-                    let unwrapped = if !raw.starts_with('=') {
-                        translated.strip_prefix('=').unwrap_or(&translated).to_string()
-                    } else {
-                        translated
-                    };
-                    let new_t = BytesText::new(&unwrapped);
-                    let _ = writer.write_event(Event::Text(new_t));
-                } else {
-                    let _ = writer.write_event(Event::Text(t.to_owned()));
-                }
-            }
-            Ok(Event::CData(ref t)) => {
-                let _ = writer.write_event(Event::CData(t.to_owned()));
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(_) => break,
+impl FormulaTranslator {
+    fn from_plan(plan: &RangeMovePlan) -> Self {
+        Self {
+            src: plan.formula_src_range(),
+            dst: plan.formula_dst_range(),
         }
-        buf.clear();
     }
 
-    writer.into_inner().into_inner()
+    /// Walk the captured cell-children byte stream and rewrite the text
+    /// inside any `<f>` element via `wolfxl_formula::move_range`. This is
+    /// the paste-style translation: refs inside `src` re-anchor by
+    /// `dst.min - src.min`; refs outside are left alone; `$`-marked refs
+    /// short-circuit.
+    fn translate_cell_children(&self, children: &[u8]) -> Vec<u8> {
+        if children.is_empty() {
+            return Vec::new();
+        }
+        let s = match std::str::from_utf8(children) {
+            Ok(s) => s,
+            Err(_) => return children.to_vec(),
+        };
+        // The captured children byte stream starts and ends inside a
+        // <c>...</c> block, so it is a sequence of zero or more child
+        // elements. Wrap in a synthetic root for parsing.
+        let wrapped = format!("<__r__>{s}</__r__>");
+        let mut reader = XmlReader::from_str(&wrapped);
+        reader.config_mut().trim_text(false);
+        let mut writer = XmlWriter::new(Cursor::new(Vec::new()));
+        let mut buf: Vec<u8> = Vec::new();
+        let mut in_f: bool = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let local = e.local_name().as_ref().to_vec();
+                    if local.as_slice() == b"__r__" {
+                        // Drop the synthetic root.
+                        buf.clear();
+                        continue;
+                    }
+                    if local.as_slice() == b"f" {
+                        in_f = true;
+                    }
+                    let _ = writer.write_event(Event::Start(e.to_owned()));
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let local = e.local_name().as_ref().to_vec();
+                    if local.as_slice() == b"__r__" {
+                        buf.clear();
+                        continue;
+                    }
+                    let _ = writer.write_event(Event::Empty(e.to_owned()));
+                }
+                Ok(Event::End(ref e)) => {
+                    let local = e.local_name().as_ref().to_vec();
+                    if local.as_slice() == b"__r__" {
+                        buf.clear();
+                        continue;
+                    }
+                    if local.as_slice() == b"f" {
+                        in_f = false;
+                    }
+                    let _ = writer.write_event(Event::End(BytesEnd::new(
+                        String::from_utf8_lossy(local.as_slice()).into_owned(),
+                    )));
+                }
+                Ok(Event::Text(ref t)) => {
+                    if in_f {
+                        let raw = match t.unescape() {
+                            Ok(c) => c.into_owned(),
+                            Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
+                        };
+                        let unwrapped = self.translate_text(&raw);
+                        let new_t = BytesText::new(&unwrapped);
+                        let _ = writer.write_event(Event::Text(new_t));
+                    } else {
+                        let _ = writer.write_event(Event::Text(t.to_owned()));
+                    }
+                }
+                Ok(Event::CData(ref t)) => {
+                    let _ = writer.write_event(Event::CData(t.to_owned()));
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+            buf.clear();
+        }
+
+        writer.into_inner().into_inner()
+    }
+
+    /// Translate an OOXML formula text payload while preserving its leading `=`.
+    fn translate_text(&self, raw: &str) -> String {
+        let has_equals = raw.starts_with('=');
+        let wrapped = if has_equals {
+            raw.to_string()
+        } else {
+            format!("={raw}")
+        };
+        let translated = formula_move_range(&wrapped, &self.src, &self.dst, true);
+        if has_equals {
+            translated
+        } else {
+            translated
+                .strip_prefix('=')
+                .unwrap_or(&translated)
+                .to_string()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Phase B — anchor + dimension rewrite (mergeCells, hyperlinks, DV, CF)
+// Anchor + dimension rewrite (mergeCells, hyperlinks, DV, CF)
 // ---------------------------------------------------------------------------
 
 /// Streaming-splice the worksheet XML to update mergeCells, hyperlinks,
 /// DV/CF sqrefs, and the `<dimension>` ref. Cells inside `<sheetData>`
-/// have already been relocated by Phase A; this pass only touches
+/// have already been relocated by the sheetData pass; this pass only touches
 /// the anchor-bearing siblings.
 fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
     let xml_str = match std::str::from_utf8(xml) {
@@ -718,6 +743,7 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
     // Track whether we're inside a formula text field (for translate=true).
     let mut in_dv_formula: u32 = 0;
     let mut in_cf_formula: u32 = 0;
+    let formula_translator = FormulaTranslator::from_plan(plan);
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -790,19 +816,7 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
                         Ok(c) => c.into_owned(),
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
-                    let wrapped =
-                        if raw.starts_with('=') { raw.clone() } else { format!("={raw}") };
-                    let translated = formula_move_range(
-                        &wrapped,
-                        &plan.formula_src_range(),
-                        &plan.formula_dst_range(),
-                        true,
-                    );
-                    let unwrapped = if !raw.starts_with('=') {
-                        translated.strip_prefix('=').unwrap_or(&translated).to_string()
-                    } else {
-                        translated
-                    };
+                    let unwrapped = formula_translator.translate_text(&raw);
                     let new_t = BytesText::new(&unwrapped);
                     let _ = writer.write_event(Event::Text(new_t));
                 } else {
@@ -912,7 +926,13 @@ mod tests {
     use super::*;
 
     fn plan(src_lo: (u32, u32), src_hi: (u32, u32), d_row: i32, d_col: i32) -> RangeMovePlan {
-        RangeMovePlan { src_lo, src_hi, d_row, d_col, translate: false }
+        RangeMovePlan {
+            src_lo,
+            src_hi,
+            d_row,
+            d_col,
+            translate: false,
+        }
     }
 
     #[test]

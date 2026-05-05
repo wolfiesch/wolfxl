@@ -419,6 +419,9 @@ def test_h_copy_with_sheet_scoped_defined_name(tmp_path: Path) -> None:
     wb.save(out)
 
     wb_xml = _read_zip_text(out, "xl/workbook.xml")
+    assert f'name="{new_ws.title}"' in wb_xml, (
+        "defined-name merge must preserve the Phase 2.7 cloned <sheet> entry"
+    )
     # The original Print_Area on Template (localSheetId=0) is preserved.
     assert (
         '<definedName name="_xlnm.Print_Area" localSheetId="0">' in wb_xml
@@ -637,6 +640,7 @@ def test_p_self_closing_sheets_block(tmp_path: Path) -> None:
     # when xl/workbook.xml's <sheets> block is empty/self-closing.
     # Default is False so well-formed inputs are unaffected.
     wb = load_workbook(src, modify=True, permissive=True)
+    assert wb._rust_reader.__class__.__name__ == "NativeXlsxBook"  # noqa: SLF001
 
     # The synthesized title is "Sheet1" (rels-iteration order), which
     # may differ from the original fixture's "Grid". This is by design

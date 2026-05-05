@@ -1,11 +1,10 @@
 """``openpyxl.worksheet.dimensions`` — re-export shim plus dimension helpers.
 
-Wolfxl's row / column dimension proxies live in :mod:`wolfxl._worksheet`
-under underscore-prefixed names (the public interaction is via
-``ws.row_dimensions[…]`` / ``ws.column_dimensions[…]``). This module
-surfaces the same classes under the openpyxl-shaped names so
-``from openpyxl.worksheet.dimensions import RowDimension`` ports
-mechanically.
+WolfXL's row / column dimension proxies live in
+:mod:`wolfxl._worksheet_dimensions` (the public interaction is via
+``ws.row_dimensions[...]`` / ``ws.column_dimensions[...]``). This module
+surfaces the same classes under the openpyxl-shaped names so imports such as
+``from openpyxl.worksheet.dimensions import RowDimension`` port mechanically.
 
 Sprint Π Pod Π-α (RFC-062) replaces the construction stubs for
 :class:`DimensionHolder`, :class:`SheetFormatProperties`, and
@@ -17,10 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from wolfxl._worksheet import (
-    _ColumnDimension as ColumnDimension,
-    _RowDimension as RowDimension,
-)
+from wolfxl._worksheet_dimensions import ColumnDimension, RowDimension
 
 
 # ---------------------------------------------------------------------------

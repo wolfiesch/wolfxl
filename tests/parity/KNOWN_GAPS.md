@@ -18,14 +18,16 @@ Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 - **1.6 — Chart construction (8 types, full depth) + RFC-035 chart-deep-clone + modify-mode `add_chart`** — closed in 1.6 (Sprint Μ Pod-α/β/γ/δ; RFC-046). Lifts "chart construction" from out-of-scope for the 2D type families (Bar / Line / Pie / Doughnut / Area / Scatter / Bubble / Radar). 3D / Stock / Surface / ProjectedPie deferred to v1.6.1; pivot-chart linkage deferred to v2.0.0 (Sprint Ν).
 - **1.6.1 — Chart-dict contract reconciliation + 3D / Stock / Surface / ProjectedPie families + modify-mode high-level `add_chart`** — closed in 1.6.1 (Sprint Μ-prime Pod-α′/β′/γ′/δ′; RFC-046 §10/§11). Lifts the v1.6.0 chart-dict gap (37 xfailed advanced sub-feature tests in `tests/test_charts_write.py` flip to pass) and ships the eight deferred 3D / Stock / Surface / ProjectedPie chart classes as real implementations. Also replaces the warn-and-drop fallback in `Workbook._flush_pending_charts_to_patcher` with a real dict→bytes bridge via the new `serialize_chart_dict` PyO3 export.
 - **1.7 — Public-launch slice (no pivot tables)** — closed in 1.7 (Sprint Ξ Pod-α/β/γ/δ; RFC-050/051/052/053). Lifts v1.6.1's lone `xfail` (`chart.title = RichText(...)`) and ships `Worksheet.remove_chart` / `replace_chart`. Bumps `pyproject.toml` and `Cargo.toml` to `1.7.0` (was drifted at `0.5.0`); promotes PyPI classifier to `Production/Stable`. Refreshes `docs/migration/` and `docs/performance/` with v1.7 status. Materialises `Plans/launch-posts.md`. Documents RFC-046 §13 legacy chart-dict key sunset (deprecated in 1.7; removed in 2.0).
-- **2.0 — Pivot tables + pivot caches + pivot charts** — closed in 2.0 (Sprint Ν Pods α/β/γ/δ/ε; RFC-047 / RFC-048 / RFC-049 / RFC-054). Lifts the last construction-side row from "Out of scope" — pivot tables, pivot caches, and pivot-chart linkage are all constructible from Python. WolfXL is the first Python OOXML library to emit `pivotCacheRecords{N}.xml` from scratch (Option A); pivots open in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open required. Lifts the RFC-035 §10 limit on `copy_worksheet` of pivot-bearing sheets. Removes the RFC-046 §13 legacy chart-dict key shim (deprecated 1.7, removed 2.0). README rewrite: \"Full openpyxl replacement, drop-in compatible, 10×–100× faster.\"
+- **2.0 — Pivot tables + pivot caches + pivot charts** — closed in 2.0 (Sprint Ν Pods α/β/γ/δ/ε; RFC-047 / RFC-048 / RFC-049 / RFC-054). Lifts the last construction-side row from "Out of scope" — pivot tables, pivot caches, and pivot-chart linkage are all constructible from Python. WolfXL emits `pivotCacheRecords{N}.xml` from scratch (Option A); pivots open in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open required. Lifts the RFC-035 §10 limit on `copy_worksheet` of pivot-bearing sheets. Removes the RFC-046 §13 legacy chart-dict key shim (deprecated 1.7, removed 2.0). README rewrite now uses openpyxl-compatible positioning while v2.0 benchmark claims remain gated on the release audit.
 
 The openpyxl-parity roadmap is now exhausted at the read level
 (1.0–1.4) AND at the full construction level (1.5 encryption +
 images, 1.6–1.6.1 charts, 1.7 chart-stack debt + RichText titles,
-**2.0 pivot tables**). The "Out of scope" section below now lists
-only deferred-to-v2.1+ items (slicers, calc fields, GroupItems,
-OLAP, pivot styling, in-place pivot edits).
+**2.0 pivot tables**, and the post-PR #23 audit slice for slicers,
+pivot calculated fields/items, GroupItems, and the remaining chart
+display-unit / data-point overrides). The "Out of scope" section
+below now lists only OLAP/external caches, deeper pivot-editing
+work, and intentionally deferred file formats.
 
 ## Gate
 
@@ -106,11 +108,11 @@ streaming mode are
 `wolfxl._streaming.StreamingCell` proxies that surface
 `value`, `coordinate`, `row`, `column`, `font`, `fill`, `border`,
 `alignment`, and `number_format` — every setter raises
-`RuntimeError("read_only=True: ...")` immediately. Style attributes
-defer to the existing eager `CalamineStyledBook` style table for
-O(1) lookups; the streaming layer parses sheet XML directly via a
-hand-rolled byte scanner driven by `quick-xml`-style lookahead, plus
-`xl/sharedStrings.xml` once at construction time.
+`RuntimeError("read_only=True: ...")` immediately. Style attributes defer to the
+eager native reader style table for O(1) lookups; the streaming layer parses
+sheet XML directly via a hand-rolled byte scanner driven by
+`quick-xml`-style lookahead, plus `xl/sharedStrings.xml` once at construction
+time.
 
 Implementation: `src/streaming.rs` (Rust SAX scanner), exposed via
 `wolfxl._rust.StreamingSheetReader`; `python/wolfxl/_streaming.py`
@@ -135,15 +137,16 @@ Documented divergences (out of scope for Pod-β, tracked elsewhere):
 
 ### Phase 5 — T1 .xls / .xlsb (✅ SHIPPED in 1.4, Sprint Κ)
 
-`load_workbook("foo.xlsb")` and `load_workbook("foo.xls")` ship in 1.4
-via runtime-dispatched calamine backends (`CalamineXlsbBook` /
-`CalamineXlsBook`). Reads return values + cached formula results.
-Style accessors (`cell.font` / `.fill` / `.border` / `.alignment` /
-`.number_format`) raise `NotImplementedError` on non-xlsx workbooks;
+`load_workbook("foo.xlsb")` and `load_workbook("foo.xls")` ship in 1.4.
+`.xlsb` now routes through `NativeXlsbBook`; `.xls` remains on
+`CalamineXlsBook`. Reads return values + cached formula results, and native
+`.xlsb` exposes read-side style accessors (`cell.font` / `.fill` / `.border` /
+`.alignment` / `.number_format`). `.xls` style accessors still raise
+`NotImplementedError`;
 `modify=True`, `read_only=True`, `password=`, and `Workbook.save("out.xlsb")`
-are explicitly xlsx-only. Parity target is
-`pandas.read_excel(engine="calamine")`, pinned by
-`tests/parity/test_xlsb_reads.py` and `tests/parity/test_xls_reads.py`.
+are explicitly xlsx-only. `.xlsb` parity is pinned by committed JSON sidecars
+in `tests/parity/fixtures/xlsb/`; `.xls` parity still uses
+`tests/parity/test_xls_reads.py`.
 See `Plans/rfcs/043-xlsb-xls-reads.md`.
 
 ## Per-fixture read gaps (surfaced by Phase 0 baseline run)
@@ -182,23 +185,20 @@ and documented here before the ratchet baseline is updated.
 - ~~**Pivot-chart linkage**~~ — ✅ SHIPPED in 2.0 (Sprint Ν Pod-δ,
   RFC-049). `chart.pivot_source = pt` on every chart family.
   See "Closed in 2.0 (Sprint Ν)" below.
-- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`) — deferred
-  to **v2.1**. Separate XML namespace; the slicer-cache-shared-
-  with-pivot-cache wiring is non-trivial. Pivots round-trip
-  without slicers in v2.0; if a source workbook has slicers,
-  modify-mode round-trip preserves them.
-- **Pivot calculated fields** (`<calculatedField>`) — deferred
-  to **v2.1**. Formula expressions in the pivot's field list.
-- **Pivot calculated items** (`<calculatedItem>`) — deferred
-  to **v2.1**. Formula expressions inside row / col fields.
-- **Pivot GroupItems** (date / range grouping —
-  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)
-  — deferred to **v2.1**. Non-trivial recursion.
+- ~~**Slicers** (`xl/slicers/` + `xl/slicerCaches/`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice; covered by slicer copy,
+  advanced-pivot bytes, and parity tests.
+- ~~**Pivot calculated fields** (`<calculatedField>`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice.
+- ~~**Pivot calculated items** (`<calculatedItem>`)~~ — ✅ SHIPPED
+  in the post-PR #23 audit slice.
+- ~~**Pivot GroupItems** (date / range grouping —
+  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`)~~
+  — ✅ SHIPPED in the post-PR #23 audit slice.
 - **OLAP / external pivot caches** (`xl/model/`, PowerPivot
   data-model) — out of scope permanently.
-- **Pivot-table styling beyond named-style picker** (themes,
-  banded formats, pivot-cell conditional formatting) — deferred
-  to **v2.1**.
+- **Pivot-table styling beyond current PivotArea / pivot-CF support**
+  (broader themes and banded-format polish) — partial.
 - **In-place pivot edits in modify mode** beyond
   `add_pivot_table` (editing an existing pivot's source range,
   field re-ordering, subtotal toggling, etc.) — deferred to
@@ -302,11 +302,12 @@ The construction-side parity roadmap closes here. Every openpyxl
   are affected (and those callers were warned in the v1.7
   release notes).
 
-- ✅ **README rewrite** (Sprint Ν Pod-ε, RFC-054). Drops the "for
-  the 95th-percentile case" qualifier; new headline: **"Full
-  openpyxl replacement, drop-in compatible, 10×–100× faster."**
-  Adds "Pivot tables in 6 lines" snippet. Refreshes feature
-  matrix (pivots ✅, charts ✅) and ecosystem comparison.
+- ✅ **README rewrite** (Sprint Ν Pod-ε, RFC-054; post-PR #23 truth
+  pass refreshed wording). Uses openpyxl-compatible positioning with
+  pivot construction, adds "Pivot tables in 6 lines", and withholds
+  benchmark headline claims until the v2.0 ExcelBench refresh is
+  complete. Refreshes feature matrix (pivots ✅, charts ✅) and
+  ecosystem comparison.
 
 - ✅ **Compatibility Matrix v2.0** (Sprint Ν Pod-ε, RFC-054).
   Pivot row flips ❌ → ✅ with full sub-table covering import

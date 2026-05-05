@@ -1,196 +1,94 @@
 """Workbook — multi-mode openpyxl-compatible wrapper.
 
 Write mode (``Workbook()``): creates a new workbook via NativeWorkbook.
-Read mode (``Workbook._from_reader(path)``): opens an existing .xlsx via CalamineStyledBook.
-Modify mode (``Workbook._from_patcher(path)``): read via CalamineStyledBook, save via XlsxPatcher.
+Read mode (``Workbook._from_reader(path)``): opens an existing .xlsx via NativeXlsxBook by default.
+Modify mode (``Workbook._from_patcher(path)``): read via NativeXlsxBook by default, save via XlsxPatcher.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import zipfile
+from xml.etree import ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
+from wolfxl._workbook_state import CopyOptions as CopyOptions
+from wolfxl._workbook_state import initialize_pending_state
+from wolfxl import _workbook_features
+from wolfxl import _workbook_calc
+from wolfxl import _workbook_metadata
+from wolfxl import _workbook_lifecycle
+from wolfxl import _workbook_patcher_flush
+from wolfxl import _workbook_save
+from wolfxl import _workbook_sheets
+from wolfxl import _workbook_sources
+from wolfxl import _workbook_writer_flush
 from wolfxl._worksheet import Worksheet
 
-
-@dataclass
-class CopyOptions:
-    """Per-workbook flags controlling :meth:`Workbook.copy_worksheet`.
-
-    Attributes:
-        deep_copy_images: When ``True``, drawings reachable from a
-            cloned sheet have their referenced ``xl/media/imageN.<ext>``
-            targets DEEP-CLONED into freshly numbered media parts.
-            When ``False`` (default), the cloned drawing rels point at
-            the same image bytes as the source — Excel's historical
-            RFC-035 §5.3 alias behaviour. Modify-mode only;
-            write-mode ignores this flag (write-mode clones run via
-            in-memory replay, not the modify-mode planner).
-    """
-
-    deep_copy_images: bool = False
 
 if TYPE_CHECKING:
     from wolfxl.calc._protocol import RecalcResult
 
 
-def _xlsb_xls_via_tempfile(
-    rust_cls: Any,
-    data: bytes | bytearray | memoryview,
-    *,
-    suffix: str,
-    permissive: bool,
-) -> tuple[Any, str]:
-    """Materialise ``data`` to a tempfile and call ``rust_cls.open(path)``.
-
-    Used as a fallback for ``CalamineXlsbBook`` / ``CalamineXlsBook``
-    when Pod-α's ``open_from_bytes`` overload isn't yet exposed.
-    Returns ``(rust_book, tempfile_path)`` so the caller can stash the
-    path on the workbook for cleanup at ``close()`` time.
-    """
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(
-        prefix="wolfxl-", suffix=suffix, delete=False
-    ) as tmp:
-        tmp.write(bytes(data))
-        tmp_path = tmp.name
-
-    opener = rust_cls.open
-    try:
-        rust_book = opener(tmp_path, permissive)
-    except TypeError:
-        rust_book = opener(tmp_path)
-    return rust_book, tmp_path
-
-
-def _build_xlsb_xls_wb(
-    cls: type,
-    *,
-    rust_book: Any,
-    fmt: str,
-    data_only: bool,
-    source_path: str | None,
-) -> Any:
-    """Wire up the read-mode workbook fields shared by xlsb / xls.
-
-    Skips the workbook-property and defined-name caches because the
-    binary backends don't expose them; everything else mirrors
-    :meth:`Workbook._from_reader` so existing call sites
-    (``wb.sheetnames``, ``wb.active``, ``ws['A1'].value``) keep working.
-    """
-    wb = object.__new__(cls)
-    wb._rust_writer = None
-    wb._rust_patcher = None
-    wb._rust_reader = rust_book
-    wb._data_only = data_only
-    wb._rich_text = False
-    wb._evaluator = None
-    wb._read_only = False
-    wb._source_path = source_path
-    wb._format = fmt
-    names = [str(n) for n in rust_book.sheet_names()]
-    wb._sheet_names = names
-    wb._sheets = {name: Worksheet(wb, name) for name in names}
-    # Keep the rest of the boilerplate empty — these caches and queues
-    # are only meaningful for xlsx (modify mode + write mode).
-    wb._properties_cache = None
-    wb._properties_dirty = False
-    wb._defined_names_cache = None
-    wb._pending_defined_names = {}
-    wb._security = None
-    wb._file_sharing = None
-    wb._pending_security_update = False
-    wb._pending_axis_shifts = []
-    wb._pending_range_moves = []
-    wb._pending_sheet_copies = []
-    wb._pending_chart_adds = {}
-    wb._pending_pivot_caches = []
-    wb._next_pivot_cache_id = 0
-    wb._pending_slicer_caches = []
-    wb._next_slicer_cache_id = 0
-    wb.copy_options = CopyOptions()
-    return wb
-
-
 class Workbook:
-    """openpyxl-compatible workbook backed by Rust."""
+    """Openpyxl-compatible workbook backed by Rust.
 
-    def __init__(self) -> None:
-        """Create a new workbook in write mode with a default 'Sheet'."""
+    A workbook operates in one of three modes:
+
+    * write mode, created with ``Workbook()``;
+    * read mode, created with ``load_workbook(path)``;
+    * modify mode, created with ``load_workbook(path, modify=True)``.
+
+    Public methods mirror openpyxl where practical while using WolfXL's native
+    Excel I/O engine for fast reads, writes, and preserving modify-mode saves.
+    """
+
+    def __init__(self, *, write_only: bool = False) -> None:
+        """Create a new workbook in write mode.
+
+        Args:
+            write_only: When ``True``, opt into openpyxl-style streaming
+                write-only mode (G20 / RFC-073). Each
+                :meth:`create_sheet` call returns a
+                :class:`WriteOnlyWorksheet` that streams rows directly
+                to a per-sheet temp file; the eager BTreeMap row
+                accumulation is bypassed, so 10M-row exports run with
+                bounded peak memory. The default sheet ``"Sheet"`` is
+                NOT created — callers must explicitly create sheets
+                before appending. A workbook saved in write-only mode
+                is consumed-on-save: a second :meth:`save` raises
+                :class:`WorkbookAlreadySaved`.
+        """
         from wolfxl import _backend, _rust  # noqa: F401  (_rust kept for typing parity)
 
         self._rust_writer: Any = _backend.make_writer()
         self._rust_reader: Any = None
         self._rust_patcher: Any = None
         self._data_only = False
-        # Sprint Ι Pod-α — flipped to True via load_workbook(rich_text=True).
+        self._iso_dates = False
+        self.template = False
+        self.encoding = "utf-8"
+        # Flipped to True via load_workbook(rich_text=True).
         self._rich_text: bool = False
         self._evaluator: Any = None
-        self._sheet_names: list[str] = ["Sheet"]
-        self._sheets: dict[str, Worksheet] = {}
-        self._sheets["Sheet"] = Worksheet(self, "Sheet")
-        self._rust_writer.add_sheet("Sheet")
-        # T1 PR3 — workbook-level metadata + defined names.
-        self._properties_cache: Any | None = None
-        self._properties_dirty: bool = False
-        self._defined_names_cache: Any | None = None
-        self._pending_defined_names: dict[str, Any] = {}
-        # RFC-058 — workbook-level security (workbookProtection + fileSharing).
-        # ``_security`` and ``_file_sharing`` hold user-supplied
-        # WorkbookProtection / FileSharing instances. ``_pending_security_update``
-        # is a sentinel: True once a setter touched either slot, drained at
-        # save() time so the writer / patcher emit the corresponding XML
-        # blocks. None ⇒ no security configured (default).
-        self._security: Any | None = None
-        self._file_sharing: Any | None = None
-        self._pending_security_update: bool = False
-        # RFC-030 / RFC-031 — append-order list of structural shift ops.
-        # Tuple shape: ``(sheet_title, axis: "row"|"col", idx, n_signed)``.
-        self._pending_axis_shifts: list[tuple[str, str, int, int]] = []
-        # RFC-034 — append-order list of range-move ops.
-        # Tuple shape: ``(sheet_title, src_min_col, src_min_row,
-        # src_max_col, src_max_row, d_row, d_col, translate)``.
-        self._pending_range_moves: list[
-            tuple[str, int, int, int, int, int, int, bool]
-        ] = []
-        # RFC-035 — append-order list of sheet-copy ops.
-        # Tuple shape: ``(src_title, dst_title, deep_copy_images)``.
-        # The deep_copy_images flag is snapshot at copy_worksheet()
-        # call time so a later toggle of wb.copy_options doesn't
-        # retroactively affect already-queued copies.
-        self._pending_sheet_copies: list[tuple[str, str, bool]] = []
-        # Sprint Μ Pod-γ (RFC-046 §6) — pending modify-mode chart adds.
-        # Per-sheet list of ``(chart_xml: bytes, anchor_a1: str,
-        # width_emu: int, height_emu: int)`` tuples. Pod-β's
-        # ``Worksheet.add_chart`` populates this in modify mode (the
-        # writer-mode path stays on Pod-α's NativeWorkbook bindings).
-        # Drained by ``_flush_pending_charts_to_patcher`` in save().
-        self._pending_chart_adds: dict[
-            str, list[tuple[bytes, str, int, int]]
-        ] = {}
-        # Sprint Ν Pod-γ (RFC-047 / RFC-048) — pending pivot caches +
-        # pivot table adds. Caches are workbook-scope (one cache → N
-        # tables); tables live on the owner Worksheet's
-        # ``_pending_pivot_tables``. Drained by
-        # ``_flush_pending_pivots_to_patcher`` at save() time AFTER
-        # charts (Phase 2.5l) so the matching patcher Phase 2.5m runs
-        # against an already-stable rels graph.
-        self._pending_pivot_caches: list[Any] = []
-        # 0-based cache id allocator. Bumps when add_pivot_cache() is
-        # called so the first cache is `cache_id=0` (matches OOXML
-        # convention of 0-based cacheId in <pivotCache>).
-        self._next_pivot_cache_id: int = 0
-        # RFC-061 Sub-feature 3.1 — slicer caches (workbook-scoped).
-        self._pending_slicer_caches: list[Any] = []
-        self._next_slicer_cache_id: int = 0
-        # Sprint Θ Pod-C2 — workbook-level copy options.
-        self.copy_options: CopyOptions = CopyOptions()
-        # Sprint Ι Pod-β — streaming read flag (write mode never streams).
+        # G20: streaming write-only mode. When set, create_sheet returns
+        # WriteOnlyWorksheet instances and the default sheet is skipped.
+        self._write_only: bool = bool(write_only)
+        # Re-entry guard for openpyxl-shape consumed-on-save semantic.
+        self._saved: bool = False
+        if self._write_only:
+            self._sheet_names: list[str] = []
+            self._sheets: dict[str, Worksheet] = {}
+        else:
+            self._sheet_names = ["Sheet"]
+            self._sheets = {}
+            self._sheets["Sheet"] = Worksheet(self, "Sheet")
+            self._rust_writer.add_sheet("Sheet")
+        initialize_pending_state(self)
+        # Streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
-        # Sprint Κ Pod-β — file format the workbook came from.  Write
+        # File format the workbook came from. Write
         # mode is xlsx by definition; the read/modify constructors set
         # this to "xlsx" / "xlsb" / "xls" as appropriate.
         self._format: str = "xlsx"
@@ -209,47 +107,19 @@ class Workbook:
         ``permissive`` plumbs through to the Rust reader and triggers a
         rels-graph fallback when ``<sheets>`` is empty/self-closing.
 
-        ``read_only`` activates the SAX streaming fast path on
-        ``iter_rows`` (Sprint Ι Pod-β). The CalamineStyledBook reader
-        is still constructed for style/format lookups (used by the
-        non-streaming Cell properties), but the streaming reader
-        bypasses calamine's eager materialization for the large-sheet
-        scan path. See :func:`wolfxl.load_workbook` for details.
+        ``read_only`` activates the SAX streaming fast path on ``iter_rows``.
+        The workbook still keeps a Rust reader for style/format lookups, while
+        the streaming reader bypasses eager materialization for the large-sheet
+        scan path. See
+        :func:`wolfxl.load_workbook` for details.
         """
-        from wolfxl import _rust
-
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._rust_patcher = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
-        wb._read_only = read_only
-        wb._source_path = path
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return _workbook_sources.from_reader(
+            cls,
+            path,
+            data_only=data_only,
+            permissive=permissive,
+            read_only=read_only,
+        )
 
     @classmethod
     def _from_encrypted(
@@ -263,13 +133,12 @@ class Workbook:
         modify: bool = False,
         read_only: bool = False,
     ) -> Workbook:
-        """Open an OOXML-encrypted .xlsx via msoffcrypto-tool (Sprint Ι Pod-γ).
+        """Open an OOXML-encrypted .xlsx via msoffcrypto-tool.
 
         Decrypts the source (path or in-memory blob) into an in-memory
-        buffer, then dispatches through the bytes-aware reader path
-        (Sprint Κ Pod-β unified entry point). On a non-encrypted file
-        the password is silently ignored and the normal path is used
-        (matches openpyxl).
+        buffer, then dispatches through the bytes-aware reader path. On a
+        non-encrypted file the password is silently ignored and the normal
+        path is used (matches openpyxl).
 
         Wrong / missing passwords raise ``ValueError`` with a clear
         message; ``ImportError`` (with install hint) surfaces when
@@ -281,121 +150,13 @@ class Workbook:
         out-of-scope).
 
         Exactly one of ``path`` / ``data`` must be supplied — the
-        ``load_workbook`` dispatcher (Sprint Κ Pod-β) threads whichever
-        the caller passed in.
+        ``load_workbook`` dispatcher threads whichever the caller passed in.
         """
-        if (path is None) == (data is None):
-            raise TypeError(
-                "_from_encrypted requires exactly one of path / data"
-            )
-
-        if path is not None:
-            with open(path, "rb") as fp:
-                is_plain_xlsx = fp.read(4).startswith(b"PK")
-        else:
-            is_plain_xlsx = bytes(data).startswith(b"PK")  # type: ignore[arg-type]
-
-        if is_plain_xlsx:
-            # openpyxl-style: silently ignore password on a non-encrypted
-            # xlsx without requiring the optional encryption dependency.
-            if path is not None:
-                if modify:
-                    return cls._from_patcher(
-                        path, data_only=data_only, permissive=permissive
-                    )
-                return cls._from_reader(
-                    path,
-                    data_only=data_only,
-                    permissive=permissive,
-                    read_only=read_only,
-                )
-            return cls._from_bytes(
-                bytes(data),  # type: ignore[arg-type]
-                data_only=data_only,
-                permissive=permissive,
-                modify=modify,
-                read_only=read_only,
-            )
-
-        # Lazy import — users without the optional dep pay no cost.
-        try:
-            import msoffcrypto  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise ImportError(
-                "password reads require msoffcrypto-tool; install with: "
-                "pip install wolfxl[encrypted]"
-            ) from exc
-
-        import io
-
-        pw_str: str
-        if isinstance(password, bytes):
-            pw_str = password.decode("utf-8")
-        else:
-            pw_str = password
-
-        # Funnel both inputs into a BytesIO so msoffcrypto sees the same
-        # shape regardless of caller path.
-        if path is not None:
-            src_fp = open(path, "rb")  # noqa: SIM115 — closed in finally
-        else:
-            src_fp = io.BytesIO(bytes(data))  # type: ignore[arg-type]
-
-        try:
-            office = msoffcrypto.OfficeFile(src_fp)
-            try:
-                is_encrypted = office.is_encrypted()
-            except Exception:
-                # Some msoffcrypto versions raise on non-OOXML inputs.
-                is_encrypted = False
-
-            if not is_encrypted:
-                # openpyxl-style: silently ignore password on a
-                # non-encrypted file.
-                if path is not None:
-                    if modify:
-                        return cls._from_patcher(
-                            path, data_only=data_only, permissive=permissive
-                        )
-                    return cls._from_reader(
-                        path,
-                        data_only=data_only,
-                        permissive=permissive,
-                        read_only=read_only,
-                    )
-                # Bytes input that isn't encrypted: route through the
-                # bytes shim so we don't lose the data.
-                return cls._from_bytes(
-                    bytes(data),  # type: ignore[arg-type]
-                    data_only=data_only,
-                    permissive=permissive,
-                    modify=modify,
-                    read_only=read_only,
-                )
-
-            try:
-                office.load_key(password=pw_str)
-            except Exception as exc:
-                raise ValueError(
-                    f"failed to load decryption key: {exc}"
-                ) from exc
-
-            buf = io.BytesIO()
-            try:
-                office.decrypt(buf)
-            except Exception as exc:
-                # msoffcrypto raises InvalidKeyError on wrong password;
-                # normalise to ValueError so callers don't have to
-                # import msoffcrypto just to except.
-                raise ValueError(
-                    f"failed to decrypt workbook (wrong password?): {exc}"
-                ) from exc
-            decrypted_bytes = buf.getvalue()
-        finally:
-            src_fp.close()
-
-        return cls._from_bytes(
-            decrypted_bytes,
+        return _workbook_sources.from_encrypted(
+            cls,
+            path,
+            data=data,
+            password=password,
             data_only=data_only,
             permissive=permissive,
             modify=modify,
@@ -412,90 +173,28 @@ class Workbook:
         modify: bool = False,
         read_only: bool = False,
     ) -> Workbook:
-        """Open an .xlsx blob from memory (Sprint Ι Pod-γ, Sprint Κ Pod-β).
+        """Open an .xlsx blob from memory.
 
         When the underlying Rust reader exposes ``open_from_bytes``
-        (Pod-α), the blob is handed to the reader directly with no
-        intermediate tempfile.  Otherwise the bytes are materialised to
-        a tempfile and the path-based reader / patcher is used; the
-        tempfile is tracked on the workbook so :meth:`close` can clean
-        it up.  Either way the public surface (``Workbook._format``,
-        ``Workbook._source_path``, etc.) is identical.
+        the blob is handed to the reader directly with no intermediate
+        tempfile. Otherwise the bytes are materialised to a tempfile and
+        the path-based reader / patcher is used; the tempfile is tracked on
+        the workbook so :meth:`close` can clean it up. Either way the
+        public surface (``Workbook._format``, ``Workbook._source_path``,
+        etc.) is identical.
 
-        ``read_only`` plumbs through to the streaming SAX path (Sprint
-        Ι Pod-β); ``modify=True`` always uses a tempfile because the
-        XlsxPatcher is path-only by design (it reopens the source zip
-        on save).
+        ``read_only`` plumbs through to the streaming SAX path;
+        ``modify=True`` always uses a tempfile because the XlsxPatcher is
+        path-only by design (it reopens the source zip on save).
         """
-        from wolfxl import _rust
-
-        data_bytes = bytes(data)
-
-        # Modify mode requires the patcher, which is path-only.  Same
-        # for the no-bytes-direct fallback when the Rust reader hasn't
-        # been taught about bytes inputs yet (Pod-α dependency).
-        bytes_open = getattr(_rust.CalamineStyledBook, "open_from_bytes", None)
-        needs_tempfile = modify or bytes_open is None
-
-        if needs_tempfile:
-            import tempfile
-
-            # delete=False so the file persists across the
-            # NamedTemporaryFile context manager. We track the path on
-            # the workbook and remove it from ``close()``.
-            with tempfile.NamedTemporaryFile(
-                prefix="wolfxl-", suffix=".xlsx", delete=False
-            ) as tmp:
-                tmp.write(data_bytes)
-                tmp_path = tmp.name
-
-            if modify:
-                wb = cls._from_patcher(
-                    tmp_path, data_only=data_only, permissive=permissive
-                )
-            else:
-                wb = cls._from_reader(
-                    tmp_path,
-                    data_only=data_only,
-                    permissive=permissive,
-                    read_only=read_only,
-                )
-            wb._tempfile_path = tmp_path
-            return wb
-
-        # Bytes-direct reader path (Pod-α onwards): no tempfile needed.
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._rust_patcher = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = bytes_open(data_bytes, permissive)
-        wb._read_only = read_only
-        wb._source_path = None
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return _workbook_sources.from_bytes(
+            cls,
+            data,
+            data_only=data_only,
+            permissive=permissive,
+            modify=modify,
+            read_only=read_only,
+        )
 
     @classmethod
     def _from_patcher(
@@ -511,40 +210,12 @@ class Workbook:
         patcher; see :func:`wolfxl.load_workbook` for the user-facing
         contract.
         """
-        from wolfxl import _rust
-
-        wb = object.__new__(cls)
-        wb._rust_writer = None
-        wb._data_only = data_only
-        wb._rich_text = False
-        wb._evaluator = None
-        wb._rust_reader = _rust.CalamineStyledBook.open(path, permissive)
-        wb._rust_patcher = _rust.XlsxPatcher.open(path, permissive)
-        wb._read_only = False
-        wb._source_path = path
-        wb._format = "xlsx"
-        names = [str(n) for n in wb._rust_reader.sheet_names()]
-        wb._sheet_names = names
-        wb._sheets = {}
-        for name in names:
-            wb._sheets[name] = Worksheet(wb, name)
-        wb._properties_cache = None
-        wb._properties_dirty = False
-        wb._defined_names_cache = None
-        wb._pending_defined_names = {}
-        wb._security = None
-        wb._file_sharing = None
-        wb._pending_security_update = False
-        wb._pending_axis_shifts = []
-        wb._pending_range_moves = []
-        wb._pending_sheet_copies = []
-        wb._pending_chart_adds = {}
-        wb._pending_pivot_caches = []
-        wb._next_pivot_cache_id = 0
-        wb._pending_slicer_caches = []
-        wb._next_slicer_cache_id = 0
-        wb.copy_options = CopyOptions()
-        return wb
+        return _workbook_sources.from_patcher(
+            cls,
+            path,
+            data_only=data_only,
+            permissive=permissive,
+        )
 
     @classmethod
     def _from_xlsb(
@@ -555,65 +226,18 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
     ) -> Workbook:
-        """Open an .xlsb workbook via Pod-α's ``CalamineXlsbBook``.
+        """Open an .xlsb workbook via the native BIFF12 reader.
 
-        xlsb is a binary OOXML container; we surface values + cached
-        formula results only (no per-cell styles, no rich text, no
-        comments — that's the same shape calamine's stock xlsb reader
-        exposes).  Callers that need style metadata should
-        load + transcribe to xlsx first.
+        xlsb is a binary OOXML container. WolfXL surfaces values,
+        cached formula results, and read-side cell styles; modify mode,
+        streaming, password reads, and writes remain xlsx-only.
         """
-        from wolfxl import _rust
-
-        rust_cls = getattr(_rust, "CalamineXlsbBook", None)
-        if rust_cls is None:
-            raise NotImplementedError(
-                ".xlsb reads require the CalamineXlsbBook backend "
-                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
-                "Pod-α merges, or use openpyxl/xlrd as an interim."
-            )
-
-        if data is not None:
-            bytes_open = getattr(rust_cls, "open_from_bytes", None)
-            if bytes_open is None:
-                # Fall back to a tempfile so we can still hand the
-                # backend a path while Pod-α plumbs the bytes overload.
-                rust_book, tmp_path = _xlsb_xls_via_tempfile(
-                    rust_cls, data, suffix=".xlsb", permissive=permissive
-                )
-                _wb = _build_xlsb_xls_wb(
-                    cls,
-                    rust_book=rust_book,
-                    fmt="xlsb",
-                    data_only=data_only,
-                    source_path=None,
-                )
-                _wb._tempfile_path = tmp_path
-                return _wb
-            try:
-                rust_book = bytes_open(data, permissive)
-            except TypeError:
-                # xlsb/xls backends don't expose a permissive flag.
-                rust_book = bytes_open(data)
-        else:
-            opener = getattr(rust_cls, "open", None)
-            if opener is None:
-                raise NotImplementedError(
-                    "CalamineXlsbBook.open is not yet exposed by the "
-                    "Rust extension; rebuild after Sprint Κ Pod-α."
-                )
-            try:
-                rust_book = opener(path, permissive)
-            except TypeError:
-                # Pod-α may not yet thread `permissive` through.
-                rust_book = opener(path)
-
-        return _build_xlsb_xls_wb(
+        return _workbook_sources.from_xlsb(
             cls,
-            rust_book=rust_book,
-            fmt="xlsb",
+            path=path,
+            data=data,
             data_only=data_only,
-            source_path=path,
+            permissive=permissive,
         )
 
     @classmethod
@@ -625,59 +249,17 @@ class Workbook:
         data_only: bool = False,
         permissive: bool = False,
     ) -> Workbook:
-        """Open a legacy .xls workbook via Pod-α's ``CalamineXlsBook``.
+        """Open a legacy .xls workbook via ``CalamineXlsBook``.
 
         Same shape as :meth:`_from_xlsb` — values + cached formula
         results only.
         """
-        from wolfxl import _rust
-
-        rust_cls = getattr(_rust, "CalamineXlsBook", None)
-        if rust_cls is None:
-            raise NotImplementedError(
-                ".xls reads require the CalamineXlsBook backend "
-                "(Sprint Κ Pod-α). Rebuild the wolfxl extension after "
-                "Pod-α merges, or use xlrd as an interim."
-            )
-
-        if data is not None:
-            bytes_open = getattr(rust_cls, "open_from_bytes", None)
-            if bytes_open is None:
-                rust_book, tmp_path = _xlsb_xls_via_tempfile(
-                    rust_cls, data, suffix=".xls", permissive=permissive
-                )
-                _wb = _build_xlsb_xls_wb(
-                    cls,
-                    rust_book=rust_book,
-                    fmt="xls",
-                    data_only=data_only,
-                    source_path=None,
-                )
-                _wb._tempfile_path = tmp_path
-                return _wb
-            try:
-                rust_book = bytes_open(data, permissive)
-            except TypeError:
-                # xlsb/xls backends don't expose a permissive flag.
-                rust_book = bytes_open(data)
-        else:
-            opener = getattr(rust_cls, "open", None)
-            if opener is None:
-                raise NotImplementedError(
-                    "CalamineXlsBook.open is not yet exposed by the "
-                    "Rust extension; rebuild after Sprint Κ Pod-α."
-                )
-            try:
-                rust_book = opener(path, permissive)
-            except TypeError:
-                rust_book = opener(path)
-
-        return _build_xlsb_xls_wb(
+        return _workbook_sources.from_xls(
             cls,
-            rust_book=rust_book,
-            fmt="xls",
+            path=path,
+            data=data,
             data_only=data_only,
-            source_path=path,
+            permissive=permissive,
         )
 
     # ------------------------------------------------------------------
@@ -686,6 +268,7 @@ class Workbook:
 
     @property
     def sheetnames(self) -> list[str]:
+        """Return worksheet titles in tab order."""
         return list(self._sheet_names)
 
     @property
@@ -704,75 +287,309 @@ class Workbook:
     def read_only(self) -> bool:
         """True if this workbook was opened with ``read_only=True``.
 
-        Sprint Ι Pod-β changes the semantics of this flag: it now
-        reflects the *explicit* ``read_only=True`` opt-in passed to
-        :func:`wolfxl.load_workbook`, not the historic
-        "no-writer-no-patcher" inference. The streaming
-        ``iter_rows`` fast path keys off the explicit flag (or the
-        > 50k row auto-trigger). Workbooks opened in plain read mode
-        (``read_only=False``, the default) retain the historic
-        in-memory behaviour for ``__getitem__`` / mutation paths.
+        The flag reflects the explicit ``read_only=True`` argument passed
+        to :func:`wolfxl.load_workbook`. Workbooks opened with the default
+        ``read_only=False`` keep the normal in-memory read behavior, while
+        streaming row iteration is used for explicit read-only workbooks
+        and very large sheets.
         """
         return bool(getattr(self, "_read_only", False))
 
     @property
-    def chartsheets(self) -> list[Any]:
-        """Chart sheets - always empty in T0 (wolfxl treats charts as preserved-only)."""
+    def write_only(self) -> bool:
+        """Whether this workbook is in openpyxl write-only mode (G20)."""
+        return bool(getattr(self, "_write_only", False))
+
+    @property
+    def data_only(self) -> bool:
+        """Whether formulas expose cached values where available."""
+        return bool(getattr(self, "_data_only", False))
+
+    @property
+    def path(self) -> str:
+        """Openpyxl-compatible workbook part path."""
+        return "/xl/workbook.xml"
+
+    @property
+    def rels(self) -> list[Any]:
+        """Workbook relationship list placeholder."""
         return []
 
     @property
-    def named_styles(self) -> list[Any]:
-        """Named styles - always empty in T0 (construction lands in T2)."""
+    def shared_strings(self) -> list[Any]:
+        """Workbook shared-string table placeholder."""
         return []
 
+    @property
+    def loaded_theme(self) -> Any:
+        """Loaded theme bytes, when exposed."""
+        return None
+
+    @property
+    def vba_archive(self) -> bytes | None:
+        """Raw ``xl/vbaProject.bin`` bytes for ``.xlsm`` workbooks (G19, RFC-072).
+
+        Returns the underlying VBA archive bytes when the workbook was
+        loaded via ``load_workbook(path, modify=True)`` from a macro-
+        bearing file (``.xlsm`` / ``.xlam``). Returns ``None`` for
+        plain ``.xlsx`` inputs (no VBA part), for write-mode workbooks
+        (``Workbook()``), and for non-modify reads (``load_workbook(path)``
+        without ``modify=True``) — those code paths do not retain the
+        bytes in v1.0.
+
+        Read-only inspection — there is no setter. VBA authoring is
+        tracked under G28 and remains decision-gated.
+        """
+        patcher = getattr(self, "_rust_patcher", None)
+        if patcher is None:
+            return None
+        getter = getattr(patcher, "get_vba_archive_bytes", None)
+        if getter is None:
+            return None
+        return getter()
+
+    @property
+    def _external_links(self) -> list[Any]:
+        """Workbook-level external-link collection (RFC-071 / G18).
+
+        Lazily loaded the first time the property is read. For
+        write-mode workbooks (``Workbook()``) and bytes-backed reads
+        with no source path the list is empty by definition. Modify-mode
+        and path-backed read mode parse ``xl/externalLinks/`` parts on
+        first access.
+
+        v1.0 contract: read-only. The patcher preserves these parts
+        byte-for-byte on save; authoring is deferred to a follow-up RFC.
+        """
+        cached = getattr(self, "_external_links_cache", None)
+        if cached is not None:
+            return cached
+
+        from wolfxl import _external_links as _el
+
+        source_path = getattr(self, "_source_path", None)
+        # Write mode: no source ZIP exists yet, return an empty list.
+        if self._rust_writer is not None or not source_path:
+            cached = []
+        else:
+            cached = _el.load_external_links(source_path)
+        self._external_links_cache = cached
+        return cached
+
+    @property
+    def external_links(self) -> list[Any]:
+        """Alias for :attr:`_external_links` (openpyxl-shape compat)."""
+        return self._external_links
+
+    @property
+    def chartsheets(self) -> list[Any]:
+        """Return chart sheets in this workbook.
+
+        WolfXL preserves chart sheets when possible, but does not expose
+        Python chart-sheet objects through this compatibility property yet.
+        """
+        return []
+
+    @property
+    def epoch(self) -> Any:
+        """Workbook date epoch, matching openpyxl's public property."""
+        from wolfxl.utils.datetime import CALENDAR_MAC_1904, CALENDAR_WINDOWS_1900
+
+        return (
+            CALENDAR_MAC_1904
+            if self.workbook_properties.date1904
+            else CALENDAR_WINDOWS_1900
+        )
+
+    @epoch.setter
+    def epoch(self, value: Any) -> None:
+        """Set the workbook date epoch."""
+        from wolfxl.utils.datetime import CALENDAR_MAC_1904, CALENDAR_WINDOWS_1900
+
+        if value == CALENDAR_MAC_1904:
+            self.workbook_properties.date1904 = True
+        elif value == CALENDAR_WINDOWS_1900:
+            self.workbook_properties.date1904 = False
+        else:
+            raise ValueError("epoch must be CALENDAR_WINDOWS_1900 or CALENDAR_MAC_1904")
+
+    @property
+    def excel_base_date(self) -> Any:
+        """Compatibility alias for :attr:`epoch`."""
+        return self.epoch
+
+    @property
+    def iso_dates(self) -> bool:
+        """Whether datetime values should be stored as ISO strings."""
+        return bool(getattr(self, "_iso_dates", False))
+
+    @iso_dates.setter
+    def iso_dates(self, value: bool) -> None:
+        """Set ISO-date serialization preference."""
+        self._iso_dates = bool(value)
+
+    @property
+    def mime_type(self) -> str:
+        """Openpyxl-compatible workbook MIME type."""
+        if getattr(self, "template", False):
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+
+    @property
+    def is_template(self) -> bool:
+        """Compatibility alias for the workbook template flag."""
+        return bool(getattr(self, "template", False))
+
+    @is_template.setter
+    def is_template(self, value: bool) -> None:
+        """Set the workbook template flag."""
+        self.template = bool(value)
+
+    @property
+    def code_name(self) -> str | None:
+        """Workbook code name from ``workbook_properties.codeName``."""
+        return self.workbook_properties.codeName
+
+    @code_name.setter
+    def code_name(self, value: str | None) -> None:
+        """Set workbook code name."""
+        self.workbook_properties.codeName = value
+
+    @property
+    def named_styles(self) -> list[Any]:
+        """Return workbook named-style names."""
+        return self._named_style_names()
+
+    @property
+    def style_names(self) -> list[str]:
+        """Return names for workbook named styles."""
+        return self._named_style_names()
+
+    def _named_style_names(self) -> list[str]:
+        """Return openpyxl-shaped named-style names."""
+        read_names = self._read_style_names()
+        if read_names is not None:
+            return read_names
+        return ["Normal"] + [
+            style.name for style in self._named_style_registry().user_styles()
+        ]
+
+    def _read_style_names(self) -> list[str] | None:
+        """Read named-style names from ``xl/styles.xml`` when available."""
+        if getattr(self, "_rust_reader", None) is None:
+            return None
+        if getattr(self, "_style_names_cache", None) is not None:
+            return list(self._style_names_cache)
+        source_path = getattr(self, "_source_path", None)
+        if not source_path:
+            return None
+        try:
+            with zipfile.ZipFile(source_path) as zf:
+                styles_xml = zf.read("xl/styles.xml")
+        except (KeyError, OSError, zipfile.BadZipFile):
+            self._style_names_cache = ["Normal"]
+            return list(self._style_names_cache)
+        root = ET.fromstring(styles_xml)
+        namespace = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        style_nodes = root.findall("main:cellStyles/main:cellStyle", namespace)
+        names = [node.attrib["name"] for node in style_nodes if node.attrib.get("name")]
+        self._style_names_cache = names or ["Normal"]
+        return list(self._style_names_cache)
+
+    def _named_style_registry(self) -> Any:
+        """Return the lazily seeded named-style registry."""
+        if getattr(self, "_named_styles_registry", None) is None:
+            from wolfxl.styles._named_style import _NamedStyleList
+
+            self._named_styles_registry = _NamedStyleList()
+        return self._named_styles_registry
+
+    @property
+    def persons(self) -> Any:
+        """Workbook-scoped threaded-comment author registry (G08).
+
+        Lazily seeded on first access. ``wb.persons.add(name=..., user_id=...)``
+        returns a ``Person`` whose GUID is auto-allocated and which is
+        idempotent on ``(user_id, provider_id)`` when both are non-empty.
+        When the workbook is read from a file with an existing
+        ``personList.xml``, the registry is hydrated from the reader so
+        the original GUIDs round-trip byte-stable.
+        """
+        if getattr(self, "_persons_registry", None) is None:
+            from wolfxl.comments._person import Person, PersonRegistry
+
+            registry = PersonRegistry()
+            reader = getattr(self, "_rust_reader", None)
+            if reader is not None and hasattr(reader, "read_persons"):
+                try:
+                    entries = reader.read_persons()
+                except Exception:
+                    entries = []
+                for entry in entries:
+                    person_id = entry.get("id")
+                    if not person_id:
+                        continue
+                    registry._seed(  # noqa: SLF001
+                        Person(
+                            name=entry.get("display_name") or "",
+                            user_id=entry.get("user_id") or "",
+                            provider_id=entry.get("provider_id") or "None",
+                            id=person_id,
+                        )
+                    )
+            self._persons_registry: Any = registry
+        return self._persons_registry
+
     def __getitem__(self, name: str) -> Worksheet:
+        """Return a worksheet by title."""
         if name not in self._sheets:
             raise KeyError(f"Worksheet '{name}' does not exist")
         return self._sheets[name]
 
     def __contains__(self, name: str) -> bool:
+        """Return whether the workbook contains a sheet named ``name``."""
         return name in self._sheets
 
     def __iter__(self):  # type: ignore[no-untyped-def]
+        """Iterate worksheet titles in tab order."""
         return iter(self._sheet_names)
 
     def get_sheet_by_name(self, name: str) -> Worksheet:
         """Look up a sheet by name. Deprecated in openpyxl but still widely used."""
         return self[name]
 
+    def get_sheet_names(self) -> list[str]:
+        """Deprecated openpyxl alias for :attr:`sheetnames`."""
+        return self.sheetnames
+
     def index(self, worksheet: Worksheet) -> int:
         """Return the 0-based index of ``worksheet`` in sheet order."""
         return self._sheet_names.index(worksheet.title)
 
+    def get_index(self, worksheet: Worksheet) -> int:
+        """Deprecated openpyxl alias for :meth:`index`."""
+        return self.index(worksheet)
+
     def remove(self, worksheet: Worksheet) -> None:
         """Remove a worksheet from the workbook (write mode only).
 
-        In read mode, the on-disk sheet is untouched — raise instead so
-        callers don't assume a destructive edit succeeded. Modify mode does
-        not yet support sheet removal (the patcher has no ``remove_sheet``
-        API surface), so it also raises.
+        In read and modify modes, WolfXL raises instead of pretending a
+        destructive edit succeeded against the source workbook.
+
+        Args:
+            worksheet: Worksheet to remove.
+
+        Raises:
+            RuntimeError: If the workbook mode cannot remove sheets.
         """
-        if self._rust_writer is None:
-            raise RuntimeError("remove requires write mode")
-        if worksheet.title not in self._sheets:
-            raise ValueError(f"Worksheet '{worksheet.title}' is not in this workbook")
-        title = worksheet.title
-        self._sheet_names.remove(title)
-        self._sheets.pop(title)
-        # If the Rust writer exposes remove_sheet, call it so the saved file
-        # doesn't include the now-dropped sheet. If the writer lacks the
-        # method, the Python bookkeeping still produces the right output
-        # because ``save()`` iterates our ``_sheets`` dict.
-        remove_fn = getattr(self._rust_writer, "remove_sheet", None)
-        if remove_fn is not None:
-            remove_fn(title)
+        _workbook_sheets.remove_sheet(self, worksheet)
 
     def remove_sheet(self, worksheet: Worksheet) -> None:
         """openpyxl alias for :meth:`remove` (deprecated there, kept for parity)."""
         self.remove(worksheet)
 
     # ------------------------------------------------------------------
-    # Workbook-level metadata (T1 PR3)
+    # Workbook-level metadata queues.
     # ------------------------------------------------------------------
 
     @property
@@ -785,23 +602,7 @@ class Workbook:
         assignments flip ``self._properties_dirty`` so :meth:`save` knows
         to flush them.
         """
-        if self._properties_cache is not None:
-            return self._properties_cache
-        from wolfxl.packaging.core import DocumentProperties, _doc_props_from_dict
-
-        if self._rust_reader is not None:
-            try:
-                raw = self._rust_reader.read_doc_properties()
-            except Exception:
-                raw = {}
-            props = _doc_props_from_dict(raw)
-        else:
-            props = DocumentProperties()
-        # Attach the back-reference so subsequent ``props.title = "X"``
-        # marks the workbook dirty without further user action.
-        props._attach_workbook(self)  # noqa: SLF001
-        self._properties_cache = props
-        return props
+        return _workbook_metadata.get_properties(self)
 
     @properties.setter
     def properties(self, value: Any) -> None:
@@ -812,15 +613,17 @@ class Workbook:
         Sets the dirty flag unconditionally — replacing the object is by
         definition a write intent.
         """
-        from wolfxl.packaging.core import DocumentProperties
+        _workbook_metadata.set_properties(self, value)
 
-        if not isinstance(value, DocumentProperties):
-            raise TypeError(
-                f"properties must be a DocumentProperties, got {type(value).__name__}"
-            )
-        value._attach_workbook(self)  # noqa: SLF001
-        self._properties_cache = value
-        self._properties_dirty = True
+    @property
+    def custom_doc_props(self) -> Any:
+        """Return workbook custom document properties."""
+        return _workbook_metadata.get_custom_doc_props(self)
+
+    @custom_doc_props.setter
+    def custom_doc_props(self, value: Any) -> None:
+        """Replace workbook custom document properties."""
+        _workbook_metadata.set_custom_doc_props(self, value)
 
     # ------------------------------------------------------------------
     # Named ranges
@@ -836,45 +639,100 @@ class Workbook:
         Mutations (``wb.defined_names["X"] = DefinedName(...)``) queue
         through to the Rust writer in write mode.
         """
-        if self._defined_names_cache is not None:
-            return self._defined_names_cache
-        from wolfxl.workbook import DefinedNameDict
+        return _workbook_metadata.get_defined_names(self)
+
+    def create_named_range(
+        self,
+        name: str,
+        worksheet: Worksheet | None = None,
+        value: str | None = None,
+        scope: Any = None,  # noqa: ARG002 - openpyxl deprecated signature
+    ) -> None:
+        """Create a deprecated openpyxl-style defined name."""
+        from wolfxl.utils import quote_sheetname
         from wolfxl.workbook.defined_name import DefinedName
 
-        dnd = DefinedNameDict()
-        if self._rust_reader is not None:
-            seen: set[str] = set()
-            for sheet_name in self._sheet_names:
-                try:
-                    entries = self._rust_reader.read_named_ranges(sheet_name)
-                except Exception:
-                    continue
-                for entry in entries:
-                    name = entry["name"]
-                    if name in seen:
-                        continue
-                    seen.add(name)
-                    refers_to = entry["refers_to"]
-                    if refers_to.startswith("="):
-                        refers_to = refers_to[1:]
-                    scope = entry.get("scope", "workbook")
-                    local_id: int | None = None
-                    if scope == "sheet":
-                        # The sheet-scope encoding in the Rust reader puts
-                        # the sheet name in the ``refers_to`` prefix; we
-                        # don't try to recover the original index.
-                        local_id = None
-                    dn = DefinedName(name=name, value=refers_to, localSheetId=local_id)
-                    # Bypass __setitem__'s queue side-effect — this is a
-                    # pure read, not a user write.
-                    dict.__setitem__(dnd, name, dn)
-        # Attach the workbook back-ref so subsequent user writes queue.
-        dnd._wb = self  # noqa: SLF001
-        self._defined_names_cache = dnd
-        return dnd
+        if worksheet is not None:
+            value = f"{quote_sheetname(worksheet.title)}!{value}"
+        self.defined_names[name] = DefinedName(name=name, value=value)
+
+    def add_named_style(self, style: Any) -> None:
+        """Register a named style on the workbook."""
+        from wolfxl.styles import NamedStyle
+
+        if not isinstance(style, NamedStyle) and hasattr(style, "name"):
+            style = NamedStyle(name=str(style.name))
+        self._named_style_registry().append(style)
+        if hasattr(style, "bind"):
+            style.bind(self)
+
+    def _has_named_style(self, name: str) -> bool:
+        """Return True if ``name`` is a registered named style.
+
+        ``"Normal"`` always resolves to True (Excel's reserved default,
+        always present in the cellStyles table). Other names must have
+        been registered via :meth:`add_named_style` or read in from the
+        source workbook on load.
+        """
+        if name == "Normal":
+            return True
+        if name in self._named_style_names():
+            return True
+        return any(
+            getattr(style, "name", None) == name
+            for style in self._named_style_registry().user_styles()
+        )
+
+    def create_chartsheet(self, title: str | None = None, index: int | None = None) -> Any:
+        """Raise clearly for chart-sheet creation, which WolfXL does not write yet."""
+        raise NotImplementedError(
+            "Workbook.create_chartsheet is not yet supported by wolfxl. "
+            "Existing chartsheets are preserved where possible, but creating "
+            "new chart-sheet parts requires chart-sheet writer support."
+        )
+
+    @property
+    def workbook_properties(self) -> Any:
+        """Return workbook-wide `<workbookPr>` properties."""
+        return _workbook_metadata.get_workbook_properties(self)
+
+    @workbook_properties.setter
+    def workbook_properties(self, value: Any) -> None:
+        """Replace workbook-wide properties."""
+        _workbook_metadata.set_workbook_properties(self, value)
+
+    @property
+    def calculation(self) -> Any:
+        """Return workbook calculation properties (`<calcPr>`)."""
+        return _workbook_metadata.get_calc_properties(self)
+
+    @calculation.setter
+    def calculation(self, value: Any) -> None:
+        """Replace workbook calculation properties."""
+        _workbook_metadata.set_calc_properties(self, value)
+
+    @property
+    def calc_properties(self) -> Any:
+        """Compatibility alias for :attr:`calculation`."""
+        return self.calculation
+
+    @calc_properties.setter
+    def calc_properties(self, value: Any) -> None:
+        """Compatibility alias for :attr:`calculation`."""
+        self.calculation = value
+
+    @property
+    def views(self) -> list[Any]:
+        """Return workbook window views."""
+        return _workbook_metadata.get_views(self)
+
+    @views.setter
+    def views(self, value: Any) -> None:
+        """Replace workbook window views."""
+        _workbook_metadata.set_views(self, value)
 
     # ------------------------------------------------------------------
-    # RFC-058 — workbook-level security
+    # Workbook-level security
     # ------------------------------------------------------------------
 
     @property
@@ -888,19 +746,17 @@ class Workbook:
         ``wb.security = wb.security`` after mutating to force the flush
         if needed (the property write is what flips the dirty flag).
         """
-        return self._security
+        return _workbook_metadata.get_security(self)
 
     @security.setter
     def security(self, value: Any) -> None:
-        from wolfxl.workbook.protection import WorkbookProtection
+        """Set workbook protection metadata.
 
-        if value is not None and not isinstance(value, WorkbookProtection):
-            raise TypeError(
-                "wb.security must be a WorkbookProtection or None, "
-                f"got {type(value).__name__}"
-            )
-        self._security = value
-        self._pending_security_update = True
+        Args:
+            value: A ``WorkbookProtection`` instance, or ``None`` to clear the
+                in-memory protection block before the next save.
+        """
+        _workbook_metadata.set_security(self, value)
 
     @property
     def fileSharing(self) -> Any:  # noqa: N802 — openpyxl-shape camelCase
@@ -910,132 +766,64 @@ class Workbook:
         Attribute name matches openpyxl's ``wb.fileSharing`` exactly so
         existing code continues to work.
         """
-        return self._file_sharing
+        return _workbook_metadata.get_file_sharing(self)
 
     @fileSharing.setter
     def fileSharing(self, value: Any) -> None:  # noqa: N802
-        from wolfxl.workbook.protection import FileSharing
+        """Set workbook file-sharing metadata.
 
-        if value is not None and not isinstance(value, FileSharing):
-            raise TypeError(
-                "wb.fileSharing must be a FileSharing or None, "
-                f"got {type(value).__name__}"
-            )
-        self._file_sharing = value
-        self._pending_security_update = True
+        Args:
+            value: A ``FileSharing`` instance, or ``None`` to clear the
+                in-memory file-sharing block before the next save.
+        """
+        _workbook_metadata.set_file_sharing(self, value)
 
     # ------------------------------------------------------------------
     # Write-mode operations
     # ------------------------------------------------------------------
 
     def create_sheet(self, title: str) -> Worksheet:
-        """Add a new sheet (write mode only)."""
-        if self._rust_writer is None:
-            raise RuntimeError("create_sheet requires write mode")
-        if title in self._sheets:
-            raise ValueError(f"Sheet '{title}' already exists")
-        self._rust_writer.add_sheet(title)
-        self._sheet_names.append(title)
-        ws = Worksheet(self, title)
-        self._sheets[title] = ws
-        return ws
+        """Create and append a worksheet.
+
+        Args:
+            title: Unique worksheet title.
+
+        Returns:
+            The newly created :class:`Worksheet`.
+
+        Raises:
+            RuntimeError: If the workbook is not in write mode.
+            ValueError: If ``title`` already exists.
+        """
+        return _workbook_sheets.create_sheet(self, title)
 
     def copy_worksheet(
         self, source: Worksheet, *, name: str | None = None
     ) -> Worksheet:
-        """Duplicate *source* into a new sheet within this workbook (RFC-035).
+        """Duplicate *source* into a new sheet within this workbook.
 
-        Supported in BOTH modify mode and write mode (Sprint Θ Pod-C1).
-        Read-only mode raises ``RuntimeError``.
+        Supported for both new workbooks and workbooks opened with
+        ``load_workbook(..., modify=True)``. Read-only workbooks raise
+        ``RuntimeError``.
 
         The new sheet appends at the end of the tab list. The default
         title is ``f"{source.title} Copy"``; on collision an incrementing
-        suffix (`Copy 2`, `Copy 3`, …) is appended until unique. An
+        suffix (``Copy 2``, ``Copy 3``, ...) is appended until unique. An
         explicit ``name`` keyword argument overrides the default and
         must not collide with any existing sheet name.
 
-        Modify mode: the returned ``Worksheet`` is a fresh proxy bound
-        to the cloned title. The actual ZIP-level clone runs at
-        ``save()`` time via Phase 2.7 of the patcher.
+        Args:
+            source: Worksheet to duplicate.
+            name: Optional explicit title for the copy.
 
-        Write mode: the source's pending writes are materialized
-        immediately and replayed onto a freshly-created destination
-        sheet (cell values, formats, row heights, column widths, merged
-        ranges, freeze pane). Native-writer-tracked features added by
-        the API after `copy_worksheet` returns flow through normally.
+        Returns:
+            The newly created worksheet.
+
+        Raises:
+            RuntimeError: If the workbook is read-only.
+            ValueError: If ``name`` collides with an existing sheet title.
         """
-        if not isinstance(source, Worksheet):
-            raise TypeError(
-                f"copy_worksheet: source must be a Worksheet, got {type(source).__name__}"
-            )
-        if source._workbook is not self:  # noqa: SLF001
-            raise ValueError(
-                "copy_worksheet: source must belong to this workbook"
-            )
-        if self._rust_patcher is None and self._rust_writer is None:
-            raise RuntimeError(
-                "copy_worksheet requires write or modify mode"
-            )
-
-        # Compute the new title. Explicit `name` wins; otherwise dedup
-        # against the running tab list.
-        if name is not None:
-            if not isinstance(name, str) or not name:
-                raise ValueError("copy_worksheet: name must be a non-empty string")
-            if name in self._sheets:
-                raise ValueError(f"copy_worksheet: sheet '{name}' already exists")
-            new_title = name
-        else:
-            base = f"{source.title} Copy"
-            new_title = base
-            suffix = 2
-            while new_title in self._sheets:
-                new_title = f"{base} {suffix}"
-                suffix += 1
-
-        if self._rust_patcher is not None:
-            # Modify-mode path — queue + tab-list update; ZIP-level clone
-            # happens during save() via Phase 2.7. Snapshot the
-            # deep_copy_images flag at queue time so a later toggle
-            # of wb.copy_options doesn't retroactively affect this
-            # already-queued copy.
-            self._pending_sheet_copies.append(
-                (source.title, new_title, bool(self.copy_options.deep_copy_images))
-            )
-            self._sheet_names.append(new_title)
-            ws = Worksheet(self, new_title)
-            self._sheets[new_title] = ws
-            # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
-            # slots into the new proxy so per-sheet divergence after a
-            # copy is preserved. The patcher's Phase 2.7 clones the
-            # source XML (which captures whatever setup is currently
-            # on disk); Phase 2.5n then re-splices our Python-side
-            # mutations onto each sheet independently. Without this
-            # deep-clone, mutating src.page_setup before save() would
-            # silently NOT propagate to dst.
-            import copy as _copy
-            for slot in (
-                "_page_setup",
-                "_page_margins",
-                "_header_footer",
-                "_sheet_view",
-                "_protection",
-                # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
-                "_row_breaks",
-                "_col_breaks",
-                "_sheet_format",
-            ):
-                src_v = getattr(source, slot, None)
-                if src_v is not None:
-                    setattr(ws, slot, _copy.deepcopy(src_v))
-            if getattr(source, "_print_title_rows", None) is not None:
-                ws._print_title_rows = source._print_title_rows  # noqa: SLF001
-            if getattr(source, "_print_title_cols", None) is not None:
-                ws._print_title_cols = source._print_title_cols  # noqa: SLF001
-            return ws
-
-        # Write-mode path (Sprint Θ Pod-C1).
-        return self._copy_worksheet_write_mode(source, new_title)
+        return _workbook_sheets.copy_worksheet(self, source, name=name)
 
     def _copy_worksheet_write_mode(
         self, source: Worksheet, new_title: str
@@ -1051,131 +839,16 @@ class Workbook:
         with the native writer via ``create_sheet`` so that downstream
         save/flush passes see it like any other sheet.
         """
-        from wolfxl._cell import _UNSET
-
-        # 1. Materialise the source's pending buffers so every value is
-        #    in `_cells` and discoverable. These helpers are idempotent.
-        if source._append_buffer:  # noqa: SLF001
-            source._materialize_append_buffer()  # noqa: SLF001
-        if source._bulk_writes:  # noqa: SLF001
-            source._materialize_bulk_writes()  # noqa: SLF001
-
-        # 2. Add a fresh destination sheet. Use the public-ish helper so
-        #    the Rust writer gets the new sheet registered first.
-        dst = self.create_sheet(new_title)
-
-        # 3. Walk the source's cell map. We iterate `_cells` (not
-        #    `_dirty`) because cells materialised from append/bulk
-        #    buffers go through `cell(...)` which writes via the
-        #    public setter that flips `_value_dirty` — so they're in
-        #    `_dirty` too — but a future caller might construct cells
-        #    via direct attribute writes. Using `_cells` is the
-        #    superset and makes the snapshot deterministic.
-        for (row, col), src_cell in source._cells.items():  # noqa: SLF001
-            value = src_cell._value  # noqa: SLF001
-            has_value = value is not _UNSET and src_cell._value_dirty  # noqa: SLF001
-            font = src_cell._font  # noqa: SLF001
-            fill = src_cell._fill  # noqa: SLF001
-            border = src_cell._border  # noqa: SLF001
-            alignment = src_cell._alignment  # noqa: SLF001
-            number_format = src_cell._number_format  # noqa: SLF001
-            has_format = src_cell._format_dirty  # noqa: SLF001
-
-            if not has_value and not has_format:
-                # Cell exists only because it was probed for read; do
-                # not propagate (would inflate destination dimensions).
-                continue
-
-            # Use cell() which builds a Cell, so the value/format
-            # setters mark dirty correctly for downstream `_flush`.
-            dst_cell = dst.cell(row=row, column=col)
-            if has_value:
-                dst_cell.value = value
-            if font is not _UNSET:
-                dst_cell.font = font  # type: ignore[assignment]
-            if fill is not _UNSET:
-                dst_cell.fill = fill  # type: ignore[assignment]
-            if border is not _UNSET:
-                dst_cell.border = border  # type: ignore[assignment]
-            if alignment is not _UNSET:
-                dst_cell.alignment = alignment  # type: ignore[assignment]
-            if number_format is not _UNSET:
-                dst_cell.number_format = number_format  # type: ignore[assignment]
-
-        # 4. Sheet-scope properties.
-        for r, h in source._row_heights.items():  # noqa: SLF001
-            dst._row_heights[r] = h  # noqa: SLF001
-        for letter, w in source._col_widths.items():  # noqa: SLF001
-            dst._col_widths[letter] = w  # noqa: SLF001
-        # Merges: round-trip through merge_cells so the Rust writer
-        # also gets the merge — `_merged_ranges` is just the Python
-        # mirror set; the writer needs an explicit call to record it.
-        for rng in source._merged_ranges:  # noqa: SLF001
-            dst.merge_cells(rng)
-        if source._freeze_panes is not None:  # noqa: SLF001
-            dst._freeze_panes = source._freeze_panes  # noqa: SLF001
-        if source._print_area is not None:  # noqa: SLF001
-            dst._print_area = source._print_area  # noqa: SLF001
-        # Sprint Ο Pod 1B (RFC-056) — deep-clone the autoFilter state.
-        # Phase 2.5o on the cloned sheet will re-evaluate against the
-        # cloned data (which the user may have mutated post-copy).
-        src_af = source._auto_filter  # noqa: SLF001
-        if (
-            src_af.ref is not None
-            or src_af.filter_columns
-            or src_af.sort_state is not None
-        ):
-            import copy as _copy
-
-            dst._auto_filter._ref = src_af.ref  # noqa: SLF001
-            dst._auto_filter.filter_columns = _copy.deepcopy(src_af.filter_columns)  # noqa: SLF001
-            dst._auto_filter.sort_state = _copy.deepcopy(src_af.sort_state)  # noqa: SLF001
-
-        # Sprint Ο Pod 1A.5 (RFC-055) — deep-clone the 5 sheet-setup
-        # slots so per-sheet divergence after a copy is preserved.
-        # `copy.deepcopy` is safe for the dataclass-shaped Pod 1A
-        # classes; we only deep-copy the underscore-private slots
-        # that have actually been initialised.
-        import copy as _copy
-        for slot in (
-            "_page_setup",
-            "_page_margins",
-            "_header_footer",
-            "_sheet_view",
-            "_protection",
-            # Sprint Π Pod Π-α (RFC-062) — page breaks + sheetFormatPr.
-            "_row_breaks",
-            "_col_breaks",
-            "_sheet_format",
-        ):
-            src_v = getattr(source, slot, None)
-            if src_v is not None:
-                setattr(dst, slot, _copy.deepcopy(src_v))
-        # print_titles are workbook-scope definedNames; clone the
-        # per-sheet selectors so the cloned sheet can retitle them.
-        if getattr(source, "_print_title_rows", None) is not None:
-            dst._print_title_rows = source._print_title_rows  # noqa: SLF001
-        if getattr(source, "_print_title_cols", None) is not None:
-            dst._print_title_cols = source._print_title_cols  # noqa: SLF001
-
-        return dst
+        return _workbook_sheets.copy_worksheet_write_mode(self, source, new_title)
 
     def move_sheet(self, sheet: Worksheet | str, offset: int = 0) -> None:
         """Move *sheet* by *offset* positions within the workbook tab list.
 
-        Mirrors openpyxl's ``Workbook.move_sheet`` (RFC-036). The new
-        position is ``current_index + offset``, clamped to ``[0, n-1]``
-        where ``n`` is the current sheet count. The in-memory tab list
-        (``self._sheet_names``) is updated immediately so subsequent
-        reads of ``wb.sheetnames`` / ``wb.worksheets`` see the post-move
-        order, regardless of whether the workbook is in write or modify
-        mode.
-
-        In modify mode, the move is queued on the patcher (along with
-        any previous moves in this save() session); on save the patcher
-        rewrites ``xl/workbook.xml``'s ``<sheets>`` order and re-points
-        every sheet-scoped ``<definedName localSheetId>`` accordingly
-        (RFC-036 §5).
+        Mirrors openpyxl's ``Workbook.move_sheet``. The new position is
+        ``current_index + offset`` and is clamped to the workbook's sheet
+        bounds. The in-memory tab list is updated immediately, so
+        subsequent reads of ``wb.sheetnames`` and ``wb.worksheets`` see
+        the post-move order before save.
 
         Args:
             sheet: A ``Worksheet`` instance or sheet name string.
@@ -1187,53 +860,7 @@ class Workbook:
                 is rejected explicitly).
             KeyError: the resolved sheet name is not in this workbook.
         """
-        # Type-check sheet.
-        if isinstance(sheet, Worksheet):
-            name = sheet.title
-        elif isinstance(sheet, str):
-            name = sheet
-        else:
-            raise TypeError(
-                f"move_sheet: 'sheet' must be a Worksheet or str, got {type(sheet).__name__}"
-            )
-
-        # Reject bool explicitly (isinstance(True, int) is True in Python,
-        # which would silently treat True as 1 / False as 0).
-        if isinstance(offset, bool) or not isinstance(offset, int):
-            raise TypeError(
-                f"move_sheet: 'offset' must be an int, got {type(offset).__name__}"
-            )
-
-        # Validate sheet name.
-        if name not in self._sheet_names:
-            raise KeyError(name)
-
-        n = len(self._sheet_names)
-        idx = self._sheet_names.index(name)
-        new_pos = idx + offset
-        # Clamp to [0, n-1], matching the patcher-side rule. Python's
-        # list.insert clamps too, but we do it explicitly so the queued
-        # offset matches the position the patcher will compute.
-        if new_pos < 0:
-            new_pos = 0
-        if new_pos > n - 1:
-            new_pos = n - 1
-
-        # Update the in-memory tab list. Even when no actual position
-        # change happens (offset=0 or clamped no-op), we still walk the
-        # patcher-queue path so a downstream caller observing the queue
-        # matches the user's intent.
-        del self._sheet_names[idx]
-        self._sheet_names.insert(new_pos, name)
-
-        # Queue the move on the patcher in modify mode. The Rust side
-        # re-resolves the offset against its own running tab list, so
-        # we pass the user's original offset (not the clamped one) for
-        # symmetry with the openpyxl signature.
-        if self._rust_patcher is not None:
-            self._flush_pending_sheet_moves_to_patcher(name, offset)
-        if self._rust_writer is not None:
-            self._rust_writer.move_sheet(name, offset)
+        _workbook_sheets.move_sheet(self, sheet, offset)
 
     def save(
         self,
@@ -1243,128 +870,19 @@ class Workbook:
     ) -> None:
         """Flush all pending writes and save to disk.
 
-        When ``password`` is supplied, the freshly written plaintext
-        xlsx is re-encoded as an OOXML-encrypted blob (Agile / AES-256,
-        the modern Excel default) via :mod:`wolfxl._encryption` before
-        being placed at ``filename``. Both the write-mode (``Workbook()``)
-        and modify-mode (``open(..., modify=True)``) save paths are
-        wrapped — encryption is applied to the final byte stream
-        regardless of which Rust backend produced it.
+        Args:
+            filename: Destination path. In modify mode this may be the original
+                source path; WolfXL writes that case through its safe in-place
+                save path.
+            password: Optional encryption password for the final ``.xlsx``
+                payload. Install ``wolfxl[encrypted]`` to enable encryption.
 
-        ``password`` accepts ``str`` or ``bytes`` (UTF-8 decoded). An
-        empty string / empty bytes raises :class:`ValueError`. The
-        ``msoffcrypto-tool`` dep is loaded lazily; install via
-        ``pip install wolfxl[encrypted]``. See ``docs/encryption.md``
-        for the supported-algorithm matrix.
+        Raises:
+            ValueError: If ``password`` is empty.
+            RuntimeError: If the workbook mode cannot save the requested
+                pending changes.
         """
-        filename = str(filename)
-        if password is not None:
-            # Validate password early so we don't write a plaintext
-            # tempfile that we'd then have to throw away.
-            from wolfxl._encryption import _coerce_password
-
-            _coerce_password(password)  # raises ValueError on empty
-            self._save_encrypted(filename, password)
-            return
-        if self._rust_patcher is not None:
-            # Modify mode — workbook-level metadata writes don't have a
-            # patcher path yet (T1.5 follow-up). Surface the limitation
-            # before mutating the file rather than silently dropping the
-            # user's edits.
-            # RFC-020: properties round-trip (Phase 2.5d in the patcher).
-            # Workbook-level, so it flushes before the per-sheet drains.
-            if self._properties_dirty:
-                self._flush_properties_to_patcher()
-            if self._pending_defined_names:
-                self._flush_defined_names_to_patcher()
-            # RFC-058: workbook-level security (workbookProtection +
-            # fileSharing). Drained BEFORE sheet flushes so the patcher's
-            # Phase 2.5q composes against the source workbook.xml.
-            if self._pending_security_update:
-                self._flush_security_to_patcher()
-            for ws in self._sheets.values():
-                ws._flush()  # noqa: SLF001
-            # RFC-035: sheet copies must flush BEFORE every per-sheet
-            # phase so cloned sheets are visible to downstream drains
-            # (cell patches, hyperlinks, tables, comments, axis shifts,
-            # range moves) as if they had always been part of the
-            # source workbook.
-            self._flush_pending_sheet_copies_to_patcher()
-            # RFC-022: hyperlinks share the sheet rels graph with future
-            # rels-touching writers (RFC-024 tables, RFC-023 comments).
-            # Flush them first so DV/CF (which don't touch rels) run
-            # afterward against an already-stable rels graph.
-            self._flush_pending_hyperlinks_to_patcher()
-            # RFC-024: tables also touch the rels graph + add new ZIP
-            # parts + content-type Overrides. Flush after hyperlinks
-            # so the rels graph already carries any external-hyperlink
-            # rIds when build_tables iterates rels.iter() to assemble
-            # the merged <tableParts> block.
-            self._flush_pending_tables_to_patcher()
-            # RFC-023: comments + VML drawings.
-            self._flush_pending_comments_to_patcher()
-            # RFC-025: flush worksheet-level setters that the patcher
-            # accepts. The cell-level _flush above handles values +
-            # formats; data validations are a separate patcher API
-            # because they live in a sibling block, not in <sheetData>.
-            self._flush_pending_data_validations_to_patcher()
-            # RFC-026: conditional formatting also lives in a sibling
-            # block (slot 17). Cross-sheet dxfId allocation happens
-            # inside the patcher's Phase-2.5b on the Rust side.
-            self._flush_pending_conditional_formats_to_patcher()
-            # RFC-030 / RFC-031: structural axis shifts (insert/delete
-            # rows/cols). Drained LAST so it sees the per-cell + per-block
-            # rewrites from the earlier flush calls and shifts them too.
-            self._flush_pending_axis_shifts_to_patcher()
-            # RFC-034: range moves. Drained AFTER axis shifts so a
-            # sequence like `insert_rows(2, 3)` then
-            # `move_range("C3:E10", rows=5)` is applied in source order
-            # against the post-shift coordinate space.
-            self._flush_pending_range_moves_to_patcher()
-            # Sprint Λ Pod-β (RFC-045): drain pending images.
-            self._flush_pending_images_to_patcher()
-            # Sprint Μ Pod-γ (RFC-046): drain pending chart adds.
-            # Sequenced AFTER images / axis shifts but BEFORE the
-            # final patcher.save() so chart cell-range formulas can
-            # compose with cell rewrites in the same save (the
-            # patcher's Phase 2.5l runs before Phase 3 cell patches).
-            self._flush_pending_charts_to_patcher()
-            # Sprint Ν Pod-γ (RFC-047 / RFC-048): drain pending pivot
-            # caches and pivot tables. Sequenced AFTER charts so the
-            # patcher's Phase 2.5m runs against an already-stable
-            # rels graph (Phase 2.5l added drawing rels first).
-            self._flush_pending_pivots_to_patcher()
-            # Sprint Ο Pod 1A.5 (RFC-055) — flush sheet-setup blocks
-            # (sheetView / sheetProtection / pageMargins / pageSetup /
-            # headerFooter) to the patcher's Phase 2.5n queue.
-            # Sequenced AFTER pivots and BEFORE slicers/autoFilter so a
-            # later protection toggle can lock the autoFilter range.
-            self._flush_pending_sheet_setup_to_patcher()
-            # Sprint Π Pod Π-α (RFC-062) — flush page breaks +
-            # sheetFormatPr to the patcher's Phase 2.5r queue.
-            # Sequenced AFTER sheet-setup (2.5n) and BEFORE slicers
-            # (2.5p) per RFC-062 §6 — page breaks must land before
-            # slicer extLst entries because slicer-list refs can
-            # anchor to break-bounded cells.
-            self._flush_pending_page_breaks_to_patcher()
-            # Sprint Ο Pod 3.5 (RFC-061 §3.1) — flush slicers to the
-            # patcher's Phase 2.5p queue. Sequenced AFTER sheet-setup
-            # (whose <extLst> blocks live alongside slicer-list refs)
-            # and BEFORE autofilters so slicer-list <extLst> entries
-            # land before any autoFilter row hides.
-            self._flush_pending_slicers_to_patcher()
-            # Sprint Ο Pod 1B (RFC-056) — flush autoFilter dicts to
-            # the patcher's Phase 2.5o queue.
-            self._flush_pending_autofilters_to_patcher()
-            self._rust_patcher.save(filename)
-        elif self._rust_writer is not None:
-            # Write mode — flush workbook-level writes, then sheets.
-            self._flush_workbook_writes()
-            for ws in self._sheets.values():
-                ws._flush()  # noqa: SLF001
-            self._rust_writer.save(filename)
-        else:
-            raise RuntimeError("save requires write or modify mode")
+        _workbook_save.save_workbook(self, filename, password=password)
 
     def _save_encrypted(
         self,
@@ -1373,9 +891,8 @@ class Workbook:
     ) -> None:
         """Save plaintext to a tempfile then re-route through encryption.
 
-        Sprint Λ Pod-α: write-side encryption stays Python-side (same
-        as Sprint Ι Pod-γ's read path); the Rust writer/patcher is
-        unchanged. We materialise the unencrypted xlsx via the normal
+        Write-side encryption stays Python-side; the Rust writer/patcher
+        is unchanged. We materialise the unencrypted xlsx via the normal
         save path, slurp it back as bytes, hand it to
         :func:`wolfxl._encryption.encrypt_xlsx_to_path` for the
         in-place encryption + atomic rename onto ``filename``.
@@ -1383,76 +900,32 @@ class Workbook:
         The plaintext tempfile is always cleaned up — including on
         error paths — so we never leak unencrypted user data on disk.
         """
-        import tempfile
-
-        from wolfxl._encryption import encrypt_xlsx_to_path
-
-        tmp_fd, tmp_name = tempfile.mkstemp(
-            prefix=".wolfxl-plain-",
-            suffix=".xlsx",
-        )
-        os.close(tmp_fd)
-        try:
-            # Re-enter save() in plaintext mode by calling the original
-            # path. Doing the call without ``password=`` keeps the
-            # branch logic simple and ensures both writer and patcher
-            # paths are exercised identically.
-            self.save(tmp_name)
-            with open(tmp_name, "rb") as fp:
-                plaintext_bytes = fp.read()
-            encrypt_xlsx_to_path(plaintext_bytes, password, filename)
-        finally:
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
+        _workbook_save.save_encrypted(self, filename, password)
 
     def _flush_pending_hyperlinks_to_patcher(self) -> None:
-        """Drain ``_pending_hyperlinks`` on every sheet into the patcher (RFC-022).
+        """Drain each sheet's pending hyperlinks into the patcher.
 
-        Modify-mode counterpart to the writer-side flush at
-        ``_worksheet.py:1911``. Each ``Hyperlink`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_hyperlink``;
-        the ``None`` sentinel routes to ``queue_hyperlink_delete``
-        (INDEX decision #5 — never use ``pop()``).
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Hyperlink`` is converted to the patcher's flat-dict shape
+        and routed to ``queue_hyperlink``; the ``None`` sentinel routes
+        to ``queue_hyperlink_delete``.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_hyperlinks  # noqa: SLF001
-            if not pending:
-                continue
-            for coord, hl in pending.items():
-                if hl is None:
-                    patcher.queue_hyperlink_delete(ws.title, coord)
-                    continue
-                payload: dict[str, Any] = {}
-                if hl.target is not None:
-                    payload["target"] = hl.target
-                if hl.location is not None:
-                    payload["location"] = hl.location
-                if hl.tooltip is not None:
-                    payload["tooltip"] = hl.tooltip
-                if hl.display is not None:
-                    payload["display"] = hl.display
-                patcher.queue_hyperlink(ws.title, coord, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_hyperlinks_to_patcher(self)
 
     def _flush_pending_tables_to_patcher(self) -> None:
-        """Drain ``_pending_tables`` on every sheet into the patcher (RFC-024).
+        """Drain each sheet's pending tables into the patcher.
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1946``. Each ``Table`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_table``. The
-        patcher allocates a workbook-unique table ``id`` at save time
-        (any explicit ``id`` on the Python ``Table`` object is
-        ignored), serializes ``xl/tables/tableN.xml``, splices a
-        ``<tableParts>`` block into the sheet XML, mutates the sheet
-        rels, and adds a ``[Content_Types].xml`` Override.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Table`` is converted to the patcher's flat-dict shape and
+        routed to ``queue_table``. The patcher allocates a
+        workbook-unique table ``id`` at save time (any explicit ``id`` on
+        the Python ``Table`` object is ignored), serializes
+        ``xl/tables/tableN.xml``, splices a ``<tableParts>`` block into
+        the sheet XML, mutates the sheet rels, and adds a
+        ``[Content_Types].xml`` Override.
 
         Per-sheet drain happens in workbook tab order; within a sheet,
         append order wins (which matches openpyxl's first-add → first-
@@ -1461,37 +934,10 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_tables  # noqa: SLF001
-            if not pending:
-                continue
-            for t in pending:
-                payload: dict[str, Any] = {
-                    "name": t.name,
-                    "ref": t.ref,
-                    "columns": [c.name for c in t.tableColumns] if t.tableColumns else [],
-                    "header_row_count": int(t.headerRowCount or 0),
-                    "totals_row_shown": bool(t.totalsRowCount and t.totalsRowCount > 0),
-                    "autofilter": True,
-                }
-                if t.displayName and t.displayName != t.name:
-                    payload["display_name"] = t.displayName
-                if t.tableStyleInfo is not None and t.tableStyleInfo.name:
-                    payload["style"] = {
-                        "name": t.tableStyleInfo.name,
-                        "show_first_column": bool(t.tableStyleInfo.showFirstColumn),
-                        "show_last_column": bool(t.tableStyleInfo.showLastColumn),
-                        "show_row_stripes": bool(t.tableStyleInfo.showRowStripes),
-                        "show_column_stripes": bool(t.tableStyleInfo.showColumnStripes),
-                    }
-                patcher.queue_table(ws.title, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_tables_to_patcher(self)
 
     def _flush_pending_images_to_patcher(self) -> None:
-        """Sprint Λ Pod-β (RFC-045) — drain pending images into the patcher.
+        """Drain pending images into the patcher.
 
         Modify-mode counterpart to the writer-side flush in
         ``Worksheet._flush_compat_properties``. Each queued
@@ -1502,305 +948,112 @@ class Workbook:
         ``NotImplementedError`` from the patcher at save time —
         appending to an existing drawing is a v1.5 follow-up.
         """
-        from wolfxl._images import image_to_writer_payload
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_images  # noqa: SLF001
-            if not pending:
-                continue
-            for img in pending:
-                payload = image_to_writer_payload(img)
-                patcher.queue_image_add(ws.title, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_images_to_patcher(self)
 
     def _flush_pending_charts_to_patcher(self) -> None:
-        """Sprint Μ-prime Pod-γ′ (RFC-046 §6, §10.12) — drain pending
-        chart adds in modify mode.
+        """Drain pending chart adds in modify mode.
 
         Two queues are drained here:
 
-        1. Workbook-level ``_pending_chart_adds`` (Pod-γ): a dict keyed
-           by sheet title with values of ``(chart_xml: bytes, anchor_a1,
+        1. Workbook-level ``_pending_chart_adds``: a dict keyed by sheet
+           title with values of ``(chart_xml: bytes, anchor_a1,
            width_emu, height_emu)`` tuples populated via
            :meth:`add_chart_modify_mode`. These are routed straight to
-           ``XlsxPatcher.queue_chart_add``. This is the bytes-level
-           escape hatch (v1.6.0) — preserved for callers that want to
-           pass pre-serialised chart XML directly.
-        2. Per-sheet ``Worksheet._pending_charts`` (Pod-β): a list of
+           ``XlsxPatcher.queue_chart_add`` and preserve the bytes-level
+           escape hatch for callers that want to pass pre-serialised
+           chart XML directly.
+        2. Per-sheet ``Worksheet._pending_charts``: a list of
            high-level :class:`~wolfxl.chart._chart.ChartBase` instances
            queued via :meth:`Worksheet.add_chart`. In **write** mode
            these are drained inside
            ``_worksheet._flush_compat_properties`` via
-           ``writer.add_chart_native``. In **modify** mode (v1.6.1+,
-           Sprint Μ-prime) we now bridge each chart through Pod-α′'s
-           ``serialize_chart_dict`` PyO3 export, producing chart XML
-           bytes that are routed through the same
+           ``writer.add_chart_native``. In **modify** mode we bridge each
+           chart through the ``serialize_chart_dict`` PyO3 export,
+           producing chart XML bytes that are routed through the same
            ``patcher.queue_chart_add`` path as the bytes escape hatch.
 
-        Sequenced AFTER images / axis shifts but BEFORE the final
+        Sequenced after images / axis shifts but before the final
         ``patcher.save()`` so chart cell-range formulas can compose
-        with cell rewrites in the same save (the patcher's Phase 2.5l
-        runs before Phase 3 cell patches).
+        with cell rewrites in the same save.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        # (1) Pod-γ workbook-level bytes queue (escape hatch / RFC-046 §6).
-        pending_bytes = getattr(self, "_pending_chart_adds", None)
-        if pending_bytes:
-            for sheet_title, items in pending_bytes.items():
-                if not items:
-                    continue
-                for chart_xml, anchor_a1, width_emu, height_emu in items:
-                    patcher.queue_chart_add(
-                        sheet_title,
-                        chart_xml,
-                        anchor_a1,
-                        int(width_emu),
-                        int(height_emu),
-                    )
-            pending_bytes.clear()
-        # (2) Sprint Μ-prime Pod-γ′ — modify-mode high-level chart
-        # bridge (RFC-046 §10.12). ``ws._pending_charts`` holds
-        # :class:`ChartBase` instances queued via
-        # ``Worksheet.add_chart(chart)``. Each chart is serialised to
-        # XML bytes via Pod-α′'s ``serialize_chart_dict`` and routed
-        # to the patcher exactly like the bytes-level escape hatch.
-        #
-        # If Pod-α′'s helper isn't yet exported on the bound wheel we
-        # raise :class:`NotImplementedError` rather than silently
-        # dropping the queue — surfacing the missing dependency
-        # synchronously so callers see the gap.
-        any_pending = any(ws._pending_charts for ws in self._sheets.values())  # noqa: SLF001
-        if not any_pending:
-            return
-        try:
-            from wolfxl._rust import serialize_chart_dict  # type: ignore[attr-defined]
-        except ImportError as exc:  # pragma: no cover — defensive
-            raise NotImplementedError(
-                "Modify-mode high-level Worksheet.add_chart() requires "
-                "Sprint Μ-prime Pod-α′'s serialize_chart_dict PyO3 "
-                "export. Build the wolfxl wheel from a branch that "
-                "includes the Pod-α′ commits, or fall back to "
-                "Workbook.add_chart_modify_mode(sheet, chart_xml_bytes, "
-                "anchor) with pre-serialised XML."
-            ) from exc
-
-        # 1 cm = 360_000 EMU. ``ChartBase.width`` / ``.height`` are in
-        # cm to match openpyxl semantics.
-        _CM_TO_EMU = 360_000
-        for ws in self._sheets.values():
-            pending_objs = ws._pending_charts  # noqa: SLF001
-            if not pending_objs:
-                continue
-            for chart in pending_objs:
-                dict_ = chart.to_rust_dict()
-                anchor = chart._anchor or "E15"  # noqa: SLF001
-                chart_xml = serialize_chart_dict(dict_, anchor)
-                width_emu = int(chart.width * _CM_TO_EMU)
-                height_emu = int(chart.height * _CM_TO_EMU)
-                patcher.queue_chart_add(
-                    ws.title,
-                    chart_xml,
-                    anchor,
-                    width_emu,
-                    height_emu,
-                )
-            pending_objs.clear()
+        _workbook_patcher_flush.flush_pending_charts_to_patcher(self)
 
     def add_pivot_cache(self, cache: Any) -> Any:
-        """Sprint Ν Pod-γ (RFC-047) — register a pivot cache against
-        this workbook in modify mode.
+        """Register a pivot cache with this workbook.
 
-        The cache must already be materialised (see
-        ``wolfxl.pivot.PivotCache.from_worksheet``); this call assigns
-        the workbook-scoped 0-based ``cache_id`` and queues the cache
-        for emission at ``save()`` time. The same ``cache`` instance
-        can be referenced by multiple ``PivotTable`` objects.
+        The cache should already be materialized, for example with
+        ``wolfxl.pivot.PivotCache.from_worksheet``. A registered cache can be
+        referenced by one or more pivot tables.
 
         Args:
-            cache: A :class:`wolfxl.pivot.PivotCache` instance.
+            cache: Pivot cache object to register.
 
         Returns:
-            The same cache (with ``_cache_id`` populated) so callers
-            can chain the call.
+            The same cache object, with its workbook-scoped cache id set.
 
         Raises:
             RuntimeError: If the workbook is not open in modify mode.
             ValueError: If the cache has already been registered.
         """
-        if self._rust_patcher is None:
-            raise RuntimeError(
-                "add_pivot_cache requires modify mode — open the "
-                "workbook with load_workbook(..., modify=True)"
-            )
-        if getattr(cache, "_cache_id", None) is not None:
-            raise ValueError(
-                f"Pivot cache already registered with cache_id="
-                f"{cache._cache_id}"
-            )
-        cache._cache_id = self._next_pivot_cache_id
-        self._next_pivot_cache_id += 1
-        # Materialize fields + records against the source worksheet
-        # (RFC-047 §10.9 inference). Skip if already materialized
-        # (caller can pre-materialize against a stub worksheet).
-        if cache._fields is None:
-            ws_obj = cache.source.worksheet
-            if ws_obj is None:
-                raise ValueError(
-                    "PivotCache.source.worksheet is None — pivot cache "
-                    "must reference a real worksheet"
-                )
-            cache._materialize(ws_obj)
-        self._pending_pivot_caches.append(cache)
-        return cache
+        return _workbook_features.add_pivot_cache(self, cache)
 
     def _flush_pending_slicers_to_patcher(self) -> None:
-        """Sprint Ο Pod 3.5 (RFC-061 §3.1) — drain queued slicers
-        into the patcher's Phase 2.5p queue.
+        """Drain queued slicers into the patcher's slicer queue.
 
         For each worksheet, iterate over ``ws._pending_slicers`` and
         bridge the (cache, slicer) pair to the Rust patcher via
         ``queue_slicer_add(sheet_title, cache_dict, slicer_dict)``.
-        Sequenced AFTER pivots (Phase 2.5m) + sheet-setup (Phase 2.5n)
-        and BEFORE autofilters (Phase 2.5o).
+        Sequenced after pivots and sheet setup, and before autofilters, so the
+        relationship graph is stable before filter rows are rewritten.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = getattr(ws, "_pending_slicers", None)
-            if not pending:
-                continue
-            for slicer in pending:
-                cache = slicer.cache
-                try:
-                    cache_dict = cache.to_rust_dict()
-                except Exception:
-                    # Defensive: skip malformed slicer cache rather
-                    # than poison the save path.
-                    continue
-                try:
-                    slicer_dict = slicer.to_rust_dict()
-                except Exception:
-                    continue
-                try:
-                    self._rust_patcher.queue_slicer_add(
-                        ws.title, cache_dict, slicer_dict
-                    )
-                except Exception:
-                    # If the patcher rejects (e.g. sheet not present
-                    # in source ZIP for write-mode), silently skip.
-                    continue
-            # Drain — calling save() twice should not double-emit.
-            ws._pending_slicers = []
-        # Also drain workbook-level pending slicer caches list so a
-        # second save() is idempotent. The cache itself is bridged
-        # via `cache.to_rust_dict()` inside the slicer loop above
-        # since each slicer references its cache directly.
-        self._pending_slicer_caches = []
+        _workbook_patcher_flush.flush_pending_slicers_to_patcher(self)
 
     def add_slicer_cache(self, cache: Any) -> Any:
-        """RFC-061 §2.1 — register a slicer cache against this workbook.
+        """Register a slicer cache with this workbook.
 
-        Slicer caches are workbook-scoped: one cache can be referenced
-        by multiple slicer presentations on different sheets.
-
-        The source pivot cache must already be registered via
-        :meth:`add_pivot_cache` BEFORE the slicer cache is added.
+        Slicer caches are workbook-scoped, and one cache can be referenced by
+        multiple slicer presentations. The source pivot cache must already be
+        registered with :meth:`add_pivot_cache`.
 
         Args:
-            cache: A :class:`wolfxl.pivot.SlicerCache` instance.
+            cache: Slicer cache object to register.
 
         Returns:
-            The same cache (with ``_slicer_cache_id`` populated).
+            The same cache object, with its workbook-scoped slicer cache id
+            set.
 
         Raises:
             RuntimeError: If the workbook is not open in modify mode.
             ValueError: If the cache has already been registered or
                 the source pivot cache is not registered.
         """
-        if self._rust_patcher is None:
-            raise RuntimeError(
-                "add_slicer_cache requires modify mode — open the "
-                "workbook with load_workbook(..., modify=True)"
-            )
-        if getattr(cache, "_slicer_cache_id", None) is not None:
-            raise ValueError(
-                f"Slicer cache already registered with id="
-                f"{cache._slicer_cache_id}"
-            )
-        if cache.source_pivot_cache._cache_id is None:
-            raise ValueError(
-                "SlicerCache.source_pivot_cache must be registered "
-                "via Workbook.add_pivot_cache(...) before "
-                "add_slicer_cache(...)"
-            )
-        cache._slicer_cache_id = self._next_slicer_cache_id
-        self._next_slicer_cache_id += 1
-        # If the caller didn't seed items explicitly, populate from the
-        # source cache's <sharedItems> per RFC-061 §3.1 default.
-        if not cache.items:
-            try:
-                cache.populate_items_from_cache()
-            except Exception:
-                # Source cache field has no enumeration; leave empty.
-                pass
-        self._pending_slicer_caches.append(cache)
-        return cache
+        return _workbook_features.add_slicer_cache(self, cache)
 
     def _flush_pending_sheet_setup_to_patcher(self) -> None:
-        """Sprint Ο Pod 1A.5 (RFC-055) — drain each sheet's queued
-        sheet-setup mutations into the patcher's Phase 2.5n queue.
+        """Drain each sheet's queued sheet-setup mutations into the patcher.
 
         Sheets whose Worksheet has any of ``_page_setup``,
-        ``_page_margins``, ``_header_footer``, ``_sheet_view``,
-        ``_protection``, ``_print_title_rows``, ``_print_title_cols``
-        non-default get their ``to_rust_setup_dict()`` queued. The
-        Rust patcher Phase 2.5n then re-emits the 5 sheet-scope
-        XML blocks and splices them into the sheet via
-        wolfxl_merger::merge_blocks.
+        ``_page_margins``, ``_print_options``, ``_header_footer``,
+        ``_sheet_view``, or ``_protection`` non-default get their
+        ``to_rust_setup_dict()`` queued. The
+        Rust patcher then re-emits the sheet-scope XML blocks and splices
+        them into the sheet via wolfxl_merger::merge_blocks.
 
         ``print_titles`` (workbook-scope ``_xlnm.Print_Titles``
-        definedName) does NOT route through Phase 2.5n on the
-        patcher side; it composes through the existing RFC-021
-        defined-names queue. The dict still includes a
-        ``print_titles`` slot for the writer-mode path.
+        definedName) does not route through this sheet-setup patch; it
+        composes through the existing defined-names queue.
+        The dict still includes a ``print_titles`` slot for the writer-mode
+        path.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            # Cheap probe: skip sheets whose 6 setup slots are all
-            # None / un-touched. The accessors lazy-init, so reading
-            # ws.page_setup would defeat the optimisation.
-            if (
-                ws._page_setup is None  # noqa: SLF001
-                and ws._page_margins is None  # noqa: SLF001
-                and ws._header_footer is None  # noqa: SLF001
-                and ws._sheet_view is None  # noqa: SLF001
-                and ws._protection is None  # noqa: SLF001
-                and getattr(ws, "_print_title_rows", None) is None
-                and getattr(ws, "_print_title_cols", None) is None
-            ):
-                continue
-            d = ws.to_rust_setup_dict()
-            # Skip queues whose slots are all None — there's nothing
-            # to splice and the patcher's parser would just no-op.
-            if all(v is None for v in d.values()):
-                continue
-            self._rust_patcher.queue_sheet_setup_update(ws.title, d)
+        _workbook_patcher_flush.flush_pending_sheet_setup_to_patcher(self)
 
     def _flush_pending_page_breaks_to_patcher(self) -> None:
-        """Sprint Π Pod Π-α (RFC-062) — drain each sheet's queued
-        page-breaks + sheet-format-pr mutations into the patcher's
-        Phase 2.5r queue.
+        """Drain each sheet's queued page-break and sheet-format mutations.
 
         Sheets whose Worksheet has any of ``_row_breaks``,
         ``_col_breaks``, or ``_sheet_format`` non-default get their
-        merged §10 dict queued. The Rust patcher Phase 2.5r then
-        re-emits the 3 sheet-scope XML blocks
+        merged patch dict queued. The Rust patcher then re-emits the
+        sheet-scope XML blocks
         (``<rowBreaks>`` / ``<colBreaks>`` / ``<sheetFormatPr>``) and
         splices them into the sheet via wolfxl_merger::merge_blocks.
 
@@ -1808,78 +1061,20 @@ class Workbook:
         (e.g. zero breaks AND default sheet-format) are skipped to
         keep the no-op save path byte-identical.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            row_breaks = getattr(ws, "_row_breaks", None)
-            col_breaks = getattr(ws, "_col_breaks", None)
-            sheet_format = getattr(ws, "_sheet_format", None)
-            # Cheap probe: skip sheets whose 3 slots are all None /
-            # un-touched. The accessors lazy-init, so reading
-            # ws.row_breaks would defeat the optimisation.
-            if row_breaks is None and col_breaks is None and sheet_format is None:
-                continue
-            try:
-                breaks_dict = ws.to_rust_page_breaks_dict()
-                fmt_dict = ws.to_rust_sheet_format_dict()
-            except Exception:
-                # Defensive: skip malformed wrappers rather than
-                # poison the save path.
-                continue
-            payload = {
-                "row_breaks": breaks_dict.get("row_breaks"),
-                "col_breaks": breaks_dict.get("col_breaks"),
-                "sheet_format": fmt_dict,
-            }
-            # Skip when every slot is None — the patcher's parser
-            # would just no-op anyway, but we match the existing
-            # sheet-setup flush's defensive shape.
-            if all(v is None for v in payload.values()):
-                continue
-            try:
-                self._rust_patcher.queue_page_breaks_update(ws.title, payload)
-            except Exception:
-                # If patcher rejects (e.g. sheet not present in source
-                # because it's a write-mode sheet), silently skip.
-                continue
+        _workbook_patcher_flush.flush_pending_page_breaks_to_patcher(self)
 
     def _flush_pending_autofilters_to_patcher(self) -> None:
-        """Sprint Ο Pod 1B (RFC-056) — drain each sheet's
-        ``ws.auto_filter`` into the patcher's Phase 2.5o queue.
+        """Drain each sheet's ``ws.auto_filter`` into the patcher.
 
         Only sheets where the user actually configured filter columns
         OR a sort state OR (legacy) just a ref are queued. The Rust
-        patcher Phase 2.5o then re-emits the ``<autoFilter>`` block
-        and computes the ``<row hidden="1">`` markers.
+        patcher then re-emits the ``<autoFilter>`` block and computes the
+        ``<row hidden="1">`` markers.
         """
-        if self._rust_patcher is None:
-            return
-        for ws in self._sheets.values():
-            af = ws._auto_filter  # noqa: SLF001
-            has_state = (
-                af.ref is not None
-                or bool(af.filter_columns)
-                or af.sort_state is not None
-            )
-            if not has_state:
-                continue
-            try:
-                d = af.to_rust_dict()
-            except Exception:
-                # Defensive: skip malformed autofilter rather than
-                # poison the save path.
-                continue
-            try:
-                self._rust_patcher.queue_autofilter(ws.title, d)
-            except Exception:
-                # If patcher rejects (e.g. sheet not present in source
-                # because it's a write-mode sheet), silently skip — the
-                # native writer path will handle it on its own.
-                continue
+        _workbook_patcher_flush.flush_pending_autofilters_to_patcher(self)
 
     def _flush_pending_pivots_to_patcher(self) -> None:
-        """Sprint Ν Pod-γ (RFC-047 / RFC-048) — drain pending pivot
-        caches and tables in modify mode.
+        """Drain pending pivot caches and tables in modify mode.
 
         Two queues are drained here:
 
@@ -1895,99 +1090,22 @@ class Workbook:
            through ``serialize_pivot_table_dict`` and routed to
            ``patcher.queue_pivot_table_add(sheet, xml, cache_id)``.
 
-        Sequenced AFTER charts (Phase 2.5l) and BEFORE the final
-        ``patcher.save()`` so the patcher's Phase 2.5m runs against
-        an already-stable rels graph.
+        Sequenced after charts and before the final ``patcher.save()`` so
+        pivot relationships are added against an already-stable rels graph.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        # Early exit if there's nothing to do.
-        any_caches = bool(self._pending_pivot_caches)
-        any_tables = any(
-            getattr(ws, "_pending_pivot_tables", None)
-            for ws in self._sheets.values()
-        )
-        if not any_caches and not any_tables:
-            return
+        _workbook_patcher_flush.flush_pending_pivots_to_patcher(self)
 
-        try:
-            from wolfxl._rust import (  # type: ignore[attr-defined]
-                serialize_pivot_cache_dict,
-                serialize_pivot_records_dict,
-                serialize_pivot_table_dict,
-            )
-        except ImportError as exc:  # pragma: no cover — defensive
-            raise NotImplementedError(
-                "Modify-mode Workbook.add_pivot_cache() / "
-                "Worksheet.add_pivot_table() require Sprint Ν "
-                "Pod-γ's serialize_pivot_*_dict PyO3 exports. "
-                "Build the wolfxl wheel from a branch that includes "
-                "the Pod-γ commits."
-            ) from exc
+    def _flush_pending_pivot_source_edits_to_patcher(self) -> None:
+        """G17 / RFC-070 — drain pivot source-range mutations.
 
-        # ---- Pass 1: caches ----
-        # Map: cache_id → cache.to_rust_dict() so Pass 2 can pass
-        # the cache dict to serialize_pivot_table_dict (the table
-        # serializer needs cache schema for field index resolution).
-        cache_dicts: dict[int, dict[str, Any]] = {}
-        for cache in self._pending_pivot_caches:
-            def_dict = cache.to_rust_dict()
-            rec_dict = cache.to_rust_records_dict()
-            def_xml = serialize_pivot_cache_dict(def_dict)
-            # records serializer takes (cache_dict, records_dict)
-            # so it can resolve field types when emitting <r>/<x>.
-            rec_xml = serialize_pivot_records_dict(def_dict, rec_dict)
-            cache_dicts[int(cache._cache_id)] = def_dict
-            allocated = patcher.queue_pivot_cache_add(def_xml, rec_xml)
-            # Sanity — patcher allocates monotonically; the python-side
-            # cache_id we eagerly stamped earlier MUST match.
-            if allocated != cache._cache_id:
-                raise RuntimeError(
-                    f"Pivot cache id mismatch: python={cache._cache_id} "
-                    f"vs patcher={allocated}. This indicates a queue-"
-                    f"ordering bug in _flush_pending_pivots_to_patcher."
-                )
-        self._pending_pivot_caches.clear()
-
-        # ---- Pass 2: tables ----
-        for ws in self._sheets.values():
-            pending = getattr(ws, "_pending_pivot_tables", None)
-            if not pending:
-                continue
-            for pt in pending:
-                if pt.cache._cache_id is None:
-                    raise ValueError(
-                        f"PivotTable on sheet {ws.title!r} references a "
-                        f"PivotCache that was not registered via "
-                        f"Workbook.add_pivot_cache() — register the "
-                        f"cache before calling save()."
-                    )
-                # Compute layout (collapses field axis assignments
-                # into row/col/page/data fields). Idempotent.
-                if hasattr(pt, "_compute_layout"):
-                    pt._compute_layout()
-                table_dict = pt.to_rust_dict()
-                cache_id = int(pt.cache._cache_id)
-                # serialize_pivot_table_dict needs the cache schema
-                # for field-index resolution (rows/cols/data field
-                # indices map to cache fields by position).
-                cache_dict = cache_dicts.get(cache_id)
-                if cache_dict is None:
-                    # Pre-existing cache from disk (not in this save).
-                    # Pull schema directly from pt.cache (Pod-β
-                    # always exposes the typed model, even after
-                    # registration).
-                    cache_dict = pt.cache.to_rust_dict()
-                table_xml = serialize_pivot_table_dict(
-                    cache_dict, table_dict
-                )
-                patcher.queue_pivot_table_add(
-                    ws.title,
-                    table_xml,
-                    cache_id,
-                )
-            pending.clear()
+        For each worksheet, scan the lazily-materialised
+        ``_pivot_handles_cache`` for dirty
+        :class:`~wolfxl.pivot.PivotTableHandle` instances and queue a
+        source-range edit for each via ``patcher.register_pivot_source_edit``.
+        Sequenced after :meth:`_flush_pending_pivots_to_patcher` so adds
+        and edits compose in the same save.
+        """
+        _workbook_patcher_flush.flush_pending_pivot_source_edits_to_patcher(self)
 
     def add_chart_modify_mode(
         self,
@@ -1997,148 +1115,99 @@ class Workbook:
         width_emu: int = 4_572_000,
         height_emu: int = 2_743_200,
     ) -> None:
-        """Sprint Μ Pod-γ (RFC-046 §6) — modify-mode chart add public API.
+        """Queue a pre-serialized chart XML part for a worksheet.
 
-        Stub-friendly entry point that the integrator can plumb
-        through Pod-α's ``emit_chart_xml(&Chart)`` once the writer
-        crate's chart serializer ships. Today the caller passes
-        pre-serialized chart XML bytes (e.g. from openpyxl's
-        ``ChartWriter`` or a hand-rolled minimal ``<chartSpace>``
-        for tests).
-
-        The chart is queued onto ``_pending_chart_adds`` and drained
-        by ``_flush_pending_charts_to_patcher`` at save time.
+        This lower-level API is for callers that already have chart XML bytes
+        and want to attach them while modifying an existing workbook. Most
+        callers should prefer :meth:`Worksheet.add_chart` with a chart object.
 
         Args:
-            sheet_title: Target worksheet by title — must exist.
-            chart_xml: Already-serialized chart XML bytes.
-            anchor_a1: A1-style anchor cell, e.g. ``"D2"``.
-            width_emu: Chart width in EMU (defaults to ~12 cm).
-            height_emu: Chart height in EMU (defaults to ~7.25 cm).
+            sheet_title: Title of the target worksheet.
+            chart_xml: Serialized ``<chartSpace>`` XML bytes.
+            anchor_a1: A1-style anchor cell, such as ``"D2"``.
+            width_emu: Chart width in EMUs.
+            height_emu: Chart height in EMUs.
+
+        Raises:
+            ValueError: If ``sheet_title`` or ``anchor_a1`` is invalid.
+            RuntimeError: If the workbook is not open in modify mode.
         """
-        if self._rust_patcher is None:
-            raise NotImplementedError(
-                "add_chart_modify_mode requires modify mode "
-                "(load_workbook(path, modify=True))"
-            )
-        if sheet_title not in self._sheets:
-            raise ValueError(
-                f"add_chart_modify_mode: no such sheet: {sheet_title!r}"
-            )
-        if not isinstance(chart_xml, (bytes, bytearray)):
-            raise TypeError(
-                "add_chart_modify_mode: chart_xml must be bytes "
-                f"(got {type(chart_xml).__name__})"
-            )
-        if not anchor_a1 or not isinstance(anchor_a1, str):
-            raise ValueError(
-                "add_chart_modify_mode: anchor_a1 must be a non-empty A1 string"
-            )
-        bucket = self._pending_chart_adds.setdefault(sheet_title, [])
-        bucket.append((bytes(chart_xml), anchor_a1, int(width_emu), int(height_emu)))
+        _workbook_features.add_chart_modify_mode(
+            self,
+            sheet_title,
+            chart_xml,
+            anchor_a1,
+            width_emu,
+            height_emu,
+        )
 
     def _flush_pending_comments_to_patcher(self) -> None:
-        """Drain ``_pending_comments`` on every sheet into the patcher (RFC-023).
+        """Drain each sheet's pending comments into the patcher.
 
-        Modify-mode counterpart to the writer-side flush at
-        ``_worksheet.py:1934``. Each ``Comment`` is converted to the
-        patcher's flat-dict shape and routed to ``queue_comment``;
-        the ``None`` sentinel routes to ``queue_comment_delete``.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each ``Comment`` is converted to the patcher's flat-dict shape and
+        routed to ``queue_comment``; the ``None`` sentinel routes to
+        ``queue_comment_delete``.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_comments  # noqa: SLF001
-            if not pending:
-                continue
-            for coord, c in pending.items():
-                if c is None:
-                    patcher.queue_comment_delete(ws.title, coord)
-                    continue
-                payload: dict[str, Any] = {
-                    "text": c.text,
-                    "author": c.author or "wolfxl",
-                }
-                if getattr(c, "width", None) is not None:
-                    payload["width_pt"] = float(c.width)
-                if getattr(c, "height", None) is not None:
-                    payload["height_pt"] = float(c.height)
-                patcher.queue_comment(ws.title, coord, payload)
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_comments_to_patcher(self)
+
+    def _flush_pending_threaded_comments_to_patcher(self) -> None:
+        """Drain each sheet's pending threaded comments into the patcher.
+
+        Modify-mode counterpart to the writer-side flush. Top-level threads
+        are bundled with their replies into one ``queue_threaded_comment``
+        call keyed by cell coordinate. The ``None`` sentinel routes to
+        ``queue_threaded_comment_delete``.
+        """
+        _workbook_patcher_flush.flush_pending_threaded_comments_to_patcher(self)
+
+    def _flush_pending_persons_to_patcher(self) -> None:
+        """Drain ``wb.persons`` into the patcher's personList queue.
+
+        Idempotent on Person ``id``: re-running the flush is safe and the
+        patcher's ``queue_person`` skips duplicates against both the
+        existing personList and the queued additions.
+        """
+        _workbook_patcher_flush.flush_pending_persons_to_patcher(self)
 
     def _flush_pending_data_validations_to_patcher(self) -> None:
         """Drain ``_pending_data_validations`` on every sheet into the patcher.
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1960`` — same drain semantics, different
-        backend. Each DV is converted to the patcher's flat-dict
-        payload via ``_dv_to_patcher_dict``. Per-sheet drain happens
-        in ``ws.title`` order; within a sheet, append order wins so
-        the final ``<dataValidations>`` block reflects the order the
-        user appended them.
+        Modify-mode counterpart to the writer-side compatibility flush.
+        Each DV is converted to the patcher's flat-dict payload via
+        ``_dv_to_patcher_dict``. Per-sheet drain happens in ``ws.title``
+        order; within a sheet, append order wins so the final
+        ``<dataValidations>`` block reflects the order the user appended
+        them.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        from wolfxl.worksheet.datavalidation import _dv_to_patcher_dict
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_data_validations  # noqa: SLF001
-            if not pending:
-                continue
-            for dv in pending:
-                patcher.queue_data_validation(ws.title, _dv_to_patcher_dict(dv))
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_data_validations_to_patcher(self)
 
     def _flush_pending_conditional_formats_to_patcher(self) -> None:
         """Drain ``_pending_conditional_formats`` on every sheet into the patcher.
 
-        Modify-mode counterpart to the writer flush at
-        ``_worksheet.py:1974`` — same drain semantics, different backend.
+        Modify-mode counterpart to the writer-side compatibility flush.
         Rules sharing a sqref are coalesced into a single
         ``ConditionalFormattingPatch`` (one wrapper per range) so
         priority ordering within a wrapper reflects insertion order.
         Multiple ``add()`` calls with different sqrefs produce multiple
         patches; the patcher then emits them in encounter order while
-        threading the workbook-wide ``running_dxf_count`` through
-        Phase-2.5b on the Rust side.
+        threading the workbook-wide ``running_dxf_count`` through the Rust
+        writer.
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        from wolfxl.formatting import _cf_to_patcher_dict
-
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        for ws in self._sheets.values():
-            pending = ws._pending_conditional_formats  # noqa: SLF001
-            if not pending:
-                continue
-            by_sqref: dict[str, list[Any]] = {}
-            order: list[str] = []
-            for sqref, rule in pending:
-                if sqref not in by_sqref:
-                    by_sqref[sqref] = []
-                    order.append(sqref)
-                by_sqref[sqref].append(rule)
-            for sqref in order:
-                patcher.queue_conditional_formatting(
-                    ws.title, _cf_to_patcher_dict(sqref, by_sqref[sqref])
-                )
-            pending.clear()
+        _workbook_patcher_flush.flush_pending_conditional_formats_to_patcher(self)
 
     def _flush_pending_axis_shifts_to_patcher(self) -> None:
-        """Drain ``_pending_axis_shifts`` into the patcher (RFC-030 / RFC-031).
+        """Drain queued row and column shifts into the patcher.
 
         Each tuple ``(sheet_title, axis, idx, n)`` is forwarded to
-        ``_rust_patcher.queue_axis_shift(sheet, axis, idx, n)``. The
-        patcher's Phase 2.5i drains the queue in append order during
-        ``save()``.
+        ``_rust_patcher.queue_axis_shift(sheet, axis, idx, n)``. The patcher
+        drains the queue in append order during ``save()``.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation.
@@ -2146,21 +1215,15 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_axis_shifts:
-            return
-        for sheet_title, axis, idx, n in self._pending_axis_shifts:
-            patcher.queue_axis_shift(sheet_title, axis, idx, n)
-        self._pending_axis_shifts.clear()
+        _workbook_patcher_flush.flush_pending_axis_shifts_to_patcher(self)
 
     def _flush_pending_range_moves_to_patcher(self) -> None:
-        """Drain ``_pending_range_moves`` into the patcher (RFC-034).
+        """Drain queued range moves into the patcher.
 
         Each tuple ``(sheet_title, src_min_col, src_min_row,
         src_max_col, src_max_row, d_row, d_col, translate)`` is
-        forwarded to ``_rust_patcher.queue_range_move(...)``. The
-        patcher's Phase 2.5j drains the queue in append order during
-        ``save()``.
+        forwarded to ``_rust_patcher.queue_range_move(...)``. The patcher
+        drains the queue in append order during ``save()``.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation.
@@ -2168,54 +1231,25 @@ class Workbook:
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_range_moves:
-            return
-        for (
-            sheet_title,
-            src_min_col,
-            src_min_row,
-            src_max_col,
-            src_max_row,
-            d_row,
-            d_col,
-            translate,
-        ) in self._pending_range_moves:
-            patcher.queue_range_move(
-                sheet_title,
-                src_min_col,
-                src_min_row,
-                src_max_col,
-                src_max_row,
-                d_row,
-                d_col,
-                translate,
-            )
-        self._pending_range_moves.clear()
+        _workbook_patcher_flush.flush_pending_range_moves_to_patcher(self)
 
     def _flush_pending_sheet_copies_to_patcher(self) -> None:
-        """Drain ``_pending_sheet_copies`` into the patcher (RFC-035).
+        """Drain queued sheet copies into the patcher.
 
         Each ``(src_title, dst_title)`` pair forwards to
-        ``_rust_patcher.queue_sheet_copy(src, dst)``. The patcher's
-        Phase 2.7 drains the queue in append order during ``save()``,
-        BEFORE every per-sheet phase so the cloned sheets are visible
-        to downstream drains.
+        ``_rust_patcher.queue_sheet_copy(src, dst)``. The patcher drains the
+        queue in append order before per-sheet mutations, so cloned sheets
+        are visible to downstream drains.
 
         Empty queue is the no-op identity path — patcher is not
         called, no FFI hop, no file mutation. Cleared after queueing
         so a subsequent ``save()`` on the same workbook doesn't
         double-emit.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_sheet_copies:
-            return
-        for src_title, dst_title, deep_copy_images in self._pending_sheet_copies:
-            patcher.queue_sheet_copy(src_title, dst_title, deep_copy_images)
-        self._pending_sheet_copies.clear()
+        _workbook_patcher_flush.flush_pending_sheet_copies_to_patcher(self)
 
     def _flush_defined_names_to_patcher(self) -> None:
-        """Drain ``_pending_defined_names`` into the patcher (RFC-021).
+        """Drain pending defined-name updates into the patcher.
 
         Modify-mode counterpart to ``_flush_workbook_writes``'s
         defined-name branch. Each ``DefinedName`` is converted to the
@@ -2228,85 +1262,50 @@ class Workbook:
 
         Cleared after queueing so a subsequent ``save()`` on the same
         workbook doesn't double-emit. Empty queue is a no-op (the Rust
-        side's no-op guard is the second line of defence — workbook.xml
+        side's no-op guard is the second line of defence; workbook.xml
         is left untouched if no upserts arrive).
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_defined_names:
-            return
-        for _, dn in self._pending_defined_names.items():
-            payload: dict[str, Any] = {
-                "name": dn.name,
-                "formula": dn.value,
-            }
-            if dn.localSheetId is not None:
-                payload["local_sheet_id"] = dn.localSheetId
-            if dn.hidden:
-                # Only forward when truthy — the Rust side treats
-                # missing-key and `None` as "preserve / omit".
-                payload["hidden"] = True
-            if dn.comment is not None:
-                payload["comment"] = dn.comment
-            patcher.queue_defined_name(payload)
-        self._pending_defined_names.clear()
+        _workbook_patcher_flush.flush_defined_names_to_patcher(self)
 
     def _flush_security_to_patcher(self) -> None:
-        """Drain ``_security`` / ``_file_sharing`` into the patcher (RFC-058).
+        """Drain workbook security and file-sharing state into the patcher.
 
-        Builds the §10 flat dict and forwards it to
-        ``_rust_patcher.queue_workbook_security``. The Rust side merges
-        the payload into ``xl/workbook.xml`` during Phase 2.5q.
+        Builds the flat dict and forwards it to
+        ``_rust_patcher.queue_workbook_security``. The Rust side merges the
+        payload into ``xl/workbook.xml``.
 
-        Empty (no setter ever ran) ⇒ no-op; the patcher leaves
+        Empty (no setter ever ran) is a no-op; the patcher leaves
         workbook.xml byte-identical with the source.
         """
-        patcher = self._rust_patcher
-        if patcher is None or not self._pending_security_update:
-            return
-        payload = self._build_security_dict()
-        patcher.queue_workbook_security(payload)
-        self._pending_security_update = False
+        _workbook_patcher_flush.flush_security_to_patcher(self)
 
     def _build_security_dict(self) -> dict[str, Any]:
-        """Return the RFC-058 §10 flat dict for the workbook's security blocks.
+        """Return the flat dict for the workbook's security blocks.
 
         Either branch may be ``None`` (the user only set one of the two
         slots). Always returns a dict — never ``None`` — so callers can
         unconditionally forward to the Rust side.
         """
-        return {
-            "workbook_protection": (
-                self._security.to_dict() if self._security is not None else None
-            ),
-            "file_sharing": (
-                self._file_sharing.to_dict()
-                if self._file_sharing is not None
-                else None
-            ),
-        }
+        return _workbook_patcher_flush.build_security_dict(self)
 
     def _flush_pending_sheet_moves_to_patcher(self, name: str, offset: int) -> None:
-        """Queue a single sheet-reorder on the patcher (RFC-036).
+        """Queue a single sheet reorder on the patcher.
 
         Called eagerly from ``move_sheet`` rather than batched at
         ``save()`` time: each ``move_sheet`` call queues exactly one
         entry, and the patcher composes them in queue order against
         its own running tab list (which is initialised from the
-        source ZIP's ``xl/workbook.xml`` and updated in place by
-        Phase 2.5h on save).
+        source ZIP's ``xl/workbook.xml`` and updated in place on save).
 
         The empty-queue invariant lives on the Rust side: an unused
         ``move_sheet`` call (i.e. modify-mode workbook never touched)
         means ``queued_sheet_moves`` is empty, which in turn keeps
         ``xl/workbook.xml`` byte-identical with the source.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        patcher.queue_sheet_move(name, offset)
+        _workbook_patcher_flush.queue_sheet_move_to_patcher(self, name, offset)
 
     def _flush_properties_to_patcher(self) -> None:
-        """Drain dirty document properties into the patcher (RFC-020).
+        """Drain dirty document properties into the patcher.
 
         Modify-mode counterpart to ``_flush_workbook_writes``'s
         property branch. Builds a flat dict keyed with the patcher's
@@ -2322,104 +1321,11 @@ class Workbook:
         ``1970-01-01T00:00:00Z`` for byte-identical save tests). If the
         user explicitly set ``props.modified``, that value wins.
         """
-        patcher = self._rust_patcher
-        if patcher is None:
-            return
-        props = self._properties_cache
-        if props is None:
-            self._properties_dirty = False
-            return
-        # Per-field "user explicitly set this" set, populated by
-        # ``DocumentProperties.__setattr__`` after ``_attach_workbook``.
-        # Used below to decide whether to forward ``modified``: by
-        # default a dirty save re-stamps it to save-time (Rust side),
-        # which is what users expect. The cache hydrates ``modified``
-        # from the source on first ``wb.properties`` read — we'd
-        # otherwise echo the source's old timestamp forever.
-        user_set: set[str] = getattr(props, "_user_set", set())
-        modified_iso: str | None = None
-        if "modified" in user_set and props.modified is not None:
-            modified_iso = props.modified.isoformat()
-        payload: dict[str, Any] = {
-            "title": props.title,
-            "subject": props.subject,
-            "creator": props.creator,
-            "keywords": props.keywords,
-            "description": props.description,
-            "last_modified_by": props.lastModifiedBy,
-            "category": props.category,
-            "content_status": props.contentStatus,
-            "created_iso": props.created.isoformat() if props.created else None,
-            "modified_iso": modified_iso,
-            "sheet_names": list(self._sheet_names),
-        }
-        payload = {k: v for k, v in payload.items() if v is not None}
-        patcher.queue_properties(payload)
-        self._properties_dirty = False
+        _workbook_patcher_flush.flush_properties_to_patcher(self)
 
     def _flush_workbook_writes(self) -> None:
         """Push workbook-level metadata + defined names into the Rust writer."""
-        writer = self._rust_writer
-        if writer is None:
-            return
-
-        if self._properties_dirty and self._properties_cache is not None:
-            props = self._properties_cache
-            payload = {
-                "title": props.title,
-                "subject": props.subject,
-                "creator": props.creator,
-                "keywords": props.keywords,
-                "description": props.description,
-                "lastModifiedBy": props.lastModifiedBy,
-                "category": props.category,
-                "contentStatus": props.contentStatus,
-                "identifier": props.identifier,
-                "language": props.language,
-                "revision": props.revision,
-                "version": props.version,
-                "created": props.created.isoformat() if props.created else None,
-                "modified": props.modified.isoformat() if props.modified else None,
-            }
-            writer.set_properties(payload)
-            self._properties_dirty = False
-
-        if self._pending_defined_names:
-            # The native writer's add_named_range expects a sheet hint
-            # plus an explicit ``scope`` token — workbook-scoped names
-            # use the first sheet (the value is ignored when scope ==
-            # "workbook"), sheet-scoped names resolve to the sheet at
-            # ``localSheetId``.
-            primary_sheet = self._sheet_names[0] if self._sheet_names else "Sheet"
-            for _, dn in self._pending_defined_names.items():
-                if dn.localSheetId is not None:
-                    if 0 <= dn.localSheetId < len(self._sheet_names):
-                        sheet_hint = self._sheet_names[dn.localSheetId]
-                    else:
-                        sheet_hint = primary_sheet
-                    scope = "sheet"
-                else:
-                    sheet_hint = primary_sheet
-                    scope = "workbook"
-                writer.add_named_range(sheet_hint, {
-                    "name": dn.name,
-                    "refers_to": dn.value,
-                    "scope": scope,
-                    "comment": dn.comment,
-                    "local_sheet_id": dn.localSheetId,
-                    "hidden": dn.hidden,
-                })
-            self._pending_defined_names.clear()
-
-        # RFC-058 — workbook-level security. The native writer accepts
-        # the §10 dict via ``set_workbook_security`` (PyO3 binding).
-        # Either branch may be ``None``; the writer side handles
-        # absence gracefully (no XML emitted for that block).
-        if self._pending_security_update:
-            payload = self._build_security_dict()
-            if hasattr(writer, "set_workbook_security"):
-                writer.set_workbook_security(payload)
-            self._pending_security_update = False
+        _workbook_writer_flush.flush_workbook_writes(self)
 
     # ------------------------------------------------------------------
     # Formula evaluation (requires wolfxl.calc)
@@ -2434,13 +1340,7 @@ class Workbook:
         The internal evaluator is cached so that a subsequent
         :meth:`recalculate` call can reuse it without rescanning.
         """
-        from wolfxl.calc._evaluator import WorkbookEvaluator
-
-        ev = WorkbookEvaluator()
-        ev.load(self)
-        result = ev.calculate()
-        self._evaluator = ev  # cache for recalculate()
-        return result
+        return _workbook_calc.calculate_workbook(self)
 
     def cached_formula_values(self) -> dict[str, Any]:
         """Return Excel-saved cached formula results for every sheet.
@@ -2450,12 +1350,7 @@ class Workbook:
         Excel's last-calculated formula values without evaluating formulas in
         Python. Cells whose formulas have no cached value are omitted.
         """
-        if self._rust_reader is None:
-            return {}
-        values: dict[str, Any] = {}
-        for sheet_name in self._sheet_names:
-            values.update(self._sheets[sheet_name].cached_formula_values(qualified=True))
-        return values
+        return _workbook_calc.cached_formula_values(self)
 
     def recalculate(
         self,
@@ -2470,47 +1365,28 @@ class Workbook:
         If :meth:`calculate` was called first, the cached evaluator is
         reused (avoiding a full rescan + recalculate).
         """
-        ev = self._evaluator
-        if ev is None:
-            from wolfxl.calc._evaluator import WorkbookEvaluator
-
-            ev = WorkbookEvaluator()
-            ev.load(self)
-            ev.calculate()
-            self._evaluator = ev
-        return ev.recalculate(perturbations, tolerance)
+        return _workbook_calc.recalculate_workbook(self, perturbations, tolerance)
 
     # ------------------------------------------------------------------
     # Context manager + cleanup
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Release resources."""
-        self._rust_reader = None
-        self._rust_writer = None
-        self._rust_patcher = None
-        # Sprint Ι Pod-γ: clean up the decryption tempfile, if any.
-        tmp_path = getattr(self, "_tempfile_path", None)
-        if tmp_path is not None:
-            import os
-
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            self._tempfile_path = None
+        """Release native handles and delete any temporary decrypted input."""
+        _workbook_lifecycle.close_workbook(self)
 
     def __enter__(self) -> Workbook:
-        return self
+        """Return this workbook for ``with`` statement use."""
+        return _workbook_lifecycle.enter_workbook(self)
 
     def __exit__(self, *args: object) -> None:
-        self.close()
+        """Close this workbook at the end of a ``with`` block."""
+        _workbook_lifecycle.exit_workbook(self, *args)
 
     def __repr__(self) -> str:
-        if self._rust_patcher is not None:
-            mode = "modify"
-        elif self._rust_reader is not None:
-            mode = "read"
-        else:
-            mode = "write"
-        return f"<Workbook [{mode}] sheets={self._sheet_names}>"
+        """Return a compact debug representation for this workbook.
+
+        Returns:
+            A string containing the workbook mode and sheet names.
+        """
+        return _workbook_lifecycle.repr_workbook(self)

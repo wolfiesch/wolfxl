@@ -6,15 +6,14 @@ more than ``AUTO_STREAM_ROW_THRESHOLD`` rows. Wraps the Rust
 ``StreamingSheetReader`` and converts its row tuples into either:
 
 - ``StreamingCell`` instances (mutation-rejected proxies that lazily look
-  up styles via the existing ``CalamineStyledBook`` reader), or
+  up styles via the eager workbook reader), or
 - plain value tuples (when ``values_only=True``), padded by the configured
   column bounds.
 
-The streaming path bypasses ``calamine-styles``' eager sheet
-materialization for the value scan but still uses the
-``CalamineStyledBook`` style table for ``StreamingCell.font`` /
-``.fill`` / etc. — that table is loaded once on first style access and
-shared across every cell in the iteration.
+The streaming path bypasses eager sheet materialization for the value scan but
+still uses the eager workbook reader's style table for ``StreamingCell.font`` /
+``.fill`` / etc. That table is loaded once on first style access and shared
+across every cell in the iteration.
 """
 
 from __future__ import annotations
@@ -86,8 +85,8 @@ class StreamingCell:
 
     Holds a snapshot of the value (parsed by the Rust SAX scanner) plus
     the originating row/column and a reference back to the Worksheet so
-    style lookups can defer to the existing
-    ``CalamineStyledBook.read_cell_format`` path. Style attributes are
+    style lookups can defer to the workbook reader's ``read_cell_format`` path.
+    Style attributes are
     fully featured (font, fill, border, alignment, number_format) and
     behave identically to the eager ``Cell`` properties — the difference
     is mutation: every setter raises ``RuntimeError``.
@@ -120,6 +119,7 @@ class StreamingCell:
 
     @property
     def value(self) -> Any:
+        """Return the streaming cell value, converting date serials when needed."""
         # Sprint Λ Pod-γ: numeric cells whose number format is date-typed
         # surface as Python datetime, mirroring openpyxl's read_only path
         # (and the eager Cell.value path, which converts via calamine).
@@ -129,22 +129,27 @@ class StreamingCell:
 
     @property
     def row(self) -> int:
+        """Return this cell's 1-based row index."""
         return self._row
 
     @property
     def column(self) -> int:
+        """Return this cell's 1-based column index."""
         return self._col
 
     @property
     def column_letter(self) -> str:
+        """Return this cell's Excel column letter."""
         return _column_letter(self._col)
 
     @property
     def coordinate(self) -> str:
+        """Return this cell's A1-style coordinate."""
         return rowcol_to_a1(self._row, self._col)
 
     @property
     def parent(self) -> Worksheet:
+        """Return the containing worksheet."""
         return self._ws
 
     @property
@@ -163,7 +168,7 @@ class StreamingCell:
         }.get(self._cell_type, "n")
 
     # ------------------------------------------------------------------
-    # Style lookups — defer to the eager CalamineStyledBook reader.
+    # Style lookups — defer to the eager workbook reader.
     # The streaming path does NOT re-implement xl/styles.xml parsing;
     # the styles table is small (~KB) regardless of sheet size and the
     # eager reader caches it after first access.
@@ -171,6 +176,7 @@ class StreamingCell:
 
     @property
     def font(self) -> Font:
+        """Return the resolved cell font."""
         from wolfxl._cell import _format_to_font
 
         wb = self._ws._workbook  # noqa: SLF001
@@ -184,6 +190,7 @@ class StreamingCell:
 
     @property
     def fill(self) -> PatternFill:
+        """Return the resolved cell fill."""
         from wolfxl._cell import _format_to_fill
 
         wb = self._ws._workbook  # noqa: SLF001
@@ -197,6 +204,7 @@ class StreamingCell:
 
     @property
     def border(self) -> Border:
+        """Return the resolved cell border."""
         from wolfxl._cell import _border_payload_to_border
 
         wb = self._ws._workbook  # noqa: SLF001
@@ -210,6 +218,7 @@ class StreamingCell:
 
     @property
     def alignment(self) -> Alignment:
+        """Return the resolved cell alignment."""
         from wolfxl._cell import _format_to_alignment
 
         wb = self._ws._workbook  # noqa: SLF001
@@ -223,6 +232,7 @@ class StreamingCell:
 
     @property
     def number_format(self) -> str | None:
+        """Return the resolved number format string."""
         wb = self._ws._workbook  # noqa: SLF001
         reader = wb._rust_reader  # noqa: SLF001
         if reader is None:
@@ -259,6 +269,7 @@ class StreamingCell:
         self._reject(name)
 
     def __repr__(self) -> str:
+        """Return a compact debug representation for this streaming cell."""
         return f"<StreamingCell {self.coordinate} value={self._value!r}>"
 
 

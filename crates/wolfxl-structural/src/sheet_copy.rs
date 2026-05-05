@@ -52,7 +52,7 @@ use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
 use wolfxl_rels::{
-    rt, walk_sheet_subgraph_with_nested, PartIdAllocator, RelsGraph, TargetMode,
+    rt, walk_sheet_subgraph_with_nested, PartIdAllocator, Relationship, RelsGraph, TargetMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -198,8 +198,7 @@ impl std::error::Error for SheetCopyError {}
 
 const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
-const CT_TABLE: &str =
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
@@ -212,9 +211,7 @@ const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.
 
 /// Plan one sheet copy. Pure: does not mutate any caller-owned data
 /// other than `inputs.allocator` (which is `&mut`).
-pub fn plan_sheet_copy(
-    inputs: SheetCopyInputs<'_>,
-) -> Result<SheetCopyMutations, SheetCopyError> {
+pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations, SheetCopyError> {
     // ---- Validate ----------------------------------------------------------
     let SheetMetadata {
         sheet_titles,
@@ -245,15 +242,12 @@ pub fn plan_sheet_copy(
     // any) in source_zip_parts and parse it. This catches drawings → images
     // and chart parts → media.
     let zip_parts = inputs.source_zip_parts;
-    let subgraph = walk_sheet_subgraph_with_nested(
-        inputs.source_rels,
-        &inputs.src_sheet_path,
-        |part_path| {
+    let subgraph =
+        walk_sheet_subgraph_with_nested(inputs.source_rels, &inputs.src_sheet_path, |part_path| {
             let rels_path = wolfxl_rels::rels_path_for(part_path)?;
             let bytes = zip_parts.get(&rels_path)?;
             RelsGraph::parse(bytes).ok()
-        },
-    );
+        });
 
     // ---- Allocate destination part suffixes + build rid_remap -------------
     let new_sheet_n = inputs.allocator.alloc_sheet();
@@ -292,7 +286,8 @@ pub fn plan_sheet_copy(
         match source_rel.rel_type.as_str() {
             // ------ Tables (need name dedup + bytes re-emit) ------
             t if t == rt::TABLE => {
-                let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_table();
                 let new_part_path = format!("xl/tables/table{new_n}.xml");
                 // Clone bytes with name + id dedup.
@@ -310,34 +305,61 @@ pub fn plan_sheet_copy(
             }
             // ------ Comments ------
             t if t == rt::COMMENTS => {
-                let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_comments();
                 let new_part_path = format!("xl/comments{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
-                content_type_overrides_to_add
-                    .push((format!("/{}", new_part_path), CT_COMMENTS.into()));
                 let new_target = format!("../comments{new_n}.xml");
-                let new_rid = dest_rels.add(rt::COMMENTS, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: src_bytes,
+                        new_part_path,
+                        content_type: Some(CT_COMMENTS),
+                        new_target,
+                    },
+                    &mut outputs,
+                );
             }
             // ------ VML drawings ------
             t if t == rt::VML_DRAWING => {
-                let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_vml_drawing();
                 let new_part_path = format!("xl/drawings/vmlDrawing{new_n}.vml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
                 // VML uses a Default content-type by extension; not an
                 // Override, but we still surface it so the caller can
                 // ensure_default("vml", ...) at the content-types layer.
                 let new_target = format!("../drawings/vmlDrawing{new_n}.vml");
-                let new_rid = dest_rels.add(rt::VML_DRAWING, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: src_bytes,
+                        new_part_path,
+                        content_type: None,
+                        new_target,
+                    },
+                    &mut outputs,
+                );
             }
             // ------ DrawingML drawings (own rels file → image alias OR deep-clone) ------
             t if t == rt::DRAWING => {
-                let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_drawing();
                 let new_part_path = format!("xl/drawings/drawing{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
@@ -362,14 +384,11 @@ pub fn plan_sheet_copy(
                     // Sprint Μ Pod-γ (RFC-046 §7): track per-chart
                     // old_rid → new_rid remap so we can patch the
                     // drawing XML's <c:chart r:id="..."/> references.
-                    let mut chart_rid_remap: HashMap<String, String> =
-                        HashMap::new();
+                    let mut chart_rid_remap: HashMap<String, String> = HashMap::new();
                     for nrel in nested.iter() {
                         if inputs.deep_copy_images && nrel.rel_type == rt::IMAGE {
-                            let resolved_image = resolve_relative(
-                                parent_dir(&resolved),
-                                &nrel.target,
-                            );
+                            let resolved_image =
+                                resolve_relative(parent_dir(&resolved), &nrel.target);
                             // Determine the original extension; fall
                             // back to "png" if the original had none
                             // (rare in practice but keeps us safe).
@@ -378,8 +397,7 @@ pub fn plan_sheet_copy(
                                 .map(|(_, e)| e.to_string())
                                 .unwrap_or_else(|| "png".to_string());
                             let new_image_n = inputs.allocator.alloc_image();
-                            let new_image_path =
-                                format!("xl/media/image{new_image_n}.{ext}");
+                            let new_image_path = format!("xl/media/image{new_image_n}.{ext}");
                             // Copy the original bytes if present.
                             if let Some(bytes) = zip_parts.get(&resolved_image).cloned() {
                                 new_ancillary_parts.push((new_image_path.clone(), bytes));
@@ -387,8 +405,7 @@ pub fn plan_sheet_copy(
                             // The rel's `target` is drawing-relative
                             // ("../media/imageN.<ext>"); we rewrite
                             // it to the new suffix.
-                            let new_rel_target =
-                                format!("../media/image{new_image_n}.{ext}");
+                            let new_rel_target = format!("../media/image{new_image_n}.{ext}");
                             cloned.add(&nrel.rel_type, &new_rel_target, nrel.mode);
                         } else if nrel.rel_type == rt::CHART {
                             // Sprint Μ Pod-γ (RFC-046 §7) — deep-clone
@@ -397,68 +414,49 @@ pub fn plan_sheet_copy(
                             // in <c:f> formulas get re-pointed from
                             // src_title to dst_title using the formula
                             // translator's `rename_sheet`.
-                            let resolved_chart = resolve_relative(
-                                parent_dir(&resolved),
-                                &nrel.target,
-                            );
+                            let resolved_chart =
+                                resolve_relative(parent_dir(&resolved), &nrel.target);
                             let new_chart_n = inputs.allocator.alloc_chart();
-                            let new_chart_path =
-                                format!("xl/charts/chart{new_chart_n}.xml");
-                            let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
-                                zip_parts.get(&resolved_chart)
-                            {
-                                rewrite_chart_sheet_refs(
-                                    src_bytes,
-                                    &inputs.src_title,
-                                    &inputs.dst_title,
-                                )
-                            } else {
-                                Vec::new()
-                            };
-                            new_ancillary_parts
-                                .push((new_chart_path.clone(), cloned_bytes));
-                            content_type_overrides_to_add.push((
-                                format!("/{new_chart_path}"),
-                                CT_CHART.into(),
-                            ));
+                            let new_chart_path = format!("xl/charts/chart{new_chart_n}.xml");
+                            let cloned_bytes: Vec<u8> =
+                                if let Some(src_bytes) = zip_parts.get(&resolved_chart) {
+                                    rewrite_chart_sheet_refs(
+                                        src_bytes,
+                                        &inputs.src_title,
+                                        &inputs.dst_title,
+                                    )
+                                } else {
+                                    Vec::new()
+                                };
+                            new_ancillary_parts.push((new_chart_path.clone(), cloned_bytes));
+                            content_type_overrides_to_add
+                                .push((format!("/{new_chart_path}"), CT_CHART.into()));
                             // Drawing-rels target is drawing-relative
                             // ("../charts/chartN.xml"); rewrite to the
                             // new suffix and stash the rId mapping so
                             // we can patch the drawing XML below.
-                            let new_rel_target =
-                                format!("../charts/chart{new_chart_n}.xml");
-                            let new_chart_rid = cloned.add(
-                                &nrel.rel_type,
-                                &new_rel_target,
-                                nrel.mode,
-                            );
-                            chart_rid_remap
-                                .insert(nrel.id.0.clone(), new_chart_rid.0);
+                            let new_rel_target = format!("../charts/chart{new_chart_n}.xml");
+                            let new_chart_rid =
+                                cloned.add(&nrel.rel_type, &new_rel_target, nrel.mode);
+                            chart_rid_remap.insert(nrel.id.0.clone(), new_chart_rid.0);
                             // If the chart has its own rels file
                             // (rare — chart-to-image pipelines), we
                             // copy it verbatim under the new suffix.
                             // Cell-range targets do not appear in
                             // chart rels, only in chart XML.
-                            let chart_rels_src = wolfxl_rels::rels_path_for(
-                                &resolved_chart,
-                            );
+                            let chart_rels_src = wolfxl_rels::rels_path_for(&resolved_chart);
                             if let Some(rels_path_src) = chart_rels_src {
-                                if let Some(rb) = zip_parts.get(&rels_path_src)
-                                {
-                                    let chart_rels_dst = format!(
-                                        "xl/charts/_rels/chart{new_chart_n}.xml.rels"
-                                    );
-                                    new_ancillary_parts
-                                        .push((chart_rels_dst, rb.clone()));
+                                if let Some(rb) = zip_parts.get(&rels_path_src) {
+                                    let chart_rels_dst =
+                                        format!("xl/charts/_rels/chart{new_chart_n}.xml.rels");
+                                    new_ancillary_parts.push((chart_rels_dst, rb.clone()));
                                 }
                             }
                         } else {
                             cloned.add(&nrel.rel_type, &nrel.target, nrel.mode);
                         }
                     }
-                    let nested_rels_path = format!(
-                        "xl/drawings/_rels/drawing{new_n}.xml.rels"
-                    );
+                    let nested_rels_path = format!("xl/drawings/_rels/drawing{new_n}.xml.rels");
                     new_ancillary_parts.push((nested_rels_path, cloned.serialize()));
                     // Sprint Μ Pod-γ — patch the just-cloned drawing
                     // XML so any `<c:chart r:id="rIdOLD"/>` tokens
@@ -470,10 +468,7 @@ pub fn plan_sheet_copy(
                             .iter_mut()
                             .find(|(p, _)| p == &new_part_path)
                         {
-                            slot.1 = rewrite_drawing_chart_rids(
-                                &slot.1,
-                                &chart_rid_remap,
-                            );
+                            slot.1 = rewrite_drawing_chart_rids(&slot.1, &chart_rid_remap);
                         }
                     }
                 }
@@ -485,31 +480,32 @@ pub fn plan_sheet_copy(
             // worksheet are NOT handled here — those hang off the
             // drawing, see the drawing-rels nested clone block above.
             t if t == rt::CHART => {
-                let resolved = resolve_relative(
-                    parent_dir(&inputs.src_sheet_path),
-                    &source_rel.target,
-                );
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_chart_n = inputs.allocator.alloc_chart();
-                let new_chart_path =
-                    format!("xl/charts/chart{new_chart_n}.xml");
-                let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
-                    zip_parts.get(&resolved)
-                {
-                    rewrite_chart_sheet_refs(
-                        src_bytes,
-                        &inputs.src_title,
-                        &inputs.dst_title,
-                    )
+                let new_chart_path = format!("xl/charts/chart{new_chart_n}.xml");
+                let cloned_bytes: Vec<u8> = if let Some(src_bytes) = zip_parts.get(&resolved) {
+                    rewrite_chart_sheet_refs(src_bytes, &inputs.src_title, &inputs.dst_title)
                 } else {
                     Vec::new()
                 };
-                new_ancillary_parts
-                    .push((new_chart_path.clone(), cloned_bytes));
-                content_type_overrides_to_add
-                    .push((format!("/{new_chart_path}"), CT_CHART.into()));
                 let new_target = format!("../charts/chart{new_chart_n}.xml");
-                let new_rid = dest_rels.add(rt::CHART, &new_target, TargetMode::Internal);
-                rid_remap.insert(old_rid, new_rid.0);
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: cloned_bytes,
+                        new_part_path: new_chart_path,
+                        content_type: Some(CT_CHART),
+                        new_target,
+                    },
+                    &mut outputs,
+                );
             }
             // ------ Pivot tables (Sprint Ν Pod-γ / RFC-035 §10) ------
             //
@@ -530,16 +526,12 @@ pub fn plan_sheet_copy(
             //     part. The cache itself is NOT deep-cloned in this
             //     pass (workbook-scope; same cache → many tables).
             t if t == rt::PIVOT_TABLE => {
-                let resolved_table = resolve_relative(
-                    parent_dir(&inputs.src_sheet_path),
-                    &source_rel.target,
-                );
+                let resolved_table =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_pivot_table();
-                let new_table_path =
-                    format!("xl/pivotTables/pivotTable{new_n}.xml");
+                let new_table_path = format!("xl/pivotTables/pivotTable{new_n}.xml");
 
-                let cloned_bytes: Vec<u8> = if let Some(src_bytes) =
-                    zip_parts.get(&resolved_table)
+                let cloned_bytes: Vec<u8> = if let Some(src_bytes) = zip_parts.get(&resolved_table)
                 {
                     wolfxl_pivot::structural::deep_clone_pivot_table(
                         src_bytes,
@@ -550,8 +542,7 @@ pub fn plan_sheet_copy(
                 } else {
                     Vec::new()
                 };
-                new_ancillary_parts
-                    .push((new_table_path.clone(), cloned_bytes));
+                new_ancillary_parts.push((new_table_path.clone(), cloned_bytes));
                 content_type_overrides_to_add.push((
                     format!("/{new_table_path}"),
                     wolfxl_pivot::ct::PIVOT_TABLE.to_string(),
@@ -561,25 +552,16 @@ pub fn plan_sheet_copy(
                 // The rels target stays pointed at the original cache
                 // definition since we don't deep-clone caches in
                 // sheet copy (RFC-047 §6: caches are workbook-scope).
-                if let Some(src_table_rels_path) =
-                    wolfxl_rels::rels_path_for(&resolved_table)
-                {
+                if let Some(src_table_rels_path) = wolfxl_rels::rels_path_for(&resolved_table) {
                     if let Some(rb) = zip_parts.get(&src_table_rels_path) {
-                        let dst_table_rels_path = format!(
-                            "xl/pivotTables/_rels/pivotTable{new_n}.xml.rels"
-                        );
-                        new_ancillary_parts
-                            .push((dst_table_rels_path, rb.clone()));
+                        let dst_table_rels_path =
+                            format!("xl/pivotTables/_rels/pivotTable{new_n}.xml.rels");
+                        new_ancillary_parts.push((dst_table_rels_path, rb.clone()));
                     }
                 }
 
-                let new_target =
-                    format!("../pivotTables/pivotTable{new_n}.xml");
-                let new_rid = dest_rels.add(
-                    rt::PIVOT_TABLE,
-                    &new_target,
-                    TargetMode::Internal,
-                );
+                let new_target = format!("../pivotTables/pivotTable{new_n}.xml");
+                let new_rid = dest_rels.add(rt::PIVOT_TABLE, &new_target, TargetMode::Internal);
                 rid_remap.insert(old_rid, new_rid.0);
             }
             // ------ Slicer presentations (Sprint Ο Pod 3.5 / RFC-061 §6) ------
@@ -601,25 +583,28 @@ pub fn plan_sheet_copy(
             // scope per RFC-061 §6: many slicer presentations can
             // reference one cache).
             t if t == wolfxl_pivot::rt::SLICER => {
-                let resolved = resolve_relative(
-                    parent_dir(&inputs.src_sheet_path),
-                    &source_rel.target,
-                );
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
                 let new_n = inputs.allocator.alloc_slicer();
                 let new_part_path = format!("xl/slicers/slicer{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                new_ancillary_parts.push((new_part_path.clone(), src_bytes));
-                content_type_overrides_to_add.push((
-                    format!("/{new_part_path}"),
-                    wolfxl_pivot::ct::SLICER.to_string(),
-                ));
                 let new_target = format!("../slicers/slicer{new_n}.xml");
-                let new_rid = dest_rels.add(
-                    wolfxl_pivot::rt::SLICER,
-                    &new_target,
-                    TargetMode::Internal,
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: src_bytes,
+                        new_part_path,
+                        content_type: Some(wolfxl_pivot::ct::SLICER),
+                        new_target,
+                    },
+                    &mut outputs,
                 );
-                rid_remap.insert(old_rid, new_rid.0);
             }
             // ------ Hyperlinks (External: alias by URL) ------
             t if t == rt::HYPERLINK => {
@@ -655,11 +640,7 @@ pub fn plan_sheet_copy(
     // re-pointed via the formula translator so the cloned sheet's
     // cross-sheet references continue to point at the right cells.
     let new_sheet_xml = if inputs.src_title != inputs.dst_title {
-        rewrite_sheet_formula_refs(
-            &new_sheet_xml,
-            &inputs.src_title,
-            &inputs.dst_title,
-        )
+        rewrite_sheet_formula_refs(&new_sheet_xml, &inputs.src_title, &inputs.dst_title)
     } else {
         new_sheet_xml
     };
@@ -681,7 +662,8 @@ pub fn plan_sheet_copy(
 
     // ---- New <sheet> entry for workbook.xml -------------------------------
     let placeholder_rid = format!("__SHEET_RID_PLACEHOLDER_{new_sheet_n}__");
-    let workbook_sheets_append = render_sheet_entry(&inputs.dst_title, new_sheet_n, &placeholder_rid);
+    let workbook_sheets_append =
+        render_sheet_entry(&inputs.dst_title, new_sheet_n, &placeholder_rid);
     let workbook_rels_to_add = vec![(
         placeholder_rid,
         rt::WORKSHEET.to_string(),
@@ -689,8 +671,7 @@ pub fn plan_sheet_copy(
     )];
 
     // Add the worksheet content-type override.
-    content_type_overrides_to_add
-        .insert(0, (format!("/{new_sheet_path}"), CT_WORKSHEET.into()));
+    content_type_overrides_to_add.insert(0, (format!("/{new_sheet_path}"), CT_WORKSHEET.into()));
 
     // Avoid `unused`: subgraph is informational; we acted on inputs.source_rels
     // directly. Keep a debug-friendly check that the sheet itself was visited.
@@ -710,6 +691,42 @@ pub fn plan_sheet_copy(
         new_table_names,
         rid_remap,
     })
+}
+
+struct InternalPartClone {
+    bytes: Vec<u8>,
+    new_part_path: String,
+    content_type: Option<&'static str>,
+    new_target: String,
+}
+
+struct SheetRelCloneOutputs<'a> {
+    dest_rels: &'a mut RelsGraph,
+    rid_remap: &'a mut HashMap<String, String>,
+    new_ancillary_parts: &'a mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &'a mut Vec<(String, String)>,
+}
+
+fn add_internal_part_clone(
+    source_rel: &Relationship,
+    clone: InternalPartClone,
+    outputs: &mut SheetRelCloneOutputs<'_>,
+) {
+    outputs
+        .new_ancillary_parts
+        .push((clone.new_part_path.clone(), clone.bytes));
+    if let Some(content_type) = clone.content_type {
+        outputs.content_type_overrides_to_add.push((
+            format!("/{}", clone.new_part_path),
+            content_type.to_string(),
+        ));
+    }
+    let new_rid = outputs.dest_rels.add(
+        &source_rel.rel_type,
+        &clone.new_target,
+        TargetMode::Internal,
+    );
+    outputs.rid_remap.insert(source_rel.id.0.clone(), new_rid.0);
 }
 
 // ---------------------------------------------------------------------------
@@ -742,25 +759,22 @@ fn parse_workbook_metadata(workbook_xml: &[u8]) -> Result<SheetMetadata, SheetCo
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                match e.local_name().as_ref() {
-                    b"sheet" => {
-                        let name = attr_value(&e, b"name").unwrap_or_default();
-                        meta.sheet_titles.push(name);
-                    }
-                    b"definedName" => {
-                        let name = attr_value(&e, b"name").unwrap_or_default();
-                        let lsid = attr_value(&e, b"localSheetId")
-                            .and_then(|v| v.parse::<u32>().ok());
-                        meta.defined_names.push(ParsedDefinedName {
-                            name,
-                            local_sheet_id: lsid,
-                            formula: String::new(),
-                        });
-                    }
-                    _ => {}
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
+                b"sheet" => {
+                    let name = attr_value(&e, b"name").unwrap_or_default();
+                    meta.sheet_titles.push(name);
                 }
-            }
+                b"definedName" => {
+                    let name = attr_value(&e, b"name").unwrap_or_default();
+                    let lsid = attr_value(&e, b"localSheetId").and_then(|v| v.parse::<u32>().ok());
+                    meta.defined_names.push(ParsedDefinedName {
+                        name,
+                        local_sheet_id: lsid,
+                        formula: String::new(),
+                    });
+                }
+                _ => {}
+            },
             Ok(Event::Eof) => break,
             Err(e) => return Err(SheetCopyError::Xml(format!("workbook.xml: {e}"))),
             _ => {}
@@ -883,9 +897,7 @@ fn clone_table_part(
                     .write_event(Event::Decl(d))
                     .map_err(|e| SheetCopyError::Xml(format!("table decl: {e}")))?;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e))
-                if e.local_name().as_ref() == b"table" =>
-            {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"table" => {
                 let mut new_e = BytesStart::new(
                     std::str::from_utf8(e.name().as_ref())
                         .map_err(|er| SheetCopyError::Xml(format!("table tag utf8: {er}")))?
@@ -1191,8 +1203,7 @@ pub(crate) fn rewrite_sheet_formula_refs(
             Ok(Event::Start(e)) => {
                 if e.local_name().as_ref() == b"f" {
                     in_f = true;
-                    let new_e =
-                        rewrite_f_attributes(&e, src_title, dst_title);
+                    let new_e = rewrite_f_attributes(&e, src_title, dst_title);
                     writer.write_event(Event::Start(new_e)).expect("write");
                 } else {
                     writer
@@ -1210,8 +1221,7 @@ pub(crate) fn rewrite_sheet_formula_refs(
             }
             Ok(Event::Empty(e)) => {
                 if e.local_name().as_ref() == b"f" {
-                    let new_e =
-                        rewrite_f_attributes(&e, src_title, dst_title);
+                    let new_e = rewrite_f_attributes(&e, src_title, dst_title);
                     writer.write_event(Event::Empty(new_e)).expect("write");
                 } else {
                     writer
@@ -1229,21 +1239,15 @@ pub(crate) fn rewrite_sheet_formula_refs(
                         // strip after.
                         let prefixed = format!("={formula_text}");
                         let translated_eq =
-                            wolfxl_formula::rename_sheet(
-                                &prefixed,
-                                src_title,
-                                dst_title,
-                            );
+                            wolfxl_formula::rename_sheet(&prefixed, src_title, dst_title);
                         let translated = translated_eq
                             .strip_prefix('=')
                             .unwrap_or(&translated_eq)
                             .to_string();
                         writer
-                            .write_event(Event::Text(
-                                quick_xml::events::BytesText::new(
-                                    &translated,
-                                ),
-                            ))
+                            .write_event(Event::Text(quick_xml::events::BytesText::new(
+                                &translated,
+                            )))
                             .expect("write");
                     } else {
                         writer
@@ -1307,17 +1311,11 @@ fn rewrite_f_attributes(
         let value = a
             .unescape_value()
             .map(|v| v.into_owned())
-            .unwrap_or_else(|_| {
-                String::from_utf8_lossy(a.value.as_ref()).into_owned()
-            });
+            .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
         let new_value = if matches!(key.as_slice(), b"ref" | b"r1" | b"r2") {
             // Wrap as `=value` to feed the tokenizer, strip back.
             let prefixed = format!("={value}");
-            let translated_eq = wolfxl_formula::rename_sheet(
-                &prefixed,
-                src_title,
-                dst_title,
-            );
+            let translated_eq = wolfxl_formula::rename_sheet(&prefixed, src_title, dst_title);
             translated_eq
                 .strip_prefix('=')
                 .unwrap_or(&translated_eq)
@@ -1394,11 +1392,8 @@ pub(crate) fn rewrite_chart_sheet_refs(
                         // do NOT carry the `=`, so we prepend it
                         // before translating and strip it afterwards.
                         let prefixed = format!("={formula_text}");
-                        let translated_eq = wolfxl_formula::rename_sheet(
-                            &prefixed,
-                            src_title,
-                            dst_title,
-                        );
+                        let translated_eq =
+                            wolfxl_formula::rename_sheet(&prefixed, src_title, dst_title);
                         let translated = translated_eq
                             .strip_prefix('=')
                             .unwrap_or(&translated_eq)
@@ -1624,7 +1619,10 @@ mod tests {
 <table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="{id}" name="{name}" displayName="{name}" ref="A1:B2"><tableColumns count="2"><tableColumn id="1" name="A"/><tableColumn id="2" name="B"/></tableColumns></table>"#).into_bytes()
     }
 
-    fn one_sheet_workbook(extra_titles: &[&str], defined_names: &[(&str, Option<u32>, &str)]) -> Vec<u8> {
+    fn one_sheet_workbook(
+        extra_titles: &[&str],
+        defined_names: &[(&str, Option<u32>, &str)],
+    ) -> Vec<u8> {
         let mut titles = vec!["Template"];
         titles.extend_from_slice(extra_titles);
         workbook_xml(&titles, defined_names)
@@ -1632,7 +1630,8 @@ mod tests {
 
     #[test]
     fn basic_clone_no_rels() {
-        let mut alloc = PartIdAllocator::from_zip_parts(["xl/worksheets/sheet1.xml"].iter().copied());
+        let mut alloc =
+            PartIdAllocator::from_zip_parts(["xl/worksheets/sheet1.xml"].iter().copied());
         let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
         zip_parts.insert("xl/worksheets/sheet1.xml".into(), minimal_sheet_xml());
         let workbook_bytes = one_sheet_workbook(&[], &[]);
@@ -1648,7 +1647,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1676,21 +1675,20 @@ mod tests {
     #[test]
     fn clone_with_one_table_dedups_name() {
         let mut alloc = PartIdAllocator::from_zip_parts(
-            [
-                "xl/worksheets/sheet1.xml",
-                "xl/tables/table1.xml",
-            ]
-            .iter()
-            .copied(),
+            ["xl/worksheets/sheet1.xml", "xl/tables/table1.xml"]
+                .iter()
+                .copied(),
         );
         let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
-        zip_parts.insert("xl/worksheets/sheet1.xml".into(), sheet_xml_with_table_part("rId1"));
+        zip_parts.insert(
+            "xl/worksheets/sheet1.xml".into(),
+            sheet_xml_with_table_part("rId1"),
+        );
         zip_parts.insert("xl/tables/table1.xml".into(), table_part_bytes("Sales", 1));
         let workbook_bytes = one_sheet_workbook(&[], &[]);
         let mut existing_table_names: HashSet<String> = HashSet::new();
         existing_table_names.insert("Sales".into());
-        let source_rels =
-            rels_with(&[(rt::TABLE, "../tables/table1.xml", TargetMode::Internal)]);
+        let source_rels = rels_with(&[(rt::TABLE, "../tables/table1.xml", TargetMode::Internal)]);
 
         let mutations = plan_sheet_copy(SheetCopyInputs {
             src_title: "Template".into(),
@@ -1701,7 +1699,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1719,7 +1717,10 @@ mod tests {
         // The cloned sheet XML's r:id should now reference the new rId.
         let new_sheet = std::str::from_utf8(&mutations.new_sheet_xml).unwrap();
         let new_rid = mutations.rid_remap.get("rId1").expect("rId1 remapped");
-        assert!(new_sheet.contains(&format!(r#"r:id="{new_rid}""#)), "{new_sheet}");
+        assert!(
+            new_sheet.contains(&format!(r#"r:id="{new_rid}""#)),
+            "{new_sheet}"
+        );
     }
 
     #[test]
@@ -1755,11 +1756,14 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
-        assert_eq!(mutations.new_table_names, vec!["Sales_2".to_string(), "Costs_2".to_string()]);
+        assert_eq!(
+            mutations.new_table_names,
+            vec!["Sales_2".to_string(), "Costs_2".to_string()]
+        );
 
         // Both tables emitted with fresh suffixes.
         let table_paths: Vec<&str> = mutations
@@ -1768,8 +1772,14 @@ mod tests {
             .map(|(p, _)| p.as_str())
             .filter(|p| p.starts_with("xl/tables/"))
             .collect();
-        assert!(table_paths.contains(&"xl/tables/table3.xml"), "{table_paths:?}");
-        assert!(table_paths.contains(&"xl/tables/table4.xml"), "{table_paths:?}");
+        assert!(
+            table_paths.contains(&"xl/tables/table3.xml"),
+            "{table_paths:?}"
+        );
+        assert!(
+            table_paths.contains(&"xl/tables/table4.xml"),
+            "{table_paths:?}"
+        );
     }
 
     #[test]
@@ -1793,7 +1803,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1824,7 +1834,11 @@ mod tests {
         let existing_table_names: HashSet<String> = HashSet::new();
         let source_rels = rels_with(&[
             (rt::COMMENTS, "../comments1.xml", TargetMode::Internal),
-            (rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal),
+            (
+                rt::VML_DRAWING,
+                "../drawings/vmlDrawing1.vml",
+                TargetMode::Internal,
+            ),
         ]);
         for p in zip_parts.keys() {
             alloc.observe(p);
@@ -1839,7 +1853,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1859,8 +1873,12 @@ mod tests {
         zip_parts.insert("xl/worksheets/sheet1.xml".into(), minimal_sheet_xml());
         zip_parts.insert("xl/drawings/drawing1.xml".into(), b"<wsDr/>".to_vec());
         // Drawing's own rels file → image1.png.
-        let drawing_rels_xml = rels_with(&[(rt::IMAGE, "../media/image1.png", TargetMode::Internal)]).serialize();
-        zip_parts.insert("xl/drawings/_rels/drawing1.xml.rels".into(), drawing_rels_xml);
+        let drawing_rels_xml =
+            rels_with(&[(rt::IMAGE, "../media/image1.png", TargetMode::Internal)]).serialize();
+        zip_parts.insert(
+            "xl/drawings/_rels/drawing1.xml.rels".into(),
+            drawing_rels_xml,
+        );
         zip_parts.insert("xl/media/image1.png".into(), b"\x89PNG".to_vec());
         let workbook_bytes = one_sheet_workbook(&[], &[]);
         let existing_table_names: HashSet<String> = HashSet::new();
@@ -1882,7 +1900,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1937,7 +1955,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -1959,10 +1977,8 @@ mod tests {
         let mut alloc = PartIdAllocator::new();
         let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
         zip_parts.insert("xl/worksheets/sheet1.xml".into(), minimal_sheet_xml());
-        let workbook_bytes = workbook_xml(
-            &["Template", "Other"],
-            &[("WorkbookScopeName", None, "A1")],
-        );
+        let workbook_bytes =
+            workbook_xml(&["Template", "Other"], &[("WorkbookScopeName", None, "A1")]);
         let existing_table_names: HashSet<String> = HashSet::new();
         let source_rels = RelsGraph::new();
 
@@ -1975,7 +1991,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -2000,7 +2016,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect_err("duplicate dst should error");
         match err {
@@ -2027,7 +2043,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect_err("missing src should error");
         assert!(matches!(err, SheetCopyError::MissingSourceTitle(_)));
@@ -2050,7 +2066,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect_err("missing src bytes should error");
         assert!(matches!(err, SheetCopyError::MissingSourceSheetBytes(_)));
@@ -2070,7 +2086,11 @@ mod tests {
         let existing_table_names: HashSet<String> = HashSet::new();
         let source_rels = rels_with(&[
             (rt::TABLE, "../tables/table1.xml", TargetMode::Internal),
-            (rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal),
+            (
+                rt::VML_DRAWING,
+                "../drawings/vmlDrawing1.vml",
+                TargetMode::Internal,
+            ),
         ]);
         for p in zip_parts.keys() {
             alloc.observe(p);
@@ -2085,7 +2105,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -2095,8 +2115,14 @@ mod tests {
         assert_ne!(new_for_table, new_for_vml);
 
         let new_xml = std::str::from_utf8(&mutations.new_sheet_xml).unwrap();
-        assert!(new_xml.contains(&format!(r#"r:id="{new_for_table}""#)), "{new_xml}");
-        assert!(new_xml.contains(&format!(r#"r:id="{new_for_vml}""#)), "{new_xml}");
+        assert!(
+            new_xml.contains(&format!(r#"r:id="{new_for_table}""#)),
+            "{new_xml}"
+        );
+        assert!(
+            new_xml.contains(&format!(r#"r:id="{new_for_vml}""#)),
+            "{new_xml}"
+        );
         // Old rIds should be gone.
         assert!(!new_xml.contains(r#"r:id="rId1""#) || new_for_table == "rId1");
     }
@@ -2134,7 +2160,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
 
@@ -2142,7 +2168,10 @@ mod tests {
         // in workbook_rels_to_add[0].0 — caller does one rename.
         let placeholder = &mutations.workbook_rels_to_add[0].0;
         let entry = std::str::from_utf8(&mutations.workbook_sheets_append).unwrap();
-        assert!(entry.contains(placeholder), "entry={entry} placeholder={placeholder}");
+        assert!(
+            entry.contains(placeholder),
+            "entry={entry} placeholder={placeholder}"
+        );
     }
 
     #[test]
@@ -2163,7 +2192,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan 1 ok");
         // Second call: the workbook_xml argument is the same (caller hasn't
@@ -2177,7 +2206,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan 2 ok");
 
@@ -2215,7 +2244,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
         assert!(mutations.defined_names_to_add.is_empty());
@@ -2228,9 +2257,11 @@ mod tests {
         zip_parts.insert("xl/worksheets/sheet1.xml".into(), minimal_sheet_xml());
         let workbook_bytes = one_sheet_workbook(&[], &[]);
         let existing_table_names: HashSet<String> = HashSet::new();
-        let source_rels = rels_with(&[
-            ("http://example.com/rels/weird", "../weird/path.bin", TargetMode::Internal),
-        ]);
+        let source_rels = rels_with(&[(
+            "http://example.com/rels/weird",
+            "../weird/path.bin",
+            TargetMode::Internal,
+        )]);
 
         let mutations = plan_sheet_copy(SheetCopyInputs {
             src_title: "Template".into(),
@@ -2241,7 +2272,7 @@ mod tests {
             workbook_xml: &workbook_bytes,
             allocator: &mut alloc,
             existing_table_names: &existing_table_names,
-        deep_copy_images: false,
+            deep_copy_images: false,
         })
         .expect("plan ok");
         // The rId is in the remap (aliased into dest rels graph).

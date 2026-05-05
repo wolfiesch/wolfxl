@@ -90,7 +90,53 @@ class WorkbookProtection:
         revisions_hash_value: str | None = None,
         revisions_salt_value: str | None = None,
         revisions_spin_count: int | None = None,
+        workbookPassword: str | None = None,  # noqa: N803
+        revisionsPassword: str | None = None,  # noqa: N803
+        lockStructure: bool | None = None,  # noqa: N803
+        lockWindows: bool | None = None,  # noqa: N803
+        lockRevision: bool | None = None,  # noqa: N803
+        workbookPasswordCharacterSet: str | None = None,  # noqa: N803
+        workbookAlgorithmName: str | None = None,  # noqa: N803
+        workbookHashValue: str | None = None,  # noqa: N803
+        workbookSaltValue: str | None = None,  # noqa: N803
+        workbookSpinCount: int | None = None,  # noqa: N803
+        revisionsPasswordCharacterSet: str | None = None,  # noqa: N803
+        revisionsAlgorithmName: str | None = None,  # noqa: N803
+        revisionsHashValue: str | None = None,  # noqa: N803
+        revisionsSaltValue: str | None = None,  # noqa: N803
+        revisionsSpinCount: int | None = None,  # noqa: N803
     ) -> None:
+        if workbookPassword is not None:
+            workbook_password = workbookPassword
+        if revisionsPassword is not None:
+            revisions_password = revisionsPassword
+        if lockStructure is not None:
+            lock_structure = lockStructure
+        if lockWindows is not None:
+            lock_windows = lockWindows
+        if lockRevision is not None:
+            lock_revision = lockRevision
+        if workbookPasswordCharacterSet is not None:
+            workbook_password_character_set = workbookPasswordCharacterSet
+        if workbookAlgorithmName is not None:
+            workbook_algorithm_name = workbookAlgorithmName
+        if workbookHashValue is not None:
+            workbook_hash_value = workbookHashValue
+        if workbookSaltValue is not None:
+            workbook_salt_value = workbookSaltValue
+        if workbookSpinCount is not None:
+            workbook_spin_count = workbookSpinCount
+        if revisionsPasswordCharacterSet is not None:
+            revisions_password_character_set = revisionsPasswordCharacterSet
+        if revisionsAlgorithmName is not None:
+            revisions_algorithm_name = revisionsAlgorithmName
+        if revisionsHashValue is not None:
+            revisions_hash_value = revisionsHashValue
+        if revisionsSaltValue is not None:
+            revisions_salt_value = revisionsSaltValue
+        if revisionsSpinCount is not None:
+            revisions_spin_count = revisionsSpinCount
+
         self.lock_structure: bool = bool(lock_structure)
         self.lock_windows: bool = bool(lock_windows)
         self.lock_revision: bool = bool(lock_revision)
@@ -243,6 +289,130 @@ class WorkbookProtection:
             f"workbook_password_set={self.workbook_hash_value is not None}, "
             f"revisions_password_set={self.revisions_hash_value is not None})"
         )
+
+    # ------------------------------------------------------------------
+    # CamelCase aliases for openpyxl compatibility.
+    # ------------------------------------------------------------------
+
+    @property
+    def lockStructure(self) -> bool:  # noqa: N802
+        return self.lock_structure
+
+    @lockStructure.setter
+    def lockStructure(self, value: bool) -> None:  # noqa: N802
+        self.lock_structure = bool(value)
+
+    @property
+    def lockWindows(self) -> bool:  # noqa: N802
+        return self.lock_windows
+
+    @lockWindows.setter
+    def lockWindows(self, value: bool) -> None:  # noqa: N802
+        self.lock_windows = bool(value)
+
+    @property
+    def lockRevision(self) -> bool:  # noqa: N802
+        return self.lock_revision
+
+    @lockRevision.setter
+    def lockRevision(self, value: bool) -> None:  # noqa: N802
+        self.lock_revision = bool(value)
+
+    @property
+    def workbookPassword(self) -> str | None:  # noqa: N802
+        return self.workbook_password
+
+    @workbookPassword.setter
+    def workbookPassword(self, value: str | None) -> None:  # noqa: N802
+        self.workbook_password = value
+
+    @property
+    def workbookPasswordCharacterSet(self) -> str | None:  # noqa: N802
+        return self.workbook_password_character_set
+
+    @workbookPasswordCharacterSet.setter
+    def workbookPasswordCharacterSet(self, value: str | None) -> None:  # noqa: N802
+        self.workbook_password_character_set = value
+
+    @property
+    def workbookAlgorithmName(self) -> str | None:  # noqa: N802
+        return self.workbook_algorithm_name
+
+    @workbookAlgorithmName.setter
+    def workbookAlgorithmName(self, value: str | None) -> None:  # noqa: N802
+        self.workbook_algorithm_name = value
+
+    @property
+    def workbookHashValue(self) -> str | None:  # noqa: N802
+        return self.workbook_hash_value
+
+    @workbookHashValue.setter
+    def workbookHashValue(self, value: str | None) -> None:  # noqa: N802
+        self.workbook_hash_value = value
+
+    @property
+    def workbookSaltValue(self) -> str | None:  # noqa: N802
+        return self.workbook_salt_value
+
+    @workbookSaltValue.setter
+    def workbookSaltValue(self, value: str | None) -> None:  # noqa: N802
+        self.workbook_salt_value = value
+
+    @property
+    def workbookSpinCount(self) -> int | None:  # noqa: N802
+        return self.workbook_spin_count
+
+    @workbookSpinCount.setter
+    def workbookSpinCount(self, value: int | None) -> None:  # noqa: N802
+        self.workbook_spin_count = value
+
+    @property
+    def revisionsPassword(self) -> str | None:  # noqa: N802
+        return self.revisions_password
+
+    @revisionsPassword.setter
+    def revisionsPassword(self, value: str | None) -> None:  # noqa: N802
+        self.revisions_password = value
+
+    @property
+    def revisionsPasswordCharacterSet(self) -> str | None:  # noqa: N802
+        return self.revisions_password_character_set
+
+    @revisionsPasswordCharacterSet.setter
+    def revisionsPasswordCharacterSet(self, value: str | None) -> None:  # noqa: N802
+        self.revisions_password_character_set = value
+
+    @property
+    def revisionsAlgorithmName(self) -> str | None:  # noqa: N802
+        return self.revisions_algorithm_name
+
+    @revisionsAlgorithmName.setter
+    def revisionsAlgorithmName(self, value: str | None) -> None:  # noqa: N802
+        self.revisions_algorithm_name = value
+
+    @property
+    def revisionsHashValue(self) -> str | None:  # noqa: N802
+        return self.revisions_hash_value
+
+    @revisionsHashValue.setter
+    def revisionsHashValue(self, value: str | None) -> None:  # noqa: N802
+        self.revisions_hash_value = value
+
+    @property
+    def revisionsSaltValue(self) -> str | None:  # noqa: N802
+        return self.revisions_salt_value
+
+    @revisionsSaltValue.setter
+    def revisionsSaltValue(self, value: str | None) -> None:  # noqa: N802
+        self.revisions_salt_value = value
+
+    @property
+    def revisionsSpinCount(self) -> int | None:  # noqa: N802
+        return self.revisions_spin_count
+
+    @revisionsSpinCount.setter
+    def revisionsSpinCount(self, value: int | None) -> None:  # noqa: N802
+        self.revisions_spin_count = value
 
 
 # ---------------------------------------------------------------------------

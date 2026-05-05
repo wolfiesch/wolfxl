@@ -1,5 +1,4 @@
-//! `xl/drawings/drawingN.xml` emitter — Sprint Λ Pod-β (RFC-045) +
-//! Sprint Μ Pod-α (RFC-046).
+//! `xl/drawings/drawingN.xml` emitter.
 //!
 //! One drawing part per sheet that has at least one image or chart.
 //! The part is a `<xdr:wsDr>` element containing one
@@ -26,9 +25,7 @@ use crate::model::image::{ImageAnchor, SheetImage};
 
 const EMU_PER_PIXEL: i64 = 9525;
 
-/// One visual on a sheet's drawing part. Sprint Μ Pod-α adds the
-/// `Chart` variant alongside the existing image-anchor flow so a sheet
-/// can mix images and charts in a single drawing.
+/// One visual on a sheet's drawing part.
 #[derive(Debug, Clone)]
 pub enum DrawingItem {
     /// Image — emitted as `<xdr:pic>` inside the anchor.
@@ -82,9 +79,9 @@ pub fn emit(images: &[SheetImage], image_rel_ids: &[String]) -> Vec<u8> {
     out.into_bytes()
 }
 
-/// Sprint Μ Pod-α (RFC-046) — emit `xl/drawings/drawingN.xml` for a
-/// mixed list of [`DrawingItem`]s (images + charts). Used by the
-/// writer driver when at least one chart is anchored on the sheet.
+/// Emit `xl/drawings/drawingN.xml` for a mixed list of [`DrawingItem`]s.
+///
+/// Used by the writer driver when at least one chart is anchored on the sheet.
 ///
 /// The cNvPr `id` is unique within the part; we assign it as 1+index
 /// in the items list so a chart that appears third on a sheet with
@@ -268,18 +265,12 @@ fn emit_chart_anchor_open(out: &mut String, anchor: &ImageAnchor) {
 fn emit_graphic_frame(out: &mut String, cnv_id: u32, rid: &str, name: &str) {
     out.push_str("<xdr:graphicFrame macro=\"\">");
     out.push_str("<xdr:nvGraphicFramePr>");
-    out.push_str(&format!(
-        "<xdr:cNvPr id=\"{cnv_id}\" name=\"{name}\"/>"
-    ));
+    out.push_str(&format!("<xdr:cNvPr id=\"{cnv_id}\" name=\"{name}\"/>"));
     out.push_str("<xdr:cNvGraphicFramePr/>");
     out.push_str("</xdr:nvGraphicFramePr>");
-    out.push_str(
-        "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>",
-    );
+    out.push_str("<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>");
     out.push_str("<a:graphic>");
-    out.push_str(
-        "<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">",
-    );
+    out.push_str("<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\">");
     out.push_str(&format!(
         "<c:chart xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\" \
          xmlns:r=\"{R_NS}\" r:id=\"{rid}\"/>"
@@ -450,7 +441,7 @@ mod tests {
         assert!(text.contains("</xdr:wsDr>"));
     }
 
-    // ----- Sprint Μ Pod-α (RFC-046) — chart anchors via graphicFrame --
+    // ----- Chart anchors via graphicFrame ---------------------------------
 
     #[test]
     fn drawing_xml_with_chart_only_emits_graphic_frame() {

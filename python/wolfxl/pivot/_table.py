@@ -1,15 +1,13 @@
 """``PivotTable`` — pivot-table layout pointing at a :class:`PivotCache`.
 
-Mirrors :class:`openpyxl.pivot.table.TableDefinition`. See RFC-048
-§10 for the authoritative dict contract returned by
-:meth:`PivotTable.to_rust_dict`.
+Mirrors :class:`openpyxl.pivot.table.TableDefinition`.
 
 The aggregation layer (computing ``<rowItems>`` / ``<colItems>``
 pre-aggregated values) is implemented in
 :meth:`PivotTable._compute_layout`, which walks the cache's records
-and computes per-(row, col) aggregated values per data field. This
-is the core of "Option A — full pivot construction": the values are
-emitted into the OOXML so Excel doesn't need to refresh on open.
+and computes per-(row, col) aggregated values per data field. The
+values are emitted into the OOXML so Excel doesn't need to refresh
+on open.
 """
 
 from __future__ import annotations
@@ -23,12 +21,12 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Enums (RFC-048 §10.5)
+# Enums
 # ---------------------------------------------------------------------------
 
 
 class DataFunction:
-    """RFC-048 §10.5 enum. Use the string constants verbatim."""
+    """Aggregator enum. Use the string constants verbatim."""
 
     SUM = "sum"
     COUNT = "count"
@@ -47,7 +45,7 @@ class DataFunction:
 
 
 # ---------------------------------------------------------------------------
-# Field-axis builders (RFC-048 §10.3)
+# Field-axis builders
 # ---------------------------------------------------------------------------
 
 
@@ -79,7 +77,7 @@ class PageField:
 
 @dataclass
 class DataField:
-    """RFC-048 §10.5 — aggregator + display name + data field index.
+    """A data-axis field — aggregator + display name + data field index.
 
     The ``name`` arg is the cache field name (e.g. ``"revenue"``) or
     a fully-spelled display name (``"Sum of revenue"``). When
@@ -123,13 +121,13 @@ class DataField:
 
 
 # ---------------------------------------------------------------------------
-# Pivot field (per cache field appearance) — RFC-048 §10.3
+# Pivot field (per cache field appearance)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class PivotItem:
-    """RFC-048 §10.4 — single ``<item>`` child."""
+    """A single ``<item>`` child of a pivot field."""
 
     x: int | None = None
     t: str | None = None
@@ -143,7 +141,7 @@ class PivotItem:
 
 @dataclass
 class PivotField:
-    """RFC-048 §10.3 — one entry per cache field, in cache-field order.
+    """One entry per cache field, in cache-field order.
 
     Constructed by :meth:`PivotTable._build_pivot_fields`; users don't
     normally instantiate this directly.
@@ -184,13 +182,13 @@ class PivotField:
 
 
 # ---------------------------------------------------------------------------
-# Location + style info (RFC-048 §10.2 + §10.7)
+# Location + style info
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class Location:
-    """RFC-048 §10.2."""
+    """Pivot-table anchor location."""
 
     ref: str
     first_header_row: int = 0
@@ -212,7 +210,7 @@ class Location:
 
 @dataclass
 class PivotTableStyleInfo:
-    """RFC-048 §10.7."""
+    """Pivot-table style info (table style + header/stripe toggles)."""
 
     name: str = "PivotStyleLight16"
     show_row_headers: bool = True
@@ -233,17 +231,16 @@ class PivotTableStyleInfo:
 
 
 # ---------------------------------------------------------------------------
-# PivotSource (RFC-049 §10.1) — chart-side linkage marker
+# PivotSource — chart-side linkage marker
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class PivotSource:
-    """RFC-049 §10.1 — the ``<c:pivotSource>`` block on a pivot chart.
+    """The ``<c:pivotSource>`` block on a pivot chart.
 
     Set on a chart via ``chart.pivot_source = pt`` (where ``pt`` is a
     :class:`PivotTable`) or ``chart.pivot_source = ("name", fmt_id)``.
-    See RFC-049 §5.1 for the chart-side setter.
     """
 
     name: str
@@ -275,9 +272,6 @@ class PivotTable:
     The bare-string convenience form resolves a string field name
     (``rows=["region"]``) to a :class:`RowField`. Order of fields in
     ``rows``/``cols`` controls nesting (first → outermost).
-
-    See RFC-048 §10 for the authoritative dict shape returned by
-    :meth:`to_rust_dict`.
     """
 
     def __init__(
@@ -344,9 +338,9 @@ class PivotTable:
         self._aggregated_values: dict[
             tuple[tuple, tuple, int], float | None
         ] = {}
-        # RFC-061 §2.3 — calculated items (table-scoped).
+        # Calculated items (table-scoped).
         self.calculated_items: list[Any] = []
-        # RFC-061 §2.5 — pivot-area Format / CF directives (table-scoped).
+        # Pivot-area Format / CF directives (table-scoped).
         self.formats: list[Any] = []
         self.conditional_formats: list[Any] = []
         self.chart_formats: list[Any] = []
@@ -357,18 +351,38 @@ class PivotTable:
 
     @property
     def rows(self) -> list[RowField]:
+        """Return row-field specifications for this pivot table.
+
+        Returns:
+            The normalized row field list, preserving the caller's field order.
+        """
         return self._row_field_specs
 
     @property
     def cols(self) -> list[ColumnField]:
+        """Return column-field specifications for this pivot table.
+
+        Returns:
+            The normalized column field list.
+        """
         return self._col_field_specs
 
     @property
     def page(self) -> list[PageField]:
+        """Return report-filter page fields for this pivot table.
+
+        Returns:
+            The normalized page field list.
+        """
         return self._page_field_specs
 
     @property
     def data(self) -> list[DataField]:
+        """Return data-value fields for this pivot table.
+
+        Returns:
+            The normalized data field list.
+        """
         return self._data_field_specs
 
     # ------------------------------------------------------------------
@@ -451,7 +465,7 @@ class PivotTable:
         )
 
     # ------------------------------------------------------------------
-    # Layout pre-computation — RFC-048 §5.2
+    # Layout pre-computation
     # ------------------------------------------------------------------
 
     def _compute_layout(self) -> None:
@@ -507,7 +521,7 @@ class PivotTable:
             row_indices, col_indices, data_field_indices
         )
 
-        # 5. Build data-field dicts (RFC-048 §10.5).
+        # 5. Build data-field dicts.
         data_field_dicts = [
             {
                 "name": df.resolved_display_name(),
@@ -521,7 +535,7 @@ class PivotTable:
             for i, df in enumerate(self._data_field_specs)
         ]
 
-        # 6. Build page-field dicts (RFC-048 §10.8).
+        # 6. Build page-field dicts.
         page_field_dicts = [
             {
                 "field_index": page_indices[i],
@@ -669,7 +683,7 @@ class PivotTable:
 
     @staticmethod
     def _aggregate(values: list[float], fn: str) -> float | None:
-        """RFC-048 §5.2 aggregator. Empty list → None."""
+        """Apply the named aggregator to a list of values. Empty list → None."""
         if not values:
             if fn == DataFunction.COUNT or fn == DataFunction.COUNT_NUMS:
                 return 0.0
@@ -740,11 +754,11 @@ class PivotTable:
         self.location.first_header_row = 0
 
     # ------------------------------------------------------------------
-    # to_rust_dict — RFC-048 §10.1
+    # to_rust_dict
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # RFC-061 §2.3 — calculated items
+    # Calculated items
     # ------------------------------------------------------------------
 
     def add_calculated_item(
@@ -770,7 +784,7 @@ class PivotTable:
         return ci
 
     # ------------------------------------------------------------------
-    # RFC-061 §2.5 — pivot-area Format / CF
+    # Pivot-area Format / CF directives
     # ------------------------------------------------------------------
 
     def add_format(
@@ -784,7 +798,7 @@ class PivotTable:
 
         Either pass an explicit ``dxf_id`` (resolved to an existing
         workbook dxf table entry) or pass a ``dxf=`` instance for
-        the patcher to allocate one via the RFC-026 dxf allocator.
+        the patcher to allocate one via the workbook dxf allocator.
 
         Returns the registered :class:`Format`.
         """
@@ -815,8 +829,8 @@ class PivotTable:
         ``rule`` is a CF rule object (e.g.
         :class:`wolfxl.formatting.Rule` /
         :class:`wolfxl.formatting.ColorScale` / etc.). The rule
-        references a workbook-scoped dxf entry through the existing
-        RFC-026 ``dxfId`` allocator.
+        references a workbook-scoped dxf entry through the workbook
+        ``dxfId`` allocator.
 
         Returns the registered :class:`PivotConditionalFormat`.
         """
@@ -838,7 +852,7 @@ class PivotTable:
         return pcf
 
     def to_rust_dict(self) -> dict:
-        """Pivot-table dict per RFC-048 §10.1 + RFC-061 extensions.
+        """Pivot-table dict for the Rust emitter.
 
         Calls :meth:`_compute_layout` if not already invoked.
         """
@@ -875,7 +889,7 @@ class PivotTable:
             "created_version": 6,
             "updated_version": 6,
             "min_refreshable_version": 3,
-            # RFC-061 extensions
+            # Extensions: calc items + pivot-scoped formats / CF.
             "calculated_items": [
                 ci.to_rust_dict() for ci in self.calculated_items
             ],

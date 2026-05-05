@@ -14,7 +14,8 @@ use pyo3::types::{PyDict, PyList};
 
 use wolfxl_writer::parse::sheet_setup::{
     HeaderFooterItemSpec, HeaderFooterSpec, PageMarginsSpec, PageSetupSpec, PaneSpec,
-    PrintTitlesSpec, SelectionSpec, SheetProtectionSpec, SheetSetupBlocks, SheetViewSpec,
+    PrintOptionsSpec, PrintTitlesSpec, SelectionSpec, SheetProtectionSpec, SheetSetupBlocks,
+    SheetViewSpec,
 };
 
 // ---------------------------------------------------------------------------
@@ -43,39 +44,43 @@ pub struct QueuedSheetSetup {
 /// Python side.
 pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetSetupBlocks> {
     let page_setup = match payload.get_item("page_setup")? {
-        Some(v) if !v.is_none() => Some(parse_page_setup(v.downcast::<PyDict>().map_err(|_| {
+        Some(v) if !v.is_none() => Some(parse_page_setup(v.cast::<PyDict>().map_err(|_| {
             PyValueError::new_err("queue_sheet_setup_update: 'page_setup' must be a dict or None")
         })?)?),
         _ => None,
     };
     let page_margins = match payload.get_item("page_margins")? {
-        Some(v) if !v.is_none() => Some(parse_page_margins(v.downcast::<PyDict>().map_err(
-            |_| {
-                PyValueError::new_err(
-                    "queue_sheet_setup_update: 'page_margins' must be a dict or None",
-                )
-            },
-        )?)?),
+        Some(v) if !v.is_none() => Some(parse_page_margins(v.cast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("queue_sheet_setup_update: 'page_margins' must be a dict or None")
+        })?)?),
+        _ => None,
+    };
+    let print_options = match payload.get_item("print_options")? {
+        Some(v) if !v.is_none() => Some(parse_print_options(v.cast::<PyDict>().map_err(|_| {
+            PyValueError::new_err(
+                "queue_sheet_setup_update: 'print_options' must be a dict or None",
+            )
+        })?)?),
         _ => None,
     };
     let header_footer = match payload.get_item("header_footer")? {
-        Some(v) if !v.is_none() => Some(parse_header_footer(v.downcast::<PyDict>().map_err(
-            |_| {
+        Some(v) if !v.is_none() => {
+            Some(parse_header_footer(v.cast::<PyDict>().map_err(|_| {
                 PyValueError::new_err(
                     "queue_sheet_setup_update: 'header_footer' must be a dict or None",
                 )
-            },
-        )?)?),
+            })?)?)
+        }
         _ => None,
     };
     let sheet_view = match payload.get_item("sheet_view")? {
-        Some(v) if !v.is_none() => Some(parse_sheet_view(v.downcast::<PyDict>().map_err(|_| {
+        Some(v) if !v.is_none() => Some(parse_sheet_view(v.cast::<PyDict>().map_err(|_| {
             PyValueError::new_err("queue_sheet_setup_update: 'sheet_view' must be a dict or None")
         })?)?),
         _ => None,
     };
     let sheet_protection = match payload.get_item("sheet_protection")? {
-        Some(v) if !v.is_none() => Some(parse_sheet_protection(v.downcast::<PyDict>().map_err(
+        Some(v) if !v.is_none() => Some(parse_sheet_protection(v.cast::<PyDict>().map_err(
             |_| {
                 PyValueError::new_err(
                     "queue_sheet_setup_update: 'sheet_protection' must be a dict or None",
@@ -85,18 +90,15 @@ pub fn parse_sheet_setup_payload(payload: &Bound<'_, PyDict>) -> PyResult<SheetS
         _ => None,
     };
     let print_titles = match payload.get_item("print_titles")? {
-        Some(v) if !v.is_none() => Some(parse_print_titles(v.downcast::<PyDict>().map_err(
-            |_| {
-                PyValueError::new_err(
-                    "queue_sheet_setup_update: 'print_titles' must be a dict or None",
-                )
-            },
-        )?)?),
+        Some(v) if !v.is_none() => Some(parse_print_titles(v.cast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("queue_sheet_setup_update: 'print_titles' must be a dict or None")
+        })?)?),
         _ => None,
     };
     Ok(SheetSetupBlocks {
         sheet_view,
         sheet_protection,
+        print_options,
         page_margins,
         page_setup,
         header_footer,
@@ -149,9 +151,23 @@ fn parse_page_setup(d: &Bound<'_, PyDict>) -> PyResult<PageSetupSpec> {
         cell_comments: extract_str(d, "cell_comments")?,
         errors: extract_str(d, "errors")?,
         use_first_page_number: extract_bool(d, "use_first_page_number")?,
+        paper_height: extract_str(d, "paper_height")?,
+        paper_width: extract_str(d, "paper_width")?,
+        page_order: extract_str(d, "page_order")?,
         use_printer_defaults: extract_bool(d, "use_printer_defaults")?,
         black_and_white: extract_bool(d, "black_and_white")?,
         draft: extract_bool(d, "draft")?,
+        copies: extract_u32(d, "copies")?,
+    })
+}
+
+fn parse_print_options(d: &Bound<'_, PyDict>) -> PyResult<PrintOptionsSpec> {
+    Ok(PrintOptionsSpec {
+        horizontal_centered: extract_bool(d, "horizontal_centered")?,
+        vertical_centered: extract_bool(d, "vertical_centered")?,
+        headings: extract_bool(d, "headings")?,
+        grid_lines: extract_bool(d, "grid_lines")?,
+        grid_lines_set: extract_bool(d, "grid_lines_set")?,
     })
 }
 
@@ -179,18 +195,13 @@ fn parse_header_footer_item(
     }
 }
 
-fn extract_dict<'py>(
-    d: &Bound<'py, PyDict>,
-    key: &str,
-) -> PyResult<Option<Bound<'py, PyDict>>> {
+fn extract_dict<'py>(d: &Bound<'py, PyDict>, key: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
     match d.get_item(key)? {
-        Some(v) if !v.is_none() => Ok(Some(
-            v.downcast_into::<PyDict>().map_err(|_| {
-                PyValueError::new_err(format!(
-                    "queue_sheet_setup_update: {key:?} must be a dict or None"
-                ))
-            })?,
-        )),
+        Some(v) if !v.is_none() => Ok(Some(v.cast_into::<PyDict>().map_err(|_| {
+            PyValueError::new_err(format!(
+                "queue_sheet_setup_update: {key:?} must be a dict or None"
+            ))
+        })?)),
         _ => Ok(None),
     }
 }
@@ -241,14 +252,14 @@ fn parse_sheet_view(d: &Bound<'_, PyDict>) -> PyResult<SheetViewSpec> {
     };
     let selection: Vec<SelectionSpec> = match d.get_item("selection")? {
         Some(v) if !v.is_none() => {
-            let list = v.downcast::<PyList>().map_err(|_| {
+            let list = v.cast::<PyList>().map_err(|_| {
                 PyValueError::new_err(
                     "queue_sheet_setup_update: 'selection' must be a list or None",
                 )
             })?;
             let mut out = Vec::with_capacity(list.len());
             for item in list.iter() {
-                let sd = item.downcast::<PyDict>().map_err(|_| {
+                let sd = item.cast::<PyDict>().map_err(|_| {
                     PyValueError::new_err(
                         "queue_sheet_setup_update: 'selection' items must be dicts",
                     )

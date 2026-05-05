@@ -79,10 +79,10 @@ def test_setitem_sheet_scope_routed_correctly(tmp_path: Path) -> None:
     out = tmp_path / "names_sheet_scope.xlsx"
     wb.save(out)
 
-    # Reload and check the name is present. The reader squashes
-    # sheet-scope to a single visible entry per name.
+    # Reload and check the name is routed to the worksheet like openpyxl 3.1.
     wb2 = Workbook._from_reader(str(out))
-    assert "LocalRange" in wb2.defined_names
+    assert "LocalRange" not in wb2.defined_names
+    assert "LocalRange" in wb2[ws.title].defined_names
 
 
 @pytest.mark.parametrize(

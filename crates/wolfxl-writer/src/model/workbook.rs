@@ -3,6 +3,7 @@
 use super::comment::CommentAuthorTable;
 use super::defined_name::DefinedName;
 use super::format::StylesBuilder;
+use super::threaded_comment::PersonTable;
 use super::worksheet::Worksheet;
 use crate::intern::SstBuilder;
 use crate::parse::workbook_security::WorkbookSecurity;
@@ -37,10 +38,15 @@ pub struct Workbook {
     /// bug that motivated this rewrite.
     pub comment_authors: CommentAuthorTable,
 
-    /// RFC-058 — workbook-level security blocks (`<workbookProtection>`
-    /// and `<fileSharing>`). Both are optional; when both are `None`
-    /// the emitter writes neither element.
+    /// Workbook-level security blocks (`<workbookProtection>` and
+    /// `<fileSharing>`). Both are optional; when both are `None` the
+    /// emitter writes neither element.
     pub security: WorkbookSecurity,
+
+    /// Workbook-scope threaded-comment person registry (RFC-068 / G08).
+    /// Empty by default — `xl/persons/personList.xml` is only emitted when
+    /// at least one threaded comment exists.
+    pub persons: PersonTable,
 }
 
 impl Workbook {
@@ -231,6 +237,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         wb.defined_names.push(DefinedName {
             name: "OnC".to_string(),
@@ -238,6 +245,7 @@ mod tests {
             scope_sheet_index: Some(2),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
 
         wb.move_sheet("A", 2).unwrap();

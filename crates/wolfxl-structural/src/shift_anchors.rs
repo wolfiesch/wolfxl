@@ -138,7 +138,14 @@ fn parse_cell_parts(s: &str) -> Option<CellParts> {
     if col > MAX_COL || row > MAX_ROW {
         return None;
     }
-    Some(CellParts { col, col_abs, row, row_abs, col_only, row_only })
+    Some(CellParts {
+        col,
+        col_abs,
+        row,
+        row_abs,
+        col_only,
+        row_only,
+    })
 }
 
 fn render_cell_parts(c: &CellParts) -> String {
@@ -325,15 +332,31 @@ fn shift_range_endpoints(lhs: &str, rhs: &str, plan: &ShiftPlan) -> Option<(Stri
             // band, snap to the surviving boundary; else keep as-is.
             let snap = |row: u32, is_lo_endpoint: bool| -> u32 {
                 if row >= band_lo && row <= band_hi {
-                    if is_lo_endpoint { new_r_min } else { new_r_max }
+                    if is_lo_endpoint {
+                        new_r_min
+                    } else {
+                        new_r_max
+                    }
                 } else {
                     row
                 }
             };
             // Determine which endpoint maps to lo vs hi.
-            let (lo_is_a, _) = if pre_a <= pre_b { (true, ()) } else { (false, ()) };
-            let new_a_row = if lo_is_a { snap(pre_a, true) } else { snap(pre_a, false) };
-            let new_b_row = if lo_is_a { snap(pre_b, false) } else { snap(pre_b, true) };
+            let (lo_is_a, _) = if pre_a <= pre_b {
+                (true, ())
+            } else {
+                (false, ())
+            };
+            let new_a_row = if lo_is_a {
+                snap(pre_a, true)
+            } else {
+                snap(pre_a, false)
+            };
+            let new_b_row = if lo_is_a {
+                snap(pre_b, false)
+            } else {
+                snap(pre_b, true)
+            };
             let new_a_row = shift_pair(new_a_row);
             let new_b_row = shift_pair(new_b_row);
             if !a.col_only {
@@ -391,14 +414,30 @@ fn shift_range_endpoints(lhs: &str, rhs: &str, plan: &ShiftPlan) -> Option<(Stri
             let pre_b = if b.col == 0 { new_c_max } else { b.col };
             let snap = |col: u32, is_lo_endpoint: bool| -> u32 {
                 if col >= band_lo && col <= band_hi {
-                    if is_lo_endpoint { new_c_min } else { new_c_max }
+                    if is_lo_endpoint {
+                        new_c_min
+                    } else {
+                        new_c_max
+                    }
                 } else {
                     col
                 }
             };
-            let (lo_is_a, _) = if pre_a <= pre_b { (true, ()) } else { (false, ()) };
-            let new_a_col = if lo_is_a { snap(pre_a, true) } else { snap(pre_a, false) };
-            let new_b_col = if lo_is_a { snap(pre_b, false) } else { snap(pre_b, true) };
+            let (lo_is_a, _) = if pre_a <= pre_b {
+                (true, ())
+            } else {
+                (false, ())
+            };
+            let new_a_col = if lo_is_a {
+                snap(pre_a, true)
+            } else {
+                snap(pre_a, false)
+            };
+            let new_b_col = if lo_is_a {
+                snap(pre_b, false)
+            } else {
+                snap(pre_b, true)
+            };
             let new_a_col = shift_pair(new_a_col);
             let new_b_col = shift_pair(new_b_col);
             if !a.row_only {
@@ -515,7 +554,11 @@ mod tests {
 
     #[test]
     fn noop_unchanged() {
-        let p = ShiftPlan { axis: Axis::Row, idx: 1, n: 0 };
+        let p = ShiftPlan {
+            axis: Axis::Row,
+            idx: 1,
+            n: 0,
+        };
         assert_eq!(shift_anchor("A1:E10", &p), "A1:E10");
     }
 

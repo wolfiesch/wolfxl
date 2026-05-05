@@ -13,6 +13,7 @@ pub mod defined_name;
 pub mod format;
 pub mod image;
 pub mod table;
+pub mod threaded_comment;
 pub mod validation;
 pub mod workbook;
 pub mod worksheet;
@@ -20,13 +21,12 @@ pub mod worksheet;
 pub use cell::{WriteCell, WriteCellValue};
 pub use chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarDir, BarGrouping, CategoryAxis, Chart,
-    ChartKind, DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition, Marker, MarkerSymbol,
-    PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis, SeriesTitle,
-    TickMark, Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
+    ChartKind, DataLabels, DataPoint, DateAxis, DisplayBlanksAs, DisplayUnits, ErrorBarType,
+    ErrorBarValType, ErrorBars, GraphicalProperties, Layout, LayoutTarget, Legend, LegendPosition,
+    Marker, MarkerSymbol, PivotSource, RadarStyle, Reference, ScatterStyle, Series, SeriesAxis,
+    SeriesTitle, TickMark, Title, TitleRun, Trendline, TrendlineKind, ValueAxis,
 };
 pub use comment::{Comment, CommentAuthor, CommentAuthorTable};
-pub use image::{ImageAnchor, SheetImage};
 pub use conditional::{
     CellIsOperator, ColorScaleStop, ConditionalFormat, ConditionalKind, ConditionalRule,
     ConditionalThreshold,
@@ -35,9 +35,11 @@ pub use date::to_excel_serial;
 pub use defined_name::{BuiltinName, DefinedName};
 pub use format::{
     AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, FormatSpec,
-    StylesBuilder,
+    GradientFillSpec, GradientStopSpec, ProtectionSpec, StylesBuilder,
 };
+pub use image::{ImageAnchor, SheetImage};
 pub use table::{Table, TableColumn, TableStyle};
+pub use threaded_comment::{Person, PersonTable, ThreadedComment};
 pub use validation::{DataValidation, ErrorStyle, ValidationOperator, ValidationType};
 pub use workbook::{DocProperties, Workbook};
 pub use worksheet::{Column, FreezePane, Hyperlink, Row, SheetVisibility, SplitPane, Worksheet};

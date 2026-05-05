@@ -5,12 +5,12 @@ This folder holds **placeholder** fixtures that exercise the `.xlsx` /
 just enough to guarantee that:
 
 1. `_rust.classify_file_format(path)` returns the right format string.
-2. `CalamineXlsbBook.open` / `CalamineXlsBook.open` (and their
+2. `NativeXlsbBook.open` / `CalamineXlsBook.open` (and their
    `open_from_bytes` siblings) accept real, parseable input.
-3. The strict-raise style accessors fire `NotImplementedError`.
+3. Legacy `.xls` strict-raise style accessors fire `NotImplementedError`.
 
-Pod-γ owns the curated parity fixtures and will replace these once
-their full parity matrix is in place.
+Curated parity fixtures live under `tests/parity/fixtures/{xls,xlsb}/`.
+This directory remains the minimal format-dispatch smoke corpus.
 
 ## Files
 
@@ -28,7 +28,7 @@ writing (`libreoffice 25` returns `Error: 0x81a` on the official
 filter).  We therefore **borrow** an existing valid xlsb from the
 `wolfxl-core` published crate's tests/fixtures.  Replace it with
 anything legitimate: the Pod-α tests only check that the file
-classifies correctly and round-trips through `Xlsb::new`.
+classifies correctly and opens through the native `.xlsb` reader.
 
 ```bash
 # xlsx (with openpyxl)

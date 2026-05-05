@@ -1,15 +1,13 @@
-"""Pivot-scoped formatting + conditional formatting (RFC-061 §2.5).
+"""Pivot-scoped formatting + conditional formatting.
 
 - :class:`PivotArea` — selector identifying a region inside a pivot
   table (a field, a data subarea, a label, a button).
 - :class:`Format` — pivot-area + dxfId + action ("formatting" |
   "blank"); table-scoped.
 - :class:`PivotConditionalFormat` — pivot-scoped CF; references a
-  workbook-scoped dxf table (RFC-026 §10).
+  workbook-scoped dxf table.
 - :class:`ChartFormat` — chart-scoped re-styling for pivot-chart
-  series (out-of-scope deferral target; ships as a typed stub).
-
-See RFC-061 §10.6 / §10.7 for the dict contracts.
+  series (read-only stub; write-side construction is deferred).
 """
 
 from __future__ import annotations
@@ -24,7 +22,7 @@ _VALID_FORMAT_ACTIONS = ("formatting", "blank")
 
 @dataclass
 class PivotArea:
-    """RFC-061 §10.6.
+    """A pivot-area selector.
 
     Selectors that combine give Excel's "specific cells in the pivot"
     targeting model. Most common:
@@ -68,7 +66,7 @@ class PivotArea:
 
 @dataclass
 class Format:
-    """RFC-061 §10.7. Table-scoped format directive."""
+    """Table-scoped format directive."""
 
     pivot_area: PivotArea
     dxf_id: int
@@ -145,12 +143,12 @@ def _rule_to_rust_dict(rule: Any) -> dict:
 
 @dataclass
 class ChartFormat:
-    """RFC-061 §2.5 — chart-scoped re-styling for pivot-chart series.
+    """Chart-scoped re-styling for pivot-chart series.
 
-    Stub for v2.0 — chart-side styling is read-write tolerant only;
-    write-side construction is deferred to v2.1+. Construction
-    succeeds (so callers can attach existing ChartFormat instances
-    via copy_worksheet); to_rust_dict returns a minimal payload.
+    Stub: chart-side styling is read-write tolerant only;
+    write-side construction is deferred. Construction succeeds (so
+    callers can attach existing ChartFormat instances via
+    copy_worksheet); to_rust_dict returns a minimal payload.
     """
 
     chart_index: int

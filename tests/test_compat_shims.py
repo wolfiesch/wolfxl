@@ -3,8 +3,9 @@
 Two goals:
 1. Every openpyxl module path exposed by wolfxl imports cleanly (no
    ``ModuleNotFoundError`` for the common paths).
-2. Every shim class raises ``NotImplementedError`` with a helpful message
-   at the construction site - not at downstream attribute access.
+2. Every formerly-stubbed shim class stays promoted to a real constructor,
+   while any remaining shim placeholders raise ``NotImplementedError`` with a
+   helpful message at construction time.
 
 A drop-in replacement that silently no-ops would be far worse than a
 pointed error. These tests pin the error behavior so we don't regress.
@@ -134,7 +135,25 @@ REAL_DATACLASSES: list[tuple[str, str, dict]] = [
     ("wolfxl.styles", "NamedStyle", {"name": "Metric"}),
     ("wolfxl.styles", "Protection", {}),
     ("wolfxl.styles", "GradientFill", {}),
+    ("wolfxl.styles.fills", "Fill", {}),
     ("wolfxl.styles.differential", "DifferentialStyle", {}),
+    ("wolfxl.worksheet.dimensions", "DimensionHolder", {"worksheet": None}),
+    ("wolfxl.worksheet.dimensions", "SheetFormatProperties", {}),
+    ("wolfxl.worksheet.dimensions", "SheetDimension", {}),
+    ("wolfxl.worksheet.merge", "MergeCell", {"ref": "A1:B2"}),
+    ("wolfxl.worksheet.merge", "MergeCells", {}),
+    ("wolfxl.worksheet.pagebreak", "Break", {}),
+    ("wolfxl.worksheet.pagebreak", "PageBreak", {}),
+    ("wolfxl.worksheet.properties", "WorksheetProperties", {}),
+    ("wolfxl.worksheet.table", "TableList", {}),
+    ("wolfxl.worksheet.table", "TablePartList", {}),
+    ("wolfxl.worksheet.table", "Related", {}),
+    ("wolfxl.worksheet.table", "XMLColumnProps", {}),
+    ("wolfxl.workbook.properties", "CalcProperties", {}),
+    ("wolfxl.workbook.properties", "WorkbookProperties", {}),
+    ("wolfxl.workbook.child", "_WorkbookChild", {}),
+    ("wolfxl.drawing.spreadsheet_drawing", "SpreadsheetDrawing", {}),
+    ("wolfxl.comments.comments", "CommentSheet", {}),
 ]
 
 
@@ -227,6 +246,180 @@ def test_color_is_hashable() -> None:
     a = wolfxl.Color(rgb="FF0000")
     b = wolfxl.Color(rgb="FF0000")
     assert {a, b} == {a}
+
+
+def test_style_openpyxl_aliases() -> None:
+    font = wolfxl.Font(b=True, i=True, u=True, sz=14, strikethrough=True)
+    assert font.bold is True
+    assert font.b is True
+    assert font.italic is True
+    assert font.i is True
+    assert font.underline == "single"
+    assert font.u == "single"
+    assert font.size == 14
+    assert font.sz == 14
+    assert font.strikethrough is True
+
+    fill = wolfxl.PatternFill(fill_type="solid", start_color="FFFF0000", end_color="FF00FF00")
+    assert fill.patternType == "solid"
+    assert fill.fill_type == "solid"
+    assert fill.fgColor == "FFFF0000"
+    assert fill.start_color == "FFFF0000"
+    assert fill.bgColor == "FF00FF00"
+    assert fill.end_color == "FF00FF00"
+
+    align = wolfxl.Alignment(wrapText=True, textRotation=45, shrinkToFit=True)
+    assert align.wrap_text is True
+    assert align.wrapText is True
+    assert align.text_rotation == 45
+    assert align.textRotation == 45
+    assert align.shrink_to_fit is True
+    assert align.shrinkToFit is True
+
+    side = wolfxl.Side(border_style="thin")
+    assert side.style == "thin"
+    assert side.border_style == "thin"
+    border = wolfxl.Border(diagonal=side, diagonalUp=True)
+    assert border.diagonal is side
+    assert border.diagonal_direction == "up"
+
+    color = wolfxl.Color(indexed=3)
+    assert color.value == 3
+    assert color.index == 3
+
+
+def test_style_tree_helpers_round_trip() -> None:
+    from xml.etree import ElementTree as ET
+
+    font = wolfxl.Font(b=True, i=True, sz=14, color="FF0000")
+    font_xml = ET.tostring(font.to_tree()).decode()
+    assert "<b" in font_xml
+    assert "<i" in font_xml
+    assert 'rgb="00FF0000"' in font_xml
+    assert wolfxl.Font.from_tree(font.to_tree()).bold is True
+
+    fill = wolfxl.PatternFill(fill_type="solid", start_color="FF0000")
+    assert wolfxl.PatternFill.from_tree(fill.to_tree()).fill_type == "solid"
+
+    alignment = wolfxl.Alignment(horizontal="center", wrapText=True)
+    assert wolfxl.Alignment.from_tree(alignment.to_tree()).wrapText is True
+
+    side = wolfxl.Side(border_style="thin")
+    border = wolfxl.Border(left=side, diagonalUp=True)
+    assert wolfxl.Border.from_tree(border.to_tree()).left.border_style == "thin"
+
+    color = wolfxl.Color.from_tree(wolfxl.Color(theme=1, tint=-0.3).to_tree())
+    assert color.theme == 1
+    assert color.tint == -0.3
+
+
+def test_protection_and_named_style_helpers() -> None:
+    from wolfxl.styles import NamedStyle, Protection
+
+    protection = Protection(locked=False, hidden=True)
+    assert Protection.from_tree(protection.to_tree()).locked is False
+    assert Protection.from_tree(protection.to_tree()).hidden is True
+
+    style = NamedStyle(name="Metric", builtinId=42, xfId=7, hidden=True)
+    assert style.as_name().name == "Metric"
+    assert style.as_tuple() == (0, 0, 0, 0, 0, 0, 0, 0, 0)
+    assert style.as_xf().xfId == 7
+    restored = NamedStyle.from_tree(style.to_tree())
+    assert restored.name == "Metric"
+    assert restored.builtinId == 42
+    assert restored.xfId == 7
+    assert restored.hidden is True
+
+
+def test_data_validation_openpyxl_aliases_and_tree_helpers() -> None:
+    from xml.etree import ElementTree as ET
+
+    from wolfxl.worksheet.datavalidation import DataValidation, DataValidationList
+
+    dv = DataValidation(type="list", formula1='"A,B"', allow_blank=True)
+    dv.add("A1:B2")
+    dv.hide_drop_down = True
+
+    assert dv.validation_type == "list"
+    assert dv.allowBlank is True
+    assert dv.allow_blank is True
+    assert dv.showDropDown is True
+    assert dv.hide_drop_down is True
+    assert str(dv.ranges) == "A1:B2"
+    assert "A1" in dv.cells
+
+    xml = ET.tostring(dv.to_tree()).decode()
+    assert 'sqref="A1:B2"' in xml
+    assert '<formula1>"A,B"</formula1>' in xml
+
+    restored = DataValidation.from_tree(dv.to_tree())
+    assert restored.validation_type == "list"
+    assert restored.formula1 == '"A,B"'
+    assert restored.hide_drop_down is True
+    assert str(restored.sqref) == "A1:B2"
+
+    validations = DataValidationList()
+    validations.append(DataValidation())
+    validations.append(restored)
+    assert validations.count == 2
+    list_xml = ET.tostring(validations.to_tree()).decode()
+    assert 'count="1"' in list_xml
+    assert "<dataValidation" in list_xml
+    assert DataValidationList.from_tree(validations.to_tree()).count == 1
+
+
+def test_filter_classes_accept_openpyxl_public_names() -> None:
+    from wolfxl.worksheet.filters import (
+        AutoFilter,
+        ColorFilter,
+        CustomFilter,
+        CustomFilters,
+        DynamicFilter,
+        FilterColumn,
+        Filters,
+        IconFilter,
+        SortCondition,
+        SortState,
+        Top10,
+    )
+
+    filters = Filters(blank=True, filter=["North"])
+    column = FilterColumn(colId=0, filters=filters, hiddenButton=True)
+    assert column.col_id == 0
+    assert column.colId == 0
+    assert column.hiddenButton is True
+    assert column.vals == ["North"]
+    assert column.blank is True
+
+    custom = FilterColumn(customFilters=CustomFilters(_and=True, customFilter=[CustomFilter(val="A")]))
+    assert custom.customFilters is not None
+    assert custom.customFilters.and_ is True
+
+    dynamic = DynamicFilter(type="today", valIso="2024-01-01", maxValIso="2024-01-31")
+    assert dynamic.valIso == "2024-01-01"
+    assert dynamic.maxValIso == "2024-01-31"
+
+    color = ColorFilter(dxfId=2, cellColor=False)
+    icon = IconFilter(iconSet="3Arrows", iconId=1)
+    top = Top10(filterVal=5.0)
+    assert color.dxfId == 2
+    assert color.cellColor is False
+    assert icon.iconSet == "3Arrows"
+    assert icon.iconId == 1
+    assert top.filterVal == 5.0
+
+    sort = SortCondition(ref="A2:A10", sortBy="cellColor", dxfId=2, iconSet="3Arrows")
+    state = SortState(sortCondition=[sort], columnSort=True, caseSensitive=True, sortMethod="stroke")
+    auto_filter = AutoFilter(ref="A1:A10", filterColumn=[column], sortState=state)
+    assert auto_filter.filterColumn == [column]
+    assert auto_filter.sortState is state
+    assert state.sortCondition == [sort]
+    assert state.columnSort is True
+    assert state.caseSensitive is True
+    assert state.sortMethod == "stroke"
+    assert sort.sortBy == "cellColor"
+    assert sort.dxfId == 2
+    assert sort.iconSet == "3Arrows"
 
 
 def test_dataframe_to_rows_without_pandas_import() -> None:

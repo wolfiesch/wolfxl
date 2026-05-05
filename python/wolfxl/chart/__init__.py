@@ -1,10 +1,6 @@
 """``wolfxl.chart`` — openpyxl-shaped chart construction API.
 
-Sprint Μ-prime Pod-β′ (RFC-046 §10/§11) ships the v1.6.1 contract
-with 16 chart families. The eight v1.6.0 2-D types still ship; the
-8 new families (BarChart3D, LineChart3D, PieChart3D / Pie3D,
-AreaChart3D, SurfaceChart, SurfaceChart3D, StockChart,
-ProjectedPieChart) replace the v1.6.0 NotImplementedError stubs.
+Sixteen chart families covering both 2-D and 3-D variants:
 
 * :class:`BarChart`, :class:`BarChart3D`
 * :class:`LineChart`, :class:`LineChart3D`

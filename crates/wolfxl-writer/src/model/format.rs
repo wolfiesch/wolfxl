@@ -20,7 +20,8 @@ use std::collections::HashMap;
 pub struct FontSpec {
     pub bold: bool,
     pub italic: bool,
-    pub underline: bool,
+    /// Underline style, e.g. `"single"` or `"double"`.
+    pub underline: Option<String>,
     pub strikethrough: bool,
     pub name: Option<String>,
     /// Stored as integer points (e.g. 11). Excel's schema allows a `Decimal`
@@ -39,6 +40,35 @@ pub struct FillSpec {
     pub pattern_type: String,
     pub fg_color_rgb: Option<String>,
     pub bg_color_rgb: Option<String>,
+    /// When `Some`, this fill is a `<gradientFill>` and the pattern
+    /// fields above are ignored on emit. OOXML allows exactly one of
+    /// `<patternFill>` / `<gradientFill>` per `<fill>`.
+    pub gradient: Option<GradientFillSpec>,
+}
+
+/// Gradient fill payload mirroring OOXML's `<gradientFill>` element.
+///
+/// All numeric fields are stored as canonical decimal strings so the
+/// builder can dedup via `Hash + Eq`. Two cells with the same gradient
+/// share one `<fill>` slot exactly like pattern fills.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct GradientFillSpec {
+    /// `"linear"` (default) or `"path"`. Linear uses `degree`; path uses
+    /// `left`/`right`/`top`/`bottom` to position a focus rectangle.
+    pub gradient_type: String,
+    pub degree: String,
+    pub left: String,
+    pub right: String,
+    pub top: String,
+    pub bottom: String,
+    pub stops: Vec<GradientStopSpec>,
+}
+
+/// One `<stop position="..."><color .../></stop>` inside a `<gradientFill>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct GradientStopSpec {
+    pub position: String,
+    pub color_rgb: Option<String>,
 }
 
 /// One side of a cell border.
@@ -75,6 +105,20 @@ pub struct AlignmentSpec {
     pub shrink_to_fit: bool,
 }
 
+/// Cell-level protection flags. Lives as a `<protection>` child element of
+/// `<xf>` and is gated on `applyProtection="1"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProtectionSpec {
+    pub locked: bool,
+    pub hidden: bool,
+}
+
+impl Default for ProtectionSpec {
+    fn default() -> Self {
+        Self { locked: true, hidden: false }
+    }
+}
+
 /// Full format description for one cell or named style.
 ///
 /// Every field is optional — a `FormatSpec::default()` means "use the
@@ -90,6 +134,9 @@ pub struct FormatSpec {
     /// A format code like `"0.00"`, `"$#,##0"`, `"yyyy-mm-dd"`, or one of
     /// Excel's 164 built-in format IDs referenced by name.
     pub number_format: Option<String>,
+    /// Cell-level protection flags. `None` means "inherit the default
+    /// (locked=true, hidden=false)" and emit no `<protection>` child.
+    pub protection: Option<ProtectionSpec>,
 }
 
 /// Deduplicating styles builder.
@@ -117,6 +164,8 @@ pub struct StylesBuilder {
     /// Differential-format records referenced by conditional-formatting rules.
     /// Index into this vec is what `<cfRule dxfId="N">` points at.
     pub dxfs: Vec<DxfRecord>,
+    /// Workbook-level named cell styles beyond the built-in Normal style.
+    pub named_styles: Vec<NamedStyleRecord>,
 
     // --- Dedup indices (not serialized) ---
     font_index: HashMap<FontSpec, u32>,
@@ -137,6 +186,7 @@ impl Default for StylesBuilder {
             num_fmts: Vec::new(),
             cell_xfs: Vec::new(),
             dxfs: Vec::new(),
+            named_styles: Vec::new(),
             font_index: HashMap::new(),
             fill_index: HashMap::new(),
             border_index: HashMap::new(),
@@ -186,19 +236,20 @@ impl StylesBuilder {
     /// The default `FormatSpec` always returns 0 (the "no style" sentinel),
     /// letting cells emit without the `s` attribute.
     pub fn intern_format(&mut self, spec: &FormatSpec) -> u32 {
-        if spec == &FormatSpec::default() {
+        self.intern_format_with_xf_id(spec, 0)
+    }
+
+    /// Like [`intern_format`], but stamps the resulting XfRecord with a
+    /// non-zero `xfId` so it points to a `<cellStyleXfs>` slot. Used by
+    /// `cell.style = "Highlight"` to bind a cell's xf to a registered
+    /// named style; the resulting `<xf>` element gets `xfId="N"` and
+    /// the reader resurfaces the style's name from `<cellStyles>`.
+    pub fn intern_format_with_xf_id(&mut self, spec: &FormatSpec, xf_id: u32) -> u32 {
+        if xf_id == 0 && spec == &FormatSpec::default() {
             return 0;
         }
-        let font_id = spec
-            .font
-            .as_ref()
-            .map(|f| self.intern_font(f))
-            .unwrap_or(0);
-        let fill_id = spec
-            .fill
-            .as_ref()
-            .map(|f| self.intern_fill(f))
-            .unwrap_or(0);
+        let font_id = spec.font.as_ref().map(|f| self.intern_font(f)).unwrap_or(0);
+        let fill_id = spec.fill.as_ref().map(|f| self.intern_fill(f)).unwrap_or(0);
         let border_id = spec
             .border
             .as_ref()
@@ -215,12 +266,15 @@ impl StylesBuilder {
             fill_id,
             border_id,
             num_fmt_id,
+            xf_id,
             alignment: spec.alignment.clone(),
+            protection: spec.protection.clone(),
             apply_font: spec.font.is_some(),
             apply_fill: spec.fill.is_some(),
             apply_border: spec.border.is_some(),
             apply_number_format: spec.number_format.is_some(),
             apply_alignment: spec.alignment.is_some(),
+            apply_protection: spec.protection.is_some(),
         };
         self.intern_xf(record)
     }
@@ -294,6 +348,41 @@ impl StylesBuilder {
         self.dxf_index.insert(dxf.clone(), idx);
         idx
     }
+
+    /// Register a workbook-level named style by name.
+    pub fn add_named_style(&mut self, name: &str) {
+        if name.is_empty() || name == "Normal" {
+            return;
+        }
+        if self.named_styles.iter().any(|style| style.name == name) {
+            return;
+        }
+        self.named_styles.push(NamedStyleRecord {
+            name: name.to_string(),
+        });
+    }
+
+    /// Resolve a named-style name to its `<cellStyleXfs>` slot.
+    ///
+    /// `"Normal"` always resolves to slot 0 (Excel's reserved default).
+    /// User-registered styles map to slot `1 + position`. Returns `None`
+    /// for unknown names so callers can decide whether to skip the xfId
+    /// stamp or auto-register first.
+    pub fn xf_id_for_named_style(&self, name: &str) -> Option<u32> {
+        if name == "Normal" {
+            return Some(0);
+        }
+        self.named_styles
+            .iter()
+            .position(|style| style.name == name)
+            .map(|idx| 1 + idx as u32)
+    }
+}
+
+/// One workbook-level named cell style.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NamedStyleRecord {
+    pub name: String,
 }
 
 /// One row of the `<cellXfs>` table. Two cells with the same `XfRecord`
@@ -304,12 +393,20 @@ pub struct XfRecord {
     pub fill_id: u32,
     pub border_id: u32,
     pub num_fmt_id: u32,
+    /// `xfId` attr on the `<xf>` element. Points to a `<cellStyleXfs>`
+    /// entry; 0 means the default Normal style. Cells that opt into a
+    /// user-defined named style (via `cell.style = "Highlight"`) carry
+    /// a non-zero `xf_id`, which is what `cell.style` resurfaces on
+    /// load via the reader's `<cellStyles>` lookup.
+    pub xf_id: u32,
     pub alignment: Option<AlignmentSpec>,
+    pub protection: Option<ProtectionSpec>,
     pub apply_font: bool,
     pub apply_fill: bool,
     pub apply_border: bool,
     pub apply_number_format: bool,
     pub apply_alignment: bool,
+    pub apply_protection: bool,
 }
 
 /// One entry in `<dxfs>` — differential formatting for conditional
@@ -412,5 +509,35 @@ mod tests {
         assert_eq!(id, 2);
         // Also should not add a custom entry.
         assert!(b.num_fmts.is_empty());
+    }
+
+    #[test]
+    fn xf_id_for_named_style_resolves_normal_and_custom() {
+        let mut b = StylesBuilder::default();
+        // Normal always maps to slot 0 (Excel's reserved default).
+        assert_eq!(b.xf_id_for_named_style("Normal"), Some(0));
+        // Unknown names return None.
+        assert_eq!(b.xf_id_for_named_style("Highlight"), None);
+        // Registered styles map to 1 + position.
+        b.add_named_style("Highlight");
+        b.add_named_style("Total");
+        assert_eq!(b.xf_id_for_named_style("Highlight"), Some(1));
+        assert_eq!(b.xf_id_for_named_style("Total"), Some(2));
+    }
+
+    #[test]
+    fn intern_format_with_xf_id_threads_xf_id_into_record() {
+        let mut b = StylesBuilder::default();
+        b.add_named_style("Highlight");
+        let spec = FormatSpec {
+            font: Some(FontSpec {
+                bold: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let xf_idx = b.intern_format_with_xf_id(&spec, 1);
+        assert!(xf_idx >= 1, "non-default spec should not collide with slot 0");
+        assert_eq!(b.cell_xfs[xf_idx as usize].xf_id, 1);
     }
 }

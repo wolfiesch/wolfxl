@@ -5,13 +5,12 @@
 //! routes to the right backend, and returns a workbook that answers the
 //! same questions (`sheet_names`, `first_sheet`, per-column schema) as
 //! the xlsx path - even when the backend has to synthesize a sheet (CSV)
-//! or calamine leaves styles empty (xls / xlsb / ods).
+//! or calamine leaves styles empty (xls / ods).
 //!
-//! What these tests do NOT assert: number-format fidelity on xls/xlsb/ods.
-//! calamine-styles' non-xlsx readers return an empty `StyleRange` today,
-//! so the `number_format` field always comes back `None`. That's a known
-//! gap per the sprint plan R1 mitigation - values and schema inference
-//! work either way.
+//! What these tests do NOT assert: number-format fidelity on xls/ods.
+//! calamine-styles' legacy non-xlsx readers return an empty `StyleRange`
+//! today, so the `number_format` field always comes back `None` there.
+//! Native xlsb carries number-format metadata through the shared Sheet API.
 
 use std::path::PathBuf;
 
@@ -118,7 +117,7 @@ fn opens_xls_with_calamine_backend() {
 }
 
 #[test]
-fn opens_xlsb_with_calamine_backend() {
+fn opens_xlsb_with_native_backend() {
     // Fixture source: calamine's MIT-licensed `tests/date.xlsb`, copied
     // into this repo as a tiny binary workbook that exercises the xlsb
     // dispatch path without relying on a local Excel install.
@@ -142,6 +141,13 @@ fn opens_xlsb_with_calamine_backend() {
     let schema = infer_sheet_schema(&sheet);
     assert_eq!(schema.columns.len(), 2);
     assert_eq!(schema.columns[1].inferred_type, InferredType::Int);
+    assert_eq!(
+        sheet
+            .row(0)
+            .and_then(|row| row.first())
+            .and_then(|cell| cell.number_format.as_deref()),
+        Some("yyyy\\-mm\\-dd")
+    );
 }
 
 #[test]

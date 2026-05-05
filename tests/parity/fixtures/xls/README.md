@@ -25,8 +25,8 @@ To regenerate:
 python3 scripts/sprint_kappa_build_fixtures.py /tmp/calamine
 ```
 
-(The calamine path is only used for `.xlsb`; `.xls` fixtures regenerate
-from the script's own `_build_*` functions regardless.)
+(`.xlsb` fixtures are vendored from calamine's corpus; `.xls` fixtures
+regenerate from the script's own `_build_*` functions.)
 
 ## Why committed, not generated at test time?
 

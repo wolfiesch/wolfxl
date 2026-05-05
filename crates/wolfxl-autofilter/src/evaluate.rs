@@ -13,8 +13,8 @@
 
 use crate::model::{
     AutoFilter, ColorFilter, CustomFilter, CustomFilterOp, CustomFilters, DynamicFilter,
-    DynamicFilterType, FilterColumn, FilterKind, IconFilter, NumberFilter, SortState,
-    StringFilter, Top10,
+    DynamicFilterType, FilterColumn, FilterKind, IconFilter, NumberFilter, SortState, StringFilter,
+    Top10,
 };
 
 /// Cell value as seen by the evaluator. The patcher reads cell text/
@@ -246,7 +246,9 @@ fn eval_dynamic_filter(
             let today = today_serial(ref_date_serial);
             let year = year_from_serial(today);
             let jan1 = serial_for_jan1(year);
-            cell.as_number().map(|n| n >= jan1 && n <= today).unwrap_or(false)
+            cell.as_number()
+                .map(|n| n >= jan1 && n <= today)
+                .unwrap_or(false)
         }
         DynamicFilterType::Today | DynamicFilterType::Tomorrow | DynamicFilterType::Yesterday => {
             let target = match d.type_ {
@@ -259,9 +261,7 @@ fn eval_dynamic_filter(
                 .map(|n| n.floor() == target.floor())
                 .unwrap_or(false)
         }
-        DynamicFilterType::ThisWeek
-        | DynamicFilterType::LastWeek
-        | DynamicFilterType::NextWeek => {
+        DynamicFilterType::ThisWeek | DynamicFilterType::LastWeek | DynamicFilterType::NextWeek => {
             let today = today_serial(ref_date_serial);
             let dow = (today.floor() as i64 + 6).rem_euclid(7);
             let week_start = today.floor() - dow as f64;
@@ -335,9 +335,7 @@ fn eval_dynamic_filter(
                 })
                 .unwrap_or(false)
         }
-        DynamicFilterType::ThisYear
-        | DynamicFilterType::LastYear
-        | DynamicFilterType::NextYear => {
+        DynamicFilterType::ThisYear | DynamicFilterType::LastYear | DynamicFilterType::NextYear => {
             let today = today_serial(ref_date_serial);
             let year = year_from_serial(today);
             let target_year = match d.type_ {
@@ -402,9 +400,7 @@ fn eval_string_filter(cell: &Cell, s: &StringFilter) -> bool {
         None => return false,
     };
     let val_lower = val.to_lowercase();
-    s.values
-        .iter()
-        .any(|v| v.to_lowercase() == val_lower)
+    s.values.iter().any(|v| v.to_lowercase() == val_lower)
 }
 
 fn eval_top10(cell: &Cell, t: &Top10, all_rows: &[Vec<Cell>], col_id: u32) -> bool {
@@ -481,11 +477,7 @@ fn compute_sort_order(rows: &[Vec<Cell>], state: &SortState) -> Option<Vec<u32>>
     Some(idx)
 }
 
-fn compare_cells(
-    a: Option<&Cell>,
-    b: Option<&Cell>,
-    case_sensitive: bool,
-) -> std::cmp::Ordering {
+fn compare_cells(a: Option<&Cell>, b: Option<&Cell>, case_sensitive: bool) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let a = a.unwrap_or(&Cell::Empty);
     let b = b.unwrap_or(&Cell::Empty);
@@ -654,10 +646,7 @@ mod tests {
 
     #[test]
     fn no_filters_no_hidden() {
-        let rows = rows_of(vec![
-            vec![Cell::Number(1.0)],
-            vec![Cell::Number(2.0)],
-        ]);
+        let rows = rows_of(vec![vec![Cell::Number(1.0)], vec![Cell::Number(2.0)]]);
         let r = evaluate(&rows, &[], None, None);
         assert!(r.hidden_row_indices.is_empty());
         assert!(r.sort_order.is_none());
@@ -903,10 +892,7 @@ mod tests {
         // Use ref_date_serial directly to avoid env var coupling.
         // Excel serial 45000 = 2023-03-15.
         let today = 45000.0;
-        let rows = vec![
-            vec![Cell::Date(45000.0)],
-            vec![Cell::Date(45001.0)],
-        ];
+        let rows = vec![vec![Cell::Date(45000.0)], vec![Cell::Date(45001.0)]];
         let fc = FilterColumn {
             col_id: 0,
             hidden_button: false,
@@ -926,8 +912,8 @@ mod tests {
     #[test]
     fn dynamic_q1() {
         let rows = vec![
-            vec![Cell::Date(serial_for_jan1(2024))],          // 2024-01-01 Q1
-            vec![Cell::Date(serial_for_jan1(2024) + 100.0)],  // ~April Q2
+            vec![Cell::Date(serial_for_jan1(2024))], // 2024-01-01 Q1
+            vec![Cell::Date(serial_for_jan1(2024) + 100.0)], // ~April Q2
         ];
         let fc = FilterColumn {
             col_id: 0,

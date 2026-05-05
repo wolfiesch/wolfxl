@@ -37,6 +37,7 @@ Changelog = "https://github.com/SynthGL/wolfxl/releases"
 bindings = "pyo3"
 module-name = "wolfxl._rust"
 python-source = "python"
+features = ["extension-module"]
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -71,6 +72,7 @@ markers = [
     "rfc035: RFC-035 — Workbook.copy_worksheet in modify+write mode.",
     "rfc031: RFC-031 — insert_cols/delete_cols in modify mode.",
     "rfc036: RFC-036 — Workbook.move_sheet in modify mode.",
+    "rfc046: RFC-046 — chart write and modify-mode chart insertion.",
     "manual: tests requiring manual environment setup (e.g. LibreOffice path).",
 ]
 

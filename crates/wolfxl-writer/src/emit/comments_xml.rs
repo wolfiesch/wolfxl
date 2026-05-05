@@ -90,14 +90,20 @@ mod tests {
         let sheet = Worksheet::new("S");
         let authors = CommentAuthorTable::default();
         let result = emit(&sheet, &authors);
-        assert!(result.is_empty(), "expected empty Vec, got {} bytes", result.len());
+        assert!(
+            result.is_empty(),
+            "expected empty Vec, got {} bytes",
+            result.len()
+        );
     }
 
     // 2. Single comment single author well-formed
     #[test]
     fn single_comment_single_author_well_formed() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(0, "the text"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(0, "the text"));
         let mut authors = make_author_table(&["Alice"]);
         let _ = authors.intern("Alice"); // already interned, just verify dedup
 
@@ -107,9 +113,15 @@ mod tests {
 
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<authors>"), "has <authors>: {text}");
-        assert!(text.contains("<author>Alice</author>"), "author Alice: {text}");
+        assert!(
+            text.contains("<author>Alice</author>"),
+            "author Alice: {text}"
+        );
         assert!(text.contains("</authors>"), "has </authors>: {text}");
-        assert!(text.contains("<comment ref=\"A1\" authorId=\"0\">"), "comment ref: {text}");
+        assert!(
+            text.contains("<comment ref=\"A1\" authorId=\"0\">"),
+            "comment ref: {text}"
+        );
         assert!(text.contains("<t>the text</t>"), "comment text: {text}");
     }
 
@@ -122,9 +134,15 @@ mod tests {
         let alice_id = authors.intern("Alice");
         let charlie_id = authors.intern("Charlie");
 
-        sheet.comments.insert("A1".to_string(), make_comment(bob_id, "from bob"));
-        sheet.comments.insert("B2".to_string(), make_comment(alice_id, "from alice"));
-        sheet.comments.insert("C3".to_string(), make_comment(charlie_id, "from charlie"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(bob_id, "from bob"));
+        sheet
+            .comments
+            .insert("B2".to_string(), make_comment(alice_id, "from alice"));
+        sheet
+            .comments
+            .insert("C3".to_string(), make_comment(charlie_id, "from charlie"));
 
         let bytes = emit(&sheet, &authors);
         parse_ok(&bytes);
@@ -141,28 +159,38 @@ mod tests {
     #[test]
     fn comment_text_xml_escape() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(0, "<b> & >"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(0, "<b> & >"));
         let authors = make_author_table(&["Author"]);
 
         let bytes = emit(&sheet, &authors);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
 
-        assert!(text.contains("&lt;b&gt; &amp; &gt;"), "escaped text: {text}");
+        assert!(
+            text.contains("&lt;b&gt; &amp; &gt;"),
+            "escaped text: {text}"
+        );
     }
 
     // 5. Author name XML escape
     #[test]
     fn author_name_xml_escape() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(0, "note"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(0, "note"));
         let authors = make_author_table(&["R&D Team"]);
 
         let bytes = emit(&sheet, &authors);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
 
-        assert!(text.contains("<author>R&amp;D Team</author>"), "escaped author: {text}");
+        assert!(
+            text.contains("<author>R&amp;D Team</author>"),
+            "escaped author: {text}"
+        );
     }
 
     // 6. Multiple comments in A1 order (BTreeMap natural order)
@@ -170,9 +198,15 @@ mod tests {
     fn multiple_comments_in_a1_order() {
         let mut sheet = Worksheet::new("S");
         // Insert in non-A1 order — BTreeMap will sort them
-        sheet.comments.insert("Z3".to_string(), make_comment(0, "last"));
-        sheet.comments.insert("A1".to_string(), make_comment(0, "first"));
-        sheet.comments.insert("B2".to_string(), make_comment(0, "middle"));
+        sheet
+            .comments
+            .insert("Z3".to_string(), make_comment(0, "last"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(0, "first"));
+        sheet
+            .comments
+            .insert("B2".to_string(), make_comment(0, "middle"));
 
         let authors = make_author_table(&["Author"]);
         let bytes = emit(&sheet, &authors);
@@ -195,11 +229,21 @@ mod tests {
         let b_id = authors.intern("Bob");
         let c_id = authors.intern("Charlie");
 
-        sheet.comments.insert("A1".to_string(), make_comment(a_id, "note1"));
-        sheet.comments.insert("B2".to_string(), make_comment(b_id, "note2"));
-        sheet.comments.insert("C3".to_string(), make_comment(c_id, "note3"));
-        sheet.comments.insert("D4".to_string(), make_comment(a_id, "note4"));
-        sheet.comments.insert("E5".to_string(), make_comment(b_id, "note5"));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(a_id, "note1"));
+        sheet
+            .comments
+            .insert("B2".to_string(), make_comment(b_id, "note2"));
+        sheet
+            .comments
+            .insert("C3".to_string(), make_comment(c_id, "note3"));
+        sheet
+            .comments
+            .insert("D4".to_string(), make_comment(a_id, "note4"));
+        sheet
+            .comments
+            .insert("E5".to_string(), make_comment(b_id, "note5"));
 
         let bytes = emit(&sheet, &authors);
         assert!(!bytes.is_empty());

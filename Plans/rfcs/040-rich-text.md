@@ -169,15 +169,17 @@ rich text. Tracked as a future RFC; see §10.
    `crates/wolfxl-reader/tests/rich_text.rs` covering `<is>`-encoded,
    `<si>`-encoded, single-run-no-rPr, multi-run, and phonetic-run
    ignored cases.
-2. **Python round-trip** — `tests/test_cell_rich_text.py` reads a
-   fixture authored by openpyxl; asserts `cell.rich_text` matches
-   the source `CellRichText` element-by-element.
+2. **Python round-trip** — `tests/parity/test_rich_text_parity.py`
+   reads fixtures authored by openpyxl; asserts `cell.rich_text`
+   matches the source `CellRichText` element-by-element.
 3. **openpyxl parity** — `tests/parity/test_rich_text_parity.py`
    compares `Cell.value` (flat) and `Cell.rich_text` (list) against
    openpyxl on the same fixture.
 4. **Cross-mode** — modify-mode reads rich text the same way; tested
    on a modify-mode loaded workbook.
-5. **Regression fixture** — checked into `tests/fixtures/rich_text/`.
+5. **Regression fixtures** — generated in-test by
+   `tests/parity/test_rich_text_parity.py` and
+   `tests/test_rich_text_read.py`.
 6. **LibreOffice cross-renderer** — N/A (read-only RFC).
 
 ## 7. Cross-Mode Asymmetries (BREAKING)

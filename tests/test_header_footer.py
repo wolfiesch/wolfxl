@@ -81,9 +81,10 @@ class TestHeaderFooterItem:
     def test_default_is_empty(self):
         hfi = HeaderFooterItem()
         assert hfi.is_empty()
-        assert hfi.left is None
-        assert hfi.center is None
-        assert hfi.right is None
+        assert hfi.left.text is None
+        assert hfi.center.text is None
+        assert hfi.right.text is None
+        assert hfi.left == None  # noqa: E711 - compare-with-None hits is_empty()
 
     def test_text_composes_segments(self):
         hfi = HeaderFooterItem(left="L", center="C", right="R")

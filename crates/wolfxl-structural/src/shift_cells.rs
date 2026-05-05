@@ -70,26 +70,22 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                 }
 
                 match local.as_slice() {
-                    b"row" => {
-                        match handle_row_start(e, plan) {
-                            RowAction::Keep(start) => {
-                                let _ = writer.write_event(Event::Start(start));
-                            }
-                            RowAction::Drop => {
-                                skip_depth = 1;
-                            }
+                    b"row" => match handle_row_start(e, plan) {
+                        RowAction::Keep(start) => {
+                            let _ = writer.write_event(Event::Start(start));
                         }
-                    }
-                    b"c" => {
-                        match handle_cell_start(e, plan) {
-                            CellAction::Keep(start) => {
-                                let _ = writer.write_event(Event::Start(start));
-                            }
-                            CellAction::Drop => {
-                                skip_depth = 1;
-                            }
+                        RowAction::Drop => {
+                            skip_depth = 1;
                         }
-                    }
+                    },
+                    b"c" => match handle_cell_start(e, plan) {
+                        CellAction::Keep(start) => {
+                            let _ = writer.write_event(Event::Start(start));
+                        }
+                        CellAction::Drop => {
+                            skip_depth = 1;
+                        }
+                    },
                     b"f" => {
                         in_f = true;
                         let _ = writer.write_event(Event::Start(e.to_owned()));
@@ -147,22 +143,18 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     continue;
                 }
                 match local.as_slice() {
-                    b"row" => {
-                        match handle_row_start(e, plan) {
-                            RowAction::Keep(start) => {
-                                let _ = writer.write_event(Event::Empty(start));
-                            }
-                            RowAction::Drop => {}
+                    b"row" => match handle_row_start(e, plan) {
+                        RowAction::Keep(start) => {
+                            let _ = writer.write_event(Event::Empty(start));
                         }
-                    }
-                    b"c" => {
-                        match handle_cell_start(e, plan) {
-                            CellAction::Keep(start) => {
-                                let _ = writer.write_event(Event::Empty(start));
-                            }
-                            CellAction::Drop => {}
+                        RowAction::Drop => {}
+                    },
+                    b"c" => match handle_cell_start(e, plan) {
+                        CellAction::Keep(start) => {
+                            let _ = writer.write_event(Event::Empty(start));
                         }
-                    }
+                        CellAction::Drop => {}
+                    },
                     b"dimension" | b"mergeCell" | b"hyperlink" => {
                         let new_e = rewrite_ref_attr(e, plan, b"ref", true);
                         if let Some(start) = new_e {
@@ -274,7 +266,11 @@ fn handle_row_start<'a>(e: &BytesStart<'a>, plan: &ShiftPlan) -> RowAction<'a> {
             row_n = Some(n);
             // Decide.
             if plan.is_insert() {
-                let new_n = if n >= plan.idx { n as i64 + plan.n as i64 } else { n as i64 };
+                let new_n = if n >= plan.idx {
+                    n as i64 + plan.n as i64
+                } else {
+                    n as i64
+                };
                 if new_n < 1 || new_n > crate::MAX_ROW as i64 {
                     return RowAction::Drop;
                 }
@@ -286,7 +282,11 @@ fn handle_row_start<'a>(e: &BytesStart<'a>, plan: &ShiftPlan) -> RowAction<'a> {
                 if n >= plan.idx && n < plan.idx + abs {
                     return RowAction::Drop;
                 }
-                let new_n = if n >= plan.idx + abs { n as i64 + plan.n as i64 } else { n as i64 };
+                let new_n = if n >= plan.idx + abs {
+                    n as i64 + plan.n as i64
+                } else {
+                    n as i64
+                };
                 if new_n < 1 {
                     return RowAction::Drop;
                 }
@@ -445,7 +445,8 @@ mod tests {
         // Row 5 (in delete band) holds value "x"; row 8 (outside band)
         // holds value "y". After delete(5, 3) the band-row drops
         // entirely, and row 8 → row 5 with cell value "y".
-        let xml = r#"<row r="5"><c r="A5"><v>x</v></c></row><row r="8"><c r="A8"><v>y</v></c></row>"#;
+        let xml =
+            r#"<row r="5"><c r="A5"><v>x</v></c></row><row r="8"><c r="A8"><v>y</v></c></row>"#;
         let p = ShiftPlan::delete(crate::Axis::Row, 5, 3);
         let out = apply(xml, &p);
         // Original band-row content "x" is gone; surviving content "y"
@@ -517,7 +518,11 @@ mod tests {
     #[test]
     fn noop_returns_input_bytes() {
         let xml = r#"<sheetData><row r="5"><c r="A5"/></row></sheetData>"#;
-        let p = ShiftPlan { axis: crate::Axis::Row, idx: 1, n: 0 };
+        let p = ShiftPlan {
+            axis: crate::Axis::Row,
+            idx: 1,
+            n: 0,
+        };
         let out = apply(xml, &p);
         assert_eq!(out, xml);
     }

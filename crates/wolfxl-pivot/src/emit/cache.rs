@@ -5,8 +5,8 @@
 
 use super::{esc_attr, fmt_num, push_attr, push_attr_if, xml_decl};
 use crate::model::cache::{
-    CacheField, CacheValue, CalculatedField, DateGroup, FieldGroup, FieldGroupKind,
-    PivotCache, RangeGroup, SharedItems, WorksheetSource,
+    CacheField, CacheValue, CalculatedField, DateGroup, FieldGroup, FieldGroupKind, PivotCache,
+    RangeGroup, SharedItems, WorksheetSource,
 };
 
 /// Emit the pivotCacheDefinition XML. The `r:id` for the records part
@@ -31,7 +31,11 @@ pub fn pivot_cache_definition_xml(pc: &PivotCache, records_rid: Option<&str>) ->
     );
     push_attr(&mut out, "refreshedBy", &pc.refreshed_by);
     push_attr(&mut out, "createdVersion", &pc.created_version.to_string());
-    push_attr(&mut out, "refreshedVersion", &pc.refreshed_version.to_string());
+    push_attr(
+        &mut out,
+        "refreshedVersion",
+        &pc.refreshed_version.to_string(),
+    );
     push_attr(
         &mut out,
         "minRefreshableVersion",

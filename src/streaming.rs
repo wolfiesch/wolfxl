@@ -5,7 +5,7 @@
 //! time using a hand-rolled byte-scanner over the sheet XML, resolving
 //! shared-string-table (SST) references upfront. Style metadata is
 //! exposed as a `style_id` only — Python-side `StreamingCell` resolves the
-//! actual font/fill/etc. via the existing `CalamineStyledBook` code path
+//! actual font/fill/etc. via the eager Rust reader code path
 //! (which already loads `xl/styles.xml` and exposes O(1) style lookups).
 //!
 //! Public surface (Python):
@@ -87,9 +87,9 @@ fn load_sst(zip: &mut ZipArchive<File>) -> PyResult<Vec<String>> {
             }
             Ok(Event::Text(t)) => {
                 if in_si && in_t {
-                    let s = t.unescape().map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("SST text decode: {e}"))
-                    })?;
+                    let s = t
+                        .unescape()
+                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("SST text decode: {e}")))?;
                     current.push_str(&s);
                 }
             }
@@ -191,10 +191,7 @@ impl StreamingSheetReader {
     ///
     /// Returns `None` when the stream is exhausted. Otherwise returns
     /// `(row_index_1based, [(col_1based, value, style_id_or_None, type_str), ...])`.
-    pub fn read_next_row<'py>(
-        &mut self,
-        py: Python<'py>,
-    ) -> PyResult<Option<Bound<'py, PyTuple>>> {
+    pub fn read_next_row<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyTuple>>> {
         if self.exhausted {
             return Ok(None);
         }
@@ -218,10 +215,8 @@ impl StreamingSheetReader {
                         )?;
                         cell_list.append(tup)?;
                     }
-                    let outer = PyTuple::new(
-                        py,
-                        [row_idx.into_py_any(py)?, cell_list.into_py_any(py)?],
-                    )?;
+                    let outer =
+                        PyTuple::new(py, [row_idx.into_py_any(py)?, cell_list.into_py_any(py)?])?;
                     return Ok(Some(outer));
                 }
                 StepResult::Skip => continue,
@@ -335,8 +330,7 @@ impl StreamingSheetReader {
 
                 let col = match coord.as_deref() {
                     Some(c) => {
-                        let (_r, c0) = a1_to_row_col(c)
-                            .map_err(PyErr::new::<PyValueError, _>)?;
+                        let (_r, c0) = a1_to_row_col(c).map_err(PyErr::new::<PyValueError, _>)?;
                         c0 + 1
                     }
                     None => cells.last().map(|c| c.col + 1).unwrap_or(1),
@@ -521,7 +515,11 @@ fn read_attr(attrs: &str, name: &str) -> Option<String> {
     while j < bytes.len() && bytes[j] != quote {
         j += 1;
     }
-    Some(std::str::from_utf8(&bytes[value_start..j]).ok()?.to_string())
+    Some(
+        std::str::from_utf8(&bytes[value_start..j])
+            .ok()?
+            .to_string(),
+    )
 }
 
 fn parse_row_index(attrs: &str) -> PyResult<u32> {
@@ -551,9 +549,9 @@ fn parse_cell_inner(
     match t_attr {
         "s" => {
             let v = raw_value.unwrap_or_default();
-            let idx: usize = v.parse().map_err(|_| {
-                PyErr::new::<PyValueError, _>(format!("Bad SST index: {v:?}"))
-            })?;
+            let idx: usize = v
+                .parse()
+                .map_err(|_| PyErr::new::<PyValueError, _>(format!("Bad SST index: {v:?}")))?;
             let resolved = sst.get(idx).cloned().unwrap_or_default();
             if let Some(formula) = formula {
                 return Ok((build_formula_dict(py, &formula, &resolved)?, "formula"));
@@ -602,9 +600,9 @@ fn parse_cell_inner(
                 // Excel-stored ints: surface as int when round-trip safe.
                 return Ok((i.into_py_any(py)?, "n"));
             }
-            let f: f64 = v.parse().map_err(|_| {
-                PyErr::new::<PyValueError, _>(format!("Bad numeric value: {v:?}"))
-            })?;
+            let f: f64 = v
+                .parse()
+                .map_err(|_| PyErr::new::<PyValueError, _>(format!("Bad numeric value: {v:?}")))?;
             Ok((f.into_py_any(py)?, "n"))
         }
     }
@@ -679,7 +677,7 @@ mod tests {
         let xml = b"<row r=\"1\"><c r=\"A1\"><v>3</v></c></row>";
         assert_eq!(find_tag_open(xml, 0, b"row"), Some(0));
         assert_eq!(find_tag_open(xml, 0, b"c"), Some(11));
-        assert_eq!(find_tag_open(xml, 0, b"v"), Some(20));
+        assert_eq!(find_tag_open(xml, 0, b"v"), Some(21));
     }
 
     #[test]

@@ -1,25 +1,25 @@
-//! `xl/drawings/vmlDrawing{N}.vml` emitter — legacy VML anchor shapes for
-//! comment boxes. Wave 3A.
+//! `xl/drawings/vmlDrawing{N}.vml` emitter: legacy VML anchor shapes for
+//! comment boxes.
 //!
 //! VML is an ancient Microsoft XML dialect kept around specifically for
 //! comment boxes and form controls. Modern OOXML uses DrawingML for
 //! everything else, but comments still need VML to show Excel a
 //! yellow-rectangle shape anchored to a cell.
 //!
-//! ## Per-column width handling (Sprint Ι Pod-δ D3)
+//! ## Per-column width handling
 //!
 //! [`compute_margin_with_widths`] mirrors the modify-mode patcher's
 //! `compute_margin_with_widths` in `src/wolfxl/comments.rs`: when a
 //! sheet has a `<cols>` block with overrides, the comment's
 //! `margin-left` is summed from per-column widths (in points) instead
 //! of multiplying by the OOXML default of 48pt. The two helpers must
-//! stay in agreement — see the parity test in
+//! stay in agreement; see the parity test in
 //! `tests/test_native_writer_comments.py`.
 
 use crate::model::worksheet::Worksheet;
 use crate::refs;
 
-/// Default per-column shape origin offset (pt) — assumes Excel's
+/// Default per-column shape origin offset (pt); assumes Excel's
 /// default column width. The math `col0 * COL_WIDTH_PT + ORIGIN_LEFT_PT`
 /// matches `rust_xlsxwriter`'s VML output exactly, so any cell with a
 /// comment lands at the same on-screen position under either backend.
@@ -222,14 +222,20 @@ mod tests {
     fn empty_sheet_returns_empty_bytes() {
         let sheet = Worksheet::new("S");
         let result = emit(&sheet);
-        assert!(result.is_empty(), "expected empty Vec, got {} bytes", result.len());
+        assert!(
+            result.is_empty(),
+            "expected empty Vec, got {} bytes",
+            result.len()
+        );
     }
 
     // 2. Root declares three namespaces
     #[test]
     fn root_declares_three_namespaces() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(false, None, None));
         let bytes = emit(&sheet);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("xmlns:v="), "xmlns:v missing: {text}");
@@ -242,14 +248,24 @@ mod tests {
     fn shape_ids_start_at_1025_and_increment() {
         let mut sheet = Worksheet::new("S");
         // A1 < B2 — BTreeMap gives them in this order
-        sheet.comments.insert("A1".to_string(), make_comment(false, None, None));
-        sheet.comments.insert("B2".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("B2".to_string(), make_comment(false, None, None));
 
         let bytes = emit(&sheet);
         let text = String::from_utf8(bytes).unwrap();
 
-        assert!(text.contains("id=\"_x0000_s1025\""), "first shape 1025: {text}");
-        assert!(text.contains("id=\"_x0000_s1026\""), "second shape 1026: {text}");
+        assert!(
+            text.contains("id=\"_x0000_s1025\""),
+            "first shape 1025: {text}"
+        );
+        assert!(
+            text.contains("id=\"_x0000_s1026\""),
+            "second shape 1026: {text}"
+        );
     }
 
     // 4. Visible true emits element; visible false omits it
@@ -257,17 +273,27 @@ mod tests {
     fn visible_true_emits_visible_element() {
         // visible=true
         let mut sheet_visible = Worksheet::new("S");
-        sheet_visible.comments.insert("A1".to_string(), make_comment(true, None, None));
+        sheet_visible
+            .comments
+            .insert("A1".to_string(), make_comment(true, None, None));
         let bytes_v = emit(&sheet_visible);
         let text_v = String::from_utf8(bytes_v).unwrap();
-        assert!(text_v.contains("<x:Visible/>"), "visible=true needs <x:Visible/>: {text_v}");
+        assert!(
+            text_v.contains("<x:Visible/>"),
+            "visible=true needs <x:Visible/>: {text_v}"
+        );
 
         // visible=false
         let mut sheet_hidden = Worksheet::new("S");
-        sheet_hidden.comments.insert("A1".to_string(), make_comment(false, None, None));
+        sheet_hidden
+            .comments
+            .insert("A1".to_string(), make_comment(false, None, None));
         let bytes_h = emit(&sheet_hidden);
         let text_h = String::from_utf8(bytes_h).unwrap();
-        assert!(!text_h.contains("<x:Visible"), "visible=false must omit <x:Visible: {text_h}");
+        assert!(
+            !text_h.contains("<x:Visible"),
+            "visible=false must omit <x:Visible: {text_h}"
+        );
     }
 
     // 5. Row and column are 0-based
@@ -275,18 +301,26 @@ mod tests {
     fn row_column_are_zero_based() {
         let mut sheet = Worksheet::new("S");
         // C3 = row 3, col 3 (1-based) → <x:Row>2</x:Row>, <x:Column>2</x:Column>
-        sheet.comments.insert("C3".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("C3".to_string(), make_comment(false, None, None));
         let bytes = emit(&sheet);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("<x:Row>2</x:Row>"), "row 0-based: {text}");
-        assert!(text.contains("<x:Column>2</x:Column>"), "col 0-based: {text}");
+        assert!(
+            text.contains("<x:Column>2</x:Column>"),
+            "col 0-based: {text}"
+        );
     }
 
     // 6. Width and height flow into style
     #[test]
     fn width_height_flow_into_style() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(false, Some(150.0), Some(80.0)));
+        sheet.comments.insert(
+            "A1".to_string(),
+            make_comment(false, Some(150.0), Some(80.0)),
+        );
         let bytes = emit(&sheet);
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("width:150pt"), "custom width: {text}");
@@ -297,9 +331,16 @@ mod tests {
     #[test]
     fn well_formed_under_quick_xml() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("A1".to_string(), make_comment(true, None, None));
-        sheet.comments.insert("B2".to_string(), make_comment(false, Some(120.0), Some(60.0)));
-        sheet.comments.insert("C3".to_string(), make_comment(true, None, Some(45.0)));
+        sheet
+            .comments
+            .insert("A1".to_string(), make_comment(true, None, None));
+        sheet.comments.insert(
+            "B2".to_string(),
+            make_comment(false, Some(120.0), Some(60.0)),
+        );
+        sheet
+            .comments
+            .insert("C3".to_string(), make_comment(true, None, Some(45.0)));
 
         let bytes = emit(&sheet);
         assert!(!bytes.is_empty());
@@ -311,7 +352,10 @@ mod tests {
     fn anchor_for_a1_is_cell_relative() {
         let (cl, ol, rt, ot, cr, or_, rb, ob) = compute_anchor(0, 0);
         // colLeft=1 (col0+1), rowTop=0 (saturating_sub clamps), colRight=3, rowBottom=3
-        assert_eq!((cl, ol, rt, ot, cr, or_, rb, ob), (1, 15, 0, 10, 3, 15, 3, 4));
+        assert_eq!(
+            (cl, ol, rt, ot, cr, or_, rb, ob),
+            (1, 15, 0, 10, 3, 15, 3, 4)
+        );
     }
 
     // 9. R1 regression: anchor for D5 must shift with the cell — matches oracle.
@@ -319,7 +363,10 @@ mod tests {
     fn anchor_for_d5_matches_oracle() {
         // D5 is (row0=4, col0=3). Oracle emits "4, 15, 3, 10, 6, 15, 7, 4".
         let (cl, ol, rt, ot, cr, or_, rb, ob) = compute_anchor(4, 3);
-        assert_eq!((cl, ol, rt, ot, cr, or_, rb, ob), (4, 15, 3, 10, 6, 15, 7, 4));
+        assert_eq!(
+            (cl, ol, rt, ot, cr, or_, rb, ob),
+            (4, 15, 3, 10, 6, 15, 7, 4)
+        );
     }
 
     // 10. R1 regression: margin origin must shift with the cell — matches oracle.
@@ -327,22 +374,33 @@ mod tests {
     fn margin_for_d5_matches_oracle() {
         // Oracle for D5 (row0=4, col0=3): margin-left=203.25pt, margin-top=52.5pt.
         let (ml, mt) = compute_margin(4, 3);
-        assert!((ml - 203.25).abs() < 1e-6, "margin-left expected 203.25 got {ml}");
-        assert!((mt - 52.5).abs() < 1e-6, "margin-top expected 52.5 got {mt}");
+        assert!(
+            (ml - 203.25).abs() < 1e-6,
+            "margin-left expected 203.25 got {ml}"
+        );
+        assert!(
+            (mt - 52.5).abs() < 1e-6,
+            "margin-top expected 52.5 got {mt}"
+        );
     }
 
     // 11. R1 regression: anchor for Z100 (col0=25, row0=99) shifts correctly.
     #[test]
     fn anchor_for_z100_far_cell() {
         let (cl, ol, rt, ot, cr, or_, rb, ob) = compute_anchor(99, 25);
-        assert_eq!((cl, ol, rt, ot, cr, or_, rb, ob), (26, 15, 98, 10, 28, 15, 102, 4));
+        assert_eq!(
+            (cl, ol, rt, ot, cr, or_, rb, ob),
+            (26, 15, 98, 10, 28, 15, 102, 4)
+        );
     }
 
     // 12. R1 regression: emit() output for D5 contains the cell-relative anchor.
     #[test]
     fn emit_d5_contains_cell_relative_anchor_and_margin() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("D5".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("D5".to_string(), make_comment(false, None, None));
         let bytes = emit(&sheet);
         let text = String::from_utf8(bytes).unwrap();
         assert!(
@@ -366,8 +424,16 @@ mod tests {
         // the override, column 1 contributes col_units_to_pt(4) ≈ 32pt,
         // so margin-left = 59.25 + 32 = 91.25pt.
         let mut sheet = Worksheet::new("S");
-        sheet.set_column(1, Column { width: Some(4.0), ..Default::default() });
-        sheet.comments.insert("B1".to_string(), make_comment(false, None, None));
+        sheet.set_column(
+            1,
+            Column {
+                width: Some(4.0),
+                ..Default::default()
+            },
+        );
+        sheet
+            .comments
+            .insert("B1".to_string(), make_comment(false, None, None));
 
         let (ml, _mt) = compute_margin_with_widths(&sheet, 0, 1);
         let expected = ORIGIN_LEFT_PT + col_units_to_pt(4.0);
@@ -390,7 +456,9 @@ mod tests {
     #[test]
     fn empty_cols_map_uses_legacy_default_math() {
         let mut sheet = Worksheet::new("S");
-        sheet.comments.insert("D5".to_string(), make_comment(false, None, None));
+        sheet
+            .comments
+            .insert("D5".to_string(), make_comment(false, None, None));
         let (ml, mt) = compute_margin_with_widths(&sheet, 4, 3);
         // 3 * 48 + 59.25 = 203.25; 4 * 12.75 + 1.5 = 52.5
         assert!((ml - 203.25).abs() < 1e-6, "ml {ml}");
@@ -406,8 +474,16 @@ mod tests {
 
         let mut sheet = Worksheet::new("S");
         // Column 1 has a custom width; column 2 does not.
-        sheet.set_column(1, Column { width: Some(4.0), ..Default::default() });
-        sheet.comments.insert("D1".to_string(), make_comment(false, None, None));
+        sheet.set_column(
+            1,
+            Column {
+                width: Some(4.0),
+                ..Default::default()
+            },
+        );
+        sheet
+            .comments
+            .insert("D1".to_string(), make_comment(false, None, None));
         // D1 is col0=3 → walks columns 1,2,3 (1-based).
         // col1 = col_units_to_pt(4)
         // col2 = COL_WIDTH_PT

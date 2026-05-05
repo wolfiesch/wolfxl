@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
+from xml.etree import ElementTree as ET
 
 
 @dataclass
 class NamedStyle:
     """Named style (CT_CellStyle §18.8.7)."""
 
-    name: str = ""
+    name: str = "Normal"
     font: Any = None
     fill: Any = None
     border: Any = None
@@ -22,6 +24,9 @@ class NamedStyle:
     customBuiltin: bool = False  # noqa: N815
     hidden: bool = False
     xfId: int | None = None  # noqa: N815
+    tagname = "cellStyle"
+    namespace = None
+    idx_base = 0
 
     @property
     def is_builtin(self) -> bool:
@@ -41,6 +46,69 @@ class NamedStyle:
             "hidden": self.hidden,
             "xf_id": self.xfId,
         }
+
+    def bind(self, workbook: Any) -> None:
+        """Bind this named style to a workbook."""
+        self._wb = workbook
+
+    def as_name(self) -> Any:
+        """Return an openpyxl-shaped named-style metadata record."""
+        return SimpleNamespace(
+            name=self.name,
+            xfId=0 if self.xfId is None else self.xfId,
+            builtinId=self.builtinId,
+            iLevel=None,
+            hidden=self.hidden,
+            customBuiltin=self.customBuiltin or None,
+        )
+
+    def as_tuple(self) -> tuple[int, int, int, int, int, int, int, int, int]:
+        """Return the compact style-array tuple shape used by openpyxl."""
+        return (0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    def as_xf(self) -> Any:
+        """Return an openpyxl-shaped cell-style projection."""
+        return SimpleNamespace(
+            numFmtId=0,
+            fontId=0,
+            fillId=0,
+            borderId=0,
+            applyAlignment=None,
+            applyProtection=None,
+            pivotButton=None,
+            quotePrefix=None,
+            xfId=self.xfId,
+            alignment=self.alignment,
+            protection=self.protection,
+        )
+
+    def to_tree(
+        self,
+        tagname: str | None = None,
+        idx: int | None = None,  # noqa: ARG002 - openpyxl signature
+        namespace: str | None = None,  # noqa: ARG002 - openpyxl signature
+    ) -> ET.Element:
+        node = ET.Element(tagname or self.tagname)
+        node.set("name", self.name)
+        node.set("xfId", str(0 if self.xfId is None else self.xfId))
+        if self.builtinId is not None:
+            node.set("builtinId", str(self.builtinId))
+        if self.hidden:
+            node.set("hidden", "1")
+        if self.customBuiltin:
+            node.set("customBuiltin", "1")
+        return node
+
+    @classmethod
+    def from_tree(cls, node: ET.Element) -> NamedStyle:
+        attrs = node.attrib
+        return cls(
+            name=attrs.get("name", "Normal"),
+            builtinId=int(attrs["builtinId"]) if "builtinId" in attrs else None,
+            hidden=attrs.get("hidden", "0") not in {"0", "false", "False"},
+            customBuiltin=attrs.get("customBuiltin", "0") not in {"0", "false", "False"},
+            xfId=int(attrs["xfId"]) if "xfId" in attrs else None,
+        )
 
 
 def _style_to_dict(value: Any) -> dict[str, Any] | None:

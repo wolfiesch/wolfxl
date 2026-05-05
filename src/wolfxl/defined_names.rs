@@ -35,28 +35,44 @@ use quick_xml::Reader as XmlReader;
 // Public types
 // ---------------------------------------------------------------------------
 
-/// One user-supplied defined-name upsert.
+/// One user-supplied defined-name mutation.
 ///
-/// Every field except `name` and `formula` is optional. `formula` is the
-/// XML text content (no leading `=`, openpyxl strips it on the Python
-/// side). `local_sheet_id` is the 0-based sheet *position index* (NOT a
-/// sheet name); `None` means workbook-scope.
+/// Every field except `name` and `formula` is optional for upserts.
+/// `formula` is the XML text content (no leading `=`, openpyxl strips it on
+/// the Python side). `local_sheet_id` is the 0-based sheet *position index*
+/// (NOT a sheet name); `None` means workbook-scope.
 ///
 /// On update of an existing name, attributes that the user did NOT provide
-/// (e.g. `comment`) are preserved verbatim from the source XML — this
-/// covers the rare attributes (`customMenu`, `description`, `help`,
-/// `statusBar`, `shortcutKey`, `function`, `vbProcedure`, `xlm`,
-/// `functionGroupId`, `publishToServer`, `workbookParameter`) that the
-/// Python API doesn't expose. RFC-021 §10 documents this scope.
+/// (`Option::None`) are preserved verbatim from the source XML. Phase 2
+/// (G22) extended the explicit field surface to cover every ECMA-376
+/// `definedName` attribute openpyxl exposes; truly unknown attributes
+/// (forward-compat) still fall through the verbatim-passthrough path in
+/// [`serialize_upsert_over_existing`].
+///
+/// When `delete` is true, the mutation removes the matching `(name,
+/// local_sheet_id)` entry if it exists and ignores all attribute/formula
+/// fields. Deleting a missing entry is a no-op.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinedNameMut {
     pub name: String,
+    pub delete: bool,
     /// XML text content. Stored verbatim modulo XML text-escape on emit.
     pub formula: String,
     /// `None` = workbook-scope; `Some(idx)` = sheet at 0-based position.
     pub local_sheet_id: Option<u32>,
     pub hidden: Option<bool>,
     pub comment: Option<String>,
+    pub custom_menu: Option<String>,
+    pub description: Option<String>,
+    pub help: Option<String>,
+    pub status_bar: Option<String>,
+    pub shortcut_key: Option<String>,
+    pub function: Option<bool>,
+    pub function_group_id: Option<u32>,
+    pub vb_procedure: Option<bool>,
+    pub xlm: Option<bool>,
+    pub publish_to_server: Option<bool>,
+    pub workbook_parameter: Option<bool>,
 }
 
 /// One existing `<definedName>` entry parsed out of the source XML.
@@ -124,25 +140,32 @@ pub fn merge_defined_names(
     }
 
     // Pass 1: walk existing entries in source order. If there's a pending
-    // upsert for an entry, replace its bytes with a freshly serialized
-    // form (preserving attributes the upsert didn't override). Otherwise
-    // pass through verbatim.
+    // mutation for an entry, either drop it (delete) or replace its bytes
+    // with a freshly serialized form (upsert, preserving attributes the
+    // upsert didn't override). Otherwise pass through verbatim.
     let mut merged_inner: Vec<u8> = Vec::with_capacity(256);
     for ex in &existing_entries {
         let key = (ex.name.clone(), ex.local_sheet_id);
-        if let Some(upsert) = pending.remove(&key) {
+        if let Some(mutation) = pending.remove(&key) {
+            if mutation.delete {
+                continue;
+            }
             // Re-serialize with overrides applied to the source attrs.
-            let serialized = serialize_upsert_over_existing(&ex.raw, upsert);
+            let serialized = serialize_upsert_over_existing(&ex.raw, mutation);
             merged_inner.extend_from_slice(&serialized);
         } else {
             merged_inner.extend_from_slice(&ex.raw);
         }
     }
 
-    // Pass 2: emit any remaining upserts (new names) at the end of the
-    // block. BTreeMap order keeps this deterministic.
-    for ((_name, _scope), upsert) in &pending {
-        serialize_new_defined_name(&mut merged_inner, upsert);
+    // Pass 2: emit any remaining upserts (new names) at the end of the block.
+    // Deletes for missing names are no-ops. BTreeMap order keeps this
+    // deterministic.
+    for ((_name, _scope), mutation) in &pending {
+        if mutation.delete {
+            continue;
+        }
+        serialize_new_defined_name(&mut merged_inner, mutation);
     }
 
     // Empty merged block + no existing block + nothing to emit → identity.
@@ -152,8 +175,7 @@ pub fn merge_defined_names(
 
     // Splice the merged block back into the workbook XML.
     let block_with_wrapper = if merged_inner.is_empty() {
-        // All existing entries were deleted (not currently reachable —
-        // this RFC has no delete op — but keep the branch defensive).
+        // All existing entries were deleted.
         Vec::new()
     } else {
         let mut wrapped: Vec<u8> = Vec::with_capacity(merged_inner.len() + 32);
@@ -201,8 +223,8 @@ struct WorkbookLayout {
 }
 
 fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
-    let s = std::str::from_utf8(xml)
-        .map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
+    let s =
+        std::str::from_utf8(xml).map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -259,8 +281,8 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         buf.clear();
     }
 
-    let sheets_end = sheets_end
-        .ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
+    let sheets_end =
+        sheets_end.ok_or_else(|| "workbook.xml has no </sheets> closing tag".to_string())?;
     let outer = match (dn_start, dn_outer_end) {
         (Some(s), Some(e)) => Some((s, e)),
         _ => None,
@@ -361,17 +383,46 @@ fn serialize_new_defined_name(out: &mut Vec<u8>, dn: &DefinedNameMut) {
     if let Some(idx) = dn.local_sheet_id {
         out.extend_from_slice(format!(" localSheetId=\"{idx}\"").as_bytes());
     }
+    // Attribute order mirrors `wolfxl-writer::emit::workbook_xml::emit_user_defined_names`
+    // so write-mode and modify-mode produce byte-identical `<definedName>` shapes.
+    push_opt_str_attr(out, b"comment", dn.comment.as_deref());
+    push_opt_str_attr(out, b"customMenu", dn.custom_menu.as_deref());
+    push_opt_str_attr(out, b"description", dn.description.as_deref());
+    push_opt_str_attr(out, b"help", dn.help.as_deref());
+    push_opt_str_attr(out, b"statusBar", dn.status_bar.as_deref());
+    push_opt_str_attr(out, b"shortcutKey", dn.shortcut_key.as_deref());
     if dn.hidden == Some(true) {
         out.extend_from_slice(b" hidden=\"1\"");
     }
-    if let Some(c) = &dn.comment {
-        out.extend_from_slice(b" comment=\"");
-        push_xml_attr_escape(out, c);
-        out.push(b'"');
+    push_opt_bool_true_attr(out, b"function", dn.function);
+    push_opt_bool_true_attr(out, b"vbProcedure", dn.vb_procedure);
+    push_opt_bool_true_attr(out, b"xlm", dn.xlm);
+    if let Some(id) = dn.function_group_id {
+        out.extend_from_slice(format!(" functionGroupId=\"{id}\"").as_bytes());
     }
+    push_opt_bool_true_attr(out, b"publishToServer", dn.publish_to_server);
+    push_opt_bool_true_attr(out, b"workbookParameter", dn.workbook_parameter);
     out.push(b'>');
     push_xml_text_escape(out, &dn.formula);
     out.extend_from_slice(b"</definedName>");
+}
+
+fn push_opt_str_attr(out: &mut Vec<u8>, key: &[u8], value: Option<&str>) {
+    if let Some(v) = value {
+        out.push(b' ');
+        out.extend_from_slice(key);
+        out.extend_from_slice(b"=\"");
+        push_xml_attr_escape(out, v);
+        out.push(b'"');
+    }
+}
+
+fn push_opt_bool_true_attr(out: &mut Vec<u8>, key: &[u8], value: Option<bool>) {
+    if value == Some(true) {
+        out.push(b' ');
+        out.extend_from_slice(key);
+        out.extend_from_slice(b"=\"1\"");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,9 +459,7 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
                     let val = a
                         .unescape_value()
                         .map(|v| v.into_owned())
-                        .unwrap_or_else(|_| {
-                            String::from_utf8_lossy(a.value.as_ref()).into_owned()
-                        });
+                        .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
                     existing_attrs.push((key, val));
                 }
                 break;
@@ -436,6 +485,27 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         attrs.retain(|(k, _)| k.as_slice() != key);
     }
 
+    fn upsert_opt_str(
+        attrs: &mut Vec<(Vec<u8>, String)>,
+        key: &[u8],
+        value: Option<&str>,
+    ) {
+        if let Some(v) = value {
+            upsert_attr(attrs, key, v.to_string());
+        }
+    }
+    fn upsert_opt_bool_true(
+        attrs: &mut Vec<(Vec<u8>, String)>,
+        key: &[u8],
+        value: Option<bool>,
+    ) {
+        match value {
+            Some(true) => upsert_attr(attrs, key, "1".to_string()),
+            Some(false) => remove_attr(attrs, key),
+            None => { /* preserve source */ }
+        }
+    }
+
     upsert_attr(&mut existing_attrs, b"name", upsert.name.clone());
     match upsert.local_sheet_id {
         Some(idx) => upsert_attr(&mut existing_attrs, b"localSheetId", idx.to_string()),
@@ -448,9 +518,24 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         Some(false) => remove_attr(&mut existing_attrs, b"hidden"),
         None => { /* preserve source */ }
     }
-    if let Some(c) = &upsert.comment {
-        upsert_attr(&mut existing_attrs, b"comment", c.clone());
+    upsert_opt_str(&mut existing_attrs, b"comment", upsert.comment.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"customMenu", upsert.custom_menu.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"description", upsert.description.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"help", upsert.help.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"statusBar", upsert.status_bar.as_deref());
+    upsert_opt_str(&mut existing_attrs, b"shortcutKey", upsert.shortcut_key.as_deref());
+    upsert_opt_bool_true(&mut existing_attrs, b"function", upsert.function);
+    upsert_opt_bool_true(&mut existing_attrs, b"vbProcedure", upsert.vb_procedure);
+    upsert_opt_bool_true(&mut existing_attrs, b"xlm", upsert.xlm);
+    if let Some(id) = upsert.function_group_id {
+        upsert_attr(&mut existing_attrs, b"functionGroupId", id.to_string());
     }
+    upsert_opt_bool_true(&mut existing_attrs, b"publishToServer", upsert.publish_to_server);
+    upsert_opt_bool_true(
+        &mut existing_attrs,
+        b"workbookParameter",
+        upsert.workbook_parameter,
+    );
 
     // Re-emit the element. Attribute order: keep original order for
     // attrs that existed, then append any newly added ones.
@@ -623,7 +708,9 @@ mod tests {
         let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains(r#"<definedName name="Foo">Sheet1!$AA$1</definedName>"#));
-        assert!(text.contains(r#"<definedName name="Foo" localSheetId="0">Sheet1!$B$1</definedName>"#));
+        assert!(
+            text.contains(r#"<definedName name="Foo" localSheetId="0">Sheet1!$B$1</definedName>"#)
+        );
         assert_eq!(text.matches(r#"name="Foo""#).count(), 2);
     }
 
@@ -673,6 +760,53 @@ mod tests {
     }
 
     #[test]
+    fn delete_existing_defined_name_preserves_unrelated_entries() {
+        let xml = workbook_xml_with_defined_names();
+        let names = vec![DefinedNameMut {
+            name: "_xlnm.Print_Area".into(),
+            local_sheet_id: Some(0),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains(r#"<definedName name="Region">Sheet1!$A$1:$A$10</definedName>"#));
+        assert!(!text.contains(r#"name="_xlnm.Print_Area""#));
+        assert!(text.contains("<definedNames>"));
+    }
+
+    #[test]
+    fn delete_only_existing_defined_name_removes_wrapper_block() {
+        let xml = r#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheets><sheet name="Sheet1" sheetId="1"/></sheets>
+  <definedNames><definedName name="Only">Sheet1!$A$1</definedName></definedNames>
+  <calcPr/>
+</workbook>"#;
+        let names = vec![DefinedNameMut {
+            name: "Only".into(),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(!text.contains("<definedNames>"));
+        assert!(text.contains("<calcPr/>"));
+    }
+
+    #[test]
+    fn delete_missing_defined_name_is_identity_when_no_block_exists() {
+        let xml = workbook_xml_no_defined_names();
+        let names = vec![DefinedNameMut {
+            name: "Missing".into(),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        assert_eq!(bytes, xml.as_bytes());
+    }
+
+    #[test]
     fn hidden_attr_emitted_when_true() {
         let xml = workbook_xml_no_defined_names();
         let names = vec![DefinedNameMut {
@@ -697,7 +831,8 @@ mod tests {
         }];
         let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
         let text = std::str::from_utf8(&bytes).unwrap();
-        assert!(text.contains(r#"<definedName name="S1Range" localSheetId="1">Sheet2!$A$1</definedName>"#));
+        assert!(text
+            .contains(r#"<definedName name="S1Range" localSheetId="1">Sheet2!$A$1</definedName>"#));
     }
 
     #[test]

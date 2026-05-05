@@ -1,11 +1,7 @@
 """``PivotCache`` — schema + records snapshot for a pivot's source range.
 
 Mirrors :class:`openpyxl.pivot.cache.CacheDefinition` plus the
-records part. See RFC-047 §10 for the authoritative dict contract
-returned by :meth:`PivotCache.to_rust_dict` and the helper
-:meth:`PivotCache.to_rust_records_dict`.
-
-Construction-time validation matches RFC-047 §10.8.
+records part.
 """
 
 from __future__ import annotations
@@ -16,7 +12,7 @@ from typing import Any
 
 from wolfxl.chart.reference import Reference
 
-# RFC-047 §10.9 inference thresholds. Tunable but documented.
+# Per-column type-inference thresholds. Tunable but documented.
 _INFER_THRESHOLDS = {
     "max_string_unique_for_enumeration": 2000,
     "max_number_unique_for_enumeration": 200,
@@ -24,12 +20,12 @@ _INFER_THRESHOLDS = {
 
 
 # ---------------------------------------------------------------------------
-# CacheValue — the variant emitted to the §10.5 contract.
+# CacheValue — the variant emitted into each pivot record.
 # ---------------------------------------------------------------------------
 
 
 class CacheValue:
-    """Tagged variant matching RFC-047 §10.5.
+    """Tagged variant for a single pivot-cache value.
 
     Use the classmethod constructors (``CacheValue.string("North")``)
     rather than the dataclass init for clarity at call sites.
@@ -43,18 +39,51 @@ class CacheValue:
 
     @classmethod
     def string(cls, s: str) -> "CacheValue":
+        """Create a string pivot-cache value.
+
+        Args:
+            s: Text value to store in the cache record.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"string"``.
+        """
         return cls("string", s)
 
     @classmethod
     def number(cls, n: float) -> "CacheValue":
+        """Create a numeric pivot-cache value.
+
+        Args:
+            n: Numeric value to store. Values are normalized to ``float``.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"number"``.
+        """
         return cls("number", float(n))
 
     @classmethod
     def boolean(cls, b: bool) -> "CacheValue":
+        """Create a boolean pivot-cache value.
+
+        Args:
+            b: Truth value to store.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"boolean"``.
+        """
         return cls("boolean", bool(b))
 
     @classmethod
     def date(cls, d: str | date | datetime) -> "CacheValue":
+        """Create a datetime-like pivot-cache value.
+
+        Args:
+            d: ISO-like string, ``date``, or ``datetime`` value. ``date``
+                inputs are normalized to midnight ISO datetimes.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"date"``.
+        """
         if isinstance(d, datetime):
             iso = d.isoformat()
         elif isinstance(d, date):
@@ -65,10 +94,23 @@ class CacheValue:
 
     @classmethod
     def missing(cls) -> "CacheValue":
+        """Create a missing-value pivot-cache marker.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"missing"`` with no payload.
+        """
         return cls("missing", None)
 
     @classmethod
     def error(cls, s: str) -> "CacheValue":
+        """Create an error pivot-cache value.
+
+        Args:
+            s: Excel-style error token, such as ``"#N/A"``.
+
+        Returns:
+            A ``CacheValue`` tagged as ``"error"``.
+        """
         return cls("error", s)
 
     def to_rust_dict(self) -> dict:
@@ -97,7 +139,7 @@ class CacheValue:
 
 @dataclass
 class WorksheetSource:
-    """RFC-047 §10.2.
+    """A worksheet source for a pivot cache.
 
     Either ``(sheet, ref)`` or ``name``, mutually exclusive.
     """
@@ -129,7 +171,7 @@ class WorksheetSource:
 
 @dataclass
 class SharedItems:
-    """RFC-047 §10.4.
+    """The ``<sharedItems>`` payload on a cache field.
 
     ``items=None`` + numeric attrs (min/max) → numeric-only no-enumeration
     form (``<sharedItems containsNumber="1" minValue=… maxValue=…/>``).
@@ -185,11 +227,11 @@ class SharedItems:
 
 @dataclass
 class CacheField:
-    """RFC-047 §10.3.
+    """A single pivot-cache field — name + dtype + shared-items.
 
     `data_type` is one of ``"string" | "number" | "date" | "bool" |
-    "mixed"`` matching RFC-047 §10.3. ``formula`` and ``hierarchy``
-    are reserved for v2.1+ (RFC-047 §11) and pinned to ``None`` here.
+    "mixed"``. ``formula`` and ``hierarchy`` are reserved for future
+    use and pinned to ``None`` here.
     """
 
     name: str
@@ -223,8 +265,8 @@ class PivotCache:
 
     1. allocates ``cache_id`` (0-based, returned to the caller);
     2. walks the source range to materialize :attr:`fields` and
-       :attr:`records` (RFC-047 §10.9 inference);
-    3. enqueues the cache for emit at patcher Phase 2.5m.
+       :attr:`records` (per-column type inference);
+    3. enqueues the cache for emit at save time.
 
     Until step 2 runs, :attr:`fields` and :attr:`records` are
     ``None`` and :meth:`to_rust_dict` raises.
@@ -249,8 +291,8 @@ class PivotCache:
         # Set by _materialize() (called by add_pivot_cache).
         self._fields: list[CacheField] | None = None
         self._records: list[list[CacheValue]] | None = None
-        # RFC-061 §2.2 / §2.4 — calculated fields + field groups.
-        # Both are cache-scoped (RFC-035 deep-clone aliases via parent).
+        # Calculated fields + field groups. Both are cache-scoped
+        # (deep-clone aliases via the parent cache).
         self.calculated_fields: list[Any] = []
         self.field_groups: list[Any] = []
 
@@ -298,7 +340,7 @@ class PivotCache:
     def _materialize(self, ws: Any) -> None:
         """Walk ``ws[self.source.range]``; build fields + records.
 
-        Per-column type inference (RFC-047 §10.9):
+        Per-column type inference:
 
         =======================  =============  =====================================
         Column observation       data_type      shared_items strategy
@@ -565,11 +607,11 @@ class PivotCache:
         return CacheValue.string(str(v))
 
     # ------------------------------------------------------------------
-    # to_rust_dict — RFC-047 §10.1 + §10.6 contracts.
+    # to_rust_dict — cache definition + records contracts.
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # RFC-061 §2.2 — calculated fields
+    # Calculated fields
     # ------------------------------------------------------------------
 
     def add_calculated_field(
@@ -581,8 +623,8 @@ class PivotCache:
         """Add a calculated field to this cache.
 
         Excel evaluates the formula on open — wolfxl does not
-        pre-evaluate values. Per RFC-061 §2.2 the formula uses pivot
-        field names as bare identifiers (``"= revenue - cost"``).
+        pre-evaluate values. The formula uses pivot field names as
+        bare identifiers (``"= revenue - cost"``).
 
         Returns the registered :class:`CalculatedField` for chaining.
         """
@@ -593,7 +635,7 @@ class PivotCache:
         return cf
 
     # ------------------------------------------------------------------
-    # RFC-061 §2.4 — field grouping (date / range)
+    # Field grouping (date / range)
     # ------------------------------------------------------------------
 
     def group_field(
@@ -634,7 +676,7 @@ class PivotCache:
             synthesize_range_group_items,
         )
 
-        # Recursion-depth cap (RFC-061 §3.3).
+        # Recursion-depth cap.
         if len(self.field_groups) >= 4:
             raise ValueError(
                 "PivotCache.group_field: recursion depth exceeds 4"
@@ -701,7 +743,7 @@ class PivotCache:
         return fg
 
     def to_rust_dict(self) -> dict:
-        """Cache-definition dict per RFC-047 §10.1 + RFC-061 extensions."""
+        """Cache-definition dict for the Rust emitter."""
         if self._cache_id is None:
             raise RuntimeError(
                 "PivotCache.cache_id not set — call "
@@ -721,7 +763,7 @@ class PivotCache:
             "min_refreshable_version": 3,
             "refreshed_by": self.refreshed_by,
             "records_part_path": None,  # set by patcher
-            # RFC-061 extensions
+            # Extensions: calculated fields + field groups.
             "calculated_fields": [
                 cf.to_rust_dict() for cf in self.calculated_fields
             ],
@@ -731,7 +773,7 @@ class PivotCache:
         }
 
     def to_rust_records_dict(self) -> dict:
-        """Records dict per RFC-047 §10.6.
+        """Records dict for the Rust emitter.
 
         Each record cell is converted to inline form unless the field
         has an enumerable ``shared_items.items`` — in which case the

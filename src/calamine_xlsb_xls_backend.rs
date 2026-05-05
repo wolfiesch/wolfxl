@@ -1,19 +1,16 @@
-//! Sprint Κ Pod-α — `.xlsb` / `.xls` value-only read backends.
+//! Sprint Κ Pod-α — Calamine-backed legacy `.xls` value-only reads.
 //!
-//! Two new pyclasses, [`CalamineXlsbBook`] and [`CalamineXlsBook`],
-//! present the same Python-facing read API as the existing
-//! [`crate::calamine_styled_backend::CalamineStyledBook`] for **values
-//! + cached formula results + sheet names + dimensions + bulk cell
-//! records**.  All style-related accessors strictly raise
+//! [`CalamineXlsBook`] presents the same Python-facing value-read API as
+//! the native readers for **values + cached formula results + sheet names +
+//! dimensions + bulk cell records**. All style-related accessors strictly raise
 //! `NotImplementedError` with the message
-//! `"styles not supported for .{xlsb|xls} files; use .xlsx for
+//! `"styles not supported for .xls files; use .xlsx for
 //! style-aware reads"`.
 //!
-//! Both backends accept paths *and* raw bytes (via
-//! `open_from_bytes`).  Reader inputs are wrapped in a small
-//! `XlsbSource` / `XlsSource` enum that delegates `Read + Seek` to
-//! either a `BufReader<File>` or a `Cursor<Vec<u8>>`, sidestepping
-//! the non-object-safe `calamine_styles::Reader` trait.
+//! The backend accepts paths *and* raw bytes (via `open_from_bytes`).
+//! Reader inputs are wrapped in a small `XlsSource` enum that delegates
+//! `Read + Seek` to either a `BufReader<File>` or a `Cursor<Vec<u8>>`,
+//! sidestepping the non-object-safe `calamine_styles::Reader` trait.
 //!
 //! This module also provides [`classify_file_format_bytes`] /
 //! [`classify_file_format_path`] for magic-byte sniffing — exposed
@@ -30,21 +27,19 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
 
-use calamine_styles::{Data, Range, Reader, Xls, Xlsb};
+use calamine_styles::{Data, Range, Reader, Xls};
 use chrono::NaiveTime;
 
 use crate::util::{a1_to_row_col, cell_blank, cell_with_value, parse_iso_date, parse_iso_datetime};
 
-pub use wolfxl_classify::{
-    classify_file_format_bytes, classify_file_format_path, XlsSource, XlsbSource,
-};
+pub use wolfxl_classify::{classify_file_format_bytes, classify_file_format_path, XlsSource};
 // `FileFormat` and `XlsxSource` are re-exported by `wolfxl_classify`
 // for downstream consumers; the cdylib doesn't reference them
 // directly, but keeping the dependency surface small avoids
 // version-skew between the cdylib and the helper crate.
 
 // ---------------------------------------------------------------------------
-// Local helpers (mirror the small subset we need from calamine_styled_backend)
+// Local helpers for the binary-format value contract.
 // ---------------------------------------------------------------------------
 
 fn map_error_value(err_str: &str) -> &'static str {
@@ -61,9 +56,8 @@ fn map_error_value(err_str: &str) -> &'static str {
     }
 }
 
-/// Convert a calamine [`Data`] cell value to the dict-shaped Python
-/// payload used by `CalamineStyledBook.read_cell_value` (the same
-/// contract Pod-β consumes via the dispatcher).
+/// Convert a calamine [`Data`] cell value to the dict-shaped Python payload
+/// used by the workbook-source dispatcher.
 fn data_to_py(py: Python<'_>, value: &Data) -> PyResult<PyObject> {
     match value {
         Data::Empty => cell_blank(py),
@@ -145,10 +139,8 @@ fn resolve_window(
             let parts: Vec<&str> = clean.split(':').collect();
             let a = parts[0];
             let b = if parts.len() > 1 { parts[1] } else { a };
-            let (r0, c0) =
-                a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
-            let (r1, c1) =
-                a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+            let (r0, c0) = a1_to_row_col(a).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
+            let (r1, c1) = a1_to_row_col(b).map_err(|msg| PyErr::new::<PyValueError, _>(msg))?;
             return Ok(Some((r0.min(r1), c0.min(c1), r0.max(r1), c0.max(c1))));
         }
     }
@@ -171,7 +163,9 @@ fn resolve_window(
 pub fn classify_file_format(py: Python<'_>, input: &Bound<'_, PyAny>) -> PyResult<String> {
     let _ = py;
     if let Ok(b) = input.cast::<PyBytes>() {
-        return Ok(classify_file_format_bytes(b.as_bytes()).as_str().to_string());
+        return Ok(classify_file_format_bytes(b.as_bytes())
+            .as_str()
+            .to_string());
     }
     if let Ok(s) = input.extract::<String>() {
         return Ok(classify_file_format_path(&s).as_str().to_string());
@@ -239,9 +233,7 @@ macro_rules! define_calamine_book {
                     return Ok(());
                 }
                 let range = self.workbook.worksheet_range(sheet).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!(
-                        "Failed to read sheet {sheet}: {e:?}"
-                    ))
+                    PyErr::new::<PyIOError, _>(format!("Failed to read sheet {sheet}: {e:?}"))
                 })?;
                 self.range_cache.insert(sheet.to_string(), range);
 
@@ -263,9 +255,8 @@ macro_rules! define_calamine_book {
             /// Open a workbook from a filesystem path.
             #[staticmethod]
             pub fn open(path: &str) -> PyResult<Self> {
-                let f = File::open(path).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}"))
-                })?;
+                let f = File::open(path)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open file: {e}")))?;
                 let source = $SourceTy::File(BufReader::new(f));
                 let wb = $new_fn(source)?;
                 let names = wb.sheet_names().to_vec();
@@ -313,10 +304,7 @@ macro_rules! define_calamine_book {
             /// or `None` for empty sheets.  Mirrors the xlsx
             /// `read_sheet_dimensions` shape (1-based max-row,
             /// max-col).
-            pub fn read_sheet_dimensions(
-                &mut self,
-                sheet: &str,
-            ) -> PyResult<Option<(u32, u32)>> {
+            pub fn read_sheet_dimensions(&mut self, sheet: &str) -> PyResult<Option<(u32, u32)>> {
                 self.ensure_sheet_exists(sheet)?;
                 self.ensure_value_caches(sheet)?;
                 let range = self.range_cache.get(sheet).unwrap();
@@ -350,8 +338,7 @@ macro_rules! define_calamine_book {
                 )))
             }
 
-            /// Bulk-read all sheet values as a `list[list[dict]]`
-            /// mirroring `CalamineStyledBook.read_sheet_values`.
+            /// Bulk-read all sheet values as a `list[list[dict]]`.
             #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
             pub fn read_sheet_values(
                 &mut self,
@@ -411,8 +398,7 @@ macro_rules! define_calamine_book {
                 a1: &str,
                 data_only: bool,
             ) -> PyResult<PyObject> {
-                let (row, col) =
-                    a1_to_row_col(a1).map_err(|m| PyErr::new::<PyValueError, _>(m))?;
+                let (row, col) = a1_to_row_col(a1).map_err(|m| PyErr::new::<PyValueError, _>(m))?;
                 self.ensure_sheet_exists(sheet)?;
                 self.ensure_value_caches(sheet)?;
                 if !data_only {
@@ -463,12 +449,7 @@ macro_rules! define_calamine_book {
             pub fn read_cell_border(&self, _row: u32, _col: u32, _sheet: &str) -> PyResult<()> {
                 styles_unsupported($format_name)
             }
-            pub fn read_cell_alignment(
-                &self,
-                _row: u32,
-                _col: u32,
-                _sheet: &str,
-            ) -> PyResult<()> {
+            pub fn read_cell_alignment(&self, _row: u32, _col: u32, _sheet: &str) -> PyResult<()> {
                 styles_unsupported($format_name)
             }
             pub fn read_cell_number_format(
@@ -491,30 +472,11 @@ macro_rules! define_calamine_book {
                 _cell_range: Option<&str>,
                 _data_only: bool,
                 _include_format: bool,
-                _include_empty: bool,
-                _include_formula_blanks: bool,
-                _include_coordinate: bool,
-                _include_style_id: bool,
-                _include_extended_format: bool,
-                _include_cached_formula_value: bool,
-                _include_number_format: bool,
             ) -> PyResult<()> {
                 styles_unsupported($format_name)
             }
         }
     };
-}
-
-define_calamine_book! {
-    struct_name = CalamineXlsbBook,
-    reader_ty   = Xlsb<XlsbSource>,
-    source_ty   = XlsbSource,
-    format_name = "xlsb",
-    new_impl    = (|src: XlsbSource| -> PyResult<Xlsb<XlsbSource>> {
-        Xlsb::new(src).map_err(|e| {
-            PyErr::new::<PyIOError, _>(format!("Failed to parse xlsb: {e:?}"))
-        })
-    }),
 }
 
 define_calamine_book! {

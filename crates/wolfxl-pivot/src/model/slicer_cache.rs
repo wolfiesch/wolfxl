@@ -95,9 +95,7 @@ impl SlicerCache {
         if self.name.is_empty() {
             return Err("SlicerCache requires a non-empty name".into());
         }
-        if !self.name.starts_with("Slicer_")
-            && !self.name.starts_with("NativeTimeline_")
-        {
+        if !self.name.starts_with("Slicer_") && !self.name.starts_with("NativeTimeline_") {
             // Not strictly required by the spec, but openpyxl + Excel
             // canonicalize on `Slicer_<field>` and timelines on
             // `NativeTimeline_<field>`. We tolerate other names but

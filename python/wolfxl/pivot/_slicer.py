@@ -1,4 +1,4 @@
-"""``Slicer`` / ``SlicerCache`` / ``SlicerItem`` — RFC-061 §2.1.
+"""``Slicer`` / ``SlicerCache`` / ``SlicerItem`` — pivot slicer support.
 
 Mirrors :mod:`openpyxl.slicer`. The public surface:
 
@@ -7,9 +7,6 @@ Mirrors :mod:`openpyxl.slicer`. The public surface:
 - :class:`Slicer` — sheet-scoped presentation pointing at a cache.
 - :class:`SlicerItem` — one enumerated value (with hidden / no_data
   flags) inside a slicer cache.
-
-See RFC-061 §10.1 / §10.2 for the dict shape returned by
-``to_rust_dict()``.
 """
 
 from __future__ import annotations
@@ -22,7 +19,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# SlicerItem (RFC-061 §10.1 items[*])
+# SlicerItem
 # ---------------------------------------------------------------------------
 
 
@@ -49,7 +46,7 @@ class SlicerItem:
 
 
 # ---------------------------------------------------------------------------
-# SlicerCache (RFC-061 §10.1)
+# SlicerCache
 # ---------------------------------------------------------------------------
 
 
@@ -62,11 +59,10 @@ class SlicerCache:
     Construct with a :class:`PivotCache` reference and a field
     name; register via :meth:`Workbook.add_slicer_cache`.
 
-    Per RFC-061 §6, slicer caches are workbook-scoped — when a
-    sheet is deep-cloned via :meth:`Workbook.copy_worksheet`, slicer
-    caches are aliased (shared between source and clone). Slicer
-    presentations on the cloned sheet are deep-cloned with the
-    cache id preserved.
+    Slicer caches are workbook-scoped — when a sheet is deep-cloned
+    via :meth:`Workbook.copy_worksheet`, slicer caches are aliased
+    (shared between source and clone). Slicer presentations on the
+    cloned sheet are deep-cloned with the cache id preserved.
     """
 
     def __init__(
@@ -168,7 +164,7 @@ class SlicerCache:
 
 
 # ---------------------------------------------------------------------------
-# Slicer presentation (RFC-061 §10.2)
+# Slicer presentation
 # ---------------------------------------------------------------------------
 
 
@@ -179,9 +175,9 @@ class Slicer:
     Anchored to a worksheet via :meth:`Worksheet.add_slicer(slicer,
     anchor)`.
 
-    Per RFC-061 §6: slicer presentations deep-clone with the sheet
-    when :meth:`Workbook.copy_worksheet` runs; the ``cache`` is
-    aliased (workbook-scoped).
+    Slicer presentations deep-clone with the sheet when
+    :meth:`Workbook.copy_worksheet` runs; the ``cache`` is aliased
+    (workbook-scoped).
     """
 
     name: str

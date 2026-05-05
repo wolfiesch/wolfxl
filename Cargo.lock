@@ -1355,6 +1355,7 @@ dependencies = [
  "wolfxl-core",
  "wolfxl-merger",
  "wolfxl-pivot",
+ "wolfxl-reader",
  "wolfxl-rels",
  "wolfxl-structural",
  "wolfxl-writer",
@@ -1397,6 +1398,7 @@ dependencies = [
  "calamine-styles",
  "chrono",
  "quick-xml 0.37.5",
+ "wolfxl-reader",
  "zip 2.4.2",
 ]
 
@@ -1422,6 +1424,16 @@ version = "2.0.0"
 dependencies = [
  "quick-xml 0.37.5",
  "wolfxl-rels",
+]
+
+[[package]]
+name = "wolfxl-reader"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.37.5",
+ "wolfxl-formula",
+ "wolfxl-rels",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -1451,6 +1463,7 @@ dependencies = [
  "chrono",
  "indexmap",
  "quick-xml 0.37.5",
+ "tempfile",
  "wolfxl-merger",
  "wolfxl-pivot",
  "wolfxl-rels",

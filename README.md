@@ -1,8 +1,8 @@
 <p align="center">
   <h1 align="center">WolfXL</h1>
   <p align="center">
-    <strong>Full openpyxl replacement, drop-in compatible, 10×–100× faster.</strong><br>
-    Pivot tables, charts, encryption, structural ops — every construction idiom that openpyxl 3.1.x supports, with a Rust backend.
+    <strong>Openpyxl-compatible Excel automation with a Rust backend.</strong><br>
+    Read, write, and surgically modify workbooks, including charts, images, encryption, structural ops, and pivot-table construction.
   </p>
 </p>
 
@@ -15,7 +15,7 @@
 
 ---
 
-## Replaces openpyxl. One import change.
+## Openpyxl-style imports. One import change.
 
 ```diff
 - from openpyxl import load_workbook, Workbook
@@ -23,7 +23,9 @@
 + from wolfxl import load_workbook, Workbook, Font, PatternFill, Alignment, Border
 ```
 
-Your existing code works as-is. Same `ws["A1"].value`, same `Font(bold=True)`, same `wb.save()`.
+Most workbook automation keeps the same shape: `ws["A1"].value`,
+`Font(bold=True)`, and `wb.save()` all work the way openpyxl users
+expect.
 
 ---
 
@@ -36,8 +38,17 @@ Your existing code works as-is. Same `ws["A1"].value`, same `Font(bold=True)`, s
 </p>
 
 <p align="center">
-  <sub>Measured with <a href="https://excelbench.vercel.app">ExcelBench</a> on Apple M4 Pro, Python 3.12, median of 3 runs.</sub>
+  <sub>Fresh WolfXL 2.0 release-artifact evidence is available in ExcelBench:
+  wheel-backed rerun, 18/18 green features, and dated performance snapshots.</sub>
 </p>
+
+## Current Evidence
+
+- WolfXL package surface is at `2.0.0`.
+- Current local verification is green: Rust workspace tests, Python package tests, and parity slices all pass in the 2026-04-28 audit.
+- Fresh wheel-backed ExcelBench rerun is now available: WolfXL reached `18/18` green features with `100%` pass rate in the [release snapshot fidelity report](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/README.md).
+- The paired dated evidence includes the [release snapshot dashboard](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/DASHBOARD.md) and the [matching perf snapshot](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/perf/README.md).
+- Use the [Public Evidence Status](docs/trust/public-evidence.md) page to see which claims are current, historical, or still gated.
 
 ## Install
 
@@ -69,16 +80,15 @@ for row in ws.iter_rows(values_only=False):
 wb.close()
 ```
 
-## Pivot tables in 6 lines
+## Pivot tables through modify mode
 
 ```python
 import wolfxl
 from wolfxl.chart import Reference
 from wolfxl.pivot import PivotCache, PivotTable
 
-wb = wolfxl.Workbook()
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 ws = wb.active
-# ... fill source data ...
 src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
 cache = wb.add_pivot_cache(PivotCache(source=src))
 pt = PivotTable(
@@ -89,7 +99,12 @@ ws.add_pivot_table(pt)
 wb.save("pivot.xlsx")
 ```
 
-WolfXL is the only Python OOXML library that constructs pivot tables with **pre-aggregated records** — pivots open in Excel, LibreOffice, and openpyxl with data populated, no refresh-on-open required. (openpyxl preserves pivots on round-trip but doesn't construct them; XlsxWriter doesn't support pivots at all.)
+WolfXL constructs pivot tables with **pre-aggregated records** —
+pivots open in Excel, LibreOffice, and openpyxl with data populated,
+through the modify-mode patcher (`load_workbook(..., modify=True)`),
+with no refresh-on-open required. In the project comparison below, openpyxl
+preserves pivots on round-trip but does not provide this constructor,
+and XlsxWriter does not support pivots.
 
 Link a chart to the pivot:
 
@@ -100,6 +115,8 @@ chart = BarChart()
 chart.pivot_source = pt          # emits <c:pivotSource> + per-series <c:fmtId>
 ws.add_chart(chart, "F18")
 ```
+
+Existing pivots can be re-pointed at a new source range in modify mode (RFC-070 Option B); v1.0 covers source-range edits only — field placement, filter, and aggregation mutations are deferred.
 
 ## Three Modes
 
@@ -113,8 +130,9 @@ ws.add_chart(chart, "F18")
 
 | Mode | Usage | Engine | What it does |
 |------|-------|--------|--------------|
-| **Read** | `load_workbook(path)` | [calamine-styles](https://crates.io/crates/calamine-styles) | Parse XLSX with full style extraction |
+| **Read** | `load_workbook(path)` | NativeXlsxBook | Parse XLSX with values, formulas, styles, metadata, drawings, and tables |
 | **Write** | `Workbook()` | [rust_xlsxwriter](https://github.com/jmcnamara/rust_xlsxwriter) | Create new XLSX files from scratch |
+| **Streaming write** | `Workbook(write_only=True)` | Per-sheet temp file + `<sheetData>` splice | Append-only, bounded-memory ETL exports — peak RSS dominated by SST + styles, not by row data |
 | **Modify** | `load_workbook(path, modify=True)` | XlsxPatcher | Surgical ZIP patch — only changed cells are rewritten |
 
 Modify mode preserves everything it doesn't touch: charts, macros, images, pivot tables, VBA.
@@ -130,12 +148,12 @@ Features marked **Preserved** are kept verbatim on modify-mode round-trip (open,
 | **Structure** | Multiple sheets, merged cells, defined names (read + write), freeze panes, row heights, column widths, document properties |
 | **Tables / Validation / CF** | `ws.tables`, `ws.add_table`, `ws.data_validations`, `ws.conditional_formatting` (read + write in `Workbook()` mode) |
 | **Charts** | 16 chart families — `BarChart`, `LineChart`, `PieChart`, `DoughnutChart`, `AreaChart`, `ScatterChart`, `BubbleChart`, `RadarChart`, `BarChart3D`, `LineChart3D`, `PieChart3D`, `AreaChart3D`, `SurfaceChart`, `SurfaceChart3D`, `StockChart`, `ProjectedPieChart` |
-| **Pivots** | `PivotCache`, `PivotTable`, `RowField` / `ColumnField` / `DataField` / `PageField`; pivot-chart linkage via `chart.pivot_source = pt`; deep-clone of pivot-bearing sheets |
+| **Pivots** | `PivotCache`, `PivotTable`, `RowField` / `ColumnField` / `DataField` / `PageField`; slicers, calculated fields/items, GroupItems; pivot-chart linkage via `chart.pivot_source = pt`; deep-clone of pivot-bearing sheets |
 | **Images** | `Image` (PNG / JPEG / GIF / BMP); one-cell, two-cell, absolute anchors; modify-mode `add_image` |
 | **Encryption** | Read + write Agile (AES-256 / SHA-512) via `wolfxl[encrypted]` |
 | **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
 | **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
-| **Preserved (read-only)** | Macros (VBA), embedded objects, slicers (v2.1 will construct slicers) — round-trip cleanly through modify mode |
+| **Preserved (read-only)** | Macros (VBA) — round-trip cleanly through modify mode with raw `xl/vbaProject.bin` bytes available via `Workbook.vba_archive` for inspection (no authoring API); external workbook links (`wb._external_links` exposes `target` / `sheet_names` / cached values, with `xl/externalLinks/` round-tripped byte-for-byte on modify-save); embedded objects also round-trip |
 
 ### openpyxl compatibility status
 
@@ -148,33 +166,38 @@ Modules that import from openpyxl generally work against wolfxl. Unsupported cla
 | `DataValidation`, `Table`, `TableStyleInfo`, `TableColumn` | Read + write (write mode); modify-mode setters T1.5 |
 | `CellIsRule`, `FormulaRule`, `ColorScaleRule`, `DataBarRule`, `IconSetRule` | Read + write (write mode); modify-mode setters T1.5 |
 | `DefinedName`, `DocumentProperties` | Read + write (write mode); modify-mode setters T1.5 |
-| `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Stub (raises `NotImplementedError`) |
+| `NamedStyle`, `Protection`, `GradientFill`, `DifferentialStyle` | Constructor / dataclass support |
 | `BarChart`, `LineChart`, `PieChart`, `Reference`, `Series` (from `wolfxl.chart`) | **Full support** (1.6+) — 16 chart families incl. 3D / Stock / Surface / ProjectedPie |
 | `Image` (from `wolfxl.drawing.image`) | **Full support** (1.5+) — PNG / JPEG / GIF / BMP, all anchor types |
-| `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — construction + chart linkage + deep-clone |
-| `AutoFilter` | Stub - preserved on modify-mode round-trip |
+| `PivotTable`, `PivotCache` (from `wolfxl.pivot`) | **Full support** (2.0+) — modify-mode construction + chart linkage + deep-clone |
+| `AutoFilter` | Read + write support |
 | `ws.insert_rows`, `ws.delete_rows` | **Full support** (modify mode, 1.1+) — RFC-030 |
 | `ws.insert_cols`, `ws.delete_cols` | **Full support** (modify mode, 1.1+) — RFC-031 |
 | `ws.move_range` | **Full support** (modify mode, 1.1+) — RFC-034 |
 | `wb.move_sheet` | **Full support** (modify mode, 1.1+) — RFC-036 |
-| `wb.copy_worksheet` | **Full support** (modify mode only, 1.1+) — RFC-035 |
+| `wb.copy_worksheet` | **Full support** (write + modify mode, 1.1+) — RFC-035 |
 
 ## Performance at Scale
 
-| Scale | File size | WolfXL Read | openpyxl Read | WolfXL Write | openpyxl Write |
-|-------|-----------|-------------|---------------|--------------|----------------|
-| 100K cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 1M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 5M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| 10M cells | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Pivot construction (100k source rows, 4-field layout) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
+The v2.0 benchmark table is intentionally withheld until the current
+audit refreshes the ExcelBench run, pivot-construction microbenchmark,
+and clean install/import smoke from the release artifact. Do not use
+draft `10×-100×` marketing copy or placeholder benchmark rows as
+release evidence.
 
-Throughput stays flat as files grow — no hidden O(n^2) pathology.
-Pivot construction scales linearly with source-row count.
+For historical context and reproducible benchmark commands, see
+[Benchmark Results](docs/performance/benchmark-results.md). For the
+current claim status, see [Public Evidence Status](docs/trust/public-evidence.md).
+
+The implementation goal remains stable throughput as files grow, with
+linear pivot construction over source-row count.
 
 ## How WolfXL Compares
 
-Every Rust-backed Python Excel project picks a different slice of the problem. WolfXL is the only one that covers all four: formatting, modify mode, openpyxl API compatibility, and pivot-table construction.
+Every Rust-backed Python Excel project picks a different slice of the
+problem. WolfXL is the only one in this comparison that covers all
+four: formatting, modify mode, openpyxl API compatibility, and
+pivot-table construction.
 
 | Library | Read | Write | Modify | Styling | openpyxl API | Pivots |
 |---------|:----:|:-----:|:------:|:-------:|:------------:|:------:|
@@ -191,9 +214,12 @@ Every Rust-backed Python Excel project picks a different slice of the problem. W
 - **openpyxl API** = same `load_workbook`, `Workbook`, `Cell`, `Font`, `PatternFill` objects
 - **Pivots** = construct a pivot table from Python with pre-aggregated records (the file opens in Excel / LibreOffice / openpyxl with data populated, no refresh-on-open)
 
-*openpyxl preserves pivot tables on round-trip but does not provide a Python-side constructor that emits the `pivotCacheRecords` snapshot. WolfXL is the first Python OOXML library to do so.
+*openpyxl preserves pivot tables on round-trip but does not provide a
+Python-side constructor that emits the `pivotCacheRecords` snapshot.
+WolfXL's public ecosystem claim here is pending the final
+public-launch truth pass.
 
-Upstream [calamine](https://github.com/tafia/calamine) does not parse styles. WolfXL's read engine uses [calamine-styles](https://crates.io/crates/calamine-styles), a fork that adds Font/Fill/Border/Alignment/NumberFormat extraction from OOXML.
+WolfXL's public `.xlsx` and `.xlsb` readers are native. `.xlsb` is read-only but exposes values, cached formula results, and cell styles; legacy `.xls` remains on the Calamine-backed value path.
 
 ## Batch APIs for Maximum Speed
 
@@ -217,7 +243,10 @@ ws.write_rows(data_grid, start_row=5, start_col=1)
 wb.save("output.xlsx")
 ```
 
-For reads, `iter_rows(values_only=True)` uses a fast bulk path that reads all values in a single Rust call (6.7x faster than openpyxl):
+For reads, `iter_rows(values_only=True)` uses a fast bulk path that
+reads all values in a single Rust call. Historical ExcelBench numbers
+are shown below; the v2.0 release audit is refreshing them before any
+new public speedup headline is made.
 
 ```python
 wb = load_workbook("data.xlsx")
@@ -241,7 +270,7 @@ for record in records:
     print(record["row"], record["column"], record["value"], record.get("number_format"))
 ```
 
-| API | vs openpyxl | How |
+| API | Last audited vs openpyxl | How |
 |-----|-------------|-----|
 | `ws.append(row)` | **3.7x** faster write | Buffers rows, single Rust call at save |
 | `ws.write_rows(grid)` | **3.7x** faster write | Same mechanism, arbitrary start position |
@@ -289,6 +318,39 @@ Named ranges are resolved automatically. Error values (`#N/A`, `#VALUE!`, `#DIV/
 ## Case Study: SynthGL
 
 [SynthGL](https://github.com/SynthGL) switched from openpyxl to WolfXL for their GL journal exports (14-column financial data, 1K-50K rows). Results: **4x faster writes**, **9x faster reads** at scale. 50K-row exports dropped from 7.6s to 1.3s. [Read the full case study](docs/case-study-synthgl.md).
+
+## Case Study: Finance Template Modify Mode
+
+For a representative finance workflow, see
+[Template-Driven Finance Workbook Updates](docs/case-study-finance-template-modify.md).
+It benchmarks the exact workload where WolfXL is most differentiated:
+open an existing workbook with formulas, charts, comments, validations,
+and large detail sheets, touch three assumption cells, and save.
+
+## Case Study: Styled Report Generation
+
+For a fresh-workbook export path, see
+[Styled Report Generation](docs/case-study-styled-report-generation.md).
+The current local snapshot on a 10k-row reporting workbook came in at
+`0.553s` for `openpyxl` vs `0.380s` for WolfXL, about `1.46x` faster.
+
+## Case Study: Workbook-Preserving ETL
+
+For the "update one data block but keep the workbook" workflow, see
+[Workbook-Preserving ETL Update](docs/case-study-workbook-preserving-etl.md).
+The current local snapshot for replacing a `2,000`-row block inside a
+`20,000`-row reporting workbook came in at `1.064s` for `openpyxl` vs
+`0.496s` for WolfXL, about `2.15x` faster.
+
+## Case Study: Pivot Construction
+
+For a capability-first example, see
+[Pivot Construction From Python](docs/case-study-pivot-construction.md).
+It demonstrates workbook-scoped pivot cache creation, pivot-table emit,
+and pivot-linked chart output through WolfXL modify mode.
+The current local snapshot constructed the full artifact on a `10,000`-row
+source sheet in `0.229s` median with emitted pivot cache, pivot records,
+pivot table, and chart `<c:pivotSource>` parts all validated.
 
 ## How It Works
 

@@ -13,8 +13,8 @@
 
 use crate::axis::{Axis, ShiftPlan};
 use wolfxl_formula::{
-    shift as formula_shift, translate_with_meta, Axis as FormulaAxis,
-    DeletedRange, RefDelta, ShiftPlan as FormulaShiftPlan, TranslateResult, MAX_COL, MAX_ROW,
+    shift as formula_shift, translate_with_meta, Axis as FormulaAxis, DeletedRange, RefDelta,
+    ShiftPlan as FormulaShiftPlan, TranslateResult, MAX_COL, MAX_ROW,
 };
 
 /// Convert our local axis enum to `wolfxl_formula::Axis`.
@@ -100,8 +100,8 @@ pub fn shift_formula(formula: &str, plan: &ShiftPlan) -> String {
                 });
             }
         }
-        let result = wolfxl_formula::translate(&wrapped, &delta)
-            .unwrap_or_else(|_| wrapped.clone());
+        let result =
+            wolfxl_formula::translate(&wrapped, &delta).unwrap_or_else(|_| wrapped.clone());
         unwrap_after_tokenize(result, was_wrapped)
     }
 }
@@ -211,8 +211,7 @@ pub fn shift_formula_on_sheet(formula: &str, plan: &ShiftPlan, sheet: &str) -> S
             delta.deleted_range_sheet = Some(sheet.to_string());
         }
     }
-    let result =
-        wolfxl_formula::translate(&wrapped, &delta).unwrap_or_else(|_| wrapped.clone());
+    let result = wolfxl_formula::translate(&wrapped, &delta).unwrap_or_else(|_| wrapped.clone());
     unwrap_after_tokenize(result, was_wrapped)
 }
 
@@ -262,7 +261,11 @@ mod tests {
 
     #[test]
     fn noop_returns_input_unchanged() {
-        let p = ShiftPlan { axis: Axis::Row, idx: 1, n: 0 };
+        let p = ShiftPlan {
+            axis: Axis::Row,
+            idx: 1,
+            n: 0,
+        };
         assert_eq!(shift_formula("=A1+B2", &p), "=A1+B2");
     }
 

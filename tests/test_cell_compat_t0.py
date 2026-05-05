@@ -9,6 +9,7 @@ import openpyxl
 import pytest
 
 import wolfxl
+from wolfxl.utils.exceptions import IllegalCharacterError
 
 
 @pytest.fixture
@@ -32,6 +33,29 @@ def test_column_letter(mixed_xlsx: Path) -> None:
     wx_ws = wolfxl.load_workbook(mixed_xlsx)["Sheet1"]
     for coord in ("A1", "B1", "F1"):
         assert wx_ws[coord].column_letter == op_ws[coord].column_letter
+
+
+def test_openpyxl_metadata_accessors(mixed_xlsx: Path) -> None:
+    op_ws = openpyxl.load_workbook(mixed_xlsx)["Sheet1"]
+    wx_ws = wolfxl.load_workbook(mixed_xlsx)["Sheet1"]
+    op_cell = op_ws["B1"]
+    wx_cell = wx_ws["B1"]
+    assert wx_cell.base_date == op_cell.base_date
+    assert wx_cell.col_idx == op_cell.col_idx
+    assert wx_cell.encoding == op_cell.encoding
+    assert wx_cell.internal_value == op_cell.internal_value
+    assert wx_cell.pivotButton == op_cell.pivotButton
+    assert wx_cell.quotePrefix == op_cell.quotePrefix
+
+
+def test_openpyxl_string_and_error_helpers() -> None:
+    wb = wolfxl.Workbook()
+    cell = wb.active["A1"]
+    assert cell.check_string(b"abc") == "abc"
+    assert len(cell.check_string("x" * 40000)) == 32767
+    assert cell.check_error(ValueError("bad")) == "bad"
+    with pytest.raises(IllegalCharacterError):
+        cell.check_string("bad\x01")
 
 
 def test_parent_backref(mixed_xlsx: Path) -> None:
@@ -110,6 +134,24 @@ def test_has_style_after_font_set() -> None:
     ws["A1"] = "hello"
     ws["A1"].font = Font(bold=True)
     assert ws["A1"].has_style is True
+    assert ws["A1"].style_id == 1
+
+
+def test_style_id_reads_default_and_styled_cells(tmp_path: Path) -> None:
+    from openpyxl.styles import Font
+
+    path = tmp_path / "styled.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "plain"
+    ws["B1"] = "bold"
+    ws["B1"].font = Font(bold=True)
+    wb.save(path)
+
+    op_ws = openpyxl.load_workbook(path).active
+    wx_ws = wolfxl.load_workbook(path).active
+    assert wx_ws["A1"].style_id == op_ws["A1"].style_id == 0
+    assert wx_ws["B1"].style_id == op_ws["B1"].style_id
 
 
 def test_style_getter_returns_none() -> None:
@@ -119,8 +161,15 @@ def test_style_getter_returns_none() -> None:
     assert ws["A1"].style is None
 
 
-def test_style_setter_raises() -> None:
+def test_style_setter_rejects_unregistered_names() -> None:
+    """Assigning a style name that wasn't registered raises ValueError.
+
+    Named-style support landed in the G05 follow-up; the previous
+    NotImplementedError was replaced with a registration check so the
+    user sees an actionable error pointing them at add_named_style.
+    """
     wb = wolfxl.Workbook()
     ws = wb.active
-    with pytest.raises(NotImplementedError, match="Named styles"):
+    assert ws is not None
+    with pytest.raises(ValueError, match="not registered"):
         ws["A1"].style = "Good"

@@ -210,9 +210,7 @@ impl PivotCache {
         let has_name = self.source.name.is_some();
         match (has_sheet_ref, has_name) {
             (false, false) => {
-                return Err(
-                    "PivotCache.source requires sheet+ref or name".into(),
-                );
+                return Err("PivotCache.source requires sheet+ref or name".into());
             }
             (true, true) => {
                 return Err("sheet+ref and name are mutually exclusive".into());

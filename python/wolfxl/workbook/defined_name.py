@@ -14,6 +14,13 @@ an alias for ``value`` to match openpyxl's canonical attribute name
 (`openpyxl.workbook.defined_name.DefinedName.attr_text`). Supplying
 both with conflicting values raises ``TypeError``; supplying neither
 also raises ``TypeError``.
+
+Phase 2 (G22) extends the dataclass to cover the full ECMA-376
+``definedName`` attribute surface that openpyxl exposes: ``customMenu``,
+``description``, ``help``, ``statusBar``, ``shortcutKey``, ``function``,
+``functionGroupId``, ``vbProcedure``, ``xlm``, ``publishToServer``,
+``workbookParameter``. Each is reachable via the openpyxl camelCase
+spelling AND the wolfxl snake_case spelling.
 """
 
 from __future__ import annotations
@@ -36,9 +43,43 @@ class DefinedName:
     ``attr_text`` is an openpyxl-compat alias for ``value`` accepted on
     construction; ``DefinedName(name="X", attr_text="Sheet1!A1")`` is
     equivalent to ``DefinedName(name="X", value="Sheet1!A1")``.
+
+    The remaining ECMA-376 ``definedName`` attributes are exposed via
+    snake_case fields with openpyxl camelCase aliases:
+
+    - ``custom_menu`` (``customMenu``) — string, custom menu text.
+    - ``description`` (``description``) — string, free-text description.
+    - ``help`` (``help``) — string, help text.
+    - ``status_bar`` (``statusBar``) — string, status-bar prompt.
+    - ``shortcut_key`` (``shortcutKey``) — single-character keyboard
+      shortcut.
+    - ``function`` (``function``) — bool, marks the name as a function.
+    - ``function_group_id`` (``functionGroupId``) — int, function group
+      identifier.
+    - ``vb_procedure`` (``vbProcedure``) — bool, marks as a VB procedure.
+    - ``xlm`` (``xlm``) — bool, marks as an Excel 4.0 macro.
+    - ``publish_to_server`` (``publishToServer``) — bool.
+    - ``workbook_parameter`` (``workbookParameter``) — bool.
     """
 
-    __slots__ = ("name", "value", "comment", "localSheetId", "hidden")
+    __slots__ = (
+        "name",
+        "value",
+        "comment",
+        "localSheetId",
+        "hidden",
+        "custom_menu",
+        "description",
+        "help",
+        "status_bar",
+        "shortcut_key",
+        "function",
+        "function_group_id",
+        "vb_procedure",
+        "xlm",
+        "publish_to_server",
+        "workbook_parameter",
+    )
 
     def __init__(
         self,
@@ -49,6 +90,24 @@ class DefinedName:
         hidden: bool = False,
         *,
         attr_text: str | None = None,
+        custom_menu: str | None = None,
+        customMenu: str | None = None,  # noqa: N803 - openpyxl alias
+        description: str | None = None,
+        help: str | None = None,  # noqa: A002 - openpyxl public API
+        status_bar: str | None = None,
+        statusBar: str | None = None,  # noqa: N803 - openpyxl alias
+        shortcut_key: str | None = None,
+        shortcutKey: str | None = None,  # noqa: N803 - openpyxl alias
+        function: bool | None = None,
+        function_group_id: int | None = None,
+        functionGroupId: int | None = None,  # noqa: N803 - openpyxl alias
+        vb_procedure: bool | None = None,
+        vbProcedure: bool | None = None,  # noqa: N803 - openpyxl alias
+        xlm: bool | None = None,
+        publish_to_server: bool | None = None,
+        publishToServer: bool | None = None,  # noqa: N803 - openpyxl alias
+        workbook_parameter: bool | None = None,
+        workbookParameter: bool | None = None,  # noqa: N803 - openpyxl alias
     ) -> None:
         if value is None and attr_text is None:
             raise TypeError(
@@ -64,6 +123,35 @@ class DefinedName:
         self.localSheetId: int | None = localSheetId  # noqa: N815
         self.hidden: bool = hidden
 
+        self.custom_menu: str | None = _pick_alias(
+            "custom_menu", custom_menu, "customMenu", customMenu
+        )
+        self.description: str | None = description
+        self.help: str | None = help
+        self.status_bar: str | None = _pick_alias(
+            "status_bar", status_bar, "statusBar", statusBar
+        )
+        self.shortcut_key: str | None = _pick_alias(
+            "shortcut_key", shortcut_key, "shortcutKey", shortcutKey
+        )
+        self.function: bool | None = function
+        self.function_group_id: int | None = _pick_alias(
+            "function_group_id", function_group_id, "functionGroupId", functionGroupId
+        )
+        self.vb_procedure: bool | None = _pick_alias(
+            "vb_procedure", vb_procedure, "vbProcedure", vbProcedure
+        )
+        self.xlm: bool | None = xlm
+        self.publish_to_server: bool | None = _pick_alias(
+            "publish_to_server", publish_to_server, "publishToServer", publishToServer
+        )
+        self.workbook_parameter: bool | None = _pick_alias(
+            "workbook_parameter",
+            workbook_parameter,
+            "workbookParameter",
+            workbookParameter,
+        )
+
     @property
     def attr_text(self) -> str:
         """openpyxl alias for ``.value``."""
@@ -73,6 +161,62 @@ class DefinedName:
     def attr_text(self, v: str) -> None:
         self.value = v
 
+    @property
+    def customMenu(self) -> str | None:  # noqa: N802 - openpyxl alias
+        return self.custom_menu
+
+    @customMenu.setter
+    def customMenu(self, v: str | None) -> None:  # noqa: N802
+        self.custom_menu = v
+
+    @property
+    def statusBar(self) -> str | None:  # noqa: N802 - openpyxl alias
+        return self.status_bar
+
+    @statusBar.setter
+    def statusBar(self, v: str | None) -> None:  # noqa: N802
+        self.status_bar = v
+
+    @property
+    def shortcutKey(self) -> str | None:  # noqa: N802 - openpyxl alias
+        return self.shortcut_key
+
+    @shortcutKey.setter
+    def shortcutKey(self, v: str | None) -> None:  # noqa: N802
+        self.shortcut_key = v
+
+    @property
+    def functionGroupId(self) -> int | None:  # noqa: N802 - openpyxl alias
+        return self.function_group_id
+
+    @functionGroupId.setter
+    def functionGroupId(self, v: int | None) -> None:  # noqa: N802
+        self.function_group_id = v
+
+    @property
+    def vbProcedure(self) -> bool | None:  # noqa: N802 - openpyxl alias
+        return self.vb_procedure
+
+    @vbProcedure.setter
+    def vbProcedure(self, v: bool | None) -> None:  # noqa: N802
+        self.vb_procedure = v
+
+    @property
+    def publishToServer(self) -> bool | None:  # noqa: N802 - openpyxl alias
+        return self.publish_to_server
+
+    @publishToServer.setter
+    def publishToServer(self, v: bool | None) -> None:  # noqa: N802
+        self.publish_to_server = v
+
+    @property
+    def workbookParameter(self) -> bool | None:  # noqa: N802 - openpyxl alias
+        return self.workbook_parameter
+
+    @workbookParameter.setter
+    def workbookParameter(self, v: bool | None) -> None:  # noqa: N802
+        self.workbook_parameter = v
+
     def __repr__(self) -> str:
         bits = [f"name={self.name!r}", f"value={self.value!r}"]
         if self.localSheetId is not None:
@@ -81,21 +225,71 @@ class DefinedName:
             bits.append("hidden=True")
         if self.comment is not None:
             bits.append(f"comment={self.comment!r}")
+        for attr in (
+            "custom_menu",
+            "description",
+            "help",
+            "status_bar",
+            "shortcut_key",
+            "function",
+            "function_group_id",
+            "vb_procedure",
+            "xlm",
+            "publish_to_server",
+            "workbook_parameter",
+        ):
+            v = getattr(self, attr)
+            if v is not None and v is not False:
+                bits.append(f"{attr}={v!r}")
         return f"DefinedName({', '.join(bits)})"
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, DefinedName):
             return NotImplemented
-        return (
-            self.name == other.name
-            and self.value == other.value
-            and self.comment == other.comment
-            and self.localSheetId == other.localSheetId
-            and self.hidden == other.hidden
+        return all(
+            getattr(self, attr) == getattr(other, attr) for attr in self.__slots__
         )
 
     def __hash__(self) -> int:
-        return hash((self.name, self.value, self.localSheetId, self.hidden))
+        return hash(
+            (
+                self.name,
+                self.value,
+                self.localSheetId,
+                self.hidden,
+                self.custom_menu,
+                self.description,
+                self.help,
+                self.status_bar,
+                self.shortcut_key,
+                self.function,
+                self.function_group_id,
+                self.vb_procedure,
+                self.xlm,
+                self.publish_to_server,
+                self.workbook_parameter,
+            )
+        )
+
+
+def _pick_alias(
+    snake_name: str,
+    snake_value: Any,
+    camel_name: str,
+    camel_value: Any,
+) -> Any:
+    """Return whichever alias the caller supplied, raising on conflict.
+
+    `None` from either side means "not supplied" — Python `None` is the
+    sentinel for "leave default" since none of these ECMA-376 attrs have
+    a meaningful `None` value at rest.
+    """
+    if snake_value is not None and camel_value is not None and snake_value != camel_value:
+        raise TypeError(
+            f"DefinedName: pass either {snake_name!r} or {camel_name!r}, "
+            "not both with conflicting values"
+        )
+    return snake_value if snake_value is not None else camel_value
 
 
 class DefinedNameList(list):

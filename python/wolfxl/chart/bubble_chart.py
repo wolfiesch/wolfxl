@@ -1,8 +1,6 @@
 """`BubbleChart` — XY scatter with marker size encoding a third dimension.
 
 Mirrors :class:`openpyxl.chart.bubble_chart.BubbleChart`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -88,7 +86,7 @@ class BubbleChart(ChartBase):
         self.sizeRepresents = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {}
         if self.bubble3D is not None:
             d["bubble_3d"] = self.bubble3D

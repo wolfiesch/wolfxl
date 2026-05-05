@@ -3,6 +3,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use calamine_styles::{open_workbook_auto, Reader, Sheets};
+use wolfxl_reader::NativeXlsbBook;
 use zip::ZipArchive;
 
 use crate::csv_reader::CsvBackend;
@@ -16,9 +17,9 @@ use crate::sheet::{Sheet, SheetsReader};
 use crate::styles::{parse_cellxfs, parse_num_fmts, XfEntry};
 use crate::worksheet_xml::parse_cell_style_ids;
 
-/// Source format detected from the file extension. Drives which calamine
-/// backend (or CSV reader) handles the workbook and gates xlsx-only
-/// features like the styles walker and table parsing.
+/// Source format detected from the file extension. Drives which backend
+/// handles the workbook and gates xlsx-only features like the styles walker
+/// and table parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceFormat {
     Xlsx,
@@ -50,11 +51,13 @@ impl SourceFormat {
     }
 }
 
-/// Internal backend dispatch. Xlsx/Xls/Xlsb/Ods all flow through calamine's
-/// `Sheets` enum (which already abstracts them); CSV gets its own minimal
-/// value-only backend because it isn't a calamine-supported format.
+/// Internal backend dispatch. Xlsx/Xls/Ods flow through calamine's `Sheets`
+/// enum (which already abstracts them); XLSB uses WolfXL's native reader; CSV
+/// gets its own minimal value-only backend because it isn't a calamine-
+/// supported format.
 pub(crate) enum Backend {
     Sheets(SheetsReader),
+    NativeXlsb(NativeXlsbBook),
     Csv(CsvBackend),
 }
 
@@ -174,9 +177,10 @@ impl Workbook {
     /// Open a workbook, dispatching to the right backend by file extension.
     ///
     /// Supported: `.xlsx` / `.xlsm` / `.xlam` (primary, full style resolution via
-    /// calamine fast-path + cellXfs walker), `.xls` / `.xla` / `.xlsb` / `.ods`
-    /// (values + defined names via calamine; styles come back empty -
-    /// calamine-styles doesn't parse them for these formats yet), and
+    /// calamine fast-path + cellXfs walker), `.xlsb` (native BIFF12 values and
+    /// number-format metadata), `.xls` / `.xla` / `.ods` (values + defined names
+    /// via calamine; styles come back empty - calamine-styles doesn't parse
+    /// them for these formats yet), and
     /// `.csv` / `.tsv` / `.txt` (single synthetic sheet, value-only, schema
     /// inference is the source of truth for column types).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -184,7 +188,7 @@ impl Workbook {
         let format = SourceFormat::from_extension(&path)?;
 
         match format {
-            SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Xlsb | SourceFormat::Ods => {
+            SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Ods => {
                 let mut inner: SheetsReader = open_workbook_auto(&path)
                     .map_err(|e| Error::Xlsx(format!("failed to open workbook: {e}")))?;
                 // Tables only exist on xlsx; load_tables is xlsx-specific
@@ -195,6 +199,22 @@ impl Workbook {
                 let sheet_names = inner.sheet_names().to_vec();
                 Ok(Self {
                     inner: Backend::Sheets(inner),
+                    sheet_names,
+                    path,
+                    format,
+                    styles: None,
+                })
+            }
+            SourceFormat::Xlsb => {
+                let inner = NativeXlsbBook::open_path(&path)
+                    .map_err(|e| Error::Xlsx(format!("failed to open native xlsb: {e}")))?;
+                let sheet_names = inner
+                    .sheet_names()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect();
+                Ok(Self {
+                    inner: Backend::NativeXlsb(inner),
                     sheet_names,
                     path,
                     format,
@@ -262,6 +282,7 @@ impl Workbook {
                 }
                 Sheet::load(sheets, name, self.styles.as_mut())
             }
+            Backend::NativeXlsb(book) => Sheet::load_native_xlsb(book, name),
             Backend::Csv(csv) => csv.load_sheet(name),
         }
     }
@@ -281,6 +302,11 @@ impl Workbook {
     pub fn named_ranges(&self) -> Vec<(String, String)> {
         match &self.inner {
             Backend::Sheets(s) => s.defined_names().to_vec(),
+            Backend::NativeXlsb(book) => book
+                .named_ranges()
+                .iter()
+                .map(|range| (range.name.clone(), range.refers_to.clone()))
+                .collect(),
             Backend::Csv(_) => Vec::new(),
         }
     }

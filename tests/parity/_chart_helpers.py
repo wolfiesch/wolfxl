@@ -66,8 +66,9 @@ def canonicalize_chart_xml(xml_bytes: bytes) -> bytes:
 
     1. Parse with lxml's strict XML parser.
     2. Walk the tree, zeroing axis ID / cross-axis values.
-    3. Serialise via ``etree.tostring(..., method="c14n")`` which
-       handles attribute ordering and namespace declaration shuffling.
+    3. Serialise via ``etree.canonicalize(..., rewrite_prefixes=True)`` which
+       handles attribute ordering, namespace declaration shuffling, and
+       default-vs-prefixed namespace spelling differences.
 
     Inputs that fail to parse raise ``XMLSyntaxError`` so callers can
     surface the underlying corruption.
@@ -75,8 +76,8 @@ def canonicalize_chart_xml(xml_bytes: bytes) -> bytes:
     parser = etree.XMLParser(remove_blank_text=False, resolve_entities=False)
     tree = etree.fromstring(xml_bytes, parser=parser)
     _normalise_axis_ids(tree)
-    out: bytes = etree.tostring(tree, method="c14n")
-    return out
+    out: str = etree.canonicalize(tree, rewrite_prefixes=True)
+    return out.encode("utf-8")
 
 
 def _normalise_axis_ids(root: etree._Element) -> None:

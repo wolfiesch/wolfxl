@@ -1,8 +1,6 @@
 """`<c:dLbl>` and `<c:dLbls>` — data labels (per-point + series-level).
 
 Mirrors :mod:`openpyxl.chart.label`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -10,7 +8,13 @@ from __future__ import annotations
 from typing import Any
 
 from .shapes import GraphicalProperties
-from .text import RichText
+from .text import (
+    CharacterProperties,
+    Paragraph,
+    ParagraphProperties,
+    RegularTextRun,
+    RichText,
+)
 
 
 _VALID_POSITIONS = (
@@ -60,8 +64,9 @@ class _DataLabelBase:
         showLeaderLines: bool | None = None,
         separator: str | None = None,
         position: str | None = None,
+        rich: Any | None = None,
     ) -> None:
-        # ``position`` is an openpyxl-style alias for ``dLblPos`` —
+        # ``position`` is an openpyxl-style alias for ``dLblPos`` -
         # accept either, prefer the one explicitly passed.
         if position is not None and dLblPos is None:
             dLblPos = position
@@ -69,6 +74,12 @@ class _DataLabelBase:
             raise ValueError(f"dLblPos={dLblPos!r} not in {_VALID_POSITIONS}")
         self.numFmt = numFmt
         self.spPr = spPr
+        # ``rich`` is a wolfxl convenience: accepts a CellRichText (or any
+        # iterable of str/TextBlock runs) and inflates it into a wolfxl
+        # ``RichText`` body that flows into ``<c:txPr>`` so the data
+        # labels emit per-run formatting (bold/italic/color/size/font).
+        if rich is not None and txPr is None:
+            txPr = _coerce_rich_to_txpr(rich)
         self.txPr = txPr
         self.dLblPos = dLblPos
         self.showLegendKey = showLegendKey
@@ -154,6 +165,67 @@ class DataLabelList(_DataLabelBase):
         if self.delete is not None:
             d["delete"] = self.delete
         return d
+
+
+def _coerce_rich_to_txpr(value: Any) -> RichText:
+    """Inflate a rich-text payload into a wolfxl :class:`RichText`.
+
+    Accepts either an existing :class:`RichText` (returned verbatim), a
+    ``CellRichText`` (iterable of ``str`` + ``TextBlock`` runs), or any
+    iterable of the same shape. Each ``TextBlock``'s ``InlineFont`` is
+    mapped onto a chart :class:`CharacterProperties` so the run carries
+    the same b/i/u/sz/color/font-name flags through the Rust emitter.
+    """
+    if isinstance(value, RichText):
+        return value
+    runs: list[RegularTextRun] = []
+    iterable = value if hasattr(value, "__iter__") else [value]
+    for item in iterable:
+        if isinstance(item, str):
+            runs.append(RegularTextRun(t=item))
+            continue
+        text = getattr(item, "text", None)
+        if text is None:
+            continue
+        font = getattr(item, "font", None)
+        rpr: CharacterProperties | None = None
+        if font is not None:
+            sz_pt = getattr(font, "sz", None)
+            sz: int | None = None
+            if sz_pt is not None:
+                try:
+                    sz = int(round(float(sz_pt) * 100))
+                except (TypeError, ValueError):
+                    sz = None
+            u = getattr(font, "u", None)
+            color = getattr(font, "color", None)
+            color_hex: str | None = None
+            if color is not None:
+                if isinstance(color, str):
+                    color_hex = color
+                else:
+                    color_hex = (
+                        getattr(color, "rgb", None)
+                        or getattr(color, "value", None)
+                        or getattr(color, "srgbClr", None)
+                    )
+                    if color_hex is not None and not isinstance(color_hex, str):
+                        color_hex = str(color_hex)
+            rpr = CharacterProperties(
+                b=getattr(font, "b", None),
+                i=getattr(font, "i", None),
+                u=u,
+                strike="sngStrike" if getattr(font, "strike", None) else None,
+                sz=sz,
+                solidFill=color_hex,
+                latin=getattr(font, "rFont", None),
+            )
+        runs.append(RegularTextRun(rPr=rpr, t=text))
+    paragraph = Paragraph(
+        pPr=ParagraphProperties(defRPr=CharacterProperties()),
+        r=runs,
+    )
+    return RichText(p=[paragraph])
 
 
 __all__ = ["DataLabel", "DataLabelList"]

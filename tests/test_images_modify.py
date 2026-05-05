@@ -33,6 +33,12 @@ def _baseline(tmp_path: Path) -> Path:
     return out
 
 
+def _image_anchor_col_row(image: object) -> tuple[int, int]:
+    marker = getattr(getattr(image, "anchor", None), "_from", None)
+    assert marker is not None
+    return int(marker.col), int(marker.row)
+
+
 def test_modify_add_first_image(tmp_path: Path) -> None:
     base = _baseline(tmp_path)
     wb = load_workbook(base, modify=True)
@@ -103,3 +109,49 @@ def test_modify_append_to_existing_drawing_raises(tmp_path: Path) -> None:
     wb2.active.add_image(Image(JPG_PATH), "D4")
     with pytest.raises(NotImplementedError, match="(?i)drawing"):
         wb2.save(tmp_path / "boom.xlsx")
+
+
+def test_modify_remove_image_by_index_round_trip(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.add_image(Image(PNG_PATH), "B2")
+    ws.add_image(Image(JPG_PATH), "D4")
+    base = tmp_path / "two_images.xlsx"
+    wb.save(base)
+
+    wb2 = load_workbook(base, modify=True)
+    ws2 = wb2.active
+    assert len(ws2.images) == 2
+    ws2.remove_image(0)
+    out = tmp_path / "after_remove.xlsx"
+    wb2.save(out)
+
+    wb3 = openpyxl.load_workbook(out)
+    images = wb3.active._images
+    assert len(images) == 1
+    assert _image_anchor_col_row(images[0]) == (3, 3)  # D4
+
+
+def test_modify_replace_image_by_index_round_trip(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.add_image(Image(PNG_PATH), "B2")
+    base = tmp_path / "one_image.xlsx"
+    wb.save(base)
+
+    wb2 = load_workbook(base, modify=True)
+    ws2 = wb2.active
+    replacement = Image(JPG_PATH)
+    replacement.anchor = "F6"
+    ws2.replace_image(0, replacement)
+    out = tmp_path / "after_replace.xlsx"
+    wb2.save(out)
+
+    wb3 = openpyxl.load_workbook(out)
+    images = wb3.active._images
+    assert len(images) == 1
+    assert _image_anchor_col_row(images[0]) == (5, 5)  # F6

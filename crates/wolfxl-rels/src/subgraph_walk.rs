@@ -122,11 +122,9 @@ pub fn walk_sheet_subgraph_with_nested(
                 TargetMode::Internal => resolve_relative(&parent_dir_path, &rel.target),
                 TargetMode::External => rel.target.clone(),
             };
-            subgraph.nested_rels.push((
-                parent_part.clone(),
-                rel.id.0.clone(),
-                target_path.clone(),
-            ));
+            subgraph
+                .nested_rels
+                .push((parent_part.clone(), rel.id.0.clone(), target_path.clone()));
             if rel.mode == TargetMode::Internal && seen.insert(target_path.clone()) {
                 subgraph.reachable_parts.push(target_path.clone());
                 if let Some(nested) = resolve_nested(&target_path) {
@@ -276,22 +274,15 @@ mod tests {
             "../drawings/drawing1.xml",
             TargetMode::Internal,
         )]);
-        let drawing_rels = rels_with(&[(
-            rt::IMAGE,
-            "../media/image1.png",
-            TargetMode::Internal,
-        )]);
-        let sub = walk_sheet_subgraph_with_nested(
-            &sheet_rels,
-            "xl/worksheets/sheet1.xml",
-            |part| {
+        let drawing_rels = rels_with(&[(rt::IMAGE, "../media/image1.png", TargetMode::Internal)]);
+        let sub =
+            walk_sheet_subgraph_with_nested(&sheet_rels, "xl/worksheets/sheet1.xml", |part| {
                 if part == "xl/drawings/drawing1.xml" {
                     Some(drawing_rels.clone())
                 } else {
                     None
                 }
-            },
-        );
+            });
         assert_eq!(
             sub.reachable_parts,
             vec![
@@ -313,27 +304,23 @@ mod tests {
             "../drawings/drawing1.xml",
             TargetMode::Internal,
         )]);
-        let cyclic = rels_with(&[(
-            rt::DRAWING,
-            "drawing1.xml",
-            TargetMode::Internal,
-        )]);
-        let sub = walk_sheet_subgraph_with_nested(
-            &sheet_rels,
-            "xl/worksheets/sheet1.xml",
-            |part| {
+        let cyclic = rels_with(&[(rt::DRAWING, "drawing1.xml", TargetMode::Internal)]);
+        let sub =
+            walk_sheet_subgraph_with_nested(&sheet_rels, "xl/worksheets/sheet1.xml", |part| {
                 if part == "xl/drawings/drawing1.xml" {
                     Some(cyclic.clone())
                 } else {
                     None
                 }
-            },
-        );
+            });
         // No infinite loop — the resolver was called twice (both for
         // drawing1 — once from the sheet's edge, once from the cycle's
         // edge), but `reachable_parts` deduplication stops re-walks.
         assert_eq!(
-            sub.reachable_parts.iter().filter(|p| **p == "xl/drawings/drawing1.xml").count(),
+            sub.reachable_parts
+                .iter()
+                .filter(|p| **p == "xl/drawings/drawing1.xml")
+                .count(),
             1
         );
     }
@@ -350,11 +337,7 @@ mod tests {
     #[test]
     fn multi_dotdot_resolves_correctly() {
         // ../../foo/bar.xml from xl/worksheets/sheet1.xml → foo/bar.xml.
-        let g = rels_with(&[(
-            rt::IMAGE,
-            "../../foo/bar.xml",
-            TargetMode::Internal,
-        )]);
+        let g = rels_with(&[(rt::IMAGE, "../../foo/bar.xml", TargetMode::Internal)]);
         let sub = walk_sheet_subgraph(&g, "xl/worksheets/sheet1.xml");
         assert_eq!(sub.sheet_rels[0].1, "foo/bar.xml");
     }

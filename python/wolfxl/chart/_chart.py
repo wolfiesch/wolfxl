@@ -6,10 +6,8 @@ inherits ``title``, ``legend``, ``layout``, ``style``, ``display_blanks``,
 the ``add_data``/``set_categories``/``append`` helpers that drive the
 fluent construction pattern.
 
-The :meth:`to_rust_dict` method is the contract surface Pod-α's PyO3
-binding consumes. It returns a flat-shape dict matching RFC-046 §10.
-
-Sprint Μ-prime Pod-β′ (RFC-046 §10) — v1.6.1 contract.
+The :meth:`to_rust_dict` method is the contract surface the Rust
+emitter consumes. It returns a flat-shape dict of snake_case keys.
 """
 
 from __future__ import annotations
@@ -30,19 +28,19 @@ from .title import TitleDescriptor
 
 _VALID_DISPLAY_BLANKS = ("span", "gap", "zero")
 
-# RFC-049 §10.2 — `pivot_source.name` regex. Optional sheet prefix +
-# table name. Sheet prefix only allows the conservative identifier set;
-# table-name segment additionally allows spaces (Excel pivot names like
-# "PivotTable 1" are commonplace in the wild).
+# `pivot_source.name` regex. Optional sheet prefix + table name. Sheet
+# prefix only allows the conservative identifier set; table-name segment
+# additionally allows spaces (Excel pivot names like "PivotTable 1" are
+# commonplace in the wild).
 _PIVOT_SOURCE_NAME_RE = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_]*!)?[A-Za-z_][A-Za-z0-9_ ]*$"
 )
 _PIVOT_FMT_ID_MAX = 65535
 
 
-# Map openpyxl tagname (`barChart`, `bar3DChart`, …) to the §10.2 short
-# kind string. Both 2D and 3D variants — the 8 new families ship in
-# Sprint Μ-prime (v1.6.1).
+# Map openpyxl tagname (`barChart`, `bar3DChart`, …) to the short
+# kind string consumed by the Rust emitter. Both 2D and 3D variants
+# are covered.
 _TAGNAME_TO_KIND = {
     "barChart": "bar",
     "bar3DChart": "bar3d",
@@ -70,7 +68,7 @@ class ChartBase:
     - ``tagname`` — XML root for this chart's plot block (e.g. ``"barChart"``).
     - ``_series_type`` — key into :data:`series.attribute_mapping`.
     - ``_chart_type_specific_keys()`` — flat dict of per-type keys merged
-      into the §10.1 top-level shape (replaces v1.6.0 ``_chart_dict_extras``).
+      into the top-level shape.
     """
 
     title = TitleDescriptor()
@@ -98,12 +96,12 @@ class ChartBase:
         self._style: int | None = None
         self.axId = tuple(axId) if axId else ()
         self.display_blanks: str = "gap"
-        # Sprint Ν Pod-δ (RFC-049). Internal storage for the snake-case
-        # ``pivot_source`` attribute is a dict shaped like the §10.1
-        # contract (or ``None``). The legacy ``pivotSource`` openpyxl
-        # alias (typed as ``Any``) is preserved for back-compat with
-        # callers that imported the openpyxl PivotSource class
-        # directly; it does not flow through ``to_rust_dict``.
+        # Internal storage for the snake-case ``pivot_source`` attribute
+        # is a dict shaped like the chart-pivot-source contract (or
+        # ``None``). The legacy ``pivotSource`` openpyxl alias (typed as
+        # ``Any``) is preserved for back-compat with callers that
+        # imported the openpyxl PivotSource class directly; it does not
+        # flow through ``to_rust_dict``.
         self._pivot_source: dict[str, Any] | None = None
         self.pivotSource: Any | None = None
         self.pivotFormats: tuple[Any, ...] = ()
@@ -127,10 +125,26 @@ class ChartBase:
     # ------------------------------------------------------------------
     @property
     def style(self) -> int | None:
+        """Return the chart style index.
+
+        Returns:
+            An Excel chart style number in the inclusive range ``1..48``, or
+            ``None`` when no explicit style is set.
+        """
         return self._style
 
     @style.setter
     def style(self, value: int | None) -> None:
+        """Set the chart style index.
+
+        Args:
+            value: Excel chart style number in ``1..48``, or ``None`` to clear
+                the explicit style.
+
+        Raises:
+            ValueError: If ``value`` falls outside Excel's supported style
+                range.
+        """
         if value is None:
             self._style = None
             return
@@ -153,17 +167,17 @@ class ChartBase:
         self._display_blanks = value
 
     # ------------------------------------------------------------------
-    # ``pivot_source`` — Sprint Ν Pod-δ (RFC-049 §10).
+    # ``pivot_source``.
     #
     # Linking a chart to a pivot table is what makes Excel render it as
     # a "pivot chart" (right-click → Refresh, pivot-aware toolbar, etc.).
     # The OOXML serialization is a top-of-`<c:chart>` ``<c:pivotSource>``
-    # block + an extra ``<c:fmtId val="0"/>`` on every series. Pod-δ's
-    # Rust emitter handles both; this attribute is the Python surface.
+    # block + an extra ``<c:fmtId val="0"/>`` on every series. The Rust
+    # emitter handles both; this attribute is the Python surface.
     # ------------------------------------------------------------------
     @property
     def pivot_source(self) -> dict[str, Any] | None:
-        """The chart's pivot-source linkage as a §10.1-shaped dict, or
+        """The chart's pivot-source linkage as a dict, or
         ``None`` if unlinked.
         """
         return self._pivot_source
@@ -213,7 +227,18 @@ class ChartBase:
 
     @staticmethod
     def _validate_pivot_source(name: Any, fmt_id: Any) -> dict[str, Any]:
-        """RFC-049 §10.2 validation. Returns a normalised dict."""
+        """Validate and normalise a pivot-source linkage.
+
+        Checks that ``name`` is a non-empty string matching the OOXML
+        pivot-source name regex (optional sheet prefix plus a table-name
+        segment that may contain spaces) and that ``fmt_id`` is an
+        integer in ``[0, 65535]``. Returns the canonical
+        ``{"name": str, "fmt_id": int}`` dict consumed by
+        :meth:`to_rust_dict`. Called from the ``pivot_source`` setter
+        whenever a user assigns a tuple, dict, or duck-typed pivot
+        table; raises :class:`ValueError` on any out-of-range or
+        malformed input.
+        """
         if not isinstance(name, str) or not name:
             raise ValueError(
                 "pivot_source.name must be a non-empty string"
@@ -304,6 +329,7 @@ class ChartBase:
         """Sort series by ``order`` and rebase indexes (matches openpyxl)."""
         ds = sorted(self.ser, key=attrgetter("order"))
         for idx, s in enumerate(ds):
+            s.idx = idx
             s.order = idx
         self.ser = ds
 
@@ -320,12 +346,62 @@ class ChartBase:
     # Validation
     # ------------------------------------------------------------------
     def _validate_at_emit(self) -> None:
-        """Per RFC-046 §10.11: raise at ``to_rust_dict`` time on bad state."""
+        """Raise at ``to_rust_dict`` time on bad state.
+
+        For combination charts, additionally walk ``self._charts[1:]``
+        and reject:
+        - empty series in any secondary chart family,
+        - Pie / Doughnut secondaries (out-of-scope),
+        - a secondary whose ``(x_axis.axId, y_axis.axId)`` exactly equals
+          the primary's *and* whose ``kind`` matches the primary's kind
+          (likely a copy-paste bug - fail loudly).
+        """
         if not self.ser:
             raise ValueError(
                 f"{type(self).__name__} requires at least one series "
                 f"(call chart.add_data(...) before saving)."
             )
+
+        # Secondary-chart validation. The first entry of ``self._charts``
+        # is ``self`` (primary); siblings live at ``[1:]``.
+        secondaries = list(self._charts[1:])
+        if not secondaries:
+            return
+
+        primary_kind = _TAGNAME_TO_KIND.get(self.tagname)
+        primary_x_id = getattr(getattr(self, "x_axis", None), "axId", None)
+        primary_y_id = getattr(getattr(self, "y_axis", None), "axId", None)
+
+        for secondary in secondaries:
+            sec_kind = _TAGNAME_TO_KIND.get(secondary.tagname)
+            # (a) Empty series in a secondary.
+            if not getattr(secondary, "ser", None):
+                raise ValueError(
+                    f"combination chart secondary {type(secondary).__name__} "
+                    f"requires at least one series "
+                    f"(call chart.add_data(...) on the secondary before saving)."
+                )
+            # (b) Pie/Doughnut secondaries — out of scope.
+            if sec_kind in {"pie", "pie3d", "doughnut", "of_pie"}:
+                raise ValueError(
+                    f"combination chart cannot include a "
+                    f"{type(secondary).__name__} secondary "
+                    f"(Pie/Doughnut combos are out of scope)."
+                )
+            # (c) Same-kind, same-axId secondary: copy-paste smell.
+            sec_x_id = getattr(getattr(secondary, "x_axis", None), "axId", None)
+            sec_y_id = getattr(getattr(secondary, "y_axis", None), "axId", None)
+            if (
+                sec_kind == primary_kind
+                and sec_x_id == primary_x_id
+                and sec_y_id == primary_y_id
+            ):
+                raise ValueError(
+                    f"combination chart secondary {type(secondary).__name__} "
+                    f"has the same kind and axIds as the primary; this is "
+                    f"likely a copy-paste bug. Set a distinct y_axis.axId "
+                    f"on the secondary (or use a different chart kind)."
+                )
 
     # ------------------------------------------------------------------
     # Rust-side serialisation
@@ -346,10 +422,11 @@ class ChartBase:
     def to_rust_dict(self) -> dict[str, Any]:
         """Produce a typed dict describing this chart for the Rust emitter.
 
-        Shape: see RFC-046 §10.1 (flat top-level keys, snake_case
-        throughout; no ``axes`` list, no ``extras`` envelope).
+        Shape: flat top-level keys, snake_case throughout; no
+        ``axes`` list, no ``extras`` envelope.
         """
         self._validate_at_emit()
+        self._reindex()
 
         kind = _TAGNAME_TO_KIND.get(self.tagname)
         if kind is None:
@@ -396,9 +473,9 @@ class ChartBase:
             "width_emu": int(self.width * 360_000) if self.width is not None else None,
             "height_emu": int(self.height * 360_000) if self.height is not None else None,
 
-            # Sprint Ν Pod-δ — RFC-049 §10.1. ``None`` → no
-            # ``<c:pivotSource>`` block emitted; chart is a standard
-            # chart. Dict shape `{"name": str, "fmt_id": int}`.
+            # ``None`` → no ``<c:pivotSource>`` block emitted; chart
+            # is a standard chart. Dict shape
+            # `{"name": str, "fmt_id": int}`.
             "pivot_source": self._pivot_source,
         }
 
@@ -409,6 +486,20 @@ class ChartBase:
 
         # Merge in per-type flat keys (snake_case at top level).
         d.update(self._chart_type_specific_keys())
+
+        # Combination charts. Each secondary is fully serialised so
+        # the Rust side does not need a half-shape; only per-family
+        # fields (`kind`, `series_type`, `series`, type-specific keys,
+        # `y_axis`) are consumed by the emitter. The outer-frame
+        # fields on a secondary (anchor, dimensions, title, legend,
+        # layout) are intentionally ignored downstream.
+        secondary_dicts = [
+            secondary.to_rust_dict()
+            for secondary in self._charts[1:]
+        ]
+        if secondary_dicts:
+            d["secondary_charts"] = secondary_dicts
+
         return d
 
 

@@ -46,10 +46,19 @@ def rich_fixture(tmp_path: Path) -> Path:
         ws[f"D{i}"] = ""
 
     # A named table on A1:D10.
-    table = XTable(displayName="SalesTable", ref="A1:D10")
+    table = XTable(
+        displayName="SalesTable",
+        ref="A1:D10",
+        comment="table comment",
+        tableType="worksheet",
+        totalsRowShown=True,
+    )
     table.tableStyleInfo = XStyle(
         name="TableStyleLight9",
+        showFirstColumn=True,
+        showLastColumn=True,
         showRowStripes=True,
+        showColumnStripes=True,
     )
     ws.add_table(table)
 
@@ -81,6 +90,9 @@ def test_tables_read(rich_fixture: Path) -> None:
     assert isinstance(t, Table)
     assert t.name == "SalesTable"
     assert t.ref == "A1:D10"
+    assert t.comment == "table comment"
+    assert t.tableType == "worksheet"
+    assert t.totalsRowShown is True
     assert t.headerRowCount == 1
     assert t.totalsRowCount == 0
     # At least the column names should round-trip.
@@ -92,6 +104,10 @@ def test_tables_read(rich_fixture: Path) -> None:
     assert t.tableStyleInfo is not None
     assert isinstance(t.tableStyleInfo, TableStyleInfo)
     assert t.tableStyleInfo.name == "TableStyleLight9"
+    assert t.tableStyleInfo.showFirstColumn is True
+    assert t.tableStyleInfo.showLastColumn is True
+    assert t.tableStyleInfo.showRowStripes is True
+    assert t.tableStyleInfo.showColumnStripes is True
 
 
 def test_data_validations_read(rich_fixture: Path) -> None:

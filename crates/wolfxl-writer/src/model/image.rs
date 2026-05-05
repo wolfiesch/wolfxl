@@ -1,4 +1,4 @@
-//! Image (drawing) data — Sprint Λ Pod-β (RFC-045).
+//! Image (drawing) data.
 //!
 //! Each [`SheetImage`] is one image queued via Python's
 //! ``ws.add_image(img, "B5")``. The native writer's emit layer consumes
@@ -9,7 +9,7 @@
 /// One image attached to a worksheet.
 #[derive(Debug, Clone)]
 pub struct SheetImage {
-    /// Raw image bytes (verbatim — written into `xl/media/imageN.<ext>`).
+    /// Raw image bytes (verbatim; written into `xl/media/imageN.<ext>`).
     pub data: Vec<u8>,
     /// Lowercase extension token: `"png"`, `"jpeg"`, `"gif"`, `"bmp"`.
     pub ext: String,
@@ -28,7 +28,7 @@ pub struct SheetImage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageAnchor {
     /// Pin top-left to one cell; image extent comes from pixel dims
-    /// (writer converts px → EMU at 9525 EMU/px).
+    /// (writer converts px to EMU at 9525 EMU/px).
     OneCell {
         from_col: u32,
         from_row: u32,

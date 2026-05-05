@@ -1,8 +1,6 @@
 """`ScatterChart` — XY scatter plots.
 
 Mirrors :class:`openpyxl.chart.scatter_chart.ScatterChart`.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -70,7 +68,7 @@ class ScatterChart(ChartBase):
         self.vary_colors = v
 
     def _chart_type_specific_keys(self) -> dict[str, Any]:
-        """RFC-046 §10.1 — flat per-type keys (snake_case)."""
+        """Flat per-type keys (snake_case)."""
         d: dict[str, Any] = {}
         if self.scatterStyle is not None:
             d["scatter_style"] = self.scatterStyle

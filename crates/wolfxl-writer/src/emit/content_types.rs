@@ -30,11 +30,13 @@ const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
+const CT_THREADED_COMMENTS: &str =
+    "application/vnd.ms-excel.threadedcomments+xml";
+const CT_PERSON_LIST: &str = "application/vnd.ms-excel.person+xml";
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
-const CT_CHART: &str =
-    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_CORE_PROPS: &str = "application/vnd.openxmlformats-package.core-properties+xml";
 const CT_APP_PROPS: &str = "application/vnd.openxmlformats-officedocument.extended-properties+xml";
 const CT_RELATIONSHIPS: &str = "application/vnd.openxmlformats-package.relationships+xml";
@@ -61,9 +63,9 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         ));
     }
 
-    // Sprint Λ Pod-β (RFC-045) — Default Extension entries for any
-    // image extensions used across the workbook. Excel only requires
-    // one per distinct extension. We emit them in stable
+    // Default Extension entries for any image extensions used across
+    // the workbook. Excel only requires one per distinct extension.
+    // We emit them in stable
     // (sheet-order, intra-sheet image-order, dedup) order so two
     // saves of the same workbook produce identical bytes.
     let mut seen_exts: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -112,6 +114,28 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
+    // Per-sheet threadedCommentsN.xml overrides (RFC-068 / G08). Numbering
+    // matches the sheet index for parity with `commentsN.xml`.
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if !sheet.threaded_comments.is_empty() {
+            let n = idx + 1;
+            out.push_str(&format!(
+                "<Override PartName=\"/xl/threadedComments/threadedComments{n}.xml\" \
+                 ContentType=\"{CT_THREADED_COMMENTS}\"/>"
+            ));
+        }
+    }
+
+    // Workbook-scoped personList.xml override (singular filename — there is
+    // exactly one personList per workbook, regardless of how many sheets
+    // carry threaded comments).
+    if !wb.persons.is_empty() {
+        out.push_str(&format!(
+            "<Override PartName=\"/xl/persons/personList.xml\" \
+             ContentType=\"{CT_PERSON_LIST}\"/>"
+        ));
+    }
+
     // Per-table overrides — tables are numbered globally (1..N) across
     // all sheets, matching openpyxl.
     let mut table_counter: usize = 0;
@@ -125,9 +149,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Λ Pod-β + Sprint Μ Pod-α — per-drawing overrides.
-    // Drawings are numbered globally (1..N) across all sheets, one
-    // drawing per sheet that has at least one image OR chart.
+    // Per-drawing overrides. Drawings are numbered globally (1..N) across
+    // all sheets, one drawing per sheet that has at least one image OR chart.
     let mut drawing_counter: usize = 0;
     for sheet in &wb.sheets {
         if !sheet.images.is_empty() || !sheet.charts.is_empty() {
@@ -139,9 +162,9 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Μ Pod-α (RFC-046) — per-chart overrides. Charts are
-    // numbered globally (1..N) across all sheets in sheet+intra-sheet
-    // order. Each chart becomes one xl/charts/chartN.xml part.
+    // Per-chart overrides. Charts are numbered globally (1..N) across all
+    // sheets in sheet+intra-sheet order. Each chart becomes one
+    // xl/charts/chartN.xml part.
     let mut chart_counter: usize = 0;
     for sheet in &wb.sheets {
         for _chart in &sheet.charts {
@@ -153,9 +176,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         }
     }
 
-    // Sprint Θ Pod-C3: calcChain.xml override, only when the workbook
-    // has at least one formula (matches the emit-side gate in
-    // `emit_xlsx`).
+    // calcChain.xml override, only when the workbook has at least one formula
+    // (matches the emit-side gate in `emit_xlsx`).
     if crate::emit::calc_chain_xml::has_any_formula(wb) {
         out.push_str(&format!(
             "<Override PartName=\"/xl/calcChain.xml\" ContentType=\"{}\"/>",

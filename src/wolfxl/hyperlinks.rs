@@ -109,10 +109,7 @@ pub fn extract_hyperlinks(
     out
 }
 
-fn parse_one(
-    e: &quick_xml::events::BytesStart<'_>,
-    rels: &RelsGraph,
-) -> Option<ExistingHyperlink> {
+fn parse_one(e: &quick_xml::events::BytesStart<'_>, rels: &RelsGraph) -> Option<ExistingHyperlink> {
     let mut coord = String::new();
     let mut rid_str: Option<String> = None;
     let mut location: Option<String> = None;
@@ -319,10 +316,7 @@ mod tests {
 
     #[test]
     fn extract_hyperlinks_resolves_rids() {
-        let rels = rels_with_hyperlinks(&[
-            "https://example.com/docs",
-            "mailto:test@example.com",
-        ]);
+        let rels = rels_with_hyperlinks(&["https://example.com/docs", "mailto:test@example.com"]);
         let xml = sheet_xml_with_hyperlinks(
             r#"<hyperlink ref="A1" r:id="rId1"/>
 <hyperlink ref="A2" r:id="rId2" tooltip="Email"/>
@@ -345,10 +339,7 @@ mod tests {
         // Existing rId1 + rId2 external; add a third → output has rId1, rId2,
         // and a fresh rId3. The sources of the first two never touch the rels
         // graph, so their numbers are stable.
-        let mut rels = rels_with_hyperlinks(&[
-            "https://example.com/a",
-            "https://example.com/b",
-        ]);
+        let mut rels = rels_with_hyperlinks(&["https://example.com/a", "https://example.com/b"]);
         let mut existing = BTreeMap::new();
         existing.insert(
             "A1".into(),

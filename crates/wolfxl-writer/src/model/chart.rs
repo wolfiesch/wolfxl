@@ -1,4 +1,4 @@
-//! Chart data model — Sprint Μ Pod-α (RFC-046).
+//! Chart data model.
 //!
 //! Pure data only; no I/O, no XML emission. Consumed by
 //! [`crate::emit::charts`] which renders one `xl/charts/chartN.xml` per
@@ -7,9 +7,8 @@
 //!
 //! # Coverage
 //!
-//! Eight chart kinds with full openpyxl per-type feature depth:
-//! Bar, Line, Pie, Doughnut, Area, Scatter, Bubble, Radar. The 3D
-//! variants, Stock, Surface, and ProjectedPie are deferred to v1.6.1.
+//! Common openpyxl-compatible chart families are represented, including
+//! 2D charts, 3D variants, Stock, Surface, and OfPie / projected pie.
 //!
 //! Every sub-feature is an `Option<T>` so absent → no XML element
 //! emitted. Defaults match openpyxl's "leave the attribute off" rule
@@ -18,19 +17,17 @@
 
 use super::image::ImageAnchor;
 
-/// Re-export of [`wolfxl_pivot::PivotSource`] so Pod-δ's chart model
-/// owns a stable name for downstream callers without forcing them to
-/// reach into the pivot crate. The chart crate cannot define this type
-/// itself (Pod-α already shipped the canonical struct in
-/// `wolfxl-pivot`); it only borrows it as an `Option<PivotSource>` on
-/// [`Chart`]. RFC-049 §10.
+/// Re-export of [`wolfxl_pivot::PivotSource`] so the chart model owns a
+/// stable name for downstream callers without forcing them to reach into
+/// the pivot crate. This module cannot define the type itself; it only
+/// borrows it as an `Option<PivotSource>` on [`Chart`].
 pub use wolfxl_pivot::PivotSource;
 
 /// Top-level chart kind. Each variant maps to one OOXML plot-area
 /// element name (e.g. `<barChart>`, `<lineChart>`).
 ///
-/// Sprint Μ-prime (RFC-046 §11) added 8 new variants for 3D / Stock /
-/// Surface / OfPie families. The 2D originals are unchanged.
+/// Includes both the original 2D chart families and the later 3D, Stock,
+/// Surface, and OfPie families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChartKind {
     Bar,
@@ -41,7 +38,6 @@ pub enum ChartKind {
     Scatter,
     Bubble,
     Radar,
-    // Sprint Μ-prime additions (v1.6.1).
     Bar3D,
     Line3D,
     Pie3D,
@@ -168,6 +164,17 @@ impl Reference {
         let abs = absolutize_a1(&self.cell_range);
         format!("'{}'!{}", self.sheet_name.replace('\'', "''"), abs)
     }
+
+    /// Render the reference as openpyxl serializes series title refs:
+    /// single cells stay relative (`'Sheet'!B1`), while ranges use the
+    /// normal absolute formula representation.
+    pub fn to_series_title_formula_string(&self) -> String {
+        if self.cell_range.contains(':') {
+            return self.to_formula_string();
+        }
+        let rel = self.cell_range.replace('$', "");
+        format!("'{}'!{}", self.sheet_name.replace('\'', "''"), rel)
+    }
 }
 
 /// Insert `$` before column letters and row numbers in an A1 fragment if
@@ -248,6 +255,10 @@ pub struct Series {
     /// Marker (Line/Scatter/Radar). Has no effect on Bar/Pie/Area.
     pub marker: Option<Marker>,
 
+    /// Per-data-point overrides (`<c:dPt>`): point-specific colors,
+    /// markers, explosion offsets, and related flags.
+    pub data_points: Vec<DataPoint>,
+
     /// Per-series data labels.
     pub data_labels: Option<DataLabels>,
 
@@ -278,6 +289,7 @@ impl Series {
             bubble_size: None,
             graphical_properties: None,
             marker: None,
+            data_points: Vec::new(),
             data_labels: None,
             error_bars: Vec::new(),
             trendlines: Vec::new(),
@@ -336,7 +348,6 @@ pub struct AxisCommon {
     /// `<minorGridlines/>` present when true (legacy short-form flag).
     pub minor_gridlines: bool,
     /// `<majorGridlines>` rich form (with optional graphical properties).
-    /// Sprint Μ-prime — RFC-046 §10.7.1.
     pub major_gridlines_obj: Option<Gridlines>,
     /// `<minorGridlines>` rich form.
     pub minor_gridlines_obj: Option<Gridlines>,
@@ -434,6 +445,8 @@ pub struct ValueAxis {
     pub max: Option<f64>,
     pub major_unit: Option<f64>,
     pub minor_unit: Option<f64>,
+    /// `<dispUnits>` for display units such as thousands or millions.
+    pub display_units: Option<DisplayUnits>,
     /// `<crosses val="…"/>` — `autoZero`, `min`, `max`.
     pub crosses: Option<String>,
 }
@@ -478,7 +491,7 @@ impl Title {
 }
 
 /// 3D chart view parameters — emitted as `<c:view3D>` at the chart level
-/// (before plotArea) for 3D variants. RFC-046 §10.10.
+/// before `<plotArea>` for 3D variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct View3D {
     /// `<c:rotX val="…"/>` — typically -90..90 (or 0..30 for Bar3D).
@@ -497,7 +510,7 @@ pub struct View3D {
     pub h_percent: Option<u32>,
 }
 
-/// `<c:majorGridlines>` / `<c:minorGridlines>` content. RFC-046 §10.7.1.
+/// `<c:majorGridlines>` / `<c:minorGridlines>` content.
 ///
 /// `None` at the parent axis means "no gridlines". Empty `Gridlines`
 /// (default) means "draw default gridlines" (an empty self-closing
@@ -617,6 +630,11 @@ pub struct DataLabels {
     pub number_format: Option<String>,
     /// Custom separator between fields (e.g. `","`, `";"`).
     pub separator: Option<String>,
+    /// Optional rich-text runs for `<c:txPr>` so labels render with
+    /// per-run formatting (bold/italic/color/size/font). Each run shares
+    /// the chart-title `TitleRun` shape; an empty vector emits no
+    /// `<c:txPr>` block.
+    pub tx_pr_runs: Vec<TitleRun>,
 }
 
 /// Per-series error bars.
@@ -719,6 +737,35 @@ pub struct Marker {
     pub symbol: MarkerSymbol,
     pub size: Option<u32>,
     pub graphical_properties: Option<GraphicalProperties>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataPoint {
+    pub idx: u32,
+    pub invert_if_negative: Option<bool>,
+    pub marker: Option<Marker>,
+    pub bubble_3d: Option<bool>,
+    pub explosion: Option<u32>,
+    pub graphical_properties: Option<GraphicalProperties>,
+}
+
+impl DataPoint {
+    pub fn new(idx: u32) -> Self {
+        Self {
+            idx,
+            invert_if_negative: None,
+            marker: None,
+            bubble_3d: None,
+            explosion: None,
+            graphical_properties: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayUnits {
+    pub built_in_unit: Option<String>,
+    pub custom_unit: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -894,6 +941,9 @@ pub struct Chart {
     /// One or more series.
     pub series: Vec<Series>,
 
+    /// Chart-level data labels (`<dLbls>` inside the chart-kind block).
+    pub data_labels: Option<DataLabels>,
+
     /// `<plotVisOnly val="1"/>` (default `true` per openpyxl).
     pub plot_visible_only: Option<bool>,
 
@@ -949,32 +999,39 @@ pub struct Chart {
     /// per-series).
     pub smoothing: Option<bool>,
 
-    /// Sprint Μ-prime (RFC-046 §10.10) — 3D view parameters; only
-    /// emitted when `kind.is_3d()`.
+    /// 3D view parameters; only emitted when `kind.is_3d()`.
     pub view_3d: Option<View3D>,
 
-    /// Sprint Μ-prime (RFC-046 §11.3) — Surface chart wireframe toggle.
+    /// Surface chart wireframe toggle.
     pub wireframe: Option<bool>,
 
-    /// Sprint Μ-prime — `<c:ofPieType val="bar|pie"/>` for OfPie kind.
+    /// `<c:ofPieType val="bar|pie"/>` for OfPie kind.
     pub of_pie_type: Option<String>,
 
-    /// Sprint Μ-prime — `<c:splitType val="auto|cust|percent|pos|val"/>`
-    /// for OfPie kind.
+    /// `<c:splitType val="auto|cust|percent|pos|val"/>` for OfPie kind.
     pub split_type: Option<String>,
 
-    /// Sprint Μ-prime — `<c:splitPos val="…"/>` for OfPie when
-    /// `split_type` requires a numeric split point.
+    /// `<c:splitPos val="…"/>` for OfPie when `split_type` requires a
+    /// numeric split point.
     pub split_pos: Option<f64>,
 
-    /// Sprint Μ-prime — `<c:secondPieSize val="…"/>` for OfPie (5..200).
+    /// `<c:secondPieSize val="…"/>` for OfPie (5..200).
     pub second_pie_size: Option<u32>,
 
-    /// Sprint Ν Pod-δ — RFC-049 §10. When `Some`, the chart is a
-    /// pivot-chart and the emitter writes a `<c:pivotSource>` block
-    /// inside `<c:chart>` (between the `<c:chart>` open and the title)
-    /// **and** injects a `<c:fmtId val="0"/>` element on every series.
+    /// When `Some`, the chart is a pivot chart and the emitter writes a
+    /// `<c:pivotSource>` block inside `<c:chart>` (between the `<c:chart>`
+    /// open and the title) and injects a `<c:fmtId val="0"/>` element on
+    /// every series.
     pub pivot_source: Option<PivotSource>,
+
+    /// Sibling chart families to emit inside the same `<plotArea>`
+    /// (RFC-069 / G15 — combination charts). Each entry is a fully-formed
+    /// `Chart` whose outer-frame fields (title, legend, anchor, dimensions)
+    /// are ignored by the combination-chart emit path; only per-family
+    /// fields (`kind`, `series`, type-specific knobs, `y_axis`) are
+    /// consumed. Default is an empty vec — every existing single-family
+    /// caller is unaffected.
+    pub secondary_charts: Vec<Chart>,
 }
 
 impl Chart {
@@ -988,6 +1045,7 @@ impl Chart {
             x_axis: None,
             y_axis: None,
             series: Vec::new(),
+            data_labels: None,
             plot_visible_only: Some(true),
             display_blanks_as: Some(DisplayBlanksAs::Gap),
             vary_colors: None,
@@ -1014,11 +1072,7 @@ impl Chart {
                 None
             },
             first_slice_ang: None,
-            scatter_style: if matches!(kind, ChartKind::Scatter) {
-                Some(ScatterStyle::LineMarker)
-            } else {
-                None
-            },
+            scatter_style: None,
             radar_style: if matches!(kind, ChartKind::Radar) {
                 Some(RadarStyle::Standard)
             } else {
@@ -1055,6 +1109,7 @@ impl Chart {
             split_pos: None,
             second_pie_size: None,
             pivot_source: None,
+            secondary_charts: Vec::new(),
         }
     }
 
@@ -1081,6 +1136,12 @@ mod tests {
     }
 
     #[test]
+    fn reference_series_title_single_cell_is_relative() {
+        let r = Reference::new("Data", "B1");
+        assert_eq!(r.to_series_title_formula_string(), "'Data'!B1");
+    }
+
+    #[test]
     fn reference_already_absolute_passes_through() {
         let r = Reference::new("Sheet", "$A$2:$A$6");
         assert_eq!(r.to_formula_string(), "'Sheet'!$A$2:$A$6");
@@ -1094,27 +1155,62 @@ mod tests {
 
     #[test]
     fn chart_kind_plot_element_names() {
-        assert_eq!(ChartKind::Bar.plot_element_name(), "barChart");
-        assert_eq!(ChartKind::Line.plot_element_name(), "lineChart");
-        assert_eq!(ChartKind::Pie.plot_element_name(), "pieChart");
-        assert_eq!(ChartKind::Doughnut.plot_element_name(), "doughnutChart");
-        assert_eq!(ChartKind::Area.plot_element_name(), "areaChart");
-        assert_eq!(ChartKind::Scatter.plot_element_name(), "scatterChart");
-        assert_eq!(ChartKind::Bubble.plot_element_name(), "bubbleChart");
-        assert_eq!(ChartKind::Radar.plot_element_name(), "radarChart");
+        let cases = [
+            (ChartKind::Bar, "barChart"),
+            (ChartKind::Line, "lineChart"),
+            (ChartKind::Pie, "pieChart"),
+            (ChartKind::Doughnut, "doughnutChart"),
+            (ChartKind::Area, "areaChart"),
+            (ChartKind::Scatter, "scatterChart"),
+            (ChartKind::Bubble, "bubbleChart"),
+            (ChartKind::Radar, "radarChart"),
+            (ChartKind::Bar3D, "bar3DChart"),
+            (ChartKind::Line3D, "line3DChart"),
+            (ChartKind::Pie3D, "pie3DChart"),
+            (ChartKind::Area3D, "area3DChart"),
+            (ChartKind::Surface, "surfaceChart"),
+            (ChartKind::Surface3D, "surface3DChart"),
+            (ChartKind::Stock, "stockChart"),
+            (ChartKind::OfPie, "ofPieChart"),
+        ];
+        for (kind, element_name) in cases {
+            assert_eq!(kind.plot_element_name(), element_name);
+        }
     }
 
     #[test]
     fn chart_kind_axis_classification() {
-        assert!(ChartKind::Bar.has_category_axis());
-        assert!(ChartKind::Line.has_category_axis());
-        assert!(!ChartKind::Pie.has_category_axis());
-        assert!(!ChartKind::Pie.has_dual_value_axes());
-        assert!(ChartKind::Pie.is_axis_free());
-        assert!(ChartKind::Doughnut.is_axis_free());
-        assert!(ChartKind::Scatter.has_dual_value_axes());
-        assert!(ChartKind::Bubble.has_dual_value_axes());
-        assert!(!ChartKind::Bar.has_dual_value_axes());
+        for kind in [
+            ChartKind::Bar,
+            ChartKind::Line,
+            ChartKind::Area,
+            ChartKind::Radar,
+            ChartKind::Bar3D,
+            ChartKind::Line3D,
+            ChartKind::Area3D,
+            ChartKind::Surface,
+            ChartKind::Surface3D,
+            ChartKind::Stock,
+        ] {
+            assert!(kind.has_category_axis(), "{kind:?}");
+            assert!(!kind.has_dual_value_axes(), "{kind:?}");
+            assert!(!kind.is_axis_free(), "{kind:?}");
+        }
+        for kind in [ChartKind::Scatter, ChartKind::Bubble] {
+            assert!(!kind.has_category_axis(), "{kind:?}");
+            assert!(kind.has_dual_value_axes(), "{kind:?}");
+            assert!(!kind.is_axis_free(), "{kind:?}");
+        }
+        for kind in [
+            ChartKind::Pie,
+            ChartKind::Doughnut,
+            ChartKind::Pie3D,
+            ChartKind::OfPie,
+        ] {
+            assert!(!kind.has_category_axis(), "{kind:?}");
+            assert!(!kind.has_dual_value_axes(), "{kind:?}");
+            assert!(kind.is_axis_free(), "{kind:?}");
+        }
     }
 
     #[test]
@@ -1132,9 +1228,9 @@ mod tests {
     }
 
     #[test]
-    fn new_scatter_has_default_scatter_style() {
+    fn new_scatter_omits_scatter_style_by_default() {
         let c = Chart::new(ChartKind::Scatter, ImageAnchor::one_cell(0, 0));
-        assert_eq!(c.scatter_style, Some(ScatterStyle::LineMarker));
+        assert_eq!(c.scatter_style, None);
     }
 
     #[test]

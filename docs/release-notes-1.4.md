@@ -125,9 +125,10 @@ Pod-α commit: `b805aac`
 ### Pre-built `.xlsb` / `.xls` parity fixtures
 
 `tests/parity/test_xlsb_reads.py` and `tests/parity/test_xls_reads.py`
-land alongside committed binary fixtures (`tests/fixtures/finance_q3.xlsb`,
-`tests/fixtures/legacy_erp.xls`). Each pins shape + values
-element-wise against `pandas.read_excel(engine="calamine")` —
+land alongside committed binary fixtures under
+`tests/parity/fixtures/xlsb/` and `tests/parity/fixtures/xls/`. Each
+pins shape + values element-wise against
+`pandas.read_excel(engine="calamine")` —
 openpyxl reads neither format, so pandas+calamine is the de-facto
 parity target for "binary Excel decoded correctly" in the Python
 ecosystem.
@@ -206,7 +207,7 @@ wb._format  # → 'xlsx' | 'xlsb' | 'xls'
 - `pytest tests/`: **1106 → ~1175+ passed** (Pod-α/β/γ each add
   test cases; the exact count is filled in on integrator merge).
 - `pytest tests/parity/`: **102 → ~140+ passed** (Pod-γ ships
-  `test_xlsb_reads.py` + `test_xls_reads.py` element-wise vs
+  `tests/parity/test_xlsb_reads.py` + `tests/parity/test_xls_reads.py` element-wise vs
   `pandas.read_excel(engine="calamine")`).
 - KNOWN_GAPS.md Phase 5 section removed; openpyxl-parity roadmap
   exhausted post-1.4.

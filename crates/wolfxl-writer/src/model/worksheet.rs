@@ -8,6 +8,7 @@ use super::comment::Comment;
 use super::conditional::ConditionalFormat;
 use super::image::SheetImage;
 use super::table::Table;
+use super::threaded_comment::ThreadedComment;
 use super::validation::DataValidation;
 use crate::refs;
 
@@ -18,7 +19,17 @@ use crate::refs;
 /// `<row>` to be sorted ascending by column letter. Using `BTreeMap`
 /// means the emitter iterates them in the right order without an
 /// explicit pre-sort pass.
-#[derive(Debug, Clone)]
+///
+/// **Streaming mode** ([`Worksheet::streaming`] = `Some`) skips the
+/// `BTreeMap` entirely. Rows are encoded straight into a per-sheet
+/// temp file as they arrive; `<sheetData>` is then spliced from that
+/// file at save time. Streaming and eager are mutually exclusive on a
+/// per-sheet basis — `Workbook(write_only=True)` makes every sheet
+/// streaming. `Worksheet` is intentionally not `Clone` because the
+/// open temp-file handle inside [`StreamingSheet`] cannot be safely
+/// duplicated; in practice nothing in the writer crate clones
+/// worksheets (each pyclass call mutates in place).
+#[derive(Debug)]
 pub struct Worksheet {
     /// Sheet display name. Maximum 31 chars; `/\?*[]:` must be stripped
     /// before reaching here. See [`crate::refs::sanitize_sheet_name`].
@@ -45,6 +56,12 @@ pub struct Worksheet {
     /// is preserved by the `IndexMap` inside the workbook-level emitter.
     pub comments: BTreeMap<String, Comment>,
 
+    /// Threaded comments (RFC-068 / G08). Flat OOXML-shaped list — replies
+    /// are siblings of their parent linked via [`ThreadedComment::parent_id`].
+    /// Order is the on-disk emit order: top-level first, then replies in
+    /// chronological order. Empty by default.
+    pub threaded_comments: Vec<ThreadedComment>,
+
     /// Conditional formatting blocks. Order is preserved (Excel honors
     /// first-matching priority).
     pub conditional_formats: Vec<ConditionalFormat>,
@@ -63,22 +80,21 @@ pub struct Worksheet {
     /// Whether the sheet tab is visible, hidden, or very-hidden.
     pub visibility: SheetVisibility,
 
-    /// Sprint Λ Pod-β (RFC-045) — images attached to this sheet via
-    /// `ws.add_image(img, anchor)`. Drained at emit time into
+    /// Images attached to this sheet via `ws.add_image(img, anchor)`.
+    /// Drained at emit time into
     /// `xl/drawings/drawingN.xml` + `xl/media/imageN.<ext>`.
     pub images: Vec<SheetImage>,
 
-    /// Sprint Μ Pod-α (RFC-046) — charts attached to this sheet. Each
-    /// chart becomes one `xl/charts/chartN.xml` part referenced from
-    /// the sheet's drawing via `<xdr:graphicFrame>`. A sheet can mix
-    /// images and charts in a single drawing.
+    /// Charts attached to this sheet. Each chart becomes one
+    /// `xl/charts/chartN.xml` part referenced from the sheet's drawing
+    /// via `<xdr:graphicFrame>`. A sheet can mix images and charts in a
+    /// single drawing.
     pub charts: Vec<Chart>,
 
-    /// Sprint Ο Pod 1B (RFC-056) — pre-emitted `<autoFilter>` block
-    /// bytes. The native writer doesn't run filter evaluation (no
-    /// existing-cell read-back path); it just splices the XML at
-    /// slot 11 of the worksheet element. Modify mode runs evaluation
-    /// in Phase 2.5o instead.
+    /// Pre-emitted `<autoFilter>` block bytes. The native writer does not
+    /// run filter evaluation (no existing-cell read-back path); it just
+    /// splices the XML at slot 11 of the worksheet element. Modify mode
+    /// runs evaluation in the patcher instead.
     ///
     /// `None` (default) → no `<autoFilter>` block emitted. The
     /// caller (workbook-level coordinator) sets this from the
@@ -86,38 +102,45 @@ pub struct Worksheet {
     /// `wolfxl_autofilter::emit::emit`.
     pub auto_filter_xml: Option<Vec<u8>>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — optional `<sheetView>` override.
-    /// When set, the native writer's `<sheetViews>` slot uses the
-    /// typed spec instead of the legacy hardcoded freeze-pane path.
-    /// `None` keeps the pre-RFC-055 behaviour (default sheet view +
-    /// `Worksheet.freeze` / `Worksheet.split` pane mapping).
+    /// Optional `<sheetView>` override. When set, the native writer's
+    /// `<sheetViews>` slot uses the typed spec instead of the legacy
+    /// hardcoded freeze-pane path. `None` keeps the default sheet view plus
+    /// `Worksheet.freeze` / `Worksheet.split` pane mapping.
     pub views: Option<crate::parse::sheet_setup::SheetViewSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<sheetProtection>` slot 8.
+    /// `<sheetProtection>` slot 8.
     pub protection: Option<crate::parse::sheet_setup::SheetProtectionSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageMargins>` slot 21.
-    /// Overrides the default margins emitted at slot 21.
+    /// `<pageMargins>` slot 21. Overrides the default margins.
     pub page_margins: Option<crate::parse::sheet_setup::PageMarginsSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<pageSetup>` slot 22.
+    /// `<printOptions>` slot 20.
+    pub print_options: Option<crate::parse::sheet_setup::PrintOptionsSpec>,
+
+    /// `<pageSetup>` slot 22.
     pub page_setup: Option<crate::parse::sheet_setup::PageSetupSpec>,
 
-    /// Sprint Ο Pod 1A.5 (RFC-055) — `<headerFooter>` slot 23.
+    /// `<headerFooter>` slot 23.
     pub header_footer: Option<crate::parse::sheet_setup::HeaderFooterSpec>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<rowBreaks>` slot 24.
-    /// `None` ⇒ no row-breaks element emitted.
+    /// `<rowBreaks>` slot 24. `None` means no row-breaks element is emitted.
     pub row_breaks: Option<crate::parse::page_breaks::PageBreakList>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<colBreaks>` slot 25.
-    /// `None` ⇒ no col-breaks element emitted.
+    /// `<colBreaks>` slot 25. `None` means no col-breaks element is emitted.
     pub col_breaks: Option<crate::parse::page_breaks::PageBreakList>,
 
-    /// Sprint Π Pod Π-α (RFC-062) — `<sheetFormatPr>` slot 4.
-    /// `None` ⇒ the writer keeps the legacy hardcoded
+    /// `<sheetFormatPr>` slot 4. `None` means the writer keeps the legacy
     /// `<sheetFormatPr defaultRowHeight="15"/>` emit path.
     pub sheet_format: Option<crate::parse::page_breaks::SheetFormatProperties>,
+
+    /// Streaming write_only state (G20 / RFC-073). `None` for normal
+    /// eager-mode sheets — the entire `BTreeMap<u32, Row>` workflow
+    /// applies. `Some(...)` flips this sheet into bounded-memory
+    /// append-only mode: each call to `append_streaming_row` writes
+    /// straight to the per-sheet temp file, and
+    /// [`crate::emit::sheet_xml::emit`] splices that file into the
+    /// `<sheetData>` slot at save time.
+    pub streaming: Option<crate::streaming::StreamingSheet>,
 }
 
 impl Worksheet {
@@ -131,6 +154,7 @@ impl Worksheet {
             columns: BTreeMap::new(),
             hyperlinks: BTreeMap::new(),
             comments: BTreeMap::new(),
+            threaded_comments: Vec::new(),
             conditional_formats: Vec::new(),
             validations: Vec::new(),
             tables: Vec::new(),
@@ -142,11 +166,13 @@ impl Worksheet {
             views: None,
             protection: None,
             page_margins: None,
+            print_options: None,
             page_setup: None,
             header_footer: None,
             row_breaks: None,
             col_breaks: None,
             sheet_format: None,
+            streaming: None,
         }
     }
 
@@ -218,10 +244,7 @@ impl Worksheet {
     /// [`Worksheet::set_cell`] that the pyclass uses on every Python-side
     /// `write_cell_value` call without having to construct `WriteCell`.
     pub fn write_cell(&mut self, row: u32, col: u32, value: WriteCellValue, style_id: Option<u32>) {
-        let cell = WriteCell {
-            value,
-            style_id,
-        };
+        let cell = WriteCell { value, style_id };
         self.set_cell(row, col, cell);
     }
 
@@ -439,17 +462,17 @@ mod tests {
         s.columns.get_mut(&1).unwrap().hidden = true;
         s.set_column_width(1, 20.0);
         assert_eq!(s.columns[&1].width, Some(20.0));
-        assert!(s.columns[&1].hidden, "hidden flag must survive width update");
+        assert!(
+            s.columns[&1].hidden,
+            "hidden flag must survive width update"
+        );
     }
 
     #[test]
     fn write_cell_upserts_and_overwrites() {
         let mut s = Worksheet::new("S");
         s.write_cell(1, 1, WriteCellValue::Number(1.0), None);
-        assert_eq!(
-            s.rows[&1].cells[&1].value,
-            WriteCellValue::Number(1.0)
-        );
+        assert_eq!(s.rows[&1].cells[&1].value, WriteCellValue::Number(1.0));
         s.write_cell(1, 1, WriteCellValue::String("hi".to_string()), Some(7));
         assert_eq!(
             s.rows[&1].cells[&1].value,
@@ -470,7 +493,10 @@ mod tests {
         let mut s = Worksheet::new("Old");
         let too_long = "x".repeat(32);
         let err = s.rename(too_long).unwrap_err();
-        assert!(err.contains("31"), "msg should mention 31-char limit: {err}");
+        assert!(
+            err.contains("31"),
+            "msg should mention 31-char limit: {err}"
+        );
         assert_eq!(s.name, "Old", "name must not change on Err");
     }
 

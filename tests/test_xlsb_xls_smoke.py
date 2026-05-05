@@ -1,9 +1,9 @@
-"""Sprint Κ Pod-α smoke tests for the new .xlsb / .xls / classify_file_format
+"""Sprint Κ Pod-α smoke tests for .xlsb / .xls / classify_file_format
 read backends.
 
 Pod-γ owns the curated parity matrix; this file only proves the new
 pyclasses load, expose the right surface, and raise the right
-exception when style accessors are touched.
+exception when unsupported style accessors are touched.
 """
 
 from __future__ import annotations
@@ -68,48 +68,34 @@ def test_classify_file_format_bytes_unknown() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CalamineXlsbBook
+# NativeXlsbBook
 # ---------------------------------------------------------------------------
 
 
-def test_calamine_xlsb_book_open_path() -> None:
-    from wolfxl._rust import CalamineXlsbBook
+def test_native_xlsb_book_open_path() -> None:
+    from wolfxl._rust import NativeXlsbBook
 
-    book = CalamineXlsbBook.open(str(XLSB_FIXTURE))
+    book = NativeXlsbBook.open(str(XLSB_FIXTURE))
     names = book.sheet_names()
     assert names, "fixture must expose at least one sheet"
-    values = book.read_sheet_values(names[0])
+    values = book.read_sheet_values(names[0], None, True)
     assert isinstance(values, list)
-    assert book.opened_from_bytes() is False
-    assert book.source_path() == str(XLSB_FIXTURE)
 
 
-def test_calamine_xlsb_book_open_from_bytes() -> None:
-    from wolfxl._rust import CalamineXlsbBook
+def test_native_xlsb_book_open_from_bytes() -> None:
+    from wolfxl._rust import NativeXlsbBook
 
-    book = CalamineXlsbBook.open_from_bytes(XLSB_FIXTURE.read_bytes())
+    book = NativeXlsbBook.open_from_bytes(XLSB_FIXTURE.read_bytes())
     names = book.sheet_names()
     assert names
-    values = book.read_sheet_values(names[0])
+    values = book.read_sheet_values(names[0], None, True)
     assert isinstance(values, list)
-    assert book.opened_from_bytes() is True
-    assert book.source_path() is None
 
 
-def test_calamine_xlsb_book_styles_raise() -> None:
-    from wolfxl._rust import CalamineXlsbBook
+def test_calamine_xlsb_book_is_not_exported() -> None:
+    import wolfxl._rust as rust
 
-    book = CalamineXlsbBook.open(str(XLSB_FIXTURE))
-    with pytest.raises(NotImplementedError, match="styles not supported"):
-        book.read_cell_font(0, 0, "Sheet1")
-    with pytest.raises(NotImplementedError, match="\\.xlsb"):
-        book.read_cell_fill(0, 0, "Sheet1")
-    with pytest.raises(NotImplementedError, match="use \\.xlsx for style-aware reads"):
-        book.read_cell_border(0, 0, "Sheet1")
-    with pytest.raises(NotImplementedError):
-        book.read_cell_alignment(0, 0, "Sheet1")
-    with pytest.raises(NotImplementedError):
-        book.read_cell_number_format(0, 0, "Sheet1")
+    assert not hasattr(rust, "CalamineXlsbBook")
 
 
 # ---------------------------------------------------------------------------
@@ -149,14 +135,14 @@ def test_calamine_xls_book_styles_raise() -> None:
 
 
 # ---------------------------------------------------------------------------
-# CalamineStyledBook.open_from_bytes (xlsx bytes path)
+# NativeXlsxBook.open_from_bytes (xlsx bytes path)
 # ---------------------------------------------------------------------------
 
 
-def test_calamine_styled_book_open_from_bytes() -> None:
-    from wolfxl._rust import CalamineStyledBook
+def test_native_xlsx_book_open_from_bytes() -> None:
+    from wolfxl._rust import NativeXlsxBook
 
-    book = CalamineStyledBook.open_from_bytes(XLSX_FIXTURE.read_bytes())
+    book = NativeXlsxBook.open_from_bytes(XLSX_FIXTURE.read_bytes())
     names = book.sheet_names()
     assert names
     assert book.opened_from_bytes() is True

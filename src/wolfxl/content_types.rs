@@ -106,12 +106,10 @@ impl ContentTypesGraph {
                             let mut ext: Option<String> = None;
                             let mut ct: Option<String> = None;
                             for a in e.attributes().with_checks(false).flatten() {
-                                let value = a
-                                    .unescape_value()
-                                    .map(|v| v.into_owned())
-                                    .unwrap_or_else(|_| {
-                                        String::from_utf8_lossy(a.value.as_ref()).into_owned()
-                                    });
+                                let value =
+                                    a.unescape_value().map(|v| v.into_owned()).unwrap_or_else(
+                                        |_| String::from_utf8_lossy(a.value.as_ref()).into_owned(),
+                                    );
                                 match a.key.as_ref() {
                                     b"Extension" => ext = Some(value),
                                     b"ContentType" => ct = Some(value),
@@ -126,12 +124,10 @@ impl ContentTypesGraph {
                             let mut part: Option<String> = None;
                             let mut ct: Option<String> = None;
                             for a in e.attributes().with_checks(false).flatten() {
-                                let value = a
-                                    .unescape_value()
-                                    .map(|v| v.into_owned())
-                                    .unwrap_or_else(|_| {
-                                        String::from_utf8_lossy(a.value.as_ref()).into_owned()
-                                    });
+                                let value =
+                                    a.unescape_value().map(|v| v.into_owned()).unwrap_or_else(
+                                        |_| String::from_utf8_lossy(a.value.as_ref()).into_owned(),
+                                    );
                                 match a.key.as_ref() {
                                     b"PartName" => part = Some(value),
                                     b"ContentType" => ct = Some(value),
@@ -225,9 +221,8 @@ impl ContentTypesGraph {
     /// the writer's `crates/wolfxl-writer/src/emit/content_types.rs::emit`
     /// produces, so write-mode and modify-mode share the same shape.
     pub fn serialize(&self) -> Vec<u8> {
-        let mut out = String::with_capacity(
-            128 + self.defaults.len() * 96 + self.overrides.len() * 128,
-        );
+        let mut out =
+            String::with_capacity(128 + self.defaults.len() * 96 + self.overrides.len() * 128);
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
         out.push_str(&format!("<Types xmlns=\"{CT_NS}\">"));
         for (ext, ct) in &self.defaults {
@@ -273,11 +268,9 @@ mod tests {
 
     const CT_COMMENTS: &str =
         "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
-    const CT_TABLE: &str =
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
+    const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
     const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
-    const CT_RELATIONSHIPS: &str =
-        "application/vnd.openxmlformats-package.relationships+xml";
+    const CT_RELATIONSHIPS: &str = "application/vnd.openxmlformats-package.relationships+xml";
     const CT_XML_DEFAULT: &str = "application/xml";
 
     fn minimal_xml() -> &'static str {
@@ -340,7 +333,10 @@ mod tests {
     fn add_override_is_idempotent_for_identical_pair() {
         let mut g = ContentTypesGraph::parse(minimal_xml().as_bytes()).unwrap();
         let n_before = g.overrides().len();
-        g.add_override("/xl/workbook.xml", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml");
+        g.add_override(
+            "/xl/workbook.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+        );
         assert_eq!(g.overrides().len(), n_before);
     }
 
@@ -365,7 +361,13 @@ mod tests {
         assert_eq!(g.overrides()[0].0, "/xl/workbook.xml");
         assert_eq!(g.overrides()[0].1, "application/X");
         // No duplicate appended at the tail.
-        assert_eq!(g.overrides().iter().filter(|(p, _)| p == "/xl/workbook.xml").count(), 1);
+        assert_eq!(
+            g.overrides()
+                .iter()
+                .filter(|(p, _)| p == "/xl/workbook.xml")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -414,7 +416,10 @@ mod tests {
         let pb = s.find("/b.xml").unwrap();
         let pc = s.find("/c.xml").unwrap();
         let pd = s.find("/d.xml").unwrap();
-        assert!(pa < pb && pb < pc && pc < pd, "expected source order preserved with new at tail");
+        assert!(
+            pa < pb && pb < pc && pc < pd,
+            "expected source order preserved with new at tail"
+        );
     }
 
     #[test]

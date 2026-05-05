@@ -3,19 +3,44 @@ use pyo3::types::{PyDict, PyList};
 
 type PyObject = Py<PyAny>;
 
-mod calamine_styled_backend;
 mod calamine_xlsb_xls_backend;
+mod native_reader_backend;
+mod native_reader_cell_helpers;
+mod native_reader_cf;
+mod native_reader_comments;
+mod native_reader_dimensions;
+mod native_reader_drawings;
+mod native_reader_filter;
+mod native_reader_hyperlinks;
+mod native_reader_metadata;
+mod native_reader_named_ranges;
+mod native_reader_page_setup;
+mod native_reader_records;
+mod native_reader_sheet_data;
+mod native_reader_sheet_view;
+mod native_reader_styles;
+mod native_reader_tables;
+mod native_reader_traits;
+mod native_reader_validations;
+mod native_reader_workbook_basics;
+mod native_writer_anchors;
+mod native_writer_autofilter;
 mod native_writer_backend;
+mod native_writer_cells;
+mod native_writer_charts;
+mod native_writer_formats;
+mod native_writer_images;
+mod native_writer_rich_text;
+mod native_writer_sheet_features;
+mod native_writer_sheet_state;
+mod native_writer_streaming;
+mod native_writer_workbook;
+mod native_writer_workbook_metadata;
 mod ooxml_util;
 mod streaming;
 mod util;
 mod wolfxl;
 mod wolfxl_core_bridge;
-
-// Re-export the rich-text helpers (parse/emit) from the writer crate so
-// the calamine read path and the modify-mode patcher can both reach
-// them without depending on the cdylib crate's own modules.
-pub(crate) use wolfxl_writer::rich_text;
 
 #[pyfunction]
 fn build_info(py: Python<'_>) -> PyResult<PyObject> {
@@ -23,14 +48,11 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     info.set_item("package", "wolfxl")?;
     info.set_item("package_version", env!("CARGO_PKG_VERSION"))?;
 
-    let enabled = PyList::new(py, ["calamine-styles", "wolfxl", "native"])?;
+    let enabled = PyList::new(py, ["native-xlsx", "native-xlsb", "calamine-xls", "wolfxl"])?;
     info.set_item("enabled_backends", enabled)?;
 
     let versions = PyDict::new(py);
-    versions.set_item(
-        "calamine-styles",
-        option_env!("WOLFXL_DEP_CALAMINE_VERSION"),
-    )?;
+    versions.set_item("calamine-xls", option_env!("WOLFXL_DEP_CALAMINE_VERSION"))?;
     info.set_item("backend_versions", versions)?;
 
     Ok(info.into())
@@ -40,8 +62,8 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
 fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
-    m.add_class::<calamine_styled_backend::CalamineStyledBook>()?;
-    m.add_class::<calamine_xlsb_xls_backend::CalamineXlsbBook>()?;
+    m.add_class::<native_reader_backend::NativeXlsxBook>()?;
+    m.add_class::<native_reader_backend::NativeXlsbBook>()?;
     m.add_class::<calamine_xlsb_xls_backend::CalamineXlsBook>()?;
     m.add_function(wrap_pyfunction!(
         calamine_xlsb_xls_backend::classify_file_format,
@@ -49,12 +71,12 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_class::<native_writer_backend::NativeWorkbook>()?;
     m.add_function(wrap_pyfunction!(
-        native_writer_backend::serialize_chart_dict,
+        native_writer_charts::serialize_chart_dict,
         m
     )?)?;
     // Sprint Ο Pod 1D (RFC-058 §10) — workbook security serializer.
     m.add_function(wrap_pyfunction!(
-        native_writer_backend::serialize_workbook_security_dict,
+        native_writer_workbook_metadata::serialize_workbook_security_dict,
         m
     )?)?;
     // Sprint Ν Pod-γ (RFC-047 / RFC-048) — pivot serialisers.
@@ -84,8 +106,23 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wolfxl::pivot::serialize_slicer_cache_dict,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(wolfxl::pivot::serialize_slicer_dict, m)?)?;
+    // G17 / RFC-070 — pivot mutation parsers (modify-mode load path).
     m.add_function(wrap_pyfunction!(
-        wolfxl::pivot::serialize_slicer_dict,
+        wolfxl::patcher_pivot_parse::parse_pivot_table_meta,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::patcher_pivot_parse::parse_pivot_cache_source,
+        m
+    )?)?;
+    // G18 / RFC-071 — external link parsers (modify-mode load path).
+    m.add_function(wrap_pyfunction!(
+        wolfxl::external_links::parse_external_link_part,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        wolfxl::external_links::parse_external_link_rels,
         m
     )?)?;
     // Sprint Π Pod Π-α (RFC-062) — page breaks + sheet format serialiser.

@@ -84,8 +84,8 @@ pub fn parse_runs_in_element(
     let mut t_buf = String::new();
 
     let mut runs: Vec<RichTextRun> = Vec::new();
-    /// True when at least one `<r>` was seen — used to decide between
-    /// "single plain text" vs. "rich-text cell with one run".
+    // True when at least one `<r>` was seen — used to decide between
+    // "single plain text" vs. "rich-text cell with one run".
     let mut saw_r = false;
     let mut plain_t_text = String::new();
     let mut plain_t_active = false;
@@ -375,12 +375,12 @@ pub fn emit_runs(runs: &[RichTextRun]) -> String {
             out.push_str("</rPr>");
         }
         // Preserve leading/trailing whitespace.
-        let needs_preserve = run
-            .text
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_whitespace())
-            || run.text.chars().next_back().is_some_and(|c| c.is_whitespace());
+        let needs_preserve = run.text.chars().next().is_some_and(|c| c.is_whitespace())
+            || run
+                .text
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_whitespace());
         let escaped = xml_text_escape(&run.text);
         if needs_preserve {
             out.push_str(&format!("<t xml:space=\"preserve\">{escaped}</t>"));

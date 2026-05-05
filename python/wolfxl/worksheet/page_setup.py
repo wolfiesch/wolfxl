@@ -15,6 +15,7 @@ from typing import Any
 _VALID_ORIENTATION = ("default", "portrait", "landscape")
 _VALID_CELL_COMMENTS = ("asDisplayed", "atEnd", "none")
 _VALID_ERRORS = ("displayed", "blank", "dash", "NA")
+_VALID_PAGE_ORDER = ("downThenOver", "overThenDown")
 
 
 @dataclass
@@ -36,9 +37,13 @@ class PageSetup:
     cellComments: str | None = None  # noqa: N815
     errors: str | None = None
     useFirstPageNumber: bool | None = None  # noqa: N815
+    paperHeight: str | None = None  # noqa: N815
+    paperWidth: str | None = None  # noqa: N815
+    pageOrder: str | None = None  # noqa: N815
     usePrinterDefaults: bool | None = None  # noqa: N815
     blackAndWhite: bool | None = None  # noqa: N815
     draft: bool | None = None
+    copies: int | None = None
 
     # openpyxl aliases (snake_case alternatives for the camelCase OOXML names)
     @property
@@ -65,6 +70,30 @@ class PageSetup:
     def fit_to_height(self, value: int | None) -> None:
         self.fitToHeight = value
 
+    @property
+    def paper_height(self) -> str | None:
+        return self.paperHeight
+
+    @paper_height.setter
+    def paper_height(self, value: str | None) -> None:
+        self.paperHeight = value
+
+    @property
+    def paper_width(self) -> str | None:
+        return self.paperWidth
+
+    @paper_width.setter
+    def paper_width(self, value: str | None) -> None:
+        self.paperWidth = value
+
+    @property
+    def page_order(self) -> str | None:
+        return self.pageOrder
+
+    @page_order.setter
+    def page_order(self, value: str | None) -> None:
+        self.pageOrder = value
+
     def __post_init__(self) -> None:
         self._validate()
 
@@ -80,6 +109,10 @@ class PageSetup:
         if self.errors is not None and self.errors not in _VALID_ERRORS:
             raise ValueError(
                 f"errors must be one of {_VALID_ERRORS}, got {self.errors!r}"
+            )
+        if self.pageOrder is not None and self.pageOrder not in _VALID_PAGE_ORDER:
+            raise ValueError(
+                f"pageOrder must be one of {_VALID_PAGE_ORDER}, got {self.pageOrder!r}"
             )
         if self.scale is not None and not (10 <= self.scale <= 400):
             raise ValueError(f"scale must be between 10 and 400, got {self.scale}")
@@ -98,9 +131,13 @@ class PageSetup:
             "cell_comments": self.cellComments,
             "errors": self.errors,
             "use_first_page_number": self.useFirstPageNumber,
+            "paper_height": self.paperHeight,
+            "paper_width": self.paperWidth,
+            "page_order": self.pageOrder,
             "use_printer_defaults": self.usePrinterDefaults,
             "black_and_white": self.blackAndWhite,
             "draft": self.draft,
+            "copies": self.copies,
         }
 
     def is_default(self) -> bool:
@@ -140,27 +177,39 @@ class PrintOptions:
     Pod 2 re-exports this under ``wolfxl.worksheet.page.PrintOptions``.
     """
 
-    horizontalCentered: bool = False  # noqa: N815
-    verticalCentered: bool = False  # noqa: N815
-    headings: bool = False
-    gridLines: bool = False  # noqa: N815
-    gridLinesSet: bool = True  # noqa: N815
+    horizontalCentered: bool | None = None  # noqa: N815
+    verticalCentered: bool | None = None  # noqa: N815
+    headings: bool | None = None
+    gridLines: bool | None = None  # noqa: N815
+    gridLinesSet: bool | None = None  # noqa: N815
 
     @property
-    def horizontal_centered(self) -> bool:
+    def horizontal_centered(self) -> bool | None:
         return self.horizontalCentered
 
     @horizontal_centered.setter
-    def horizontal_centered(self, value: bool) -> None:
-        self.horizontalCentered = bool(value)
+    def horizontal_centered(self, value: bool | None) -> None:
+        self.horizontalCentered = None if value is None else bool(value)
 
     @property
-    def vertical_centered(self) -> bool:
+    def vertical_centered(self) -> bool | None:
         return self.verticalCentered
 
     @vertical_centered.setter
-    def vertical_centered(self, value: bool) -> None:
-        self.verticalCentered = bool(value)
+    def vertical_centered(self, value: bool | None) -> None:
+        self.verticalCentered = None if value is None else bool(value)
+
+    def to_rust_dict(self) -> dict[str, Any]:
+        return {
+            "horizontal_centered": self.horizontalCentered,
+            "vertical_centered": self.verticalCentered,
+            "headings": self.headings,
+            "grid_lines": self.gridLines,
+            "grid_lines_set": self.gridLinesSet,
+        }
+
+    def is_default(self) -> bool:
+        return self == PrintOptions()
 
 
 @dataclass

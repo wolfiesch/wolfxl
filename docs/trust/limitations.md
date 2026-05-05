@@ -1,33 +1,32 @@
 # Known Limitations
 
-WolfXL targets high-impact openpyxl-style workflows, not complete openpyxl API parity. This page lists concrete gaps so you can evaluate fit before migrating.
+This page lists concrete openpyxl-parity gaps in WolfXL so you can evaluate
+fit before migrating. Surfaces that openpyxl itself does not expose
+(`.xlsb`/`.xls` writes, `.ods`, VBA authoring) are wolfxl-extras tracked in
+[`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md)
+under G25-G28; they are not parity gaps and are not listed here. The
+machine-checked source of truth is
+[`compatibility-matrix.md`](../migration/compatibility-matrix.md).
 
-## Not yet supported
+## Current hard limits
 
 | Feature | Read | Write | Modify | Notes |
 |---------|:----:|:-----:|:------:|-------|
-| Images (pictures/drawings) | No | No | — | Preserved in modify mode but not accessible via API |
-| Diagonal borders | Partial | Yes | — | Read extracts top/bottom/left/right; diagonal is recognized but fidelity score is 1 |
-| Charts | No | No | — | Preserved untouched in modify mode |
-| Pivot tables | No | No | — | Preserved in modify mode; creation requires Excel |
-| VBA macros | No | No | — | Preserved in modify mode (`.xlsm` files) |
-| DefinedName manipulation | No | No | No | Named ranges can be read; programmatic creation not yet exposed |
-| Print settings | No | No | — | Page setup, margins, headers/footers |
-| Protection (sheet/workbook) | No | No | — | Password-protected files cannot be opened |
-| Rich text (mixed fonts in one cell) | No | No | No | Font applies per-cell, not per-run |
+| In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
+| External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
+| Dynamic-array spill metadata | Partial | Partial | Partial | Array formulas and data-table formulas round-trip; dynamic-array spill metadata is not fully preserved yet. |
+| Calc-chain edge cases | Partial | Partial | Partial | Basic calc-chain rebuild is supported; cross-sheet ordering, deleted-cell pruning, and `calcChainExtLst` edge cases remain open. |
+| Standalone table-driven slicers | No | No | Preserve | Pivot-backed slicers are supported. Slicers tied directly to tables, outside a pivot context, are still unimplemented. |
 
-"Preserved in modify mode" means the feature survives a load-modify-save cycle untouched, even though WolfXL cannot read or create it programmatically.
+"Preserve" means the feature survives a load-modify-save cycle untouched, even
+though WolfXL does not expose a full authoring API for that surface.
 
 ## API surface gaps vs openpyxl
 
-These openpyxl APIs do not have WolfXL equivalents yet:
+These openpyxl APIs are still incomplete or intentionally narrower:
 
-- `ws.add_image()`, `ws.add_chart()`
-- `ws.protection`, `wb.security`
-- `ws.page_setup`, `ws.print_options`
-- `ws.auto_filter` (preserved in modify, not creatable)
-- `ws.conditional_formatting` complex rule builders (basic rules work)
-- `copy_worksheet()`
+- `ws.conditional_formatting` supports common rules; some complex builder combinations remain lower-priority.
+- Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
 
 ## Performance claim guardrails
 
@@ -38,5 +37,9 @@ These openpyxl APIs do not have WolfXL equivalents yet:
 ## Integrity guidance
 
 - Use reproducible fixtures and benchmarks for acceptance testing.
+- Before public releases, run the local external-oracle fixture pack generated
+  by ExcelBench. It currently exercises Excelize, ClosedXML, NPOI, ExcelJS, and
+  Apache POI outputs through LibreOffice and WolfXL preservation checks.
 - Review output workbooks in Excel for business-critical templates.
 - WolfXL's fidelity is tracked by [ExcelBench](https://excelbench.vercel.app) — check the dashboard for current scores.
+- When sharing numbers externally, check [Public Evidence Status](public-evidence.md) first so historical snapshots are not presented as current release evidence.

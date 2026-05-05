@@ -1,8 +1,8 @@
 //! `xl/styles.xml` emitter — full styles file assembled from [`StylesBuilder`]. Wave 2A.
 
 use crate::model::format::{
-    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, StylesBuilder,
-    XfRecord,
+    AlignmentSpec, BorderSideSpec, BorderSpec, DxfRecord, FillSpec, FontSpec, GradientFillSpec,
+    StylesBuilder, XfRecord,
 };
 use crate::xml_escape;
 
@@ -19,83 +19,15 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
         "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
     );
 
-    // 1. numFmts — only custom (id >= 164); omit entirely when empty.
-    if !styles.num_fmts.is_empty() {
-        out.push_str(&format!(
-            "<numFmts count=\"{}\">",
-            styles.num_fmts.len()
-        ));
-        for (id, code) in &styles.num_fmts {
-            out.push_str(&format!(
-                "<numFmt numFmtId=\"{id}\" formatCode=\"{}\"/>",
-                xml_escape::attr(code)
-            ));
-        }
-        out.push_str("</numFmts>");
-    }
-
-    // 2. fonts
-    out.push_str(&format!("<fonts count=\"{}\">", styles.fonts.len()));
-    for font in &styles.fonts {
-        out.push_str(&font_to_xml(font));
-    }
-    out.push_str("</fonts>");
-
-    // 3. fills
-    out.push_str(&format!("<fills count=\"{}\">", styles.fills.len()));
-    for fill in &styles.fills {
-        out.push_str(&fill_to_xml(fill));
-    }
-    out.push_str("</fills>");
-
-    // 4. borders
-    out.push_str(&format!("<borders count=\"{}\">", styles.borders.len()));
-    for border in &styles.borders {
-        out.push_str(&border_to_xml(border));
-    }
-    out.push_str("</borders>");
-
-    // 5. cellStyleXfs — singleton required by Excel schema validators.
-    out.push_str(
-        "<cellStyleXfs count=\"1\">\
-         <xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>\
-         </cellStyleXfs>",
-    );
-
-    // 6. cellXfs
-    out.push_str(&format!("<cellXfs count=\"{}\">", styles.cell_xfs.len()));
-    for xf in &styles.cell_xfs {
-        out.push_str(&xf_to_xml(xf));
-    }
-    out.push_str("</cellXfs>");
-
-    // 7. cellStyles — singleton hardcoded Normal style.
-    out.push_str(
-        "<cellStyles count=\"1\">\
-         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>\
-         </cellStyles>",
-    );
-
-    // 8. dxfs — differential formats referenced by conditional-formatting
-    //    rules. Empty is the common case; when populated, each dxf emits
-    //    whichever of <font>/<fill>/<border> is `Some` — number formats
-    //    and alignment are not valid children of <dxf>.
-    if styles.dxfs.is_empty() {
-        out.push_str("<dxfs count=\"0\"/>");
-    } else {
-        out.push_str(&format!("<dxfs count=\"{}\">", styles.dxfs.len()));
-        for dxf in &styles.dxfs {
-            out.push_str(&dxf_to_xml(dxf));
-        }
-        out.push_str("</dxfs>");
-    }
-
-    // 9. tableStyles
-    out.push_str(
-        "<tableStyles count=\"0\" \
-         defaultTableStyle=\"TableStyleMedium9\" \
-         defaultPivotStyle=\"PivotStyleLight16\"/>",
-    );
+    emit_num_fmts(&mut out, styles);
+    emit_fonts(&mut out, styles);
+    emit_fills(&mut out, styles);
+    emit_borders(&mut out, styles);
+    emit_cell_style_xfs(&mut out, styles);
+    emit_cell_xfs(&mut out, styles);
+    emit_cell_styles(&mut out, styles);
+    emit_dxfs(&mut out, styles);
+    emit_table_styles(&mut out);
 
     out.push_str("</styleSheet>");
     out.into_bytes()
@@ -105,6 +37,99 @@ pub fn emit(styles: &StylesBuilder) -> Vec<u8> {
 // Per-element helpers (private)
 // ---------------------------------------------------------------------------
 
+fn emit_num_fmts(out: &mut String, styles: &StylesBuilder) {
+    if styles.num_fmts.is_empty() {
+        return;
+    }
+    out.push_str(&format!("<numFmts count=\"{}\">", styles.num_fmts.len()));
+    for (id, code) in &styles.num_fmts {
+        out.push_str(&format!(
+            "<numFmt numFmtId=\"{id}\" formatCode=\"{}\"/>",
+            xml_escape::attr(code)
+        ));
+    }
+    out.push_str("</numFmts>");
+}
+
+fn emit_fonts(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<fonts count=\"{}\">", styles.fonts.len()));
+    for font in &styles.fonts {
+        out.push_str(&font_to_xml(font));
+    }
+    out.push_str("</fonts>");
+}
+
+fn emit_fills(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<fills count=\"{}\">", styles.fills.len()));
+    for fill in &styles.fills {
+        out.push_str(&fill_to_xml(fill));
+    }
+    out.push_str("</fills>");
+}
+
+fn emit_borders(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<borders count=\"{}\">", styles.borders.len()));
+    for border in &styles.borders {
+        out.push_str(&border_to_xml(border));
+    }
+    out.push_str("</borders>");
+}
+
+fn emit_cell_style_xfs(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!(
+        "<cellStyleXfs count=\"{}\">",
+        1 + styles.named_styles.len()
+    ));
+    for _ in 0..=styles.named_styles.len() {
+        out.push_str("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/>");
+    }
+    out.push_str("</cellStyleXfs>");
+}
+
+fn emit_cell_xfs(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!("<cellXfs count=\"{}\">", styles.cell_xfs.len()));
+    for xf in &styles.cell_xfs {
+        out.push_str(&xf_to_xml(xf));
+    }
+    out.push_str("</cellXfs>");
+}
+
+fn emit_cell_styles(out: &mut String, styles: &StylesBuilder) {
+    out.push_str(&format!(
+        "<cellStyles count=\"{}\">\
+         <cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/>",
+        1 + styles.named_styles.len()
+    ));
+    for (idx, style) in styles.named_styles.iter().enumerate() {
+        out.push_str(&format!(
+            "<cellStyle name=\"{}\" xfId=\"{}\"/>",
+            xml_escape::attr(&style.name),
+            idx + 1
+        ));
+    }
+    out.push_str("</cellStyles>");
+}
+
+fn emit_dxfs(out: &mut String, styles: &StylesBuilder) {
+    if styles.dxfs.is_empty() {
+        out.push_str("<dxfs count=\"0\"/>");
+        return;
+    }
+    out.push_str(&format!("<dxfs count=\"{}\">", styles.dxfs.len()));
+    for dxf in &styles.dxfs {
+        out.push_str(&dxf_to_xml(dxf));
+    }
+    out.push_str("</dxfs>");
+}
+
+fn emit_table_styles(out: &mut String) {
+    out.push_str(
+        "<tableStyles count=\"0\" \
+         defaultTableStyle=\"TableStyleMedium9\" \
+         defaultPivotStyle=\"PivotStyleLight16\"/>",
+    );
+}
+
 fn font_to_xml(spec: &FontSpec) -> String {
     let mut parts = String::new();
     if spec.bold {
@@ -113,8 +138,12 @@ fn font_to_xml(spec: &FontSpec) -> String {
     if spec.italic {
         parts.push_str("<i/>");
     }
-    if spec.underline {
-        parts.push_str("<u/>");
+    if let Some(underline) = &spec.underline {
+        if underline.is_empty() || underline == "single" {
+            parts.push_str("<u/>");
+        } else {
+            parts.push_str(&format!("<u val=\"{}\"/>", xml_escape::attr(underline)));
+        }
     }
     if spec.strikethrough {
         parts.push_str("<strike/>");
@@ -133,9 +162,14 @@ fn font_to_xml(spec: &FontSpec) -> String {
 }
 
 fn fill_to_xml(spec: &FillSpec) -> String {
-    // OOXML schema: `<patternFill>` may carry `<fgColor>` and/or `<bgColor>`
-    // children. Emit both when present, in spec order (fg before bg). When
-    // neither is present, self-close the element to match Excel's style.
+    // OOXML schema: `<fill>` carries EITHER `<patternFill>` or `<gradientFill>`,
+    // never both. When `spec.gradient` is set the pattern fields are ignored.
+    if let Some(ref grad) = spec.gradient {
+        return gradient_fill_to_xml(grad);
+    }
+    // `<patternFill>` may carry `<fgColor>` and/or `<bgColor>` children.
+    // Emit both when present, in spec order (fg before bg). When neither
+    // is present, self-close the element to match Excel's style.
     let pattern_attr = xml_escape::attr(&spec.pattern_type);
     let has_fg = spec.fg_color_rgb.is_some();
     let has_bg = spec.bg_color_rgb.is_some();
@@ -152,6 +186,45 @@ fn fill_to_xml(spec: &FillSpec) -> String {
         inner.push_str(&format!("<bgColor rgb=\"{}\"/>", xml_escape::attr(rgb)));
     }
     inner.push_str("</patternFill>");
+    format!("<fill>{inner}</fill>")
+}
+
+fn gradient_fill_to_xml(grad: &GradientFillSpec) -> String {
+    // `<gradientFill>` attribute set differs between linear and path types:
+    // - linear: `type` (default linear, may be omitted) + `degree`
+    // - path: `type="path"` + `left`/`right`/`top`/`bottom`
+    // We always emit `type` when not "linear" so Excel parses correctly.
+    let mut attrs = String::new();
+    if !grad.gradient_type.is_empty() && grad.gradient_type != "linear" {
+        attrs.push_str(&format!(" type=\"{}\"", xml_escape::attr(&grad.gradient_type)));
+    }
+    if grad.gradient_type == "path" {
+        for (name, val) in [
+            ("left", &grad.left),
+            ("right", &grad.right),
+            ("top", &grad.top),
+            ("bottom", &grad.bottom),
+        ] {
+            if !val.is_empty() {
+                attrs.push_str(&format!(" {name}=\"{}\"", xml_escape::attr(val)));
+            }
+        }
+    } else if !grad.degree.is_empty() && grad.degree != "0" {
+        attrs.push_str(&format!(" degree=\"{}\"", xml_escape::attr(&grad.degree)));
+    }
+
+    let mut inner = format!("<gradientFill{attrs}>");
+    for stop in &grad.stops {
+        inner.push_str(&format!(
+            "<stop position=\"{}\">",
+            xml_escape::attr(&stop.position)
+        ));
+        if let Some(ref rgb) = stop.color_rgb {
+            inner.push_str(&format!("<color rgb=\"{}\"/>", xml_escape::attr(rgb)));
+        }
+        inner.push_str("</stop>");
+    }
+    inner.push_str("</gradientFill>");
     format!("<fill>{inner}</fill>")
 }
 
@@ -236,8 +309,8 @@ fn dxf_to_xml(dxf: &DxfRecord) -> String {
 
 fn xf_to_xml(xf: &XfRecord) -> String {
     let mut attrs = format!(
-        "numFmtId=\"{}\" fontId=\"{}\" fillId=\"{}\" borderId=\"{}\" xfId=\"0\"",
-        xf.num_fmt_id, xf.font_id, xf.fill_id, xf.border_id
+        "numFmtId=\"{}\" fontId=\"{}\" fillId=\"{}\" borderId=\"{}\" xfId=\"{}\"",
+        xf.num_fmt_id, xf.font_id, xf.fill_id, xf.border_id, xf.xf_id
     );
     if xf.apply_font {
         attrs.push_str(" applyFont=\"1\"");
@@ -252,15 +325,36 @@ fn xf_to_xml(xf: &XfRecord) -> String {
         attrs.push_str(" applyNumberFormat=\"1\"");
     }
 
-    if let Some(ref align) = xf.alignment {
-        if xf.apply_alignment {
-            attrs.push_str(" applyAlignment=\"1\"");
-            let align_xml = alignment_xml(align);
-            return format!("<xf {attrs}>{align_xml}</xf>");
-        }
+    let align_child = xf
+        .alignment
+        .as_ref()
+        .filter(|_| xf.apply_alignment)
+        .map(alignment_xml);
+    if align_child.is_some() {
+        attrs.push_str(" applyAlignment=\"1\"");
     }
 
-    format!("<xf {attrs}/>")
+    let protection_child = xf
+        .protection
+        .as_ref()
+        .filter(|_| xf.apply_protection)
+        .map(|p| {
+            format!(
+                "<protection locked=\"{}\" hidden=\"{}\"/>",
+                if p.locked { 1 } else { 0 },
+                if p.hidden { 1 } else { 0 },
+            )
+        });
+    if protection_child.is_some() {
+        attrs.push_str(" applyProtection=\"1\"");
+    }
+
+    match (align_child, protection_child) {
+        (None, None) => format!("<xf {attrs}/>"),
+        (Some(a), None) => format!("<xf {attrs}>{a}</xf>"),
+        (None, Some(p)) => format!("<xf {attrs}>{p}</xf>"),
+        (Some(a), Some(p)) => format!("<xf {attrs}>{a}{p}</xf>"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +365,8 @@ fn xf_to_xml(xf: &XfRecord) -> String {
 mod tests {
     use super::*;
     use crate::model::format::{
-        AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec, StylesBuilder,
+        AlignmentSpec, BorderSideSpec, BorderSpec, FillSpec, FontSpec, FormatSpec,
+        GradientFillSpec, GradientStopSpec, StylesBuilder,
     };
     use quick_xml::events::Event;
     use quick_xml::Reader;
@@ -307,15 +402,42 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
 
         assert!(text.contains("<styleSheet"), "missing <styleSheet");
-        assert!(text.contains("<fonts count=\"1\">"), "missing <fonts count=\"1\">");
-        assert!(text.contains("<fills count=\"2\">"), "missing <fills count=\"2\">");
-        assert!(text.contains("<borders count=\"1\">"), "missing <borders count=\"1\">");
-        assert!(text.contains("<cellStyleXfs count=\"1\">"), "missing <cellStyleXfs count=\"1\">");
-        assert!(text.contains("<cellXfs count=\"1\">"), "missing <cellXfs count=\"1\">");
-        assert!(text.contains("<cellStyles count=\"1\">"), "missing <cellStyles count=\"1\">");
-        assert!(text.contains("<dxfs count=\"0\"/>"), "missing <dxfs count=\"0\"/>");
-        assert!(text.contains("<tableStyles count=\"0\""), "missing <tableStyles count=\"0\"");
-        assert!(!text.contains("<numFmts"), "numFmts should be omitted when empty");
+        assert!(
+            text.contains("<fonts count=\"1\">"),
+            "missing <fonts count=\"1\">"
+        );
+        assert!(
+            text.contains("<fills count=\"2\">"),
+            "missing <fills count=\"2\">"
+        );
+        assert!(
+            text.contains("<borders count=\"1\">"),
+            "missing <borders count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellStyleXfs count=\"1\">"),
+            "missing <cellStyleXfs count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellXfs count=\"1\">"),
+            "missing <cellXfs count=\"1\">"
+        );
+        assert!(
+            text.contains("<cellStyles count=\"1\">"),
+            "missing <cellStyles count=\"1\">"
+        );
+        assert!(
+            text.contains("<dxfs count=\"0\"/>"),
+            "missing <dxfs count=\"0\"/>"
+        );
+        assert!(
+            text.contains("<tableStyles count=\"0\""),
+            "missing <tableStyles count=\"0\""
+        );
+        assert!(
+            !text.contains("<numFmts"),
+            "numFmts should be omitted when empty"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -425,7 +547,10 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
 
-        assert!(text.contains("<numFmts count=\"1\">"), "missing numFmts count=1");
+        assert!(
+            text.contains("<numFmts count=\"1\">"),
+            "missing numFmts count=1"
+        );
         assert!(
             text.contains("numFmtId=\"164\""),
             "custom fmt should have id 164"
@@ -529,7 +654,10 @@ mod tests {
 
         assert!(text.contains("applyFont=\"1\""), "applyFont flag missing");
         assert!(text.contains("applyFill=\"1\""), "applyFill flag missing");
-        assert!(text.contains("applyBorder=\"1\""), "applyBorder flag missing");
+        assert!(
+            text.contains("applyBorder=\"1\""),
+            "applyBorder flag missing"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -564,7 +692,10 @@ mod tests {
         let mut styles = StylesBuilder::default();
         let id = styles.intern_num_fmt("0.00");
         assert_eq!(id, 2, "0.00 is builtin id 2");
-        assert!(styles.num_fmts.is_empty(), "no custom entry should be created");
+        assert!(
+            styles.num_fmts.is_empty(),
+            "no custom entry should be created"
+        );
         let text = emit_str(&styles);
         assert!(!text.contains("<numFmts"), "numFmts should be absent");
     }
@@ -584,6 +715,48 @@ mod tests {
         assert!(
             text.contains("<cellStyles count=\"1\">"),
             "cellStyles wrapper missing"
+        );
+    }
+
+    #[test]
+    fn custom_named_styles_emit_cell_style_entries() {
+        let mut styles = StylesBuilder::default();
+        styles.add_named_style("Metric");
+        let text = emit_str(&styles);
+
+        assert!(text.contains("<cellStyleXfs count=\"2\">"));
+        assert!(text.contains("<cellStyles count=\"2\">"));
+        assert!(text.contains("<cellStyle name=\"Metric\" xfId=\"1\"/>"));
+    }
+
+    #[test]
+    fn cell_xf_with_named_style_id_emits_xfid_attr() {
+        // A cell that opts into a named style gets its `<xf>` stamped with
+        // the cellStyleXfs slot. Round-tripping that attr is what surfaces
+        // `cell.style == "Highlight"` on load.
+        let mut styles = StylesBuilder::default();
+        styles.add_named_style("Highlight");
+        let spec = FormatSpec {
+            font: Some(FontSpec {
+                bold: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        styles.intern_format_with_xf_id(&spec, 1);
+        let text = emit_str(&styles);
+
+        // Default xf at index 0 still self-closes with xfId=0.
+        assert!(
+            text.contains(
+                "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
+            ),
+            "default xf must keep xfId=0; got:\n{text}"
+        );
+        // The named-style xf carries xfId=1 so the reader can resolve it.
+        assert!(
+            text.contains("xfId=\"1\""),
+            "named-style xf must emit xfId=\"1\"; got:\n{text}"
         );
     }
 
@@ -787,6 +960,7 @@ mod tests {
             pattern_type: "darkHorizontal".into(),
             fg_color_rgb: None,
             bg_color_rgb: Some("FFAABBCC".into()),
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
         assert!(
@@ -805,10 +979,15 @@ mod tests {
             pattern_type: "darkHorizontal".into(),
             fg_color_rgb: Some("FF111111".into()),
             bg_color_rgb: Some("FF222222".into()),
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
-        let fg_pos = text.find("<fgColor rgb=\"FF111111\"/>").expect("fg present");
-        let bg_pos = text.find("<bgColor rgb=\"FF222222\"/>").expect("bg present");
+        let fg_pos = text
+            .find("<fgColor rgb=\"FF111111\"/>")
+            .expect("fg present");
+        let bg_pos = text
+            .find("<bgColor rgb=\"FF222222\"/>")
+            .expect("bg present");
         assert!(fg_pos < bg_pos, "fg must precede bg in OOXML; got:\n{text}");
     }
 
@@ -822,11 +1001,101 @@ mod tests {
             pattern_type: "gray0625".into(),
             fg_color_rgb: None,
             bg_color_rgb: None,
+            gradient: None,
         });
         let text = String::from_utf8(emit(&styles)).unwrap();
         assert!(
             text.contains("<patternFill patternType=\"gray0625\"/>"),
             "empty pattern fill must self-close; got:\n{text}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // G05 follow-up: linear `<gradientFill>` emits with `degree` and stops
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_linear_gradient_emits_gradient_fill() {
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: String::new(),
+            fg_color_rgb: None,
+            bg_color_rgb: None,
+            gradient: Some(GradientFillSpec {
+                gradient_type: "linear".into(),
+                degree: "90".into(),
+                stops: vec![
+                    GradientStopSpec {
+                        position: "0".into(),
+                        color_rgb: Some("FFFF0000".into()),
+                    },
+                    GradientStopSpec {
+                        position: "1".into(),
+                        color_rgb: Some("FF0000FF".into()),
+                    },
+                ],
+                ..Default::default()
+            }),
+        });
+        let bytes = emit(&styles);
+        parse_ok(&bytes);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            text.contains("<gradientFill degree=\"90\">"),
+            "linear gradient must emit degree attr; got:\n{text}"
+        );
+        assert!(
+            text.contains("<stop position=\"0\"><color rgb=\"FFFF0000\"/></stop>"),
+            "first stop must round-trip; got:\n{text}"
+        );
+        assert!(
+            text.contains("<stop position=\"1\"><color rgb=\"FF0000FF\"/></stop>"),
+            "second stop must round-trip; got:\n{text}"
+        );
+        // The reserved fills (none, gray125) always emit <patternFill>; the
+        // gradient fill itself must not — assert only inside the gradient block.
+        let grad_open = text.find("<gradientFill").expect("gradientFill present");
+        let grad_close = text[grad_open..]
+            .find("</gradientFill>")
+            .expect("gradientFill close present");
+        let grad_block = &text[grad_open..grad_open + grad_close];
+        assert!(
+            !grad_block.contains("<patternFill"),
+            "gradient fill must NOT also emit patternFill; got:\n{grad_block}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // G05 follow-up: path `<gradientFill>` emits left/right/top/bottom
+    // -------------------------------------------------------------------
+    #[test]
+    fn fill_with_path_gradient_emits_corner_attrs() {
+        use crate::model::format::{GradientFillSpec, GradientStopSpec};
+        let mut styles = StylesBuilder::default();
+        styles.intern_fill(&FillSpec {
+            pattern_type: String::new(),
+            fg_color_rgb: None,
+            bg_color_rgb: None,
+            gradient: Some(GradientFillSpec {
+                gradient_type: "path".into(),
+                degree: String::new(),
+                left: "0.5".into(),
+                right: "0.5".into(),
+                top: "0.5".into(),
+                bottom: "0.5".into(),
+                stops: vec![GradientStopSpec {
+                    position: "0".into(),
+                    color_rgb: Some("FF112233".into()),
+                }],
+            }),
+        });
+        let text = String::from_utf8(emit(&styles)).unwrap();
+        assert!(
+            text.contains(r#"type="path""#)
+                && text.contains(r#"left="0.5""#)
+                && text.contains(r#"right="0.5""#)
+                && text.contains(r#"top="0.5""#)
+                && text.contains(r#"bottom="0.5""#),
+            "path gradient must emit corner attrs; got:\n{text}"
         );
     }
 

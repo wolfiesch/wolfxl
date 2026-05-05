@@ -3,9 +3,9 @@
 //! Emits the workbook XML part that lists sheets, defined names,
 //! and a handful of fixed metadata elements that Excel requires.
 
-use crate::model::defined_name::BuiltinName;
-use crate::model::worksheet::SheetVisibility;
+use crate::model::defined_name::{BuiltinName, DefinedName};
 use crate::model::workbook::Workbook;
+use crate::model::worksheet::SheetVisibility;
 use crate::parse::workbook_security::{emit_file_sharing, emit_workbook_protection};
 use crate::refs::quote_sheet_name_if_needed;
 use crate::xml_escape;
@@ -25,13 +25,94 @@ fn builtin_name_str(b: BuiltinName) -> &'static str {
 /// True iff `defined_names` already carries a `PrintArea` builtin scoped
 /// to sheet `idx`. Used to suppress the `Worksheet::print_area` auto-inject
 /// when the caller has declared the print area explicitly via `DefinedName`.
-fn has_user_print_area_for_sheet(
-    defined_names: &[crate::model::defined_name::DefinedName],
-    idx: usize,
-) -> bool {
+fn has_user_print_area_for_sheet(defined_names: &[DefinedName], idx: usize) -> bool {
     defined_names.iter().any(|dn| {
         matches!(dn.builtin, Some(BuiltinName::PrintArea)) && dn.scope_sheet_index == Some(idx)
     })
+}
+
+fn emit_defined_names(out: &mut String, wb: &Workbook) {
+    let has_user_names = !wb.defined_names.is_empty();
+    let has_print_areas = wb.sheets.iter().any(|s| s.print_area.is_some());
+
+    if !has_user_names && !has_print_areas {
+        return;
+    }
+
+    out.push_str("<definedNames>");
+    emit_user_defined_names(out, &wb.defined_names);
+    emit_sheet_print_areas(out, wb);
+    out.push_str("</definedNames>");
+}
+
+fn emit_user_defined_names(out: &mut String, defined_names: &[DefinedName]) {
+    for dn in defined_names {
+        let name_str = match dn.builtin {
+            Some(b) => builtin_name_str(b).to_string(),
+            None => dn.name.clone(),
+        };
+        let name_escaped = xml_escape::attr(&name_str);
+
+        let local_attr = match dn.scope_sheet_index {
+            Some(idx) => format!(" localSheetId=\"{idx}\""),
+            None => String::new(),
+        };
+
+        // ECMA-376 §18.2.5 attribute order matches openpyxl's emit order
+        // so wolfxl-written workbooks diff cleanly against openpyxl-written
+        // ones. Attribute is omitted when its value is the XML default.
+        let mut extra = String::new();
+        emit_opt_str(&mut extra, "comment", dn.comment.as_deref());
+        emit_opt_str(&mut extra, "customMenu", dn.custom_menu.as_deref());
+        emit_opt_str(&mut extra, "description", dn.description.as_deref());
+        emit_opt_str(&mut extra, "help", dn.help.as_deref());
+        emit_opt_str(&mut extra, "statusBar", dn.status_bar.as_deref());
+        emit_opt_str(&mut extra, "shortcutKey", dn.shortcut_key.as_deref());
+        if dn.hidden {
+            extra.push_str(" hidden=\"1\"");
+        }
+        emit_opt_bool_true(&mut extra, "function", dn.function);
+        emit_opt_bool_true(&mut extra, "vbProcedure", dn.vb_procedure);
+        emit_opt_bool_true(&mut extra, "xlm", dn.xlm);
+        if let Some(id) = dn.function_group_id {
+            extra.push_str(&format!(" functionGroupId=\"{id}\""));
+        }
+        emit_opt_bool_true(&mut extra, "publishToServer", dn.publish_to_server);
+        emit_opt_bool_true(&mut extra, "workbookParameter", dn.workbook_parameter);
+
+        let formula_escaped = xml_escape::text(&dn.formula);
+        out.push_str(&format!(
+            "<definedName name=\"{name_escaped}\"{local_attr}{extra}>{formula_escaped}</definedName>"
+        ));
+    }
+}
+
+fn emit_opt_str(out: &mut String, attr: &str, value: Option<&str>) {
+    if let Some(v) = value {
+        out.push_str(&format!(" {attr}=\"{}\"", xml_escape::attr(v)));
+    }
+}
+
+fn emit_opt_bool_true(out: &mut String, attr: &str, value: Option<bool>) {
+    if value == Some(true) {
+        out.push_str(&format!(" {attr}=\"1\""));
+    }
+}
+
+fn emit_sheet_print_areas(out: &mut String, wb: &Workbook) {
+    for (idx, sheet) in wb.sheets.iter().enumerate() {
+        if let Some(ref range) = sheet.print_area {
+            if has_user_print_area_for_sheet(&wb.defined_names, idx) {
+                continue;
+            }
+            let quoted_name = quote_sheet_name_if_needed(&sheet.name);
+            let formula = format!("{quoted_name}!{range}");
+            let formula_escaped = xml_escape::text(&formula);
+            out.push_str(&format!(
+                "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{idx}\">{formula_escaped}</definedName>"
+            ));
+        }
+    }
 }
 
 /// Emit `xl/workbook.xml` as UTF-8 bytes.
@@ -48,8 +129,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
         "<fileVersion appName=\"xl\" lastEdited=\"7\" lowestEdited=\"7\" rupBuild=\"10000\"/>",
     );
 
-    // RFC-058: <fileSharing> sits between <fileVersion> and <workbookPr>
-    // per ECMA-376 CT_Workbook child ordering. Empty bytes ⇒ no element.
+    // <fileSharing> sits between <fileVersion> and <workbookPr> per
+    // ECMA-376 CT_Workbook child ordering. Empty bytes mean no element.
     if let Some(spec) = wb.security.file_sharing.as_ref() {
         let bytes = emit_file_sharing(spec);
         if !bytes.is_empty() {
@@ -61,8 +142,8 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
 
     out.push_str("<workbookPr date1904=\"false\"/>");
 
-    // RFC-058: <workbookProtection> sits between <workbookPr> and
-    // <bookViews>. Empty bytes ⇒ no element.
+    // <workbookProtection> sits between <workbookPr> and <bookViews>.
+    // Empty bytes mean no element.
     if let Some(spec) = wb.security.workbook_protection.as_ref() {
         let bytes = emit_workbook_protection(spec);
         if !bytes.is_empty() {
@@ -93,61 +174,7 @@ pub fn emit(wb: &Workbook) -> Vec<u8> {
     }
     out.push_str("</sheets>");
 
-    // Collect all defined names:
-    //   1. User-defined (from wb.defined_names).
-    //   2. Auto-injected print areas from sheets that have print_area set.
-    //
-    // Only emit the <definedNames> block when there is at least one entry.
-    let has_user_names = !wb.defined_names.is_empty();
-    let has_print_areas = wb.sheets.iter().any(|s| s.print_area.is_some());
-
-    if has_user_names || has_print_areas {
-        out.push_str("<definedNames>");
-
-        // User-defined names.
-        for dn in &wb.defined_names {
-            let name_str = match dn.builtin {
-                Some(b) => builtin_name_str(b).to_string(),
-                None => dn.name.clone(),
-            };
-            let name_escaped = xml_escape::attr(&name_str);
-
-            let local_attr = match dn.scope_sheet_index {
-                Some(idx) => format!(" localSheetId=\"{idx}\""),
-                None => String::new(),
-            };
-
-            let hidden_attr = if dn.hidden {
-                " hidden=\"1\"".to_string()
-            } else {
-                String::new()
-            };
-
-            let formula_escaped = xml_escape::text(&dn.formula);
-            out.push_str(&format!(
-                "<definedName name=\"{name_escaped}\"{local_attr}{hidden_attr}>{formula_escaped}</definedName>"
-            ));
-        }
-
-        // Auto-injected print areas. If the caller already declared a
-        // `_xlnm.Print_Area` `DefinedName` for this sheet, skip — emitting
-        // both would produce a malformed workbook. User-declared wins.
-        for (idx, sheet) in wb.sheets.iter().enumerate() {
-            if let Some(ref range) = sheet.print_area {
-                if has_user_print_area_for_sheet(&wb.defined_names, idx) {
-                    continue;
-                }
-                let quoted_name = quote_sheet_name_if_needed(&sheet.name);
-                let formula = format!("{quoted_name}!{range}");
-                let formula_escaped = xml_escape::text(&formula);
-                out.push_str(&format!(
-                    "<definedName name=\"_xlnm.Print_Area\" localSheetId=\"{idx}\">{formula_escaped}</definedName>"
-                ));
-            }
-        }
-
-        out.push_str("</definedNames>");
-    }
+    emit_defined_names(&mut out, wb);
 
     // calcId="171027" is the openpyxl-matching stamp; Excel accepts it unchanged.
     out.push_str("<calcPr calcId=\"171027\"/>");
@@ -195,7 +222,10 @@ mod tests {
             text.contains("<sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/>"),
             "{text}"
         );
-        assert!(!text.contains("<definedNames>"), "no defined names expected: {text}");
+        assert!(
+            !text.contains("<definedNames>"),
+            "no defined names expected: {text}"
+        );
     }
 
     // 2. Multiple sheets numbered correctly.
@@ -249,6 +279,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -276,6 +307,7 @@ mod tests {
             scope_sheet_index: Some(1),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -340,7 +372,10 @@ mod tests {
         let text = text_of(&bytes);
         assert!(text.contains("name=\"A &amp; B\""), "{text}");
         // Raw ampersand must not appear inside attributes.
-        assert!(!text.contains("name=\"A & B\""), "raw & in attribute: {text}");
+        assert!(
+            !text.contains("name=\"A & B\""),
+            "raw & in attribute: {text}"
+        );
     }
 
     // 10. Formula text content is text-escaped.
@@ -354,6 +389,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -375,6 +411,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -406,6 +443,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -441,6 +479,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -454,8 +493,7 @@ mod tests {
         assert!(text.contains("localSheetId=\"1\""), "{text}");
     }
 
-    // 14. RFC-058: <workbookProtection> emits between <workbookPr> and
-    // <bookViews>.
+    // 14. <workbookProtection> emits between <workbookPr> and <bookViews>.
     #[test]
     fn workbook_protection_emitted_between_pr_and_book_views() {
         use crate::parse::workbook_security::{WorkbookProtectionSpec, WorkbookSecurity};
@@ -478,7 +516,9 @@ mod tests {
         parse_ok(&bytes);
         let text = text_of(&bytes);
         let pr = text.find("<workbookPr ").expect("workbookPr present");
-        let prot = text.find("<workbookProtection ").expect("workbookProtection present");
+        let prot = text
+            .find("<workbookProtection ")
+            .expect("workbookProtection present");
         let bv = text.find("<bookViews>").expect("bookViews present");
         assert!(pr < prot, "workbookProtection must come AFTER workbookPr");
         assert!(prot < bv, "workbookProtection must come BEFORE bookViews");
@@ -486,8 +526,7 @@ mod tests {
         assert!(text.contains("lockWindows=\"1\""));
     }
 
-    // 15. RFC-058: <fileSharing> emits between <fileVersion> and
-    // <workbookPr>.
+    // 15. <fileSharing> emits between <fileVersion> and <workbookPr>.
     #[test]
     fn file_sharing_emitted_between_file_version_and_workbook_pr() {
         use crate::parse::workbook_security::{FileSharingSpec, WorkbookSecurity};
@@ -514,7 +553,7 @@ mod tests {
         assert!(text.contains("userName=\"alice\""));
     }
 
-    // 16. RFC-058: empty security ⇒ no new XML elements emitted.
+    // 16. Empty security emits no new XML elements.
     #[test]
     fn empty_security_emits_nothing() {
         let mut wb = Workbook::new();
@@ -526,7 +565,7 @@ mod tests {
         assert!(!text.contains("fileSharing"));
     }
 
-    // 17. RFC-058: both blocks emit at correct positions.
+    // 17. Both security blocks emit at correct positions.
     #[test]
     fn both_security_blocks_canonical_positions() {
         use crate::parse::workbook_security::{
@@ -577,6 +616,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: true,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);

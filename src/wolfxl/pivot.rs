@@ -79,6 +79,7 @@ pub struct QueuedPivotCacheAdd {
 /// One pivot table queued for emit on a sheet. The cache it
 /// references must already have been queued (caches drain first).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QueuedPivotTableAdd {
     /// Owner sheet title.
     pub sheet: String,
@@ -108,7 +109,7 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
         .ok_or_else(|| PyValueError::new_err("pivot_cache_dict missing 'source'"))?;
     let source = parse_worksheet_source(
         source_d
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("pivot_cache_dict.source must be a dict"))?,
     )?;
 
@@ -119,7 +120,7 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
     let mut fields: Vec<CacheField> = Vec::with_capacity(fields_list.len());
     for fv in &fields_list {
         let fd = fv
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("pivot_cache_dict.fields[*] must be dicts"))?;
         fields.push(parse_cache_field(fd)?);
     }
@@ -139,7 +140,7 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("calculated_fields[*] must be dict"))?;
                 out.push(parse_calculated_field(pd)?);
             }
@@ -154,7 +155,7 @@ pub fn parse_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotCache> {
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("field_groups[*] must be dict"))?;
                 out.push(parse_field_group(pd)?);
             }
@@ -189,7 +190,7 @@ fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
     let date = match d.get_item("date")? {
         Some(v) if !v.is_none() => {
             let pd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("date must be dict"))?;
             Some(DateGroup {
                 group_by: extract_str(pd, "group_by", "")?,
@@ -202,7 +203,7 @@ fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
     let range = match d.get_item("range")? {
         Some(v) if !v.is_none() => {
             let pd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("range must be dict"))?;
             Some(RangeGroup {
                 start: extract_opt_f64(pd, "start")?.unwrap_or(0.0),
@@ -218,7 +219,7 @@ fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("items[*] must be dict"))?;
                 out.push(extract_str(pd, "name", "")?);
             }
@@ -239,10 +240,7 @@ fn parse_field_group(d: &Bound<'_, PyDict>) -> PyResult<FieldGroup> {
 /// Parse a §10.6 records dict, mutating the supplied `PivotCache`'s
 /// `records` field. The records dict carries `field_count` +
 /// `record_count` for sanity checks.
-pub fn parse_pivot_records_into(
-    d: &Bound<'_, PyDict>,
-    pc: &mut PivotCache,
-) -> PyResult<()> {
+pub fn parse_pivot_records_into(d: &Bound<'_, PyDict>, pc: &mut PivotCache) -> PyResult<()> {
     let field_count: u32 = extract_u32(d, "field_count", 0)?;
     if field_count as usize != pc.fields.len() {
         return Err(PyValueError::new_err(format!(
@@ -256,12 +254,12 @@ pub fn parse_pivot_records_into(
     let recs: Vec<Bound<'_, PyAny>> = recs_d.extract()?;
     let mut out: Vec<CacheRecord> = Vec::with_capacity(recs.len());
     for row in &recs {
-        let cells_list: Vec<Bound<'_, PyAny>> = row.extract().map_err(|_| {
-            PyValueError::new_err("pivot_records_dict.records[*] must be lists")
-        })?;
+        let cells_list: Vec<Bound<'_, PyAny>> = row
+            .extract()
+            .map_err(|_| PyValueError::new_err("pivot_records_dict.records[*] must be lists"))?;
         let mut cells: Vec<RecordCell> = Vec::with_capacity(cells_list.len());
         for cell in &cells_list {
-            let cd = cell.downcast::<PyDict>().map_err(|_| {
+            let cd = cell.cast::<PyDict>().map_err(|_| {
                 PyValueError::new_err("pivot_records_dict.records[*][*] must be dicts")
             })?;
             cells.push(parse_record_cell(cd)?);
@@ -281,7 +279,7 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
         .ok_or_else(|| PyValueError::new_err("pivot_table_dict missing 'location'"))?;
     let location = parse_location(
         location_d
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("pivot_table_dict.location must be a dict"))?,
     )?;
 
@@ -292,7 +290,7 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
     let mut pivot_fields: Vec<PivotField> = Vec::with_capacity(pf_list.len());
     for v in &pf_list {
         let pd = v
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("pivot_fields[*] must be dict"))?;
         pivot_fields.push(parse_pivot_field(pd)?);
     }
@@ -305,9 +303,9 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
-                let pd = vv.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err("page_fields[*] must be dict")
-                })?;
+                let pd = vv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("page_fields[*] must be dict"))?;
                 out.push(parse_page_field(pd)?);
             }
             out
@@ -320,9 +318,9 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
-                let pd = vv.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err("data_fields[*] must be dict")
-                })?;
+                let pd = vv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("data_fields[*] must be dict"))?;
                 out.push(parse_data_field(pd)?);
             }
             out
@@ -336,7 +334,7 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
     let style_info = match d.get_item("style_info")? {
         Some(v) if !v.is_none() => {
             let sd = v
-                .downcast::<PyDict>()
+                .cast::<PyDict>()
                 .map_err(|_| PyValueError::new_err("style_info must be a dict"))?;
             Some(parse_style_info(sd)?)
         }
@@ -387,18 +385,15 @@ pub fn parse_pivot_table_dict(d: &Bound<'_, PyDict>) -> PyResult<PivotTable> {
     Ok(pt)
 }
 
-fn parse_calculated_items_list(
-    d: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<Vec<CalculatedItem>> {
+fn parse_calculated_items_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<CalculatedItem>> {
     match d.get_item(key)? {
         Some(v) if !v.is_none() => {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
-                let pd = vv.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err(format!("{key}[*] must be dict"))
-                })?;
+                let pd = vv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
                 out.push(CalculatedItem {
                     field_name: extract_str(pd, "field_name", "")?,
                     item_name: extract_str(pd, "item_name", "")?,
@@ -432,13 +427,13 @@ fn parse_formats_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Format>>
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
                 let pa_d = pd
                     .get_item("pivot_area")?
                     .ok_or_else(|| PyValueError::new_err("format missing 'pivot_area'"))?;
                 let pa = parse_pivot_area(
-                    pa_d.downcast::<PyDict>()
+                    pa_d.cast::<PyDict>()
                         .map_err(|_| PyValueError::new_err("pivot_area must be dict"))?,
                 )?;
                 let dxf_id: i32 = match pd.get_item("dxf_id")? {
@@ -457,28 +452,23 @@ fn parse_formats_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<Format>>
     }
 }
 
-fn parse_pivot_cfs_list(
-    d: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<Vec<PivotConditionalFormat>> {
+fn parse_pivot_cfs_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<PivotConditionalFormat>> {
     match d.get_item(key)? {
         Some(v) if !v.is_none() => {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
-                let areas_d = pd
-                    .get_item("pivot_areas")?
-                    .ok_or_else(|| {
-                        PyValueError::new_err("conditional_format missing 'pivot_areas'")
-                    })?;
+                let areas_d = pd.get_item("pivot_areas")?.ok_or_else(|| {
+                    PyValueError::new_err("conditional_format missing 'pivot_areas'")
+                })?;
                 let areas_list: Vec<Bound<'_, PyAny>> = areas_d.extract()?;
                 let mut areas = Vec::with_capacity(areas_list.len());
                 for av in &areas_list {
                     let ad = av
-                        .downcast::<PyDict>()
+                        .cast::<PyDict>()
                         .map_err(|_| PyValueError::new_err("pivot_areas[*] must be dict"))?;
                     areas.push(parse_pivot_area(ad)?);
                 }
@@ -524,7 +514,7 @@ fn parse_cache_field(d: &Bound<'_, PyDict>) -> PyResult<CacheField> {
         .get_item("shared_items")?
         .ok_or_else(|| PyValueError::new_err("cache_field missing 'shared_items'"))?;
     let shared_items = parse_shared_items(
-        si_d.downcast::<PyDict>()
+        si_d.cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("shared_items must be dict"))?,
     )?;
     let formula = extract_opt_str(d, "formula")?;
@@ -552,9 +542,9 @@ fn parse_shared_items(d: &Bound<'_, PyDict>) -> PyResult<SharedItems> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
-                let cd = vv.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err("shared_items.items[*] must be dict")
-                })?;
+                let cd = vv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("shared_items.items[*] must be dict"))?;
                 out.push(parse_cache_value(cd)?);
             }
             Some(out)
@@ -617,7 +607,7 @@ fn parse_pivot_field(d: &Bound<'_, PyDict>) -> PyResult<PivotField> {
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let pd = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err("items[*] must be dict"))?;
                 out.push(parse_pivot_item(pd)?);
             }
@@ -705,7 +695,7 @@ fn parse_axis_items(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<AxisItem>>
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
                 let ad = vv
-                    .downcast::<PyDict>()
+                    .cast::<PyDict>()
                     .map_err(|_| PyValueError::new_err(format!("{key}[*] must be dict")))?;
                 out.push(parse_axis_item(ad)?);
             }
@@ -799,10 +789,7 @@ fn extract_u32_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<u32>> {
     }
 }
 
-fn extract_parsed_value(
-    d: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<Option<pp::ParsedValue>> {
+fn extract_parsed_value(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<pp::ParsedValue>> {
     match d.get_item(key)? {
         Some(v) if !v.is_none() => {
             // Try bool first because bool extracts as int in Python.
@@ -841,7 +828,10 @@ fn extract_parsed_value(
 pub fn serialize_pivot_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<Vec<u8>> {
     let pc = parse_pivot_cache_dict(d)?;
     // The records `r:id` rel target is "rId1" from the cache's per-cache rels file (see Phase 2.5m).
-    Ok(wolfxl_pivot::emit::pivot_cache_definition_xml(&pc, Some("rId1")))
+    Ok(wolfxl_pivot::emit::pivot_cache_definition_xml(
+        &pc,
+        Some("rId1"),
+    ))
 }
 
 /// Sprint Ν Pod-γ — serialize a §10.6 records dict to OOXML bytes.
@@ -909,9 +899,9 @@ pub fn parse_slicer_cache_dict(d: &Bound<'_, PyDict>) -> PyResult<SlicerCache> {
             let list: Vec<Bound<'_, PyAny>> = v.extract()?;
             let mut out = Vec::with_capacity(list.len());
             for vv in &list {
-                let pd = vv.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err("slicer_cache.items[*] must be dict")
-                })?;
+                let pd = vv
+                    .cast::<PyDict>()
+                    .map_err(|_| PyValueError::new_err("slicer_cache.items[*] must be dict"))?;
                 out.push(parse_slicer_item(pd)?);
             }
             out
@@ -966,7 +956,7 @@ pub fn serialize_slicer_dict(slicers_list: &Bound<'_, PyAny>) -> PyResult<Vec<u8
     let mut slicers: Vec<Slicer> = Vec::with_capacity(list.len());
     for v in &list {
         let pd = v
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("slicer dict expected"))?;
         slicers.push(parse_slicer_dict(pd)?);
     }
@@ -979,6 +969,7 @@ pub fn serialize_slicer_dict(slicers_list: &Bound<'_, PyAny>) -> PyResult<Vec<u8
 
 /// One slicer cache queued for emit. Mirrors `QueuedPivotCacheAdd`.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QueuedSlicerCacheAdd {
     /// `xl/slicerCaches/slicerCache{N}.xml` body.
     pub cache_xml: Vec<u8>,
@@ -995,6 +986,7 @@ pub struct QueuedSlicerCacheAdd {
 
 /// One slicer presentation queued for a sheet.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct QueuedSlicerAdd {
     /// Owner sheet title.
     pub sheet: String,
@@ -1056,8 +1048,15 @@ pub fn splice_pivot_caches(
         ));
     }
 
-    let s = std::str::from_utf8(workbook_xml)
-        .map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+    let s0 =
+        std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+    let owned;
+    let s = if workbook_root_has_relationship_namespace(s0)? {
+        s0
+    } else {
+        owned = add_workbook_relationship_namespace(s0)?;
+        owned.as_str()
+    };
 
     // Look for an existing `<pivotCaches>` block.
     if let Some(open_pos) = s.find("<pivotCaches>") {
@@ -1102,6 +1101,37 @@ pub fn splice_pivot_caches(
     Ok(out.into_bytes())
 }
 
+fn add_workbook_relationship_namespace(s: &str) -> Result<String, String> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| "workbook.xml has no <workbook> root".to_string())?;
+    let rel_end = s[open..]
+        .find('>')
+        .ok_or_else(|| "workbook.xml has unclosed <workbook> root".to_string())?;
+    let insert_at = open + rel_end;
+    let mut out = String::with_capacity(
+        s.len()
+            + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
+                .len(),
+    );
+    out.push_str(&s[..insert_at]);
+    out.push_str(
+        " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+    );
+    out.push_str(&s[insert_at..]);
+    Ok(out)
+}
+
+fn workbook_root_has_relationship_namespace(s: &str) -> Result<bool, String> {
+    let open = s
+        .find("<workbook")
+        .ok_or_else(|| "workbook.xml has no <workbook> root".to_string())?;
+    let rel_end = s[open..]
+        .find('>')
+        .ok_or_else(|| "workbook.xml has unclosed <workbook> root".to_string())?;
+    Ok(s[open..open + rel_end].contains("xmlns:r="))
+}
+
 /// Splice a `<pivotTable>` rel reference into a sheet's XML. OOXML
 /// puts pivot-table associations on the sheet's rels file (not in the
 /// sheet XML body itself), and the sheet doesn't carry an inline
@@ -1111,6 +1141,7 @@ pub fn splice_pivot_caches(
 ///
 /// This is a no-op marker function preserved here for symmetry with
 /// the chart `splice_drawing_ref`. Returns the input unchanged.
+#[allow(dead_code)]
 pub fn splice_sheet_for_pivot_table(sheet_xml: &[u8]) -> Vec<u8> {
     sheet_xml.to_vec()
 }
@@ -1199,12 +1230,38 @@ mod tests {
         let out = splice_pivot_caches(xml, &entries).unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains(r#"<pivotCache cacheId="0" r:id="rId7"/>"#));
+        assert!(
+            s.contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "{s}"
+        );
         assert!(s.contains("<pivotCaches>"));
         assert!(s.contains("</pivotCaches>"));
         // Inserted right after </sheets>.
         let after_sheets = s.find("</sheets>").unwrap();
         let pivots_at = s.find("<pivotCaches>").unwrap();
         assert!(pivots_at > after_sheets);
+    }
+
+    #[test]
+    fn splice_pivot_caches_adds_root_rel_namespace_when_only_sheet_has_it() {
+        let xml = br#"<workbook xmlns="x"><sheets><sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+        let entries = vec![PivotCacheRef {
+            cache_id: 0,
+            rid: "rId2".into(),
+        }];
+
+        let out = splice_pivot_caches(xml, &entries).unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_end = s.find('>').unwrap();
+        assert!(
+            s[..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "workbook-level pivotCache r:id needs an r namespace on the workbook root"
+        );
+        assert!(s.contains(r#"<pivotCache cacheId="0" r:id="rId2"/>"#));
     }
 
     #[test]

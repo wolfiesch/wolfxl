@@ -96,18 +96,23 @@ impl CommentAuthorTable {
         id
     }
 
+    #[allow(dead_code)]
     pub fn name_of(&self, id: u32) -> Option<&str> {
-        self.inner.iter().find_map(|(k, v)| if *v == id { Some(k.as_str()) } else { None })
+        self.inner
+            .iter()
+            .find_map(|(k, v)| if *v == id { Some(k.as_str()) } else { None })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {
         self.inner.iter().map(|(k, v)| (k.as_str(), *v))
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -177,7 +182,6 @@ pub fn extract_comments(xml: &[u8]) -> (Vec<String>, BTreeMap<String, ExistingCo
                     authors.push(std::mem::take(&mut current_author));
                     in_author = false;
                 } else if name == b"authors" {
-                    in_authors = false;
                     break;
                 }
             }
@@ -310,8 +314,14 @@ fn parse_pt(s: &str) -> Option<f64> {
 }
 
 fn parse_anchor_cell_from_body(body: &str) -> Option<String> {
-    let row = extract_block_inner(body, "x:Row")?.trim().parse::<u32>().ok()?;
-    let col = extract_block_inner(body, "x:Column")?.trim().parse::<u32>().ok()?;
+    let row = extract_block_inner(body, "x:Row")?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
+    let col = extract_block_inner(body, "x:Column")?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
     Some(rowcol0_to_a1(row, col))
 }
 
@@ -336,6 +346,7 @@ pub struct ColWidthMap {
 }
 
 impl ColWidthMap {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -711,7 +722,11 @@ pub fn build_comments(
 
     let comments_rid = match comments_rid_existing.clone() {
         Some(r) => r,
-        None => rels.add(rt::COMMENTS, &comments_target_relative, TargetMode::Internal),
+        None => rels.add(
+            rt::COMMENTS,
+            &comments_target_relative,
+            TargetMode::Internal,
+        ),
     };
     let vml_rid = match vml_rid_existing.clone() {
         Some(r) => r,
@@ -770,7 +785,10 @@ fn iter_top_level_elements(xml: &str, name: &str) -> Vec<String> {
     while let Some(rel_start) = xml[cursor..].find(&open_prefix) {
         let start = cursor + rel_start;
         let next_byte = xml.as_bytes().get(start + open_prefix.len()).copied();
-        if !matches!(next_byte, Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'/') | Some(b'>')) {
+        if !matches!(
+            next_byte,
+            Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'/') | Some(b'>')
+        ) {
             cursor = start + open_prefix.len();
             continue;
         }
@@ -877,13 +895,20 @@ fn xml_unescape(s: &str) -> String {
 }
 
 fn find_self_closing_attr(xml: &str, name: &str, attr: &str) -> Option<String> {
-    let open_prefix = format!("<{}", name);
     let mut cursor = 0usize;
-    while let Some(rel_start) = xml[cursor..].find(&open_prefix) {
+    while let Some(rel_start) = xml[cursor..].find('<') {
         let start = cursor + rel_start;
+        if !tag_at_has_local_name(xml, start, name) {
+            cursor = start + 1;
+            continue;
+        }
         let after_open_rel = xml[start..].find('>')?;
         let after_open = start + after_open_rel + 1;
-        let attr_text = &xml[start + open_prefix.len()..after_open - 1];
+        let tag_end = xml[start + 1..after_open - 1]
+            .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+            .map(|rel| start + 1 + rel)
+            .unwrap_or(after_open - 1);
+        let attr_text = &xml[tag_end..after_open - 1];
         let mut attrs: Vec<(String, String)> = Vec::new();
         parse_attrs(attr_text.trim_end_matches('/').trim(), &mut attrs);
         for (k, v) in attrs {
@@ -894,6 +919,24 @@ fn find_self_closing_attr(xml: &str, name: &str, attr: &str) -> Option<String> {
         cursor = after_open;
     }
     None
+}
+
+fn tag_at_has_local_name(xml: &str, start: usize, expected: &str) -> bool {
+    if xml.as_bytes().get(start) != Some(&b'<') {
+        return false;
+    }
+    let rest = &xml[start + 1..];
+    if rest.starts_with('/') || rest.starts_with('!') || rest.starts_with('?') {
+        return false;
+    }
+    let tag_end = rest
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(rest.len());
+    let tag_name = &rest[..tag_end];
+    tag_name
+        .rsplit_once(':')
+        .map_or(tag_name, |(_, local)| local)
+        == expected
 }
 
 fn xml_escape_text(s: &str) -> String {
@@ -1166,11 +1209,14 @@ mod tests {
         );
         let bytes = build_vml(&merged, &[], &cols, None);
         let s = std::str::from_utf8(&bytes).unwrap();
-        // Column A 20 units → 145 px → 108.75 pt.
+        // Column A 20 units -> 149 px -> 111.75 pt.
         // Native writer would emit (1 * 48 + 59.25) = 107.25 pt regardless
         // of width. The patcher's width-aware path should reflect col A's
-        // actual size: ORIGIN_LEFT_PT + 108.75 = 168 pt.
-        assert!(s.contains("margin-left:168pt"), "patcher uses actual width: {s}");
+        // actual size: ORIGIN_LEFT_PT + 111.75 = 171.75 pt.
+        assert!(
+            s.contains("margin-left:171.75pt"),
+            "patcher uses actual width: {s}"
+        );
     }
 
     #[test]
@@ -1250,8 +1296,16 @@ mod tests {
 <v:shape id="_x0000_s1025" type="#_x0000_t202" style="margin-left:59.25pt; margin-top:1.5pt; width:96pt; height:55.5pt"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>
 </xml>"##;
         let mut rels = RelsGraph::new();
-        rels.add(rt::COMMENTS, "../comments/comments1.xml", TargetMode::Internal);
-        rels.add(rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal);
+        rels.add(
+            rt::COMMENTS,
+            "../comments/comments1.xml",
+            TargetMode::Internal,
+        );
+        rels.add(
+            rt::VML_DRAWING,
+            "../drawings/vmlDrawing1.vml",
+            TargetMode::Internal,
+        );
         let mut authors = CommentAuthorTable::new();
         let mut ops = BTreeMap::new();
         ops.insert("A1".to_string(), CommentOp::Delete);
@@ -1286,8 +1340,16 @@ mod tests {
 <v:shape id="_x0000_s1025" type="#_x0000_t202" style="margin-left:59.25pt; margin-top:1.5pt; width:96pt; height:55.5pt"><x:ClientData ObjectType="Note"><x:Row>0</x:Row><x:Column>0</x:Column></x:ClientData></v:shape>
 </xml>"##;
         let mut rels = RelsGraph::new();
-        rels.add(rt::COMMENTS, "../comments/comments1.xml", TargetMode::Internal);
-        rels.add(rt::VML_DRAWING, "../drawings/vmlDrawing1.vml", TargetMode::Internal);
+        rels.add(
+            rt::COMMENTS,
+            "../comments/comments1.xml",
+            TargetMode::Internal,
+        );
+        rels.add(
+            rt::VML_DRAWING,
+            "../drawings/vmlDrawing1.vml",
+            TargetMode::Internal,
+        );
         let mut authors = CommentAuthorTable::new();
         let mut ops = BTreeMap::new();
         ops.insert("A1".to_string(), CommentOp::Delete);

@@ -84,7 +84,11 @@ pub struct Token {
 impl Token {
     /// Construct an arbitrary token.
     pub fn new(value: impl Into<String>, kind: TokenKind, subkind: TokenSubKind) -> Self {
-        Self { value: value.into(), kind, subkind }
+        Self {
+            value: value.into(),
+            kind,
+            subkind,
+        }
     }
 
     /// Build an `Operand` with the right subkind based on the value's
@@ -102,7 +106,11 @@ impl Token {
         } else {
             TokenSubKind::Range
         };
-        Self { value: v, kind: TokenKind::Operand, subkind }
+        Self {
+            value: v,
+            kind: TokenKind::Operand,
+            subkind,
+        }
     }
 
     fn make_subexp(value: impl Into<String>) -> Self {
@@ -122,13 +130,24 @@ impl Token {
         } else {
             TokenSubKind::Open
         };
-        Self { value: v, kind, subkind }
+        Self {
+            value: v,
+            kind,
+            subkind,
+        }
     }
 
     fn closer_for(opener: &Token) -> Token {
-        debug_assert!(matches!(opener.kind, TokenKind::Func | TokenKind::Array | TokenKind::Paren));
+        debug_assert!(matches!(
+            opener.kind,
+            TokenKind::Func | TokenKind::Array | TokenKind::Paren
+        ));
         debug_assert_eq!(opener.subkind, TokenSubKind::Open);
-        let value = if opener.kind == TokenKind::Array { "}" } else { ")" };
+        let value = if opener.kind == TokenKind::Array {
+            "}"
+        } else {
+            ")"
+        };
         Self {
             value: value.to_string(),
             kind: opener.kind,
@@ -138,7 +157,11 @@ impl Token {
 
     fn make_separator(value: char) -> Self {
         debug_assert!(value == ',' || value == ';');
-        let subkind = if value == ',' { TokenSubKind::Arg } else { TokenSubKind::Row };
+        let subkind = if value == ',' {
+            TokenSubKind::Arg
+        } else {
+            TokenSubKind::Row
+        };
         Self {
             value: value.to_string(),
             kind: TokenKind::Sep,
@@ -198,7 +221,9 @@ impl fmt::Display for TokenizeError {
             TokenizeError::MismatchedSubexp { offset } => {
                 write!(f, "mismatched ( / {{ pair at offset {}", offset)
             }
-            TokenizeError::UnclosedSubexp => f.write_str("unclosed subexpression at end of formula"),
+            TokenizeError::UnclosedSubexp => {
+                f.write_str("unclosed subexpression at end of formula")
+            }
             TokenizeError::UnexpectedChar { offset } => {
                 write!(f, "unexpected character at offset {}", offset)
             }
@@ -280,7 +305,11 @@ impl<'a> Tokenizer<'a> {
             return Ok(self.items);
         }
         if self.bytes[0] != b'=' {
-            self.items.push(Token::new(self.formula.to_string(), TokenKind::Literal, TokenSubKind::None));
+            self.items.push(Token::new(
+                self.formula.to_string(),
+                TokenKind::Literal,
+                TokenSubKind::None,
+            ));
             return Ok(self.items);
         }
         self.offset = 1;
@@ -408,7 +437,9 @@ impl<'a> Tokenizer<'a> {
                 return Ok(code.len());
             }
         }
-        Err(TokenizeError::InvalidErrorCode { offset: self.offset })
+        Err(TokenizeError::InvalidErrorCode {
+            offset: self.offset,
+        })
     }
 
     fn parse_whitespace(&mut self) -> usize {
@@ -443,7 +474,10 @@ impl<'a> Tokenizer<'a> {
             }
         }
         let c = self.bytes[self.offset] as char;
-        debug_assert!(matches!(c, '%' | '*' | '/' | '^' | '&' | '=' | '>' | '<' | '+' | '-'));
+        debug_assert!(matches!(
+            c,
+            '%' | '*' | '/' | '^' | '&' | '=' | '>' | '<' | '+' | '-'
+        ));
         let token = if c == '%' {
             Token::new("%", TokenKind::OpPost, TokenSubKind::None)
         } else if matches!(c, '*' | '/' | '^' | '&' | '=' | '>' | '<') {
@@ -451,7 +485,11 @@ impl<'a> Tokenizer<'a> {
         } else if self.items.is_empty() {
             Token::new(c.to_string(), TokenKind::OpPre, TokenSubKind::None)
         } else {
-            let prev = self.items.iter().rev().find(|t| t.kind != TokenKind::Wspace);
+            let prev = self
+                .items
+                .iter()
+                .rev()
+                .find(|t| t.kind != TokenKind::Wspace);
             let is_infix = match prev {
                 Some(t) => {
                     t.subkind == TokenSubKind::Close
@@ -495,11 +533,15 @@ impl<'a> Tokenizer<'a> {
         let opener_idx = self
             .token_stack
             .pop()
-            .ok_or(TokenizeError::MismatchedSubexp { offset: self.offset })?;
+            .ok_or(TokenizeError::MismatchedSubexp {
+                offset: self.offset,
+            })?;
         let opener = self.items[opener_idx].clone();
         let closer = Token::closer_for(&opener);
         if (c == b')' && closer.value != ")") || (c == b'}' && closer.value != "}") {
-            return Err(TokenizeError::MismatchedSubexp { offset: self.offset });
+            return Err(TokenizeError::MismatchedSubexp {
+                offset: self.offset,
+            });
         }
         self.items.push(closer);
         Ok(1)
@@ -511,9 +553,10 @@ impl<'a> Tokenizer<'a> {
         let token = if c == b';' {
             Token::make_separator(';')
         } else {
-            let inside_paren = self.token_stack.last().map_or(true, |&idx| {
-                self.items[idx].kind == TokenKind::Paren
-            });
+            let inside_paren = self
+                .token_stack
+                .last()
+                .map_or(true, |&idx| self.items[idx].kind == TokenKind::Paren);
             if inside_paren {
                 Token::new(",", TokenKind::OpIn, TokenSubKind::None)
             } else {
@@ -569,7 +612,9 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        Err(TokenizeError::UnexpectedChar { offset: self.offset })
+        Err(TokenizeError::UnexpectedChar {
+            offset: self.offset,
+        })
     }
 
     fn save_token(&mut self) {
@@ -657,7 +702,10 @@ mod tokenizer_tests {
     fn string_literal_preserved() {
         let f = "=IF(A1=\"B5\",X1,Y1)";
         let toks = t(f);
-        let text_tok = toks.iter().find(|t| t.subkind == TokenSubKind::Text).unwrap();
+        let text_tok = toks
+            .iter()
+            .find(|t| t.subkind == TokenSubKind::Text)
+            .unwrap();
         assert_eq!(text_tok.value, "\"B5\"");
         assert_eq!(render(&toks), f);
     }
@@ -748,7 +796,9 @@ mod tokenizer_tests {
     #[test]
     fn comparison_two_char() {
         let toks = t("=A1>=B1");
-        assert!(toks.iter().any(|t| t.value == ">=" && t.kind == TokenKind::OpIn));
+        assert!(toks
+            .iter()
+            .any(|t| t.value == ">=" && t.kind == TokenKind::OpIn));
     }
 
     #[test]

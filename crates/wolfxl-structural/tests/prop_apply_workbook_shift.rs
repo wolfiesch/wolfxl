@@ -37,9 +37,7 @@ use proptest::prelude::*;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
-use wolfxl_structural::{
-    apply_workbook_shift, Axis, AxisShiftOp, SheetXmlInputs,
-};
+use wolfxl_structural::{apply_workbook_shift, Axis, AxisShiftOp, SheetXmlInputs};
 
 /// Small but representative sheet XML.
 ///
@@ -96,10 +94,9 @@ fn build_inputs<'a>() -> SheetXmlInputs<'a> {
     inputs
         .sheets
         .insert("Sheet1".to_string(), FIXTURE_SHEET_XML);
-    inputs.sheet_paths.insert(
-        "Sheet1".to_string(),
-        "xl/worksheets/sheet1.xml".to_string(),
-    );
+    inputs
+        .sheet_paths
+        .insert("Sheet1".to_string(), "xl/worksheets/sheet1.xml".to_string());
     inputs.workbook_xml = Some(FIXTURE_WORKBOOK_XML);
     let mut tables: BTreeMap<String, Vec<(String, &'a [u8])>> = BTreeMap::new();
     tables.insert(
@@ -169,9 +166,7 @@ fn drive_one(axis: Axis, idx: u32, n: i32) {
         let s = std::str::from_utf8(bytes)
             .unwrap_or_else(|e| panic!("non-utf8 output for {path}: {e}"));
         xml_is_well_formed(s.as_bytes()).unwrap_or_else(|e| {
-            panic!(
-                "malformed XML on {path} after axis={axis:?} idx={idx} n={n}: {e}"
-            )
+            panic!("malformed XML on {path} after axis={axis:?} idx={idx} n={n}: {e}")
         });
     }
 }

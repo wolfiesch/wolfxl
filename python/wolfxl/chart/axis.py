@@ -6,8 +6,6 @@ Mirrors :mod:`openpyxl.chart.axis`. Each axis subclass shares the
 Chart-side axis IDs default to the same constants openpyxl picks
 (``catAx`` 10, ``valAx`` 100, ``dateAx`` 500, ``serAx`` 1000) so the
 emitted XML matches openpyxl's by default.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -31,9 +29,8 @@ _VALID_TIME_UNIT = (None, "days", "months", "years")
 class ChartLines:
     """`<c:majorGridlines>` / `<c:minorGridlines>` — optional spPr-only block.
 
-    Per RFC-046 §10.7.1: emits ``{graphical_properties}`` snake-case.
-    Empty ``{}`` means "default gridlines"; ``None`` at the parent
-    means "no gridlines".
+    Emits ``{graphical_properties}`` snake-case. Empty ``{}`` means
+    "default gridlines"; ``None`` at the parent means "no gridlines".
     """
 
     __slots__ = ("spPr",)
@@ -56,7 +53,7 @@ class ChartLines:
         return d
 
 
-# Public alias matching RFC-046 §10.7.1 naming.
+# Public alias used by external callers.
 Gridlines = ChartLines
 
 
@@ -185,8 +182,8 @@ class _BaseAxis:
         minorGridlines: ChartLines | None = None,
         title: Any | None = None,
         numFmt: Any | None = None,
-        majorTickMark: str | None = None,
-        minorTickMark: str | None = None,
+        majorTickMark: str | None = "none",
+        minorTickMark: str | None = "none",
         tickLblPos: str | None = None,
         spPr: GraphicalProperties | None = None,
         txPr: RichText | None = None,
@@ -262,7 +259,7 @@ class _BaseAxis:
         self.txPr = v
 
     def _base_to_dict(self) -> dict[str, Any]:
-        """Emit the snake_case shared keys per RFC-046 §10.7."""
+        """Emit the snake_case shared keys."""
         scaling_d = self.scaling.to_dict() if self.scaling is not None else None
         if scaling_d is not None:
             # Map nested keys to snake_case per §10.7

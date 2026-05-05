@@ -19,6 +19,7 @@
 //! Relationship-type URIs and the `Relationship` model live in the shared
 //! `wolfxl-rels` crate so the writer and the patcher stay in lock-step.
 
+use super::sheet_rel_ids::SheetRelIdPlan;
 use crate::model::workbook::Workbook;
 use wolfxl_rels::{rt, RelId, RelsGraph, TargetMode};
 
@@ -75,13 +76,24 @@ pub fn emit_workbook(wb: &Workbook) -> Vec<u8> {
         TargetMode::Internal,
     );
     next_rid += 1;
-    // Sprint Θ Pod-C3: calcChain rel, only when the workbook has at
-    // least one formula (matches the gate in `emit_xlsx`).
+    // calcChain rel, only when the workbook has at least one formula
+    // (matches the gate in `emit_xlsx`).
     if crate::emit::calc_chain_xml::has_any_formula(wb) {
         g.add_with_id(
             RelId(format!("rId{next_rid}")),
             crate::emit::calc_chain_xml::REL_CALC_CHAIN,
             "calcChain.xml",
+            TargetMode::Internal,
+        );
+        next_rid += 1;
+    }
+    // RFC-068 / G08: workbook-scoped personList rel, only when the workbook
+    // has at least one threaded-comment person.
+    if !wb.persons.is_empty() {
+        g.add_with_id(
+            RelId(format!("rId{next_rid}")),
+            rt::PERSON_LIST,
+            "persons/personList.xml",
             TargetMode::Internal,
         );
     }
@@ -110,19 +122,19 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
         return Vec::new();
     };
 
+    let rel_ids = SheetRelIdPlan::new(sheet);
     let has_comments = !sheet.comments.is_empty();
     let external_hyperlinks: Vec<(&String, &crate::model::worksheet::Hyperlink)> = sheet
         .hyperlinks
         .iter()
         .filter(|(_, h)| !h.is_internal)
         .collect();
-    let has_tables = !sheet.tables.is_empty();
     let has_images = !sheet.images.is_empty();
     let has_charts = !sheet.charts.is_empty();
     // A sheet needs a drawing part if it has at least one image OR chart.
     let has_drawing = has_images || has_charts;
 
-    if !has_comments && external_hyperlinks.is_empty() && !has_tables && !has_drawing {
+    if !rel_ids.has_relationships() {
         return Vec::new();
     }
 
@@ -131,23 +143,18 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     let tables_before: usize = wb.sheets[..sheet_idx].iter().map(|s| s.tables.len()).sum();
 
     let mut g = RelsGraph::new();
-    let mut rid_counter: u32 = 0;
-    let mut next_rid = || -> RelId {
-        rid_counter += 1;
-        RelId(format!("rId{rid_counter}"))
-    };
 
     // Comments + VML.
     if has_comments {
         let n = sheet_idx + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.comments().expect("comments relationship id")),
             rt::COMMENTS,
             &format!("../comments/comments{n}.xml"),
             TargetMode::Internal,
         );
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.vml_drawing().expect("VML relationship id")),
             rt::VML_DRAWING,
             &format!("../drawings/vmlDrawing{n}.vml"),
             TargetMode::Internal,
@@ -158,7 +165,7 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     for (local_idx, _table) in sheet.tables.iter().enumerate() {
         let global_id = tables_before + local_idx + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.table(local_idx as u32)),
             rt::TABLE,
             &format!("../tables/table{global_id}.xml"),
             TargetMode::Internal,
@@ -166,20 +173,15 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     }
 
     // External hyperlinks (URLs, not internal `#Sheet!A1` references).
-    for (_cell_ref, hyperlink) in &external_hyperlinks {
+    for (external_idx, (_cell_ref, hyperlink)) in external_hyperlinks.iter().enumerate() {
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.external_hyperlink(external_idx as u32)),
             rt::HYPERLINK,
             &hyperlink.target,
             TargetMode::External,
         );
     }
 
-    // Sprint Λ Pod-β + Sprint Μ Pod-α — drawing rel for images and/or
-    // charts. The drawing part is allocated globally per sheet (one
-    // drawing per sheet that has at least one image or chart). The
-    // rId is allocated last so existing numbering for
-    // comments/tables/hyperlinks is preserved.
     if has_drawing {
         // drawingN.xml is numbered globally — count how many earlier
         // sheets had a drawing (image or chart) to compute this
@@ -190,9 +192,25 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
             .count();
         let drawing_n = drawings_before + 1;
         g.add_with_id(
-            next_rid(),
+            RelId(rel_ids.drawing().expect("drawing relationship id")),
             rt::DRAWING,
             &format!("../drawings/drawing{drawing_n}.xml"),
+            TargetMode::Internal,
+        );
+    }
+
+    // RFC-068 / G08: threadedCommentsN rel — sheet-numbered (matches
+    // commentsN.xml). Only emitted when this sheet has threaded comments.
+    if !sheet.threaded_comments.is_empty() {
+        let n = sheet_idx + 1;
+        g.add_with_id(
+            RelId(
+                rel_ids
+                    .threaded_comments()
+                    .expect("threadedComments relationship id"),
+            ),
+            rt::THREADED_COMMENTS,
+            &format!("../threadedComments/threadedComments{n}.xml"),
             TargetMode::Internal,
         );
     }
@@ -200,12 +218,12 @@ pub fn emit_sheet(wb: &Workbook, sheet_idx: usize) -> Vec<u8> {
     g.serialize()
 }
 
-/// Sprint Λ Pod-β — emit `xl/drawings/_rels/drawingN.xml.rels` for the
-/// drawing part on `sheet_idx`. Each image becomes one `image`
-/// relationship pointing at `../media/imageM.<ext>` where M is the
-/// global image index assigned by the caller (`image_indices` is
-/// parallel to `sheet.images`). Returns the allocated `rId`s in image
-/// order so the drawings emitter can reference them.
+/// Emit `xl/drawings/_rels/drawingN.xml.rels` for image-only drawings.
+///
+/// Each image becomes one `image` relationship pointing at
+/// `../media/imageM.<ext>` where M is the global image index assigned by the
+/// caller (`image_indices` is parallel to `sheet.images`). Returns the
+/// allocated `rId`s in image order so the drawings emitter can reference them.
 pub fn emit_drawing_rels(
     sheet: &crate::model::worksheet::Worksheet,
     image_indices: &[u32],
@@ -224,12 +242,12 @@ pub fn emit_drawing_rels(
     (g.serialize(), rids)
 }
 
-/// Sprint Μ Pod-α (RFC-046) — emit `xl/drawings/_rels/drawingN.xml.rels`
-/// for a drawing that may contain both images and charts. Returns the
-/// rels bytes plus two parallel `Vec<String>` of rIds — one for images
-/// (in `sheet.images` order) and one for charts (in `sheet.charts`
-/// order). Image rels come first so existing image-only sheets keep
-/// their rId allocation stable.
+/// Emit `xl/drawings/_rels/drawingN.xml.rels` for mixed image/chart drawings.
+///
+/// Returns the rels bytes plus two parallel `Vec<String>` of rIds: one for
+/// images (in `sheet.images` order) and one for charts (in `sheet.charts`
+/// order). Image rels come first so existing image-only sheets keep their
+/// rId allocation stable.
 pub fn emit_drawing_rels_with_charts(
     sheet: &crate::model::worksheet::Worksheet,
     image_indices: &[u32],

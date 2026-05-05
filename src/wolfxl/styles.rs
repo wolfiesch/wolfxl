@@ -57,12 +57,20 @@ pub struct BorderSideSpec {
 }
 
 /// Border specification for creating a new `<border>` element.
+///
+/// `diagonal` carries the single `<diagonal>` child shared by both
+/// directions; `diagonal_up` and `diagonal_down` are the boolean
+/// `diagonalUp` / `diagonalDown` attrs on the parent `<border>`,
+/// gating which direction(s) Excel renders.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct BorderSpec {
     pub left: BorderSideSpec,
     pub right: BorderSideSpec,
     pub top: BorderSideSpec,
     pub bottom: BorderSideSpec,
+    pub diagonal: BorderSideSpec,
+    pub diagonal_up: bool,
+    pub diagonal_down: bool,
 }
 
 /// Alignment specification.
@@ -265,8 +273,17 @@ pub fn border_to_xml(spec: &BorderSpec) -> String {
     let right = side_xml("right", &spec.right);
     let top = side_xml("top", &spec.top);
     let bottom = side_xml("bottom", &spec.bottom);
+    let diagonal = side_xml("diagonal", &spec.diagonal);
 
-    format!("<border>{left}{right}{top}{bottom}<diagonal/></border>")
+    let mut border_attrs = String::new();
+    if spec.diagonal_up {
+        border_attrs.push_str(" diagonalUp=\"1\"");
+    }
+    if spec.diagonal_down {
+        border_attrs.push_str(" diagonalDown=\"1\"");
+    }
+
+    format!("<border{border_attrs}>{left}{right}{top}{bottom}{diagonal}</border>")
 }
 
 /// Generate an `<xf>` element from component IDs.

@@ -4,8 +4,6 @@ Wolfxl's pivot-cache classes live in :mod:`wolfxl.pivot._cache`; the
 package init re-exports them.  This module surfaces the same surface
 under the openpyxl-shaped explicit-module path so
 ``from openpyxl.pivot.cache import CacheDefinition`` ports mechanically.
-
-Pod 2 (RFC-060).
 """
 
 from __future__ import annotations

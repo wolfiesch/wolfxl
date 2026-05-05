@@ -380,7 +380,7 @@ pub struct Format {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotConditionalFormat {
     pub priority: i32,
-    pub scope: String, // "selection" | "data" | "field"
+    pub scope: String,   // "selection" | "data" | "field"
     pub cf_type: String, // "all" | "row" | "column" | "none"
     pub pivot_areas: Vec<PivotArea>,
     /// Reference to a workbook-scoped dxf entry id (-1 = unallocated).

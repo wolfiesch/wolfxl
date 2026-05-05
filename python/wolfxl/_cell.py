@@ -3,12 +3,34 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from wolfxl._styles import Alignment, Border, Color, Font, PatternFill, Side
+from wolfxl._cell_annotations import (
+    get_comment,
+    get_hyperlink,
+    set_comment,
+    set_hyperlink,
+)
+from wolfxl._cell_payloads import (
+    alignment_to_format_dict as alignment_to_format_dict,
+    border_payload_to_border as _border_payload_to_border,
+    border_to_rust_dict as border_to_rust_dict,
+    fill_to_format_dict as fill_to_format_dict,
+    font_to_format_dict as font_to_format_dict,
+    format_to_alignment as _format_to_alignment,
+    format_to_fill as _format_to_fill,
+    format_to_font as _format_to_font,
+    format_to_protection as _format_to_protection,
+    payload_to_python as _payload_to_python,
+    protection_to_format_dict as protection_to_format_dict,
+    python_value_to_payload as python_value_to_payload,
+)
+from wolfxl._styles import Alignment, Border, Font, PatternFill
+from wolfxl.styles.fills import GradientFill
+from wolfxl.styles.protection import Protection
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl._worksheet_rich_text import runs_payload_to_cellrichtext
 from wolfxl.utils.exceptions import IllegalCharacterError
 from wolfxl.utils.numbers import is_date_format
 
@@ -41,10 +63,17 @@ class Cell:
         "_border",
         "_alignment",
         "_number_format",
+        "_protection",
+        # Workbook-level named-style binding ("Highlight", "Heading 1", ...).
+        # ``_UNSET`` means the cell has never been touched; ``None`` means
+        # the cell was explicitly cleared. The flush layer threads the name
+        # through `_named_style` in the format dict so the native writer can
+        # look up the cellStyleXfs slot.
+        "_named_style",
         "_value_dirty",
         "_format_dirty",
-        # RFC-057 (Sprint Ο Pod 1C) — array / data-table formula
-        # metadata.  Populated when ``cell.value`` is assigned an
+        # Array / data-table formula metadata. Populated when ``cell.value`` is
+        # assigned an
         # :class:`ArrayFormula` / :class:`DataTableFormula` instance,
         # or when an existing cell parses back as one of those types.
         # ``_formula_type`` is one of: ``None`` (plain), ``"array"``,
@@ -66,14 +95,16 @@ class Cell:
         # Sentinel — None is a valid value so we use a special marker.
         self._value: Any = _UNSET
         self._font: Font | None | _Sentinel = _UNSET
-        self._fill: PatternFill | None | _Sentinel = _UNSET
+        self._fill: PatternFill | GradientFill | None | _Sentinel = _UNSET
         self._border: Border | None | _Sentinel = _UNSET
         self._alignment: Alignment | None | _Sentinel = _UNSET
         self._number_format: str | None | _Sentinel = _UNSET
+        self._protection: Protection | None | _Sentinel = _UNSET
+        self._named_style: str | None | _Sentinel = _UNSET
         self._value_dirty = False
         self._format_dirty = False
-        # RFC-057 metadata — None until the cell is identified as
-        # array / data-table either via setter or on read-back.
+        # None until the cell is identified as array / data-table either via
+        # setter or on read-back.
         self._formula_type: str | None = None
         self._array_ref: str | None = None
         self._formula_text: str | None = None
@@ -85,14 +116,22 @@ class Cell:
 
     @property
     def coordinate(self) -> str:
+        """Return this cell's A1-style coordinate."""
         return rowcol_to_a1(self._row, self._col)
 
     @property
     def row(self) -> int:
+        """Return this cell's 1-based row index."""
         return self._row
 
     @property
     def column(self) -> int:
+        """Return this cell's 1-based column index."""
+        return self._col
+
+    @property
+    def col_idx(self) -> int:
+        """Return this cell's 1-based column index."""
         return self._col
 
     @property
@@ -105,6 +144,38 @@ class Cell:
         """The containing Worksheet — openpyxl alias."""
         return self._ws
 
+    @property
+    def base_date(self) -> Any:
+        """Workbook epoch used for Excel serial date conversion."""
+        return self._ws._workbook.excel_base_date  # noqa: SLF001
+
+    @property
+    def encoding(self) -> str:
+        """Cell text encoding marker for openpyxl compatibility."""
+        return "utf-8"
+
+    @property
+    def internal_value(self) -> Any:
+        """Internal cell value; WolfXL stores the openpyxl-facing value."""
+        return self.value
+
+    @property
+    def pivotButton(self) -> bool:  # noqa: N802 - openpyxl public alias
+        """Whether the cell displays a pivot-table field button."""
+        return False
+
+    @property
+    def quotePrefix(self) -> bool:  # noqa: N802 - openpyxl public alias
+        """Whether the cell has Excel's quote-prefix flag."""
+        return False
+
+    @property
+    def style_id(self) -> int:
+        """Return the workbook style identifier for this cell."""
+        if self._format_dirty:
+            return 1
+        return self._read_style_id()
+
     def offset(self, row: int = 0, column: int = 0) -> Cell:
         """Return the cell ``row`` rows down and ``column`` columns right.
 
@@ -113,6 +184,24 @@ class Cell:
         1-based address space.
         """
         return self._ws._get_or_create_cell(self._row + row, self._col + column)  # noqa: SLF001
+
+    def check_string(self, value: Any) -> str | None:
+        """Validate a worksheet string using openpyxl's public helper rules."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value, self.encoding)
+        value = str(value)[:32767]
+        if ILLEGAL_CHARACTERS_RE.search(value):
+            raise IllegalCharacterError(f"{value} cannot be used in worksheets.")
+        return value
+
+    def check_error(self, value: Any) -> str:
+        """Convert an error-like value to openpyxl's string representation."""
+        try:
+            return str(value)
+        except UnicodeDecodeError:
+            return "#N/A"
 
     @property
     def data_type(self) -> str:
@@ -156,6 +245,7 @@ class Cell:
         border = self._border if self._border is not _UNSET else None
         align = self._alignment if self._alignment is not _UNSET else None
         nfmt = self._number_format if self._number_format is not _UNSET else None
+        prot = self._protection if self._protection is not _UNSET else None
         if font and font != Font():
             return True
         if fill and fill != PatternFill():
@@ -166,6 +256,8 @@ class Cell:
             return True
         if nfmt and nfmt != "General":
             return True
+        if prot and prot != Protection():
+            return True
         return False
 
     @property
@@ -174,31 +266,54 @@ class Cell:
         value = self.value
         if hasattr(value, "year") and hasattr(value, "month"):
             return True
-        # Sprint Κ Pod-β: xlsb / xls workbooks don't expose number_format
-        # because the binary backends don't carry per-cell style records.
-        # Fall back to the value-type check above and return False rather
-        # than raise out of an introspection accessor.
+        # Binary formats may not expose style metadata. Fall back to the
+        # value-type check above rather than raise from an introspection
+        # accessor.
         wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
         if wb_format != "xlsx":
             return False
         return is_date_format(self.number_format)
 
     @property
-    def style(self) -> None:
-        """Named style name. Not yet supported; always returns None.
+    def style(self) -> str | None:
+        """Return the workbook-level named style bound to this cell.
 
-        openpyxl uses this to look up ``NamedStyle`` objects in
-        ``wb.named_styles``. wolfxl hasn't implemented named styles yet
-        (tracked for T2). Setting it raises ``NotImplementedError``.
+        Pending in-memory writes win over the on-disk binding so a cell
+        whose style has just been assigned reads back the same name even
+        before the workbook is saved. ``None`` is returned for cells using
+        the implicit Normal style.
         """
-        return None
+        if self._named_style is not _UNSET:
+            return self._named_style  # type: ignore[return-value]
+        return self._read_named_style()
 
     @style.setter
-    def style(self, value: Any) -> None:  # noqa: ARG002
-        raise NotImplementedError(
-            "Named styles are not yet supported by wolfxl. "
-            "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility for tracking."
-        )
+    def style(self, value: str | None) -> None:
+        """Bind this cell to a workbook-level named cell style.
+
+        Args:
+            value: Name of a previously-registered named style, or ``None``
+                to clear an existing binding.
+        """
+        if value is None:
+            self._named_style = None
+            self._format_dirty = True
+            self._ws._dirty.add((self._row, self._col))  # noqa: SLF001
+            return
+        if not isinstance(value, str):
+            raise TypeError(
+                f"cell.style must be a string or None, got {type(value).__name__}"
+            )
+        wb = self._ws._workbook  # noqa: SLF001
+        if not wb._has_named_style(value):  # noqa: SLF001
+            raise ValueError(
+                f"Named style {value!r} is not registered on the workbook. "
+                "Call workbook.add_named_style(...) first or use the explicit "
+                "font/fill/border accessors."
+            )
+        self._named_style = value
+        self._format_dirty = True
+        self._ws._dirty.add((self._row, self._col))  # noqa: SLF001
 
     # ------------------------------------------------------------------
     # T1 PR1: hyperlink / comment read access (write-mode setters land in PR4)
@@ -212,87 +327,121 @@ class Cell:
 
     @property
     def hyperlink(self) -> Any:
-        # Pre-save visibility: a queued hyperlink shows up immediately
-        # without waiting for ``save()`` to flush to the writer.
-        ws = self._ws
-        coord = self.coordinate
-        pending = ws._pending_hyperlinks.get(coord, _UNSET)  # noqa: SLF001
-        if pending is None:
-            return None  # explicit-delete sentinel
-        if pending is not _UNSET:
-            return pending
-        return ws._get_hyperlinks_map().get(coord)  # noqa: SLF001
+        """Return the cell hyperlink, including pending unsaved edits."""
+        return get_hyperlink(self, _UNSET)
 
     @hyperlink.setter
     def hyperlink(self, value: Any) -> None:
-        from wolfxl.worksheet.hyperlink import Hyperlink
+        """Set or clear the cell hyperlink.
 
-        ws = self._ws
-        wb = ws._workbook  # noqa: SLF001
-        # RFC-022: cell.hyperlink rounds-trips in BOTH write and modify
-        # mode. Both backends consume the same _pending_hyperlinks dict;
-        # the workbook flush dispatches to writer.add_hyperlink (write)
-        # or patcher.queue_hyperlink (modify). None is the explicit-delete
-        # sentinel per INDEX decision #5 — never use pop().
-        if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError("cell.hyperlink requires write or modify mode")
-        coord = self.coordinate
-        if value is None:
-            ws._pending_hyperlinks[coord] = None  # noqa: SLF001
-            return
-        if isinstance(value, str):
-            value = Hyperlink(target=value)
-        if not isinstance(value, Hyperlink):
-            raise TypeError(
-                f"hyperlink must be a Hyperlink or str, got {type(value).__name__}"
-            )
-        ws._pending_hyperlinks[coord] = value  # noqa: SLF001
-        # openpyxl parity: if the cell has no value yet, surface the
-        # target/location as the visible cell value so a freshly-set
-        # hyperlink is also visibly clickable text.
-        if self.value is None:
-            display_value = value.display or value.target or value.location
-            if display_value is not None:
-                self.value = display_value
+        Args:
+            value: ``Hyperlink`` instance, URL string, or ``None`` to delete
+                the hyperlink on the next save.
+        """
+        set_hyperlink(self, value)
 
     @property
     def comment(self) -> Any:
+        """Return the cell comment, including pending unsaved edits."""
+        return get_comment(self, _UNSET)
+
+    @comment.setter
+    def comment(self, value: Any) -> None:
+        """Set or clear the cell comment.
+
+        Args:
+            value: ``Comment`` instance, or ``None`` to delete the comment on
+                the next save.
+        """
+        if value is not None:
+            ws = self._ws
+            pending_t = ws._pending_threaded_comments.get(self.coordinate)  # noqa: SLF001
+            if pending_t is not None:
+                raise ValueError(
+                    f"cell {self.coordinate} already has a threaded comment; "
+                    "remove it before adding a legacy comment"
+                )
+        set_comment(self, value)
+
+    @property
+    def threaded_comment(self) -> Any:
+        """Return the cell's top-level threaded comment, or ``None`` (G08).
+
+        Pending unsaved edits take precedence over reader state, matching
+        the legacy ``comment`` property's contract. When no pending edit
+        exists, the workbook's reader-side cache is consulted; that cache
+        is populated lazily on first access from
+        ``xl/threadedComments/threadedCommentsN.xml``.
+        """
         ws = self._ws
-        coord = self.coordinate
-        pending = ws._pending_comments.get(coord, _UNSET)  # noqa: SLF001
+        pending = ws._pending_threaded_comments.get(self.coordinate, _UNSET)  # noqa: SLF001
         if pending is None:
             return None
         if pending is not _UNSET:
             return pending
-        return ws._get_comments_map().get(coord)  # noqa: SLF001
+        from wolfxl._worksheet_features import get_threaded_comments_map
 
-    @comment.setter
-    def comment(self, value: Any) -> None:
-        from wolfxl.comments import Comment
+        return get_threaded_comments_map(ws).get(self.coordinate)
+
+    @threaded_comment.setter
+    def threaded_comment(self, value: Any) -> None:
+        """Attach or clear the cell's top-level threaded comment.
+
+        Setting to ``None`` deletes the threaded comment (and replies) on
+        the next save. Assigning a reply (one whose ``parent`` is non-None)
+        raises — replies belong on the top-level's ``replies`` list.
+        Assigning to a cell that already carries a legacy ``Comment``
+        raises with a precise message; remove the legacy comment first.
+        """
+        from wolfxl.comments import ThreadedComment
 
         ws = self._ws
         wb = ws._workbook  # noqa: SLF001
-        # RFC-023: cell.comment round-trips in both write and modify
-        # mode. Both backends consume the same _pending_comments dict;
-        # the workbook flush dispatches to writer.add_comment (write)
-        # or patcher.queue_comment (modify). None is the explicit-
-        # delete sentinel.
         if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
-            raise RuntimeError("cell.comment requires write or modify mode")
+            raise RuntimeError("cell.threaded_comment requires write or modify mode")
+
         coord = self.coordinate
         if value is None:
-            ws._pending_comments[coord] = None  # noqa: SLF001
+            ws._pending_threaded_comments[coord] = None  # noqa: SLF001
             return
-        if not isinstance(value, Comment):
+        if not isinstance(value, ThreadedComment):
             raise TypeError(
-                f"comment must be a Comment, got {type(value).__name__}"
+                f"threaded_comment must be a ThreadedComment, got {type(value).__name__}"
             )
-        ws._pending_comments[coord] = value  # noqa: SLF001
+        if value.parent is not None:
+            raise ValueError(
+                "threaded_comment must be a top-level comment; "
+                "reply via threaded_comment.replies.append(...)"
+            )
+        legacy = ws._pending_comments.get(coord)  # noqa: SLF001
+        if legacy is not None and legacy is not _UNSET:
+            raise ValueError(
+                f"cell {coord} already has a legacy comment; "
+                "remove it before adding a threaded comment"
+            )
+        ws._pending_threaded_comments[coord] = value  # noqa: SLF001
 
     @property
-    def protection(self) -> None:
-        """Read-only default (None). Cell protection is not supported."""
-        return None
+    def protection(self) -> Protection:
+        """Return the resolved cell protection flags.
+
+        Falls back to ``Protection()`` (Excel's default of
+        ``locked=True, hidden=False``) when the cell carries no
+        explicit ``<protection>`` override.
+        """
+        self._require_xlsx_for_style("protection")
+        if self._protection is _UNSET:
+            self._protection = self._read_protection()
+        return self._protection if self._protection is not None else Protection()  # type: ignore[return-value]
+
+    @protection.setter
+    def protection(self, val: Protection) -> None:
+        """Set the cell protection flags.
+
+        Args:
+            val: Protection object with ``locked``/``hidden`` flags.
+        """
+        self._set_style_value("protection", "_protection", val)
 
     # ------------------------------------------------------------------
     # Value
@@ -300,68 +449,27 @@ class Cell:
 
     @property
     def value(self) -> Any:
+        """Return the cell value using openpyxl-compatible Python types."""
         # RFC-057: surface array / data-table formulas as the typed
         # instance regardless of what's been cached in ``_value``.
         # The metadata is populated either by the setter or by the
         # read-back path (parse_cell in the calamine backend tags the
         # cell post-read; pending-array map carries write-side state).
-        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+        pending_value = self._value_from_pending_formula()
+        if pending_value is not _UNSET:
+            return pending_value
 
-        ws = self._ws
-        # Pre-save visibility for write-mode / modify-mode setters: any
-        # pending array-formula entry on the worksheet wins over the
-        # cached value.
-        pending = ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
-        if pending is not None:
-            kind, payload = pending
-            if kind == "spill_child":
-                return None
-            if kind == "array":
-                return ArrayFormula(payload["ref"], payload["text"])
-            if kind == "data_table":
-                return DataTableFormula(
-                    ref=payload["ref"],
-                    ca=payload.get("ca", False),
-                    dt2D=payload.get("dt2D", False),
-                    dtr=payload.get("dtr", False),
-                    r1=payload.get("r1"),
-                    r2=payload.get("r2"),
-                )
-        # Read-side: if a previous read populated _formula_type, we
-        # surface the typed instance.
-        if self._formula_type == "array":
-            return ArrayFormula(self._array_ref or "", self._formula_text or "")
-        if self._formula_type == "dataTable":
-            return DataTableFormula(
-                ref=self._array_ref or "",
-                ca=self._dt_ca,
-                dt2D=self._dt_2d,
-                dtr=self._dt_r,
-                r1=self._dt_r1,
-                r2=self._dt_r2,
-            )
-        if self._formula_type == "array_child":
-            # Cell inside a spill range that isn't the master.  openpyxl
-            # also returns None here — Excel computes the spill on open.
-            return None
+        formula_value = self._value_from_formula_metadata()
+        if formula_value is not _UNSET:
+            return formula_value
 
         if self._value is _UNSET:
             self._value = self._read_value()
             # _read_value may have populated the formula metadata —
             # re-check after the read.
-            if self._formula_type == "array":
-                return ArrayFormula(self._array_ref or "", self._formula_text or "")
-            if self._formula_type == "dataTable":
-                return DataTableFormula(
-                    ref=self._array_ref or "",
-                    ca=self._dt_ca,
-                    dt2D=self._dt_2d,
-                    dtr=self._dt_r,
-                    r1=self._dt_r1,
-                    r2=self._dt_r2,
-                )
-            if self._formula_type == "array_child":
-                return None
+            formula_value = self._value_from_formula_metadata()
+            if formula_value is not _UNSET:
+                return formula_value
         # Sprint Ι Pod-α: when the workbook was opened with
         # ``rich_text=True``, surface ``CellRichText`` for cells whose
         # backing string carries `<r>` runs.  Default load mode mirrors
@@ -377,6 +485,12 @@ class Cell:
 
     @value.setter
     def value(self, val: Any) -> None:
+        """Set the cell value and queue it for the next workbook save.
+
+        Args:
+            val: Scalar value, formula string, rich text object, array formula,
+                data-table formula, or ``None``.
+        """
         # Accept CellRichText pass-through: if the user assigns a
         # CellRichText, defer rich-text serialization to the writer.
         # Plain strings keep the existing fast path.
@@ -396,62 +510,16 @@ class Cell:
 
         # RFC-057 — array / data-table formula assignment.
         if isinstance(val, ArrayFormula):
-            self._formula_type = "array"
-            self._array_ref = val.ref
-            self._formula_text = val.text
-            self._value = val
-            self._value_dirty = True
-            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
-            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
-                "array",
-                {"ref": val.ref, "text": val.text},
-            )
-            # Populate placeholder entries for cells inside the spill
-            # range (excluding the master).  These show up as
-            # ``<c r="..."/>`` placeholders so Excel sees the spill
-            # area pre-populated; without them the spill master would
-            # be the only cell in the range.
-            self._populate_spill_placeholders(val.ref)
-            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            self._queue_array_formula(val)
             return
 
         if isinstance(val, DataTableFormula):
-            self._formula_type = "dataTable"
-            self._array_ref = val.ref
-            self._dt_ca = val.ca
-            self._dt_2d = val.dt2D
-            self._dt_r = val.dtr
-            self._dt_r1 = val.r1
-            self._dt_r2 = val.r2
-            self._value = val
-            self._value_dirty = True
-            ws._mark_dirty(self._row, self._col)  # noqa: SLF001
-            ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
-                "data_table",
-                {
-                    "ref": val.ref,
-                    "ca": val.ca,
-                    "dt2D": val.dt2D,
-                    "dtr": val.dtr,
-                    "r1": val.r1,
-                    "r2": val.r2,
-                },
-            )
-            ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+            self._queue_data_table_formula(val)
             return
 
         # Plain assignment — clear any previous array / data-table
         # state so a former master cell can be replaced cleanly.
-        if self._formula_type in ("array", "dataTable", "array_child"):
-            self._formula_type = None
-            self._array_ref = None
-            self._formula_text = None
-            self._dt_ca = False
-            self._dt_2d = False
-            self._dt_r = False
-            self._dt_r1 = None
-            self._dt_r2 = None
-        ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+        self._clear_formula_metadata()
 
         self._value = val
         self._value_dirty = True
@@ -465,6 +533,105 @@ class Cell:
         else:
             # Clearing or replacing with plain — drop any prior rich entry.
             ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _value_from_pending_formula(self) -> Any:
+        """Return pending array/data-table formula value or ``_UNSET``."""
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        pending = self._ws._pending_array_formulas.get((self._row, self._col))  # noqa: SLF001
+        if pending is None:
+            return _UNSET
+        kind, payload = pending
+        if kind == "spill_child":
+            return None
+        if kind == "array":
+            return ArrayFormula(payload["ref"], payload["text"])
+        if kind == "data_table":
+            return DataTableFormula(
+                ref=payload["ref"],
+                ca=payload.get("ca", False),
+                dt2D=payload.get("dt2D", False),
+                dtr=payload.get("dtr", False),
+                r1=payload.get("r1"),
+                r2=payload.get("r2"),
+            )
+        return _UNSET
+
+    def _value_from_formula_metadata(self) -> Any:
+        """Return read-side formula metadata value or ``_UNSET``."""
+        from wolfxl.cell.cell import ArrayFormula, DataTableFormula
+
+        if self._formula_type == "array":
+            return ArrayFormula(self._array_ref or "", self._formula_text or "")
+        if self._formula_type == "dataTable":
+            return DataTableFormula(
+                ref=self._array_ref or "",
+                ca=self._dt_ca,
+                dt2D=self._dt_2d,
+                dtr=self._dt_r,
+                r1=self._dt_r1,
+                r2=self._dt_r2,
+            )
+        if self._formula_type == "array_child":
+            return None
+        return _UNSET
+
+    def _clear_formula_metadata(self) -> None:
+        """Clear array/data-table metadata and pending formula state."""
+        self._formula_type = None
+        self._array_ref = None
+        self._formula_text = None
+        self._dt_ca = False
+        self._dt_2d = False
+        self._dt_r = False
+        self._dt_r1 = None
+        self._dt_r2 = None
+        self._ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _queue_array_formula(self, val: Any) -> None:
+        """Queue an array formula assignment for save."""
+        ws = self._ws
+        self._formula_type = "array"
+        self._array_ref = val.ref
+        self._formula_text = val.text
+        self._value = val
+        self._value_dirty = True
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+            "array",
+            {"ref": val.ref, "text": val.text},
+        )
+        # Populate placeholder entries for cells inside the spill range
+        # (excluding the master). These show up as ``<c r="..."/>``
+        # placeholders so Excel sees the spill area pre-populated.
+        self._populate_spill_placeholders(val.ref)
+        ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
+
+    def _queue_data_table_formula(self, val: Any) -> None:
+        """Queue a data-table formula assignment for save."""
+        ws = self._ws
+        self._formula_type = "dataTable"
+        self._array_ref = val.ref
+        self._dt_ca = val.ca
+        self._dt_2d = val.dt2D
+        self._dt_r = val.dtr
+        self._dt_r1 = val.r1
+        self._dt_r2 = val.r2
+        self._value = val
+        self._value_dirty = True
+        ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        ws._pending_array_formulas[(self._row, self._col)] = (  # noqa: SLF001
+            "data_table",
+            {
+                "ref": val.ref,
+                "ca": val.ca,
+                "dt2D": val.dt2D,
+                "dtr": val.dtr,
+                "r1": val.r1,
+                "r2": val.r2,
+            },
+        )
+        ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
 
     def _populate_spill_placeholders(self, ref: str) -> None:
         """Mark every non-master cell in ``ref`` as a spill child.
@@ -517,8 +684,6 @@ class Cell:
         channel — defaulting ``Cell.value`` to flattened ``str`` so
         existing user code keeps working unchanged.
         """
-        from wolfxl.cell.rich_text import CellRichText, InlineFont, TextBlock
-
         ws = self._ws
         # Pre-save visibility for write/modify-mode setters.
         pending = ws._pending_rich_text.get((self._row, self._col))  # noqa: SLF001
@@ -530,33 +695,7 @@ class Cell:
         if reader is None:
             return None
         payload = reader.read_cell_rich_text(ws.title, self.coordinate)
-        if payload is None:
-            return None
-        out = CellRichText()
-        for entry in payload:
-            text, font_dict = entry[0], entry[1]
-            if font_dict is None:
-                out.append(text)
-            else:
-                out.append(
-                    TextBlock(
-                        InlineFont(
-                            rFont=font_dict.get("rFont"),
-                            charset=font_dict.get("charset"),
-                            family=font_dict.get("family"),
-                            b=font_dict.get("b"),
-                            i=font_dict.get("i"),
-                            strike=font_dict.get("strike"),
-                            color=font_dict.get("color"),
-                            sz=font_dict.get("sz"),
-                            u=font_dict.get("u"),
-                            vertAlign=font_dict.get("vertAlign"),
-                            scheme=font_dict.get("scheme"),
-                        ),
-                        text,
-                    )
-                )
-        return out
+        return runs_payload_to_cellrichtext(payload)
 
     @rich_text.setter
     def rich_text(self, val: Any) -> None:
@@ -573,15 +712,16 @@ class Cell:
     # ------------------------------------------------------------------
 
     def _require_xlsx_for_style(self, attr: str) -> None:
-        """Raise NotImplementedError if the workbook isn't xlsx.
-
-        xlsb / xls workbooks load via calamine's binary readers which
-        don't expose the per-cell style records that ``cell.font``,
-        ``cell.fill`` etc. need.  Surface a clear error at the Python
-        layer so callers don't get a confusing Rust panic / empty
-        Font object.
-        """
+        """Raise NotImplementedError if this format cannot expose styles."""
         wb_format = getattr(self._ws._workbook, "_format", "xlsx")  # noqa: SLF001
+        if wb_format == "xlsb" and attr in {
+            "font",
+            "fill",
+            "border",
+            "alignment",
+            "number_format",
+        }:
+            return
         if wb_format != "xlsx":
             raise NotImplementedError(
                 f"cell.{attr} is xlsx-only; this workbook is .{wb_format}. "
@@ -594,6 +734,7 @@ class Cell:
 
     @property
     def font(self) -> Font:
+        """Return the resolved cell font."""
         self._require_xlsx_for_style("font")
         if self._font is _UNSET:
             self._font = self._read_font()
@@ -601,10 +742,12 @@ class Cell:
 
     @font.setter
     def font(self, val: Font) -> None:
-        self._require_xlsx_for_style("font")
-        self._font = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        """Set the cell font.
+
+        Args:
+            val: Font object to apply to the cell.
+        """
+        self._set_style_value("font", "_font", val)
 
     # ------------------------------------------------------------------
     # Fill
@@ -612,6 +755,7 @@ class Cell:
 
     @property
     def fill(self) -> PatternFill:
+        """Return the resolved cell fill."""
         self._require_xlsx_for_style("fill")
         if self._fill is _UNSET:
             self._fill = self._read_fill()
@@ -619,10 +763,12 @@ class Cell:
 
     @fill.setter
     def fill(self, val: PatternFill) -> None:
-        self._require_xlsx_for_style("fill")
-        self._fill = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        """Set the cell fill.
+
+        Args:
+            val: Pattern fill object to apply to the cell.
+        """
+        self._set_style_value("fill", "_fill", val)
 
     # ------------------------------------------------------------------
     # Border
@@ -630,6 +776,7 @@ class Cell:
 
     @property
     def border(self) -> Border:
+        """Return the resolved cell border."""
         self._require_xlsx_for_style("border")
         if self._border is _UNSET:
             self._border = self._read_border()
@@ -637,10 +784,12 @@ class Cell:
 
     @border.setter
     def border(self, val: Border) -> None:
-        self._require_xlsx_for_style("border")
-        self._border = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        """Set the cell border.
+
+        Args:
+            val: Border object to apply to the cell.
+        """
+        self._set_style_value("border", "_border", val)
 
     # ------------------------------------------------------------------
     # Alignment
@@ -648,6 +797,7 @@ class Cell:
 
     @property
     def alignment(self) -> Alignment:
+        """Return the resolved cell alignment."""
         self._require_xlsx_for_style("alignment")
         if self._alignment is _UNSET:
             self._alignment = self._read_alignment()
@@ -655,10 +805,12 @@ class Cell:
 
     @alignment.setter
     def alignment(self, val: Alignment) -> None:
-        self._require_xlsx_for_style("alignment")
-        self._alignment = val
-        self._format_dirty = True
-        self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
+        """Set the cell alignment.
+
+        Args:
+            val: Alignment object to apply to the cell.
+        """
+        self._set_style_value("alignment", "_alignment", val)
 
     # ------------------------------------------------------------------
     # Number format
@@ -666,6 +818,7 @@ class Cell:
 
     @property
     def number_format(self) -> str | None:
+        """Return the resolved number format string."""
         self._require_xlsx_for_style("number_format")
         if self._number_format is _UNSET:
             self._number_format = self._read_number_format()
@@ -673,8 +826,22 @@ class Cell:
 
     @number_format.setter
     def number_format(self, val: str | None) -> None:
-        self._require_xlsx_for_style("number_format")
-        self._number_format = val
+        """Set the cell number format.
+
+        Args:
+            val: Number format code, or ``None`` to clear the cached format.
+        """
+        self._set_style_value("number_format", "_number_format", val)
+
+    def _set_style_value(self, public_attr: str, storage_attr: str, value: Any) -> None:
+        """Set a cached style value and mark the cell dirty."""
+        if getattr(self._ws._workbook, "_format", "xlsx") == "xlsb":  # noqa: SLF001
+            raise NotImplementedError(
+                f"cell.{public_attr} assignment is xlsx-only; .xlsb workbooks "
+                "are read-only in WolfXL. Transcribe to .xlsx before editing styles."
+            )
+        self._require_xlsx_for_style(public_attr)
+        setattr(self, storage_attr, value)
         self._format_dirty = True
         self._ws._mark_dirty(self._row, self._col)  # noqa: SLF001
 
@@ -726,7 +893,7 @@ class Cell:
         )
         return _format_to_font(payload)
 
-    def _read_fill(self) -> PatternFill:
+    def _read_fill(self) -> PatternFill | GradientFill:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return PatternFill()
@@ -764,7 +931,54 @@ class Cell:
             return payload.get("number_format")
         return None
 
+    def _read_protection(self) -> Protection | None:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return None
+        payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
+            self._ws.title, self.coordinate,
+        )
+        return _format_to_protection(payload)
+
+    def _read_named_style(self) -> str | None:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return None
+        payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
+            self._ws.title, self.coordinate,
+        )
+        if isinstance(payload, dict):
+            name = payload.get("named_style")
+            if isinstance(name, str) and name:
+                return name
+        return None
+
+    def _read_style_id(self) -> int:
+        wb = self._ws._workbook  # noqa: SLF001
+        if wb._rust_reader is None:  # noqa: SLF001
+            return 0
+        try:
+            records = wb._rust_reader.read_sheet_records(  # noqa: SLF001
+                self._ws.title,
+                f"{self.coordinate}:{self.coordinate}",
+                getattr(wb, "_data_only", False),
+                True,
+                True,
+                True,
+                False,
+                True,
+                False,
+                False,
+            )
+        except AttributeError:
+            return 0
+        for record in records:
+            style_id = record.get("style_id")
+            return int(style_id or 0)
+        return 0
+
     def __repr__(self) -> str:
+        """Return a compact debug representation for this cell."""
         return f"<Cell {self.coordinate}>"
 
 
@@ -783,6 +997,7 @@ class _Sentinel:
         return cls._instance
 
     def __repr__(self) -> str:
+        """Return the sentinel's debug label."""
         return "<UNSET>"
 
     def __bool__(self) -> bool:
@@ -790,184 +1005,3 @@ class _Sentinel:
 
 
 _UNSET = _Sentinel()
-
-
-# ======================================================================
-# Payload <-> Python conversion helpers
-# ======================================================================
-
-def _payload_to_python(payload: Any) -> Any:
-    """Convert a Rust cell-value payload dict to a plain Python value."""
-    if not isinstance(payload, dict):
-        return payload
-    t = payload.get("type", "blank")
-    v = payload.get("value")
-    if t == "blank":
-        return None
-    if t == "string":
-        return v
-    if t == "number":
-        return v
-    if t == "boolean":
-        return bool(v)
-    if t == "error":
-        return v
-    if t == "formula":
-        return payload.get("formula", v)
-    if t == "date":
-        if isinstance(v, str):
-            return datetime.fromisoformat(v)
-        if isinstance(v, date) and not isinstance(v, datetime):
-            return datetime.combine(v, datetime.min.time())
-        return v
-    if t == "datetime":
-        if isinstance(v, str):
-            return datetime.fromisoformat(v)
-        return v
-    return v
-
-
-def _format_to_font(payload: Any) -> Font:
-    """Extract Font fields from a Rust format dict."""
-    if not isinstance(payload, dict) or not payload:
-        return Font()
-    color_raw = payload.get("font_color")
-    color: Color | str | None = None
-    if color_raw:
-        color = color_raw if isinstance(color_raw, str) else str(color_raw)
-    return Font(
-        name=payload.get("font_name"),
-        size=payload.get("font_size"),
-        bold=bool(payload.get("bold", False)),
-        italic=bool(payload.get("italic", False)),
-        underline=payload.get("underline"),
-        strike=bool(payload.get("strikethrough", False)),
-        color=color,
-    )
-
-
-def _format_to_fill(payload: Any) -> PatternFill:
-    """Extract PatternFill fields from a Rust format dict."""
-    if not isinstance(payload, dict) or not payload:
-        return PatternFill()
-    bg = payload.get("bg_color")
-    if bg:
-        return PatternFill(patternType="solid", fgColor=bg)
-    return PatternFill()
-
-
-def _format_to_alignment(payload: Any) -> Alignment:
-    """Extract Alignment fields from a Rust format dict."""
-    if not isinstance(payload, dict) or not payload:
-        return Alignment()
-    return Alignment(
-        horizontal=payload.get("h_align"),
-        vertical=payload.get("v_align"),
-        wrap_text=bool(payload.get("wrap", False)),
-        text_rotation=int(payload.get("rotation", 0)),
-        indent=int(payload.get("indent", 0)),
-    )
-
-
-def _border_payload_to_border(payload: Any) -> Border:
-    """Convert a Rust border dict to a Border dataclass."""
-    if not isinstance(payload, dict) or not payload:
-        return Border()
-    return Border(
-        left=_edge_to_side(payload.get("left")),
-        right=_edge_to_side(payload.get("right")),
-        top=_edge_to_side(payload.get("top")),
-        bottom=_edge_to_side(payload.get("bottom")),
-    )
-
-
-def _edge_to_side(edge: Any) -> Side:
-    if not isinstance(edge, dict):
-        return Side()
-    return Side(
-        style=edge.get("style"),
-        color=edge.get("color"),
-    )
-
-
-# ======================================================================
-# Python -> Rust payload converters (for write mode)
-# ======================================================================
-
-def python_value_to_payload(value: Any) -> dict[str, Any]:
-    """Convert a plain Python value to a Rust cell-value payload dict."""
-    if value is None:
-        return {"type": "blank"}
-    if isinstance(value, bool):
-        return {"type": "boolean", "value": value}
-    if isinstance(value, (int, float)):
-        return {"type": "number", "value": value}
-    if isinstance(value, datetime):
-        return {"type": "datetime", "value": value.replace(microsecond=0).isoformat()}
-    if isinstance(value, date):
-        return {"type": "date", "value": value.isoformat()}
-    if isinstance(value, str) and value.startswith("="):
-        return {"type": "formula", "formula": value, "value": value}
-    return {"type": "string", "value": str(value)}
-
-
-def font_to_format_dict(font: Font) -> dict[str, Any]:
-    """Convert a Font to a Rust format dict."""
-    d: dict[str, Any] = {}
-    if font.bold:
-        d["bold"] = True
-    if font.italic:
-        d["italic"] = True
-    if font.underline:
-        d["underline"] = font.underline
-    if font.strike:
-        d["strikethrough"] = True
-    if font.name:
-        d["font_name"] = font.name
-    if font.size is not None:
-        d["font_size"] = font.size
-    color_hex = font._color_hex()  # noqa: SLF001
-    if color_hex:
-        d["font_color"] = color_hex
-    return d
-
-
-def fill_to_format_dict(fill: PatternFill) -> dict[str, Any]:
-    """Convert a PatternFill to a Rust format dict."""
-    d: dict[str, Any] = {}
-    fg = fill._fg_hex()  # noqa: SLF001
-    if fg:
-        d["bg_color"] = fg
-    return d
-
-
-def alignment_to_format_dict(alignment: Alignment) -> dict[str, Any]:
-    """Convert an Alignment to a Rust format dict."""
-    d: dict[str, Any] = {}
-    if alignment.horizontal:
-        d["h_align"] = alignment.horizontal
-    if alignment.vertical:
-        d["v_align"] = alignment.vertical
-    if alignment.wrap_text:
-        d["wrap"] = True
-    if alignment.text_rotation:
-        d["rotation"] = alignment.text_rotation
-    if alignment.indent:
-        d["indent"] = alignment.indent
-    return d
-
-
-def border_to_rust_dict(border: Border) -> dict[str, Any]:
-    """Convert a Border to a Rust border dict."""
-    d: dict[str, Any] = {}
-    for edge_name in ("left", "right", "top", "bottom"):
-        side: Side = getattr(border, edge_name)
-        if side.style:
-            edge: dict[str, str] = {"style": side.style}
-            color = side._color_hex()  # noqa: SLF001
-            if color:
-                edge["color"] = color
-            else:
-                edge["color"] = "#000000"
-            d[edge_name] = edge
-    return d

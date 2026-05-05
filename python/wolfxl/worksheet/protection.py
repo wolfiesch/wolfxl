@@ -1,4 +1,4 @@
-"""Sheet protection (RFC-055 §2.6).
+"""Sheet protection.
 
 Backs ``ws.protection``. Mirrors openpyxl's
 ``openpyxl.worksheet.protection.SheetProtection`` field surface
@@ -46,10 +46,20 @@ class SheetProtection:
     # but several call sites in the wider Python ecosystem use snake_case).
     @property
     def format_cells(self) -> bool:
+        """Return whether users may format cells on a protected sheet.
+
+        Returns:
+            ``True`` when cell-formatting operations are allowed.
+        """
         return self.formatCells
 
     @format_cells.setter
     def format_cells(self, value: bool) -> None:
+        """Set whether users may format cells on a protected sheet.
+
+        Args:
+            value: Truthy value to allow cell-formatting operations.
+        """
         self.formatCells = bool(value)
 
     @property

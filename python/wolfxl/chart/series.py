@@ -7,8 +7,6 @@ are already on the parent class); we keep it as a separate name purely so
 
 The ``attribute_mapping`` dict mirrors openpyxl's: it tells each chart type
 which slot subset of ``Series`` actually round-trips for its kind.
-
-Sprint Μ Pod-β (RFC-046).
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ from .error_bar import ErrorBars
 from .label import DataLabelList
 from .marker import DataPoint, Marker
 from .reference import Reference
-from .shapes import GraphicalProperties
+from .shapes import GraphicalProperties, LineProperties
 from .trendline import Trendline
 
 
@@ -132,7 +130,11 @@ class Series:
         self.idx = idx
         self.order = order
         self.tx = tx
-        self.spPr = spPr if spPr is not None else GraphicalProperties()
+        self.spPr = (
+            spPr
+            if spPr is not None
+            else GraphicalProperties(ln=LineProperties(prstDash="solid"))
+        )
         self.pictureOptions = pictureOptions
         self.dPt = list(dPt)
         self.dLbls = dLbls
@@ -202,7 +204,7 @@ class Series:
     def to_rust_dict(self, series_type: str = "bar") -> dict[str, Any]:
         """Serialise this series for a chart of the given ``series_type``.
 
-        Emits the RFC-046 §10.6 shape (snake_case, flat fields):
+        Emits a flat snake_case dict for the Rust emitter:
         ``{idx, order, title_ref|title_text, values_ref, categories_ref,
         x_values_ref, y_values_ref, bubble_size_ref, graphical_properties,
         marker, smooth, invert_if_negative, data_labels, err_bars,
@@ -224,9 +226,13 @@ class Series:
                 d["title_text"] = str(self.tx.v)
 
         # Data references — surface as A1 strings
-        d["values_ref"] = _ref_string(self.val)
+        values_ref = _ref_string(self.val)
+        x_values_ref = _ref_string(self.xVal)
+        if series_type in ("scatter", "bubble") and x_values_ref is None:
+            values_ref = None
+        d["values_ref"] = values_ref
         d["categories_ref"] = _ref_string(self.cat)
-        d["x_values_ref"] = _ref_string(self.xVal)
+        d["x_values_ref"] = x_values_ref
         d["y_values_ref"] = _ref_string(self.yVal)
         d["bubble_size_ref"] = _ref_string(self.bubbleSize)
 
@@ -236,11 +242,24 @@ class Series:
             if gp_dict:
                 d["graphical_properties"] = _gp_to_snake(gp_dict)
 
-        # Marker — emit per §10.6.1 even if defaults
-        if self.marker is not None:
+        # Marker — openpyxl emits default "none" markers for line/radar
+        # series, even when the public object carries no explicit fields.
+        if self.marker is not None and series_type in ("line", "radar", "scatter"):
             md = self.marker.to_dict()
+            if not md:
+                md = {
+                    "symbol": "none",
+                    "spPr": {
+                        "ln": {
+                            "prstDash": "solid",
+                        },
+                    },
+                }
             if md:
                 d["marker"] = _marker_to_snake(md)
+
+        if self.dPt:
+            d["data_points"] = [_data_point_to_snake(dp.to_dict()) for dp in self.dPt]
 
         if self.smooth is not None:
             d["smooth"] = self.smooth
@@ -338,6 +357,23 @@ def _marker_to_snake(md: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _data_point_to_snake(dp: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if "idx" in dp:
+        out["idx"] = dp["idx"]
+    if "invertIfNegative" in dp:
+        out["invert_if_negative"] = dp["invertIfNegative"]
+    if "marker" in dp:
+        out["marker"] = _marker_to_snake(dp["marker"])
+    if "bubble3D" in dp:
+        out["bubble_3d"] = dp["bubble3D"]
+    if "explosion" in dp:
+        out["explosion"] = dp["explosion"]
+    if "spPr" in dp:
+        out["graphical_properties"] = _gp_to_snake(dp["spPr"])
+    return out
+
+
 def _dlbls_to_snake(dl: dict[str, Any]) -> dict[str, Any]:
     """Translate :class:`DataLabelList.to_dict` camelCase → §10.6.2 snake_case."""
     out: dict[str, Any] = {}
@@ -355,6 +391,58 @@ def _dlbls_to_snake(dl: dict[str, Any]) -> dict[str, Any]:
     for ck, sk in mapping.items():
         if ck in dl and dl[ck] is not None:
             out[sk] = dl[ck]
+    txpr = dl.get("txPr")
+    if isinstance(txpr, dict):
+        runs = _flatten_rich_runs(txpr)
+        if runs:
+            out["tx_pr_runs"] = runs
+    return out
+
+
+def _flatten_rich_runs(rich: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten a :class:`RichText.to_dict()` payload into ``[{text, font}]``.
+
+    Mirrors :meth:`Title.to_dict`'s flattening: each ``<a:r>`` becomes a
+    ``{"text": str, "font": {name, size, bold, italic, color, underline}}``
+    dict that the Rust emitter consumes via the ``TitleRun`` shape.
+    """
+    out: list[dict[str, Any]] = []
+    paragraphs = rich.get("p") or []
+    for para in paragraphs:
+        for r in para.get("r", []) or []:
+            text = r.get("t", "") or ""
+            font: dict[str, Any] = {}
+            rpr = r.get("rPr")
+            if isinstance(rpr, dict):
+                if rpr.get("latin") is not None:
+                    font["name"] = rpr["latin"]
+                sz = rpr.get("sz")
+                if sz is not None:
+                    try:
+                        font["size"] = int(sz) // 100
+                    except (TypeError, ValueError):
+                        font["size"] = sz
+                if rpr.get("b") is not None:
+                    font["bold"] = rpr["b"]
+                if rpr.get("i") is not None:
+                    font["italic"] = rpr["i"]
+                if rpr.get("u") is not None:
+                    font["underline"] = rpr["u"] not in (None, "none")
+                sf = rpr.get("solidFill")
+                if sf is not None:
+                    if isinstance(sf, str):
+                        font["color"] = sf
+                    else:
+                        rgb = (
+                            getattr(sf, "srgbClr", None)
+                            or getattr(sf, "value", None)
+                            or getattr(sf, "rgb", None)
+                        )
+                        if rgb is not None and not isinstance(rgb, str):
+                            rgb = getattr(rgb, "val", None) or str(rgb)
+                        if rgb is not None:
+                            font["color"] = rgb
+            out.append({"text": text, "font": font or None})
     return out
 
 

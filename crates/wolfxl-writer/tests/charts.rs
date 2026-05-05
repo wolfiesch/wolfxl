@@ -1,13 +1,10 @@
-//! Integration tests for the chart emit pipeline — Sprint Μ Pod-α
-//! (RFC-046).
+//! Integration tests for the chart emit pipeline.
 //!
 //! Each test builds a [`Chart`] in memory, emits its
 //! `xl/charts/chartN.xml` via [`wolfxl_writer::emit::charts::emit_chart_xml`],
 //! then re-parses the bytes with `quick-xml` to assert structural
-//! invariants. Eight kind-specific tests + 12 sub-feature tests.
-//!
-//! Pod-β (Python) and Pod-δ (cross-language byte parity) will layer
-//! their own tests on top; this file owns the Rust-only contract.
+//! invariants. The Python API and cross-language parity suites layer their
+//! own tests on top; this file owns the Rust-only contract.
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -15,9 +12,9 @@ use quick_xml::Reader;
 use wolfxl_writer::emit::charts::emit_chart_xml;
 use wolfxl_writer::model::chart::{
     Axis, AxisCommon, AxisOrientation, AxisPos, BarGrouping, CategoryAxis, Chart, ChartKind,
-    DataLabels, DateAxis, DisplayBlanksAs, ErrorBarType, ErrorBarValType, ErrorBars,
-    GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition, Marker,
-    MarkerSymbol, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title,
+    DataLabels, DataPoint, DateAxis, DisplayBlanksAs, DisplayUnits, ErrorBarType, ErrorBarValType,
+    ErrorBars, GraphicalProperties, Gridlines, Layout, LayoutTarget, Legend, LegendPosition,
+    Marker, MarkerSymbol, RadarStyle, Reference, Series, SeriesAxis, SeriesTitle, TickMark, Title,
     TitleRun, Trendline, TrendlineKind, ValueAxis, View3D,
 };
 use wolfxl_writer::model::image::ImageAnchor;
@@ -76,6 +73,7 @@ fn cat_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     (cat, val)
@@ -88,6 +86,7 @@ fn dual_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     let y = Axis::Value(ValueAxis {
@@ -96,6 +95,7 @@ fn dual_value_pair() -> (Axis, Axis) {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     });
     (x, y)
@@ -213,14 +213,18 @@ fn scatter_chart_round_trips() {
     let bytes = emit_chart_xml(&c);
     parse_ok(&bytes);
     assert_contains(&bytes, "<c:scatterChart>");
-    assert_contains(&bytes, "<c:scatterStyle val=\"lineMarker\"/>");
+    assert_not_contains(&bytes, "<c:scatterStyle");
     assert_contains(&bytes, "<c:xVal>");
     assert_contains(&bytes, "<c:yVal>");
     assert_not_contains(&bytes, "<c:cat>");
     // Scatter uses two valAx, no catAx.
     assert_not_contains(&bytes, "<c:catAx>");
     let text = std::str::from_utf8(&bytes).unwrap();
-    assert_eq!(text.matches("<c:valAx>").count(), 2, "two valAx for scatter");
+    assert_eq!(
+        text.matches("<c:valAx>").count(),
+        2,
+        "two valAx for scatter"
+    );
 }
 
 #[test]
@@ -279,6 +283,7 @@ fn category_axis_emits_lbl_offset() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -302,6 +307,7 @@ fn value_axis_emits_min_max_units() {
         max: Some(100.0),
         major_unit: Some(20.0),
         minor_unit: Some(5.0),
+        display_units: None,
         crosses: Some("autoZero".to_string()),
     }));
     let bytes = emit_chart_xml(&c);
@@ -331,6 +337,7 @@ fn date_axis_emits_base_time_unit() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -355,6 +362,7 @@ fn title_with_rich_text_runs() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     c.title = Some(Title {
@@ -419,6 +427,7 @@ fn legend_each_position() {
             max: None,
             major_unit: None,
             minor_unit: None,
+            display_units: None,
             crosses: None,
         }));
         c.legend = Some(Legend {
@@ -428,10 +437,7 @@ fn legend_each_position() {
         });
         let bytes = emit_chart_xml(&c);
         parse_ok(&bytes);
-        assert_contains(
-            &bytes,
-            &format!("<c:legendPos val=\"{expected}\"/>"),
-        );
+        assert_contains(&bytes, &format!("<c:legendPos val=\"{expected}\"/>"));
     }
 }
 
@@ -449,6 +455,7 @@ fn data_labels_show_val_cat_position() {
         position: Some("outEnd".to_string()),
         number_format: Some("0.00".to_string()),
         separator: Some(", ".to_string()),
+        tx_pr_runs: Vec::new(),
     });
     c.add_series(s);
     let (x, y) = cat_value_pair();
@@ -486,14 +493,8 @@ fn error_bars_each_type_and_val_type() {
         c.y_axis = Some(y);
         let bytes = emit_chart_xml(&c);
         parse_ok(&bytes);
-        assert_contains(
-            &bytes,
-            &format!("<c:errBarType val=\"{}\"/>", bt.as_str()),
-        );
-        assert_contains(
-            &bytes,
-            &format!("<c:errValType val=\"{}\"/>", vt.as_str()),
-        );
+        assert_contains(&bytes, &format!("<c:errBarType val=\"{}\"/>", bt.as_str()));
+        assert_contains(&bytes, &format!("<c:errValType val=\"{}\"/>", vt.as_str()));
     }
 }
 
@@ -601,6 +602,7 @@ fn major_and_minor_gridlines_emitted() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -658,6 +660,31 @@ fn marker_symbol_size_emitted() {
 }
 
 #[test]
+fn data_point_overrides_emitted_on_series() {
+    let mut c = Chart::new(ChartKind::Pie, anchor_at(0, 0));
+    let mut s = Series::new(0);
+    s.values = Some(Reference::new("S", "B2:B6"));
+    s.data_points.push(DataPoint {
+        idx: 2,
+        invert_if_negative: None,
+        marker: None,
+        bubble_3d: None,
+        explosion: Some(15),
+        graphical_properties: Some(GraphicalProperties {
+            fill_color: Some("FFFF0000".into()),
+            ..GraphicalProperties::default()
+        }),
+    });
+    c.add_series(s);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:dPt>");
+    assert_contains(&bytes, "<c:idx val=\"2\"/>");
+    assert_contains(&bytes, "<c:explosion val=\"15\"/>");
+    assert_contains(&bytes, "<a:srgbClr val=\"FF0000\"/>");
+}
+
+#[test]
 fn multi_series_chart_emits_distinct_idx_order() {
     let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
     for i in 0..3 {
@@ -711,6 +738,7 @@ fn series_axis_shape_emitted() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -739,6 +767,7 @@ fn axis_orientation_and_tick_marks() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -764,6 +793,28 @@ fn display_blanks_as_emitted() {
 }
 
 #[test]
+fn value_axis_display_units_emitted() {
+    let mut c = Chart::new(ChartKind::Line, anchor_at(0, 0));
+    c.add_series(series_with_cat_val());
+    let (x, mut y) = cat_value_pair();
+    if let Axis::Value(ref mut val) = y {
+        val.display_units = Some(DisplayUnits {
+            built_in_unit: Some("millions".into()),
+            custom_unit: Some(1000.0),
+        });
+    }
+    c.x_axis = Some(x);
+    c.y_axis = Some(y);
+    let bytes = emit_chart_xml(&c);
+    parse_ok(&bytes);
+    assert_contains(&bytes, "<c:dispUnits>");
+    assert_contains(&bytes, "<c:custUnit val=\"1000\"/>");
+    assert_contains(&bytes, "<c:builtInUnit val=\"millions\"/>");
+    let text = std::str::from_utf8(&bytes).unwrap();
+    assert!(text.find("<c:custUnit").unwrap() < text.find("<c:builtInUnit").unwrap());
+}
+
+#[test]
 fn bar_overlap_emitted_when_set() {
     let mut c = Chart::new(ChartKind::Bar, anchor_at(0, 0));
     c.overlap = Some(-25);
@@ -778,10 +829,10 @@ fn bar_overlap_emitted_when_set() {
 
 #[test]
 fn end_to_end_emits_chart_part_via_emit_xlsx() {
+    use std::io::Cursor;
     use wolfxl_writer::emit_xlsx;
     use wolfxl_writer::model::Worksheet;
     use wolfxl_writer::Workbook;
-    use std::io::Cursor;
 
     let mut wb = Workbook::new();
     let mut sheet = Worksheet::new("Sheet");
@@ -810,7 +861,7 @@ fn end_to_end_emits_chart_part_via_emit_xlsx() {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint Μ-prime Pod-α' — new family round-trips + new sub-features
+// Additional chart-family round-trips and sub-features.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -909,7 +960,7 @@ fn surface3d_chart_round_trips() {
 fn stock_chart_emits_hilow_and_updown_bars() {
     let mut c = Chart::new(ChartKind::Stock, anchor_at(0, 0));
     // 4 series typical (Open, High, Low, Close), but emit accepts any
-    // count — semantic validation is Pod-β's job.
+    // count; semantic validation lives in the Python API tests.
     for i in 0..4u32 {
         let mut s = Series::new(i);
         s.values = Some(Reference::new("Sheet", &format!("B{}:B{}", 2 + i, 6 + i)));
@@ -999,6 +1050,7 @@ fn major_gridlines_obj_with_graphical_properties() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);
@@ -1027,6 +1079,7 @@ fn empty_gridlines_obj_emits_self_closing_tag() {
         max: None,
         major_unit: None,
         minor_unit: None,
+        display_units: None,
         crosses: None,
     }));
     let bytes = emit_chart_xml(&c);

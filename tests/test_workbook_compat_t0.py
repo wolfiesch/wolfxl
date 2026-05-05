@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import openpyxl
 import openpyxl.utils.cell as ouc
 import pytest
 import wolfxl.utils as wu
@@ -30,6 +31,59 @@ def test_index_returns_sheet_position() -> None:
     ws3 = wb.create_sheet("Sheet3")
     assert wb.index(ws2) == 1
     assert wb.index(ws3) == 2
+    assert wb.get_index(ws3) == 2
+    assert wb.get_sheet_names() == wb.sheetnames
+
+
+def test_create_named_range_alias() -> None:
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    wb.create_named_range("Region", ws, "$A$1:$A$5")
+    assert wb.defined_names["Region"].value == "'Sheet'!$A$1:$A$5"
+
+
+def test_add_named_style_registers_name_and_binds() -> None:
+    from wolfxl.styles import NamedStyle
+
+    wb = wolfxl.Workbook()
+    style = NamedStyle(name="Metric")
+    wb.add_named_style(style)
+    assert "Metric" in wb.named_styles
+    assert "Metric" in wb.style_names
+    assert style._wb is wb
+
+
+def test_style_names_read_existing_named_styles(tmp_path: Path) -> None:
+    from openpyxl.styles import NamedStyle
+
+    path = tmp_path / "named-style.xlsx"
+    op_wb = openpyxl.Workbook()
+    op_wb.add_named_style(NamedStyle(name="Metric"))
+    op_wb.save(path)
+
+    wb = wolfxl.load_workbook(path)
+    assert wb.style_names == op_wb.style_names == ["Normal", "Metric"]
+    assert wb.named_styles == ["Normal", "Metric"]
+
+
+def test_add_named_style_persists_name_on_save(tmp_path: Path) -> None:
+    from openpyxl.styles import NamedStyle
+
+    path = tmp_path / "wolfxl-named-style.xlsx"
+    wb = wolfxl.Workbook()
+    wb.add_named_style(NamedStyle(name="Metric"))
+    wb.save(path)
+
+    op_wb = openpyxl.load_workbook(path)
+    assert op_wb.style_names == ["Normal", "Metric"]
+    rt = wolfxl.load_workbook(path)
+    assert rt.style_names == ["Normal", "Metric"]
+
+
+def test_create_chartsheet_raises_clear_error() -> None:
+    wb = wolfxl.Workbook()
+    with pytest.raises(NotImplementedError, match="create_chartsheet"):
+        wb.create_chartsheet("Chart")
 
 
 def test_read_only_false_for_write_mode() -> None:

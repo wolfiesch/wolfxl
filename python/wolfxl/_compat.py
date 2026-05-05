@@ -19,10 +19,10 @@ class _UnsupportedFeature:
     """Base for openpyxl classes that wolfxl exposes as shims.
 
     Subclasses carry a human-readable ``_feature_name`` and a ``_hint``
-    pointing to the migration story (modify mode, T1/T2 roadmap, or
-    openpyxl fallback). Attempting to instantiate raises with the full
-    message so users discover the gap at the construction site rather
-    than at a downstream ``AttributeError``.
+    pointing to the recommended path: modify-mode preservation, native
+    WolfXL support when available, or an openpyxl fallback. Attempting to
+    instantiate raises with the full message so users discover the gap at
+    the construction site rather than at a downstream ``AttributeError``.
     """
 
     _feature_name: str = "<unknown>"
@@ -32,7 +32,7 @@ class _UnsupportedFeature:
         raise NotImplementedError(
             f"wolfxl does not implement {self._feature_name}. {self._hint} "
             "See https://github.com/SynthGL/wolfxl#openpyxl-compatibility "
-            "for the compatibility roadmap."
+            "for compatibility notes."
         )
 
 

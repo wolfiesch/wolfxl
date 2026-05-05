@@ -37,17 +37,12 @@ pub fn emit(sst: &SstBuilder) -> Vec<u8> {
     ));
 
     for (_idx, s) in sst.iter() {
-        let needs_preserve = s
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_whitespace())
+        let needs_preserve = s.chars().next().is_some_and(|c| c.is_whitespace())
             || s.chars().next_back().is_some_and(|c| c.is_whitespace());
 
         let escaped = xml_escape::text(s);
         if needs_preserve {
-            out.push_str(&format!(
-                "<si><t xml:space=\"preserve\">{escaped}</t></si>"
-            ));
+            out.push_str(&format!("<si><t xml:space=\"preserve\">{escaped}</t></si>"));
         } else {
             out.push_str(&format!("<si><t>{escaped}</t></si>"));
         }
@@ -96,7 +91,10 @@ mod tests {
             "missing uniqueCount=\"0\": {text}"
         );
         // Self-closing: no <si> elements.
-        assert!(!text.contains("<si>"), "unexpected <si> in empty SST: {text}");
+        assert!(
+            !text.contains("<si>"),
+            "unexpected <si> in empty SST: {text}"
+        );
     }
 
     // 2. Single string.
@@ -126,7 +124,10 @@ mod tests {
         assert!(text.contains("uniqueCount=\"2\""), "{text}");
         // Two <si> elements (one per unique string), not three.
         let si_count = text.matches("<si>").count();
-        assert_eq!(si_count, 2, "expected 2 <si> elements, got {si_count}: {text}");
+        assert_eq!(
+            si_count, 2,
+            "expected 2 <si> elements, got {si_count}: {text}"
+        );
     }
 
     // 4. Leading/trailing whitespace triggers xml:space="preserve".
@@ -168,7 +169,10 @@ mod tests {
         let text = text_of(&bytes);
         assert!(text.contains("A &amp; B &lt; C &gt;"), "{text}");
         // Double-quotes are legal in text nodes — they must NOT be escaped.
-        assert!(text.contains("\"quote\""), "quotes should be literal in text: {text}");
+        assert!(
+            text.contains("\"quote\""),
+            "quotes should be literal in text: {text}"
+        );
     }
 
     // 7. Unicode passes through as UTF-8.

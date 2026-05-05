@@ -6,8 +6,8 @@
 use super::{push_attr, push_attr_if, xml_decl};
 use crate::model::cache::PivotCache;
 use crate::model::table::{
-    AxisItem, CalculatedItem, DataField, Format, Location, PageField, PivotArea, PivotField,
-    PivotItem, PivotConditionalFormat, PivotTable, PivotTableStyleInfo,
+    AxisItem, CalculatedItem, DataField, Format, Location, PageField, PivotArea,
+    PivotConditionalFormat, PivotField, PivotItem, PivotTable, PivotTableStyleInfo,
 };
 
 /// Emit pivotTable XML. The `cache` is needed to resolve cache-field
@@ -22,7 +22,11 @@ pub fn pivot_table_xml(pt: &PivotTable, cache: &PivotCache) -> Vec<u8> {
     push_attr(&mut out, "name", &pt.name);
     push_attr(&mut out, "cacheId", &pt.cache_id.to_string());
 
-    push_attr(&mut out, "dataOnRows", if pt.data_on_rows { "1" } else { "0" });
+    push_attr(
+        &mut out,
+        "dataOnRows",
+        if pt.data_on_rows { "1" } else { "0" },
+    );
     push_attr(&mut out, "dataCaption", &pt.data_caption);
     if let Some(c) = &pt.grand_total_caption {
         push_attr(&mut out, "grandTotalCaption", c);
@@ -62,7 +66,11 @@ pub fn pivot_table_xml(pt: &PivotTable, cache: &PivotCache) -> Vec<u8> {
     push_attr(
         &mut out,
         "applyWidthHeightFormats",
-        if pt.apply_width_height_formats { "1" } else { "0" },
+        if pt.apply_width_height_formats {
+            "1"
+        } else {
+            "0"
+        },
     );
 
     push_attr(&mut out, "useAutoFormatting", "1");
@@ -76,17 +84,9 @@ pub fn pivot_table_xml(pt: &PivotTable, cache: &PivotCache) -> Vec<u8> {
     );
     push_attr(&mut out, "indent", "0");
     push_attr(&mut out, "outline", if pt.outline { "1" } else { "0" });
-    push_attr(
-        &mut out,
-        "outlineData",
-        if pt.outline { "1" } else { "0" },
-    );
+    push_attr(&mut out, "outlineData", if pt.outline { "1" } else { "0" });
     push_attr(&mut out, "compact", if pt.compact { "1" } else { "0" });
-    push_attr(
-        &mut out,
-        "compactData",
-        if pt.compact { "1" } else { "0" },
-    );
+    push_attr(&mut out, "compactData", if pt.compact { "1" } else { "0" });
     push_attr(
         &mut out,
         "rowGrandTotals",

@@ -185,14 +185,13 @@ encryption envelope is a separate (future) RFC.
    * Plain fixture + spurious password → msoffcrypto's
      `FileFormatError` propagates (we don't swallow it).
    * Missing dep → `RuntimeError` with the install hint.
-3. **openpyxl parity** — `tests/parity/test_password_parity.py`
-   loads the same encrypted fixture via both libs; cell values
-   compare element-wise.
+3. **Password coverage** — `tests/test_password_reads.py` loads
+   synthesized encrypted fixtures and verifies correct password,
+   wrong password, missing dependency, and plain-file password paths.
 4. **Cross-mode** — `password=` + `modify=True` reads OK, `save()`
    raises with the RFC pointer.
-5. **Regression fixture** — `tests/fixtures/encrypted_aes256.xlsx`
-   (password "hunter2"), `tests/fixtures/encrypted_empty.xlsx`
-   (password ""). Both checked in.
+5. **Regression fixtures** — synthesized per test session from
+   `tests/fixtures/minimal.xlsx` in pytest tmp dirs.
 6. **LibreOffice cross-renderer** — N/A (read-only).
 
 ## 7. Cross-Mode Asymmetries

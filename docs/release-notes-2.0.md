@@ -1,16 +1,22 @@
-# wolfxl 2.0.0 — full openpyxl replacement, pivot tables included
+# wolfxl 2.0.0 audit draft — pivot tables included
 
 _Date: 2026-04-27_
 
-WolfXL 2.0.0 closes the last construction-side gap on the
+> **Audit status**: draft release collateral. Do not publish, tag, or
+> post externally from this file until the v2.0 benchmark replacement,
+> manual advanced-pivot/slicer checks, clean release-artifact smoke, and
+> final wording truth pass are complete.
+
+WolfXL 2.0.0 closes the tracked construction-side pivot gap on the
 openpyxl-parity roadmap: **pivot tables, pivot caches, and
 pivot-chart linkage**. After 24 RFCs across 9 sprints
-(Δ → Ν), every construction idiom that openpyxl 3.1.x supports
-works with the same Python code.
+(Delta to Nu), the release-candidate surface now covers the project
+parity roadmap, with final public replacement wording still gated on
+the release audit.
 
-The marketing claim shifts from "openpyxl parity for the
-95th-percentile case" (v1.7) to **"full openpyxl replacement,
-period."**
+The marketing goal shifts from "openpyxl parity for the
+95th-percentile case" (v1.7) toward a full replacement claim, but that
+public wording remains gated on the final audit.
 
 ## TL;DR
 
@@ -18,11 +24,10 @@ period."**
   `PivotTable` / `RowField` / `ColumnField` / `DataField` /
   `PageField` / `PivotItem` are real classes with full layout
   pre-computation. Replaces the v0.5+ `_make_stub`.
-- ✅ **`pivotCacheRecords{N}.xml` emit from scratch.** wolfxl is
-  the first Python OOXML library to construct pivot tables with a
-  pre-aggregated records snapshot. Pivots open in Excel,
-  LibreOffice, and openpyxl with data populated — without
-  requiring an Excel-side refresh round-trip.
+- ✅ **`pivotCacheRecords{N}.xml` emit from scratch.** wolfxl
+  constructs pivot tables with a pre-aggregated records snapshot.
+  Pivots open in Excel, LibreOffice, and openpyxl with data
+  populated — without requiring an Excel-side refresh round-trip.
 - ✅ **Pivot-chart linkage** — `chart.pivot_source = pt` on every
   one of the 16 chart families. Emits `<c:pivotSource>` at the
   start of `<c:chart>` and per-series `<c:fmtId val="0"/>` per
@@ -36,12 +41,14 @@ period."**
   `wolfxl.__version__` reports `2.0.0`. PyPI classifier stays
   `Development Status :: 5 - Production/Stable` (promoted in
   v1.7).
-- ✅ **README rewritten** — "Full openpyxl replacement, drop-in
-  compatible, 10×–100× faster."
+- ✅ **README rewritten for the audit** — openpyxl-compatible Excel
+  automation with pivot construction; final benchmark claims are held
+  until the v2.0 ExcelBench refresh lands.
 - ✅ **Migration guide + Compatibility Matrix updated.**
-  "Pivot table construction" flips from ❌ to ✅. wolfxl is the
-  only Python OOXML library that constructs pivot tables with
-  pre-aggregated records.
+  "Pivot table construction" flips from ❌ to ✅. The current
+  comparison identifies wolfxl as the sole Python OOXML library in
+  scope with pivot construction backed by pre-aggregated records;
+  public "first/only" wording remains gated on the final truth pass.
 - ✅ **RFC-046 §13 legacy chart-dict key sunset.** The Rust
   parser's accept-also for `fill_color` / `line_color` /
   `line_dash` / `line_width_emu` (deprecated in v1.7) is
@@ -50,23 +57,17 @@ period."**
 
 ## Three things you can now do
 
-### 1. Construct a pivot in 6 lines
+### 1. Construct a pivot through modify mode
 
 ```python
 import wolfxl
 from wolfxl.chart import Reference
 from wolfxl.pivot import PivotCache, PivotTable
 
-wb = wolfxl.Workbook()
+wb = wolfxl.load_workbook("source-data.xlsx", modify=True)
 ws = wb.active
 
-# Source data
-ws.append(["region", "quarter", "product", "revenue"])
-ws.append(["NA",     "Q1",      "Widget",  100])
-ws.append(["NA",     "Q2",      "Widget",  120])
-ws.append(["EU",     "Q1",      "Widget",   80])
-ws.append(["EU",     "Q2",      "Widget",   95])
-# ... fill source data ...
+# Source data already exists in the loaded workbook.
 
 src = Reference(ws, min_col=1, min_row=1, max_col=4, max_row=100)
 cache = wb.add_pivot_cache(PivotCache(source=src))
@@ -139,12 +140,18 @@ field, and emits two XML parts:
   `<x v="N"/>` indices into SharedItems for shared values and
   inline `<n v=42/>` / `<s v="text"/>` for non-shared.
 
-The records emit is the **Option A** differentiator: no other
-Python OOXML library writes the records snapshot from scratch,
-so Excel / LibreOffice / openpyxl all read the pivot's data
-without an Excel-side refresh. (openpyxl preserves records on
-round-trip but doesn't construct them; XlsxWriter doesn't
-support pivots at all.)
+The records emit is the **Option A** differentiator: in the current
+project comparison, no other Python OOXML library has been identified
+that writes the records snapshot from scratch, so Excel / LibreOffice /
+openpyxl all read the pivot's data without an Excel-side refresh.
+(openpyxl preserves records on round-trip but doesn't construct them;
+XlsxWriter doesn't support pivots at all.) Keep any public "first/only"
+wording gated on the final launch truth pass.
+
+Pivot construction currently runs through modify mode
+(`load_workbook(..., modify=True)`) so the patcher can add the
+workbook-level cache rels, content-type overrides, and sheet-level
+pivot table parts in one save.
 
 The workbook-side splice (`<pivotCaches>` collection in
 `xl/workbook.xml` + a rel of type `pivotCacheDefinition` in
@@ -234,7 +241,8 @@ This RFC has no code; it's the launch-day envelope:
   snippets in HN / Twitter / r/Python / dev.to / GH Discussions
   drafts.
 - `CHANGELOG.md` — v2.0.0 entry replaces the WIP `2.0.0-dev`.
-- README rewrite — "Full openpyxl replacement" headline.
+- README rewrite — openpyxl-compatible positioning with release-claim
+  caveats.
 
 ## Sprint Ν acknowledgements
 
@@ -249,9 +257,9 @@ This RFC has no code; it's the launch-day envelope:
 Sprint Ν used the parallel-pod orchestration that landed v1.6 /
 v1.6.1 / v1.7. Pre-dispatch §10 contracts (RFC-047 §10, RFC-048
 §10, RFC-049 §10) were authored before any pod opened a worktree
-— Sprint Μ-prime lesson #12. Pod-ε scaffolded with `<!-- TBD:
-SHA -->` markers (lesson #3); the integrator finalize commit
-filled them after γ / δ merge.
+— Sprint Μ-prime lesson #12. Pod-ε scaffolded with SHA markers
+(lesson #3); the post-PR #23 audit keeps final branch evidence gated
+until the release truth pass reconciles it.
 
 ## Migration notes
 
@@ -317,51 +325,48 @@ API differences:
 See `docs/migration/openpyxl-migration.md` "Pivot tables (Sprint
 Ν / v2.0)" for the full mapping.
 
-## Out of scope (deferred to v2.1+)
+## Out of scope / partial after post-PR #23 audit
 
-- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`). Separate XML
-  namespace; the slicer-cache-shared-with-pivot-cache wiring is
-  non-trivial. Tracked in v2.1 RFC backlog.
-- **Calculated fields** (`<calculatedField>`). Formula
-  expressions in the pivot's field list. v2.1.
-- **Calculated items** (`<calculatedItem>`). Formula expressions
-  inside row/col fields. v2.1.
-- **GroupItems** (date / range grouping —
-  `<fieldGroup base="N"><rangePr><groupItems/></rangePr></fieldGroup>`).
-  Non-trivial recursion; deferred to v2.1.
+- **Slicers** (`xl/slicers/` + `xl/slicerCaches/`) are now
+  implemented and covered by zip-integrity, copy-worksheet, and
+  openpyxl-load smoke tests. Full manual Excel/LibreOffice visual
+  verification remains a release-readiness task.
+- **Calculated fields** (`<calculatedField>`), **calculated items**
+  (`<calculatedItem>`), and **GroupItems** (`<fieldGroup>`) are now
+  implemented and covered by advanced pivot tests.
 - **OLAP / external pivot caches**. Needs the PowerPivot
   data-model (`xl/model/`). Out of scope permanently.
 - **Pivot-table styling beyond the named-style picker**.
-  Themes, banded formats, conditional formatting on pivots.
-  v2.1.
+  PivotArea formats and pivot-scoped conditional formatting are
+  implemented; broader theme/banded styling is still partial.
 - **In-place pivot edits in modify mode** beyond
   `add_pivot_table`. Editing an existing pivot's source range,
   field ordering, etc. v2.2.
+- **Combination charts** (multi-plot charts on shared axes) remain
+  post-v2.0.
 
 ## Verification
 
 | Surface | Status | Tooling |
 |---|---|---|
-| Rust unit tests | <!-- TBD: BENCHMARK NUMBERS --> tests, all green | `cargo test --workspace --exclude wolfxl` |
-| Python unit tests | <!-- TBD: BENCHMARK NUMBERS --> tests, all green | `pytest tests/` |
-| openpyxl-parity ratchet | <!-- TBD: BENCHMARK NUMBERS --> entries; pivot row flipped to `wolfxl_supported=True` | `pytest tests/parity/` |
-| LibreOffice cross-renderer | Pivot construction fixture renders pivot table + linked chart correctly | `tests/fixtures/pivots/*.xlsx` opened in headless LibreOffice |
-| openpyxl interop | Pivot constructed by wolfxl reads via `openpyxl.load_workbook(...).pivots[0]` | `tests/parity/test_pivot_interop.py` |
+| Rust unit tests | full workspace green in the post-PR #23 audit | `cargo test --workspace` |
+| Python unit tests | 2278 passed, 29 skipped in the post-chart/LibreOffice truth pass | `uv run --no-sync pytest -q` |
+| openpyxl-parity ratchet | 445 passed, 4 skipped in the post-PR #23 parity run | `uv run pytest tests/parity -q -x` |
+| LibreOffice cross-renderer | 47 opt-in smoke tests passed, including copy_worksheet, array formulas, and pivot-chart render smoke | `WOLFXL_RUN_LIBREOFFICE_SMOKE=1 uv run --no-sync pytest ...` |
+| openpyxl interop | Advanced pivot fixtures save cleanly and can be opened by `openpyxl.load_workbook(...)` | `tests/parity/test_advanced_pivots_parity.py` |
+| Advanced pivot/slicer smoke | 96 focused tests passed; a generated advanced pivot+slicer workbook converted through LibreOffice headless to XLSX and PDF without repair/error output | advanced pivot/slicer focused pytest slice + `/opt/homebrew/bin/soffice --headless --convert-to ...` |
+| Local release artifact smoke | macOS arm64 CPython 3.14 wheel builds and installs in a fresh venv; import/build_info, write-mode chart save, and modify-mode pivot construction smoke all pass | `uv run --no-sync maturin build --release --out dist` + fresh-venv smoke |
+| Local ExcelBench smoke | adapter registration restored for WolfXL 2.0 `NativeWorkbook`; smoke-scale perf completed across 19 fixtures; full local fidelity smoke now shows WolfXL and openpyxl at 125/125 read + 125/125 write tests, 18/18 green scored features, and no diagnostics | ExcelBench local `perf` + `benchmark` smoke against `openpyxl` and `wolfxl` |
 | Excel-on-Windows | Manual smoke test on each pivot-fixture file | Excel 365 (latest) and Excel 2021 |
 | Benchmark dashboard | v2.0 numbers refreshed | `WOLFXL_TEST_EPOCH=0 python scripts/bench-all.py --include-pivot --output benchmark-results-v2.0.json` |
 
 ### Benchmark headline (v2.0)
 
-| Workload | openpyxl 3.1.5 | wolfxl 2.0.0 | Speedup |
-|---|---|---|---|
-| Read 100k rows | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Write 100k rows | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Touch 1 cell + save (100k-row workbook) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| `copy_worksheet` (10k-row + table + DV + CF + pivot) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-| Pivot construction (100k source rows, 4-field layout) | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> | <!-- TBD: BENCHMARK NUMBERS --> |
-
-Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
-`python scripts/bench-all.py --include-pivot`.
+Benchmark numbers are intentionally withheld until the v2.0 ExcelBench
+refresh is rerun and checked against the release artifact. The release
+benchmark grid should cover read, write, modify/touch-one-cell,
+`copy_worksheet`, and pivot construction workloads before any public
+speedup claim is restored.
 
 ## Stats (post-2.0.0)
 
@@ -372,8 +377,9 @@ Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
 - `tests/parity/openpyxl_surface.py` — pivot row flipped:
   `wolfxl_supported=True`.
 - `tests/parity/KNOWN_GAPS.md` "Out of scope" section reduced
-  to: slicers, calculated fields, GroupItems, OLAP, pivot
-  styling beyond named-style picker, in-place pivot edits.
+  to: OLAP/external pivots, partial pivot styling, in-place pivot
+  edits, combination charts, chart removal for source-surviving
+  charts, and non-xlsx write/style-accessor limits.
 
 ## Pods that landed 2.0.0
 
@@ -403,8 +409,8 @@ Apple M4 Pro, Python 3.13, median of 3 runs. Reproduce with
 
 ## Next
 
-**v2.1.x** — slicers (RFC backlog), calculated fields,
-calculated items, GroupItems, pivot styling beyond named-style
-picker. The construction-side parity claim ("full openpyxl
-replacement, period.") stands as of v2.0; v2.1 extends the
-pivot envelope rather than closing a gap.
+**Next audit focus** — finish manual Excel/LibreOffice visual
+checks for advanced pivots/slicers, run benchmark replacement for
+the remaining TBD numbers, and decide whether partial pivot styling
+is acceptable for the release claim. No publish/release step should
+run until those gates are complete.

@@ -88,7 +88,11 @@ fn build_fixture() -> (Workbook, u32) {
         WriteCell::new(WriteCellValue::String("styled".to_string())).with_style(style_id),
     );
     // A genuinely blank styled cell to prove blank+style still emits.
-    s1.set_cell(5, 2, WriteCell::new(WriteCellValue::Blank).with_style(style_id));
+    s1.set_cell(
+        5,
+        2,
+        WriteCell::new(WriteCellValue::Blank).with_style(style_id),
+    );
 
     s1.merge(Merge {
         top_row: 1,
@@ -121,6 +125,7 @@ fn build_fixture() -> (Workbook, u32) {
         scope_sheet_index: None,
         builtin: None,
         hidden: false,
+        ..Default::default()
     });
 
     (wb, style_id)
@@ -261,7 +266,10 @@ fn wave2_full_pipeline_roundtrip() {
     // 5. Sheet2 re-uses the "apples" SST index. Parse the string-typed
     //    cell and verify the index maps back to "apples".
     let sheet2 = std::str::from_utf8(&parts["xl/worksheets/sheet2.xml"]).unwrap();
-    let apples_idx = sst.iter().position(|s| s == "apples").expect("apples in SST");
+    let apples_idx = sst
+        .iter()
+        .position(|s| s == "apples")
+        .expect("apples in SST");
     let expected = format!("t=\"s\"><v>{apples_idx}</v>");
     assert!(
         sheet2.contains(&expected),
@@ -397,6 +405,7 @@ fn build_wave3_fixture() -> (Workbook, u32) {
             },
             dxf_id: Some(dxf_id),
             stop_if_true: false,
+            priority: None,
         }],
     });
 
@@ -538,7 +547,9 @@ fn wave3_rich_features_roundtrip() {
         "dxfs must not be empty when CF references one: {dxfs_block}"
     );
     assert!(
-        dxfs_block.contains("<dxf>") && dxfs_block.contains("<font>") && dxfs_block.contains("<b/>"),
+        dxfs_block.contains("<dxf>")
+            && dxfs_block.contains("<font>")
+            && dxfs_block.contains("<b/>"),
         "dxfs block must contain bold-font dxf: {dxfs_block}"
     );
     assert!(

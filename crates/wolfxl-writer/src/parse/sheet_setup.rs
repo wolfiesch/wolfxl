@@ -1,6 +1,6 @@
 //! Pure-Rust serializers for the 5 sheet-setup child elements of
-//! CT_Worksheet — `<sheetView>`, `<sheetProtection>`, `<pageMargins>`,
-//! `<pageSetup>`, `<headerFooter>`. (RFC-055 §3 / §10.)
+//! CT_Worksheet — `<sheetView>`, `<sheetProtection>`, `<printOptions>`,
+//! `<pageMargins>`, `<pageSetup>`, `<headerFooter>`. (RFC-055 §3 / §10.)
 //!
 //! The structs in this module mirror the §10 dict shape produced by
 //! `Worksheet.to_rust_setup_dict()` on the Python side. Each emitter
@@ -31,9 +31,23 @@ pub struct PageSetupSpec {
     pub cell_comments: Option<String>,
     pub errors: Option<String>,
     pub use_first_page_number: Option<bool>,
+    pub paper_height: Option<String>,
+    pub paper_width: Option<String>,
+    pub page_order: Option<String>,
     pub use_printer_defaults: Option<bool>,
     pub black_and_white: Option<bool>,
     pub draft: Option<bool>,
+    pub copies: Option<u32>,
+}
+
+/// `<printOptions>` toggles (CT_PrintOptions, ECMA-376 §18.3.1.70).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrintOptionsSpec {
+    pub horizontal_centered: Option<bool>,
+    pub vertical_centered: Option<bool>,
+    pub headings: Option<bool>,
+    pub grid_lines: Option<bool>,
+    pub grid_lines_set: Option<bool>,
 }
 
 /// `<pageMargins>` (CT_PageMargins, ECMA-376 §18.3.1.49). All values
@@ -275,6 +289,7 @@ pub struct PrintTitlesSpec {
 pub struct SheetSetupBlocks {
     pub sheet_view: Option<SheetViewSpec>,
     pub sheet_protection: Option<SheetProtectionSpec>,
+    pub print_options: Option<PrintOptionsSpec>,
     pub page_margins: Option<PageMarginsSpec>,
     pub page_setup: Option<PageSetupSpec>,
     pub header_footer: Option<HeaderFooterSpec>,
@@ -286,6 +301,7 @@ impl SheetSetupBlocks {
     pub fn is_empty(&self) -> bool {
         self.sheet_view.is_none()
             && self.sheet_protection.is_none()
+            && self.print_options.is_none()
             && self.page_margins.is_none()
             && self.page_setup.is_none()
             && self.header_footer.is_none()
@@ -331,6 +347,29 @@ pub fn emit_page_margins(spec: &PageMarginsSpec) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// Emit `<printOptions .../>`. Returns empty bytes when every attribute
+/// is unspecified.
+pub fn emit_print_options(spec: &PrintOptionsSpec) -> Vec<u8> {
+    let any_set = spec.horizontal_centered.is_some()
+        || spec.vertical_centered.is_some()
+        || spec.headings.is_some()
+        || spec.grid_lines.is_some()
+        || spec.grid_lines_set.is_some();
+    if !any_set {
+        return Vec::new();
+    }
+
+    let mut out = String::with_capacity(96);
+    out.push_str("<printOptions");
+    push_opt_bool(&mut out, "horizontalCentered", spec.horizontal_centered);
+    push_opt_bool(&mut out, "verticalCentered", spec.vertical_centered);
+    push_opt_bool(&mut out, "headings", spec.headings);
+    push_opt_bool(&mut out, "gridLines", spec.grid_lines);
+    push_opt_bool(&mut out, "gridLinesSet", spec.grid_lines_set);
+    out.push_str("/>");
+    out.into_bytes()
+}
+
 /// Emit `<pageSetup .../>`. Returns empty bytes when every attribute
 /// is at its default (`None`) — Excel treats absence as "use defaults".
 pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
@@ -345,9 +384,13 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
         || spec.cell_comments.is_some()
         || spec.errors.is_some()
         || spec.use_first_page_number.is_some()
+        || spec.paper_height.is_some()
+        || spec.paper_width.is_some()
+        || spec.page_order.is_some()
         || spec.use_printer_defaults.is_some()
         || spec.black_and_white.is_some()
-        || spec.draft.is_some();
+        || spec.draft.is_some()
+        || spec.copies.is_some();
     if !any_set {
         return Vec::new();
     }
@@ -373,7 +416,10 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
         push_attr(&mut out, "orientation", s);
     }
     if let Some(b) = spec.use_printer_defaults {
-        out.push_str(&format!(" usePrinterDefaults=\"{}\"", if b { "1" } else { "0" }));
+        out.push_str(&format!(
+            " usePrinterDefaults=\"{}\"",
+            if b { "1" } else { "0" }
+        ));
     }
     if let Some(b) = spec.black_and_white {
         out.push_str(&format!(" blackAndWhite=\"{}\"", if b { "1" } else { "0" }));
@@ -385,7 +431,19 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
         push_attr(&mut out, "cellComments", s);
     }
     if let Some(b) = spec.use_first_page_number {
-        out.push_str(&format!(" useFirstPageNumber=\"{}\"", if b { "1" } else { "0" }));
+        out.push_str(&format!(
+            " useFirstPageNumber=\"{}\"",
+            if b { "1" } else { "0" }
+        ));
+    }
+    if let Some(ref s) = spec.paper_height {
+        push_attr(&mut out, "paperHeight", s);
+    }
+    if let Some(ref s) = spec.paper_width {
+        push_attr(&mut out, "paperWidth", s);
+    }
+    if let Some(ref s) = spec.page_order {
+        push_attr(&mut out, "pageOrder", s);
     }
     if let Some(ref s) = spec.errors {
         push_attr(&mut out, "errors", s);
@@ -396,17 +454,23 @@ pub fn emit_page_setup(spec: &PageSetupSpec) -> Vec<u8> {
     if let Some(n) = spec.vertical_dpi {
         out.push_str(&format!(" verticalDpi=\"{n}\""));
     }
+    if let Some(n) = spec.copies {
+        out.push_str(&format!(" copies=\"{n}\""));
+    }
     out.push_str("/>");
     out.into_bytes()
+}
+
+fn push_opt_bool(out: &mut String, key: &str, value: Option<bool>) {
+    if let Some(b) = value {
+        out.push_str(&format!(" {key}=\"{}\"", if b { "1" } else { "0" }));
+    }
 }
 
 /// Emit `<headerFooter>`. Returns empty bytes when the spec is at
 /// construction defaults (no segments + standard flags).
 pub fn emit_header_footer(spec: &HeaderFooterSpec) -> Vec<u8> {
-    let any_text = spec
-        .odd_header
-        .as_ref()
-        .map_or(false, |i| !i.is_empty())
+    let any_text = spec.odd_header.as_ref().map_or(false, |i| !i.is_empty())
         || spec.odd_footer.as_ref().map_or(false, |i| !i.is_empty())
         || spec.even_header.as_ref().map_or(false, |i| !i.is_empty())
         || spec.even_footer.as_ref().map_or(false, |i| !i.is_empty())

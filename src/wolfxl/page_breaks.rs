@@ -13,9 +13,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use wolfxl_writer::parse::page_breaks::{
-    BreakSpec, PageBreakList, SheetFormatProperties,
-};
+use wolfxl_writer::parse::page_breaks::{BreakSpec, PageBreakList, SheetFormatProperties};
 
 // ---------------------------------------------------------------------------
 // QueuedPageBreaks — the patcher's per-sheet queue entry.
@@ -81,17 +79,13 @@ fn parse_page_break_list(d: &Bound<'_, PyDict>) -> PyResult<PageBreakList> {
     let manual_break_count = extract_u32(d, "manual_break_count")?.unwrap_or(0);
     let breaks: Vec<BreakSpec> = match d.get_item("breaks")? {
         Some(v) if !v.is_none() => {
-            let list = v.downcast::<PyList>().map_err(|_| {
-                PyValueError::new_err(
-                    "queue_page_breaks_update: 'breaks' must be a list or None",
-                )
+            let list = v.cast::<PyList>().map_err(|_| {
+                PyValueError::new_err("queue_page_breaks_update: 'breaks' must be a list or None")
             })?;
             let mut out = Vec::with_capacity(list.len());
             for item in list.iter() {
-                let bd = item.downcast::<PyDict>().map_err(|_| {
-                    PyValueError::new_err(
-                        "queue_page_breaks_update: 'breaks' items must be dicts",
-                    )
+                let bd = item.cast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err("queue_page_breaks_update: 'breaks' items must be dicts")
                 })?;
                 out.push(parse_break(bd)?);
             }
@@ -150,7 +144,7 @@ fn parse_sheet_format(d: &Bound<'_, PyDict>) -> PyResult<SheetFormatProperties> 
 /// ```
 pub fn parse_page_breaks_payload(payload: &Bound<'_, PyDict>) -> PyResult<QueuedPageBreaks> {
     let row_breaks = match payload.get_item("row_breaks")? {
-        Some(v) if !v.is_none() => Some(parse_page_break_list(v.downcast::<PyDict>().map_err(
+        Some(v) if !v.is_none() => Some(parse_page_break_list(v.cast::<PyDict>().map_err(
             |_| {
                 PyValueError::new_err(
                     "queue_page_breaks_update: 'row_breaks' must be a dict or None",
@@ -160,7 +154,7 @@ pub fn parse_page_breaks_payload(payload: &Bound<'_, PyDict>) -> PyResult<Queued
         _ => None,
     };
     let col_breaks = match payload.get_item("col_breaks")? {
-        Some(v) if !v.is_none() => Some(parse_page_break_list(v.downcast::<PyDict>().map_err(
+        Some(v) if !v.is_none() => Some(parse_page_break_list(v.cast::<PyDict>().map_err(
             |_| {
                 PyValueError::new_err(
                     "queue_page_breaks_update: 'col_breaks' must be a dict or None",
@@ -170,13 +164,9 @@ pub fn parse_page_breaks_payload(payload: &Bound<'_, PyDict>) -> PyResult<Queued
         _ => None,
     };
     let sheet_format = match payload.get_item("sheet_format")? {
-        Some(v) if !v.is_none() => Some(parse_sheet_format(v.downcast::<PyDict>().map_err(
-            |_| {
-                PyValueError::new_err(
-                    "queue_page_breaks_update: 'sheet_format' must be a dict or None",
-                )
-            },
-        )?)?),
+        Some(v) if !v.is_none() => Some(parse_sheet_format(v.cast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("queue_page_breaks_update: 'sheet_format' must be a dict or None")
+        })?)?),
         _ => None,
     };
     Ok(QueuedPageBreaks {
