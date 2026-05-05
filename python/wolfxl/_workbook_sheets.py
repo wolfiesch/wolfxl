@@ -46,7 +46,7 @@ def create_sheet(wb: Any, title: str) -> Worksheet:
     """
     if wb._rust_writer is None:  # noqa: SLF001
         raise RuntimeError("create_sheet requires write mode")
-    if title in wb._sheets:  # noqa: SLF001
+    if title in wb._sheets or title in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
         raise ValueError(f"Sheet '{title}' already exists")
     # G20: streaming write-only mode dispatches to a different sheet
     # type — the eager Worksheet is materialisation-heavy, while

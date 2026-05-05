@@ -23,6 +23,7 @@ import os
 from typing import IO
 
 from wolfxl._cell import Cell
+from wolfxl.chartsheet import Chartsheet
 from wolfxl._external_links import ExternalFileLink, ExternalLink
 from wolfxl._rust import __version__, classify_format
 
@@ -44,6 +45,7 @@ __all__ = [
     "Alignment",
     "Border",
     "Cell",
+    "Chartsheet",
     "Color",
     "CopyOptions",
     "ExternalFileLink",

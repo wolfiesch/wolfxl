@@ -262,6 +262,15 @@ ENTRIES: list[Entry] = [
         "notes": "remove/replace shipped in v1.7.",
     },
     {
+        "id": "charts.chartsheet",
+        "category": "charts",
+        "openpyxl": "wb.create_chartsheet(...).add_chart(chart)",
+        "wolfxl": "wb.create_chartsheet(...).add_chart(chart)",
+        "status": "supported",
+        "probe": "charts_chartsheet",
+        "notes": "Write-mode chartsheet authoring emits chartsheet, drawing, chart, rels, and content-type parts that openpyxl reloads as workbook.chartsheets.",
+    },
+    {
         "id": "charts.combination",
         "category": "charts",
         "openpyxl": "bar + line on shared category axis with secondary value axis",

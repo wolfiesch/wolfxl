@@ -581,6 +581,36 @@ def _probe_charts_add_remove_replace(tmp_path: Path) -> None:
     ws.remove_chart(chart)
 
 
+@_register("charts_chartsheet")
+def _probe_charts_chartsheet(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.chart import BarChart, Reference
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [["x", "y"], [1, 10], [2, 20]]:
+        ws.append(row)
+
+    chart = BarChart()
+    chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=3), titles_from_data=True)
+    chart.set_categories(Reference(ws, min_col=1, min_row=2, max_row=3))
+    cs = wb.create_chartsheet("ChartOnly")
+    cs.add_chart(chart)
+    out = tmp_path / "chartsheet.xlsx"
+    wb.save(out)
+
+    op = _opx.load_workbook(out)
+    assert op.sheetnames == ["Sheet", "ChartOnly"]
+    assert len(op.chartsheets) == 1
+    assert op.chartsheets[0].title == "ChartOnly"
+    with zipfile.ZipFile(out) as zf:
+        assert "xl/chartsheets/sheet1.xml" in zf.namelist()
+        assert "/relationships/chartsheet" in zf.read(
+            "xl/_rels/workbook.xml.rels"
+        ).decode()
+
+
 @_register("charts_combination")
 def _probe_charts_combination(tmp_path: Path) -> None:
     import openpyxl as _opx

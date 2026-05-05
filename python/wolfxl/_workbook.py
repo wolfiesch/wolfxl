@@ -274,13 +274,14 @@ class Workbook:
     @property
     def worksheets(self) -> list[Worksheet]:
         """List of Worksheet objects in sheet order — openpyxl alias."""
-        return [self._sheets[name] for name in self._sheet_names]
+        return [self._sheets[name] for name in self._sheet_names if name in self._sheets]
 
     @property
     def active(self) -> Worksheet | None:
         """Return the first sheet, or None if no sheets exist."""
-        if self._sheet_names:
-            return self._sheets[self._sheet_names[0]]
+        for name in self._sheet_names:
+            if name in self._sheets:
+                return self._sheets[name]
         return None
 
     @property
@@ -387,10 +388,11 @@ class Workbook:
     def chartsheets(self) -> list[Any]:
         """Return chart sheets in this workbook.
 
-        WolfXL preserves chart sheets when possible, but does not expose
-        Python chart-sheet objects through this compatibility property yet.
+        Write/modify-mode chartsheets created through
+        :meth:`create_chartsheet` are returned in tab order.
         """
-        return []
+        chartsheets = getattr(self, "_chartsheets", {})
+        return [chartsheets[name] for name in self._sheet_names if name in chartsheets]
 
     @property
     def epoch(self) -> Any:
@@ -543,14 +545,17 @@ class Workbook:
         return self._persons_registry
 
     def __getitem__(self, name: str) -> Worksheet:
-        """Return a worksheet by title."""
-        if name not in self._sheets:
-            raise KeyError(f"Worksheet '{name}' does not exist")
-        return self._sheets[name]
+        """Return a worksheet or chartsheet by title."""
+        if name in self._sheets:
+            return self._sheets[name]
+        chartsheets = getattr(self, "_chartsheets", {})
+        if name in chartsheets:
+            return chartsheets[name]
+        raise KeyError(f"Worksheet '{name}' does not exist")
 
     def __contains__(self, name: str) -> bool:
         """Return whether the workbook contains a sheet named ``name``."""
-        return name in self._sheets
+        return name in self._sheets or name in getattr(self, "_chartsheets", {})
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         """Iterate worksheet titles in tab order."""
@@ -686,12 +691,10 @@ class Workbook:
         )
 
     def create_chartsheet(self, title: str | None = None, index: int | None = None) -> Any:
-        """Raise clearly for chart-sheet creation, which WolfXL does not write yet."""
-        raise NotImplementedError(
-            "Workbook.create_chartsheet is not yet supported by wolfxl. "
-            "Existing chartsheets are preserved where possible, but creating "
-            "new chart-sheet parts requires chart-sheet writer support."
-        )
+        """Create a chartsheet tab."""
+        from wolfxl import _chartsheets
+
+        return _chartsheets.create_chartsheet(self, title=title, index=index)
 
     @property
     def workbook_properties(self) -> Any:
@@ -946,9 +949,8 @@ class Workbook:
         :class:`wolfxl.drawing.image.Image` is converted to the flat
         dict shape and routed to ``XlsxPatcher.queue_image_add``.
 
-        Sheets that already have a drawing rel will surface
-        ``NotImplementedError`` from the patcher at save time —
-        appending to an existing drawing is a v1.5 follow-up.
+        Sheets that already have a drawing rel are merged into the existing
+        drawing part so images and charts can share one drawing.
         """
         _workbook_patcher_flush.flush_pending_images_to_patcher(self)
 

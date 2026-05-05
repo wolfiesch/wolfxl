@@ -137,10 +137,15 @@ def _initialize_sheet_proxies(wb: Any, rust_book: Any) -> None:
     names = [str(n) for n in rust_book.sheet_names()]
     wb._sheet_names = names
     wb._sheets = {name: Worksheet(wb, name) for name in names}
+    wb._chartsheets = {}
+    wb._chartsheets_dirty = False
 
 
 def initialize_pending_state(wb: Any) -> None:
     """Initialize workbook caches and pending mutation queues."""
+    if not hasattr(wb, "_chartsheets"):
+        wb._chartsheets = {}
+    wb._chartsheets_dirty = bool(getattr(wb, "_chartsheets_dirty", False))
     wb._properties_cache = None
     wb._custom_doc_props_cache = None
     wb._properties_dirty = False

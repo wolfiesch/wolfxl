@@ -395,7 +395,8 @@ def test_parity_image_aliasing_wolf_aliases_op_deep_copies(tmp_path: Path) -> No
     except (ImportError, Exception) as exc:  # pragma: no cover
         pytest.skip(f"image fixture build failed (likely missing pillow): {exc}")
 
-    # wolfxl path — may not yet support image-bearing copy fully.
+    # wolfxl path — image-bearing copy is supported; this guard turns any
+    # regression into a clear historical-ledger pointer.
     wb_w = load_workbook(src, modify=True)
     try:
         wb_w.copy_worksheet(wb_w.active)
@@ -403,8 +404,8 @@ def test_parity_image_aliasing_wolf_aliases_op_deep_copies(tmp_path: Path) -> No
     except Exception as exc:  # pragma: no cover
         pytest.xfail(
             f"wolfxl image-bearing copy_worksheet failed: "
-            f"{type(exc).__name__}: {exc}. Documented as a "
-            "follow-up at KNOWN_GAPS.md."
+            f"{type(exc).__name__}: {exc}. See the historical copy_worksheet "
+            "notes in KNOWN_GAPS.md."
         )
 
     # openpyxl path
@@ -424,7 +425,7 @@ def test_parity_image_aliasing_wolf_aliases_op_deep_copies(tmp_path: Path) -> No
         pytest.xfail(
             f"wolfxl emitted {len(wolf_media)} media entries — "
             "RFC-035 §5.3 aliasing contract expects 1. "
-            "Tracked at KNOWN_GAPS.md as a future follow-up."
+            "See the historical copy_worksheet notes in KNOWN_GAPS.md."
         )
     assert len(wolf_media) == 1, (
         f"wolfxl should alias image media (one entry expected); "

@@ -80,10 +80,14 @@ def test_add_named_style_persists_name_on_save(tmp_path: Path) -> None:
     assert rt.style_names == ["Normal", "Metric"]
 
 
-def test_create_chartsheet_raises_clear_error() -> None:
+def test_create_chartsheet_returns_chartsheet() -> None:
     wb = wolfxl.Workbook()
-    with pytest.raises(NotImplementedError, match="create_chartsheet"):
-        wb.create_chartsheet("Chart")
+    cs = wb.create_chartsheet("Chart")
+    assert cs.title == "Chart"
+    assert wb["Chart"] is cs
+    assert wb.chartsheets == [cs]
+    assert wb.sheetnames == ["Sheet", "Chart"]
+    assert wb.worksheets == [wb["Sheet"]]
 
 
 def test_read_only_false_for_write_mode() -> None:

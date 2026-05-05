@@ -78,6 +78,7 @@ def save_write_only_mode(wb: Any, filename: str) -> None:
     wb._flush_workbook_writes()  # noqa: SLF001
     wb._rust_writer.finalize_streaming_sheets()  # noqa: SLF001
     wb._rust_writer.save(filename)  # noqa: SLF001
+    flush_chartsheets_authoring(wb, filename)
 
 
 def save_modify_mode(wb: Any, filename: str) -> None:
@@ -146,6 +147,7 @@ def save_modify_mode(wb: Any, filename: str) -> None:
         wb._rust_patcher.save(filename)  # noqa: SLF001
     flush_pivot_layout_authoring(wb, filename)
     flush_external_links_authoring(wb, filename)
+    flush_chartsheets_authoring(wb, filename)
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
@@ -167,10 +169,12 @@ def save_write_mode(wb: Any, filename: str) -> None:
             ws._flush()  # noqa: SLF001
         wb._rust_writer.save(filename)  # noqa: SLF001
         flush_external_links_authoring(wb, filename)
+        flush_chartsheets_authoring(wb, filename)
         return
 
     _save_write_mode_with_pivots(wb, filename)
     flush_external_links_authoring(wb, filename)
+    flush_chartsheets_authoring(wb, filename)
 
 
 def flush_external_links_authoring(wb: Any, filename: str) -> None:
@@ -180,6 +184,14 @@ def flush_external_links_authoring(wb: Any, filename: str) -> None:
     from wolfxl import _external_links as _el
 
     _el.apply_authoring_to_xlsx(filename, links)
+
+
+def flush_chartsheets_authoring(wb: Any, filename: str) -> None:
+    if not getattr(wb, "_chartsheets", None):
+        return
+    from wolfxl import _chartsheets
+
+    _chartsheets.apply_chartsheets_to_xlsx(filename, wb)
 
 
 def flush_pivot_layout_authoring(wb: Any, filename: str) -> None:
