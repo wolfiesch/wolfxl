@@ -52,6 +52,24 @@ def test_create_chartsheet_with_chart_round_trips_through_openpyxl(tmp_path: Pat
         assert "/xl/chartsheets/sheet1.xml" in content_types
 
 
+def test_eager_chartsheet_survives_second_save(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+
+    wb, chart = _workbook_with_chart()
+    cs = wb.create_chartsheet("Sales Chart")
+    cs.add_chart(chart)
+    first = tmp_path / "first.xlsx"
+    second = tmp_path / "second.xlsx"
+    wb.save(first)
+    wb.active["C1"] = "resaved"
+    wb.save(second)
+
+    op = openpyxl.load_workbook(second)
+    assert op.sheetnames == ["Sheet", "Sales Chart"]
+    assert [cs.title for cs in op.chartsheets] == ["Sales Chart"]
+    assert len(op.chartsheets[0]._charts) == 1  # noqa: SLF001
+
+
 def test_create_chartsheet_in_modify_mode_round_trips(tmp_path: Path) -> None:
     openpyxl = pytest.importorskip("openpyxl")
 
@@ -114,3 +132,52 @@ def test_empty_chartsheet_saves_like_openpyxl(tmp_path: Path) -> None:
         assert "xl/chartsheets/_rels/sheet1.xml.rels" in names
         rels = z.read("xl/chartsheets/_rels/sheet1.xml.rels").decode()
         assert "<Relationship " not in rels
+
+
+def test_openpyxl_authored_chartsheet_loads_as_chartsheet(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+
+    src = tmp_path / "openpyxl_chartsheet.xlsx"
+    op = openpyxl.Workbook()
+    ws = op.active
+    ws.append(["month", "sales"])
+    ws.append(["Jan", 10])
+    ws.append(["Feb", 20])
+    chart = openpyxl.chart.BarChart()
+    chart.add_data(openpyxl.chart.Reference(ws, min_col=2, min_row=1, max_row=3))
+    cs = op.create_chartsheet("ChartOnly")
+    cs.add_chart(chart)
+    op.save(src)
+
+    wb = wolfxl.load_workbook(src)
+    assert wb.sheetnames == ["Sheet", "ChartOnly"]
+    assert [ws.title for ws in wb.worksheets] == ["Sheet"]
+    assert [cs.title for cs in wb.chartsheets] == ["ChartOnly"]
+    assert wb["ChartOnly"] is wb.chartsheets[0]
+    assert len(wb.chartsheets[0]._charts) == 1  # noqa: SLF001
+
+
+def test_openpyxl_authored_chartsheet_is_preserved_on_modify_save(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+
+    src = tmp_path / "source.xlsx"
+    op = openpyxl.Workbook()
+    ws = op.active
+    ws.append(["month", "sales"])
+    ws.append(["Jan", 10])
+    ws.append(["Feb", 20])
+    chart = openpyxl.chart.BarChart()
+    chart.add_data(openpyxl.chart.Reference(ws, min_col=2, min_row=1, max_row=3))
+    cs = op.create_chartsheet("ChartOnly")
+    cs.add_chart(chart)
+    op.save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb["Sheet"]["C1"] = "edited"
+    out = tmp_path / "modified.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded["Sheet"]["C1"].value == "edited"
+    assert [cs.title for cs in reloaded.chartsheets] == ["ChartOnly"]
+    assert len(reloaded.chartsheets[0]._charts) == 1  # noqa: SLF001

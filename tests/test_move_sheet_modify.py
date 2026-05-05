@@ -129,6 +129,41 @@ def test_rfc036_write_mode_move_sheet_persists_on_save(tmp_path: Path) -> None:
     assert rt["C"]["A1"].value == "charlie"
 
 
+def test_modify_mode_worksheet_rename_persists_on_save(tmp_path: Path) -> None:
+    """Renaming a loaded worksheet must update workbook.xml like openpyxl."""
+    src = tmp_path / "rename_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    wb["First"].title = "Renamed"
+    out = tmp_path / "renamed.xlsx"
+    wb.save(out)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["Renamed", "Second"]
+    assert reloaded["Renamed"]["A1"].value == "first"
+
+
+def test_modify_mode_rename_then_edit_uses_new_title(tmp_path: Path) -> None:
+    """Queued mutations after rename should target the renamed worksheet."""
+    src = tmp_path / "rename_edit_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    ws = wb["First"]
+    ws.title = "Renamed"
+    ws["B1"] = "after"
+    out = tmp_path / "renamed_edited.xlsx"
+    wb.save(out)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["Renamed", "Second"]
+    assert reloaded["Renamed"]["A1"].value == "first"
+    assert reloaded["Renamed"]["B1"].value == "after"
+
+
 def test_rfc036_move_sheet_accepts_worksheet_instance() -> None:
     wb = Workbook()
     wb.create_sheet("Second")

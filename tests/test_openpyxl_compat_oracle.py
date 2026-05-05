@@ -177,6 +177,7 @@ def _probe_workbook_load_read_only(tmp_path: Path) -> None:
 
 @_register("workbook_save_basic")
 def _probe_workbook_save_basic(tmp_path: Path) -> None:
+    import openpyxl
     import wolfxl
 
     wb = wolfxl.Workbook()
@@ -184,6 +185,12 @@ def _probe_workbook_save_basic(tmp_path: Path) -> None:
     out = tmp_path / "save_basic.xlsx"
     wb.save(out)
     assert out.exists() and out.stat().st_size > 0
+    wb.active["B1"] = 84
+    second = tmp_path / "save_basic_again.xlsx"
+    wb.save(second)
+    reloaded = openpyxl.load_workbook(second)
+    assert reloaded.active["A1"].value == 42
+    assert reloaded.active["B1"].value == 84
 
 
 @_register("workbook_sheet_access")
@@ -206,6 +213,30 @@ def _probe_workbook_create_sheet(tmp_path: Path) -> None:
     ws = wb.create_sheet(title="Extra")
     assert "Extra" in wb.sheetnames
     assert wb["Extra"] is ws
+
+
+@_register("workbook_rename_sheet_modify")
+def _probe_workbook_rename_sheet_modify(tmp_path: Path) -> None:
+    import openpyxl
+    import wolfxl
+
+    src = tmp_path / "rename_modify.xlsx"
+    seed = openpyxl.Workbook()
+    seed.active.title = "Old"
+    seed.active["A1"] = "before"
+    seed.save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Old"]
+    ws.title = "New"
+    ws["B1"] = "after"
+    wb.save(src)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(src)
+    assert reloaded.sheetnames == ["New"]
+    assert reloaded["New"]["A1"].value == "before"
+    assert reloaded["New"]["B1"].value == "after"
 
 
 @_register("workbook_copy_worksheet")
@@ -604,6 +635,14 @@ def _probe_charts_chartsheet(tmp_path: Path) -> None:
     assert op.sheetnames == ["Sheet", "ChartOnly"]
     assert len(op.chartsheets) == 1
     assert op.chartsheets[0].title == "ChartOnly"
+
+    opened = wolfxl.load_workbook(out)
+    assert opened.sheetnames == ["Sheet", "ChartOnly"]
+    assert [ws.title for ws in opened.worksheets] == ["Sheet"]
+    assert [cs.title for cs in opened.chartsheets] == ["ChartOnly"]
+    assert opened["ChartOnly"] is opened.chartsheets[0]
+    assert len(opened.chartsheets[0]._charts) == 1  # noqa: SLF001
+
     with zipfile.ZipFile(out) as zf:
         assert "xl/chartsheets/sheet1.xml" in zf.namelist()
         assert "/relationships/chartsheet" in zf.read(

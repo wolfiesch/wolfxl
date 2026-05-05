@@ -30,8 +30,9 @@
 
 use std::collections::BTreeMap;
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
+use quick_xml::Writer as XmlWriter;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -144,6 +145,77 @@ pub fn merge_sheet_moves(
         workbook_xml: final_bytes,
         new_order,
     })
+}
+
+/// Rename `<sheet name="...">` attributes in `xl/workbook.xml`.
+///
+/// Used by modify mode when a loaded worksheet's `.title` is changed. The
+/// patcher updates its in-memory sheet maps eagerly, while this function makes
+/// the workbook tab name mutation durable in the saved OOXML.
+pub fn merge_sheet_renames(
+    workbook_xml: &[u8],
+    renames: &[(String, String)],
+) -> Result<Vec<u8>, String> {
+    if renames.is_empty() {
+        return Ok(workbook_xml.to_vec());
+    }
+    let rename_map: BTreeMap<&str, &str> = renames
+        .iter()
+        .map(|(old, new)| (old.as_str(), new.as_str()))
+        .collect();
+
+    let mut reader = XmlReader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(workbook_xml.len()));
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"sheet" => {
+                let renamed = rename_sheet_event(&e, &rename_map)?;
+                writer
+                    .write_event(Event::Start(renamed))
+                    .map_err(|e| format!("workbook.xml write error: {e}"))?;
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"sheet" => {
+                let renamed = rename_sheet_event(&e, &rename_map)?;
+                writer
+                    .write_event(Event::Empty(renamed))
+                    .map_err(|e| format!("workbook.xml write error: {e}"))?;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer
+                .write_event(event)
+                .map_err(|e| format!("workbook.xml write error: {e}"))?,
+            Err(e) => return Err(format!("workbook.xml parse error: {e}")),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn rename_sheet_event(
+    event: &BytesStart<'_>,
+    rename_map: &BTreeMap<&str, &str>,
+) -> Result<BytesStart<'static>, String> {
+    let mut out = BytesStart::new(String::from_utf8_lossy(event.name().as_ref()).into_owned());
+    for attr in event.attributes().with_checks(false) {
+        let attr = attr.map_err(|e| format!("workbook.xml sheet attr error: {e}"))?;
+        if attr.key.as_ref() == b"name" {
+            let value = attr
+                .unescape_value()
+                .map_err(|e| format!("workbook.xml sheet name decode error: {e}"))?;
+            if let Some(new_name) = rename_map.get(value.as_ref()) {
+                out.push_attribute(("name", *new_name));
+            } else {
+                out.push_attribute(("name", value.as_ref()));
+            }
+        } else {
+            out.push_attribute(attr);
+        }
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

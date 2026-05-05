@@ -202,8 +202,12 @@ class Worksheet:
         old = self._title
         if old == value:
             return
-        if value in wb._sheets:  # noqa: SLF001
+        if value in wb._sheets or value in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
             raise ValueError(f"Sheet '{value}' already exists")
+        if wb._rust_patcher is not None:  # noqa: SLF001
+            queue_rename = getattr(wb._rust_patcher, "queue_sheet_rename", None)  # noqa: SLF001
+            if queue_rename is not None:
+                queue_rename(old, value)
         # Update workbook bookkeeping.
         idx = wb._sheet_names.index(old)  # noqa: SLF001
         wb._sheet_names[idx] = value  # noqa: SLF001

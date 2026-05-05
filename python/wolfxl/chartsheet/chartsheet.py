@@ -32,6 +32,7 @@ class Chartsheet:
         self.sheet_properties = ChartsheetProperties()
         self.protection = ChartsheetProtection()
         self._charts: list[Any] = []
+        self._source_chartsheet = False
 
     def add_chart(self, chart: Any) -> None:
         """Attach ``chart`` to this chartsheet."""

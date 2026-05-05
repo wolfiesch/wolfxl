@@ -129,6 +129,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "wb.save(path)",
         "status": "supported",
         "probe": "workbook_save_basic",
+        "notes": "Eager workbooks can be edited and saved repeatedly; write_only=True remains consumed-on-save like openpyxl.",
     },
     {
         "id": "workbook.sheet_access",
@@ -145,6 +146,15 @@ ENTRIES: list[Entry] = [
         "wolfxl": "wb.create_sheet(title)",
         "status": "supported",
         "probe": "workbook_create_sheet",
+    },
+    {
+        "id": "workbook.rename_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "ws.title = 'Renamed' on loaded workbook",
+        "wolfxl": "ws.title = 'Renamed' on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_rename_sheet_modify",
+        "notes": "Modify-mode sheet title changes update workbook.xml and subsequent queued sheet mutations target the renamed tab.",
     },
     {
         "id": "workbook.copy_worksheet",
@@ -268,7 +278,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "wb.create_chartsheet(...).add_chart(chart)",
         "status": "supported",
         "probe": "charts_chartsheet",
-        "notes": "Write-mode chartsheet authoring emits chartsheet, drawing, chart, rels, and content-type parts that openpyxl reloads as workbook.chartsheets.",
+        "notes": "Chartsheet authoring emits chartsheet, drawing, chart, rels, and content-type parts that openpyxl reloads; existing chartsheet tabs load back as workbook.chartsheets rather than worksheets.",
     },
     {
         "id": "charts.combination",

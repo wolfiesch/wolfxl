@@ -352,7 +352,8 @@ pub(super) fn apply_document_properties_phase(
 }
 
 // These phases all mutate xl/workbook.xml, so keep the in-progress bytes flowing
-// security -> sheet order -> defined names before publishing the final patch.
+// security -> sheet renames -> sheet order -> defined names before publishing
+// the final patch.
 pub(super) fn apply_workbook_xml_phases(
     patcher: &mut XlsxPatcher,
     file_patches: &mut HashMap<String, Vec<u8>>,
@@ -370,6 +371,19 @@ pub(super) fn apply_workbook_xml_phases(
                 .map_err(|e| PyIOError::new_err(format!("workbook-security merge: {e}")))?;
             workbook_xml_in_progress = Some(updated);
         }
+    }
+
+    if !patcher.queued_sheet_renames.is_empty() {
+        let wb_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+            Some(b) => b,
+            None => match file_patches.get("xl/workbook.xml") {
+                Some(b) => b.clone(),
+                None => ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes(),
+            },
+        };
+        let updated = sheet_order::merge_sheet_renames(&wb_bytes, &patcher.queued_sheet_renames)
+            .map_err(|e| PyIOError::new_err(format!("sheet-rename merge: {e}")))?;
+        workbook_xml_in_progress = Some(updated);
     }
 
     if !patcher.queued_sheet_moves.is_empty() {
@@ -420,6 +434,7 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
         || !patcher.queued_defined_names.is_empty()
         || !patcher.queued_tables.is_empty()
         || !patcher.queued_comments.is_empty()
+        || !patcher.queued_sheet_renames.is_empty()
         || !patcher.queued_sheet_moves.is_empty()
         || !patcher.queued_axis_shifts.is_empty()
         || !patcher.queued_range_moves.is_empty()

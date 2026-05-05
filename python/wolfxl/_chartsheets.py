@@ -44,6 +44,7 @@ def create_chartsheet(wb: Any, title: str | None = None, index: int | None = Non
     base = title or "Chart"
     final = _unique_title(wb, base)
     cs = Chartsheet(wb, final)
+    cs._source_chartsheet = False
     wb._chartsheets[final] = cs  # noqa: SLF001
     if index is None:
         wb._sheet_names.append(final)  # noqa: SLF001
@@ -55,7 +56,12 @@ def create_chartsheet(wb: Any, title: str | None = None, index: int | None = Non
 
 def apply_chartsheets_to_xlsx(path: str, wb: Any) -> None:
     """Rewrite ``path`` to include any authored chartsheets."""
-    chartsheets = [wb._chartsheets[name] for name in wb._sheet_names if name in wb._chartsheets]  # noqa: SLF001
+    chartsheets = [
+        wb._chartsheets[name]  # noqa: SLF001
+        for name in wb._sheet_names  # noqa: SLF001
+        if name in wb._chartsheets  # noqa: SLF001
+        and not getattr(wb._chartsheets[name], "_source_chartsheet", False)  # noqa: SLF001
+    ]
     if not chartsheets:
         return
 
@@ -170,7 +176,7 @@ def _rewrite_workbook_parts(
     existing_by_name = {
         sheet.attrib.get("name"): sheet
         for sheet in list(sheets_el)
-        if sheet.attrib.get("name") not in wb._chartsheets  # noqa: SLF001
+        if sheet.attrib.get("name") not in {cs.title for cs in chartsheets}
     }
     existing_rel_ids = [
         rel.attrib.get("Id", "")

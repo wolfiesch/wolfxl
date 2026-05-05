@@ -187,7 +187,10 @@ def flush_external_links_authoring(wb: Any, filename: str) -> None:
 
 
 def flush_chartsheets_authoring(wb: Any, filename: str) -> None:
-    if not getattr(wb, "_chartsheets", None):
+    chartsheets = getattr(wb, "_chartsheets", None)
+    if not chartsheets or not any(
+        not getattr(cs, "_source_chartsheet", False) for cs in chartsheets.values()
+    ):
         return
     from wolfxl import _chartsheets
 

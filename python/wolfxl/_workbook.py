@@ -74,7 +74,7 @@ class Workbook:
         # G20: streaming write-only mode. When set, create_sheet returns
         # WriteOnlyWorksheet instances and the default sheet is skipped.
         self._write_only: bool = bool(write_only)
-        # Re-entry guard for openpyxl-shape consumed-on-save semantic.
+        # Re-entry guard for openpyxl-shape write-only consumed-on-save semantic.
         self._saved: bool = False
         if self._write_only:
             self._sheet_names: list[str] = []

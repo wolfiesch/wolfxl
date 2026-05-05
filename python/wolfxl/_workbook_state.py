@@ -134,11 +134,56 @@ def build_xlsb_xls_wb(
 
 def _initialize_sheet_proxies(wb: Any, rust_book: Any) -> None:
     """Attach worksheet proxies from a Rust reader's tab list."""
+    from wolfxl.chartsheet import Chartsheet
+
     names = [str(n) for n in rust_book.sheet_names()]
+    chartsheet_names = set(_read_chartsheet_names(rust_book))
     wb._sheet_names = names
-    wb._sheets = {name: Worksheet(wb, name) for name in names}
+    wb._sheets = {name: Worksheet(wb, name) for name in names if name not in chartsheet_names}
     wb._chartsheets = {}
+    for name in names:
+        if name in chartsheet_names:
+            cs = Chartsheet(wb, name)
+            cs._source_chartsheet = True
+            read_state = getattr(rust_book, "read_sheet_state", None)
+            if read_state is not None:
+                try:
+                    cs.sheet_state = read_state(name)
+                except Exception:
+                    pass
+            cs._charts = _read_chartsheet_charts(rust_book, name)
+            wb._chartsheets[name] = cs
     wb._chartsheets_dirty = False
+
+
+def _read_chartsheet_names(rust_book: Any) -> list[str]:
+    reader = getattr(rust_book, "chartsheet_names", None)
+    if reader is None:
+        return []
+    try:
+        return [str(n) for n in reader()]
+    except Exception:
+        return []
+
+
+def _read_chartsheet_charts(rust_book: Any, name: str) -> list[Any]:
+    reader = getattr(rust_book, "read_chartsheet_charts", None)
+    if reader is None:
+        return []
+    try:
+        payloads = reader(name)
+    except Exception:
+        return []
+
+    from wolfxl._worksheet_media import _chart_from_payload
+
+    charts = []
+    for payload in payloads:
+        if isinstance(payload, dict):
+            chart = _chart_from_payload(payload)
+            if chart is not None:
+                charts.append(chart)
+    return charts
 
 
 def initialize_pending_state(wb: Any) -> None:

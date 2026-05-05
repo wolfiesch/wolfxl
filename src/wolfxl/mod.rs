@@ -244,6 +244,10 @@ pub struct XlsxPatcher {
     /// workbook.xml whose tab indices already reflect the move.
     /// Empty queue → no `xl/workbook.xml` touch.
     queued_sheet_moves: Vec<(String, i32)>,
+    /// Sheet-title rename operations pending flush. Queueing a rename also
+    /// updates `sheet_paths` and `sheet_order` immediately so subsequent
+    /// sheet-scoped mutations can use the new openpyxl-visible title.
+    queued_sheet_renames: Vec<(String, String)>,
     /// Per-workbook structural-shift queue (RFC-030 / RFC-031). Each
     /// entry is `(sheet, axis, idx, n)` where `axis` is "row" or "col"
     /// and `n` is signed (positive = insert, negative = delete).
@@ -352,6 +356,29 @@ pub struct XlsxPatcher {
     /// 2.5p (after Phase 2.5n sheet-setup, before Phase 2.5o
     /// autoFilter).
     queued_slicers: Vec<pivot_slicer::QueuedSlicer>,
+}
+
+fn rename_hash_key<T>(map: &mut HashMap<String, T>, old_name: &str, new_name: &str) {
+    if let Some(value) = map.remove(old_name) {
+        map.insert(new_name.to_string(), value);
+    }
+}
+
+fn rename_tuple_sheet_keys<T>(
+    map: &mut HashMap<(String, String), T>,
+    old_name: &str,
+    new_name: &str,
+) {
+    let keys: Vec<(String, String)> = map
+        .keys()
+        .filter(|(sheet, _)| sheet == old_name)
+        .cloned()
+        .collect();
+    for old_key in keys {
+        if let Some(value) = map.remove(&old_key) {
+            map.insert((new_name.to_string(), old_key.1), value);
+        }
+    }
 }
 
 #[pymethods]
@@ -503,6 +530,7 @@ impl XlsxPatcher {
             queued_threaded_comments: HashMap::new(),
             queued_persons: Vec::new(),
             queued_sheet_moves: Vec::new(),
+            queued_sheet_renames: Vec::new(),
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
             queued_sheet_copies: Vec::new(),
@@ -1099,6 +1127,62 @@ impl XlsxPatcher {
     /// the defined-names merger runs.
     fn queue_sheet_move(&mut self, sheet: &str, offset: i32) -> PyResult<()> {
         self.queued_sheet_moves.push((sheet.to_string(), offset));
+        Ok(())
+    }
+
+    /// Queue a sheet-title rename for modify mode.
+    ///
+    /// The in-memory maps are updated immediately so any later queued
+    /// sheet-scoped mutations can address the worksheet by its new title.
+    /// `xl/workbook.xml` is rewritten during the workbook XML phase.
+    fn queue_sheet_rename(&mut self, old_name: &str, new_name: &str) -> PyResult<()> {
+        if old_name == new_name {
+            return Ok(());
+        }
+        if new_name.is_empty() {
+            return Err(PyValueError::new_err(
+                "queue_sheet_rename: new sheet title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(new_name) {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_rename: destination sheet '{new_name}' already exists"
+            )));
+        }
+        let Some(path) = self.sheet_paths.remove(old_name) else {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_rename: source sheet '{old_name}' not found in workbook"
+            )));
+        };
+        self.sheet_paths.insert(new_name.to_string(), path);
+        for name in &mut self.sheet_order {
+            if name == old_name {
+                *name = new_name.to_string();
+            }
+        }
+        for (sheet, _) in &mut self.queued_sheet_moves {
+            if sheet == old_name {
+                *sheet = new_name.to_string();
+            }
+        }
+        rename_tuple_sheet_keys(&mut self.value_patches, old_name, new_name);
+        rename_tuple_sheet_keys(&mut self.format_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_dv_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_cf_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_content_type_ops, old_name, new_name);
+        rename_hash_key(&mut self.queued_hyperlinks, old_name, new_name);
+        rename_hash_key(&mut self.queued_tables, old_name, new_name);
+        rename_hash_key(&mut self.queued_comments, old_name, new_name);
+        rename_hash_key(&mut self.queued_threaded_comments, old_name, new_name);
+        rename_hash_key(&mut self.queued_images, old_name, new_name);
+        rename_hash_key(&mut self.queued_image_removes, old_name, new_name);
+        rename_hash_key(&mut self.queued_charts, old_name, new_name);
+        rename_hash_key(&mut self.queued_pivot_tables, old_name, new_name);
+        rename_hash_key(&mut self.queued_autofilters, old_name, new_name);
+        rename_hash_key(&mut self.queued_sheet_setup, old_name, new_name);
+        rename_hash_key(&mut self.queued_page_breaks, old_name, new_name);
+        self.queued_sheet_renames
+            .push((old_name.to_string(), new_name.to_string()));
         Ok(())
     }
 

@@ -56,7 +56,7 @@ use crate::native_writer_sheet_state::{
 use crate::native_writer_streaming::{
     append_streaming_row, enable_streaming, finalize_all_streaming,
 };
-use crate::native_writer_workbook::{add_sheet_if_missing, move_sheet, rename_sheet, save_once};
+use crate::native_writer_workbook::{add_sheet_if_missing, move_sheet, rename_sheet};
 use crate::native_writer_workbook_metadata::{
     dict_to_defined_name, dict_to_doc_properties, dict_to_workbook_security,
 };
@@ -68,7 +68,6 @@ use crate::native_writer_workbook_metadata::{
 #[pyclass(unsendable)]
 pub struct NativeWorkbook {
     inner: Workbook,
-    saved: bool,
 }
 
 fn require_sheet<'wb>(wb: &'wb mut Workbook, name: &str) -> PyResult<&'wb mut Worksheet> {
@@ -86,7 +85,6 @@ impl NativeWorkbook {
     pub fn new() -> Self {
         Self {
             inner: Workbook::new(),
-            saved: false,
         }
     }
 
@@ -229,7 +227,7 @@ impl NativeWorkbook {
     }
 
     pub fn save(&mut self, path: &str) -> PyResult<()> {
-        save_once(&mut self.inner, &mut self.saved, path)
+        crate::native_writer_workbook::save(&mut self.inner, path)
     }
 
     // =========================================================================
