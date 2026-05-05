@@ -110,6 +110,7 @@ from wolfxl._worksheet_write_buffers import (
     materialize_bulk_writes,
     write_rows as _write_rows,
 )
+from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -395,7 +396,32 @@ class Worksheet:
     @property
     def array_formulae(self) -> dict[str, str]:
         """Return array formula ranges by master cell."""
-        return {}
+        out: dict[str, str] = {}
+        reader = getattr(self._workbook, "_rust_reader", None)  # noqa: SLF001
+        if reader is not None and hasattr(reader, "read_sheet_array_formulas"):
+            payloads = reader.read_sheet_array_formulas(self._title)  # noqa: SLF001
+            if isinstance(payloads, dict):
+                for coord, payload in payloads.items():
+                    try:
+                        row_col = a1_to_rowcol(coord)
+                    except ValueError:
+                        row_col = None
+                    cell = self._cells.get(row_col) if row_col is not None else None  # noqa: SLF001
+                    if cell is not None and getattr(cell, "_value_dirty", False):
+                        continue
+                    if isinstance(payload, dict) and payload.get("kind") == "array":
+                        ref = payload.get("ref")
+                        if ref:
+                            out[coord] = ref
+        for (row, col), (kind, payload) in self._pending_array_formulas.items():  # noqa: SLF001
+            if kind == "array":
+                ref = payload.get("ref")
+                if ref:
+                    out[rowcol_to_a1(row, col)] = ref
+        for (row, col), cell in self._cells.items():  # noqa: SLF001
+            if getattr(cell, "_formula_type", None) == "array" and cell._array_ref:  # noqa: SLF001
+                out[rowcol_to_a1(row, col)] = cell._array_ref  # noqa: SLF001
+        return out
 
     @property
     def column_groups(self) -> list[Any]:

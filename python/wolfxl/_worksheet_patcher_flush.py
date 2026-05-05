@@ -58,6 +58,8 @@ def flush_to_patcher(
                         "dtr": value.dtr,
                         "r1": value.r1,
                         "r2": value.r2,
+                        "del1": value.del1,
+                        "del2": value.del2,
                     },
                 )
             elif isinstance(value, CellRichText):

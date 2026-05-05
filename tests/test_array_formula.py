@@ -32,6 +32,12 @@ def test_constructor_positional() -> None:
     assert af.text == "SUM(B1:B10*C1:C10)"
 
 
+def test_constructor_text_optional() -> None:
+    af = ArrayFormula("A1:A10")
+    assert af.ref == "A1:A10"
+    assert af.text == ""
+
+
 def test_constructor_strips_leading_equals() -> None:
     af = ArrayFormula("A1:A10", "=B1:B10*2")
     assert af.text == "B1:B10*2"
@@ -169,6 +175,36 @@ def test_round_trip_write_mode(tmp_path: Path) -> None:
     # Untouched neighbor cells survive.
     assert reloaded.active["B1"].value == 1
     assert reloaded.active["B3"].value == 3
+    assert reloaded.active.array_formulae == {"A1": "A1:A3"}
+
+
+def test_array_formulae_uses_reader_index_not_grid_scan() -> None:
+    class FakeReader:
+        def read_sheet_array_formulas(self, sheet: str) -> dict[str, dict[str, str]]:
+            assert sheet == "Sheet"
+            return {"A1": {"kind": "array", "ref": "A1:A3"}}
+
+        def read_cell_array_formula(self, sheet: str, coord: str) -> None:
+            raise AssertionError(f"unexpected per-cell array formula probe for {sheet}!{coord}")
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws["ZZ2000"] = "force a large sparse used range"
+    wb._rust_reader = FakeReader()  # noqa: SLF001
+
+    assert ws.array_formulae == {"A1": "A1:A3"}
+
+
+def test_array_formulae_excludes_overwritten_reader_formula(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = ArrayFormula("A1:A3", "B1:B3*2")
+    wb.save(str(src))
+
+    loaded = wolfxl.load_workbook(str(src), modify=True)
+    loaded.active["A1"] = 123
+
+    assert loaded.active.array_formulae == {}
 
 
 def test_round_trip_modify_mode(tmp_path: Path) -> None:

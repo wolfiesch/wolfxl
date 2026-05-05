@@ -293,6 +293,10 @@ impl NativeXlsxBook {
         crate::native_reader_styles::read_cell_array_formula_xlsx(self, py, sheet, a1)
     }
 
+    pub fn read_sheet_array_formulas(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        crate::native_reader_styles::read_sheet_array_formulas_xlsx(self, py, sheet)
+    }
+
     pub fn read_cell_rich_text(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_rich_text_xlsx(self, py, sheet, a1)
     }
@@ -517,6 +521,10 @@ impl NativeXlsbBook {
 
     pub fn read_cell_array_formula(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_array_formula_xlsb(self, py, sheet, a1)
+    }
+
+    pub fn read_sheet_array_formulas(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        crate::native_reader_styles::read_sheet_array_formulas_xlsb(self, py, sheet)
     }
 
     pub fn read_cell_format(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {

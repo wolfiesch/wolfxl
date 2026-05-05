@@ -606,6 +606,16 @@ impl XlsxPatcher {
                     .unwrap_or(false);
                 let r1: Option<String> = payload.get_item("r1")?.and_then(|v| v.extract().ok());
                 let r2: Option<String> = payload.get_item("r2")?.and_then(|v| v.extract().ok());
+                let del1: bool = payload
+                    .get_item("del1")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                let del2: bool = payload
+                    .get_item("del2")?
+                    .map(|v| v.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
                 CellValue::DataTableFormula {
                     ref_range,
                     ca,
@@ -613,6 +623,8 @@ impl XlsxPatcher {
                     dtr,
                     r1,
                     r2,
+                    del1,
+                    del2,
                 }
             }
             "spill_child" => CellValue::SpillChild,
@@ -1471,9 +1483,11 @@ impl XlsxPatcher {
             }
         }
 
-        let op = threaded_comments::ThreadedCommentOp::Set(
-            threaded_comments::ThreadedCommentPatch { top, replies },
-        );
+        let op =
+            threaded_comments::ThreadedCommentOp::Set(threaded_comments::ThreadedCommentPatch {
+                top,
+                replies,
+            });
         self.queued_threaded_comments
             .entry(sheet.to_string())
             .or_default()
@@ -1488,7 +1502,10 @@ impl XlsxPatcher {
         self.queued_threaded_comments
             .entry(sheet.to_string())
             .or_default()
-            .insert(cell.to_string(), threaded_comments::ThreadedCommentOp::Delete);
+            .insert(
+                cell.to_string(),
+                threaded_comments::ThreadedCommentOp::Delete,
+            );
         Ok(())
     }
 
@@ -1503,7 +1520,9 @@ impl XlsxPatcher {
         let id = extract_str(payload, "id")?
             .ok_or_else(|| PyValueError::new_err("queue_person: missing 'id'"))?;
         if id.is_empty() {
-            return Err(PyValueError::new_err("queue_person: 'id' must be non-empty"));
+            return Err(PyValueError::new_err(
+                "queue_person: 'id' must be non-empty",
+            ));
         }
         let display_name = extract_str(payload, "name")?.unwrap_or_default();
         let user_id = extract_str(payload, "user_id")?.unwrap_or_default();
@@ -1717,9 +1736,7 @@ impl XlsxPatcher {
             Ok(mut f) => {
                 let mut buf = Vec::with_capacity(f.size() as usize);
                 std::io::Read::read_to_end(&mut f, &mut buf).map_err(|e| {
-                    PyErr::new::<PyIOError, _>(format!(
-                        "Failed to read xl/vbaProject.bin: {e}"
-                    ))
+                    PyErr::new::<PyIOError, _>(format!("Failed to read xl/vbaProject.bin: {e}"))
                 })?;
                 Some(buf)
             }
@@ -2228,7 +2245,11 @@ impl XlsxPatcher {
         // session is touched in its post-adds form. The phase is a
         // no-op when no edits have been registered.
         if !self.queued_pivot_source_edits.is_empty() {
-            patcher_pivot_edit::apply_pivot_source_edits_phase(self, &mut save.file_patches, &mut zip)?;
+            patcher_pivot_edit::apply_pivot_source_edits_phase(
+                self,
+                &mut save.file_patches,
+                &mut zip,
+            )?;
         }
 
         // --- Phase 2.5n: Sheet setup (Sprint Ο Pod 1A.5 / RFC-055) ---

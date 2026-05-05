@@ -21,7 +21,7 @@ Pod 1C — Sprint Ο.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 
 class ArrayFormula:
@@ -42,7 +42,7 @@ class ArrayFormula:
 
     __slots__ = ("ref", "text")
 
-    def __init__(self, ref: str, text: str) -> None:
+    def __init__(self, ref: str, text: str | None = None) -> None:
         """Create an array-formula value.
 
         Args:
@@ -55,6 +55,8 @@ class ArrayFormula:
         # convenience — matches openpyxl's coercion.  Also strip
         # surrounding braces so users can paste a CSE formula
         # verbatim from Excel's name box.
+        if text is None:
+            text = ""
         if text.startswith("{=") and text.endswith("}"):
             text = text[2:-1]
         elif text.startswith("="):
@@ -89,7 +91,7 @@ class DataTableFormula:
         r2: Second input cell for 2D tables.
     """
 
-    __slots__ = ("ref", "ca", "dt2D", "dtr", "r1", "r2")
+    __slots__ = ("ref", "ca", "dt2D", "dtr", "r1", "r2", "del1", "del2")
 
     def __init__(
         self,
@@ -99,7 +101,10 @@ class DataTableFormula:
         dtr: bool = False,
         r1: Optional[str] = None,
         r2: Optional[str] = None,
+        del1: bool = False,
+        del2: bool = False,
         t: Optional[str] = None,
+        **kw: Any,
     ) -> None:
         """Create a data-table formula value.
 
@@ -110,8 +115,12 @@ class DataTableFormula:
             dtr: Whether the data-table input is a row.
             r1: First input cell reference.
             r2: Second input cell reference for two-variable tables.
+            del1: Deleted first input-cell flag.
+            del2: Deleted second input-cell flag.
             t: Optional OOXML formula-type discriminator. Accepted for
                 openpyxl API compatibility and ignored.
+            **kw: Additional openpyxl-compatible keyword arguments, accepted
+                and ignored for forwards compatibility.
         """
         if t is not None and t != "dataTable":
             raise ValueError(f"Unsupported data-table formula kind: {t!r}")
@@ -121,6 +130,8 @@ class DataTableFormula:
         self.dtr = bool(dtr)
         self.r1 = r1
         self.r2 = r2
+        self.del1 = bool(del1)
+        self.del2 = bool(del2)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DataTableFormula):
@@ -132,10 +143,14 @@ class DataTableFormula:
             and self.dtr == other.dtr
             and self.r1 == other.r1
             and self.r2 == other.r2
+            and self.del1 == other.del1
+            and self.del2 == other.del2
         )
 
     def __hash__(self) -> int:
-        return hash((self.ref, self.ca, self.dt2D, self.dtr, self.r1, self.r2))
+        return hash(
+            (self.ref, self.ca, self.dt2D, self.dtr, self.r1, self.r2, self.del1, self.del2)
+        )
 
     def __repr__(self) -> str:
         parts = [f"ref={self.ref!r}"]
@@ -149,6 +164,10 @@ class DataTableFormula:
             parts.append(f"r1={self.r1!r}")
         if self.r2 is not None:
             parts.append(f"r2={self.r2!r}")
+        if self.del1:
+            parts.append(f"del1={self.del1!r}")
+        if self.del2:
+            parts.append(f"del2={self.del2!r}")
         return f"DataTableFormula({', '.join(parts)})"
 
 
