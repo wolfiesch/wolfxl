@@ -389,28 +389,30 @@ def apply_pivot_layout_authoring_to_xlsx(path: str, workbook: Any) -> None:
     if not payloads:
         return
 
+    replacements: dict[str, bytes] = {}
     with zipfile.ZipFile(path, "r") as src:
-        entries = {info.filename: (info, src.read(info.filename)) for info in src.infolist()}
-
-    for payload in payloads:
-        table_path = payload["table_part_path"]
-        cache_path = payload["cache_part_path"]
-        if table_path in entries:
-            entries[table_path] = (
-                entries[table_path][0],
-                _rewrite_pivot_table_xml(entries[table_path][1], payload),
-            )
-        if cache_path in entries:
-            entries[cache_path] = (
-                entries[cache_path][0],
-                _force_refresh_on_load(entries[cache_path][1]),
-            )
+        names = set(src.namelist())
+        for payload in payloads:
+            table_path = payload["table_part_path"]
+            cache_path = payload["cache_part_path"]
+            if table_path in names:
+                table_bytes = replacements.get(table_path) or src.read(table_path)
+                replacements[table_path] = _rewrite_pivot_table_xml(table_bytes, payload)
+            if cache_path in names:
+                cache_bytes = replacements.get(cache_path) or src.read(cache_path)
+                replacements[cache_path] = _force_refresh_on_load(cache_bytes)
 
     fd, tmp_name = tempfile.mkstemp(prefix="wolfxl-pivot-layout-", suffix=".xlsx")
     os.close(fd)
     try:
-        with zipfile.ZipFile(tmp_name, "w", zipfile.ZIP_DEFLATED) as dst:
-            for _name, (info, data) in entries.items():
+        with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
+            tmp_name, "w", zipfile.ZIP_DEFLATED
+        ) as dst:
+            for info in src.infolist():
+                data = replacements.get(info.filename)
+                if data is None:
+                    with src.open(info, "r") as handle:
+                        data = handle.read()
                 dst.writestr(info, data)
         os.replace(tmp_name, path)
     finally:
@@ -444,6 +446,9 @@ def _replace_block(text: str, tag: str, replacement: str) -> str:
     pattern = rf"<{tag}\b[^>]*>.*?</{tag}>"
     if re.search(pattern, text, flags=re.DOTALL):
         return re.sub(pattern, replacement, text, count=1, flags=re.DOTALL)
+    self_closing_pattern = rf"<{tag}\b[^>]*/>"
+    if re.search(self_closing_pattern, text):
+        return re.sub(self_closing_pattern, replacement, text, count=1)
     if not replacement:
         return text
     if tag == "pivotFields" and "</location>" in text:

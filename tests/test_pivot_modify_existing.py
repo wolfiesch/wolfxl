@@ -10,6 +10,7 @@ import pytest
 
 import wolfxl
 from wolfxl.chart import Reference
+from wolfxl.pivot._handle import _replace_block
 from wolfxl.pivot import DataField, DataFunction, PageField, PivotCache, PivotTable
 
 
@@ -218,6 +219,27 @@ def test_modify_pivot_source_and_layout_compose(tmp_path: Path) -> None:
     assert 'ref="A1:C4"' in cache
     assert '<colFields count="1"><field x="2"/></colFields>' in table
     assert 'subtotal="count"' in table
+
+
+def test_replace_block_replaces_self_closing_axis_blocks() -> None:
+    """Empty pivot axis blocks often serialize as self-closing OOXML tags."""
+    xml = (
+        '<pivotTableDefinition><location ref="A1"/>'
+        '<pivotFields count="2"><pivotField/><pivotField/></pivotFields>'
+        '<rowFields count="0"/><colFields count="0"/>'
+        '<pivotTableStyleInfo name="PivotStyleLight16"/>'
+        "</pivotTableDefinition>"
+    )
+
+    updated = _replace_block(
+        xml,
+        "rowFields",
+        '<rowFields count="1"><field x="0"/></rowFields>',
+    )
+
+    assert '<rowFields count="1"><field x="0"/></rowFields>' in updated
+    assert '<rowFields count="0"/>' not in updated
+    assert updated.count("<rowFields") == 1
 
 
 def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:

@@ -226,14 +226,12 @@ def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
     if not links.dirty:
         return
     with zipfile.ZipFile(path, "r") as src:
-        entries = {info.filename: (info, src.read(info.filename)) for info in src.infolist()}
-
-    try:
-        workbook_xml = entries["xl/workbook.xml"][1].decode("utf-8")
-        workbook_rels_xml = entries["xl/_rels/workbook.xml.rels"][1]
-        content_types_xml = entries["[Content_Types].xml"][1]
-    except KeyError as exc:
-        raise ValueError(f"workbook missing required OOXML part: {exc.args[0]}") from exc
+        try:
+            workbook_xml = src.read("xl/workbook.xml").decode("utf-8")
+            workbook_rels_xml = src.read("xl/_rels/workbook.xml.rels")
+            content_types_xml = src.read("[Content_Types].xml")
+        except KeyError as exc:
+            raise ValueError(f"workbook missing required OOXML part: {exc.args[0]}") from exc
 
     link_list = list(links)
     rels_xml, rel_ids = _rewrite_workbook_rels(workbook_rels_xml, link_list)
@@ -254,11 +252,15 @@ def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix="wolfxl-extlinks-", suffix=".xlsx")
     os.close(fd)
     try:
-        with zipfile.ZipFile(tmp_name, "w", zipfile.ZIP_DEFLATED) as dst:
-            for name, (info, data) in entries.items():
+        with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
+            tmp_name, "w", zipfile.ZIP_DEFLATED
+        ) as dst:
+            for info in src.infolist():
+                name = info.filename
                 if name.startswith("xl/externalLinks/") or name in generated:
                     continue
-                dst.writestr(info, data)
+                with src.open(info, "r") as handle:
+                    dst.writestr(info, handle.read())
             for name in sorted(generated):
                 dst.writestr(name, generated[name])
         os.replace(tmp_name, path)
