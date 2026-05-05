@@ -293,6 +293,16 @@ fn array_formula_payload_to_write_cell_value(
                 .unwrap_or(false);
             let r1: Option<String> = payload.get_item("r1")?.and_then(|v| v.extract().ok());
             let r2: Option<String> = payload.get_item("r2")?.and_then(|v| v.extract().ok());
+            let del1: bool = payload
+                .get_item("del1")?
+                .map(|v| v.extract::<bool>())
+                .transpose()?
+                .unwrap_or(false);
+            let del2: bool = payload
+                .get_item("del2")?
+                .map(|v| v.extract::<bool>())
+                .transpose()?
+                .unwrap_or(false);
             WriteCellValue::DataTableFormula {
                 ref_range,
                 ca,
@@ -300,6 +310,8 @@ fn array_formula_payload_to_write_cell_value(
                 dtr,
                 r1,
                 r2,
+                del1,
+                del2,
             }
         }
         "spill_child" => WriteCellValue::SpillChild,

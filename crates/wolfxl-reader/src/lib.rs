@@ -1082,6 +1082,8 @@ pub enum ArrayFormulaInfo {
         dtr: bool,
         r1: Option<String>,
         r2: Option<String>,
+        del1: bool,
+        del2: bool,
     },
     SpillChild,
 }
@@ -1376,7 +1378,10 @@ impl NativeXlsxBook {
         let threaded_comments = match rels.as_ref() {
             Some(graph) => {
                 let mut acc: Vec<ParsedThreadedComment> = Vec::new();
-                for rel in graph.iter().filter(|rel| rel.rel_type == wolfxl_rels::rt::THREADED_COMMENTS) {
+                for rel in graph
+                    .iter()
+                    .filter(|rel| rel.rel_type == wolfxl_rels::rt::THREADED_COMMENTS)
+                {
                     let path = join_and_normalize(&part_dir(&info.path), &rel.target);
                     if let Some(xml) = read_part_optional(&mut zip, &path)? {
                         acc.extend(parse_threaded_comments(&xml)?);
@@ -1548,7 +1553,10 @@ pub struct ProtectionInfo {
 
 impl Default for ProtectionInfo {
     fn default() -> Self {
-        Self { locked: true, hidden: false }
+        Self {
+            locked: true,
+            hidden: false,
+        }
     }
 }
 
@@ -4293,9 +4301,9 @@ fn parse_threaded_comments(xml: &str) -> Result<Vec<ParsedThreadedComment>> {
             },
             Ok(Event::Text(e)) => {
                 if in_text {
-                    let s = e.unescape().map_err(|err| {
-                        ReaderError::Xml(format!("threadedComments text: {err}"))
-                    })?;
+                    let s = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("threadedComments text: {err}")))?;
                     text_buf.push_str(&s);
                 }
             }
@@ -5670,6 +5678,8 @@ struct CellBuilder {
     formula_dtr: bool,
     formula_r1: Option<String>,
     formula_r2: Option<String>,
+    formula_del1: bool,
+    formula_del2: bool,
     inline_runs: Vec<RichTextRun>,
     inline_current_run: Option<RichTextRun>,
     inline_current_props: Option<InlineFontProps>,
@@ -5710,6 +5720,8 @@ impl CellBuilder {
             formula_dtr: false,
             formula_r1: None,
             formula_r2: None,
+            formula_del1: false,
+            formula_del2: false,
             inline_runs: Vec::new(),
             inline_current_run: None,
             inline_current_props: None,
@@ -5726,6 +5738,8 @@ impl CellBuilder {
         self.formula_dtr = attr_truthy(attr_value(e, b"dtr").as_deref());
         self.formula_r1 = attr_value(e, b"r1");
         self.formula_r2 = attr_value(e, b"r2");
+        self.formula_del1 = attr_truthy(attr_value(e, b"del1").as_deref());
+        self.formula_del2 = attr_truthy(attr_value(e, b"del2").as_deref());
     }
 
     fn push_text(&mut self, target: TextTarget, text: &str) {
@@ -5836,6 +5850,8 @@ impl CellBuilder {
                 dtr: self.formula_dtr,
                 r1: self.formula_r1.clone(),
                 r2: self.formula_r2.clone(),
+                del1: self.formula_del1,
+                del2: self.formula_del2,
             }),
             _ => None,
         };
@@ -6768,7 +6784,10 @@ mod tests {
         assert_eq!(entries[0].person_id, "{A}");
         assert_eq!(entries[0].text, "Looks wrong");
         assert_eq!(entries[0].parent_id, None);
-        assert_eq!(entries[0].created.as_deref(), Some("2026-05-03T12:00:00.000"));
+        assert_eq!(
+            entries[0].created.as_deref(),
+            Some("2026-05-03T12:00:00.000")
+        );
         assert_eq!(entries[1].parent_id.as_deref(), Some("{T1}"));
         assert_eq!(entries[1].text, "Why?");
     }
@@ -6797,5 +6816,4 @@ mod tests {
         assert_eq!(entries[0].done, true);
         assert_eq!(entries[1].done, false);
     }
-
 }

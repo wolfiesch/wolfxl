@@ -1518,6 +1518,38 @@ def _probe_array_formula_data_table(tmp_path: Path) -> None:
     assert val is not None
 
 
+@_register("array_formula_spill_metadata")
+def _probe_array_formula_spill_metadata(tmp_path: Path) -> None:
+    """openpyxl 3.1.x array/spill metadata surface parity."""
+    import openpyxl as _opx
+    from openpyxl.worksheet.formula import DataTableFormula as _OpxDataTableFormula
+    import wolfxl
+    from wolfxl.worksheet.formula import ArrayFormula, DataTableFormula
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws["A1"] = ArrayFormula(ref="A1:A3")
+    ws["B2"] = DataTableFormula(ref="B2:B4", del1=True, del2=True, aca=True)
+    out = tmp_path / "array_spill_metadata.xlsx"
+    wb.save(out)
+
+    wolf_rt = wolfxl.load_workbook(out)
+    wolf_ws = wolf_rt.active
+    assert wolf_ws.array_formulae == {"A1": "A1:A3"}
+    wolf_dt = wolf_ws["B2"].value
+    assert isinstance(wolf_dt, DataTableFormula)
+    assert wolf_dt.del1 is True
+    assert wolf_dt.del2 is True
+
+    op_rt = _opx.load_workbook(out)
+    op_ws = op_rt.active
+    assert op_ws.array_formulae == {"A1": "A1:A3"}
+    op_dt = op_ws["B2"].value
+    assert isinstance(op_dt, _OpxDataTableFormula)
+    assert str(op_dt.del1).lower() in {"1", "true"}
+    assert str(op_dt.del2).lower() in {"1", "true"}
+
+
 # --------------------------------------------------------------------------
 # Test runner / parametrisation
 # --------------------------------------------------------------------------

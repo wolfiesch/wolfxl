@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **66** / 75
-- 🟡 Partial: **2** / 75
+- ✅ Supported: **67** / 75
+- 🟡 Partial: **1** / 75
 - ❌ Not Yet: **1** / 75
 - ⛔ Out of Scope: **6** / 75
 
@@ -189,7 +189,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `ArrayFormula(ref, text)` | `ArrayFormula(ref, text)` | ✅ Supported |  | Round-trips through openpyxl reload (ref + text preserved as openpyxl ArrayFormula). |
 | `DataTableFormula(...)` | `DataTableFormula(...)` | ✅ Supported |  |  |
-| `dynamic-array spill metadata` | `dynamic-array spill metadata` | 🟡 Partial | G07 |  |
+| `Worksheet.array_formulae + DataTableFormula del flags` | `Worksheet.array_formulae + DataTableFormula del flags` | ✅ Supported |  | openpyxl 3.1.5 exposes array/spill ranges via Worksheet.array_formulae; formula_attributes is not part of the supported reference surface. |
 
 ## Calc chain
 

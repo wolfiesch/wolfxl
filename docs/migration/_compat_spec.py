@@ -720,10 +720,11 @@ ENTRIES: list[Entry] = [
     {
         "id": "array_formulas.spill",
         "category": "array_formulas",
-        "openpyxl": "dynamic-array spill metadata",
-        "wolfxl": "dynamic-array spill metadata",
-        "status": "partial",
-        "gap_id": "G07",
+        "openpyxl": "Worksheet.array_formulae + DataTableFormula del flags",
+        "wolfxl": "Worksheet.array_formulae + DataTableFormula del flags",
+        "status": "supported",
+        "probe": "array_formula_spill_metadata",
+        "notes": "openpyxl 3.1.5 exposes array/spill ranges via Worksheet.array_formulae; formula_attributes is not part of the supported reference surface.",
     },
     # --- Calc chain -------------------------------------------------------
     {

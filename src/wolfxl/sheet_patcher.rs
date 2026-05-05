@@ -53,6 +53,8 @@ pub enum CellValue {
         dtr: bool,
         r1: Option<String>,
         r2: Option<String>,
+        del1: bool,
+        del2: bool,
     },
     /// RFC-057: bare placeholder cell that lives inside an
     /// array-formula's spill range (everything except the master).
@@ -531,6 +533,8 @@ fn write_patched_cell<W: Write>(
             dtr,
             r1,
             r2,
+            del1,
+            del2,
         }) => {
             // RFC-057: <c r="..."><f t="dataTable" ref=".." dt2D="1" r1=".." r2=".."/></c>
             writer
@@ -553,6 +557,12 @@ fn write_patched_cell<W: Write>(
             }
             if let Some(rv) = r2.as_ref() {
                 f_empty.push_attribute(("r2", rv.as_str()));
+            }
+            if *del1 {
+                f_empty.push_attribute(("del1", "1"));
+            }
+            if *del2 {
+                f_empty.push_attribute(("del2", "1"));
             }
             writer
                 .write_event(Event::Empty(f_empty))

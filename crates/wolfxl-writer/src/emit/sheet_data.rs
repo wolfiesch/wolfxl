@@ -212,6 +212,8 @@ fn emit_cell_to<W: fmt::Write>(
             dtr,
             r1,
             r2,
+            del1,
+            del2,
         } => {
             write!(out, "<c r=\"{}\"", cell_ref)?;
             if let Some(s) = cell.style_id {
@@ -233,6 +235,12 @@ fn emit_cell_to<W: fmt::Write>(
             }
             if let Some(r2v) = r2 {
                 write!(out, " r2=\"{}\"", xml_escape::attr(r2v))?;
+            }
+            if *del1 {
+                out.write_str(" del1=\"1\"")?;
+            }
+            if *del2 {
+                out.write_str(" del2=\"1\"")?;
             }
             out.write_str("/></c>")?;
         }

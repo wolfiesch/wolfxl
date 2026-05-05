@@ -76,6 +76,10 @@ pub enum WriteCellValue {
         r1: Option<String>,
         /// Second input cell (`r2`).
         r2: Option<String>,
+        /// Deleted first input-cell flag (`del1`).
+        del1: bool,
+        /// Deleted second input-cell flag (`del2`).
+        del2: bool,
     },
 
     /// Empty placeholder cell that lives inside an array-formula's spill
