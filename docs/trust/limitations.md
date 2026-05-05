@@ -1,30 +1,27 @@
 # Known Limitations
 
-This page lists concrete openpyxl-parity gaps in WolfXL so you can evaluate
-fit before migrating. Surfaces that openpyxl itself does not expose
+This page lists concrete fidelity limits in WolfXL so you can evaluate fit
+before migrating. Surfaces that openpyxl itself does not expose
 (`.xlsb`/`.xls` writes, `.ods`, VBA authoring, standalone table-driven
 slicer authoring) are wolfxl-extras tracked in
 [`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md);
-they are not parity gaps and are not listed here. The
-machine-checked source of truth is
+they are not openpyxl parity gaps. The machine-checked source of truth is
 [`compatibility-matrix.md`](../migration/compatibility-matrix.md).
 
 ## Current hard limits
 
 | Feature | Read | Write | Modify | Notes |
 |---------|:----:|:-----:|:------:|-------|
-| In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
-| External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
+| Pivot cache record regeneration after layout edits | Yes | No | Refresh | WolfXL can mutate existing pivot source ranges, row/column/page field placement, page-field selection, and data-field aggregation. Layout edits stamp `refreshOnLoad="1"` and let Excel regenerate cache records on open rather than recalculating `pivotCacheRecords` inside WolfXL. |
 
-"Preserve" means the feature survives a load-modify-save cycle untouched, even
-though WolfXL does not expose a full authoring API for that surface.
+"Refresh" means the edited workbook opens cleanly and Excel refreshes derived
+cache data when needed.
 
 ## API surface gaps vs openpyxl
 
-These openpyxl APIs are still incomplete or intentionally narrower:
+These openpyxl APIs are intentionally narrower:
 
-- Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
-- External workbook links are exposed for inspection and opaque modify-mode preservation; appending, removing, and editing external links are deferred to v2.
+- Existing pivot-table layout edits prioritize OOXML correctness and refresh-on-open over WolfXL-side cache-record regeneration.
 
 ## Performance claim guardrails
 

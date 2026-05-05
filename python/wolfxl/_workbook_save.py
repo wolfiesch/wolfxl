@@ -144,6 +144,8 @@ def save_modify_mode(wb: Any, filename: str) -> None:
         wb._rust_patcher.save_in_place()  # noqa: SLF001
     else:
         wb._rust_patcher.save(filename)  # noqa: SLF001
+    flush_pivot_layout_authoring(wb, filename)
+    flush_external_links_authoring(wb, filename)
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
@@ -164,9 +166,26 @@ def save_write_mode(wb: Any, filename: str) -> None:
         for ws in wb._sheets.values():  # noqa: SLF001
             ws._flush()  # noqa: SLF001
         wb._rust_writer.save(filename)  # noqa: SLF001
+        flush_external_links_authoring(wb, filename)
         return
 
     _save_write_mode_with_pivots(wb, filename)
+    flush_external_links_authoring(wb, filename)
+
+
+def flush_external_links_authoring(wb: Any, filename: str) -> None:
+    links = getattr(wb, "_external_links_cache", None)
+    if links is None or not getattr(links, "dirty", False):
+        return
+    from wolfxl import _external_links as _el
+
+    _el.apply_authoring_to_xlsx(filename, links)
+
+
+def flush_pivot_layout_authoring(wb: Any, filename: str) -> None:
+    from wolfxl.pivot._handle import apply_pivot_layout_authoring_to_xlsx
+
+    apply_pivot_layout_authoring_to_xlsx(filename, wb)
 
 
 def _save_write_mode_with_pivots(wb: Any, filename: str) -> None:

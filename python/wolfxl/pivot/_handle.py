@@ -18,9 +18,14 @@ The handle is intentionally thin: full pivot mutation
 
 from __future__ import annotations
 
+import os
+import re
+import tempfile
+import zipfile
 from typing import TYPE_CHECKING, Any
 
 from wolfxl.chart.reference import Reference
+from ._table import ColumnField, DataField, DataFunction, PageField, RowField
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -46,8 +51,14 @@ class PivotTableHandle:
         "_orig_source_range",
         "_orig_source_sheet",
         "_orig_field_count",
+        "_field_names",
         "_dirty",
         "_new_source",
+        "_layout_dirty",
+        "_row_field_specs",
+        "_col_field_specs",
+        "_page_field_specs",
+        "_data_field_specs",
     )
 
     def __init__(
@@ -64,6 +75,7 @@ class PivotTableHandle:
         orig_source_range: str,
         orig_source_sheet: str,
         orig_field_count: int,
+        field_names: list[str] | None = None,
     ) -> None:
         self._workbook = workbook
         self._owner_sheet = owner_sheet
@@ -76,8 +88,14 @@ class PivotTableHandle:
         self._orig_source_range = orig_source_range
         self._orig_source_sheet = orig_source_sheet
         self._orig_field_count = orig_field_count
+        self._field_names = list(field_names or [])
         self._dirty = False
         self._new_source: Reference | None = None
+        self._layout_dirty = False
+        self._row_field_specs: list[RowField] | None = None
+        self._col_field_specs: list[ColumnField] | None = None
+        self._page_field_specs: list[PageField] | None = None
+        self._data_field_specs: list[DataField] | None = None
 
     # ------------------------------------------------------------------
     # Read-only props
@@ -102,6 +120,76 @@ class PivotTableHandle:
     def cache_id(self) -> int:
         """Workbook-scope ``cacheId`` linking the table to its cache."""
         return self._cache_id
+
+    @property
+    def row_fields(self) -> list[RowField]:
+        return list(self._row_field_specs or [])
+
+    @row_fields.setter
+    def row_fields(self, values: list[str | RowField]) -> None:
+        self._row_field_specs = [v if isinstance(v, RowField) else RowField(str(v)) for v in values]
+        self._mark_layout_dirty()
+
+    @property
+    def column_fields(self) -> list[ColumnField]:
+        return list(self._col_field_specs or [])
+
+    @column_fields.setter
+    def column_fields(self, values: list[str | ColumnField]) -> None:
+        self._col_field_specs = [
+            v if isinstance(v, ColumnField) else ColumnField(str(v)) for v in values
+        ]
+        self._mark_layout_dirty()
+
+    @property
+    def page_fields(self) -> list[PageField]:
+        return list(self._page_field_specs or [])
+
+    @page_fields.setter
+    def page_fields(self, values: list[str | PageField]) -> None:
+        self._page_field_specs = [v if isinstance(v, PageField) else PageField(str(v)) for v in values]
+        self._mark_layout_dirty()
+
+    @property
+    def data_fields(self) -> list[DataField]:
+        return list(self._data_field_specs or [])
+
+    @data_fields.setter
+    def data_fields(self, values: list[str | DataField]) -> None:
+        self._data_field_specs = [v if isinstance(v, DataField) else DataField(str(v)) for v in values]
+        self._mark_layout_dirty()
+
+    def set_aggregation(self, field: str, function: str) -> None:
+        if function not in DataFunction.ALL:
+            raise ValueError(f"Unknown aggregation function {function!r}")
+        existing = self._data_field_specs or [DataField(field, function=function)]
+        updated: list[DataField] = []
+        found = False
+        for spec in existing:
+            if spec.name == field:
+                updated.append(DataField(field, function=function, display_name=None))
+                found = True
+            else:
+                updated.append(spec)
+        if not found:
+            updated.append(DataField(field, function=function))
+        self._data_field_specs = updated
+        self._mark_layout_dirty()
+
+    def set_filter(self, field: str, *, item_index: int = -1) -> None:
+        existing = self._page_field_specs or []
+        updated: list[PageField] = []
+        found = False
+        for spec in existing:
+            if spec.name == field:
+                updated.append(PageField(field, item_index=item_index, hier=spec.hier, cap=spec.cap))
+                found = True
+            else:
+                updated.append(spec)
+        if not found:
+            updated.append(PageField(field, item_index=item_index))
+        self._page_field_specs = updated
+        self._mark_layout_dirty()
 
     # ------------------------------------------------------------------
     # source — the only mutator in v1.0
@@ -204,6 +292,44 @@ class PivotTableHandle:
         assert ref is not None
         return int(ref.max_col) - int(ref.min_col) + 1
 
+    def _mark_layout_dirty(self) -> None:
+        if getattr(self._workbook, "_read_only", False):
+            raise RuntimeError("PivotTableHandle layout mutation requires modify mode")
+        if getattr(self._workbook, "_rust_patcher", None) is None:
+            raise RuntimeError(
+                "PivotTableHandle layout mutation requires load_workbook(..., modify=True)"
+            )
+        self._layout_dirty = True
+
+    def _layout_payload(self) -> dict[str, Any]:
+        return {
+            "table_part_path": self._table_part_path,
+            "cache_part_path": self._cache_part_path,
+            "field_names": list(self._field_names),
+            "rows": [spec.name for spec in self._row_field_specs or []],
+            "cols": [spec.name for spec in self._col_field_specs or []],
+            "pages": [
+                {
+                    "name": spec.name,
+                    "item_index": spec.item_index,
+                    "hier": spec.hier,
+                    "cap": spec.cap,
+                }
+                for spec in self._page_field_specs or []
+            ],
+            "data": [
+                {
+                    "name": spec.name,
+                    "function": spec.function,
+                    "display_name": spec.resolved_display_name(),
+                    "base_field": spec.base_field,
+                    "base_item": spec.base_item,
+                    "num_fmt_id": spec.num_fmt_id,
+                }
+                for spec in self._data_field_specs or []
+            ],
+        }
+
     def __repr__(self) -> str:
         sfx = " *dirty*" if self._dirty else ""
         return f"<PivotTableHandle name={self._name!r} location={self._location!r}{sfx}>"
@@ -247,3 +373,181 @@ def _parse_a1_cell(cell: str) -> tuple[int | None, int | None]:
 
 
 __all__ = ["PivotTableHandle"]
+
+
+def apply_pivot_layout_authoring_to_xlsx(path: str, workbook: Any) -> None:
+    payloads: list[dict[str, Any]] = []
+    for ws in workbook._sheets.values():  # noqa: SLF001
+        handles = getattr(ws, "_pivot_handles_cache", None)
+        if not handles:
+            continue
+        for handle in handles:
+            if getattr(handle, "_layout_dirty", False):
+                payloads.append(handle._layout_payload())  # noqa: SLF001
+                handle._layout_dirty = False  # noqa: SLF001
+    if not payloads:
+        return
+
+    with zipfile.ZipFile(path, "r") as src:
+        entries = {info.filename: (info, src.read(info.filename)) for info in src.infolist()}
+
+    for payload in payloads:
+        table_path = payload["table_part_path"]
+        cache_path = payload["cache_part_path"]
+        if table_path in entries:
+            entries[table_path] = (
+                entries[table_path][0],
+                _rewrite_pivot_table_xml(entries[table_path][1], payload),
+            )
+        if cache_path in entries:
+            entries[cache_path] = (
+                entries[cache_path][0],
+                _force_refresh_on_load(entries[cache_path][1]),
+            )
+
+    fd, tmp_name = tempfile.mkstemp(prefix="wolfxl-pivot-layout-", suffix=".xlsx")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp_name, "w", zipfile.ZIP_DEFLATED) as dst:
+            for _name, (info, data) in entries.items():
+                dst.writestr(info, data)
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+def _rewrite_pivot_table_xml(xml: bytes, payload: dict[str, Any]) -> bytes:
+    text = xml.decode("utf-8")
+    field_names = payload["field_names"]
+    rows = [_field_index(field_names, name) for name in payload["rows"]]
+    cols = [_field_index(field_names, name) for name in payload["cols"]]
+    pages = [
+        {**page, "idx": _field_index(field_names, page["name"])}
+        for page in payload["pages"]
+    ]
+    data = [
+        {**data_field, "idx": _field_index(field_names, data_field["name"])}
+        for data_field in payload["data"]
+    ]
+
+    text = _replace_block(text, "pivotFields", _pivot_fields_block(len(field_names), rows, cols, pages, data))
+    text = _replace_block(text, "rowFields", _axis_fields_block("rowFields", rows))
+    text = _replace_block(text, "colFields", _axis_fields_block("colFields", cols))
+    text = _replace_block(text, "pageFields", _page_fields_block(pages))
+    text = _replace_block(text, "dataFields", _data_fields_block(data))
+    return text.encode("utf-8")
+
+
+def _replace_block(text: str, tag: str, replacement: str) -> str:
+    pattern = rf"<{tag}\b[^>]*>.*?</{tag}>"
+    if re.search(pattern, text, flags=re.DOTALL):
+        return re.sub(pattern, replacement, text, count=1, flags=re.DOTALL)
+    if not replacement:
+        return text
+    if tag == "pivotFields" and "</location>" in text:
+        return text.replace("</location>", f"</location>{replacement}", 1)
+    if tag in {"rowFields", "colFields", "pageFields"}:
+        anchor = "</pivotFields>"
+        return text.replace(anchor, f"{anchor}{replacement}", 1)
+    anchor = "<pivotTableStyleInfo"
+    if anchor in text:
+        return text.replace(anchor, f"{replacement}{anchor}", 1)
+    return text.replace("</pivotTableDefinition>", f"{replacement}</pivotTableDefinition>", 1)
+
+
+def _pivot_fields_block(
+    count: int,
+    rows: list[int],
+    cols: list[int],
+    pages: list[dict[str, Any]],
+    data: list[dict[str, Any]],
+) -> str:
+    page_indices = {int(page["idx"]): int(page.get("item_index", -1)) for page in pages}
+    data_indices = {int(item["idx"]) for item in data}
+    parts = [f'<pivotFields count="{count}">']
+    for idx in range(count):
+        attrs = ['showAll="0"']
+        if idx in rows:
+            attrs.insert(0, 'axis="axisRow"')
+        elif idx in cols:
+            attrs.insert(0, 'axis="axisCol"')
+        elif idx in page_indices:
+            attrs.insert(0, 'axis="axisPage"')
+        if idx in data_indices:
+            attrs.insert(0, 'dataField="1"')
+        item_index = page_indices.get(idx)
+        if item_index is not None and item_index >= 0:
+            parts.append(f'<pivotField {" ".join(attrs)}><items count="1"><item x="{item_index}"/></items></pivotField>')
+        else:
+            parts.append(f'<pivotField {" ".join(attrs)}/>')
+    parts.append("</pivotFields>")
+    return "".join(parts)
+
+
+def _axis_fields_block(tag: str, indices: list[int]) -> str:
+    if not indices:
+        return ""
+    inner = "".join(f'<field x="{idx}"/>' for idx in indices)
+    return f'<{tag} count="{len(indices)}">{inner}</{tag}>'
+
+
+def _page_fields_block(pages: list[dict[str, Any]]) -> str:
+    if not pages:
+        return ""
+    inner = ""
+    for page in pages:
+        attrs = [f'fld="{page["idx"]}"', f'item="{int(page.get("item_index", -1))}"']
+        if int(page.get("hier", -1)) != -1:
+            attrs.append(f'hier="{int(page["hier"])}"')
+        if page.get("cap"):
+            attrs.append(f'name="{_xml_attr_escape(str(page["cap"]))}"')
+        inner += f'<pageField {" ".join(attrs)}/>'
+    return f'<pageFields count="{len(pages)}">{inner}</pageFields>'
+
+
+def _data_fields_block(data_fields: list[dict[str, Any]]) -> str:
+    if not data_fields:
+        return ""
+    inner = ""
+    for field in data_fields:
+        attrs = [
+            f'name="{_xml_attr_escape(str(field["display_name"]))}"',
+            f'fld="{field["idx"]}"',
+            f'subtotal="{_xml_attr_escape(str(field["function"]))}"',
+            f'baseField="{int(field.get("base_field", 0))}"',
+            f'baseItem="{int(field.get("base_item", 0))}"',
+        ]
+        if field.get("num_fmt_id") is not None:
+            attrs.append(f'numFmtId="{int(field["num_fmt_id"])}"')
+        inner += f'<dataField {" ".join(attrs)}/>'
+    return f'<dataFields count="{len(data_fields)}">{inner}</dataFields>'
+
+
+def _force_refresh_on_load(xml: bytes) -> bytes:
+    text = xml.decode("utf-8")
+    match = re.search(r"<pivotCacheDefinition\b[^>]*>", text)
+    if not match:
+        return xml
+    tag = match.group(0)
+    if "refreshOnLoad=" in tag:
+        new_tag = re.sub(r'refreshOnLoad="[^"]*"', 'refreshOnLoad="1"', tag, count=1)
+    else:
+        new_tag = tag[:-1] + ' refreshOnLoad="1">'
+    return (text[: match.start()] + new_tag + text[match.end() :]).encode("utf-8")
+
+
+def _field_index(field_names: list[str], name: str) -> int:
+    try:
+        return field_names.index(name)
+    except ValueError as exc:
+        raise ValueError(f"unknown pivot field {name!r}; known fields: {field_names}") from exc
+
+
+def _xml_attr_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )

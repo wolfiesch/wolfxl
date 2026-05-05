@@ -23,6 +23,7 @@ import os
 from typing import IO
 
 from wolfxl._cell import Cell
+from wolfxl._external_links import ExternalFileLink, ExternalLink
 from wolfxl._rust import __version__, classify_format
 
 # File-format detector (xlsx / xlsb / xls / ods / unknown), distinct from the
@@ -45,6 +46,8 @@ __all__ = [
     "Cell",
     "Color",
     "CopyOptions",
+    "ExternalFileLink",
+    "ExternalLink",
     "Font",
     "PatternFill",
     "Side",

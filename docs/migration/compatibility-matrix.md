@@ -15,10 +15,10 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **68** / 75
-- 🟡 Partial: **0** / 75
-- ❌ Not Yet: **0** / 75
-- ⛔ Out of Scope: **7** / 75
+- ✅ Supported: **72** / 79
+- 🟡 Partial: **0** / 79
+- ❌ Not Yet: **0** / 79
+- ⛔ Out of Scope: **7** / 79
 
 ## Workbook + Worksheet
 
@@ -64,7 +64,10 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `PivotCache + PivotTable construction` | `wolfxl.pivot.PivotCache + PivotTable` | ✅ Supported |  | v2.0 ships pre-aggregated records emit (no refresh-on-open required). |
 | `chart.pivot_source = pt` | `chart.pivot_source = pt` | ✅ Supported |  |  |
-| `edit existing pivot's source range, field order, etc.` | `edit existing pivot's source range` | ✅ Supported |  | G17 / RFC-070 v1.0: source-range mutation only. Field placement, filters, aggregation function changes, and live record regeneration remain out of scope. |
+| `edit existing pivot's source range, field order, etc.` | `edit existing pivot's source range` | ✅ Supported |  | Source-range mutation is supported; layout edits that change cache semantics stamp refresh-on-open rather than regenerating pivot cache records. |
+| `edit existing pivot row/column fields` | `PivotTableHandle.row_fields / column_fields` | ✅ Supported |  | Mutates existing pivot table layout XML and marks the linked cache refresh-on-open. |
+| `edit existing pivot page field filter` | `PivotTableHandle.page_fields / set_filter` | ✅ Supported |  |  |
+| `edit existing pivot data-field aggregation` | `PivotTableHandle.data_fields / set_aggregation` | ✅ Supported |  |  |
 | `copy_worksheet of pivot-bearing sheet (drops in openpyxl)` | `copy_worksheet of pivot-bearing sheet (deep-clone)` | ✅ Supported |  |  |
 
 ## Images + drawings
@@ -126,7 +129,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ✅ Supported |  | v1.0 — read-only inspection (ExternalLink dataclass with target / sheet_names / cached_data) + opaque preservation: modify-mode round-trips xl/externalLinks/* and the matching rels byte-for-byte. Authoring (append/remove) is deferred. |
+| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ✅ Supported |  | Inspection (target / sheet_names / cached_data), opaque modify-mode preservation when unchanged, and append/remove/edit authoring. |
+| `append/remove/edit external workbook links` | `wb._external_links append/remove/update_target` | ✅ Supported |  | Authoring emits externalLink parts, workbook rels/references, content-types, and per-link rels. Cached data is preserved when provided but linked workbooks are not dereferenced. |
 
 ## VBA macros
 

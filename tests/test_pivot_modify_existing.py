@@ -10,7 +10,7 @@ import pytest
 
 import wolfxl
 from wolfxl.chart import Reference
-from wolfxl.pivot import PivotCache, PivotTable
+from wolfxl.pivot import DataField, DataFunction, PageField, PivotCache, PivotTable
 
 
 def _build_pivot_workbook(path: Path, *, max_row: int = 3, max_col: int = 2) -> Path:
@@ -152,6 +152,72 @@ def test_modify_pivot_handle_metadata_round_trips(tmp_path: Path) -> None:
     assert isinstance(pivot.name, str) and pivot.name
     assert ":" in pivot.location  # "A1:..." form
     assert pivot.cache_id >= 0
+
+
+def test_modify_pivot_field_placement_updates_table_xml(tmp_path: Path) -> None:
+    src = tmp_path / "pivot_fields.xlsx"
+    _build_pivot_workbook(src, max_row=4, max_col=3)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    pivot = wb["Pivot"].pivot_tables[0]
+    pivot.row_fields = ["col1"]
+    pivot.column_fields = ["col3"]
+    pivot.data_fields = [DataField("col2", function=DataFunction.SUM)]
+    wb.save(src)
+
+    table = _read_zip_entry(src, "xl/pivotTables/pivotTable1.xml").decode()
+    cache = _read_zip_entry(src, "xl/pivotCache/pivotCacheDefinition1.xml").decode()
+    assert '<rowFields count="1"><field x="0"/></rowFields>' in table
+    assert '<colFields count="1"><field x="2"/></colFields>' in table
+    assert 'axis="axisCol"' in table
+    assert 'fld="1" subtotal="sum"' in table
+    assert 'refreshOnLoad="1"' in cache
+
+
+def test_modify_pivot_filter_item_selection_updates_page_fields(tmp_path: Path) -> None:
+    src = tmp_path / "pivot_filter.xlsx"
+    _build_pivot_workbook(src, max_row=4, max_col=3)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    pivot = wb["Pivot"].pivot_tables[0]
+    pivot.page_fields = [PageField("col1", item_index=0)]
+    wb.save(src)
+
+    table = _read_zip_entry(src, "xl/pivotTables/pivotTable1.xml").decode()
+    assert '<pageFields count="1"><pageField fld="0" item="0"/></pageFields>' in table
+    assert 'axis="axisPage"' in table
+
+
+def test_modify_pivot_aggregation_updates_data_field(tmp_path: Path) -> None:
+    src = tmp_path / "pivot_agg.xlsx"
+    _build_pivot_workbook(src, max_row=4, max_col=3)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    pivot = wb["Pivot"].pivot_tables[0]
+    pivot.set_aggregation("col2", DataFunction.AVERAGE)
+    wb.save(src)
+
+    table = _read_zip_entry(src, "xl/pivotTables/pivotTable1.xml").decode()
+    assert 'name="Average of col2"' in table
+    assert 'fld="1" subtotal="average"' in table
+
+
+def test_modify_pivot_source_and_layout_compose(tmp_path: Path) -> None:
+    src = tmp_path / "pivot_compose.xlsx"
+    _build_pivot_workbook(src, max_row=4, max_col=3)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    pivot = wb["Pivot"].pivot_tables[0]
+    pivot.source = Reference(wb.active, min_col=1, min_row=1, max_col=3, max_row=4)
+    pivot.column_fields = ["col3"]
+    pivot.set_aggregation("col2", DataFunction.COUNT)
+    wb.save(src)
+
+    table = _read_zip_entry(src, "xl/pivotTables/pivotTable1.xml").decode()
+    cache = _read_zip_entry(src, "xl/pivotCache/pivotCacheDefinition1.xml").decode()
+    assert 'ref="A1:C4"' in cache
+    assert '<colFields count="1"><field x="2"/></colFields>' in table
+    assert 'subtotal="count"' in table
 
 
 def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:

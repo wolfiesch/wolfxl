@@ -327,10 +327,35 @@ ENTRIES: list[Entry] = [
         "status": "supported",
         "probe": "pivots_in_place_edit",
         "notes": (
-            "G17 / RFC-070 v1.0: source-range mutation only. Field "
-            "placement, filters, aggregation function changes, and "
-            "live record regeneration remain out of scope."
+            "Source-range mutation is supported; layout edits that change "
+            "cache semantics stamp refresh-on-open rather than regenerating "
+            "pivot cache records."
         ),
+    },
+    {
+        "id": "pivots.field_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot row/column fields",
+        "wolfxl": "PivotTableHandle.row_fields / column_fields",
+        "status": "supported",
+        "probe": "pivots_field_mutation",
+        "notes": "Mutates existing pivot table layout XML and marks the linked cache refresh-on-open.",
+    },
+    {
+        "id": "pivots.filter_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot page field filter",
+        "wolfxl": "PivotTableHandle.page_fields / set_filter",
+        "status": "supported",
+        "probe": "pivots_filter_mutation",
+    },
+    {
+        "id": "pivots.aggregation_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot data-field aggregation",
+        "wolfxl": "PivotTableHandle.data_fields / set_aggregation",
+        "status": "supported",
+        "probe": "pivots_aggregation_mutation",
     },
     {
         "id": "pivots.copy_worksheet",
@@ -513,11 +538,19 @@ ENTRIES: list[Entry] = [
         "status": "supported",
         "probe": "external_links_collection",
         "notes": (
-            "v1.0 — read-only inspection (ExternalLink dataclass with "
-            "target / sheet_names / cached_data) + opaque preservation: "
-            "modify-mode round-trips xl/externalLinks/* and the matching "
-            "rels byte-for-byte. Authoring (append/remove) is deferred."
+            "Inspection (target / sheet_names / cached_data), opaque "
+            "modify-mode preservation when unchanged, and append/remove/edit "
+            "authoring."
         ),
+    },
+    {
+        "id": "external_links.authoring",
+        "category": "external_links",
+        "openpyxl": "append/remove/edit external workbook links",
+        "wolfxl": "wb._external_links append/remove/update_target",
+        "status": "supported",
+        "probe": "external_links_authoring",
+        "notes": "Authoring emits externalLink parts, workbook rels/references, content-types, and per-link rels. Cached data is preserved when provided but linked workbooks are not dereferenced.",
     },
     # --- VBA --------------------------------------------------------------
     {

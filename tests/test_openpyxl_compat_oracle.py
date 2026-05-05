@@ -744,6 +744,84 @@ def _probe_pivots_in_place_edit(tmp_path: Path) -> None:
     wb2.save(src)
 
 
+@_register("pivots_field_mutation")
+def _probe_pivots_field_mutation(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl.chart import Reference
+    from wolfxl.pivot import DataField, DataFunction, PivotCache, PivotTable
+
+    src = tmp_path / "pivot_field_mutation.xlsx"
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [("region", "amount", "scenario"), ("east", 10, "A"), ("west", 20, "B")]:
+        ws.append(row)
+    cache = PivotCache(source=Reference(ws, min_col=1, min_row=1, max_col=3, max_row=3))
+    wb.add_pivot_cache(cache)
+    pt = PivotTable(cache=cache, location="D2", rows=["region"], data=["amount"])
+    wb.create_sheet("Pivot").add_pivot_table(pt, "A1")
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    pivot = wb2["Pivot"].pivot_tables[0]
+    pivot.row_fields = ["region"]
+    pivot.column_fields = ["scenario"]
+    pivot.data_fields = [DataField("amount", function=DataFunction.SUM)]
+    wb2.save(src)
+
+    xml = _zip_read_text(src, "xl/pivotTables/pivotTable1.xml")
+    assert '<colFields count="1"><field x="2"/></colFields>' in xml
+
+
+@_register("pivots_filter_mutation")
+def _probe_pivots_filter_mutation(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl.chart import Reference
+    from wolfxl.pivot import PageField, PivotCache, PivotTable
+
+    src = tmp_path / "pivot_filter_mutation.xlsx"
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [("region", "amount"), ("east", 10), ("west", 20)]:
+        ws.append(row)
+    cache = PivotCache(source=Reference(ws, min_col=1, min_row=1, max_col=2, max_row=3))
+    wb.add_pivot_cache(cache)
+    pt = PivotTable(cache=cache, location="D2", rows=["region"], data=["amount"])
+    wb.create_sheet("Pivot").add_pivot_table(pt, "A1")
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2["Pivot"].pivot_tables[0].page_fields = [PageField("region", item_index=0)]
+    wb2.save(src)
+
+    xml = _zip_read_text(src, "xl/pivotTables/pivotTable1.xml")
+    assert '<pageFields count="1"><pageField fld="0" item="0"/></pageFields>' in xml
+
+
+@_register("pivots_aggregation_mutation")
+def _probe_pivots_aggregation_mutation(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl.chart import Reference
+    from wolfxl.pivot import DataFunction, PivotCache, PivotTable
+
+    src = tmp_path / "pivot_aggregation_mutation.xlsx"
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [("region", "amount"), ("east", 10), ("west", 20)]:
+        ws.append(row)
+    cache = PivotCache(source=Reference(ws, min_col=1, min_row=1, max_col=2, max_row=3))
+    wb.add_pivot_cache(cache)
+    pt = PivotTable(cache=cache, location="D2", rows=["region"], data=["amount"])
+    wb.create_sheet("Pivot").add_pivot_table(pt, "A1")
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2["Pivot"].pivot_tables[0].set_aggregation("amount", DataFunction.AVERAGE)
+    wb2.save(src)
+
+    xml = _zip_read_text(src, "xl/pivotTables/pivotTable1.xml")
+    assert 'subtotal="average"' in xml
+
+
 def _make_pivot_fixture(path: Path) -> None:
     import openpyxl
     import wolfxl
@@ -1210,6 +1288,24 @@ def _probe_external_links_collection(tmp_path: Path) -> None:
     wb2 = wolfxl.load_workbook(out)
     links = getattr(wb2, "_external_links", None) or getattr(wb2, "external_links", None)
     assert links is not None and len(links) >= 0  # surface must exist
+
+
+@_register("external_links_authoring")
+def _probe_external_links_authoring(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl import ExternalLink
+
+    out = tmp_path / "authored_external_link.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "='[linked.xlsx]Sheet1'!$A$1"
+    wb._external_links.append(ExternalLink(target="linked.xlsx", sheet_names=["Sheet1"]))
+    wb.save(out)
+
+    entries = _zip_listing(out)
+    assert "xl/externalLinks/externalLink1.xml" in entries
+    assert "xl/externalLinks/_rels/externalLink1.xml.rels" in entries
+    rels = _zip_read_text(out, "xl/externalLinks/_rels/externalLink1.xml.rels")
+    assert "linked.xlsx" in rels
 
 
 # --------------------------------------------------------------------------

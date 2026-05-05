@@ -118,6 +118,7 @@ def load_pivot_tables_for_sheet(
                     cache_meta = parse_cache(cache_xml)
                 except Exception:
                     continue
+                field_names = _cache_field_names(cache_xml)
 
                 # Best-effort: resolve the records part path via the
                 # cache's own _rels so the handle can carry it for
@@ -151,12 +152,27 @@ def load_pivot_tables_for_sheet(
                     orig_source_range=str(cache_meta["range"]),
                     orig_source_sheet=str(cache_meta["sheet"]),
                     orig_field_count=int(cache_meta["field_count"]),
+                    field_names=field_names,
                 )
                 handles.append(handle)
     except (zipfile.BadZipFile, OSError):
         return []
 
     return handles
+
+
+def _cache_field_names(cache_xml: bytes) -> list[str]:
+    out: list[str] = []
+    try:
+        root = ET.fromstring(cache_xml)
+    except ET.ParseError:
+        return out
+    for elem in root.iter():
+        if elem.tag.endswith("cacheField"):
+            name = elem.get("name")
+            if name is not None:
+                out.append(name)
+    return out
 
 
 def _resolve_sheet_zip_path(
