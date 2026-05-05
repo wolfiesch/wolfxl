@@ -36,6 +36,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
+import shutil
+import zipfile
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -80,6 +83,16 @@ def _register(name: str) -> Callable[[_ProbeFn], _ProbeFn]:
         return fn
 
     return decorator
+
+
+def _zip_listing(path: Path) -> list[str]:
+    with zipfile.ZipFile(path, "r") as zf:
+        return sorted(zf.namelist())
+
+
+def _zip_read_text(path: Path, member: str) -> str:
+    with zipfile.ZipFile(path, "r") as zf:
+        return zf.read(member).decode("utf-8")
 
 
 # --------------------------------------------------------------------------
@@ -480,6 +493,76 @@ def _probe_charts_advanced_2d(tmp_path: Path) -> None:
     assert out.exists() and out.stat().st_size > 0
 
 
+@_register("charts_3d")
+def _probe_charts_3d(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.chart import AreaChart3D, BarChart3D, LineChart3D, PieChart3D, Reference
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    for row in [["label", "value"], ["a", 10], ["b", 20], ["c", 30], ["d", 40]]:
+        ws.append(row)
+
+    families = [
+        (BarChart3D, "D2"),
+        (LineChart3D, "D18"),
+        (PieChart3D, "L2"),
+        (AreaChart3D, "L18"),
+    ]
+    for chart_cls, anchor in families:
+        chart = chart_cls()
+        chart.add_data(Reference(ws, min_col=2, min_row=1, max_row=5), titles_from_data=True)
+        ws.add_chart(chart, anchor)
+
+    out = tmp_path / "charts_3d.xlsx"
+    wb.save(out)
+
+    ref_ws = _opx.load_workbook(out).active
+    chart_types = {type(chart).__name__ for chart in ref_ws._charts}
+    assert {"BarChart3D", "LineChart3D", "PieChart3D", "AreaChart3D"} <= chart_types
+
+
+@_register("charts_surface_stock_projected")
+def _probe_charts_surface_stock_projected(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+    from wolfxl.chart import ProjectedPieChart, Reference, StockChart, SurfaceChart, SurfaceChart3D
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.append(["label", "open", "high", "low", "close"])
+    for idx in range(1, 5):
+        ws.append([f"q{idx}", 10 + idx, 14 + idx, 8 + idx, 12 + idx])
+
+    surface = SurfaceChart()
+    surface.add_data(Reference(ws, min_col=2, max_col=5, min_row=1, max_row=5), titles_from_data=True)
+    ws.add_chart(surface, "G2")
+
+    surface_3d = SurfaceChart3D()
+    surface_3d.add_data(
+        Reference(ws, min_col=2, max_col=5, min_row=1, max_row=5),
+        titles_from_data=True,
+    )
+    ws.add_chart(surface_3d, "G18")
+
+    stock = StockChart()
+    stock.add_data(Reference(ws, min_col=2, max_col=5, min_row=1, max_row=5), titles_from_data=True)
+    stock.set_categories(Reference(ws, min_col=1, min_row=2, max_row=5))
+    ws.add_chart(stock, "O2")
+
+    projected = ProjectedPieChart()
+    projected.add_data(Reference(ws, min_col=5, min_row=1, max_row=5), titles_from_data=True)
+    ws.add_chart(projected, "O18")
+
+    out = tmp_path / "charts_surface_stock_projected.xlsx"
+    wb.save(out)
+
+    ref_ws = _opx.load_workbook(out).active
+    chart_types = {type(chart).__name__ for chart in ref_ws._charts}
+    assert {"SurfaceChart", "SurfaceChart3D", "StockChart", "ProjectedPieChart"} <= chart_types
+
+
 @_register("charts_add_remove_replace")
 def _probe_charts_add_remove_replace(tmp_path: Path) -> None:
     import wolfxl
@@ -661,6 +744,101 @@ def _probe_pivots_in_place_edit(tmp_path: Path) -> None:
     wb2.save(src)
 
 
+def _make_pivot_fixture(path: Path) -> None:
+    import openpyxl
+    import wolfxl
+    from wolfxl.chart import Reference
+    from wolfxl.pivot import PivotCache, PivotTable
+
+    seed = path.parent / "_pivot_seed.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    for row in [
+        ("region", "quarter", "revenue"),
+        ("North", "Q1", 100.0),
+        ("South", "Q1", 200.0),
+        ("North", "Q2", 150.0),
+        ("South", "Q2", 250.0),
+    ]:
+        ws.append(row)
+    wb.save(seed)
+
+    wbm = wolfxl.load_workbook(seed, modify=True)
+    try:
+        wsm = wbm["Data"]
+        ref = Reference(wsm, min_col=1, min_row=1, max_col=3, max_row=5)
+        cache = PivotCache(source=ref)
+        table = PivotTable(
+            cache=cache,
+            location="F2",
+            rows=["region"],
+            cols=["quarter"],
+            data=["revenue"],
+            name="SalesPivot",
+        )
+        wbm.add_pivot_cache(cache)
+        wsm.add_pivot_table(table)
+        wbm.save(path)
+    finally:
+        wbm.close()
+    seed.unlink(missing_ok=True)
+
+
+@_register("pivots_linked_chart")
+def _probe_pivots_linked_chart(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl.chart import BarChart, Reference
+
+    src = tmp_path / "pivot.xlsx"
+    out = tmp_path / "pivot_chart.xlsx"
+    _make_pivot_fixture(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    try:
+        ws = wb["Data"]
+        chart = BarChart()
+        chart.add_data(Reference(ws, min_col=3, min_row=1, max_row=5), titles_from_data=True)
+        chart.set_categories(Reference(ws, min_col=1, min_row=2, max_row=5))
+        chart.pivot_source = ws.pivot_tables[0]
+        ws.add_chart(chart, "F12")
+        wb.save(out)
+    finally:
+        wb.close()
+
+    chart_files = [name for name in _zip_listing(out) if re.match(r"^xl/charts/chart\d+\.xml$", name)]
+    assert chart_files, "pivot-linked chart part missing"
+    chart_xml = "\n".join(_zip_read_text(out, name) for name in chart_files)
+    assert "<c:pivotSource>" in chart_xml
+    assert "<c:name>SalesPivot</c:name>" in chart_xml
+
+
+@_register("pivots_copy_worksheet")
+def _probe_pivots_copy_worksheet(tmp_path: Path) -> None:
+    import wolfxl
+
+    src = tmp_path / "pivot.xlsx"
+    out = tmp_path / "pivot_copy.xlsx"
+    _make_pivot_fixture(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    try:
+        wb.copy_worksheet(wb["Data"], name="DataCopy")
+        wb.save(out)
+    finally:
+        wb.close()
+
+    entries = _zip_listing(out)
+    table_parts = [name for name in entries if re.match(r"^xl/pivotTables/pivotTable\d+\.xml$", name)]
+    assert len(table_parts) == 2, f"expected source + copied pivot table parts, got {table_parts}"
+
+    pivot_targets: set[str] = set()
+    for rels in [name for name in entries if re.match(r"^xl/worksheets/_rels/sheet\d+\.xml\.rels$", name)]:
+        rels_xml = _zip_read_text(out, rels)
+        pivot_targets.update(re.findall(r'Target="\.\./pivotTables/(pivotTable\d+\.xml)"', rels_xml))
+    assert len(pivot_targets) == 2, f"expected distinct pivot table rel targets, got {pivot_targets}"
+
+
 # --------------------------------------------------------------------------
 # Image probes
 # --------------------------------------------------------------------------
@@ -746,6 +924,61 @@ def _probe_structural_insert_delete_rows(tmp_path: Path) -> None:
     assert wb5.active["A2"].value == 2
 
 
+@_register("structural_insert_delete_cols")
+def _probe_structural_insert_delete_cols(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "cols.xlsx"
+    wb = _opx.Workbook()
+    ws = wb.active
+    for col, value in enumerate(["A", "B", "C", "D"], start=1):
+        ws.cell(row=1, column=col, value=value)
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2.active.insert_cols(2, amount=1)
+    wb2.save(src)
+    wb2.close()
+
+    inserted = _opx.load_workbook(src).active
+    assert inserted["A1"].value == "A"
+    assert inserted["B1"].value is None
+    assert inserted["C1"].value == "B"
+
+    wb3 = wolfxl.load_workbook(src, modify=True)
+    wb3.active.delete_cols(2, amount=1)
+    wb3.save(src)
+    wb3.close()
+
+    deleted = _opx.load_workbook(src).active
+    assert [deleted.cell(row=1, column=col).value for col in range(1, 5)] == ["A", "B", "C", "D"]
+
+
+@_register("structural_move_range")
+def _probe_structural_move_range(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "move.xlsx"
+    wb = _opx.Workbook()
+    ws = wb.active
+    ws["B2"] = 10
+    ws["C2"] = 20
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2.active.move_range("B2:C2", rows=2, cols=1)
+    wb2.save(src)
+    wb2.close()
+
+    moved = _opx.load_workbook(src).active
+    assert moved["B2"].value is None
+    assert moved["C2"].value is None
+    assert moved["C4"].value == 10
+    assert moved["D4"].value == 20
+
+
 # --------------------------------------------------------------------------
 # Modify-mode probes
 # --------------------------------------------------------------------------
@@ -806,6 +1039,61 @@ def _probe_modify_data_validations(tmp_path: Path) -> None:
     assert len(list(wb2.active.data_validations.dataValidation)) >= 1
 
 
+@_register("modify_document_properties")
+def _probe_modify_document_properties(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "props.xlsx"
+    _opx.Workbook().save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb.properties.title = "Phase 10 Oracle"
+    wb.properties.creator = "wolfxl"
+    wb.save(src)
+    wb.close()
+
+    ref = _opx.load_workbook(src)
+    assert ref.properties.title == "Phase 10 Oracle"
+    assert ref.properties.creator == "wolfxl"
+
+
+# --------------------------------------------------------------------------
+# Read-side probes
+# --------------------------------------------------------------------------
+
+
+@_register("read_xlsx")
+def _probe_read_xlsx(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "read.xlsx"
+    wb = _opx.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws["A1"] = "hello"
+    ws["B2"] = 42
+    wb.save(src)
+
+    got = wolfxl.load_workbook(src)
+    assert got.sheetnames == ["Data"]
+    assert got["Data"]["A1"].value == "hello"
+    assert got["Data"]["B2"].value == 42
+
+
+@_register("read_xlsb")
+def _probe_read_xlsb(tmp_path: Path) -> None:
+    import wolfxl
+
+    fixture = Path(__file__).parent / "fixtures" / "sprint_kappa_smoke.xlsb"
+    assert fixture.exists(), f"xlsb fixture missing: {fixture}"
+    wb = wolfxl.load_workbook(fixture)
+    assert wb.sheetnames, "xlsb fixture should expose sheet names"
+    rows = list(wb.active.iter_rows(values_only=True, max_row=5))
+    assert any(any(cell is not None for cell in row) for row in rows), "xlsb fixture read no values"
+
+
 # --------------------------------------------------------------------------
 # Utility probes
 # --------------------------------------------------------------------------
@@ -836,6 +1124,22 @@ def _probe_utils_range_boundaries(tmp_path: Path) -> None:
 
     for r in ("A1:B2", "C3:Z99", "AA1:AZ100"):
         assert wc.range_boundaries(r) == openpyxl.utils.range_boundaries(r)
+
+
+@_register("utils_coordinate_to_tuple")
+def _probe_utils_coordinate_to_tuple(tmp_path: Path) -> None:
+    from openpyxl.utils.cell import coordinate_to_tuple as openpyxl_coordinate_to_tuple
+    import wolfxl.utils.cell as wc
+
+    for coordinate in ("A1", "B3", "C4", "XFD1048576"):
+        assert wc.coordinate_to_tuple(coordinate) == openpyxl_coordinate_to_tuple(coordinate)
+
+    with pytest.raises(Exception):
+        openpyxl_coordinate_to_tuple("$C$4")
+
+    for bad in ("not-a-cell", "A", "1", "AAAA1", "$C$4"):
+        with pytest.raises(Exception):
+            wc.coordinate_to_tuple(bad)
 
 
 # --------------------------------------------------------------------------
@@ -931,6 +1235,30 @@ def _probe_vba_inspect(tmp_path: Path) -> None:
     assert archive is not None, "wb.vba_archive must surface bytes for .xlsm"
     assert isinstance(archive, (bytes, bytearray, memoryview))
     assert len(archive) > 0
+
+
+@_register("vba_preserve")
+def _probe_vba_preserve(tmp_path: Path) -> None:
+    import wolfxl
+
+    fixture = Path(__file__).parent / "fixtures" / "macro_basic.xlsm"
+    if not fixture.exists():
+        pytest.skip("vba preservation fixture not vendored")
+    work = tmp_path / "macro_preserve.xlsm"
+    shutil.copy(fixture, work)
+
+    wb = wolfxl.load_workbook(work, modify=True)
+    before = wb.vba_archive
+    assert before is not None and len(before) > 0
+    wb.active["A1"] = "preserve"
+    wb.save(work)
+    wb.close()
+
+    wb2 = wolfxl.load_workbook(work, modify=True)
+    after = wb2.vba_archive
+    assert after is not None
+    assert bytes(after) == bytes(before)
+    assert "xl/vbaProject.bin" in _zip_listing(work)
 
 
 # --------------------------------------------------------------------------
@@ -1548,6 +1876,92 @@ def _probe_array_formula_spill_metadata(tmp_path: Path) -> None:
     assert isinstance(op_dt, _OpxDataTableFormula)
     assert str(op_dt.del1).lower() in {"1", "true"}
     assert str(op_dt.del2).lower() in {"1", "true"}
+
+
+# --------------------------------------------------------------------------
+# Calc-chain probes
+# --------------------------------------------------------------------------
+
+
+@_register("calc_chain_basic")
+def _probe_calc_chain_basic(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "calc_seed.xlsx"
+    out = tmp_path / "calc_out.xlsx"
+    wb = _opx.Workbook()
+    ws = wb.active
+    ws["A1"] = 1
+    ws["A2"] = 2
+    ws["A3"] = "=SUM(A1:A2)"
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2.active["B1"] = "dirty"
+    wb2.save(out)
+    wb2.close()
+
+    entries = _zip_listing(out)
+    assert "xl/calcChain.xml" in entries
+    calc_chain = _zip_read_text(out, "xl/calcChain.xml")
+    assert 'r="A3"' in calc_chain
+    _opx.load_workbook(out, data_only=False)
+
+
+# --------------------------------------------------------------------------
+# Slicer probes
+# --------------------------------------------------------------------------
+
+
+@_register("slicers_with_pivot")
+def _probe_slicers_with_pivot(tmp_path: Path) -> None:
+    import openpyxl
+    import wolfxl
+    from wolfxl.chart import Reference
+    from wolfxl.pivot import Slicer, SlicerCache
+    from wolfxl.pivot import PivotCache, PivotTable
+
+    seed = tmp_path / "slicer_seed.xlsx"
+    out = tmp_path / "pivot_slicer.xlsx"
+    seed_wb = openpyxl.Workbook()
+    seed_ws = seed_wb.active
+    seed_ws.title = "Data"
+    for row in [
+        ("region", "quarter", "revenue"),
+        ("North", "Q1", 100.0),
+        ("South", "Q1", 200.0),
+        ("North", "Q2", 150.0),
+        ("South", "Q2", 250.0),
+    ]:
+        seed_ws.append(row)
+    seed_wb.save(seed)
+
+    wb = wolfxl.load_workbook(seed, modify=True)
+    try:
+        ws = wb["Data"]
+        ref = Reference(ws, min_col=1, min_row=1, max_col=3, max_row=5)
+        cache = PivotCache(source=ref)
+        pivot = PivotTable(cache=cache, location="F2", rows=["region"], data=["revenue"])
+        wb.add_pivot_cache(cache)
+        ws.add_pivot_table(pivot)
+        slicer_cache = SlicerCache(name="Slicer_region", source_pivot_cache=cache, field="region")
+        slicer = Slicer(name="Slicer_region1", cache=slicer_cache, caption="Region")
+        wb.add_slicer_cache(slicer_cache)
+        ws.add_slicer(slicer, anchor="H2")
+        wb.save(out)
+    finally:
+        wb.close()
+
+    entries = _zip_listing(out)
+    assert any(re.match(r"^xl/slicerCaches/slicerCache\d+\.xml$", name) for name in entries)
+    assert any(re.match(r"^xl/slicers/slicer\d+\.xml$", name) for name in entries)
+    rels_xml = "\n".join(
+        _zip_read_text(out, name)
+        for name in entries
+        if re.match(r"^xl/worksheets/_rels/sheet\d+\.xml\.rels$", name)
+    )
+    assert "office/2007/relationships/slicer" in rels_xml
 
 
 # --------------------------------------------------------------------------

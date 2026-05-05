@@ -241,6 +241,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "BarChart3D / LineChart3D / PieChart3D / AreaChart3D",
         "wolfxl": "BarChart3D / LineChart3D / PieChart3D / AreaChart3D",
         "status": "supported",
+        "probe": "charts_3d",
     },
     {
         "id": "charts.surface_stock_projected",
@@ -248,6 +249,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart",
         "wolfxl": "SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart",
         "status": "supported",
+        "probe": "charts_surface_stock_projected",
     },
     {
         "id": "charts.add_remove_replace",
@@ -314,6 +316,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "chart.pivot_source = pt",
         "wolfxl": "chart.pivot_source = pt",
         "status": "supported",
+        "probe": "pivots_linked_chart",
     },
     {
         "id": "pivots.in_place_edit",
@@ -334,6 +337,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "copy_worksheet of pivot-bearing sheet (drops in openpyxl)",
         "wolfxl": "copy_worksheet of pivot-bearing sheet (deep-clone)",
         "status": "supported",
+        "probe": "pivots_copy_worksheet",
     },
     # --- Images + drawings -------------------------------------------------
     {
@@ -367,6 +371,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "ws.insert_cols / delete_cols",
         "wolfxl": "ws.insert_cols / delete_cols",
         "status": "supported",
+        "probe": "structural_insert_delete_cols",
     },
     {
         "id": "structural.move_range",
@@ -374,6 +379,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "ws.move_range(range, rows, cols)",
         "wolfxl": "ws.move_range(range, rows, cols)",
         "status": "supported",
+        "probe": "structural_move_range",
     },
     # --- Modify-mode mutations ---------------------------------------------
     {
@@ -382,6 +388,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "wb.properties.title = ...",
         "wolfxl": "wb.properties.title = ...",
         "status": "supported",
+        "probe": "modify_document_properties",
     },
     {
         "id": "modify.defined_names",
@@ -414,6 +421,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "load_workbook(path)",
         "wolfxl": "load_workbook(path)",
         "status": "supported",
+        "probe": "read_xlsx",
     },
     {
         "id": "read.xlsb",
@@ -421,6 +429,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "native BIFF12; values, cached formulas, read-side styles",
         "status": "supported",
+        "probe": "read_xlsb",
     },
     {
         "id": "read.xls",
@@ -472,7 +481,10 @@ ENTRIES: list[Entry] = [
         "category": "utils",
         "openpyxl": "openpyxl.utils.coordinate_to_tuple",
         "wolfxl": "wolfxl.utils.cell.coordinate_to_tuple",
-        "status": "supported",
+        "status": "partial",
+        "gap_id": "P10-COORD-ABS",
+        "probe": "utils_coordinate_to_tuple",
+        "notes": "Phase 10 probe found WolfXL accepts absolute refs like `$C$4`; openpyxl 3.1.x rejects them for coordinate_to_tuple.",
     },
     # --- Protection -------------------------------------------------------
     {
@@ -515,6 +527,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": ".xlsm preserved on read+write",
         "wolfxl": ".xlsm preserved on modify-mode save",
         "status": "supported",
+        "probe": "vba_preserve",
     },
     {
         "id": "vba.inspect",
@@ -733,6 +746,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "calcChain rebuild on modify",
         "wolfxl": "calcChain rebuild on modify",
         "status": "supported",
+        "probe": "calc_chain_basic",
     },
     {
         "id": "calc_chain.edge_cases",
@@ -749,6 +763,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "Slicer + SlicerCache wired to a PivotCache",
         "wolfxl": "Slicer + SlicerCache wired to a PivotCache",
         "status": "supported",
+        "probe": "slicers_with_pivot",
     },
     {
         "id": "slicers.standalone",

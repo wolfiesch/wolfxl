@@ -15,8 +15,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **67** / 75
-- 🟡 Partial: **1** / 75
+- ✅ Supported: **66** / 75
+- 🟡 Partial: **2** / 75
 - ❌ Not Yet: **1** / 75
 - ⛔ Out of Scope: **6** / 75
 
@@ -107,7 +107,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `openpyxl.utils.get_column_letter` | `wolfxl.utils.cell.get_column_letter` | ✅ Supported |  |  |
 | `openpyxl.utils.column_index_from_string` | `wolfxl.utils.cell.column_index_from_string` | ✅ Supported |  |  |
 | `openpyxl.utils.range_boundaries` | `wolfxl.utils.cell.range_boundaries` | ✅ Supported |  |  |
-| `openpyxl.utils.coordinate_to_tuple` | `wolfxl.utils.cell.coordinate_to_tuple` | ✅ Supported |  |  |
+| `openpyxl.utils.coordinate_to_tuple` | `wolfxl.utils.cell.coordinate_to_tuple` | 🟡 Partial | P10-COORD-ABS | Phase 10 probe found WolfXL accepts absolute refs like `$C$4`; openpyxl 3.1.x rejects them for coordinate_to_tuple. |
 
 ## Streaming write (`write_only=True`)
 
