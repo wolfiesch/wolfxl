@@ -580,22 +580,43 @@ def to_rust_sheet_format_dict(ws: Worksheet) -> dict[str, Any] | None:
 
 def set_print_title_rows(ws: Worksheet, value: str | None) -> None:
     """Set repeat rows for printed pages."""
+    _ensure_print_titles_loaded(ws)
     if value is not None:
         from wolfxl.worksheet.print_settings import RowRange
 
         ws._print_title_rows = str(RowRange.from_string(value))  # noqa: SLF001
     else:
         ws._print_title_rows = None  # noqa: SLF001
+    ws._print_titles_dirty = True  # noqa: SLF001
 
 
 def set_print_title_cols(ws: Worksheet, value: str | None) -> None:
     """Set repeat columns for printed pages."""
+    _ensure_print_titles_loaded(ws)
     if value is not None:
         from wolfxl.worksheet.print_settings import ColRange
 
         ws._print_title_cols = str(ColRange.from_string(value))  # noqa: SLF001
     else:
         ws._print_title_cols = None  # noqa: SLF001
+    ws._print_titles_dirty = True  # noqa: SLF001
+
+
+def _ensure_print_titles_loaded(ws: Worksheet) -> None:
+    """Load both print-title selectors before mutating one side."""
+    if (
+        ws._print_titles_dirty  # noqa: SLF001
+        or ws._print_title_rows is not None  # noqa: SLF001
+        or ws._print_title_cols is not None  # noqa: SLF001
+    ):
+        return
+    reader = getattr(ws._workbook, "_rust_reader", None)  # noqa: SLF001
+    if reader is None or not hasattr(reader, "read_print_titles"):
+        return
+    payload = reader.read_print_titles(ws._title)  # noqa: SLF001
+    if isinstance(payload, dict):
+        ws._print_title_rows = payload.get("rows")  # noqa: SLF001
+        ws._print_title_cols = payload.get("cols")  # noqa: SLF001
 
 
 def to_rust_setup_dict(ws: Worksheet) -> dict[str, Any]:

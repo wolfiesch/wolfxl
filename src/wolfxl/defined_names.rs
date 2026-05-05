@@ -35,12 +35,12 @@ use quick_xml::Reader as XmlReader;
 // Public types
 // ---------------------------------------------------------------------------
 
-/// One user-supplied defined-name upsert.
+/// One user-supplied defined-name mutation.
 ///
-/// Every field except `name` and `formula` is optional. `formula` is the
-/// XML text content (no leading `=`, openpyxl strips it on the Python
-/// side). `local_sheet_id` is the 0-based sheet *position index* (NOT a
-/// sheet name); `None` means workbook-scope.
+/// Every field except `name` and `formula` is optional for upserts.
+/// `formula` is the XML text content (no leading `=`, openpyxl strips it on
+/// the Python side). `local_sheet_id` is the 0-based sheet *position index*
+/// (NOT a sheet name); `None` means workbook-scope.
 ///
 /// On update of an existing name, attributes that the user did NOT provide
 /// (`Option::None`) are preserved verbatim from the source XML. Phase 2
@@ -48,9 +48,14 @@ use quick_xml::Reader as XmlReader;
 /// `definedName` attribute openpyxl exposes; truly unknown attributes
 /// (forward-compat) still fall through the verbatim-passthrough path in
 /// [`serialize_upsert_over_existing`].
+///
+/// When `delete` is true, the mutation removes the matching `(name,
+/// local_sheet_id)` entry if it exists and ignores all attribute/formula
+/// fields. Deleting a missing entry is a no-op.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinedNameMut {
     pub name: String,
+    pub delete: bool,
     /// XML text content. Stored verbatim modulo XML text-escape on emit.
     pub formula: String,
     /// `None` = workbook-scope; `Some(idx)` = sheet at 0-based position.
@@ -135,25 +140,32 @@ pub fn merge_defined_names(
     }
 
     // Pass 1: walk existing entries in source order. If there's a pending
-    // upsert for an entry, replace its bytes with a freshly serialized
-    // form (preserving attributes the upsert didn't override). Otherwise
-    // pass through verbatim.
+    // mutation for an entry, either drop it (delete) or replace its bytes
+    // with a freshly serialized form (upsert, preserving attributes the
+    // upsert didn't override). Otherwise pass through verbatim.
     let mut merged_inner: Vec<u8> = Vec::with_capacity(256);
     for ex in &existing_entries {
         let key = (ex.name.clone(), ex.local_sheet_id);
-        if let Some(upsert) = pending.remove(&key) {
+        if let Some(mutation) = pending.remove(&key) {
+            if mutation.delete {
+                continue;
+            }
             // Re-serialize with overrides applied to the source attrs.
-            let serialized = serialize_upsert_over_existing(&ex.raw, upsert);
+            let serialized = serialize_upsert_over_existing(&ex.raw, mutation);
             merged_inner.extend_from_slice(&serialized);
         } else {
             merged_inner.extend_from_slice(&ex.raw);
         }
     }
 
-    // Pass 2: emit any remaining upserts (new names) at the end of the
-    // block. BTreeMap order keeps this deterministic.
-    for ((_name, _scope), upsert) in &pending {
-        serialize_new_defined_name(&mut merged_inner, upsert);
+    // Pass 2: emit any remaining upserts (new names) at the end of the block.
+    // Deletes for missing names are no-ops. BTreeMap order keeps this
+    // deterministic.
+    for ((_name, _scope), mutation) in &pending {
+        if mutation.delete {
+            continue;
+        }
+        serialize_new_defined_name(&mut merged_inner, mutation);
     }
 
     // Empty merged block + no existing block + nothing to emit → identity.
@@ -163,8 +175,7 @@ pub fn merge_defined_names(
 
     // Splice the merged block back into the workbook XML.
     let block_with_wrapper = if merged_inner.is_empty() {
-        // All existing entries were deleted (not currently reachable —
-        // this RFC has no delete op — but keep the branch defensive).
+        // All existing entries were deleted.
         Vec::new()
     } else {
         let mut wrapped: Vec<u8> = Vec::with_capacity(merged_inner.len() + 32);
@@ -746,6 +757,53 @@ mod tests {
         assert!(text.contains(
             r#"<definedName name="_xlnm.Print_Area" localSheetId="0">Sheet1!$A$1:$D$20</definedName>"#
         ));
+    }
+
+    #[test]
+    fn delete_existing_defined_name_preserves_unrelated_entries() {
+        let xml = workbook_xml_with_defined_names();
+        let names = vec![DefinedNameMut {
+            name: "_xlnm.Print_Area".into(),
+            local_sheet_id: Some(0),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains(r#"<definedName name="Region">Sheet1!$A$1:$A$10</definedName>"#));
+        assert!(!text.contains(r#"name="_xlnm.Print_Area""#));
+        assert!(text.contains("<definedNames>"));
+    }
+
+    #[test]
+    fn delete_only_existing_defined_name_removes_wrapper_block() {
+        let xml = r#"<?xml version="1.0"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheets><sheet name="Sheet1" sheetId="1"/></sheets>
+  <definedNames><definedName name="Only">Sheet1!$A$1</definedName></definedNames>
+  <calcPr/>
+</workbook>"#;
+        let names = vec![DefinedNameMut {
+            name: "Only".into(),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(!text.contains("<definedNames>"));
+        assert!(text.contains("<calcPr/>"));
+    }
+
+    #[test]
+    fn delete_missing_defined_name_is_identity_when_no_block_exists() {
+        let xml = workbook_xml_no_defined_names();
+        let names = vec![DefinedNameMut {
+            name: "Missing".into(),
+            delete: true,
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml.as_bytes(), &names).expect("merge");
+        assert_eq!(bytes, xml.as_bytes());
     }
 
     #[test]

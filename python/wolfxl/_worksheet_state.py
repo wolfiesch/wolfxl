@@ -80,6 +80,7 @@ def initialize_worksheet_state(
     ws._protection: Any = None  # noqa: SLF001
     ws._print_title_rows: str | None = None  # noqa: SLF001
     ws._print_title_cols: str | None = None  # noqa: SLF001
+    ws._print_titles_dirty = False  # noqa: SLF001
     ws._row_breaks: Any = None  # noqa: SLF001
     ws._col_breaks: Any = None  # noqa: SLF001
     ws._sheet_format: Any = None  # noqa: SLF001

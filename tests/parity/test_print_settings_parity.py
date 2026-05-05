@@ -222,6 +222,68 @@ def test_g24_print_titles_modify_mode_round_trip(tmp_xlsx: Path, tmp_path: Path)
         op_rt.close()
 
 
+def test_g24_print_titles_modify_mode_can_clear_existing_titles(
+    tmp_xlsx: Path, tmp_path: Path
+) -> None:
+    src = tmp_path / "source-print-titles.xlsx"
+    op = openpyxl.Workbook()
+    op.active.title = "Report"
+    op.active["A1"] = "x"
+    op.active.print_title_rows = "1:2"
+    op.active.print_title_cols = "A:B"
+    op.save(src)
+    op.close()
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Report"]
+    ws.print_title_rows = None
+    ws.print_title_cols = None
+    wb.save(tmp_xlsx)
+
+    rt = wolfxl.load_workbook(tmp_xlsx)
+    assert rt["Report"].print_title_rows is None
+    assert rt["Report"].print_title_cols is None
+
+    workbook_xml = _read_workbook_xml(tmp_xlsx)
+    assert 'name="_xlnm.Print_Titles"' not in workbook_xml
+
+    op_rt = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        assert op_rt["Report"].print_title_rows is None
+        assert op_rt["Report"].print_title_cols is None
+    finally:
+        op_rt.close()
+
+
+def test_g24_print_titles_modify_mode_clearing_rows_preserves_columns(
+    tmp_xlsx: Path, tmp_path: Path
+) -> None:
+    src = tmp_path / "source-print-title-cols.xlsx"
+    op = openpyxl.Workbook()
+    op.active.title = "Report"
+    op.active["A1"] = "x"
+    op.active.print_title_rows = "1:2"
+    op.active.print_title_cols = "A:B"
+    op.save(src)
+    op.close()
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Report"]
+    ws.print_title_rows = None
+    wb.save(tmp_xlsx)
+
+    rt = wolfxl.load_workbook(tmp_xlsx)
+    assert rt["Report"].print_title_rows is None
+    assert rt["Report"].print_title_cols == "A:B"
+
+    op_rt = openpyxl.load_workbook(tmp_xlsx)
+    try:
+        assert op_rt["Report"].print_title_rows is None
+        assert op_rt["Report"].print_title_cols == "$A:$B"
+    finally:
+        op_rt.close()
+
+
 def test_page_margins_round_trip(tmp_xlsx: Path) -> None:
     wb = wolfxl.Workbook()
     ws = wb.active

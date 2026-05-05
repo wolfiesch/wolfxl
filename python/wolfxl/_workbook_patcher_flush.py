@@ -345,6 +345,14 @@ def _queue_print_titles_to_patcher(wb: Any, patcher: Any) -> None:
         rows = getattr(ws, "_print_title_rows", None)
         cols = getattr(ws, "_print_title_cols", None)
         if rows is None and cols is None:
+            if getattr(ws, "_print_titles_dirty", False):
+                patcher.queue_defined_name(
+                    {
+                        "name": "_xlnm.Print_Titles",
+                        "local_sheet_id": sheet_idx,
+                        "delete": True,
+                    }
+                )
             continue
         if _has_pending_print_titles_for_sheet(wb, sheet_idx):
             continue

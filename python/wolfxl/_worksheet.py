@@ -179,7 +179,7 @@ class Worksheet:
         # Print/view/protection lazy slots.
         "_page_setup", "_page_margins", "_print_options", "_header_footer",
         "_sheet_properties", "_sheet_view", "_protection",
-        "_print_title_rows", "_print_title_cols",
+        "_print_title_rows", "_print_title_cols", "_print_titles_dirty",
         # Pending slicer presentations.
         "_pending_slicers",
         # Page breaks and sheetFormatPr lazy slots.
@@ -548,6 +548,7 @@ class Worksheet:
         reader = getattr(self._workbook, "_rust_reader", None)
         if (
             self._print_title_rows is None
+            and not self._print_titles_dirty
             and reader is not None
             and hasattr(reader, "read_print_titles")
         ):
@@ -573,6 +574,7 @@ class Worksheet:
         reader = getattr(self._workbook, "_rust_reader", None)
         if (
             self._print_title_cols is None
+            and not self._print_titles_dirty
             and reader is not None
             and hasattr(reader, "read_print_titles")
         ):

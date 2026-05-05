@@ -886,11 +886,12 @@ impl XlsxPatcher {
         Ok(())
     }
 
-    /// Queue a defined-name upsert (RFC-021).
+    /// Queue a defined-name upsert/delete (RFC-021).
     ///
-    /// `payload` keys (`name` + `formula` required; rest optional):
+    /// `payload` keys (`name` required; `formula` required for upserts; rest optional):
     ///   - `name`               (str)  — defined name. Includes any `_xlnm.` prefix verbatim.
     ///   - `formula`            (str)  — XML text content (no leading `=`).
+    ///   - `delete`             (bool?)— remove matching name/scope when true.
     ///   - `local_sheet_id`     (int?) — `None` = workbook-scope; 0-based sheet position otherwise.
     ///   - `hidden`             (bool?)— `True` emits `hidden="1"`.
     ///   - `comment`            (str?) — defined-name `comment` attribute.
@@ -914,9 +915,16 @@ impl XlsxPatcher {
         let name = extract_str(payload, "name")?.ok_or_else(|| {
             PyErr::new::<PyValueError, _>("queue_defined_name: 'name' is required")
         })?;
-        let formula = extract_str(payload, "formula")?.ok_or_else(|| {
-            PyErr::new::<PyValueError, _>("queue_defined_name: 'formula' is required")
-        })?;
+        let delete = extract_bool(payload, "delete")?.unwrap_or(false);
+        let formula = match extract_str(payload, "formula")? {
+            Some(formula) => formula,
+            None if delete => String::new(),
+            None => {
+                return Err(PyErr::new::<PyValueError, _>(
+                    "queue_defined_name: 'formula' is required",
+                ));
+            }
+        };
         let local_sheet_id = match payload.get_item("local_sheet_id")? {
             Some(v) if !v.is_none() => Some(v.extract::<u32>()?),
             _ => None,
@@ -937,6 +945,7 @@ impl XlsxPatcher {
         self.queued_defined_names
             .push(defined_names::DefinedNameMut {
                 name,
+                delete,
                 formula,
                 local_sheet_id,
                 hidden,
