@@ -485,20 +485,12 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         attrs.retain(|(k, _)| k.as_slice() != key);
     }
 
-    fn upsert_opt_str(
-        attrs: &mut Vec<(Vec<u8>, String)>,
-        key: &[u8],
-        value: Option<&str>,
-    ) {
+    fn upsert_opt_str(attrs: &mut Vec<(Vec<u8>, String)>, key: &[u8], value: Option<&str>) {
         if let Some(v) = value {
             upsert_attr(attrs, key, v.to_string());
         }
     }
-    fn upsert_opt_bool_true(
-        attrs: &mut Vec<(Vec<u8>, String)>,
-        key: &[u8],
-        value: Option<bool>,
-    ) {
+    fn upsert_opt_bool_true(attrs: &mut Vec<(Vec<u8>, String)>, key: &[u8], value: Option<bool>) {
         match value {
             Some(true) => upsert_attr(attrs, key, "1".to_string()),
             Some(false) => remove_attr(attrs, key),
@@ -519,18 +511,38 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         None => { /* preserve source */ }
     }
     upsert_opt_str(&mut existing_attrs, b"comment", upsert.comment.as_deref());
-    upsert_opt_str(&mut existing_attrs, b"customMenu", upsert.custom_menu.as_deref());
-    upsert_opt_str(&mut existing_attrs, b"description", upsert.description.as_deref());
+    upsert_opt_str(
+        &mut existing_attrs,
+        b"customMenu",
+        upsert.custom_menu.as_deref(),
+    );
+    upsert_opt_str(
+        &mut existing_attrs,
+        b"description",
+        upsert.description.as_deref(),
+    );
     upsert_opt_str(&mut existing_attrs, b"help", upsert.help.as_deref());
-    upsert_opt_str(&mut existing_attrs, b"statusBar", upsert.status_bar.as_deref());
-    upsert_opt_str(&mut existing_attrs, b"shortcutKey", upsert.shortcut_key.as_deref());
+    upsert_opt_str(
+        &mut existing_attrs,
+        b"statusBar",
+        upsert.status_bar.as_deref(),
+    );
+    upsert_opt_str(
+        &mut existing_attrs,
+        b"shortcutKey",
+        upsert.shortcut_key.as_deref(),
+    );
     upsert_opt_bool_true(&mut existing_attrs, b"function", upsert.function);
     upsert_opt_bool_true(&mut existing_attrs, b"vbProcedure", upsert.vb_procedure);
     upsert_opt_bool_true(&mut existing_attrs, b"xlm", upsert.xlm);
     if let Some(id) = upsert.function_group_id {
         upsert_attr(&mut existing_attrs, b"functionGroupId", id.to_string());
     }
-    upsert_opt_bool_true(&mut existing_attrs, b"publishToServer", upsert.publish_to_server);
+    upsert_opt_bool_true(
+        &mut existing_attrs,
+        b"publishToServer",
+        upsert.publish_to_server,
+    );
     upsert_opt_bool_true(
         &mut existing_attrs,
         b"workbookParameter",

@@ -13,7 +13,7 @@ The user has demanded zero openpyxl-parity gaps. The current state, per the 2026
 - The dynamic-surface ratchet (`tests/test_openpyxl_dynamic_surface.py`) now compares 22 representative objects: Workbook, Worksheet, Cell, Font, Fill, PatternFill, GradientFill, Border, Alignment, Protection, NamedStyle, DefinedName, ExternalLink, BarChart, Image, Comment, Table, DataValidation, ConditionalFormatting, ConditionalFormattingList, AutoFilter, and PageSetup. Pivot and slicer internals remain intentionally behavioral-oracle-first because their openpyxl construction surface is mostly internal state rather than stable end-user API.
 - The openpyxl source-distribution test corpus has never been vendored, even though the parity program plan called for it in S1+.
 
-The remaining parity work is: pivot field/filter/aggregation mutation, external-link authoring, dynamic-array spill metadata, calc-chain edge cases, standalone table-driven slicers, and the CF/dynamic-surface/probe/corpus measurement debt. Total ~4,700 LOC after Phase 3, ~15 implementation sessions, plus ~4 sessions for measurement infrastructure (corpus vendoring + ratchet expansion + 13 missing probes).
+The remaining parity work is now intentionally staged v2 depth: pivot field/filter/aggregation mutation and external-link authoring. Dynamic-array spill metadata, calc-chain edge cases, and coordinate utility strictness have parity coverage; standalone table-driven slicers were reclassified as a possible wolfxl-extra because openpyxl 3.1.5 has no public standalone slicer authoring API. Follow-up acceptance targets live in `Plans/followups/remaining-v2-depth.md`.
 
 ## Definition of "no gaps with openpyxl"
 
@@ -413,4 +413,5 @@ Frequently-modified shared files across phases:
 - 2026-05-04: Phase 3 landed on branch `parity-closure-phase2`; G24 print settings depth moved to supported and the limitations row was removed.
 - 2026-05-04: Phase 4 landed via PR #27; array formula and data-table formula surface moved to supported, with openpyxl 3.1.5 `Worksheet.array_formulae` treated as the reference surface.
 - 2026-05-04: Phase 10 landed via PR #28; compatibility-oracle coverage expanded, leaving `coordinate_to_tuple` strictness as the remaining probe-discovered partial.
+- 2026-05-05: Remaining-limitations closure slice tightened `coordinate_to_tuple`, added calc-chain edge-case coverage (`extLst` preservation, stale ref pruning, cross-sheet formulas), and reclassified standalone slicers as out-of-scope parity based on openpyxl 3.1.5 source evidence.
 - 2026-05-04: Phase 9 implemented locally on `parity-closure-phase9-cf-ratchet`; CF rare-combo probes, modify-mode CF attr tests, and a 22-object dynamic-surface ratchet are green locally.

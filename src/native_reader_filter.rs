@@ -30,7 +30,10 @@ pub(crate) fn read_auto_filter_xlsb(
     serialize_auto_filter(py, auto_filter)
 }
 
-fn serialize_auto_filter(py: Python<'_>, auto_filter: Option<AutoFilterInfo>) -> PyResult<PyObject> {
+fn serialize_auto_filter(
+    py: Python<'_>,
+    auto_filter: Option<AutoFilterInfo>,
+) -> PyResult<PyObject> {
     match auto_filter {
         Some(auto_filter) => {
             let d = PyDict::new(py);
@@ -41,9 +44,7 @@ fn serialize_auto_filter(py: Python<'_>, auto_filter: Option<AutoFilterInfo>) ->
             }
             d.set_item("filter_columns", columns)?;
             match &auto_filter.sort_state {
-                Some(sort_state) => {
-                    d.set_item("sort_state", sort_state_to_py(py, sort_state)?)?
-                }
+                Some(sort_state) => d.set_item("sort_state", sort_state_to_py(py, sort_state)?)?,
                 None => d.set_item("sort_state", py.None())?,
             }
             Ok(d.into())
@@ -52,10 +53,7 @@ fn serialize_auto_filter(py: Python<'_>, auto_filter: Option<AutoFilterInfo>) ->
     }
 }
 
-pub(crate) fn filter_column_to_py(
-    py: Python<'_>,
-    column: &FilterColumnInfo,
-) -> PyResult<PyObject> {
+pub(crate) fn filter_column_to_py(py: Python<'_>, column: &FilterColumnInfo) -> PyResult<PyObject> {
     let d = PyDict::new(py);
     d.set_item("col_id", column.col_id)?;
     d.set_item("hidden_button", column.hidden_button)?;

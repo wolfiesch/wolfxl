@@ -520,7 +520,12 @@ pub(super) fn apply_image_removes_phase(
     let drained: Vec<(String, Vec<usize>)> = patcher
         .sheet_order
         .iter()
-        .filter_map(|s| patcher.queued_image_removes.remove(s).map(|v| (s.clone(), v)))
+        .filter_map(|s| {
+            patcher
+                .queued_image_removes
+                .remove(s)
+                .map(|v| (s.clone(), v))
+        })
         .collect();
     if drained.is_empty() {
         patcher.queued_image_removes.clear();
@@ -579,21 +584,21 @@ pub(super) fn apply_image_removes_phase(
             let drawing_rels_path = drawing_rels_path_for_part(&drawing_path)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels path: {e}")))?;
 
-            let mut drawing_rels: wolfxl_rels::RelsGraph =
-                if let Some(g) = patcher.rels_patches.get(&drawing_rels_path) {
-                    g.clone()
-                } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
-                    wolfxl_rels::RelsGraph::parse(bytes).map_err(|e| {
+            let mut drawing_rels: wolfxl_rels::RelsGraph = if let Some(g) =
+                patcher.rels_patches.get(&drawing_rels_path)
+            {
+                g.clone()
+            } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
+                wolfxl_rels::RelsGraph::parse(bytes)
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}")))?
+            } else {
+                match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
+                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
                         PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                    })?
-                } else {
-                    match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                        Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                            PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                        })?,
-                        None => wolfxl_rels::RelsGraph::new(),
-                    }
-                };
+                    })?,
+                    None => wolfxl_rels::RelsGraph::new(),
+                }
+            };
 
             let drawing_xml: Vec<u8> = if let Some(bytes) = file_patches.get(&drawing_path) {
                 bytes.clone()
@@ -624,8 +629,8 @@ pub(super) fn apply_image_removes_phase(
                 } else {
                     ooxml_util::zip_read_to_string(zip, &sheet_path)?
                 };
-                let stripped_sheet_xml =
-                    remove_sheet_drawing_ref(&sheet_xml, &drawing_rel.id.0).map_err(|e| {
+                let stripped_sheet_xml = remove_sheet_drawing_ref(&sheet_xml, &drawing_rel.id.0)
+                    .map_err(|e| {
                         PyErr::new::<PyIOError, _>(format!("remove sheet drawing ref: {e}"))
                     })?;
                 file_patches.insert(sheet_path.clone(), stripped_sheet_xml.into_bytes());
@@ -1127,7 +1132,8 @@ mod tests {
     <xdr:pic><xdr:blipFill><a:blip r:embed="rId2"/></xdr:blipFill></xdr:pic><xdr:clientData/>
   </xdr:oneCellAnchor>
 </xdr:wsDr>"#;
-        let (updated, removed_rid, kept_anchor_count) = remove_image_anchor_by_index(xml, 1).unwrap();
+        let (updated, removed_rid, kept_anchor_count) =
+            remove_image_anchor_by_index(xml, 1).unwrap();
         let s = String::from_utf8(updated).unwrap();
         assert_eq!(removed_rid, "rId2");
         assert_eq!(kept_anchor_count, 1);

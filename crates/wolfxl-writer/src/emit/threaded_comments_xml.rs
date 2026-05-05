@@ -141,7 +141,9 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         assert!(
-            text.contains("xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\""),
+            text.contains(
+                "xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\""
+            ),
             "namespace: {text}"
         );
         assert!(text.contains("ref=\"A1\""));
@@ -167,9 +169,7 @@ mod tests {
         let bytes = emit(&threads);
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
-        let reply_pos = text
-            .find("<text>reply</text>")
-            .expect("reply text present");
+        let reply_pos = text.find("<text>reply</text>").expect("reply text present");
         let parent_attr = text.find("parentId=\"{A}\"").expect("parentId attr");
         assert!(parent_attr < reply_pos, "parentId precedes reply text");
     }
@@ -257,9 +257,7 @@ mod tests {
                 visible: false,
             },
         );
-        sheet
-            .threaded_comments
-            .push(make("{TID}", None, "thread"));
+        sheet.threaded_comments.push(make("{TID}", None, "thread"));
         wb.add_sheet(sheet);
 
         synthesize_legacy_placeholders(&mut wb);

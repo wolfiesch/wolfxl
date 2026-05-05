@@ -166,11 +166,7 @@ fn secondary_axis_pair<'a>(
     primary_axes: (u32, u32),
     secondary_value_axes: &mut Vec<&'a ValueAxis>,
 ) -> (u32, u32) {
-    let sec_y_id = secondary
-        .y_axis
-        .as_ref()
-        .map(axis_common)
-        .map(|c| c.ax_id);
+    let sec_y_id = secondary.y_axis.as_ref().map(axis_common).map(|c| c.ax_id);
 
     match sec_y_id {
         Some(id) if id != primary_axes.1 => {
@@ -555,8 +551,7 @@ mod tests {
     #[test]
     fn combination_chart_emits_multi_family_plot_area() {
         let mut bar = bar_chart_with_one_series();
-        bar.secondary_charts
-            .push(line_secondary_with_axid(200, 10));
+        bar.secondary_charts.push(line_secondary_with_axid(200, 10));
         let bytes = emit_chart_xml(&bar);
         parse_ok(&bytes);
         let text = std::str::from_utf8(&bytes).unwrap();
@@ -575,8 +570,7 @@ mod tests {
     #[test]
     fn combination_chart_secondary_axis_renders_on_right_with_crosses_max() {
         let mut bar = bar_chart_with_one_series();
-        bar.secondary_charts
-            .push(line_secondary_with_axid(200, 10));
+        bar.secondary_charts.push(line_secondary_with_axid(200, 10));
         let bytes = emit_chart_xml(&bar);
         parse_ok(&bytes);
         let text = std::str::from_utf8(&bytes).unwrap();

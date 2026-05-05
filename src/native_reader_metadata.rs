@@ -31,10 +31,7 @@ pub(crate) fn read_custom_doc_properties(
     Ok(result.into())
 }
 
-pub(crate) fn read_workbook_security(
-    book: &NativeXlsxBook,
-    py: Python<'_>,
-) -> PyResult<PyObject> {
+pub(crate) fn read_workbook_security(book: &NativeXlsxBook, py: Python<'_>) -> PyResult<PyObject> {
     workbook_security_to_py(py, book.book.workbook_security())
 }
 
@@ -48,10 +45,7 @@ pub(crate) fn read_workbook_properties(
     }
 }
 
-pub(crate) fn read_calc_properties(
-    book: &NativeXlsxBook,
-    py: Python<'_>,
-) -> PyResult<PyObject> {
+pub(crate) fn read_calc_properties(book: &NativeXlsxBook, py: Python<'_>) -> PyResult<PyObject> {
     match book.book.calc_properties() {
         Some(properties) => calc_properties_to_py(py, properties),
         None => Ok(py.None()),

@@ -482,10 +482,8 @@ ENTRIES: list[Entry] = [
         "category": "utils",
         "openpyxl": "openpyxl.utils.coordinate_to_tuple",
         "wolfxl": "wolfxl.utils.cell.coordinate_to_tuple",
-        "status": "partial",
-        "gap_id": "P10-COORD-ABS",
+        "status": "supported",
         "probe": "utils_coordinate_to_tuple",
-        "notes": "Phase 10 probe found WolfXL accepts absolute refs like `$C$4`; openpyxl 3.1.x rejects them for coordinate_to_tuple.",
     },
     # --- Protection -------------------------------------------------------
     {
@@ -757,8 +755,9 @@ ENTRIES: list[Entry] = [
         "category": "calc_chain",
         "openpyxl": "cross-sheet calc-chain ordering, deleted-cell pruning",
         "wolfxl": "cross-sheet calc-chain ordering, deleted-cell pruning",
-        "status": "partial",
-        "gap_id": "G23",
+        "status": "supported",
+        "probe": "calc_chain_edge_cases",
+        "notes": "Rebuild scans post-mutation sheet XML across tab order, prunes stale refs, and preserves a source calcChain extLst when emitting a non-empty chain.",
     },
     # --- Slicers ----------------------------------------------------------
     {
@@ -774,8 +773,9 @@ ENTRIES: list[Entry] = [
         "category": "slicers",
         "openpyxl": "Slicer outside pivot context (table-driven, etc.)",
         "wolfxl": "Slicer outside pivot context (table-driven, etc.)",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G21",
+        "notes": "openpyxl 3.1.5 exposes no public slicer modules/classes or table-driven slicer authoring API; tracked as a possible wolfxl-extra, not an openpyxl parity gap.",
     },
 ]
 

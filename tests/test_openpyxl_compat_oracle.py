@@ -2024,6 +2024,59 @@ def _probe_calc_chain_basic(tmp_path: Path) -> None:
     _opx.load_workbook(out, data_only=False)
 
 
+@_register("calc_chain_edge_cases")
+def _probe_calc_chain_edge_cases(tmp_path: Path) -> None:
+    import openpyxl as _opx
+    import wolfxl
+
+    src = tmp_path / "calc_edge_seed.xlsx"
+    out = tmp_path / "calc_edge_out.xlsx"
+    wb = _opx.Workbook()
+    first = wb.active
+    first.title = "First"
+    first["A1"] = 1
+    first["A2"] = 2
+    first["B1"] = "=SUM(A1:A2)"
+    first["B4"] = "=Second!A1"
+    second = wb.create_sheet("Second")
+    second["A1"] = 10
+    second["B2"] = "=First!B1+A1"
+    wb.save(src)
+
+    rewritten = tmp_path / "calc_edge_seed_rewritten.xlsx"
+    with zipfile.ZipFile(src, "r") as zsrc, zipfile.ZipFile(
+        rewritten, "w", compression=zipfile.ZIP_DEFLATED
+    ) as zdst:
+        for info in zsrc.infolist():
+            if info.filename != "xl/calcChain.xml":
+                zdst.writestr(info, zsrc.read(info.filename))
+        zdst.writestr(
+            "xl/calcChain.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <c r="B1" i="1"/>
+  <c r="B4" i="1"/>
+  <c r="X99" i="2"/>
+  <extLst><ext uri="{wolfxl-test-calcchain-ext}"><x:test xmlns:x="urn:wolfxl:test">keep</x:test></ext></extLst>
+</calcChain>""",
+        )
+    shutil.move(rewritten, src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    wb2["First"].delete_rows(4)
+    wb2.save(out)
+    wb2.close()
+
+    calc_chain = _zip_read_text(out, "xl/calcChain.xml")
+    assert 'r="B1" i="1"' in calc_chain
+    assert 'r="B2" i="2"' in calc_chain
+    assert 'r="B4"' not in calc_chain
+    assert 'r="X99"' not in calc_chain
+    assert "{wolfxl-test-calcchain-ext}" in calc_chain
+    assert "urn:wolfxl:test" in calc_chain
+    _opx.load_workbook(out, data_only=False)
+
+
 # --------------------------------------------------------------------------
 # Slicer probes
 # --------------------------------------------------------------------------

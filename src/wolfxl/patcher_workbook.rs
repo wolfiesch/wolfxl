@@ -516,7 +516,11 @@ pub(super) fn rebuild_calc_chain_phase(
     }
 
     const CALC_CHAIN_PATH: &str = "xl/calcChain.xml";
-    let source_has_calc_chain = zip.by_name(CALC_CHAIN_PATH).is_ok();
+    let source_calc_chain = get_bytes(file_patches, &patcher.file_adds, zip, CALC_CHAIN_PATH);
+    let source_has_calc_chain = source_calc_chain.is_some();
+    let source_calc_chain_ext_lst = source_calc_chain
+        .as_deref()
+        .and_then(calcchain::extract_ext_lst);
 
     // Walk sheets in tab order, scanning each.
     let mut all_entries: Vec<calcchain::CalcChainEntry> = Vec::new();
@@ -535,7 +539,10 @@ pub(super) fn rebuild_calc_chain_phase(
         all_entries.extend(entries);
     }
 
-    match calcchain::render_calc_chain(&all_entries) {
+    match calcchain::render_calc_chain_with_ext_lst(
+        &all_entries,
+        source_calc_chain_ext_lst.as_deref(),
+    ) {
         Some(bytes) => {
             // Route the rewrite based on whether the source ZIP
             // already had a calcChain.xml entry.

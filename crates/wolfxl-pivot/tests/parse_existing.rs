@@ -6,8 +6,7 @@
 //! malformed-XML rejection path.
 
 use wolfxl_pivot::mutate::{
-    column_count_of_range, parse_pivot_cache_source, parse_pivot_table_meta,
-    rewrite_cache_source,
+    column_count_of_range, parse_pivot_cache_source, parse_pivot_table_meta, rewrite_cache_source,
 };
 
 #[test]
@@ -46,9 +45,7 @@ fn parses_libreoffice_style_emit_with_extlst() {
     let out = rewrite_cache_source(xml, "A1:C10", Some("Data"), false).expect("rewrite");
     let s = std::str::from_utf8(&out).unwrap();
     assert!(s.contains(r#"ref="A1:C10""#));
-    assert!(s.contains(
-        r#"<x14:pivotCacheDefinition/>"#
-    ));
+    assert!(s.contains(r#"<x14:pivotCacheDefinition/>"#));
     assert!(s.contains("</extLst>"));
 }
 

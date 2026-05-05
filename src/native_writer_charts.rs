@@ -1135,9 +1135,9 @@ fn parse_optional_runs(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<TitleRu
         let mut font_name = py_opt_str(rd, "font_name")?;
         if let Some(fv) = rd.get_item("font")? {
             if !fv.is_none() {
-                let fd = fv
-                    .cast::<PyDict>()
-                    .map_err(|_| PyValueError::new_err(format!("{key} run 'font' must be a dict")))?;
+                let fd = fv.cast::<PyDict>().map_err(|_| {
+                    PyValueError::new_err(format!("{key} run 'font' must be a dict"))
+                })?;
                 if let Some(b) = py_opt_bool(fd, "bold")? {
                     bold = Some(b);
                 }

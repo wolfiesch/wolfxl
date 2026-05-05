@@ -30,8 +30,7 @@ const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const CT_COMMENTS: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
-const CT_THREADED_COMMENTS: &str =
-    "application/vnd.ms-excel.threadedcomments+xml";
+const CT_THREADED_COMMENTS: &str = "application/vnd.ms-excel.threadedcomments+xml";
 const CT_PERSON_LIST: &str = "application/vnd.ms-excel.person+xml";
 const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";

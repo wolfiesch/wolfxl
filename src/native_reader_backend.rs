@@ -88,18 +88,40 @@ impl NativeXlsxBook {
     }
 
     #[pyo3(signature = (sheet, a1, data_only = false))]
-    pub fn read_cell_value(&mut self, py: Python<'_>, sheet: &str, a1: &str, data_only: bool) -> PyResult<PyObject> {
+    pub fn read_cell_value(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
         crate::native_reader_sheet_data::read_cell_value_xlsx(self, py, sheet, a1, data_only)
     }
 
     #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
-    pub fn read_sheet_values(&mut self, py: Python<'_>, sheet: &str, cell_range: Option<&str>, data_only: bool) -> PyResult<PyObject> {
-        crate::native_reader_sheet_data::read_sheet_values_xlsx(self, py, sheet, cell_range, data_only)
+    pub fn read_sheet_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        crate::native_reader_sheet_data::read_sheet_values_xlsx(
+            self, py, sheet, cell_range, data_only,
+        )
     }
 
     #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
-    pub fn read_sheet_values_plain(&mut self, py: Python<'_>, sheet: &str, cell_range: Option<&str>, data_only: bool) -> PyResult<PyObject> {
-        crate::native_reader_sheet_data::read_sheet_values_plain_xlsx(self, py, sheet, cell_range, data_only)
+    pub fn read_sheet_values_plain(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        crate::native_reader_sheet_data::read_sheet_values_plain_xlsx(
+            self, py, sheet, cell_range, data_only,
+        )
     }
 
     #[pyo3(signature = (
@@ -149,11 +171,20 @@ impl NativeXlsxBook {
         crate::native_reader_sheet_data::read_sheet_formulas_xlsx(self, sheet)
     }
 
-    pub fn read_cell_formula(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_sheet_data::read_cell_formula_xlsx(self, py, sheet, a1)
     }
 
-    pub fn read_cached_formula_values(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+    pub fn read_cached_formula_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_sheet_data::read_cached_formula_values_xlsx(self, py, sheet)
     }
 
@@ -289,7 +320,12 @@ impl NativeXlsxBook {
         crate::native_reader_sheet_data::read_column_width_xlsx(self, sheet, col_letter)
     }
 
-    pub fn read_cell_array_formula(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_array_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_array_formula_xlsx(self, py, sheet, a1)
     }
 
@@ -297,15 +333,30 @@ impl NativeXlsxBook {
         crate::native_reader_styles::read_sheet_array_formulas_xlsx(self, py, sheet)
     }
 
-    pub fn read_cell_rich_text(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_rich_text_xlsx(self, py, sheet, a1)
     }
 
-    pub fn read_cell_format(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_format(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_format_xlsx(self, py, sheet, a1)
     }
 
-    pub fn read_cell_border(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_border(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_border_xlsx(self, py, sheet, a1)
     }
 }
@@ -442,18 +493,40 @@ impl NativeXlsbBook {
     }
 
     #[pyo3(signature = (sheet, a1, data_only = false))]
-    pub fn read_cell_value(&mut self, py: Python<'_>, sheet: &str, a1: &str, data_only: bool) -> PyResult<PyObject> {
+    pub fn read_cell_value(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
         crate::native_reader_sheet_data::read_cell_value_xlsb(self, py, sheet, a1, data_only)
     }
 
     #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
-    pub fn read_sheet_values(&mut self, py: Python<'_>, sheet: &str, cell_range: Option<&str>, data_only: bool) -> PyResult<PyObject> {
-        crate::native_reader_sheet_data::read_sheet_values_xlsb(self, py, sheet, cell_range, data_only)
+    pub fn read_sheet_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        crate::native_reader_sheet_data::read_sheet_values_xlsb(
+            self, py, sheet, cell_range, data_only,
+        )
     }
 
     #[pyo3(signature = (sheet, cell_range = None, data_only = false))]
-    pub fn read_sheet_values_plain(&mut self, py: Python<'_>, sheet: &str, cell_range: Option<&str>, data_only: bool) -> PyResult<PyObject> {
-        crate::native_reader_sheet_data::read_sheet_values_plain_xlsb(self, py, sheet, cell_range, data_only)
+    pub fn read_sheet_values_plain(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        cell_range: Option<&str>,
+        data_only: bool,
+    ) -> PyResult<PyObject> {
+        crate::native_reader_sheet_data::read_sheet_values_plain_xlsb(
+            self, py, sheet, cell_range, data_only,
+        )
     }
 
     #[pyo3(signature = (
@@ -503,7 +576,11 @@ impl NativeXlsbBook {
         crate::native_reader_sheet_data::read_sheet_formulas_xlsb(self, sheet)
     }
 
-    pub fn read_cached_formula_values(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+    pub fn read_cached_formula_values(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_sheet_data::read_cached_formula_values_xlsb(self, py, sheet)
     }
 
@@ -515,11 +592,21 @@ impl NativeXlsbBook {
         crate::native_reader_sheet_data::read_column_width_xlsb(self, sheet, col_letter)
     }
 
-    pub fn read_cell_rich_text(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_rich_text(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_rich_text_xlsb(self, py, sheet, a1)
     }
 
-    pub fn read_cell_array_formula(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_array_formula(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_array_formula_xlsb(self, py, sheet, a1)
     }
 
@@ -527,11 +614,21 @@ impl NativeXlsbBook {
         crate::native_reader_styles::read_sheet_array_formulas_xlsb(self, py, sheet)
     }
 
-    pub fn read_cell_format(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_format(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_format_xlsb(self, py, sheet, a1)
     }
 
-    pub fn read_cell_border(&mut self, py: Python<'_>, sheet: &str, a1: &str) -> PyResult<PyObject> {
+    pub fn read_cell_border(
+        &mut self,
+        py: Python<'_>,
+        sheet: &str,
+        a1: &str,
+    ) -> PyResult<PyObject> {
         crate::native_reader_styles::read_cell_border_xlsb(self, py, sheet, a1)
     }
 }

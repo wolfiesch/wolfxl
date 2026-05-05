@@ -69,10 +69,7 @@ pub(crate) fn open_xlsb_bytes(data: &[u8]) -> PyResult<NativeXlsbBook> {
     })
 }
 
-pub(crate) fn read_sheet_state_xlsx(
-    book: &NativeXlsxBook,
-    sheet: &str,
-) -> PyResult<&'static str> {
+pub(crate) fn read_sheet_state_xlsx(book: &NativeXlsxBook, sheet: &str) -> PyResult<&'static str> {
     if !book.sheet_names.iter().any(|name| name == sheet) {
         return Err(PyErr::new::<PyValueError, _>(format!(
             "Unknown sheet: {sheet}"
@@ -85,10 +82,7 @@ pub(crate) fn read_sheet_state_xlsx(
     Ok(sheet_state_to_str(state))
 }
 
-pub(crate) fn read_sheet_state_xlsb(
-    book: &NativeXlsbBook,
-    sheet: &str,
-) -> PyResult<&'static str> {
+pub(crate) fn read_sheet_state_xlsb(book: &NativeXlsbBook, sheet: &str) -> PyResult<&'static str> {
     let state = book
         .book
         .sheet_state(sheet)
@@ -104,10 +98,7 @@ fn sheet_state_to_str(state: SheetState) -> &'static str {
     }
 }
 
-pub(crate) fn read_print_area_xlsx(
-    book: &NativeXlsxBook,
-    sheet: &str,
-) -> PyResult<Option<String>> {
+pub(crate) fn read_print_area_xlsx(book: &NativeXlsxBook, sheet: &str) -> PyResult<Option<String>> {
     if !book.sheet_names.iter().any(|name| name == sheet) {
         return Err(PyErr::new::<PyValueError, _>(format!(
             "Unknown sheet: {sheet}"
@@ -116,10 +107,7 @@ pub(crate) fn read_print_area_xlsx(
     Ok(book.book.print_area(sheet).map(str::to_string))
 }
 
-pub(crate) fn read_print_area_xlsb(
-    book: &NativeXlsbBook,
-    sheet: &str,
-) -> PyResult<Option<String>> {
+pub(crate) fn read_print_area_xlsb(book: &NativeXlsbBook, sheet: &str) -> PyResult<Option<String>> {
     if !book.sheet_names.iter().any(|name| name == sheet) {
         return Err(PyErr::new::<PyValueError, _>(format!(
             "Unknown sheet: {sheet}"

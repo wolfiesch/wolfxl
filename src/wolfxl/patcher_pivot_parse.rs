@@ -23,10 +23,7 @@ use wolfxl_pivot::mutate::{
 
 /// Parse a pivot-table part's metadata.
 #[pyfunction]
-pub fn parse_pivot_table_meta<'py>(
-    py: Python<'py>,
-    xml: &[u8],
-) -> PyResult<Bound<'py, PyDict>> {
+pub fn parse_pivot_table_meta<'py>(py: Python<'py>, xml: &[u8]) -> PyResult<Bound<'py, PyDict>> {
     let meta = core_parse_table(xml).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let d = PyDict::new(py);
     d.set_item("name", meta.name)?;
@@ -37,10 +34,7 @@ pub fn parse_pivot_table_meta<'py>(
 
 /// Parse a pivot cache definition's source metadata.
 #[pyfunction]
-pub fn parse_pivot_cache_source<'py>(
-    py: Python<'py>,
-    xml: &[u8],
-) -> PyResult<Bound<'py, PyDict>> {
+pub fn parse_pivot_cache_source<'py>(py: Python<'py>, xml: &[u8]) -> PyResult<Bound<'py, PyDict>> {
     let meta = core_parse_cache(xml).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let d = PyDict::new(py);
     d.set_item("range", meta.range)?;

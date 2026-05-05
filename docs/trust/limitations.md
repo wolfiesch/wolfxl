@@ -2,9 +2,10 @@
 
 This page lists concrete openpyxl-parity gaps in WolfXL so you can evaluate
 fit before migrating. Surfaces that openpyxl itself does not expose
-(`.xlsb`/`.xls` writes, `.ods`, VBA authoring) are wolfxl-extras tracked in
-[`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md)
-under G25-G28; they are not parity gaps and are not listed here. The
+(`.xlsb`/`.xls` writes, `.ods`, VBA authoring, standalone table-driven
+slicer authoring) are wolfxl-extras tracked in
+[`Plans/openpyxl-parity-program.md`](../../Plans/openpyxl-parity-program.md);
+they are not parity gaps and are not listed here. The
 machine-checked source of truth is
 [`compatibility-matrix.md`](../migration/compatibility-matrix.md).
 
@@ -14,9 +15,6 @@ machine-checked source of truth is
 |---------|:----:|:-----:|:------:|-------|
 | In-place pivot-table field/filter/aggregation edits | Partial | Partial | Partial | WolfXL constructs pivot caches/tables/charts, copies pivot-bearing sheets, and mutates the source range of existing pivots via `ws.pivot_tables[i].source = ...`; field placement, filter, aggregation-function changes, and live aggregate regeneration remain open. |
 | External workbook link authoring (`wb._external_links`) | Yes | No | Preserve | WolfXL exposes a read-only `ExternalLink` collection (target, sheet names, cached values) and round-trips `xl/externalLinks/` parts byte-for-byte on modify-save; append/remove/edit authoring is not implemented yet. |
-| Dynamic-array spill metadata | Partial | Partial | Partial | Array formulas and data-table formulas round-trip; dynamic-array spill metadata is not fully preserved yet. |
-| Calc-chain edge cases | Partial | Partial | Partial | Basic calc-chain rebuild is supported; cross-sheet ordering, deleted-cell pruning, and `calcChainExtLst` edge cases remain open. |
-| Standalone table-driven slicers | No | No | Preserve | Pivot-backed slicers are supported. Slicers tied directly to tables, outside a pivot context, are still unimplemented. |
 
 "Preserve" means the feature survives a load-modify-save cycle untouched, even
 though WolfXL does not expose a full authoring API for that surface.
@@ -26,6 +24,7 @@ though WolfXL does not expose a full authoring API for that surface.
 These openpyxl APIs are still incomplete or intentionally narrower:
 
 - Existing pivot-table mutation in v1.0 covers only source-range edits (`ws.pivot_tables[i].source = "Sheet!A1:E100"`); field placement, filter, and aggregation mutations are deferred to v2.
+- External workbook links are exposed for inspection and opaque modify-mode preservation; appending, removing, and editing external links are deferred to v2.
 
 ## Performance claim guardrails
 

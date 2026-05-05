@@ -1,7 +1,7 @@
 //! Dimensions / merged-ranges / used-range / visibility logic for native books.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::native_reader_backend::{NativeXlsbBook, NativeXlsxBook};
@@ -41,10 +41,7 @@ pub(crate) fn read_sheet_visibility_xlsb(
     serialize_visibility(py, data)
 }
 
-fn serialize_visibility(
-    py: Python<'_>,
-    data: &wolfxl_reader::WorksheetData,
-) -> PyResult<PyObject> {
+fn serialize_visibility(py: Python<'_>, data: &wolfxl_reader::WorksheetData) -> PyResult<PyObject> {
     let d = PyDict::new(py);
     d.set_item("hidden_rows", data.hidden_rows.clone())?;
     d.set_item("hidden_columns", data.hidden_columns.clone())?;
