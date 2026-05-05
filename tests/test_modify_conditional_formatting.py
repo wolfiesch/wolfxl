@@ -565,12 +565,8 @@ def test_cf_no_pending_no_op(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     )
 
 
-def test_unsupported_rule_kind_raises(tmp_path: Path) -> None:
-    """Stub CF kinds (containsText, beginsWith, etc.) raise pointing at §10.
-
-    G11 promoted ``iconSet`` to a supported kind, so this test now uses
-    a still-stubbed openpyxl rule type instead.
-    """
+def test_unknown_rule_kind_raises(tmp_path: Path) -> None:
+    """Unknown CF kinds still raise before they can poison OOXML output."""
     from wolfxl.formatting.rule import Rule
 
     src = tmp_path / "src.xlsx"
@@ -578,11 +574,59 @@ def test_unsupported_rule_kind_raises(tmp_path: Path) -> None:
 
     wb = Workbook._from_patcher(str(src))
     ws = wb["Sheet1"]
-    with pytest.raises(NotImplementedError, match="026-conditional-formatting"):
-        ws.conditional_formatting.add(
-            "A1:A10", Rule(type="containsText", formula=["foo"])
-        )
+    with pytest.raises(NotImplementedError, match="not yet supported"):
+        ws.conditional_formatting.add("A1:A10", Rule(type="unknownRule"))
     wb.close()
+
+
+def test_generic_rule_kinds_round_trip_in_modify_mode(tmp_path: Path) -> None:
+    """Openpyxl's generic ``Rule`` taxonomy writes through modify mode."""
+    from wolfxl.formatting.rule import DifferentialStyle, Rule
+    from wolfxl.styles import PatternFill
+
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        Rule(
+            type="containsText",
+            operator="containsText",
+            text="foo",
+            formula=['NOT(ISERROR(SEARCH("foo",A1)))'],
+            dxf=DifferentialStyle(
+                fill=PatternFill(fill_type="solid", fgColor="FFFF0000")
+            ),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "B1:B10",
+        Rule(type="top10", rank=3, percent=True, bottom=False),
+    )
+    ws.conditional_formatting.add(
+        "C1:C10",
+        Rule(type="aboveAverage", aboveAverage=False, stdDev=1),
+    )
+
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    assert 'type="containsText"' in sheet_xml
+    assert 'operator="containsText"' in sheet_xml
+    assert 'text="foo"' in sheet_xml
+    assert 'dxfId="' in sheet_xml
+    assert '<formula>NOT(ISERROR(SEARCH("foo",A1)))</formula>' in sheet_xml
+    assert 'type="top10"' in sheet_xml
+    assert 'rank="3"' in sheet_xml
+    assert 'percent="1"' in sheet_xml
+    assert 'bottom="0"' in sheet_xml
+    assert 'type="aboveAverage"' in sheet_xml
+    assert 'aboveAverage="0"' in sheet_xml
+    assert 'stdDev="1"' in sheet_xml
 
 
 # ---------------------------------------------------------------------------

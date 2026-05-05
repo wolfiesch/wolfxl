@@ -1523,17 +1523,17 @@ class Worksheet:
         In modify mode the list is populated lazily by walking the
         sheet's relationship graph and parsing the on-disk pivot
         table parts. Each entry is a
-        :class:`~wolfxl.pivot.PivotTableHandle` whose ``.source``
-        attribute can be reassigned to mutate the underlying
-        ``<cacheSource><worksheetSource>`` element on save.
+        :class:`~wolfxl.pivot.PivotTableHandle` whose ``.source`` and
+        layout fields can be reassigned to mutate the underlying pivot
+        table/cache XML on save.
 
         In construction mode the list is empty: pivots queued via
         :meth:`add_pivot_table` are tracked separately on
         ``_pending_pivot_tables`` until save.
 
-        Out-of-scope per RFC-070 §3 (Option B): mutating
-        field-placement, filters, or aggregation. Only ``.source``
-        round-trips today.
+        Layout edits that can change derived cache records mark the
+        linked cache refresh-on-open; source edits with matching shape
+        stay byte-stable.
         """
         if self._pivot_handles_cache is not None:
             return self._pivot_handles_cache

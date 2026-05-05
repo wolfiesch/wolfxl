@@ -16,9 +16,10 @@ the compat oracle and downstream introspection:
   ``target_mode`` so callers can check ``link.file_link.target_mode ==
   "External"``.
 
-The collection is read-only in v1.0 (RFC-071 §5 / §8): we expose the
-parsed list, but the patcher rewrites ``xl/externalLinks/`` parts
-byte-for-byte on save. Authoring is deferred to a follow-up RFC.
+The collection is mutable: callers can append/remove links and update
+targets. Modify-mode saves rewrite the workbook relationship graph,
+content types, external-link parts, and per-link rels when the
+collection is dirty; unchanged collections preserve source bytes.
 """
 
 from __future__ import annotations
@@ -63,8 +64,7 @@ class ExternalFileLink:
 class ExternalLink:
     """One entry in :attr:`Workbook._external_links`.
 
-    All fields are read-only in v1.0. ``cached_data`` shape is loose by
-    design — see RFC-071 §3.
+    ``cached_data`` shape is loose by design — see RFC-071 §3.
     """
 
     file_link: ExternalFileLink | None = None

@@ -94,6 +94,11 @@ pub enum CfRuleKind {
         percent: Option<bool>,
         reverse: Option<bool>,
     },
+    Generic {
+        type_name: String,
+        attrs: Vec<(String, String)>,
+        formulas: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -482,6 +487,45 @@ pub fn build_cf_blocks(
                     }
                     rules_buf.extend_from_slice(b"</iconSet>");
                     rules_buf.extend_from_slice(b"</cfRule>");
+                }
+                CfRuleKind::Generic {
+                    type_name,
+                    attrs,
+                    formulas,
+                } => {
+                    rules_buf.extend_from_slice(
+                        format!(
+                            "<cfRule type=\"{}\" priority=\"{}\"",
+                            attr_escape(type_name),
+                            priority
+                        )
+                        .as_bytes(),
+                    );
+                    for (name, value) in attrs {
+                        if value.is_empty() {
+                            continue;
+                        }
+                        rules_buf.extend_from_slice(
+                            format!(" {}=\"{}\"", attr_escape(name), attr_escape(value)).as_bytes(),
+                        );
+                    }
+                    if let Some(id) = dxf_id {
+                        rules_buf.extend_from_slice(format!(" dxfId=\"{}\"", id).as_bytes());
+                    }
+                    if rule.stop_if_true {
+                        rules_buf.extend_from_slice(b" stopIfTrue=\"1\"");
+                    }
+                    if formulas.is_empty() {
+                        rules_buf.extend_from_slice(b"/>");
+                    } else {
+                        rules_buf.push(b'>');
+                        for formula in formulas {
+                            rules_buf.extend_from_slice(
+                                format!("<formula>{}</formula>", text_escape(formula)).as_bytes(),
+                            );
+                        }
+                        rules_buf.extend_from_slice(b"</cfRule>");
+                    }
                 }
             }
 

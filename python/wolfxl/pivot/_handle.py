@@ -1,8 +1,8 @@
 """:class:`PivotTableHandle` — modify-mode proxy for an existing pivot table.
 
 Returned from ``Worksheet.pivot_tables`` for a pivot table that was
-parsed off disk. Carries the minimal metadata required to round-trip
-a source-range edit:
+parsed off disk. Carries the metadata required to round-trip source
+and layout edits:
 
 - ``name`` (read-only) — the ``<pivotTableDefinition name="...">``.
 - ``location`` (read-only) — the ``<location ref="A1:E20">`` string.
@@ -11,9 +11,10 @@ a source-range edit:
   ``<cacheSource><worksheetSource>`` element. Setting this stamps a
   new ref + flips ``_dirty``; the actual XML rewrite happens at
   :meth:`Workbook.save` time via ``apply_pivot_source_edits_phase``.
-
-The handle is intentionally thin: full pivot mutation
-(field placement, filters, aggregation) is out of scope.
+- ``row_fields`` / ``column_fields`` / ``page_fields`` /
+  ``data_fields`` plus ``set_filter`` / ``set_aggregation`` mutate
+  the existing pivot table layout and mark the linked cache
+  refresh-on-open when derived cache records may need recalculation.
 """
 
 from __future__ import annotations

@@ -323,7 +323,7 @@ ENTRIES: list[Entry] = [
         "id": "pivots.in_place_edit",
         "category": "pivots",
         "openpyxl": "edit existing pivot's source range, field order, etc.",
-        "wolfxl": "edit existing pivot's source range",
+        "wolfxl": "edit existing pivot source + layout fields",
         "status": "supported",
         "probe": "pivots_in_place_edit",
         "notes": (

@@ -1,8 +1,8 @@
 # Known parity gaps — WolfXL vs openpyxl
 
-This file enumerates every openpyxl symbol that SynthGL relies on but WolfXL
-0.3.2 does not yet expose (or exposes under a different name). Each gap is
-tied to a phase in the rollout plan.
+This file is the historical parity-gap ledger. The active openpyxl-supported
+gap inventory is currently empty; new gaps must be added here only after they
+are also encoded in `openpyxl_surface.py` or `docs/migration/_compat_spec.py`.
 
 Gaps are also encoded in `openpyxl_surface.py` via `wolfxl_supported=False`
 — the parity smoke test keeps the two in sync.
@@ -26,8 +26,8 @@ images, 1.6–1.6.1 charts, 1.7 chart-stack debt + RichText titles,
 **2.0 pivot tables**, and the post-PR #23 audit slice for slicers,
 pivot calculated fields/items, GroupItems, and the remaining chart
 display-unit / data-point overrides). The "Out of scope" section
-below now lists only OLAP/external caches, deeper pivot-editing
-work, and intentionally deferred file formats.
+below now lists only surfaces openpyxl itself does not expose or project
+caveats that are not openpyxl advantages.
 
 ## Gate
 
@@ -197,12 +197,13 @@ and documented here before the ratchet baseline is updated.
   — ✅ SHIPPED in the post-PR #23 audit slice.
 - **OLAP / external pivot caches** (`xl/model/`, PowerPivot
   data-model) — out of scope permanently.
-- **Pivot-table styling beyond current PivotArea / pivot-CF support**
-  (broader themes and banded-format polish) — partial.
-- **In-place pivot edits in modify mode** beyond
-  `add_pivot_table` (editing an existing pivot's source range,
-  field re-ordering, subtotal toggling, etc.) — deferred to
-  **v2.2**.
+- **Pivot cache record regeneration after layout edits** — WolfXL
+  mutates existing pivot source ranges, row/column/page field placement,
+  page-field selection, and data-field aggregation. Layout edits stamp
+  `refreshOnLoad="1"` and let Excel regenerate derived cache records on
+  open rather than recalculating `pivotCacheRecords` inside WolfXL.
+  openpyxl also does not provide a public cache-record regeneration
+  engine, so this is not tracked as an openpyxl-parity gap.
 - **OpenDocument (`.ods`)** — out of scope; not on the roadmap.
   Detected and rejected by `_rust.classify_format` with a friendly
   pointer.

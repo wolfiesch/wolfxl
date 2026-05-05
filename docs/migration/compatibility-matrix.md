@@ -64,7 +64,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 |---|---|---|---|---|
 | `PivotCache + PivotTable construction` | `wolfxl.pivot.PivotCache + PivotTable` | ✅ Supported |  | v2.0 ships pre-aggregated records emit (no refresh-on-open required). |
 | `chart.pivot_source = pt` | `chart.pivot_source = pt` | ✅ Supported |  |  |
-| `edit existing pivot's source range, field order, etc.` | `edit existing pivot's source range` | ✅ Supported |  | Source-range mutation is supported; layout edits that change cache semantics stamp refresh-on-open rather than regenerating pivot cache records. |
+| `edit existing pivot's source range, field order, etc.` | `edit existing pivot source + layout fields` | ✅ Supported |  | Source-range mutation is supported; layout edits that change cache semantics stamp refresh-on-open rather than regenerating pivot cache records. |
 | `edit existing pivot row/column fields` | `PivotTableHandle.row_fields / column_fields` | ✅ Supported |  | Mutates existing pivot table layout XML and marks the linked cache refresh-on-open. |
 | `edit existing pivot page field filter` | `PivotTableHandle.page_fields / set_filter` | ✅ Supported |  |  |
 | `edit existing pivot data-field aggregation` | `PivotTableHandle.data_fields / set_aggregation` | ✅ Supported |  |  |

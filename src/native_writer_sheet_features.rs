@@ -456,8 +456,17 @@ pub(crate) fn dict_to_conditional_format(
                 reverse,
             }
         }
-        _ => ConditionalKind::Expression {
-            formula: "FALSE()".to_string(),
+        "containsText" | "notContainsText" | "beginsWith" | "endsWith" | "duplicateValues"
+        | "uniqueValues" | "top10" | "aboveAverage" | "containsBlanks" | "notContainsBlanks"
+        | "containsErrors" | "notContainsErrors" | "timePeriod" => ConditionalKind::Generic {
+            type_name: rule_type.clone(),
+            attrs: generic_cf_attrs(cfg, &rule_type)?,
+            formulas: generic_cf_formulas(cfg)?,
+        },
+        _ => ConditionalKind::Generic {
+            type_name: rule_type.clone(),
+            attrs: generic_cf_attrs(cfg, &rule_type)?,
+            formulas: generic_cf_formulas(cfg)?,
         },
     };
 
@@ -478,6 +487,75 @@ pub(crate) fn dict_to_conditional_format(
         sqref: range,
         rules: vec![rule],
     }))
+}
+
+fn generic_cf_attrs(cfg: &Bound<'_, PyDict>, rule_type: &str) -> PyResult<Vec<(String, String)>> {
+    let mut attrs: Vec<(String, String)> = Vec::new();
+    if let Some(operator) = dict_get_string(cfg, "operator")? {
+        attrs.push(("operator".to_string(), operator));
+    }
+    if let Some(text) = dict_get_string(cfg, "text")? {
+        attrs.push(("text".to_string(), text));
+    }
+    if let Some(time_period) =
+        dict_get_string(cfg, "time_period")?.or(dict_get_string(cfg, "timePeriod")?)
+    {
+        attrs.push(("timePeriod".to_string(), time_period));
+    }
+    if let Some(rank) = dict_get_string(cfg, "rank")? {
+        attrs.push(("rank".to_string(), rank));
+    }
+    if let Some(std_dev) = dict_get_string(cfg, "std_dev")?.or(dict_get_string(cfg, "stdDev")?) {
+        attrs.push(("stdDev".to_string(), std_dev));
+    }
+    if let Some(value) = extract_bool(cfg, "above_average")?.or(extract_bool(cfg, "aboveAverage")?)
+    {
+        attrs.push(("aboveAverage".to_string(), bool_attr(value)));
+    } else if rule_type == "aboveAverage" {
+        attrs.push(("aboveAverage".to_string(), "1".to_string()));
+    }
+    if let Some(value) = extract_bool(cfg, "equal_average")?.or(extract_bool(cfg, "equalAverage")?)
+    {
+        attrs.push(("equalAverage".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(cfg, "percent")? {
+        attrs.push(("percent".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(cfg, "bottom")? {
+        attrs.push(("bottom".to_string(), bool_attr(value)));
+    }
+    Ok(attrs)
+}
+
+fn generic_cf_formulas(cfg: &Bound<'_, PyDict>) -> PyResult<Vec<String>> {
+    if let Some(v) = cfg.get_item("formulas")? {
+        if let Ok(items) = v.extract::<Vec<String>>() {
+            return Ok(items
+                .into_iter()
+                .map(|s| s.trim_start_matches('=').to_string())
+                .filter(|s| !s.is_empty())
+                .collect());
+        }
+    }
+    let mut formulas = Vec::new();
+    for key in ["formula_a", "formula_b", "formula"] {
+        if let Some(value) = dict_get_string(cfg, key)? {
+            formulas.push(value.trim_start_matches('=').to_string());
+        }
+    }
+    Ok(formulas)
+}
+
+fn bool_attr(value: bool) -> String {
+    if value {
+        "1".to_string()
+    } else {
+        "0".to_string()
+    }
+}
+
+fn extract_bool(cfg: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    Ok(cfg.get_item(key)?.and_then(|v| v.extract::<bool>().ok()))
 }
 
 /// Map a cfvo type string + optional value into a `ConditionalThreshold`.

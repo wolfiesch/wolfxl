@@ -197,11 +197,18 @@ pub(crate) fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
                 reverse: extract_bool(d, "reverse")?,
             }
         }
-        other => {
-            return Err(PyValueError::new_err(format!(
-                "unsupported CF rule kind: '{other}'"
-            )));
-        }
+        "containsText" | "notContainsText" | "beginsWith" | "endsWith" | "duplicateValues"
+        | "uniqueValues" | "top10" | "aboveAverage" | "containsBlanks" | "notContainsBlanks"
+        | "containsErrors" | "notContainsErrors" | "timePeriod" => CfRuleKind::Generic {
+            type_name: kind_tag.clone(),
+            attrs: generic_cf_attrs(d, &kind_tag)?,
+            formulas: generic_cf_formulas(d)?,
+        },
+        _ => CfRuleKind::Generic {
+            type_name: kind_tag.clone(),
+            attrs: generic_cf_attrs(d, &kind_tag)?,
+            formulas: generic_cf_formulas(d)?,
+        },
     };
 
     let dxf = match d.get_item("dxf")? {
@@ -219,6 +226,90 @@ pub(crate) fn extract_cf_rule(d: &Bound<'_, PyDict>) -> PyResult<CfRulePatch> {
         dxf,
         stop_if_true: extract_bool(d, "stop_if_true")?.unwrap_or(false),
     })
+}
+
+fn generic_cf_attrs(d: &Bound<'_, PyDict>, rule_type: &str) -> PyResult<Vec<(String, String)>> {
+    let mut attrs: Vec<(String, String)> = Vec::new();
+    if let Some(operator) = extract_str(d, "operator")? {
+        attrs.push(("operator".to_string(), operator));
+    }
+    if let Some(text) = extract_str(d, "text")? {
+        attrs.push(("text".to_string(), text));
+    }
+    if let Some(time_period) = extract_str(d, "time_period")?.or(extract_str(d, "timePeriod")?) {
+        attrs.push(("timePeriod".to_string(), time_period));
+    }
+    if let Some(rank) = extract_attr_string(d, "rank")? {
+        attrs.push(("rank".to_string(), rank));
+    }
+    if let Some(std_dev) = extract_attr_string(d, "std_dev")?.or(extract_attr_string(d, "stdDev")?)
+    {
+        attrs.push(("stdDev".to_string(), std_dev));
+    }
+    if let Some(value) = extract_bool(d, "above_average")?.or(extract_bool(d, "aboveAverage")?) {
+        attrs.push(("aboveAverage".to_string(), bool_attr(value)));
+    } else if rule_type == "aboveAverage" {
+        attrs.push(("aboveAverage".to_string(), "1".to_string()));
+    }
+    if let Some(value) = extract_bool(d, "equal_average")?.or(extract_bool(d, "equalAverage")?) {
+        attrs.push(("equalAverage".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(d, "percent")? {
+        attrs.push(("percent".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(d, "bottom")? {
+        attrs.push(("bottom".to_string(), bool_attr(value)));
+    }
+    Ok(attrs)
+}
+
+fn extract_attr_string(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+    let Some(value) = d.get_item(key)? else {
+        return Ok(None);
+    };
+    if let Ok(s) = value.extract::<String>() {
+        return Ok(Some(s));
+    }
+    if let Ok(i) = value.extract::<i64>() {
+        return Ok(Some(i.to_string()));
+    }
+    if let Ok(f) = value.extract::<f64>() {
+        if f.fract() == 0.0 && f.abs() < 1e15 {
+            return Ok(Some((f as i64).to_string()));
+        }
+        return Ok(Some(f.to_string()));
+    }
+    Ok(None)
+}
+
+fn generic_cf_formulas(d: &Bound<'_, PyDict>) -> PyResult<Vec<String>> {
+    if let Some(v) = d.get_item("formulas")? {
+        if let Ok(items) = v.extract::<Vec<String>>() {
+            return Ok(items
+                .into_iter()
+                .map(|s| s.trim_start_matches('=').to_string())
+                .filter(|s| !s.is_empty())
+                .collect());
+        }
+    }
+    let mut formulas = Vec::new();
+    for key in ["formula_a", "formula_b", "formula"] {
+        if let Some(value) = extract_str(d, key)? {
+            let value = value.trim_start_matches('=').to_string();
+            if !value.is_empty() {
+                formulas.push(value);
+            }
+        }
+    }
+    Ok(formulas)
+}
+
+fn bool_attr(value: bool) -> String {
+    if value {
+        "1".to_string()
+    } else {
+        "0".to_string()
+    }
 }
 
 /// Converts a Python RFC-058 workbook-security payload into writer state.

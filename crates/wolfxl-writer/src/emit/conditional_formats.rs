@@ -1,22 +1,15 @@
 //! `<conditionalFormatting>` emitter for worksheet XML.
 
-use std::collections::BTreeSet;
-
 use crate::model::conditional::{CellIsOperator, ConditionalKind, ConditionalThreshold};
 use crate::model::worksheet::Worksheet;
 use crate::xml_escape;
 
 /// Emit all supported conditional-formatting blocks for a worksheet.
 ///
-/// Unsupported/stub variants are intentionally skipped. Emitting guessed XML
-/// for those variants causes Excel repair prompts, so all-stub blocks also
-/// omit their `<conditionalFormatting>` wrapper.
 pub fn emit(out: &mut String, sheet: &Worksheet) {
     if sheet.conditional_formats.is_empty() {
         return;
     }
-
-    let mut dropped: BTreeSet<&'static str> = BTreeSet::new();
 
     for cf in &sheet.conditional_formats {
         let mut rules_buf = String::new();
@@ -137,37 +130,106 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     rules_buf.push_str("</cfRule>");
                 }
 
-                ConditionalKind::ContainsText { .. } => {
-                    dropped.insert("ContainsText");
-                    continue;
-                }
-                ConditionalKind::NotContainsText { .. } => {
-                    dropped.insert("NotContainsText");
-                    continue;
-                }
-                ConditionalKind::BeginsWith { .. } => {
-                    dropped.insert("BeginsWith");
-                    continue;
-                }
-                ConditionalKind::EndsWith { .. } => {
-                    dropped.insert("EndsWith");
-                    continue;
-                }
+                ConditionalKind::ContainsText { text } => emit_generic_rule(
+                    &mut rules_buf,
+                    "containsText",
+                    priority,
+                    rule.dxf_id,
+                    rule.stop_if_true,
+                    &[("operator", "containsText"), ("text", text.as_str())],
+                    &[],
+                ),
+                ConditionalKind::NotContainsText { text } => emit_generic_rule(
+                    &mut rules_buf,
+                    "notContainsText",
+                    priority,
+                    rule.dxf_id,
+                    rule.stop_if_true,
+                    &[("operator", "notContains"), ("text", text.as_str())],
+                    &[],
+                ),
+                ConditionalKind::BeginsWith { text } => emit_generic_rule(
+                    &mut rules_buf,
+                    "beginsWith",
+                    priority,
+                    rule.dxf_id,
+                    rule.stop_if_true,
+                    &[("operator", "beginsWith"), ("text", text.as_str())],
+                    &[],
+                ),
+                ConditionalKind::EndsWith { text } => emit_generic_rule(
+                    &mut rules_buf,
+                    "endsWith",
+                    priority,
+                    rule.dxf_id,
+                    rule.stop_if_true,
+                    &[("operator", "endsWith"), ("text", text.as_str())],
+                    &[],
+                ),
                 ConditionalKind::Duplicate => {
-                    dropped.insert("Duplicate");
-                    continue;
+                    emit_generic_rule(
+                        &mut rules_buf,
+                        "duplicateValues",
+                        priority,
+                        rule.dxf_id,
+                        rule.stop_if_true,
+                        &[],
+                        &[],
+                    );
                 }
                 ConditionalKind::Unique => {
-                    dropped.insert("Unique");
-                    continue;
+                    emit_generic_rule(
+                        &mut rules_buf,
+                        "uniqueValues",
+                        priority,
+                        rule.dxf_id,
+                        rule.stop_if_true,
+                        &[],
+                        &[],
+                    );
                 }
-                ConditionalKind::Top10 { .. } => {
-                    dropped.insert("Top10");
-                    continue;
+                ConditionalKind::Top10 {
+                    count,
+                    bottom,
+                    percent,
+                } => {
+                    let rank = count.to_string();
+                    let bottom_value = if *bottom { "1" } else { "0" };
+                    let percent_value = if *percent { "1" } else { "0" };
+                    emit_generic_rule(
+                        &mut rules_buf,
+                        "top10",
+                        priority,
+                        rule.dxf_id,
+                        rule.stop_if_true,
+                        &[
+                            ("rank", rank.as_str()),
+                            ("bottom", bottom_value),
+                            ("percent", percent_value),
+                        ],
+                        &[],
+                    );
                 }
-                ConditionalKind::AboveAverage { .. } => {
-                    dropped.insert("AboveAverage");
-                    continue;
+                ConditionalKind::AboveAverage { above, std_dev } => {
+                    let above_value = if *above { "1" } else { "0" };
+                    let std_dev_value = std_dev.to_string();
+                    let attrs = if *std_dev > 0 {
+                        vec![
+                            ("aboveAverage", above_value),
+                            ("stdDev", std_dev_value.as_str()),
+                        ]
+                    } else {
+                        vec![("aboveAverage", above_value)]
+                    };
+                    emit_generic_rule(
+                        &mut rules_buf,
+                        "aboveAverage",
+                        priority,
+                        rule.dxf_id,
+                        rule.stop_if_true,
+                        &attrs,
+                        &[],
+                    );
                 }
                 ConditionalKind::IconSet {
                     set_name,
@@ -220,6 +282,25 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
                     rules_buf.push_str("</iconSet>");
                     rules_buf.push_str("</cfRule>");
                 }
+                ConditionalKind::Generic {
+                    type_name,
+                    attrs,
+                    formulas,
+                } => {
+                    let attr_pairs: Vec<(&str, &str)> = attrs
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                        .collect();
+                    emit_generic_rule(
+                        &mut rules_buf,
+                        type_name,
+                        priority,
+                        rule.dxf_id,
+                        rule.stop_if_true,
+                        &attr_pairs,
+                        formulas,
+                    );
+                }
             }
         }
 
@@ -232,19 +313,47 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
             out.push_str("</conditionalFormatting>");
         }
     }
+}
 
-    if !dropped.is_empty() {
-        let names: Vec<&str> = dropped.iter().copied().collect();
-        eprintln!(
-            "wolfxl-writer: dropped {} conditional-format rule kind{} on sheet {:?} \
-             (variants: {}). wolfxl currently emits CellIs/Expression/DataBar/ColorScale/IconSet; \
-             other kinds are pending a future CF expansion wave.",
-            names.len(),
-            if names.len() == 1 { "" } else { "s" },
-            sheet.name,
-            names.join(", "),
-        );
+fn emit_generic_rule(
+    out: &mut String,
+    type_name: &str,
+    priority: usize,
+    dxf_id: Option<u32>,
+    stop_if_true: bool,
+    attrs: &[(&str, &str)],
+    formulas: &[String],
+) {
+    out.push_str(&format!(
+        "<cfRule type=\"{}\" priority=\"{}\"",
+        xml_escape::attr(type_name),
+        priority
+    ));
+    for (name, value) in attrs {
+        if value.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            " {}=\"{}\"",
+            xml_escape::attr(name),
+            xml_escape::attr(value)
+        ));
     }
+    if let Some(dxf_id) = dxf_id {
+        out.push_str(&format!(" dxfId=\"{}\"", dxf_id));
+    }
+    if stop_if_true {
+        out.push_str(" stopIfTrue=\"1\"");
+    }
+    if formulas.is_empty() {
+        out.push_str("/>");
+        return;
+    }
+    out.push('>');
+    for formula in formulas {
+        out.push_str(&format!("<formula>{}</formula>", xml_escape::text(formula)));
+    }
+    out.push_str("</cfRule>");
 }
 
 fn emit_cfvo(out: &mut String, threshold: &ConditionalThreshold) {
@@ -599,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn stub_variants_are_skipped_but_supported_rules_still_emit() {
+    fn generic_rule_variants_emit_with_supported_rules() {
         let mut sheet = Worksheet::new("S");
         sheet.conditional_formats.push(cf(
             "A1:A10",
@@ -616,10 +725,12 @@ mod tests {
 
         assert_fragment_parses(&out);
         assert!(out.contains("<conditionalFormatting sqref=\"A1:A10\">"));
-        assert_eq!(out.matches("<cfRule").count(), 1);
+        assert_eq!(out.matches("<cfRule").count(), 3);
+        assert!(out.contains(
+            "<cfRule type=\"containsText\" priority=\"1\" operator=\"containsText\" text=\"late\"/>"
+        ));
         assert!(out.contains("<cfRule type=\"expression\" priority=\"2\">"));
-        assert!(!out.contains("containsText"));
-        assert!(!out.contains("type=\"duplicate\""));
+        assert!(out.contains("<cfRule type=\"duplicateValues\" priority=\"3\"/>"));
     }
 
     #[test]
@@ -730,14 +841,18 @@ mod tests {
     }
 
     #[test]
-    fn all_stub_rules_emit_no_wrapper() {
+    fn generic_only_rules_emit_wrapper() {
         let out = emit_one_cf(vec![
             rule(ConditionalKind::Duplicate),
             rule(ConditionalKind::Unique),
             contains_text_rule(),
         ]);
 
-        assert!(out.is_empty());
+        assert_fragment_parses(&out);
+        assert_eq!(out.matches("<cfRule").count(), 3);
+        assert!(out.contains("type=\"duplicateValues\""));
+        assert!(out.contains("type=\"uniqueValues\""));
+        assert!(out.contains("type=\"containsText\""));
     }
 
     #[test]

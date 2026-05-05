@@ -23,7 +23,26 @@ if TYPE_CHECKING:
 # See ``crates/wolfxl-writer/src/emit/sheet_xml.rs::emit_conditional_formats``
 # stub-variant arm for the same list on the writer side.
 _SUPPORTED_CF_KINDS: frozenset[str] = frozenset(
-    {"cellIs", "expression", "colorScale", "dataBar", "iconSet"}
+    {
+        "cellIs",
+        "expression",
+        "colorScale",
+        "dataBar",
+        "iconSet",
+        "top10",
+        "uniqueValues",
+        "duplicateValues",
+        "containsText",
+        "notContainsText",
+        "beginsWith",
+        "endsWith",
+        "containsBlanks",
+        "notContainsBlanks",
+        "containsErrors",
+        "notContainsErrors",
+        "timePeriod",
+        "aboveAverage",
+    }
 )
 
 
@@ -96,9 +115,9 @@ class ConditionalFormattingList:
         ``save()`` routes through to the right backend (RFC-026 wires
         the modify-mode flush).
 
-        Stubbed CF rule kinds (ContainsText, BeginsWith, IconSet, etc.)
-        raise ``NotImplementedError`` with a pointer to the CF expansion
-        wave — see ``Plans/rfcs/026-conditional-formatting.md`` §10.
+        Supports openpyxl's public ``Rule`` taxonomy, including text,
+        duplicate/unique, blanks/errors, time-period, top10, and
+        above-average rules.
         """
         ws = self._ws
         if ws is None:
@@ -141,6 +160,7 @@ def _cf_to_patcher_dict(sqref: str, rules: list[Rule]) -> dict[str, Any]:
             "kind": rule.type,
             "stop_if_true": bool(rule.stopIfTrue),
         }
+        _add_generic_cf_attrs(rd, rule)
         if rule.type == "cellIs":
             if rule.operator is not None:
                 rd["operator"] = rule.operator
@@ -206,9 +226,33 @@ def _cf_to_patcher_dict(sqref: str, rules: list[Rule]) -> dict[str, Any]:
                 rd["percent"] = bool(extra["percent"])
             if extra.get("reverse") is not None:
                 rd["reverse"] = bool(extra["reverse"])
+        else:
+            rd["dxf"] = _dxf_from_rule(rule)
         rule_dicts.append({k: v for k, v in rd.items() if v is not None})
 
     return {"sqref": sqref, "rules": rule_dicts}
+
+
+def _add_generic_cf_attrs(rd: dict[str, Any], rule: Rule) -> None:
+    formulas = [str(part) for part in rule.formula] if rule.formula else []
+    if formulas:
+        rd["formulas"] = formulas
+    if rule.operator is not None:
+        rd["operator"] = rule.operator
+    attr_map = {
+        "aboveAverage": "above_average",
+        "percent": "percent",
+        "bottom": "bottom",
+        "text": "text",
+        "timePeriod": "time_period",
+        "rank": "rank",
+        "stdDev": "std_dev",
+        "equalAverage": "equal_average",
+    }
+    for public_name, payload_name in attr_map.items():
+        value = getattr(rule, public_name, None)
+        if value is not None:
+            rd[payload_name] = value
 
 
 def _dxf_from_rule(rule: Rule) -> dict[str, Any] | None:
@@ -243,12 +287,14 @@ def _dxf_from_rule(rule: Rule) -> dict[str, Any] | None:
     return None
 
 
-def _normalize_dxf_dict(d: dict[str, Any]) -> dict[str, Any]:
+def _normalize_dxf_dict(d: Any) -> dict[str, Any]:
     """Strip ``None`` values so PyO3's ``extract::<String>()`` doesn't reject them.
 
     Color fields normalize to ``"FFRRGGBB"`` so the Rust side can write
     them straight into the OOXML ARGB attribute.
     """
+    if not isinstance(d, dict):
+        d = _dxf_object_to_dict(d)
     out: dict[str, Any] = {}
     for key, val in d.items():
         if val is None:
@@ -257,6 +303,34 @@ def _normalize_dxf_dict(d: dict[str, Any]) -> dict[str, Any]:
             out[key] = _normalize_color(val)
         else:
             out[key] = val
+    return out
+
+
+def _dxf_object_to_dict(dxf: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    font = getattr(dxf, "font", None)
+    if font is not None:
+        if getattr(font, "bold", None) is not None:
+            out["font_bold"] = bool(font.bold)
+        if getattr(font, "italic", None) is not None:
+            out["font_italic"] = bool(font.italic)
+        color = getattr(font, "color", None)
+        if color is not None and getattr(color, "rgb", None):
+            out["font_color_rgb"] = color.rgb
+    fill = getattr(dxf, "fill", None)
+    if fill is not None:
+        out["fill_pattern_type"] = (
+            getattr(fill, "fill_type", None)
+            or getattr(fill, "patternType", None)
+            or "solid"
+        )
+        color = (
+            getattr(fill, "fgColor", None)
+            or getattr(fill, "start_color", None)
+            or getattr(fill, "color", None)
+        )
+        if color is not None and getattr(color, "rgb", None):
+            out["fill_fg_color_rgb"] = color.rgb
     return out
 
 

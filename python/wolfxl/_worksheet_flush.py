@@ -398,6 +398,7 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
         "formula": formula,
         "stop_if_true": rule.stopIfTrue,
     }
+    _add_generic_cf_attrs(payload, rule, formulas)
     # G14: forward explicit user-set priority so multi-rule blocks keep
     # openpyxl semantics (priority is positional in the wire format, but
     # users author by explicit number). Only forward when the rule isn't
@@ -416,6 +417,10 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
                 payload["formula_a"] = formulas[0]
             if len(formulas) > 1:
                 payload["formula_b"] = formulas[1]
+        bg_hex = _extract_dxf_bg_hex(extra)
+        if bg_hex is not None:
+            payload["format"] = {"bg_color": bg_hex}
+    elif rule.type not in ("colorScale", "dataBar", "iconSet"):
         bg_hex = _extract_dxf_bg_hex(extra)
         if bg_hex is not None:
             payload["format"] = {"bg_color": bg_hex}
@@ -461,6 +466,30 @@ def _conditional_format_payload(range_string: str, rule: Any) -> dict[str, Any]:
             if value is not None:
                 payload[key] = value
     return payload
+
+
+def _add_generic_cf_attrs(
+    payload: dict[str, Any],
+    rule: Any,
+    formulas: list[str],
+) -> None:
+    """Forward openpyxl's generic ``Rule`` attrs for non-special CF kinds."""
+    if formulas:
+        payload["formulas"] = formulas
+    attr_map = {
+        "aboveAverage": "above_average",
+        "percent": "percent",
+        "bottom": "bottom",
+        "text": "text",
+        "timePeriod": "time_period",
+        "rank": "rank",
+        "stdDev": "std_dev",
+        "equalAverage": "equal_average",
+    }
+    for public_name, payload_name in attr_map.items():
+        value = getattr(rule, public_name, None)
+        if value is not None:
+            payload[payload_name] = value
 
 
 def _extract_dxf_bg_hex(extra: dict[str, Any]) -> str | None:

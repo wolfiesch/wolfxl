@@ -116,7 +116,11 @@ chart.pivot_source = pt          # emits <c:pivotSource> + per-series <c:fmtId>
 ws.add_chart(chart, "F18")
 ```
 
-Existing pivots can be re-pointed at a new source range in modify mode (RFC-070 Option B); v1.0 covers source-range edits only — field placement, filter, and aggregation mutations are deferred.
+Existing pivots can also be edited in modify mode: source ranges,
+row/column/page field placement, page-field selection, and data-field
+aggregation all route through `PivotTableHandle`. Layout edits stamp
+`refreshOnLoad="1"` so Excel refreshes derived pivot cache records on
+open; source-range edits with the same shape stay byte-stable.
 
 ## Three Modes
 
@@ -153,7 +157,7 @@ Features marked **Preserved** are kept verbatim on modify-mode round-trip (open,
 | **Encryption** | Read + write Agile (AES-256 / SHA-512) via `wolfxl[encrypted]` |
 | **Iteration** | `iter_rows`, `iter_cols`, `rows`, `columns`, `values`, range slicing (`ws["A1:B2"]`, `ws["A:B"]`, `ws[1:3]`) |
 | **Utils** | `get_column_letter`, `column_index_from_string`, `coordinate_to_tuple`, `range_boundaries`, `absolute_coordinate`, `quote_sheetname`, `range_to_tuple`, `rows_from_range`, `cols_from_range`, `get_column_interval`, `dataframe_to_rows`, `is_date_format` |
-| **Preserved (read-only)** | Macros (VBA) — round-trip cleanly through modify mode with raw `xl/vbaProject.bin` bytes available via `Workbook.vba_archive` for inspection (no authoring API); external workbook links (`wb._external_links` exposes `target` / `sheet_names` / cached values, with `xl/externalLinks/` round-tripped byte-for-byte on modify-save); embedded objects also round-trip |
+| **Preserved / linked content** | Macros (VBA) — round-trip cleanly through modify mode with raw `xl/vbaProject.bin` bytes available via `Workbook.vba_archive` for inspection (no authoring API); external workbook links (`wb._external_links` exposes `target` / `sheet_names` / cached values and supports append/remove/update-target authoring); embedded objects also round-trip |
 
 ### openpyxl compatibility status
 

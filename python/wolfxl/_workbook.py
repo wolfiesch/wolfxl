@@ -358,8 +358,10 @@ class Workbook:
         and path-backed read mode parse ``xl/externalLinks/`` parts on
         first access.
 
-        v1.0 contract: read-only. The patcher preserves these parts
-        byte-for-byte on save; authoring is deferred to a follow-up RFC.
+        The returned collection is mutable. Unchanged source links are
+        preserved byte-for-byte; dirty collections are rewritten with
+        workbook rels, content-types, externalLink parts, and per-link
+        rels kept in sync.
         """
         cached = getattr(self, "_external_links_cache", None)
         if cached is not None:

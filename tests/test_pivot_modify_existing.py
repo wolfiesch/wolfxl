@@ -223,11 +223,11 @@ def test_modify_pivot_source_and_layout_compose(tmp_path: Path) -> None:
 def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:
     """Best-effort test for a foreign-authored pivot fixture.
 
-    RFC-070 §7.2 marks this as best-effort: we look for any pre-baked
-    fixture that contains a pivot, mutate its source, and verify the
-    rewrite. When no such fixture is checked into the repo, the test
-    xfails so CI surfaces the gap without blocking landing."""
+    RFC-070 §7.2 marks this as best-effort: we look for a pre-baked
+    external-oracle fixture that contains a pivot, mutate its source,
+    and verify the rewrite."""
     fixture_dirs = [
+        Path("tests/fixtures/external_oracle"),
         Path("tests/data/pivot_fixtures"),
         Path("tests/fixtures/pivot"),
     ]
@@ -241,8 +241,7 @@ def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:
                         break
         if candidate:
             break
-    if candidate is None:
-        pytest.xfail("no foreign-authored pivot fixture available")
+    assert candidate is not None, "expected a foreign-authored pivot fixture"
 
     dest = tmp_path / candidate.name
     dest.write_bytes(candidate.read_bytes())
@@ -265,6 +264,5 @@ def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:
             max_row=cur.max_row,
         )
         break
-    if not found_pivot:
-        pytest.xfail("fixture had no parseable pivot handle")
+    assert found_pivot, "fixture had no parseable pivot handle"
     wb.save(dest)

@@ -1469,14 +1469,9 @@ def _probe_rich_text_headers_footers(tmp_path: Path) -> None:
 
 @_register("cf_basic_rules")
 def _probe_cf_basic_rules(tmp_path: Path) -> None:
-    """Basic CF rule round-trip - the openpyxl ``fill=`` convenience kwarg
-    on ``CellIsRule`` routes through a DifferentialStyle and is tracked under
-    G14 (CF dxf integration). This probe deliberately uses a no-style rule
-    so the basic-CF row stays green; the dxf path is exercised by
-    ``cf_stop_if_true_priority``.
-    """
+    """Basic CF rule round-trip, including openpyxl's generic text rule."""
     import wolfxl
-    from wolfxl.formatting.rule import CellIsRule
+    from wolfxl.formatting.rule import CellIsRule, Rule
 
     wb = wolfxl.Workbook()
     ws = wb.active
@@ -1486,12 +1481,30 @@ def _probe_cf_basic_rules(tmp_path: Path) -> None:
         "A1:A5",
         CellIsRule(operator="greaterThan", formula=["3"]),
     )
+    ws.conditional_formatting.add(
+        "B1:B5",
+        Rule(
+            type="containsText",
+            operator="containsText",
+            text="foo",
+            formula=['NOT(ISERROR(SEARCH("foo",B1)))'],
+        ),
+    )
     out = tmp_path / "cf.xlsx"
     wb.save(out)
 
     wb2 = wolfxl.load_workbook(out)
     rules = list(wb2.active.conditional_formatting)
     assert len(rules) >= 1
+    import openpyxl as _opx
+
+    ref_wb = _opx.load_workbook(out)
+    seen_types = {
+        rule.type
+        for cf_range in ref_wb.active.conditional_formatting
+        for rule in ref_wb.active.conditional_formatting[cf_range]
+    }
+    assert {"cellIs", "containsText"} <= seen_types
 
 
 @_register("cf_cellis_operator_matrix")
