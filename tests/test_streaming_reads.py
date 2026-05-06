@@ -217,11 +217,9 @@ def test_streaming_sparse_rows(sparse_xlsx: Path) -> None:
     rows = list(
         ws.iter_rows(min_row=1, max_row=10, min_col=1, max_col=3, values_only=True)
     )
-    # 10 rows total, even though only 3 have content.
-    assert len(rows) == 3  # SAX path emits one record per `<row>` actually present.
-    # We don't assert exact row count above — Excel emits explicit
-    # `<row>` entries for non-empty rows only. The sparse rows should
-    # appear with the right shape:
+    # Explicit bounds match openpyxl: missing rows are padded with empty tuples.
+    assert len(rows) == 10
+    # Sparse rows should appear with the right shape:
     found_first_cells = [r[0] for r in rows]
     assert "r1" in found_first_cells
     assert "r10" in found_first_cells

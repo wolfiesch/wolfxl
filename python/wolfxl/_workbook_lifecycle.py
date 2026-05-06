@@ -9,6 +9,12 @@ WorkbookT = TypeVar("WorkbookT")
 
 def close_workbook(workbook: Any) -> None:
     """Release native handles and delete any temporary decrypted input."""
+    archive = getattr(workbook, "_archive", None)
+    if archive is not None:
+        try:
+            archive.close()
+        except Exception:
+            pass
     workbook._rust_reader = None
     workbook._rust_writer = None
     workbook._rust_patcher = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from wolfxl._workbook_state import (
@@ -113,13 +114,19 @@ def from_reader(
     """Open an existing .xlsx file in read mode."""
     from wolfxl import _rust
 
+    original_path = path
+    temp_path = None
+    path = _normalize_nonstandard_workbook_part(path) or path
+    if path != original_path:
+        temp_path = path
+
     reader_cls = _xlsx_reader_class(
         _rust,
         modify=False,
         read_only=read_only,
         permissive=permissive,
     )
-    return build_xlsx_wb(
+    wb = build_xlsx_wb(
         cls,
         rust_reader=reader_cls.open(path, permissive),
         rust_patcher=None,
@@ -128,6 +135,11 @@ def from_reader(
         source_path=path,
         keep_links=keep_links,
     )
+    if temp_path is not None:
+        wb._tempfile_path = temp_path
+    if read_only:
+        _attach_read_only_archive(wb, path)
+    return wb
 
 
 def _open_plain_xlsx_source(
@@ -168,6 +180,83 @@ def _open_plain_xlsx_source(
         modify=modify,
         read_only=read_only,
     )
+
+
+def _normalize_nonstandard_workbook_part(path: str) -> str | None:
+    """Return a temp XLSX path when the workbook part is not ``xl/workbook.xml``."""
+    import tempfile
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    try:
+        with zipfile.ZipFile(path, "r") as src:
+            names = set(src.namelist())
+            if "xl/workbook.xml" in names:
+                return None
+            rels = ET.fromstring(src.read("_rels/.rels"))
+            target = None
+            for rel in rels:
+                if rel.get("Type", "").endswith("/officeDocument"):
+                    target = rel.get("Target")
+                    break
+            if not target or target not in names:
+                return None
+            tmp = tempfile.NamedTemporaryFile(prefix="wolfxl-normalized-", suffix=".xlsx", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            target_rels = _workbook_rels_for_part(target)
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst:
+                for info in src.infolist():
+                    member = info.filename
+                    data = src.read(member)
+                    if member == target:
+                        member = "xl/workbook.xml"
+                    elif member == target_rels:
+                        member = "xl/_rels/workbook.xml.rels"
+                    elif member == "_rels/.rels":
+                        data = _rewrite_root_rels_target(data)
+                    elif member == "[Content_Types].xml":
+                        data = _rewrite_content_types_workbook_part(data, target)
+                    info.filename = member
+                    dst.writestr(info, data)
+            return tmp_path
+    except Exception:
+        return None
+
+
+def _workbook_rels_for_part(target: str) -> str:
+    part = Path(target)
+    return str(part.parent / "_rels" / f"{part.name}.rels")
+
+
+def _rewrite_root_rels_target(data: bytes) -> bytes:
+    from xml.etree import ElementTree as ET
+
+    root = ET.fromstring(data)
+    for rel in root:
+        if rel.get("Type", "").endswith("/officeDocument"):
+            rel.set("Target", "xl/workbook.xml")
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _rewrite_content_types_workbook_part(data: bytes, old_target: str) -> bytes:
+    from xml.etree import ElementTree as ET
+
+    root = ET.fromstring(data)
+    old_part = "/" + old_target.lstrip("/")
+    for child in root:
+        if child.get("PartName") == old_part:
+            child.set("PartName", "/xl/workbook.xml")
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _attach_read_only_archive(wb: Any, path: str) -> None:
+    import zipfile
+
+    try:
+        wb._archive = zipfile.ZipFile(path, "r")
+    except Exception:
+        wb._archive = None
 
 
 def from_encrypted(

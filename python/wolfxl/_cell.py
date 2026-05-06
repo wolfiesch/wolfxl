@@ -31,6 +31,7 @@ from wolfxl.styles.protection import Protection
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
 from wolfxl._worksheet_rich_text import runs_payload_to_cellrichtext
+from wolfxl.utils.cell import range_boundaries
 from wolfxl.utils.exceptions import IllegalCharacterError
 from wolfxl.utils.numbers import is_date_format
 
@@ -940,12 +941,14 @@ class Cell:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return None
+        if _is_merged_subordinate(self):
+            return None
         payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
             self._ws.title, self.coordinate,
         )
         if isinstance(payload, dict):
-            return payload.get("number_format")
-        return None
+            return payload.get("number_format") or "General"
+        return "General"
 
     def _read_protection(self) -> Protection | None:
         wb = self._ws._workbook  # noqa: SLF001
@@ -1021,3 +1024,24 @@ class _Sentinel:
 
 
 _UNSET = _Sentinel()
+
+
+def _is_merged_subordinate(cell: Cell) -> bool:
+    """Return True for cells inside a merged range but not its anchor."""
+    try:
+        ranges = cell._ws.merged_cells.ranges  # noqa: SLF001
+    except Exception:
+        return False
+    for ref in ranges:
+        try:
+            min_col, min_row, max_col, max_row = range_boundaries(str(ref))
+        except Exception:
+            continue
+        if None in (min_col, min_row, max_col, max_row):
+            continue
+        if (
+            int(min_row) <= cell.row <= int(max_row)
+            and int(min_col) <= cell.column <= int(max_col)
+        ):
+            return not (cell.row == int(min_row) and cell.column == int(min_col))
+    return False

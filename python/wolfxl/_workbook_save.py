@@ -7,18 +7,21 @@ preserving the exact writer/patcher flush order used by the save pipeline.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, BinaryIO
 
 from wolfxl._workbook_state import same_existing_path
 
 
 def save_workbook(
     wb: Any,
-    filename: str | os.PathLike[str],
+    filename: str | os.PathLike[str] | BinaryIO,
     *,
     password: str | bytes | None = None,
 ) -> None:
     """Flush workbook state and save it through the active backend."""
+    if hasattr(filename, "write") and not isinstance(filename, (str, bytes, os.PathLike)):
+        save_workbook_to_fileobj(wb, filename, password=password)
+        return
     filename = str(filename)
     # G20: write-only mode is consumed-on-save. A second save raises
     # WorkbookAlreadySaved (matches openpyxl's `_write_only.py`).
@@ -47,6 +50,8 @@ def save_workbook(
             save_write_only_mode(wb, filename)
         else:
             save_write_mode(wb, filename)
+    elif getattr(wb, "_rust_reader", None) is not None and getattr(wb, "_source_path", None):
+        save_read_mode(wb, filename)
     else:
         raise RuntimeError("save requires write or modify mode")
     # Mark consumed AFTER save succeeds so a write failure leaves the
@@ -60,6 +65,50 @@ def save_workbook(
             close = getattr(ws, "close", None)
             if close is not None:
                 close()
+
+
+def save_workbook_to_fileobj(
+    wb: Any,
+    fileobj: BinaryIO,
+    *,
+    password: str | bytes | None = None,
+) -> None:
+    """Save to a binary file-like object using the path-oriented backends."""
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(prefix="wolfxl-save-", suffix=".xlsx", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        save_workbook(wb, tmp_path, password=password)
+        with open(tmp_path, "rb") as src:
+            data = src.read()
+        try:
+            fileobj.seek(0)
+            fileobj.truncate()
+        except Exception:
+            pass
+        fileobj.write(data)
+        try:
+            fileobj.flush()
+            fileobj.seek(0)
+        except Exception:
+            pass
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def save_read_mode(wb: Any, filename: str) -> None:
+    """Save an unmodified path-backed read workbook by copying the source package."""
+    import shutil
+
+    source_path = getattr(wb, "_source_path", None)
+    if source_path is None:
+        raise RuntimeError("save requires write or modify mode")
+    shutil.copyfile(source_path, filename)
 
 
 def save_write_only_mode(wb: Any, filename: str) -> None:

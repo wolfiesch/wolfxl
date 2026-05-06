@@ -14,6 +14,8 @@ pointed error. These tests pin the error behavior so we don't regress.
 from __future__ import annotations
 
 import importlib
+from io import BytesIO
+import zipfile
 
 import pytest
 
@@ -72,8 +74,16 @@ def test_utils_cell_lazy_reexports() -> None:
     "module_path",
     [
         "wolfxl.styles",
+        "wolfxl.styles.cell_style",
+        "wolfxl.styles.styleable",
         "wolfxl.styles.named_styles",
         "wolfxl.styles.differential",
+        "wolfxl.xml",
+        "wolfxl.xml.constants",
+        "wolfxl.xml.functions",
+        "wolfxl.reader",
+        "wolfxl.reader.excel",
+        "wolfxl.cell.read_only",
         "wolfxl.utils.cell",
         "wolfxl.utils.dataframe",
         "wolfxl.comments",
@@ -88,12 +98,58 @@ def test_utils_cell_lazy_reexports() -> None:
         "wolfxl.formatting",
         "wolfxl.formatting.rule",
         "wolfxl.workbook",
+        "wolfxl.workbook._writer",
         "wolfxl.workbook.defined_name",
+        "wolfxl.packaging.manifest",
         "wolfxl.pivot",
     ],
 )
 def test_module_imports(module_path: str) -> None:
     importlib.import_module(module_path)
+
+
+def test_openpyxl_corpus_import_paths_are_real() -> None:
+    """Upstream corpus collection imports these openpyxl-shaped paths."""
+    from wolfxl import DEFUSEDXML, LXML
+    from wolfxl.cell.read_only import EMPTY_CELL
+    from wolfxl.packaging.manifest import Manifest
+    from wolfxl.reader.excel import load_workbook
+    from wolfxl.styles.styleable import StyleArray
+    from wolfxl.xml.constants import CPROPS_TYPE, SHEET_MAIN_NS
+    from wolfxl.xml.functions import Element, tostring
+
+    style = StyleArray([0, 0, 0, 7, 0, 0, 0, 0, 0])
+    assert style.numFmtId == 7
+    style.fontId = 3
+    assert tuple(style[:4]) == (3, 0, 0, 7)
+    assert EMPTY_CELL.value is None
+    assert load_workbook is wolfxl.load_workbook
+    assert isinstance(LXML, bool)
+    assert isinstance(DEFUSEDXML, bool)
+    assert SHEET_MAIN_NS.endswith("/main")
+    assert CPROPS_TYPE == "application/vnd.openxmlformats-officedocument.custom-properties+xml"
+    assert tostring(Element("root")).startswith(b"<root")
+    assert Manifest().path == "[Content_Types].xml"
+
+
+def test_save_accepts_binary_file_like_objects(tmp_path) -> None:
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "file-like"
+
+    fp = BytesIO()
+    wb.save(fp)
+
+    fp.seek(0)
+    with zipfile.ZipFile(fp) as zf:
+        assert "xl/workbook.xml" in zf.namelist()
+
+
+def test_load_workbook_accepts_keep_vba_keyword(tmp_path) -> None:
+    path = tmp_path / "plain.xlsx"
+    wolfxl.Workbook().save(path)
+
+    wb = wolfxl.load_workbook(path, keep_vba=False)
+    assert wb.sheetnames == ["Sheet"]
 
 
 # ---------------- stubs raise at construction ----------------
