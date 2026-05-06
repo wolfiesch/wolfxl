@@ -173,6 +173,11 @@ def _rewrite_workbook_parts(
     if sheets_el is None:
         raise ValueError("workbook.xml has no <sheets> block")
 
+    old_order = [
+        sheet.attrib.get("name", "")
+        for sheet in list(sheets_el)
+        if sheet.attrib.get("name")
+    ]
     existing_by_name = {
         sheet.attrib.get("name"): sheet
         for sheet in list(sheets_el)
@@ -213,10 +218,35 @@ def _rewrite_workbook_parts(
             sheet.set(f"{{{REL_NS}}}id", chart_rid_by_name[name])
             sheets_el.append(sheet)
 
+    _remap_defined_name_local_sheet_ids(wb_root, old_order, list(wb._sheet_names))  # noqa: SLF001
     workbook_out = ET.tostring(wb_root, encoding="utf-8")
     ET.register_namespace("", PKG_REL_NS)
     rels_out = ET.tostring(rels_root, encoding="utf-8")
     return workbook_out, rels_out, rel_ids
+
+
+def _remap_defined_name_local_sheet_ids(
+    wb_root: ET.Element,
+    old_order: list[str],
+    new_order: list[str],
+) -> None:
+    defined_names_el = wb_root.find(f"{{{MAIN_NS}}}definedNames")
+    if defined_names_el is None:
+        return
+    new_index_by_name = {name: idx for idx, name in enumerate(new_order)}
+    for defined_name in defined_names_el.findall(f"{{{MAIN_NS}}}definedName"):
+        raw = defined_name.attrib.get("localSheetId")
+        if raw is None:
+            continue
+        try:
+            old_index = int(raw)
+        except ValueError:
+            continue
+        if old_index < 0 or old_index >= len(old_order):
+            continue
+        sheet_name = old_order[old_index]
+        if sheet_name in new_index_by_name:
+            defined_name.set("localSheetId", str(new_index_by_name[sheet_name]))
 
 
 def _max_sheet_id(sheets: Any) -> int:

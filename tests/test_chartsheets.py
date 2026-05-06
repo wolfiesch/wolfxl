@@ -114,6 +114,33 @@ def test_chartsheet_can_be_inserted_between_worksheets(tmp_path: Path) -> None:
     assert [cs.title for cs in op.chartsheets] == ["Middle"]
 
 
+def test_chartsheet_insert_remaps_sheet_local_defined_names(tmp_path: Path) -> None:
+    openpyxl = pytest.importorskip("openpyxl")
+    from openpyxl.workbook.defined_name import DefinedName
+
+    src = tmp_path / "defined_name_source.xlsx"
+    op = openpyxl.Workbook()
+    op.active.title = "First"
+    op.create_sheet("Second")
+    op.defined_names["SecondLocal"] = DefinedName(
+        "SecondLocal",
+        attr_text="Second!$A$1",
+        localSheetId=1,
+    )
+    op.save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb.create_chartsheet("Chart", index=1)
+    out = tmp_path / "defined_name_with_chartsheet.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["First", "Chart", "Second"]
+    with zipfile.ZipFile(out) as z:
+        workbook_xml = z.read("xl/workbook.xml").decode()
+    assert 'name="SecondLocal" localSheetId="2"' in workbook_xml
+
+
 def test_empty_chartsheet_saves_like_openpyxl(tmp_path: Path) -> None:
     openpyxl = pytest.importorskip("openpyxl")
 
