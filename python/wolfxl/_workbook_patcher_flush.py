@@ -514,15 +514,19 @@ def _autofilter_has_state(autofilter: Any) -> bool:
 
 
 def _queue_autofilter(patcher: Any, sheet_title: str, autofilter: Any) -> None:
-    """Queue one autofilter update, preserving the historical skip-on-error path."""
+    """Queue one autofilter update, failing loudly on malformed state."""
     try:
         payload = autofilter.to_rust_dict()
-    except Exception:
-        return
+    except Exception as exc:
+        raise ValueError(
+            f"failed to serialize autofilter for sheet {sheet_title!r}"
+        ) from exc
     try:
         patcher.queue_autofilter(sheet_title, payload)
-    except Exception:
-        return
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to queue autofilter for sheet {sheet_title!r}"
+        ) from exc
 
 
 def flush_pending_charts_to_patcher(wb: Any) -> None:
@@ -531,6 +535,16 @@ def flush_pending_charts_to_patcher(wb: Any) -> None:
     if patcher is None:
         return
 
+    from wolfxl._worksheet_media import pop_pending_chart_deletions
+
+    for ws in wb._sheets.values():  # noqa: SLF001
+        for meta in pop_pending_chart_deletions(ws):
+            patcher.queue_chart_remove(
+                ws.title,
+                meta["drawing_path"],
+                meta["chart_rid"],
+                meta["chart_path"],
+            )
     _flush_pending_chart_bytes(wb, patcher)
     _flush_pending_chart_objects(wb, patcher)
 
@@ -611,20 +625,26 @@ def flush_pending_slicers_to_patcher(wb: Any) -> None:
 
 
 def _queue_slicer_add(patcher: Any, sheet_title: str, slicer: Any) -> None:
-    """Queue one slicer presentation, preserving the historical skip-on-error path."""
+    """Queue one slicer presentation, failing loudly on malformed state."""
     cache = slicer.cache
     try:
         cache_dict = cache.to_rust_dict()
-    except Exception:
-        return
+    except Exception as exc:
+        raise ValueError(
+            f"failed to serialize slicer cache for sheet {sheet_title!r}"
+        ) from exc
     try:
         slicer_dict = slicer.to_rust_dict()
-    except Exception:
-        return
+    except Exception as exc:
+        raise ValueError(
+            f"failed to serialize slicer for sheet {sheet_title!r}"
+        ) from exc
     try:
         patcher.queue_slicer_add(sheet_title, cache_dict, slicer_dict)
-    except Exception:
-        return
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to queue slicer for sheet {sheet_title!r}"
+        ) from exc
 
 
 def flush_pending_pivots_to_patcher(wb: Any) -> None:
@@ -765,6 +785,10 @@ def flush_pending_pivot_source_edits_to_patcher(wb: Any) -> None:
             )
             # Reset dirty so a subsequent save() on the same workbook
             # doesn't double-register.
+            handle._orig_source_range = new_ref  # noqa: SLF001
+            handle._orig_source_sheet = new_sheet  # noqa: SLF001
+            handle._orig_field_count = new_cols  # noqa: SLF001
+            handle._new_source = None  # noqa: SLF001
             handle._dirty = False  # noqa: SLF001
 
 

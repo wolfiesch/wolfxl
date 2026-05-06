@@ -7,6 +7,8 @@ Covers RFC-071 §6.2:
 * real fixture round-trip (a hand-built xlsx with one external link)
 * alias check (``wb.external_links is wb._external_links``)
 * modify-mode preservation (the patcher round-trips the bytes)
+* ``keep_links=False`` hides links in read mode and drops external-link
+  OOXML parts in modify mode
 """
 
 from __future__ import annotations
@@ -133,6 +135,52 @@ def _build_external_link_fixture() -> bytes:
     return buf.getvalue()
 
 
+def _build_two_external_links_fixture(path: Path) -> Path:
+    """Clone the one-link fixture and add a second external link part."""
+    src = _build_external_link_fixture()
+    parts: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(src), "r") as zf:
+        for name in zf.namelist():
+            parts[name] = zf.read(name)
+
+    parts["xl/externalLinks/externalLink2.xml"] = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        b' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        b'<externalBook r:id="rId1"><sheetNames><sheetName val="Sheet2"/></sheetNames>'
+        b"</externalBook></externalLink>"
+    )
+    parts["xl/externalLinks/_rels/externalLink2.xml.rels"] = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" '
+        b'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" '
+        b'Target="ext2.xlsx" TargetMode="External"/>'
+        b"</Relationships>"
+    )
+    parts["xl/workbook.xml"] = parts["xl/workbook.xml"].replace(
+        b'<externalReferences><externalReference r:id="rId2"/></externalReferences>',
+        b'<externalReferences><externalReference r:id="rId2"/><externalReference r:id="rId4"/></externalReferences>',
+    )
+    parts["xl/_rels/workbook.xml.rels"] = parts["xl/_rels/workbook.xml.rels"].replace(
+        b"</Relationships>",
+        b'<Relationship Id="rId4" '
+        b'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" '
+        b'Target="externalLinks/externalLink2.xml"/></Relationships>',
+    )
+    parts["[Content_Types].xml"] = parts["[Content_Types].xml"].replace(
+        b"</Types>",
+        b'<Override PartName="/xl/externalLinks/externalLink2.xml" '
+        b'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>'
+        b"</Types>",
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in parts.items():
+            zf.writestr(name, data)
+    return path
+
+
 @pytest.fixture(scope="module")
 def fixture_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Yield the on-disk fixture, copied to a tmp path for hermetic mods.
@@ -200,6 +248,12 @@ def test_real_fixture_exposes_link(fixture_path: Path) -> None:
     assert link.rid == "rId2"  # the externalLink rel id in the workbook rels
 
 
+def test_keep_links_false_hides_links_in_read_mode(fixture_path: Path) -> None:
+    wb = wolfxl.load_workbook(fixture_path, keep_links=False)
+    assert wb._external_links == []
+    assert wb.external_links == []
+
+
 def test_modify_mode_preserves_external_link_bytes(
     fixture_path: Path, tmp_path: Path
 ) -> None:
@@ -223,6 +277,46 @@ def test_modify_mode_preserves_external_link_bytes(
     wb2 = wolfxl.load_workbook(out)
     assert len(wb2._external_links) == 1
     assert wb2._external_links[0].target == "ext.xlsx"
+
+
+def test_modify_mode_keep_links_false_drops_external_link_parts(
+    fixture_path: Path, tmp_path: Path
+) -> None:
+    wb = wolfxl.load_workbook(fixture_path, modify=True, keep_links=False)
+    assert wb._external_links == []
+    out = tmp_path / "dropped_links.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        assert not any(name.startswith("xl/externalLinks/") for name in names)
+        workbook_xml = zf.read("xl/workbook.xml").decode()
+        workbook_rels = zf.read("xl/_rels/workbook.xml.rels").decode()
+        content_types = zf.read("[Content_Types].xml").decode()
+
+    assert "externalReferences" not in workbook_xml
+    assert "/relationships/externalLink" not in workbook_rels
+    assert "externalLink+xml" not in content_types
+
+
+def test_modify_mode_keep_links_false_drops_multiple_external_links(
+    tmp_path: Path,
+) -> None:
+    fixture = _build_two_external_links_fixture(tmp_path / "two_external_links.xlsx")
+    wb = wolfxl.load_workbook(fixture, modify=True, keep_links=False)
+    out = tmp_path / "dropped_two_links.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        workbook_xml = zf.read("xl/workbook.xml").decode()
+        workbook_rels = zf.read("xl/_rels/workbook.xml.rels").decode()
+        content_types = zf.read("[Content_Types].xml").decode()
+
+    assert not any(name.startswith("xl/externalLinks/") for name in names)
+    assert "externalReferences" not in workbook_xml
+    assert "/relationships/externalLink" not in workbook_rels
+    assert "externalLink+xml" not in content_types
 
 
 def test_external_links_alias_is_same_list(fixture_path: Path) -> None:

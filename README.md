@@ -45,9 +45,9 @@ expect.
 ## Current Evidence
 
 - WolfXL package surface is at `2.0.0`.
-- Current local verification is green: Rust workspace tests, Python package tests, and parity slices all pass in the 2026-04-28 audit.
-- Fresh wheel-backed ExcelBench rerun is now available: WolfXL reached `18/18` green features with `100%` pass rate in the [release snapshot fidelity report](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/README.md).
-- The paired dated evidence includes the [release snapshot dashboard](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/DASHBOARD.md) and the [matching perf snapshot](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/perf/README.md).
+- The next release is gated on a fresh verification pass: Rust workspace tests, Python package tests, parity slices, clean install/import smoke, and ExcelBench refresh.
+- Historical wheel-backed ExcelBench evidence is available in the [2026-04-28 release snapshot fidelity report](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/README.md).
+- The paired dated evidence includes the [release snapshot dashboard](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/DASHBOARD.md) and the [matching perf snapshot](https://github.com/SynthGL/ExcelBench/blob/main/results-release-2026-04-28/perf/README.md); refresh these before using them as next-release proof.
 - Use the [Public Evidence Status](docs/trust/public-evidence.md) page to see which claims are current, historical, or still gated.
 
 ## Install

@@ -1,6 +1,5 @@
 //! Workbook-level helpers for the native writer backend.
 
-use std::fs::File;
 use std::io::BufWriter;
 
 use pyo3::exceptions::{PyIOError, PyValueError};
@@ -44,14 +43,14 @@ pub(crate) fn save_once(wb: &mut Workbook, saved: &mut bool, path: &str) -> PyRe
     // but real on the disk-write peak; closing the larger sheet-body
     // materialisation requires plumbing `Write` all the way through
     // `sheet_xml::emit`, which is out of scope for v1.5.
-    let file = File::create(path)
-        .map_err(|e| PyIOError::new_err(format!("failed to create {path}: {e}")))?;
-    let mut writer = BufWriter::new(file);
-    wolfxl_writer::emit_xlsx_to(wb, &mut writer)
-        .map_err(|e| PyIOError::new_err(format!("failed to write {path}: {e}")))?;
-    use std::io::Write;
-    writer
-        .flush()
-        .map_err(|e| PyIOError::new_err(format!("failed to flush {path}: {e}")))?;
-    Ok(())
+    crate::atomic_save::write_zip_atomically(path, |file| {
+        let mut writer = BufWriter::new(file);
+        wolfxl_writer::emit_xlsx_to(wb, &mut writer)
+            .map_err(|e| PyIOError::new_err(format!("failed to write {path}: {e}")))?;
+        use std::io::Write;
+        writer
+            .flush()
+            .map_err(|e| PyIOError::new_err(format!("failed to flush {path}: {e}")))?;
+        Ok(())
+    })
 }

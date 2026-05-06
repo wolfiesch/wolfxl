@@ -23,7 +23,9 @@ from __future__ import annotations
 import posixpath
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from wolfxl._zip_safety import read_entry_optional, validate_zipfile
 
 from ._handle import PivotTableHandle
 
@@ -67,7 +69,7 @@ def load_pivot_tables_for_sheet(
     sheet_rels_path = posixpath.join(sheet_dir, "_rels", f"{sheet_name}.rels")
 
     try:
-        from wolfxl import _rust  # type: ignore[attr-defined]
+        from wolfxl import _rust
     except ImportError:
         return []
 
@@ -80,6 +82,7 @@ def load_pivot_tables_for_sheet(
     handles: list[PivotTableHandle] = []
     try:
         with zipfile.ZipFile(source_path) as zf:
+            validate_zipfile(zf)
             sheet_rels_xml = _safe_read(zf, sheet_rels_path)
             if not sheet_rels_xml:
                 return []
@@ -153,7 +156,7 @@ def load_pivot_tables_for_sheet(
                     orig_field_count=int(cache_meta["field_count"]),
                 )
                 handles.append(handle)
-    except (zipfile.BadZipFile, OSError):
+    except (zipfile.BadZipFile, OSError, ValueError):
         return []
 
     return handles
@@ -170,9 +173,10 @@ def _resolve_sheet_zip_path(
         return None
     try:
         with zipfile.ZipFile(source_path) as zf:
+            validate_zipfile(zf)
             wb_rels = _safe_read(zf, "xl/_rels/workbook.xml.rels")
             wb_xml = _safe_read(zf, "xl/workbook.xml")
-    except (zipfile.BadZipFile, OSError):
+    except (zipfile.BadZipFile, OSError, ValueError):
         return None
     if not wb_rels or not wb_xml:
         return None
@@ -186,10 +190,7 @@ def _resolve_sheet_zip_path(
 
 def _safe_read(zf: zipfile.ZipFile, path: str) -> bytes | None:
     """Read a ZIP entry, returning ``None`` on missing entries."""
-    try:
-        return zf.read(path)
-    except KeyError:
-        return None
+    return read_entry_optional(zf, path)
 
 
 def _rels_targets_by_type(rels_xml: bytes, rel_type: str) -> list[str]:

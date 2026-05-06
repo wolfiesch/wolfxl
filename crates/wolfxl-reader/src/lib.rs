@@ -12,9 +12,9 @@ pub mod external_links;
 
 pub use xlsb::NativeXlsbBook;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use quick_xml::events::attributes::Attribute;
@@ -23,6 +23,11 @@ use quick_xml::Reader as XmlReader;
 use wolfxl_formula::{translate as translate_formula, RefDelta};
 use wolfxl_rels::{RelId, RelsGraph};
 use zip::ZipArchive;
+
+const DEFAULT_MAX_ZIP_ENTRIES: usize = 200_000;
+const DEFAULT_MAX_ZIP_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+const DEFAULT_MAX_ZIP_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_COMPRESSION_RATIO: u64 = 1_000;
 
 /// Native reader result type.
 pub type Result<T> = std::result::Result<T, ReaderError>;
@@ -717,6 +722,9 @@ pub struct ImageInfo {
 /// Parsed worksheet chart payload and anchor metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartInfo {
+    pub source_drawing_path: Option<String>,
+    pub source_chart_rid: Option<String>,
+    pub source_chart_path: Option<String>,
     pub kind: String,
     pub title: Option<String>,
     pub x_axis_title: Option<String>,
@@ -1115,6 +1123,7 @@ impl NativeXlsxBook {
     pub fn open_bytes_permissive(bytes: impl Into<Vec<u8>>, permissive: bool) -> Result<Self> {
         let bytes = bytes.into();
         let mut zip = zip_from_bytes(&bytes)?;
+        validate_zip_archive(&mut zip)?;
         let workbook_xml = read_part_required(&mut zip, "xl/workbook.xml")?;
         let workbook_rels = read_part_required(&mut zip, "xl/_rels/workbook.xml.rels")?;
         let rels = RelsGraph::parse(workbook_rels.as_bytes())
@@ -1338,7 +1347,10 @@ impl NativeXlsxBook {
         let threaded_comments = match rels.as_ref() {
             Some(graph) => {
                 let mut acc: Vec<ParsedThreadedComment> = Vec::new();
-                for rel in graph.iter().filter(|rel| rel.rel_type == wolfxl_rels::rt::THREADED_COMMENTS) {
+                for rel in graph
+                    .iter()
+                    .filter(|rel| rel.rel_type == wolfxl_rels::rt::THREADED_COMMENTS)
+                {
                     let path = join_and_normalize(&part_dir(&info.path), &rel.target);
                     if let Some(xml) = read_part_optional(&mut zip, &path)? {
                         acc.extend(parse_threaded_comments(&xml)?);
@@ -1510,7 +1522,10 @@ pub struct ProtectionInfo {
 
 impl Default for ProtectionInfo {
     fn default() -> Self {
-        Self { locked: true, hidden: false }
+        Self {
+            locked: true,
+            hidden: false,
+        }
     }
 }
 
@@ -4176,9 +4191,9 @@ fn parse_threaded_comments(xml: &str) -> Result<Vec<ParsedThreadedComment>> {
             },
             Ok(Event::Text(e)) => {
                 if in_text {
-                    let s = e.unescape().map_err(|err| {
-                        ReaderError::Xml(format!("threadedComments text: {err}"))
-                    })?;
+                    let s = e
+                        .unescape()
+                        .map_err(|err| ReaderError::Xml(format!("threadedComments text: {err}")))?;
                     text_buf.push_str(&s);
                 }
             }
@@ -4577,7 +4592,10 @@ pub(crate) fn read_charts<R: Read + std::io::Seek>(
             let Some(chart_xml) = read_part_optional(zip, &chart_path)? else {
                 continue;
             };
-            if let Some(chart) = parse_chart_xml(&chart_xml, chart_ref.anchor)? {
+            if let Some(mut chart) = parse_chart_xml(&chart_xml, chart_ref.anchor)? {
+                chart.source_drawing_path = Some(drawing_path.clone());
+                chart.source_chart_rid = Some(chart_ref.rid);
+                chart.source_chart_path = Some(chart_path);
                 out.push(chart);
             }
         }
@@ -4923,6 +4941,9 @@ fn parse_chart_xml(xml: &str, anchor: ImageAnchorInfo) -> Result<Option<ChartInf
         Some(title_parts.join(""))
     };
     Ok(Some(ChartInfo {
+        source_drawing_path: None,
+        source_chart_rid: None,
+        source_chart_path: None,
         kind,
         title,
         x_axis_title,
@@ -5753,6 +5774,106 @@ fn zip_from_bytes(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
     ZipArchive::new(Cursor::new(bytes)).map_err(ReaderError::Zip)
 }
 
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn max_zip_entries() -> usize {
+    env_usize("WOLFXL_MAX_ZIP_ENTRIES", DEFAULT_MAX_ZIP_ENTRIES)
+}
+
+fn max_zip_entry_bytes() -> u64 {
+    env_u64("WOLFXL_MAX_ZIP_ENTRY_BYTES", DEFAULT_MAX_ZIP_ENTRY_BYTES)
+}
+
+fn max_zip_total_bytes() -> u64 {
+    env_u64("WOLFXL_MAX_ZIP_TOTAL_BYTES", DEFAULT_MAX_ZIP_TOTAL_BYTES)
+}
+
+fn max_zip_compression_ratio() -> u64 {
+    env_u64(
+        "WOLFXL_MAX_ZIP_COMPRESSION_RATIO",
+        DEFAULT_MAX_COMPRESSION_RATIO,
+    )
+}
+
+fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
+    if zip.len() > max_zip_entries() {
+        return Err(ReaderError::Unsupported(format!(
+            "OOXML package has too many ZIP entries: {} > {}",
+            zip.len(),
+            max_zip_entries()
+        )));
+    }
+    let mut names = HashSet::with_capacity(zip.len());
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        let name = file.name().to_string();
+        validate_zip_part_name(&name)?;
+        if !names.insert(name.clone()) {
+            return Err(ReaderError::Unsupported(format!(
+                "OOXML package contains duplicate ZIP entry: {name}"
+            )));
+        }
+        validate_zip_entry_metadata(&name, file.size(), file.compressed_size())?;
+        total = total.saturating_add(file.size());
+        if total > max_zip_total_bytes() {
+            return Err(ReaderError::Unsupported(format!(
+                "OOXML package is too large: {total} > {} uncompressed bytes",
+                max_zip_total_bytes()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_zip_part_name(name: &str) -> Result<()> {
+    let invalid = name.is_empty()
+        || name.starts_with('/')
+        || name.starts_with('\\')
+        || name.contains('\\')
+        || name
+            .split('/')
+            .any(|part| part == ".." || part.contains(':'));
+    if invalid {
+        return Err(ReaderError::Unsupported(format!(
+            "unsafe OOXML package part path: {name}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_zip_entry_metadata(name: &str, size: u64, compressed_size: u64) -> Result<()> {
+    if size > max_zip_entry_bytes() {
+        return Err(ReaderError::Unsupported(format!(
+            "OOXML package part {name} is too large: {size} > {} bytes",
+            max_zip_entry_bytes()
+        )));
+    }
+    if size > 0 && compressed_size == 0 {
+        return Err(ReaderError::Unsupported(format!(
+            "OOXML package part {name} has invalid compressed size"
+        )));
+    }
+    if compressed_size > 0 && size / compressed_size > max_zip_compression_ratio() {
+        return Err(ReaderError::Unsupported(format!(
+            "OOXML package part {name} exceeds compression ratio limit"
+        )));
+    }
+    Ok(())
+}
+
 fn normalize_ooxml_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
@@ -5770,6 +5891,7 @@ fn read_part_optional<R: Read + std::io::Seek>(
 ) -> Result<Option<String>> {
     match zip.by_name(name) {
         Ok(mut file) => {
+            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
             let mut out = String::new();
             file.read_to_string(&mut out)?;
             Ok(Some(out))
@@ -5785,6 +5907,7 @@ fn read_part_optional_bytes<R: Read + std::io::Seek>(
 ) -> Result<Option<Vec<u8>>> {
     match zip.by_name(name) {
         Ok(mut file) => {
+            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
             let mut out = Vec::new();
             file.read_to_end(&mut out)?;
             Ok(Some(out))
@@ -6649,7 +6772,10 @@ mod tests {
         assert_eq!(entries[0].person_id, "{A}");
         assert_eq!(entries[0].text, "Looks wrong");
         assert_eq!(entries[0].parent_id, None);
-        assert_eq!(entries[0].created.as_deref(), Some("2026-05-03T12:00:00.000"));
+        assert_eq!(
+            entries[0].created.as_deref(),
+            Some("2026-05-03T12:00:00.000")
+        );
         assert_eq!(entries[1].parent_id.as_deref(), Some("{T1}"));
         assert_eq!(entries[1].text, "Why?");
     }
@@ -6678,5 +6804,4 @@ mod tests {
         assert_eq!(entries[0].done, true);
         assert_eq!(entries[1].done, false);
     }
-
 }

@@ -427,6 +427,7 @@ def test_dataframe_to_rows_without_pandas_import() -> None:
     import wolfxl.utils.dataframe as dfmod
 
     assert hasattr(dfmod, "dataframe_to_rows")
+    assert hasattr(dfmod, "worksheet_to_dataframe")
 
 
 def test_dataframe_to_rows_basic() -> None:
@@ -438,3 +439,21 @@ def test_dataframe_to_rows_basic() -> None:
     assert rows[0] == ["a", "b"]
     assert rows[1] == [1, 3]
     assert rows[2] == [2, 4]
+
+
+def test_worksheet_to_dataframe_basic() -> None:
+    pd = pytest.importorskip("pandas")
+    from wolfxl.utils.dataframe import worksheet_to_dataframe
+
+    wb = wolfxl.Workbook()
+    ws = wb.active
+    ws.append(["a", "b"])
+    ws.append([1, 3])
+    ws.append([2, 4])
+
+    df = worksheet_to_dataframe(ws)
+    expected = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    pd.testing.assert_frame_equal(df, expected)
+
+    via_method = ws.to_dataframe(max_row=2)
+    pd.testing.assert_frame_equal(via_method, expected.iloc[:1])

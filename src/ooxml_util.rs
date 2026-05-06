@@ -1,13 +1,51 @@
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
 use zip::ZipArchive;
+
+const DEFAULT_MAX_ZIP_ENTRIES: usize = 200_000;
+const DEFAULT_MAX_ZIP_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+const DEFAULT_MAX_ZIP_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_COMPRESSION_RATIO: u64 = 1_000;
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn max_entries() -> usize {
+    env_usize("WOLFXL_MAX_ZIP_ENTRIES", DEFAULT_MAX_ZIP_ENTRIES)
+}
+
+fn max_entry_bytes() -> u64 {
+    env_u64("WOLFXL_MAX_ZIP_ENTRY_BYTES", DEFAULT_MAX_ZIP_ENTRY_BYTES)
+}
+
+fn max_total_bytes() -> u64 {
+    env_u64("WOLFXL_MAX_ZIP_TOTAL_BYTES", DEFAULT_MAX_ZIP_TOTAL_BYTES)
+}
+
+fn max_compression_ratio() -> u64 {
+    env_u64(
+        "WOLFXL_MAX_ZIP_COMPRESSION_RATIO",
+        DEFAULT_MAX_COMPRESSION_RATIO,
+    )
+}
 
 pub fn normalize_zip_path(path: &str) -> String {
     let mut stack: Vec<&str> = Vec::new();
@@ -22,6 +60,76 @@ pub fn normalize_zip_path(path: &str) -> String {
         stack.push(part);
     }
     stack.join("/")
+}
+
+pub fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> PyResult<()> {
+    if zip.len() > max_entries() {
+        return Err(PyErr::new::<PyIOError, _>(format!(
+            "OOXML package has too many ZIP entries: {} > {}",
+            zip.len(),
+            max_entries()
+        )));
+    }
+
+    let mut names = HashSet::with_capacity(zip.len());
+    let mut total: u64 = 0;
+    for i in 0..zip.len() {
+        let file = zip
+            .by_index(i)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP entry read error: {e}")))?;
+        let name = file.name().to_string();
+        validate_part_name(&name)?;
+        if !names.insert(name.clone()) {
+            return Err(PyErr::new::<PyIOError, _>(format!(
+                "OOXML package contains duplicate ZIP entry: {name}"
+            )));
+        }
+        validate_zip_entry_metadata(&name, file.size(), file.compressed_size())?;
+        total = total.saturating_add(file.size());
+        if total > max_total_bytes() {
+            return Err(PyErr::new::<PyIOError, _>(format!(
+                "OOXML package is too large: {total} > {} uncompressed bytes",
+                max_total_bytes()
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_part_name(name: &str) -> PyResult<()> {
+    let invalid = name.is_empty()
+        || name.starts_with('/')
+        || name.starts_with('\\')
+        || name.contains('\\')
+        || name
+            .split('/')
+            .any(|part| part == ".." || part.contains(':'));
+    if invalid {
+        return Err(PyErr::new::<PyIOError, _>(format!(
+            "unsafe OOXML package part path: {name}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_zip_entry_metadata(name: &str, size: u64, compressed_size: u64) -> PyResult<()> {
+    if size > max_entry_bytes() {
+        return Err(PyErr::new::<PyIOError, _>(format!(
+            "OOXML package part {name} is too large: {size} > {} bytes",
+            max_entry_bytes()
+        )));
+    }
+    if size > 0 && compressed_size == 0 {
+        return Err(PyErr::new::<PyIOError, _>(format!(
+            "OOXML package part {name} has invalid compressed size"
+        )));
+    }
+    if compressed_size > 0 && size / compressed_size > max_compression_ratio() {
+        return Err(PyErr::new::<PyIOError, _>(format!(
+            "OOXML package part {name} exceeds compression ratio limit"
+        )));
+    }
+    Ok(())
 }
 
 pub fn join_and_normalize(base_dir: &str, target: &str) -> String {
@@ -94,6 +202,7 @@ pub fn zip_read_to_string(zip: &mut ZipArchive<File>, name: &str) -> PyResult<St
     let mut f = zip
         .by_name(name)
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Missing zip entry {name}: {e}")))?;
+    validate_zip_entry_metadata(name, f.size(), f.compressed_size())?;
     let mut out = String::new();
     f.read_to_string(&mut out)
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;
@@ -103,6 +212,7 @@ pub fn zip_read_to_string(zip: &mut ZipArchive<File>, name: &str) -> PyResult<St
 pub fn zip_read_to_string_opt(zip: &mut ZipArchive<File>, name: &str) -> PyResult<Option<String>> {
     match zip.by_name(name) {
         Ok(mut f) => {
+            validate_zip_entry_metadata(name, f.size(), f.compressed_size())?;
             let mut out = String::new();
             f.read_to_string(&mut out)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;

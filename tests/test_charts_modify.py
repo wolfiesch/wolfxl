@@ -511,10 +511,8 @@ def test_modify_mode_add_chart_then_copy_worksheet_deep_clones(
     chart_files = [e for e in entries if e.startswith("xl/charts/chart")]
     # Source had no charts but we add 1 high-level then copy → the
     # high-level chart goes onto the source, and the copy deep-clones
-    # whatever charts are on the source. Depending on flush ordering
-    # we expect at least 1; integrator verifies the exact count
-    # post-merge.
-    assert chart_files, f"no chart emitted; entries={entries}"
+    # the pending chart in the same save.
+    assert len(chart_files) == 2, f"expected source+copy charts; entries={entries}"
 
 
 def test_modify_mode_add_3d_chart_works(tmp_path: Path) -> None:
@@ -528,10 +526,7 @@ def test_modify_mode_add_3d_chart_works(tmp_path: Path) -> None:
     _make_data_fixture(src)
     wb = load_workbook(src, modify=True)
     ws = wb["Data"]
-    try:
-        chart = BarChart3D()
-    except NotImplementedError:
-        pytest.skip("BarChart3D not yet exposed (Pod-β′ not merged)")
+    chart = BarChart3D()
     chart.add_data(
         Reference(ws, min_col=2, min_row=1, max_row=4),
         titles_from_data=False,

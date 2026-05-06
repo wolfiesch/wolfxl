@@ -170,6 +170,7 @@ impl StreamingSheetReader {
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open xlsx: {e}")))?;
         let mut zip = ZipArchive::new(file)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open zip: {e}")))?;
+        ooxml_util::validate_zip_archive(&mut zip)?;
 
         let sst = load_sst(&mut zip)?;
         let sheet_path = resolve_sheet_xml_path(&mut zip, sheet)?;

@@ -18,11 +18,13 @@ when the fixture isn't yet committed.
 from __future__ import annotations
 
 import io
+import tempfile
 from pathlib import Path
 
 import pytest
 
 import wolfxl
+from wolfxl import _workbook_sources
 from wolfxl._loader import (
     _classify_bytes_python,
     _classify_path_python,
@@ -32,6 +34,22 @@ from wolfxl._loader import (
 
 FIXTURE_DIR = Path(__file__).parent / "parity" / "fixtures" / "synthgl_snapshot"
 KAPPA_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_from_bytes_modify_cleans_tempfile_on_open_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("patcher open failed")
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(_workbook_sources, "_xlsx_reader_class", lambda *args, **kwargs: object)
+    monkeypatch.setattr(_workbook_sources, "from_patcher", boom)
+
+    with pytest.raises(RuntimeError, match="patcher open failed"):
+        _workbook_sources.from_bytes(wolfxl.Workbook, b"not an xlsx", modify=True)
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def _first_xlsx() -> Path:

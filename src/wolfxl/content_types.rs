@@ -57,6 +57,8 @@ const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-type
 pub enum ContentTypeOp {
     AddOverride(String, String),
     EnsureDefault(String, String),
+    RemoveOverride(String),
+    RemoveOverridePrefix(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +191,14 @@ impl ContentTypesGraph {
             .push((extension.to_string(), content_type.to_string()));
     }
 
+    pub fn remove_override(&mut self, part: &str) {
+        self.overrides.retain(|(p, _)| p != part);
+    }
+
+    pub fn remove_override_prefix(&mut self, prefix: &str) {
+        self.overrides.retain(|(p, _)| !p.starts_with(prefix));
+    }
+
     /// Source-order accessors (used by tests; no live caller in slice).
     #[allow(dead_code)]
     pub fn defaults(&self) -> &[(String, String)] {
@@ -208,6 +218,8 @@ impl ContentTypesGraph {
         match op {
             ContentTypeOp::AddOverride(part, ct) => self.add_override(part, ct),
             ContentTypeOp::EnsureDefault(ext, ct) => self.ensure_default(ext, ct),
+            ContentTypeOp::RemoveOverride(part) => self.remove_override(part),
+            ContentTypeOp::RemoveOverridePrefix(prefix) => self.remove_override_prefix(prefix),
         }
     }
 

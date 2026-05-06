@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
+import math
 from typing import Any
 
 from wolfxl.chart.reference import Reference
@@ -17,6 +18,15 @@ _INFER_THRESHOLDS = {
     "max_string_unique_for_enumeration": 2000,
     "max_number_unique_for_enumeration": 200,
 }
+
+
+def _finite_float(value: Any, context: str) -> float:
+    n = float(value)
+    if not math.isfinite(n):
+        raise ValueError(
+            f"{context}: non-finite floats are not representable in xlsx pivot caches"
+        )
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +69,7 @@ class CacheValue:
         Returns:
             A ``CacheValue`` tagged as ``"number"``.
         """
-        return cls("number", float(n))
+        return cls("number", _finite_float(n, "CacheValue.number"))
 
     @classmethod
     def boolean(cls, b: bool) -> "CacheValue":
@@ -470,7 +480,11 @@ class PivotCache:
     def _infer_numeric_field(
         self, name: str, values: list[Any]
     ) -> CacheField:
-        nums = [float(v) for v in values if v is not None]
+        nums = [
+            _finite_float(v, f"PivotCache field {name!r}")
+            for v in values
+            if v is not None
+        ]
         unique_nums = set(nums)
         threshold = _INFER_THRESHOLDS["max_number_unique_for_enumeration"]
         if len(unique_nums) <= threshold:
@@ -601,7 +615,7 @@ class PivotCache:
         if isinstance(v, bool):
             return CacheValue.boolean(v)
         if isinstance(v, (int, float)):
-            return CacheValue.number(float(v))
+            return CacheValue.number(_finite_float(v, "PivotCache record value"))
         if isinstance(v, (date, datetime)):
             return CacheValue.date(v)
         return CacheValue.string(str(v))
@@ -728,13 +742,16 @@ class PivotCache:
                     "PivotCache.group_field: range grouping requires "
                     "start=, end=, and interval=  (or by= for date grouping)"
                 )
-            items = synthesize_range_group_items(start, end, interval)
+            start_f = _finite_float(start, "PivotCache.group_field start")
+            end_f = _finite_float(end, "PivotCache.group_field end")
+            interval_f = _finite_float(interval, "PivotCache.group_field interval")
+            items = synthesize_range_group_items(start_f, end_f, interval_f)
             fg = FieldGroup(
                 field_index=field_index,
                 parent_index=parent_index,
                 kind="range",
                 range=FieldGroupRange(
-                    start=float(start), end=float(end), interval=float(interval)
+                    start=start_f, end=end_f, interval=interval_f
                 ),
                 items=items,
             )

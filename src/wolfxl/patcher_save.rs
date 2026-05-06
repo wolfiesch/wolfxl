@@ -9,11 +9,16 @@ use zip::ZipArchive;
 
 use wolfxl_merger::SheetBlock;
 
+use crate::ooxml_util;
+
 /// Open the source workbook as a ZIP archive with consistent PyO3 errors.
 pub(super) fn open_source_zip(file_path: &str) -> PyResult<ZipArchive<File>> {
     let file = File::open(file_path)
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Cannot open '{file_path}': {e}")))?;
-    ZipArchive::new(file).map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))
+    let mut zip = ZipArchive::new(file)
+        .map_err(|e| PyErr::new::<PyIOError, _>(format!("ZIP read error: {e}")))?;
+    ooxml_util::validate_zip_archive(&mut zip)?;
+    Ok(zip)
 }
 
 /// Mutable workspace threaded through the ordered save phases.

@@ -20,7 +20,7 @@ Usage::
 from __future__ import annotations
 
 import os
-from typing import IO
+from typing import IO, cast
 
 from wolfxl._cell import Cell
 from wolfxl._rust import __version__, classify_format
@@ -155,17 +155,26 @@ def load_workbook(
             "expected xlsx/xlsb/xls"
         )
 
-    wb = open_workbook_source(
+    wb = cast(
         Workbook,
-        fmt=fmt,
-        path=path,
-        data=data,
-        password=password,
-        data_only=data_only,
-        permissive=permissive,
-        modify=modify,
-        read_only=read_only,
+        open_workbook_source(
+            Workbook,
+            fmt=fmt,
+            path=path,
+            data=data,
+            password=password,
+            data_only=data_only,
+            permissive=permissive,
+            modify=modify,
+            read_only=read_only,
+        ),
     )
 
+    wb._keep_links = bool(keep_links)  # noqa: SLF001
+    if not keep_links:
+        wb._external_links_cache = []  # noqa: SLF001
+        patcher = getattr(wb, "_rust_patcher", None)
+        if patcher is not None and hasattr(patcher, "queue_external_links_drop"):
+            patcher.queue_external_links_drop()
     wb._rich_text = rich_text  # noqa: SLF001
     return wb

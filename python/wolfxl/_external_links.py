@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from wolfxl._zip_safety import read_entry, validate_zipfile
+
 _RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _REL_TYPE_EXTERNAL_LINK = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink"
@@ -81,10 +83,11 @@ def load_external_links(source_path: str | None) -> list[ExternalLink]:
 
     try:
         with zipfile.ZipFile(source_path, "r") as zf:
+            validate_zipfile(zf)
             return _load_from_zip(zf)
     except FileNotFoundError:
         raise
-    except (zipfile.BadZipFile, KeyError, OSError):
+    except (zipfile.BadZipFile, KeyError, OSError, ValueError):
         # A malformed source ZIP shouldn't kill the whole load. The
         # patcher will surface a clearer error on save if the file is
         # actually unusable.
@@ -94,7 +97,7 @@ def load_external_links(source_path: str | None) -> list[ExternalLink]:
 def _load_from_zip(zf: zipfile.ZipFile) -> list[ExternalLink]:
     """Walk the workbook rels graph and parse every external link."""
     try:
-        rels_bytes = zf.read("xl/_rels/workbook.xml.rels")
+        rels_bytes = read_entry(zf, "xl/_rels/workbook.xml.rels")
     except KeyError:
         return []
 
@@ -109,7 +112,7 @@ def _load_from_zip(zf: zipfile.ZipFile) -> list[ExternalLink]:
         target = rel["target"]
         part_path = _normalize_part_path("xl/", target)
         try:
-            part_bytes = zf.read(part_path)
+            part_bytes = read_entry(zf, part_path)
         except KeyError:
             # Rel without a matching part — preserved on save by the
             # passthrough but not introspectable. Skip.
@@ -118,7 +121,7 @@ def _load_from_zip(zf: zipfile.ZipFile) -> list[ExternalLink]:
         parsed_part = _parse_part_xml(part_bytes)
         rels_path = _sibling_rels_path(part_path)
         try:
-            part_rels_bytes = zf.read(rels_path)
+            part_rels_bytes = read_entry(zf, rels_path)
         except KeyError:
             part_rels_bytes = b""
 

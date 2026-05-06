@@ -15,6 +15,13 @@ pub struct QueuedChartAdd {
     pub height_emu: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct QueuedChartRemove {
+    pub drawing_path: String,
+    pub chart_rid: String,
+    pub chart_path: String,
+}
+
 /// Sprint Lambda Pod-beta (RFC-045) — one image queued for emit on a sheet.
 #[derive(Debug, Clone)]
 pub struct QueuedImageAdd {

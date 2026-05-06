@@ -256,7 +256,10 @@ ENTRIES: list[Entry] = [
         "wolfxl": "ws.add_chart / remove_chart / replace_chart",
         "status": "supported",
         "probe": "charts_add_remove_replace",
-        "notes": "remove/replace shipped in v1.7.",
+        "notes": (
+            "remove/replace shipped in v1.7 for charts added in the current "
+            "session; deleting/replacing source-workbook charts is planned."
+        ),
     },
     {
         "id": "charts.combination",
@@ -343,6 +346,10 @@ ENTRIES: list[Entry] = [
         "wolfxl": 'Image("logo.png") + ws.add_image(img, "B5")',
         "status": "supported",
         "probe": "images_basic",
+        "notes": (
+            "Write mode and common modify-mode image adds are supported; "
+            "appending images into an existing drawing part is planned."
+        ),
     },
     {
         "id": "images_replace_remove",
@@ -351,6 +358,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "ws.replace_image / remove_image",
         "status": "supported",
         "probe": "images_replace_remove",
+        "notes": "Covers WolfXL-managed images; loaded-template drawing mutations remain narrower.",
     },
     # --- Structural ops ----------------------------------------------------
     {

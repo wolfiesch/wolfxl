@@ -2,9 +2,7 @@
 
 Counterpart to ``test_images_write.py``. Verifies that
 ``ws.add_image(Image(...))`` works in modify mode (load → mutate →
-save) and produces a valid xlsx with all the same parts. Also
-exercises the v1.5 limit: appending to a sheet that already has a
-drawing part raises ``NotImplementedError``.
+save) and produces a valid xlsx with all the same parts.
 """
 
 from __future__ import annotations
@@ -95,8 +93,10 @@ def test_modify_multiple_images(tmp_path: Path) -> None:
         assert d_rels.count("/relationships/image") == 2
 
 
-def test_modify_append_to_existing_drawing_raises(tmp_path: Path) -> None:
-    """v1.5 limit — appending to a sheet that already has a drawing part."""
+def test_modify_append_to_existing_drawing_round_trip(tmp_path: Path) -> None:
+    """Appending an image to a sheet with an existing drawing part works."""
+    openpyxl = pytest.importorskip("openpyxl")
+
     # Stage 1: create a workbook WITH an image (so it has a drawing rel).
     wb = wolfxl.Workbook()
     wb.active.add_image(Image(PNG_PATH), "B5")
@@ -104,11 +104,16 @@ def test_modify_append_to_existing_drawing_raises(tmp_path: Path) -> None:
     wb.save(base)
 
     # Stage 2: open in modify mode, try to add another image — should
-    # raise NotImplementedError.
+    # append to the existing drawing part.
     wb2 = load_workbook(base, modify=True)
     wb2.active.add_image(Image(JPG_PATH), "D4")
-    with pytest.raises(NotImplementedError, match="(?i)drawing"):
-        wb2.save(tmp_path / "boom.xlsx")
+    out = tmp_path / "with_two_images.xlsx"
+    wb2.save(out)
+
+    wb3 = openpyxl.load_workbook(out)
+    images = wb3.active._images
+    assert len(images) == 2
+    assert [_image_anchor_col_row(image) for image in images] == [(1, 4), (3, 3)]
 
 
 def test_modify_remove_image_by_index_round_trip(tmp_path: Path) -> None:

@@ -49,5 +49,5 @@ wb.close()
 
 ## Notes
 
-- `read_only`, `data_only`, and `keep_links` kwargs are accepted for compatibility.
+- `read_only` and `data_only` are implemented for compatible read workflows; `keep_links=True` preserves links, while `keep_links=False` is not implemented yet.
 - Save operations flush dirty cells in batch.

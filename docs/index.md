@@ -17,6 +17,7 @@ It is built around three priorities:
 | Migrate existing code | [Openpyxl Migration Guide](migration/openpyxl-migration.md) |
 | Check support coverage | [Compatibility Matrix](migration/compatibility-matrix.md) |
 | Understand benchmarks | [Benchmark Methodology](performance/methodology.md) |
+| Check current public claims | [Public Evidence Status](trust/public-evidence.md) |
 | Review caveats first | [Known Limitations](trust/limitations.md) |
 
 ## Why WolfXL
@@ -30,6 +31,7 @@ Keep openpyxl-style workbook, worksheet, and cell patterns.
 ### Evidence-first
 
 Benchmark claims are tied to reproducible commands and raw artifacts.
+When release evidence is in flux, the docs call that out explicitly.
 
 ### Correctness-first
 
@@ -54,10 +56,18 @@ See [Benchmark Methodology](performance/methodology.md) and [Benchmark Results](
 - `operations/` - production rollout and upgrade checklists
 - `trust/` - limitations, changelog, integrity notes
 
+## Case Studies
+
+- [SynthGL export workload](case-study-synthgl.md)
+- [Template-driven finance workbook updates](case-study-finance-template-modify.md)
+- [Styled report generation](case-study-styled-report-generation.md)
+- [Workbook-preserving ETL update](case-study-workbook-preserving-etl.md)
+- [Pivot construction from Python](case-study-pivot-construction.md)
+
 ## Build Docs Locally
 
 From repository root:
 
 ```bash
-uv run --with mkdocs-material mkdocs serve -f docs/mkdocs.yml
+uv run --with mkdocs-material mkdocs serve -f mkdocs.yml
 ```

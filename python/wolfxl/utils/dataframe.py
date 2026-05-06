@@ -2,7 +2,7 @@
 
 Accepts a pandas DataFrame and yields rows suitable for ``ws.append()``.
 Pandas is imported lazily so that ``import wolfxl.utils.dataframe`` works
-without pandas installed - only calling ``dataframe_to_rows()`` triggers
+without pandas installed - only calling dataframe helpers triggers
 the import.
 """
 
@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import pandas as pd  # pragma: no cover - type-only
+    import pandas as pd  # type: ignore[import-untyped]  # pragma: no cover - type-only
 
 
 def dataframe_to_rows(
@@ -30,7 +30,7 @@ def dataframe_to_rows(
     - An empty separator row is yielded between header and data when
       ``index=True`` to match openpyxl's layout convention.
     """
-    import pandas as pd
+    import pandas as pd  # type: ignore[import-untyped]
 
     if header:
         if isinstance(df.columns, pd.MultiIndex):
@@ -61,4 +61,37 @@ def dataframe_to_rows(
             yield list(values)
 
 
-__all__ = ["dataframe_to_rows"]
+def worksheet_to_dataframe(
+    ws: Any,
+    *,
+    header: bool = True,
+    min_row: int | None = None,
+    max_row: int | None = None,
+    min_col: int | None = None,
+    max_col: int | None = None,
+) -> pd.DataFrame:
+    """Materialize worksheet values as a pandas DataFrame.
+
+    Pandas is imported lazily. When ``header=True``, the first row in
+    the requested range becomes the DataFrame columns.
+    """
+    import pandas as pd  # type: ignore[import-untyped]
+
+    rows = list(
+        ws.iter_rows(
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+            values_only=True,
+        )
+    )
+    if not rows:
+        return pd.DataFrame()
+    if header:
+        columns = list(rows[0])
+        return pd.DataFrame(rows[1:], columns=columns)
+    return pd.DataFrame(rows)
+
+
+__all__ = ["dataframe_to_rows", "worksheet_to_dataframe"]
