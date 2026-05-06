@@ -21,6 +21,12 @@ pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
     wolfxl_rels::rels_path_for(sheet_path).unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
 }
 
+/// Maps any OOXML part path to its conventional relationship sidecar path.
+pub(crate) fn part_rels_path_for(part_path: &str) -> PyResult<String> {
+    wolfxl_rels::rels_path_for(part_path)
+        .ok_or_else(|| PyIOError::new_err(format!("part has no rels path: {part_path}")))
+}
+
 /// Parses the trailing integer from an OOXML part path.
 pub(crate) fn parse_n_from_part_path(path: &str, prefix: &str, suffix: &str) -> Option<u32> {
     let mid = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
@@ -34,6 +40,22 @@ pub(crate) fn load_or_empty_rels(zip: &mut ZipArchive<File>, path: &str) -> PyRe
             .map_err(|e| PyIOError::new_err(format!("rels parse for '{path}': {e}"))),
         None => Ok(RelsGraph::new()),
     }
+}
+
+/// Loads the current rels graph, preferring queued replacements/adds over ZIP source.
+pub(crate) fn current_or_empty_rels(
+    patcher: &XlsxPatcher,
+    zip: &mut ZipArchive<File>,
+    path: &str,
+) -> PyResult<RelsGraph> {
+    if let Some(g) = patcher.rels_patches.get(path) {
+        return Ok(g.clone());
+    }
+    if let Some(bytes) = patcher.file_adds.get(path) {
+        return RelsGraph::parse(bytes)
+            .map_err(|e| PyIOError::new_err(format!("rels parse for '{path}': {e}")));
+    }
+    load_or_empty_rels(zip, path)
 }
 
 /// Returns true when the source ZIP contains an entry with the exact name.

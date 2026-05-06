@@ -141,6 +141,43 @@ def test_streaming_values_only_yields_1000_rows(basic_xlsx: Path) -> None:
     assert rows[-1] == (10001, 10002, 10003, 10004, 10005)
 
 
+def test_read_only_values_only_does_not_hydrate_cells_or_bulk_read(
+    basic_xlsx: Path,
+) -> None:
+    class BulkGuard:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        def read_sheet_values_plain(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("streaming values_only must not use bulk eager read")
+
+        def read_sheet_values(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("streaming values_only must not use bulk eager read")
+
+    wb = wolfxl.load_workbook(basic_xlsx, read_only=True)
+    wb._rust_reader = BulkGuard(wb._rust_reader)  # noqa: SLF001
+    ws = wb["Sheet1"]
+    assert ws._cells == {}  # noqa: SLF001
+
+    rows = list(ws.iter_rows(values_only=True))
+
+    assert rows[0] == (11, 12, 13, 14, 15)
+    assert ws._cells == {}  # noqa: SLF001
+
+
+def test_read_only_values_property_does_not_hydrate_cells(basic_xlsx: Path) -> None:
+    wb = wolfxl.load_workbook(basic_xlsx, read_only=True)
+    ws = wb["Sheet1"]
+
+    first = next(ws.values)
+
+    assert first == (11, 12, 13, 14, 15)
+    assert ws._cells == {}  # noqa: SLF001
+
+
 # ---------------------------------------------------------------------------
 # 2. Style access — read-mode StreamingCell exposes font.bold etc.
 # ---------------------------------------------------------------------------

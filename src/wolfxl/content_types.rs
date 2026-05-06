@@ -44,6 +44,20 @@ use quick_xml::Reader as XmlReader;
 
 const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 
+pub(crate) const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+pub(crate) const CT_CHART: &str =
+    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+
+pub(crate) fn image_content_type_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpeg" | "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-sheet aggregation op (Phase 2.5c — see `mod.rs::do_save`).
 // ---------------------------------------------------------------------------

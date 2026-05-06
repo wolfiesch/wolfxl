@@ -11,6 +11,7 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 
 use super::patcher_models::{QueuedChartAdd, QueuedChartRemove, QueuedImageAdd, QueuedImageAnchor};
+use super::patcher_workbook;
 use super::{content_types, XlsxPatcher};
 
 pub(crate) fn parse_queued_image_anchor(d: &Bound<'_, PyDict>) -> PyResult<QueuedImageAnchor> {
@@ -238,25 +239,7 @@ pub(crate) fn parse_a1_coord(s: &str) -> Option<(u32, u32)> {
 
 /// Resolve a relative or absolute OOXML rel target against a base directory.
 pub(crate) fn resolve_relative_path(base_dir: &str, target: &str) -> String {
-    let (mut parts, target_iter): (Vec<&str>, _) = if let Some(stripped) = target.strip_prefix('/')
-    {
-        (Vec::new(), stripped.split('/'))
-    } else {
-        (
-            base_dir.split('/').filter(|p| !p.is_empty()).collect(),
-            target.split('/'),
-        )
-    };
-    for seg in target_iter {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            other => parts.push(other),
-        }
-    }
-    parts.join("/")
+    wolfxl_rels::resolve_target(base_dir, target)
 }
 
 fn remove_image_anchor_by_index(
@@ -391,17 +374,6 @@ fn anchor_has_chart_rid(anchor_xml: &str, chart_rid: &str) -> bool {
     }
     anchor_xml.contains(&format!("r:id=\"{chart_rid}\""))
         || anchor_xml.contains(&format!("id=\"{chart_rid}\""))
-}
-
-fn rels_path_for_part(part_path: &str) -> Result<String, String> {
-    let (dir, filename) = part_path
-        .rsplit_once('/')
-        .ok_or_else(|| format!("invalid part path: {part_path}"))?;
-    Ok(format!("{dir}/_rels/{filename}.rels"))
-}
-
-fn drawing_rels_path_for_part(drawing_path: &str) -> Result<String, String> {
-    rels_path_for_part(drawing_path)
 }
 
 fn remove_sheet_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, String> {
@@ -700,24 +672,9 @@ pub(super) fn apply_image_removes_phase(
                 PyValueError::new_err(format!("queue_image_remove: no such sheet: {sheet_name}"))
             })?;
 
-        let sheet_rels_path = format!(
-            "{}/_rels/{}.rels",
-            sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
-            sheet_path.rsplit('/').next().unwrap_or("")
-        );
-        let mut sheet_rels: wolfxl_rels::RelsGraph =
-            if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+        let sheet_rels_path = patcher_workbook::sheet_rels_path_for(&sheet_path);
+        let mut sheet_rels =
+            patcher_workbook::current_or_empty_rels(patcher, zip, &sheet_rels_path)?;
 
         for remove_index in remove_ops {
             let drawing_rel = sheet_rels
@@ -736,38 +693,22 @@ pub(super) fn apply_image_removes_phase(
                 .unwrap_or("")
                 .to_string();
             let drawing_path = resolve_relative_path(&sheet_dir, &drawing_rel.target);
-            let drawing_rels_path = drawing_rels_path_for_part(&drawing_path)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels path: {e}")))?;
+            let drawing_rels_path = patcher_workbook::part_rels_path_for(&drawing_path)?;
 
-            let mut drawing_rels: wolfxl_rels::RelsGraph = if let Some(g) =
-                patcher.rels_patches.get(&drawing_rels_path)
-            {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                    })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+            let mut drawing_rels =
+                patcher_workbook::current_or_empty_rels(patcher, zip, &drawing_rels_path)?;
 
-            let drawing_xml: Vec<u8> = if let Some(bytes) = file_patches.get(&drawing_path) {
-                bytes.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&drawing_path) {
-                bytes.clone()
-            } else {
-                ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
-                    .ok_or_else(|| {
-                        PyErr::new::<PyIOError, _>(format!(
-                            "queue_image_remove: drawing part missing at {drawing_path}"
-                        ))
-                    })?
-                    .into_bytes()
-            };
+            let drawing_xml = patcher_workbook::current_part_bytes(
+                file_patches,
+                &patcher.file_adds,
+                zip,
+                &drawing_path,
+            )
+            .ok_or_else(|| {
+                PyErr::new::<PyIOError, _>(format!(
+                    "queue_image_remove: drawing part missing at {drawing_path}"
+                ))
+            })?;
 
             let (updated_xml, removed_rid, kept_anchor_count) =
                 remove_image_anchor_by_index(&drawing_xml, remove_index).map_err(|e| {
@@ -844,25 +785,9 @@ pub(super) fn apply_image_adds_phase(
                 PyValueError::new_err(format!("queue_image_add: no such sheet: {sheet_name}"))
             })?;
 
-        // 1. Get sheet rels graph (from rels_patches → file_adds → ZIP).
-        let sheet_rels_path = format!(
-            "{}/_rels/{}.rels",
-            sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
-            sheet_path.rsplit('/').next().unwrap_or("")
-        );
-        let mut rels_graph: wolfxl_rels::RelsGraph =
-            if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+        let sheet_rels_path = patcher_workbook::sheet_rels_path_for(&sheet_path);
+        let mut rels_graph =
+            patcher_workbook::current_or_empty_rels(patcher, zip, &sheet_rels_path)?;
 
         let image_indices: Vec<u32> = queued
             .iter()
@@ -889,21 +814,9 @@ pub(super) fn apply_image_adds_phase(
             let drawing_path = resolve_relative_path(&sheet_dir, &drawing_rel.target);
             drawing_n = drawing_n_from_path(&drawing_path)
                 .unwrap_or_else(|| part_id_allocator.alloc_drawing());
-            let drawing_rels_path = drawing_rels_path_for_part(&drawing_path)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels path: {e}")))?;
-            let mut drawing_rels = if let Some(g) = patcher.rels_patches.get(&drawing_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                    })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+            let drawing_rels_path = patcher_workbook::part_rels_path_for(&drawing_path)?;
+            let mut drawing_rels =
+                patcher_workbook::current_or_empty_rels(patcher, zip, &drawing_rels_path)?;
             let image_rids: Vec<String> = queued
                 .iter()
                 .zip(image_indices.iter())
@@ -917,15 +830,13 @@ pub(super) fn apply_image_adds_phase(
                         .0
                 })
                 .collect();
-            let existing_drawing_xml: Vec<u8> = if let Some(b) = file_patches.get(&drawing_path) {
-                b.clone()
-            } else if let Some(b) = patcher.file_adds.get(&drawing_path) {
-                b.clone()
-            } else {
-                ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
-                    .unwrap_or_default()
-                    .into_bytes()
-            };
+            let existing_drawing_xml = patcher_workbook::current_part_bytes(
+                file_patches,
+                &patcher.file_adds,
+                zip,
+                &drawing_path,
+            )
+            .unwrap_or_default();
             let merged = append_image_pictures(&existing_drawing_xml, &queued, &image_rids)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge image drawing: {e}")))?;
             if zip.by_name(&drawing_path).is_ok() {
@@ -978,13 +889,7 @@ pub(super) fn apply_image_adds_phase(
         let mut ops: Vec<content_types::ContentTypeOp> = Vec::new();
         for img in &queued {
             if seen_exts.insert(img.ext.clone()) {
-                let ct = match img.ext.as_str() {
-                    "png" => "image/png",
-                    "jpeg" | "jpg" => "image/jpeg",
-                    "gif" => "image/gif",
-                    "bmp" => "image/bmp",
-                    _ => "application/octet-stream",
-                };
+                let ct = content_types::image_content_type_for_ext(&img.ext);
                 ops.push(content_types::ContentTypeOp::EnsureDefault(
                     img.ext.clone(),
                     ct.to_string(),
@@ -994,7 +899,7 @@ pub(super) fn apply_image_adds_phase(
         if let Some(part) = drawing_override {
             ops.push(content_types::ContentTypeOp::AddOverride(
                 part,
-                "application/vnd.openxmlformats-officedocument.drawing+xml".to_string(),
+                content_types::CT_DRAWING.to_string(),
             ));
         }
         patcher
@@ -1034,60 +939,36 @@ pub(super) fn apply_chart_removes_phase(
             .ok_or_else(|| {
                 PyValueError::new_err(format!("queue_chart_remove: no such sheet: {sheet_name}"))
             })?;
-        let sheet_rels_path = format!(
-            "{}/_rels/{}.rels",
-            sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
-            sheet_path.rsplit('/').next().unwrap_or("")
-        );
-        let mut sheet_rels: wolfxl_rels::RelsGraph =
-            if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+        let sheet_rels_path = patcher_workbook::sheet_rels_path_for(&sheet_path);
+        let mut sheet_rels =
+            patcher_workbook::current_or_empty_rels(patcher, zip, &sheet_rels_path)?;
 
         for op in remove_ops {
-            let drawing_rels_path = drawing_rels_path_for_part(&op.drawing_path)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels path: {e}")))?;
-            let mut drawing_rels = if let Some(g) = patcher.rels_patches.get(&drawing_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&drawing_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                    })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
-            let drawing_xml: Vec<u8> = if let Some(bytes) = file_patches.get(&op.drawing_path) {
-                bytes.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&op.drawing_path) {
-                bytes.clone()
-            } else {
-                ooxml_util::zip_read_to_string(zip, &op.drawing_path)?.into_bytes()
-            };
+            let drawing_rels_path = patcher_workbook::part_rels_path_for(&op.drawing_path)?;
+            let mut drawing_rels =
+                patcher_workbook::current_or_empty_rels(patcher, zip, &drawing_rels_path)?;
+            let drawing_xml = patcher_workbook::current_part_bytes(
+                file_patches,
+                &patcher.file_adds,
+                zip,
+                &op.drawing_path,
+            )
+            .ok_or_else(|| {
+                PyErr::new::<PyIOError, _>(format!(
+                    "queue_chart_remove: drawing part missing at {}",
+                    op.drawing_path
+                ))
+            })?;
             let (updated_xml, kept_anchor_count) =
                 remove_chart_anchor_by_rid(&drawing_xml, &op.chart_rid).map_err(|e| {
                     PyErr::new::<PyValueError, _>(format!("queue_chart_remove: {e}"))
                 })?;
             drawing_rels.remove(&wolfxl_rels::RelId(op.chart_rid.clone()));
             patcher.file_deletes.insert(op.chart_path.clone());
-            let chart_rels_path = rels_path_for_part(&op.chart_path)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("chart rels path: {e}")))?;
-            if let Some(chart_rels_xml) = ooxml_util::zip_read_to_string_opt(zip, &chart_rels_path)?
-            {
-                let chart_rels = wolfxl_rels::RelsGraph::parse(chart_rels_xml.as_bytes())
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("chart rels parse: {e}")))?;
+            let chart_rels_path = patcher_workbook::part_rels_path_for(&op.chart_path)?;
+            let chart_rels =
+                patcher_workbook::current_or_empty_rels(patcher, zip, &chart_rels_path)?;
+            if !chart_rels.is_empty() {
                 let chart_dir = op.chart_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
                 for rel in chart_rels.iter() {
                     if rel.mode == wolfxl_rels::TargetMode::External {
@@ -1095,7 +976,8 @@ pub(super) fn apply_chart_removes_phase(
                     }
                     let target_path = resolve_relative_path(chart_dir, &rel.target);
                     patcher.file_deletes.insert(target_path.clone());
-                    if let Ok(target_rels_path) = rels_path_for_part(&target_path) {
+                    if let Ok(target_rels_path) = patcher_workbook::part_rels_path_for(&target_path)
+                    {
                         patcher.file_deletes.insert(target_rels_path);
                     }
                     patcher
@@ -1200,24 +1082,9 @@ pub(super) fn apply_chart_adds_phase(
             })?;
 
         // 1. Get sheet rels graph (rels_patches → file_adds → ZIP).
-        let sheet_rels_path = format!(
-            "{}/_rels/{}.rels",
-            sheet_path.rsplit_once('/').map(|(d, _)| d).unwrap_or(""),
-            sheet_path.rsplit('/').next().unwrap_or("")
-        );
-        let mut sheet_rels: wolfxl_rels::RelsGraph =
-            if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
-                g.clone()
-            } else if let Some(bytes) = patcher.file_adds.get(&sheet_rels_path) {
-                wolfxl_rels::RelsGraph::parse(bytes)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &sheet_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes())
-                        .map_err(|e| PyErr::new::<PyIOError, _>(format!("rels parse: {e}")))?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+        let sheet_rels_path = patcher_workbook::sheet_rels_path_for(&sheet_path);
+        let mut sheet_rels =
+            patcher_workbook::current_or_empty_rels(patcher, zip, &sheet_rels_path)?;
 
         // 2. Probe for existing drawing rel + drawing path.
         let mut existing_drawing_target: Option<String> = None;
@@ -1239,7 +1106,7 @@ pub(super) fn apply_chart_adds_phase(
         for &n in &chart_indices {
             ct_ops.push(content_types::ContentTypeOp::AddOverride(
                 format!("/xl/charts/chart{n}.xml"),
-                "application/vnd.openxmlformats-officedocument.drawingml.chart+xml".to_string(),
+                content_types::CT_CHART.to_string(),
             ));
         }
 
@@ -1250,7 +1117,6 @@ pub(super) fn apply_chart_adds_phase(
         }
 
         // Branch on fresh vs. existing drawing.
-        let drawing_n: u32;
         let drawing_path: String;
         let drawing_rels_path: String;
         let mut drawing_rels: wolfxl_rels::RelsGraph;
@@ -1269,25 +1135,11 @@ pub(super) fn apply_chart_adds_phase(
                 .to_string();
             let resolved = resolve_relative_path(&sheet_dir, &target);
             drawing_path = resolved.clone();
-            let n = drawing_n_from_path(&drawing_path)
-                .unwrap_or_else(|| part_id_allocator.alloc_drawing());
-            drawing_n = n;
-            drawing_rels_path = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
+            drawing_rels_path = patcher_workbook::part_rels_path_for(&drawing_path)?;
             // Load existing drawing rels (if any) — drawing
             // graphs without rels are legal but rare.
-            drawing_rels = if let Some(g) = patcher.rels_patches.get(&drawing_rels_path) {
-                g.clone()
-            } else if let Some(b) = patcher.file_adds.get(&drawing_rels_path) {
-                wolfxl_rels::RelsGraph::parse(b)
-                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}")))?
-            } else {
-                match ooxml_util::zip_read_to_string_opt(zip, &drawing_rels_path)? {
-                    Some(s) => wolfxl_rels::RelsGraph::parse(s.as_bytes()).map_err(|e| {
-                        PyErr::new::<PyIOError, _>(format!("drawing rels parse: {e}"))
-                    })?,
-                    None => wolfxl_rels::RelsGraph::new(),
-                }
-            };
+            drawing_rels =
+                patcher_workbook::current_or_empty_rels(patcher, zip, &drawing_rels_path)?;
             // Add a chart rel per queued chart.
             let mut chart_rids: Vec<String> = Vec::with_capacity(queued.len());
             for &n in &chart_indices {
@@ -1299,15 +1151,13 @@ pub(super) fn apply_chart_adds_phase(
                 chart_rids.push(rid.0);
             }
             // Read existing drawing XML.
-            let existing_drawing_xml: Vec<u8> = if let Some(b) = file_patches.get(&drawing_path) {
-                b.clone()
-            } else if let Some(b) = patcher.file_adds.get(&drawing_path) {
-                b.clone()
-            } else {
-                let s = ooxml_util::zip_read_to_string_opt(zip, &drawing_path)?
-                    .unwrap_or_else(|| String::from(""));
-                s.into_bytes()
-            };
+            let existing_drawing_xml = patcher_workbook::current_part_bytes(
+                file_patches,
+                &patcher.file_adds,
+                zip,
+                &drawing_path,
+            )
+            .unwrap_or_default();
             // SAX-merge: append a graphicFrame per queued chart.
             let merged = append_graphic_frames(&existing_drawing_xml, &queued, &chart_rids)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge drawing: {e}")))?;
@@ -1316,7 +1166,7 @@ pub(super) fn apply_chart_adds_phase(
             // [Content_Types].xml.
         } else {
             // Fresh drawing.
-            drawing_n = part_id_allocator.alloc_drawing();
+            let drawing_n = part_id_allocator.alloc_drawing();
             drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
             drawing_rels_path = format!("xl/drawings/_rels/drawing{drawing_n}.xml.rels");
             drawing_rels = wolfxl_rels::RelsGraph::new();
@@ -1350,7 +1200,7 @@ pub(super) fn apply_chart_adds_phase(
             file_patches.insert(sheet_path.clone(), after.into_bytes());
             ct_ops.push(content_types::ContentTypeOp::AddOverride(
                 format!("/xl/drawings/drawing{drawing_n}.xml"),
-                "application/vnd.openxmlformats-officedocument.drawing+xml".to_string(),
+                content_types::CT_DRAWING.to_string(),
             ));
         }
 
