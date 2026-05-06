@@ -37,6 +37,9 @@ def main() -> int:
     parser.add_argument("--require-corpus", action="store_true")
     parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    pytest_args = list(args.pytest_args)
+    if pytest_args and pytest_args[0] == "--":
+        pytest_args = pytest_args[1:]
 
     corpus = args.corpus
     report = args.report
@@ -55,13 +58,25 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="wolfxl-openpyxl-corpus-") as tmp:
         sitecustomize = Path(tmp) / "sitecustomize.py"
+        openpyxl_tests_dir = _openpyxl_tests_dir(corpus)
         sitecustomize.write_text(
             dedent(
-                """
+                f"""
                 import sys
+                import types
                 import wolfxl
 
                 sys.modules.setdefault("openpyxl", wolfxl)
+                # Upstream openpyxl tests import helpers as ``openpyxl.tests``.
+                # Keep library imports routed to wolfxl, and expose only the
+                # test-helper package so missing wolfxl shims do not silently
+                # fall back to upstream openpyxl implementation modules.
+                tests_dir = {str(openpyxl_tests_dir)!r}
+                if tests_dir:
+                    tests_pkg = types.ModuleType("openpyxl.tests")
+                    tests_pkg.__path__ = [tests_dir]
+                    sys.modules.setdefault("openpyxl.tests", tests_pkg)
+                    setattr(wolfxl, "tests", tests_pkg)
                 """
             )
         )
@@ -73,7 +88,7 @@ def main() -> int:
             "pytest",
             str(corpus),
             "-q",
-            *args.pytest_args,
+            *pytest_args,
         ]
         proc = subprocess.run(cmd, cwd=ROOT, env=env, text=True, capture_output=True)
 
@@ -99,6 +114,20 @@ def _load_allowlist(path: Path) -> dict[str, object]:
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         return {"error": f"invalid allowlist JSON: {exc}"}
+
+
+def _openpyxl_tests_dir(corpus: Path) -> Path | str:
+    """Return the upstream ``openpyxl.tests`` package dir for ``corpus``.
+
+    Typical input is ``.../openpyxl/tests`` from an upstream source archive.
+    When callers point at a custom directory that is not nested under an
+    ``openpyxl/tests`` package, return an empty path sentinel so the shim
+    remains compatible with ad-hoc corpora.
+    """
+    resolved = corpus.resolve()
+    if resolved.name == "tests" and resolved.parent.name == "openpyxl":
+        return resolved
+    return ""
 
 
 if __name__ == "__main__":

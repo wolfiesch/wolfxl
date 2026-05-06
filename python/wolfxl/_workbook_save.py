@@ -7,18 +7,31 @@ preserving the exact writer/patcher flush order used by the save pipeline.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, BinaryIO
 
 from wolfxl._workbook_state import same_existing_path
 
 
+def normalize_openpyxl_package_shape(wb: Any, filename: str) -> None:
+    """Apply source-backed openpyxl package-shape cleanup when relevant."""
+    from wolfxl._openpyxl_package_shape import normalize_openpyxl_package_shape as _normalize
+
+    keep_vba = bool(getattr(wb, "_keep_vba", False))
+    if not keep_vba and getattr(wb, "_rust_patcher", None) is not None:
+        keep_vba = getattr(wb, "vba_archive", None) is not None
+    _normalize(filename, keep_vba=keep_vba)
+
+
 def save_workbook(
     wb: Any,
-    filename: str | os.PathLike[str],
+    filename: str | os.PathLike[str] | BinaryIO,
     *,
     password: str | bytes | None = None,
 ) -> None:
     """Flush workbook state and save it through the active backend."""
+    if hasattr(filename, "write") and not isinstance(filename, (str, bytes, os.PathLike)):
+        save_workbook_to_fileobj(wb, filename, password=password)
+        return
     filename = str(filename)
     # G20: write-only mode is consumed-on-save. A second save raises
     # WorkbookAlreadySaved (matches openpyxl's `_write_only.py`).
@@ -47,6 +60,8 @@ def save_workbook(
             save_write_only_mode(wb, filename)
         else:
             save_write_mode(wb, filename)
+    elif getattr(wb, "_rust_reader", None) is not None and getattr(wb, "_source_path", None):
+        save_read_mode(wb, filename)
     else:
         raise RuntimeError("save requires write or modify mode")
     # Mark consumed AFTER save succeeds so a write failure leaves the
@@ -60,6 +75,110 @@ def save_workbook(
             close = getattr(ws, "close", None)
             if close is not None:
                 close()
+
+
+def save_workbook_to_fileobj(
+    wb: Any,
+    fileobj: BinaryIO,
+    *,
+    password: str | bytes | None = None,
+) -> None:
+    """Save to a binary file-like object using the path-oriented backends."""
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(prefix="wolfxl-save-", suffix=".xlsx", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        save_workbook(wb, tmp_path, password=password)
+        with open(tmp_path, "rb") as src:
+            data = src.read()
+        try:
+            fileobj.seek(0)
+            fileobj.truncate()
+        except Exception:
+            pass
+        fileobj.write(data)
+        try:
+            fileobj.flush()
+            fileobj.seek(0)
+        except Exception:
+            pass
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def save_read_mode(wb: Any, filename: str) -> None:
+    """Save an unmodified path-backed read workbook by copying the source package."""
+    import shutil
+
+    source_path = getattr(wb, "_source_path", None)
+    if source_path is None:
+        raise RuntimeError("save requires write or modify mode")
+    if _read_mode_has_pending_changes(wb):
+        if getattr(wb, "_read_only", False):
+            raise RuntimeError(
+                "save() on a read_only=True workbook would discard pending changes; "
+                "reopen with modify=True before editing"
+            )
+        _promote_read_mode_to_patcher(wb, source_path)
+        save_modify_mode(wb, filename)
+        return
+    shutil.copyfile(source_path, filename)
+    normalize_openpyxl_package_shape(wb, filename)
+
+
+def _promote_read_mode_to_patcher(wb: Any, source_path: str) -> None:
+    from wolfxl import _rust
+
+    wb._rust_patcher = _rust.XlsxPatcher.open(source_path, False)
+
+
+def _read_mode_has_pending_changes(wb: Any) -> bool:
+    workbook_pending_attrs = (
+        "_chartsheets_dirty",
+        "_properties_dirty",
+        "_pending_defined_names",
+        "_pending_security_update",
+        "_pending_axis_shifts",
+        "_pending_range_moves",
+        "_pending_sheet_copies",
+        "_pending_chart_adds",
+        "_pending_source_chart_ops",
+        "_pending_pivot_caches",
+        "_pending_slicer_caches",
+    )
+    if any(bool(getattr(wb, attr, None)) for attr in workbook_pending_attrs):
+        return True
+    links = getattr(wb, "_external_links", None)
+    if links is not None and getattr(links, "dirty", False):
+        return True
+
+    worksheet_pending_attrs = (
+        "_dirty",
+        "_append_buffer",
+        "_bulk_writes",
+        "_pending_comments",
+        "_pending_threaded_comments",
+        "_pending_hyperlinks",
+        "_pending_tables",
+        "_pending_data_validations",
+        "_pending_conditional_formats",
+        "_pending_rich_text",
+        "_pending_array_formulas",
+        "_pending_images",
+        "_pending_charts",
+        "_pending_pivot_tables",
+        "_pending_slicers",
+        "_print_titles_dirty",
+    )
+    for ws in getattr(wb, "_sheets", {}).values():
+        if any(bool(getattr(ws, attr, None)) for attr in worksheet_pending_attrs):
+            return True
+    return False
 
 
 def save_write_only_mode(wb: Any, filename: str) -> None:
@@ -149,6 +268,7 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     flush_external_links_authoring(wb, filename)
     flush_source_chart_authoring(wb, filename)
     flush_chartsheets_authoring(wb, filename)
+    normalize_openpyxl_package_shape(wb, filename)
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
