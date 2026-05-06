@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from wolfxl._cell import Cell
+from wolfxl.styles.numbers import BUILTIN_FORMATS
 from wolfxl.utils import get_column_letter
+from wolfxl.utils.numbers import is_date_format
 
 
 class ReadOnlyCell:
@@ -53,12 +55,12 @@ class ReadOnlyCell:
     def number_format(self) -> Any:
         styles = getattr(self.parent.parent, "_cell_styles", None)
         if styles is None:
-            return None
+            return "General"
         try:
             style = styles[self._style_id]
-            return getattr(style, "numFmtId", 0)
+            return _number_format_code(self.parent.parent, getattr(style, "numFmtId", 0))
         except Exception:
-            return None
+            return "General"
 
     @property
     def font(self) -> Any:
@@ -82,7 +84,10 @@ class ReadOnlyCell:
 
     @property
     def is_date(self) -> bool:
-        return bool(getattr(Cell, "is_date", False))
+        value = self.value
+        if hasattr(value, "year") and hasattr(value, "month"):
+            return True
+        return is_date_format(self.number_format)
 
     @property
     def internal_value(self) -> Any:
@@ -120,3 +125,21 @@ class EmptyCell:
 EMPTY_CELL = EmptyCell()
 
 __all__ = ["EMPTY_CELL", "EmptyCell", "ReadOnlyCell"]
+
+
+def _number_format_code(workbook: Any, num_fmt_id: Any) -> str:
+    try:
+        fmt_id = int(num_fmt_id)
+    except (TypeError, ValueError):
+        return "General"
+    if fmt_id in BUILTIN_FORMATS:
+        return BUILTIN_FORMATS[fmt_id]
+    custom_formats = getattr(workbook, "_number_formats", None)
+    if isinstance(custom_formats, dict):
+        value = custom_formats.get(fmt_id, custom_formats.get(str(fmt_id)))
+        return value if isinstance(value, str) else "General"
+    if isinstance(custom_formats, (list, tuple)) and fmt_id >= 164:
+        idx = fmt_id - 164
+        if 0 <= idx < len(custom_formats) and isinstance(custom_formats[idx], str):
+            return custom_formats[idx]
+    return "General"

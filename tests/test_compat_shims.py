@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib
 from io import BytesIO
+from xml.etree import ElementTree as ET
 import zipfile
 
 import pytest
@@ -150,6 +151,68 @@ def test_load_workbook_accepts_keep_vba_keyword(tmp_path) -> None:
 
     wb = wolfxl.load_workbook(path, keep_vba=False)
     assert wb.sheetnames == ["Sheet"]
+
+
+def test_read_only_cell_number_format_and_is_date() -> None:
+    from wolfxl.cell.read_only import ReadOnlyCell
+    from wolfxl.styles.styleable import StyleArray
+
+    workbook = type("Book", (), {"_cell_styles": [StyleArray(), StyleArray([0, 0, 0, 14, 0, 0, 0, 0, 0])]})()
+    sheet = type("Sheet", (), {"parent": workbook, "title": "Sheet"})()
+
+    plain = ReadOnlyCell(sheet, 1, 1, 42, style_id=0)
+    dated = ReadOnlyCell(sheet, 1, 2, 42, style_id=1)
+
+    assert plain.number_format == "General"
+    assert plain.is_date is False
+    assert dated.number_format == "mm-dd-yy"
+    assert dated.is_date is True
+
+
+def test_dirty_read_mode_save_promotes_to_modify_mode(tmp_path) -> None:
+    path = tmp_path / "source.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "old"
+    wb.save(path)
+
+    loaded = wolfxl.load_workbook(path)
+    loaded.active["A1"] = "new"
+    out = tmp_path / "saved.xlsx"
+    loaded.save(out)
+
+    assert wolfxl.load_workbook(out).active["A1"].value == "new"
+
+
+def test_nonstandard_absolute_workbook_target_loads(tmp_path) -> None:
+    source = tmp_path / "source.xlsx"
+    wolfxl.Workbook().save(source)
+    shifted = tmp_path / "shifted.xlsx"
+
+    with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(shifted, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            member = info.filename
+            data = src.read(member)
+            if member == "xl/workbook.xml":
+                member = "xl/workbook2.xml"
+            elif member == "xl/_rels/workbook.xml.rels":
+                member = "xl/_rels/workbook2.xml.rels"
+            elif member == "_rels/.rels":
+                data = _rewrite_office_document_target(data, "/xl/workbook2.xml")
+            elif member == "[Content_Types].xml":
+                data = data.replace(b'PartName="/xl/workbook.xml"', b'PartName="/xl/workbook2.xml"')
+            info.filename = member
+            dst.writestr(info, data)
+
+    wb = wolfxl.load_workbook(shifted)
+    assert wb.sheetnames == ["Sheet"]
+
+
+def _rewrite_office_document_target(data: bytes, target: str) -> bytes:
+    root = ET.fromstring(data)
+    for rel in root:
+        if rel.get("Type", "").endswith("/officeDocument"):
+            rel.set("Target", target)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 # ---------------- stubs raise at construction ----------------

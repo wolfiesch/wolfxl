@@ -195,10 +195,12 @@ def _open_plain_xlsx_source(
 
 def _normalize_nonstandard_workbook_part(path: str) -> str | None:
     """Return a temp XLSX path when the workbook part is not ``xl/workbook.xml``."""
+    import os
     import tempfile
     import zipfile
     from xml.etree import ElementTree as ET
 
+    tmp_path = None
     try:
         with zipfile.ZipFile(path, "r") as src:
             names = set(src.namelist())
@@ -210,6 +212,8 @@ def _normalize_nonstandard_workbook_part(path: str) -> str | None:
                 if rel.get("Type", "").endswith("/officeDocument"):
                     target = rel.get("Target")
                     break
+            if target:
+                target = target.lstrip("/")
             if not target or target not in names:
                 return None
             tmp = tempfile.NamedTemporaryFile(prefix="wolfxl-normalized-", suffix=".xlsx", delete=False)
@@ -232,6 +236,11 @@ def _normalize_nonstandard_workbook_part(path: str) -> str | None:
                     dst.writestr(info, data)
             return tmp_path
     except Exception:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         return None
 
 

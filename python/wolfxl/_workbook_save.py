@@ -118,8 +118,67 @@ def save_read_mode(wb: Any, filename: str) -> None:
     source_path = getattr(wb, "_source_path", None)
     if source_path is None:
         raise RuntimeError("save requires write or modify mode")
+    if _read_mode_has_pending_changes(wb):
+        if getattr(wb, "_read_only", False):
+            raise RuntimeError(
+                "save() on a read_only=True workbook would discard pending changes; "
+                "reopen with modify=True before editing"
+            )
+        _promote_read_mode_to_patcher(wb, source_path)
+        save_modify_mode(wb, filename)
+        return
     shutil.copyfile(source_path, filename)
     normalize_openpyxl_package_shape(wb, filename)
+
+
+def _promote_read_mode_to_patcher(wb: Any, source_path: str) -> None:
+    from wolfxl import _rust
+
+    wb._rust_patcher = _rust.XlsxPatcher.open(source_path, False)
+
+
+def _read_mode_has_pending_changes(wb: Any) -> bool:
+    workbook_pending_attrs = (
+        "_chartsheets_dirty",
+        "_properties_dirty",
+        "_pending_defined_names",
+        "_pending_security_update",
+        "_pending_axis_shifts",
+        "_pending_range_moves",
+        "_pending_sheet_copies",
+        "_pending_chart_adds",
+        "_pending_source_chart_ops",
+        "_pending_pivot_caches",
+        "_pending_slicer_caches",
+    )
+    if any(bool(getattr(wb, attr, None)) for attr in workbook_pending_attrs):
+        return True
+    links = getattr(wb, "_external_links", None)
+    if links is not None and getattr(links, "dirty", False):
+        return True
+
+    worksheet_pending_attrs = (
+        "_dirty",
+        "_append_buffer",
+        "_bulk_writes",
+        "_pending_comments",
+        "_pending_threaded_comments",
+        "_pending_hyperlinks",
+        "_pending_tables",
+        "_pending_data_validations",
+        "_pending_conditional_formats",
+        "_pending_rich_text",
+        "_pending_array_formulas",
+        "_pending_images",
+        "_pending_charts",
+        "_pending_pivot_tables",
+        "_pending_slicers",
+        "_print_titles_dirty",
+    )
+    for ws in getattr(wb, "_sheets", {}).values():
+        if any(bool(getattr(ws, attr, None)) for attr in worksheet_pending_attrs):
+            return True
+    return False
 
 
 def save_write_only_mode(wb: Any, filename: str) -> None:
