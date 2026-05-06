@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 from wolfxl._workbook_state import (
@@ -245,7 +245,7 @@ def _normalize_nonstandard_workbook_part(path: str) -> str | None:
 
 
 def _workbook_rels_for_part(target: str) -> str:
-    part = Path(target)
+    part = PurePosixPath(target)
     return str(part.parent / "_rels" / f"{part.name}.rels")
 
 
