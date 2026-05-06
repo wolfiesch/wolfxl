@@ -4,7 +4,7 @@ Counterpart to ``test_images_write.py``. Verifies that
 ``ws.add_image(Image(...))`` works in modify mode (load → mutate →
 save) and produces a valid xlsx with all the same parts. Also
 exercises the v1.5 limit: appending to a sheet that already has a
-drawing part raises ``NotImplementedError``.
+drawing part now merges into the existing drawing part.
 """
 
 from __future__ import annotations
@@ -95,20 +95,36 @@ def test_modify_multiple_images(tmp_path: Path) -> None:
         assert d_rels.count("/relationships/image") == 2
 
 
-def test_modify_append_to_existing_drawing_raises(tmp_path: Path) -> None:
-    """v1.5 limit — appending to a sheet that already has a drawing part."""
+def test_modify_append_to_existing_drawing_round_trip(tmp_path: Path) -> None:
+    """Appending to a sheet that already has a drawing part preserves both images."""
+    openpyxl = pytest.importorskip("openpyxl")
+
     # Stage 1: create a workbook WITH an image (so it has a drawing rel).
     wb = wolfxl.Workbook()
     wb.active.add_image(Image(PNG_PATH), "B5")
     base = tmp_path / "with_drawing.xlsx"
     wb.save(base)
 
-    # Stage 2: open in modify mode, try to add another image — should
-    # raise NotImplementedError.
+    # Stage 2: open in modify mode, add another image into the existing drawing.
     wb2 = load_workbook(base, modify=True)
     wb2.active.add_image(Image(JPG_PATH), "D4")
-    with pytest.raises(NotImplementedError, match="(?i)drawing"):
-        wb2.save(tmp_path / "boom.xlsx")
+    out = tmp_path / "merged_drawing.xlsx"
+    wb2.save(out)
+
+    wb3 = openpyxl.load_workbook(out)
+    images = wb3.active._images
+    assert len(images) == 2
+    assert _image_anchor_col_row(images[0]) == (1, 4)  # B5
+    assert _image_anchor_col_row(images[1]) == (3, 3)  # D4
+
+    with zipfile.ZipFile(out) as z:
+        names = set(z.namelist())
+        drawing_files = sorted(n for n in names if n.startswith("xl/drawings/drawing"))
+        assert drawing_files == ["xl/drawings/drawing1.xml"]
+        drawing = z.read("xl/drawings/drawing1.xml").decode()
+        assert drawing.count("<xdr:pic") == 2
+        rels = z.read("xl/drawings/_rels/drawing1.xml.rels").decode()
+        assert rels.count("/relationships/image") == 2
 
 
 def test_modify_remove_image_by_index_round_trip(tmp_path: Path) -> None:

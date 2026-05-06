@@ -11,7 +11,7 @@
 //!    `wb._backend.append_streaming_row(name, row_idx, cells)` with a
 //!    Python list of cell payload dicts (or `None` to skip a column).
 //!    Index in the list is `column - 1` (1-based on Excel side).
-//! 3. `wb.save(path)` calls `save_once`, which now invokes
+//! 3. `wb.save(path)` calls the native workbook save helper, which invokes
 //!    `finalize_all_streaming` before `emit_xlsx` so each streaming
 //!    `BufWriter` is flushed to disk and the splice phase reads valid
 //!    bytes.

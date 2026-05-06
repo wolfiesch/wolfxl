@@ -56,6 +56,7 @@ const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-type
 #[allow(dead_code)] // No live caller in this slice; field reserved.
 pub enum ContentTypeOp {
     AddOverride(String, String),
+    RemoveOverride(String),
     EnsureDefault(String, String),
 }
 
@@ -174,6 +175,11 @@ impl ContentTypesGraph {
             .push((part.to_string(), content_type.to_string()));
     }
 
+    /// Remove an Override entry by part name. Idempotent.
+    pub fn remove_override(&mut self, part: &str) {
+        self.overrides.retain(|(p, _)| p != part);
+    }
+
     /// Append (or update in place) a Default entry. Same semantics as
     /// `add_override` keyed on `extension`.
     pub fn ensure_default(&mut self, extension: &str, content_type: &str) {
@@ -207,6 +213,7 @@ impl ContentTypesGraph {
     pub fn apply_op(&mut self, op: &ContentTypeOp) {
         match op {
             ContentTypeOp::AddOverride(part, ct) => self.add_override(part, ct),
+            ContentTypeOp::RemoveOverride(part) => self.remove_override(part),
             ContentTypeOp::EnsureDefault(ext, ct) => self.ensure_default(ext, ct),
         }
     }

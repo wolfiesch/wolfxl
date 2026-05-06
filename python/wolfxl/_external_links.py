@@ -221,6 +221,17 @@ def load_external_links(source_path: str | None) -> ExternalLinkCollection:
         return ExternalLinkCollection()
 
 
+def load_external_links_from_bytes(data: bytes | bytearray | memoryview) -> ExternalLinkCollection:
+    """Load external-link parts from an in-memory xlsx blob."""
+    import io
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(bytes(data)), "r") as zf:
+            return ExternalLinkCollection(_load_from_zip(zf))
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return ExternalLinkCollection()
+
+
 def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
     """Rewrite workbook external-link parts to match ``links``."""
     if not links.dirty:

@@ -233,6 +233,14 @@ PATHS: list[tuple[str, str]] = [
     ("openpyxl.chart.data_source", "AxDataSource"),
     ("openpyxl.chart.data_source", "StrRef"),
 
+    # ---- chartsheet ------------------------------------------------------
+    ("openpyxl.chartsheet", "Chartsheet"),
+    ("openpyxl.chartsheet.chartsheet", "Chartsheet"),
+    ("openpyxl.chartsheet.chartsheet", "ChartsheetProperties"),
+    ("openpyxl.chartsheet.chartsheet", "ChartsheetProtection"),
+    ("openpyxl.chartsheet.properties", "ChartsheetProperties"),
+    ("openpyxl.chartsheet.protection", "ChartsheetProtection"),
+
     # ---- pivot -----------------------------------------------------------
     ("openpyxl.pivot.table", "PivotTable"),
     ("openpyxl.pivot.table", "TableDefinition"),

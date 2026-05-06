@@ -77,7 +77,9 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
 use patcher_drawing::parse_queued_image_anchor;
-use patcher_models::{AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp};
+use patcher_models::{
+    AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp, SheetCreateOp,
+};
 use patcher_payload::{
     dict_to_border_spec, dict_to_format_spec, dict_to_threaded_entry, extract_bool,
     extract_cf_rule, extract_f64, extract_str, extract_u32, parse_workbook_security_payload,
@@ -244,6 +246,10 @@ pub struct XlsxPatcher {
     /// workbook.xml whose tab indices already reflect the move.
     /// Empty queue → no `xl/workbook.xml` touch.
     queued_sheet_moves: Vec<(String, i32)>,
+    /// Sheet-title rename operations pending flush. Queueing a rename also
+    /// updates `sheet_paths` and `sheet_order` immediately so subsequent
+    /// sheet-scoped mutations can use the new openpyxl-visible title.
+    queued_sheet_renames: Vec<(String, String)>,
     /// Per-workbook structural-shift queue (RFC-030 / RFC-031). Each
     /// entry is `(sheet, axis, idx, n)` where `axis` is "row" or "col"
     /// and `n` is signed (positive = insert, negative = delete).
@@ -264,6 +270,13 @@ pub struct XlsxPatcher {
     /// the cloned sheet is visible to downstream phases as if it
     /// had always been part of the source workbook.
     queued_sheet_copies: Vec<SheetCopyOp>,
+    /// Per-workbook blank sheet creation queue for modify mode.
+    queued_sheet_creates: Vec<SheetCreateOp>,
+    /// Per-workbook source sheet deletion queue for modify mode.
+    queued_sheet_deletes: Vec<String>,
+    /// Deleted sheet title -> original worksheet part path. Kept separate
+    /// because queue_sheet_delete removes the live sheet path eagerly.
+    deleted_sheet_paths: HashMap<String, String>,
     /// Sprint Θ Pod-A: pre-seeded `file_patches` entries produced by
     /// permissive-mode load-time normalization (e.g. rewriting an
     /// empty `<sheets/>` block in `xl/workbook.xml`). Empty in the
@@ -352,6 +365,29 @@ pub struct XlsxPatcher {
     /// 2.5p (after Phase 2.5n sheet-setup, before Phase 2.5o
     /// autoFilter).
     queued_slicers: Vec<pivot_slicer::QueuedSlicer>,
+}
+
+fn rename_hash_key<T>(map: &mut HashMap<String, T>, old_name: &str, new_name: &str) {
+    if let Some(value) = map.remove(old_name) {
+        map.insert(new_name.to_string(), value);
+    }
+}
+
+fn rename_tuple_sheet_keys<T>(
+    map: &mut HashMap<(String, String), T>,
+    old_name: &str,
+    new_name: &str,
+) {
+    let keys: Vec<(String, String)> = map
+        .keys()
+        .filter(|(sheet, _)| sheet == old_name)
+        .cloned()
+        .collect();
+    for old_key in keys {
+        if let Some(value) = map.remove(&old_key) {
+            map.insert((new_name.to_string(), old_key.1), value);
+        }
+    }
 }
 
 #[pymethods]
@@ -503,9 +539,13 @@ impl XlsxPatcher {
             queued_threaded_comments: HashMap::new(),
             queued_persons: Vec::new(),
             queued_sheet_moves: Vec::new(),
+            queued_sheet_renames: Vec::new(),
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
             queued_sheet_copies: Vec::new(),
+            queued_sheet_creates: Vec::new(),
+            queued_sheet_deletes: Vec::new(),
+            deleted_sheet_paths: HashMap::new(),
             permissive_seed_file_patches: file_patches,
             queued_images: HashMap::new(),
             queued_image_removes: HashMap::new(),
@@ -1099,6 +1139,123 @@ impl XlsxPatcher {
     /// the defined-names merger runs.
     fn queue_sheet_move(&mut self, sheet: &str, offset: i32) -> PyResult<()> {
         self.queued_sheet_moves.push((sheet.to_string(), offset));
+        Ok(())
+    }
+
+    /// Queue a sheet-title rename for modify mode.
+    ///
+    /// The in-memory maps are updated immediately so any later queued
+    /// sheet-scoped mutations can address the worksheet by its new title.
+    /// `xl/workbook.xml` is rewritten during the workbook XML phase.
+    fn queue_sheet_rename(&mut self, old_name: &str, new_name: &str) -> PyResult<()> {
+        if old_name == new_name {
+            return Ok(());
+        }
+        if new_name.is_empty() {
+            return Err(PyValueError::new_err(
+                "queue_sheet_rename: new sheet title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(new_name) {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_rename: destination sheet '{new_name}' already exists"
+            )));
+        }
+        let Some(path) = self.sheet_paths.remove(old_name) else {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_rename: source sheet '{old_name}' not found in workbook"
+            )));
+        };
+        self.sheet_paths.insert(new_name.to_string(), path);
+        for name in &mut self.sheet_order {
+            if name == old_name {
+                *name = new_name.to_string();
+            }
+        }
+        for (sheet, _) in &mut self.queued_sheet_moves {
+            if sheet == old_name {
+                *sheet = new_name.to_string();
+            }
+        }
+        rename_tuple_sheet_keys(&mut self.value_patches, old_name, new_name);
+        rename_tuple_sheet_keys(&mut self.format_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_dv_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_cf_patches, old_name, new_name);
+        rename_hash_key(&mut self.queued_content_type_ops, old_name, new_name);
+        rename_hash_key(&mut self.queued_hyperlinks, old_name, new_name);
+        rename_hash_key(&mut self.queued_tables, old_name, new_name);
+        rename_hash_key(&mut self.queued_comments, old_name, new_name);
+        rename_hash_key(&mut self.queued_threaded_comments, old_name, new_name);
+        rename_hash_key(&mut self.queued_images, old_name, new_name);
+        rename_hash_key(&mut self.queued_image_removes, old_name, new_name);
+        rename_hash_key(&mut self.queued_charts, old_name, new_name);
+        rename_hash_key(&mut self.queued_pivot_tables, old_name, new_name);
+        rename_hash_key(&mut self.queued_autofilters, old_name, new_name);
+        rename_hash_key(&mut self.queued_sheet_setup, old_name, new_name);
+        rename_hash_key(&mut self.queued_page_breaks, old_name, new_name);
+        self.queued_sheet_renames
+            .push((old_name.to_string(), new_name.to_string()));
+        Ok(())
+    }
+
+    /// Queue creation of a blank worksheet in modify mode.
+    #[pyo3(signature = (title, index=None))]
+    fn queue_sheet_create(&mut self, title: &str, index: Option<usize>) -> PyResult<()> {
+        if title.is_empty() {
+            return Err(PyValueError::new_err(
+                "queue_sheet_create: sheet title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(title)
+            || self.queued_sheet_creates.iter().any(|op| op.title == title)
+        {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_create: sheet '{title}' already exists"
+            )));
+        }
+        self.queued_sheet_creates.push(SheetCreateOp {
+            title: title.to_string(),
+        });
+        self.sheet_paths.insert(
+            title.to_string(),
+            format!("__wolfxl_pending_sheet_create__/{title}"),
+        );
+        let insert_at = index
+            .unwrap_or(self.sheet_order.len())
+            .min(self.sheet_order.len());
+        self.sheet_order.insert(insert_at, title.to_string());
+        Ok(())
+    }
+
+    /// Queue deletion of an existing worksheet in modify mode.
+    fn queue_sheet_delete(&mut self, title: &str) -> PyResult<()> {
+        let Some(path) = self.sheet_paths.remove(title) else {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_delete: sheet '{title}' not found in workbook"
+            )));
+        };
+        self.sheet_order.retain(|name| name != title);
+        self.queued_dv_patches.remove(title);
+        self.queued_cf_patches.remove(title);
+        self.value_patches.retain(|(sheet, _), _| sheet != title);
+        self.format_patches.retain(|(sheet, _), _| sheet != title);
+        self.queued_hyperlinks.remove(title);
+        self.queued_tables.remove(title);
+        self.queued_comments.remove(title);
+        self.queued_threaded_comments.remove(title);
+        self.queued_images.remove(title);
+        self.queued_image_removes.remove(title);
+        self.queued_charts.remove(title);
+        self.queued_pivot_tables.remove(title);
+        self.queued_autofilters.remove(title);
+        self.queued_sheet_setup.remove(title);
+        self.queued_page_breaks.remove(title);
+        if path.starts_with("__wolfxl_pending_sheet_create__/") {
+            self.queued_sheet_creates.retain(|op| op.title != title);
+            return Ok(());
+        }
+        self.deleted_sheet_paths.insert(title.to_string(), path);
+        self.queued_sheet_deletes.push(title.to_string());
         Ok(())
     }
 
@@ -1948,6 +2105,22 @@ impl XlsxPatcher {
         // phase to write into it (workbook.xml + workbook.xml.rels).
         // Phase 3 mutates it further with per-sheet rewrites.
         patcher_workbook::drain_permissive_seed_file_patches_phase(self, &mut save.file_patches);
+
+        // --- Phase 2.6: Sheet deletes / creates ---
+        //
+        // Source sheet removal must run before blank-sheet creation so a user
+        // can remove a sheet and recreate the same title in one save session.
+        if !self.queued_sheet_deletes.is_empty() {
+            patcher_workbook::apply_sheet_deletes_phase(self, &mut save.file_patches, &mut zip)?;
+        }
+        if !self.queued_sheet_creates.is_empty() {
+            patcher_workbook::apply_sheet_creates_phase(
+                self,
+                &mut save.file_patches,
+                &mut zip,
+                &mut save.part_id_allocator,
+            )?;
+        }
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //

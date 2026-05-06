@@ -56,6 +56,26 @@ impl NativeXlsxBook {
         self.sheet_names.clone()
     }
 
+    pub fn chartsheet_names(&self) -> Vec<String> {
+        self.book
+            .sheets()
+            .iter()
+            .filter(|sheet| sheet.path.contains("chartsheets/"))
+            .map(|sheet| sheet.name.clone())
+            .collect()
+    }
+
+    pub fn read_chartsheet_charts(&mut self, py: Python<'_>, sheet: &str) -> PyResult<PyObject> {
+        let charts = self.book.chartsheet_charts(sheet).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("native chartsheet read failed: {e}"))
+        })?;
+        let result = pyo3::types::PyList::empty(py);
+        for chart in &charts {
+            result.append(crate::native_reader_drawings::chart_to_py(py, chart)?)?;
+        }
+        Ok(result.into())
+    }
+
     pub fn read_sheet_state(&self, sheet: &str) -> PyResult<&'static str> {
         crate::native_reader_workbook_basics::read_sheet_state_xlsx(self, sheet)
     }

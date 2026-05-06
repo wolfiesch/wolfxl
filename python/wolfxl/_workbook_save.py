@@ -78,6 +78,7 @@ def save_write_only_mode(wb: Any, filename: str) -> None:
     wb._flush_workbook_writes()  # noqa: SLF001
     wb._rust_writer.finalize_streaming_sheets()  # noqa: SLF001
     wb._rust_writer.save(filename)  # noqa: SLF001
+    flush_chartsheets_authoring(wb, filename)
 
 
 def save_modify_mode(wb: Any, filename: str) -> None:
@@ -146,6 +147,8 @@ def save_modify_mode(wb: Any, filename: str) -> None:
         wb._rust_patcher.save(filename)  # noqa: SLF001
     flush_pivot_layout_authoring(wb, filename)
     flush_external_links_authoring(wb, filename)
+    flush_source_chart_authoring(wb, filename)
+    flush_chartsheets_authoring(wb, filename)
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
@@ -167,19 +170,95 @@ def save_write_mode(wb: Any, filename: str) -> None:
             ws._flush()  # noqa: SLF001
         wb._rust_writer.save(filename)  # noqa: SLF001
         flush_external_links_authoring(wb, filename)
+        flush_chartsheets_authoring(wb, filename)
         return
 
     _save_write_mode_with_pivots(wb, filename)
     flush_external_links_authoring(wb, filename)
+    flush_chartsheets_authoring(wb, filename)
 
 
 def flush_external_links_authoring(wb: Any, filename: str) -> None:
     links = getattr(wb, "_external_links_cache", None)
-    if links is None or not getattr(links, "dirty", False):
+    strip_links = bool(getattr(wb, "_strip_external_links_on_save", False))
+    if links is None and strip_links:
+        links = wb._external_links  # noqa: SLF001
+    if links is None or (not getattr(links, "dirty", False) and not strip_links):
         return
     from wolfxl import _external_links as _el
 
+    if strip_links:
+        links._mark_dirty()  # noqa: SLF001
     _el.apply_authoring_to_xlsx(filename, links)
+    wb._strip_external_links_on_save = False  # noqa: SLF001
+
+
+def flush_chartsheets_authoring(wb: Any, filename: str) -> None:
+    chartsheets = getattr(wb, "_chartsheets", None)
+    if not chartsheets or not any(
+        not getattr(cs, "_source_chartsheet", False) for cs in chartsheets.values()
+    ):
+        return
+    from wolfxl import _chartsheets
+
+    _chartsheets.apply_chartsheets_to_xlsx(filename, wb)
+
+
+def flush_source_chart_authoring(wb: Any, filename: str) -> None:
+    ops = list(getattr(wb, "_pending_source_chart_ops", []))
+    touched = {
+        op.get("meta", {}).get("chart_path")
+        for op in ops
+        if isinstance(op.get("meta"), dict)
+    }
+    for ws in getattr(wb, "_sheets", {}).values():
+        for chart in getattr(ws, "_charts_cache", None) or []:
+            meta = getattr(chart, "_wolfxl_source_chart", None)
+            if not meta or meta.get("chart_path") in touched:
+                continue
+            original_title = getattr(chart, "_wolfxl_source_title", None)
+            current_title = _source_chart_title_signature(chart)
+            if current_title != original_title:
+                ops.append({"op": "title", "meta": meta, "chart": chart})
+                touched.add(meta.get("chart_path"))
+
+    if not ops:
+        return
+
+    from wolfxl import _source_charts
+
+    materialized = []
+    for op in ops:
+        if op["op"] in {"replace", "title"}:
+            op = dict(op)
+            op["chart_xml"] = _serialize_chart_xml(op["chart"])
+        materialized.append(op)
+    _source_charts.apply_source_chart_authoring_to_xlsx(filename, materialized)
+    wb._pending_source_chart_ops.clear()  # noqa: SLF001
+
+
+def _serialize_chart_xml(chart: Any) -> bytes:
+    from wolfxl._rust import serialize_chart_dict  # type: ignore[attr-defined]
+
+    original_anchor = getattr(chart, "_anchor", None)
+    chart._anchor = "E15"  # noqa: SLF001
+    try:
+        return serialize_chart_dict(chart.to_rust_dict(), "E15")
+    finally:
+        chart._anchor = original_anchor  # noqa: SLF001
+
+
+def _source_chart_title_signature(chart: Any) -> Any:
+    title = getattr(chart, "title", None)
+    if title is None:
+        return None
+    to_dict = getattr(title, "to_dict", None)
+    if to_dict is not None:
+        try:
+            return to_dict()
+        except Exception:
+            pass
+    return str(title)
 
 
 def flush_pivot_layout_authoring(wb: Any, filename: str) -> None:

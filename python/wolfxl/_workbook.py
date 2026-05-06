@@ -74,7 +74,7 @@ class Workbook:
         # G20: streaming write-only mode. When set, create_sheet returns
         # WriteOnlyWorksheet instances and the default sheet is skipped.
         self._write_only: bool = bool(write_only)
-        # Re-entry guard for openpyxl-shape consumed-on-save semantic.
+        # Re-entry guard for openpyxl-shape write-only consumed-on-save semantic.
         self._saved: bool = False
         if self._write_only:
             self._sheet_names: list[str] = []
@@ -274,13 +274,14 @@ class Workbook:
     @property
     def worksheets(self) -> list[Worksheet]:
         """List of Worksheet objects in sheet order — openpyxl alias."""
-        return [self._sheets[name] for name in self._sheet_names]
+        return [self._sheets[name] for name in self._sheet_names if name in self._sheets]
 
     @property
     def active(self) -> Worksheet | None:
         """Return the first sheet, or None if no sheets exist."""
-        if self._sheet_names:
-            return self._sheets[self._sheet_names[0]]
+        for name in self._sheet_names:
+            if name in self._sheets:
+                return self._sheets[name]
         return None
 
     @property
@@ -369,12 +370,22 @@ class Workbook:
 
         from wolfxl import _external_links as _el
 
+        if not getattr(self, "_keep_links", True):
+            cached = _el.ExternalLinkCollection()
+            self._external_links_cache = cached
+            return cached
+
         source_path = getattr(self, "_source_path", None)
+        source_bytes = getattr(self, "_source_bytes", None)
+        if source_path:
+            cached = _el.load_external_links(source_path)
+        elif source_bytes:
+            cached = _el.load_external_links_from_bytes(source_bytes)
         # Write mode: no source ZIP exists yet, return an empty list.
-        if self._rust_writer is not None or not source_path:
+        elif self._rust_writer is not None:
             cached = _el.ExternalLinkCollection()
         else:
-            cached = _el.load_external_links(source_path)
+            cached = _el.ExternalLinkCollection()
         self._external_links_cache = cached
         return cached
 
@@ -387,10 +398,11 @@ class Workbook:
     def chartsheets(self) -> list[Any]:
         """Return chart sheets in this workbook.
 
-        WolfXL preserves chart sheets when possible, but does not expose
-        Python chart-sheet objects through this compatibility property yet.
+        Write/modify-mode chartsheets created through
+        :meth:`create_chartsheet` are returned in tab order.
         """
-        return []
+        chartsheets = getattr(self, "_chartsheets", {})
+        return [chartsheets[name] for name in self._sheet_names if name in chartsheets]
 
     @property
     def epoch(self) -> Any:
@@ -543,14 +555,17 @@ class Workbook:
         return self._persons_registry
 
     def __getitem__(self, name: str) -> Worksheet:
-        """Return a worksheet by title."""
-        if name not in self._sheets:
-            raise KeyError(f"Worksheet '{name}' does not exist")
-        return self._sheets[name]
+        """Return a worksheet or chartsheet by title."""
+        if name in self._sheets:
+            return self._sheets[name]
+        chartsheets = getattr(self, "_chartsheets", {})
+        if name in chartsheets:
+            return chartsheets[name]
+        raise KeyError(f"Worksheet '{name}' does not exist")
 
     def __contains__(self, name: str) -> bool:
         """Return whether the workbook contains a sheet named ``name``."""
-        return name in self._sheets
+        return name in self._sheets or name in getattr(self, "_chartsheets", {})
 
     def __iter__(self):  # type: ignore[no-untyped-def]
         """Iterate worksheet titles in tab order."""
@@ -686,12 +701,10 @@ class Workbook:
         )
 
     def create_chartsheet(self, title: str | None = None, index: int | None = None) -> Any:
-        """Raise clearly for chart-sheet creation, which WolfXL does not write yet."""
-        raise NotImplementedError(
-            "Workbook.create_chartsheet is not yet supported by wolfxl. "
-            "Existing chartsheets are preserved where possible, but creating "
-            "new chart-sheet parts requires chart-sheet writer support."
-        )
+        """Create a chartsheet tab."""
+        from wolfxl import _chartsheets
+
+        return _chartsheets.create_chartsheet(self, title=title, index=index)
 
     @property
     def workbook_properties(self) -> Any:
@@ -784,20 +797,20 @@ class Workbook:
     # Write-mode operations
     # ------------------------------------------------------------------
 
-    def create_sheet(self, title: str) -> Worksheet:
+    def create_sheet(self, title: str | None = None, index: int | None = None) -> Worksheet:
         """Create and append a worksheet.
 
         Args:
-            title: Unique worksheet title.
+            title: Worksheet title. When omitted, empty, or already present,
+                WolfXL mirrors openpyxl by generating the next unique title.
 
         Returns:
             The newly created :class:`Worksheet`.
 
         Raises:
             RuntimeError: If the workbook is not in write mode.
-            ValueError: If ``title`` already exists.
         """
-        return _workbook_sheets.create_sheet(self, title)
+        return _workbook_sheets.create_sheet(self, title, index)
 
     def copy_worksheet(
         self, source: Worksheet, *, name: str | None = None
@@ -946,9 +959,8 @@ class Workbook:
         :class:`wolfxl.drawing.image.Image` is converted to the flat
         dict shape and routed to ``XlsxPatcher.queue_image_add``.
 
-        Sheets that already have a drawing rel will surface
-        ``NotImplementedError`` from the patcher at save time —
-        appending to an existing drawing is a v1.5 follow-up.
+        Sheets that already have a drawing rel are merged into the existing
+        drawing part so images and charts can share one drawing.
         """
         _workbook_patcher_flush.flush_pending_images_to_patcher(self)
 

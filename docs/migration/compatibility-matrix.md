@@ -15,10 +15,10 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 ## Totals
 
-- ✅ Supported: **72** / 79
-- 🟡 Partial: **0** / 79
-- ❌ Not Yet: **0** / 79
-- ⛔ Out of Scope: **7** / 79
+- ✅ Supported: **76** / 83
+- 🟡 Partial: **0** / 83
+- ❌ Not Yet: **0** / 83
+- ⛔ Out of Scope: **7** / 83
 
 ## Workbook + Worksheet
 
@@ -29,9 +29,12 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `load_workbook(path, data_only=True)` | `wolfxl.load_workbook(path, data_only=True)` | ✅ Supported |  |  |
 | `Implicit (full DOM rewrite)` | `wolfxl.load_workbook(path, modify=True)` | ✅ Supported |  | Surgical patcher; faster than DOM rewrite. |
 | `load_workbook(path, read_only=True)` | `wolfxl.load_workbook(path, read_only=True)` | ✅ Supported |  | Streaming reads (auto-engages > 50k rows). |
-| `wb.save(path)` | `wb.save(path)` | ✅ Supported |  |  |
+| `wb.save(path)` | `wb.save(path)` | ✅ Supported |  | Eager workbooks can be edited and saved repeatedly; write_only=True remains consumed-on-save like openpyxl. |
 | `wb["Sheet"], wb.active, wb.sheetnames` | `wb["Sheet"], wb.active, wb.sheetnames` | ✅ Supported |  |  |
 | `wb.create_sheet(title)` | `wb.create_sheet(title)` | ✅ Supported |  |  |
+| `wb.create_sheet(title, index=...) on loaded workbook` | `wb.create_sheet(title, index=...) on modify=True workbook` | ✅ Supported |  | Modify-mode blank sheet creation updates workbook.xml, workbook rels, content-types, tab order, and accepts cell edits before save. |
+| `wb.remove(ws) on loaded workbook` | `wb.remove(ws) on modify=True workbook` | ✅ Supported |  | Modify-mode sheet removal prunes the workbook tab, workbook rel, worksheet part, local defined-name indexes, and reachable sheet subgraph parts. |
+| `ws.title = 'Renamed' on loaded workbook` | `ws.title = 'Renamed' on modify=True workbook` | ✅ Supported |  | Modify-mode sheet title changes update workbook.xml and subsequent queued sheet mutations target the renamed tab. |
 | `wb.copy_worksheet(ws)` | `wb.copy_worksheet(ws)` | ✅ Supported |  | Diverges from openpyxl in 5 documented ways (always more preservation). |
 
 ## Cell + style API
@@ -53,7 +56,8 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 | `AreaChart / ScatterChart / BubbleChart / RadarChart` | `AreaChart / ScatterChart / BubbleChart / RadarChart` | ✅ Supported |  |  |
 | `BarChart3D / LineChart3D / PieChart3D / AreaChart3D` | `BarChart3D / LineChart3D / PieChart3D / AreaChart3D` | ✅ Supported |  |  |
 | `SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart` | `SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart` | ✅ Supported |  |  |
-| `ws.add_chart / remove_chart / replace_chart` | `ws.add_chart / remove_chart / replace_chart` | ✅ Supported |  | remove/replace shipped in v1.7. |
+| `ws.add_chart / remove_chart / replace_chart` | `ws.add_chart / remove_chart / replace_chart` | ✅ Supported |  | Covers pending charts plus source-loaded worksheet chart removal, replacement, and title edits in modify mode. |
+| `wb.create_chartsheet(...).add_chart(chart)` | `wb.create_chartsheet(...).add_chart(chart)` | ✅ Supported |  | Chartsheet authoring emits chartsheet, drawing, chart, rels, and content-type parts that openpyxl reloads; existing chartsheet tabs load back as workbook.chartsheets rather than worksheets. |
 | `bar + line on shared category axis with secondary value axis` | `bar + line on shared category axis with secondary value axis` | ✅ Supported |  | Combination charts ship as a multi-family `<plotArea>` (RFC-069 §6) for real Excel/LibreOffice rendering, plus per-family standalone shadow chartspaces parked at row 1048576 so openpyxl's reader exposes each family as a distinct `ws._charts` entry without the shadows visually overlapping the real combo. Secondary value axis (right side) honored when `line.y_axis.crosses='max'` and `line.y_axis.axId` is set. Closes G15. |
 | `data label + axis label rich-text runs` | `data label + axis label rich-text runs` | ✅ Supported | G10 | Data label `<c:txPr>` runs and axis-title rich text round-trip end-to-end (G10). |
 | `pivot chart with per-point overrides` | `pivot chart with per-point overrides` | ✅ Supported |  | Per-point `<c:dPt>` overrides round-trip through openpyxl on pivot-source charts (G16). Bar/line/scatter all share the same dict bridge: `Series.dPt` -> `data_points` -> Rust `DataPoint` -> `<c:dPt>` with `<c:spPr>`. Pivot vs non-pivot only differ in the chart-level `<c:pivotSource>` block. |
@@ -129,7 +133,7 @@ This page is the public scoreboard for wolfxl's openpyxl-API compatibility. Each
 
 | openpyxl | wolfxl | Status | Gap | Notes |
 |---|---|---|---|---|
-| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ✅ Supported |  | Inspection (target / sheet_names / cached_data), opaque modify-mode preservation when unchanged, and append/remove/edit authoring. |
+| `wb._external_links + xl/externalLinks/* parts` | `wb._external_links + xl/externalLinks/* parts` | ✅ Supported |  | Inspection (target / sheet_names / cached_data), opaque modify-mode preservation when unchanged, and append/remove/edit authoring. keep_links=False strips preserved source links, and file-like/bytes-backed xlsx reads expose the same collection. |
 | `append/remove/edit external workbook links` | `wb._external_links append/remove/update_target` | ✅ Supported |  | Authoring emits externalLink parts, workbook rels/references, content-types, and per-link rels. Cached data is preserved when provided but linked workbooks are not dereferenced. |
 
 ## VBA macros

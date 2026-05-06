@@ -103,8 +103,8 @@ def _diff_sheet(
     op_max_row = op_ws.max_row
     op_max_col = op_ws.max_column
 
-    # wolfxl 0.3.2 exposes these via private methods; fall back gracefully so
-    # this test still runs on a pre-fix build.
+    # Older wolfxl wheels exposed these via private methods; keep the fallback
+    # so this parity harness can still compare archived baseline wheels.
     wx_max_row = getattr(wx_ws, "max_row", None)
     if wx_max_row is None and hasattr(wx_ws, "_max_row"):
         wx_max_row = wx_ws._max_row()  # noqa: SLF001
@@ -169,14 +169,10 @@ def _normalize_value(v: Any) -> Any:
 
 
 def _normalize_number_format(v: Any) -> Any:
-    """openpyxl returns ``'General'`` for unformatted cells; wolfxl 0.3.2
-    returns ``None``. Both mean "no explicit format" — coerce to ``'General'``.
+    """Normalize archived pre-fix ``None`` values to openpyxl's ``'General'``.
 
-    Tracked as a Phase 0 cleanup item in ``KNOWN_GAPS.md``: wolfxl's
-    ``Cell.number_format`` should match openpyxl's contract and return
-    ``'General'`` for unformatted cells. Until that lands, this normalization
-    keeps the harness green without hiding real number-format mismatches
-    (anything other than the None-vs-General case still surfaces).
+    Current wolfxl matches openpyxl here; the coercion keeps the harness useful
+    for old baseline wheels without hiding other number-format mismatches.
     """
     if v is None:
         return "General"

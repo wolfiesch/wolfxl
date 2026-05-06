@@ -1401,6 +1401,25 @@ impl NativeXlsxBook {
         data.threaded_comments = threaded_comments;
         Ok(data)
     }
+
+    /// Parse charts attached to a chartsheet tab.
+    pub fn chartsheet_charts(&self, sheet_name: &str) -> Result<Vec<ChartInfo>> {
+        let Some(info) = self
+            .sheets
+            .iter()
+            .find(|s| s.name == sheet_name && s.path.contains("chartsheets/"))
+        else {
+            return Err(ReaderError::SheetNotFound(sheet_name.to_string()));
+        };
+        let mut zip = zip_from_bytes(&self.bytes)?;
+        let rels = read_part_optional(&mut zip, &sheet_rels_path(&info.path))?
+            .map(|xml| {
+                RelsGraph::parse(xml.as_bytes())
+                    .map_err(|e| ReaderError::Xml(format!("failed to parse chartsheet rels: {e}")))
+            })
+            .transpose()?;
+        read_charts(&mut zip, &info.path, rels.as_ref())
+    }
 }
 
 #[derive(Debug)]

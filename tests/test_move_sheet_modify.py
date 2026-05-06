@@ -129,6 +129,90 @@ def test_rfc036_write_mode_move_sheet_persists_on_save(tmp_path: Path) -> None:
     assert rt["C"]["A1"].value == "charlie"
 
 
+def test_modify_mode_worksheet_rename_persists_on_save(tmp_path: Path) -> None:
+    """Renaming a loaded worksheet must update workbook.xml like openpyxl."""
+    src = tmp_path / "rename_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    wb["First"].title = "Renamed"
+    out = tmp_path / "renamed.xlsx"
+    wb.save(out)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["Renamed", "Second"]
+    assert reloaded["Renamed"]["A1"].value == "first"
+
+
+def test_modify_mode_create_sheet_persists_with_cells_and_order(tmp_path: Path) -> None:
+    src = tmp_path / "create_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    ws = wb.create_sheet("Inserted", index=1)
+    ws["A1"] = "created"
+    out = tmp_path / "created.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["First", "Inserted", "Second"]
+    assert reloaded["Inserted"]["A1"].value == "created"
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+    assert any(name.startswith("xl/worksheets/sheet") for name in names)
+
+
+def test_modify_mode_create_sheet_auto_names_and_create_remove_noops(tmp_path: Path) -> None:
+    src = tmp_path / "create_autoname_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    assert wb.create_sheet().title == "Sheet"
+    assert wb.create_sheet("First").title == "First1"
+    transient = wb.create_sheet("Transient")
+    wb.remove(transient)
+    out = tmp_path / "create_autoname.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["First", "Second", "Sheet", "First1"]
+    assert "Transient" not in reloaded.sheetnames
+
+
+def test_modify_mode_remove_sheet_prunes_tab_and_part(tmp_path: Path) -> None:
+    src = tmp_path / "remove_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    wb.remove(wb["Second"])
+    out = tmp_path / "removed.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["First"]
+    assert "Second" not in reloaded.sheetnames
+
+
+def test_modify_mode_rename_then_edit_uses_new_title(tmp_path: Path) -> None:
+    """Queued mutations after rename should target the renamed worksheet."""
+    src = tmp_path / "rename_edit_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    ws = wb["First"]
+    ws.title = "Renamed"
+    ws["B1"] = "after"
+    out = tmp_path / "renamed_edited.xlsx"
+    wb.save(out)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["Renamed", "Second"]
+    assert reloaded["Renamed"]["A1"].value == "first"
+    assert reloaded["Renamed"]["B1"].value == "after"
+
+
 def test_rfc036_move_sheet_accepts_worksheet_instance() -> None:
     wb = Workbook()
     wb.create_sheet("Second")
