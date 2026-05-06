@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from wolfxl._worksheet import Worksheet
@@ -33,22 +34,21 @@ def remove_sheet(wb: Any, worksheet: Worksheet) -> None:
         remove_fn(title)
 
 
-def create_sheet(wb: Any, title: str, index: int | None = None) -> Worksheet:
+def create_sheet(wb: Any, title: str | None, index: int | None = None) -> Worksheet:
     """Create and append a worksheet in write or modify mode.
 
     Args:
         wb: Workbook-like object carrying writer and sheet state.
-        title: Unique worksheet title.
+        title: Worksheet title. ``None``/``""`` and duplicate names are
+            resolved with openpyxl-style numeric suffixes.
 
     Returns:
         The newly created worksheet.
 
     Raises:
         RuntimeError: If ``wb`` is not in write mode.
-        ValueError: If ``title`` is already used.
     """
-    if title in wb._sheets or title in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
-        raise ValueError(f"Sheet '{title}' already exists")
+    title = _unique_sheet_title(wb, title)
     insert_at = _normalize_insert_index(wb, index)
     if wb._rust_patcher is not None:  # noqa: SLF001
         wb._rust_patcher.queue_sheet_create(title, insert_at)  # noqa: SLF001
@@ -76,6 +76,22 @@ def create_sheet(wb: Any, title: str, index: int | None = None) -> Worksheet:
     wb._sheets[title] = ws  # noqa: SLF001
     _move_new_writer_sheet_to_index(wb, title, insert_at)
     return ws
+
+
+def _unique_sheet_title(wb: Any, title: str | None) -> str:
+    candidate = title or "Sheet"
+    names = [str(name) for name in wb._sheet_names]  # noqa: SLF001
+    if not any(name.lower() == candidate.lower() for name in names):
+        return candidate
+
+    joined_names = ",".join(names)
+    title_regex = re.compile(f"(?P<title>{re.escape(candidate)})(?P<count>\\d*),?", re.I)
+    counts = [
+        int(match.group("count"))
+        for match in title_regex.finditer(joined_names)
+        if match.group("count").isdigit()
+    ]
+    return f"{candidate}{max(counts) + 1 if counts else 1}"
 
 
 def _normalize_insert_index(wb: Any, index: int | None) -> int:

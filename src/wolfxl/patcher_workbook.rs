@@ -270,6 +270,9 @@ pub(super) fn apply_sheet_creates_phase(
     let mut created_titles: HashSet<String> = HashSet::new();
     let ops = patcher.queued_sheet_creates.clone();
     for op in ops {
+        if !desired_order.contains(&op.title) {
+            continue;
+        }
         let sheet_n = part_id_allocator.alloc_sheet();
         let sheet_path = format!("xl/worksheets/sheet{sheet_n}.xml");
         let target = format!("worksheets/sheet{sheet_n}.xml");

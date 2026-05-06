@@ -1235,8 +1235,6 @@ impl XlsxPatcher {
             )));
         };
         self.sheet_order.retain(|name| name != title);
-        self.deleted_sheet_paths.insert(title.to_string(), path);
-        self.queued_sheet_deletes.push(title.to_string());
         self.queued_dv_patches.remove(title);
         self.queued_cf_patches.remove(title);
         self.value_patches.retain(|(sheet, _), _| sheet != title);
@@ -1252,6 +1250,12 @@ impl XlsxPatcher {
         self.queued_autofilters.remove(title);
         self.queued_sheet_setup.remove(title);
         self.queued_page_breaks.remove(title);
+        if path.starts_with("__wolfxl_pending_sheet_create__/") {
+            self.queued_sheet_creates.retain(|op| op.title != title);
+            return Ok(());
+        }
+        self.deleted_sheet_paths.insert(title.to_string(), path);
+        self.queued_sheet_deletes.push(title.to_string());
         Ok(())
     }
 

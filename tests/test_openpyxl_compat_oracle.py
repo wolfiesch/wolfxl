@@ -214,6 +214,8 @@ def _probe_workbook_create_sheet(tmp_path: Path) -> None:
     ws = wb.create_sheet(title="Extra")
     assert "Extra" in wb.sheetnames
     assert wb["Extra"] is ws
+    assert wb.create_sheet().title == "Sheet1"
+    assert wb.create_sheet("Extra").title == "Extra1"
 
 
 @_register("workbook_create_sheet_modify")
@@ -230,12 +232,16 @@ def _probe_workbook_create_sheet_modify(tmp_path: Path) -> None:
     wb = wolfxl.load_workbook(src, modify=True)
     ws = wb.create_sheet("Inserted", index=1)
     ws["A1"] = "created"
+    assert wb.create_sheet().title == "Sheet"
+    transient = wb.create_sheet("Transient")
+    wb.remove(transient)
     out = tmp_path / "create_sheet_modify.xlsx"
     wb.save(out)
 
     rt = openpyxl.load_workbook(out)
-    assert rt.sheetnames == ["First", "Inserted", "Second"]
+    assert rt.sheetnames == ["First", "Inserted", "Second", "Sheet"]
     assert rt["Inserted"]["A1"].value == "created"
+    assert "Transient" not in rt.sheetnames
 
 
 @_register("workbook_remove_sheet_modify")

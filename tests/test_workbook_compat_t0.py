@@ -35,6 +35,17 @@ def test_index_returns_sheet_position() -> None:
     assert wb.get_sheet_names() == wb.sheetnames
 
 
+def test_create_sheet_auto_generates_duplicate_names_like_openpyxl() -> None:
+    wb = wolfxl.Workbook()
+
+    assert wb.create_sheet().title == "Sheet1"
+    assert wb.create_sheet("Sheet").title == "Sheet2"
+    assert wb.create_sheet("Data").title == "Data"
+    assert wb.create_sheet("data").title == "data1"
+    assert wb.create_sheet("Data1").title == "Data11"
+    assert wb.create_sheet("").title == "Sheet3"
+
+
 def test_create_named_range_alias() -> None:
     wb = wolfxl.Workbook()
     ws = wb.active

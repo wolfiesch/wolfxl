@@ -797,18 +797,18 @@ class Workbook:
     # Write-mode operations
     # ------------------------------------------------------------------
 
-    def create_sheet(self, title: str = "Sheet", index: int | None = None) -> Worksheet:
+    def create_sheet(self, title: str | None = None, index: int | None = None) -> Worksheet:
         """Create and append a worksheet.
 
         Args:
-            title: Unique worksheet title.
+            title: Worksheet title. When omitted, empty, or already present,
+                WolfXL mirrors openpyxl by generating the next unique title.
 
         Returns:
             The newly created :class:`Worksheet`.
 
         Raises:
             RuntimeError: If the workbook is not in write mode.
-            ValueError: If ``title`` already exists.
         """
         return _workbook_sheets.create_sheet(self, title, index)
 

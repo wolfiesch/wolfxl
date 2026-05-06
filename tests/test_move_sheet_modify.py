@@ -163,6 +163,23 @@ def test_modify_mode_create_sheet_persists_with_cells_and_order(tmp_path: Path) 
     assert any(name.startswith("xl/worksheets/sheet") for name in names)
 
 
+def test_modify_mode_create_sheet_auto_names_and_create_remove_noops(tmp_path: Path) -> None:
+    src = tmp_path / "create_autoname_src.xlsx"
+    _make_two_sheet_fixture(src)
+
+    wb = load_workbook(src, modify=True)
+    assert wb.create_sheet().title == "Sheet"
+    assert wb.create_sheet("First").title == "First1"
+    transient = wb.create_sheet("Transient")
+    wb.remove(transient)
+    out = tmp_path / "create_autoname.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded.sheetnames == ["First", "Second", "Sheet", "First1"]
+    assert "Transient" not in reloaded.sheetnames
+
+
 def test_modify_mode_remove_sheet_prunes_tab_and_part(tmp_path: Path) -> None:
     src = tmp_path / "remove_src.xlsx"
     _make_two_sheet_fixture(src)
