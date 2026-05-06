@@ -15,6 +15,7 @@ def close_workbook(workbook: Any) -> None:
             archive.close()
         except Exception:
             pass
+        workbook._archive = None
     workbook._rust_reader = None
     workbook._rust_writer = None
     workbook._rust_patcher = None

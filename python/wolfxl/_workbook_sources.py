@@ -262,12 +262,110 @@ def _rewrite_content_types_workbook_part(data: bytes, old_target: str) -> bytes:
 
 
 def _attach_read_only_archive(wb: Any, path: str) -> None:
-    import zipfile
-
     try:
-        wb._archive = zipfile.ZipFile(path, "r")
+        wb._archive = _ReadOnlyArchive(path)
     except Exception:
         wb._archive = None
+
+
+class _ReadOnlyArchive:
+    """ZipFile-shaped archive that does not keep the source path locked."""
+
+    def __init__(self, path: str) -> None:
+        self.filename = path
+        self.mode = "r"
+        self._closed = False
+
+    def open(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        import zipfile
+
+        self._check_open()
+        archive = zipfile.ZipFile(self.filename, "r")
+        try:
+            member = archive.open(name, *args, **kwargs)
+        except Exception:
+            archive.close()
+            raise
+        return _ZipMemberHandle(member, archive)
+
+    def read(self, name: str, *args: Any, **kwargs: Any) -> bytes:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.read(name, *args, **kwargs)
+
+    def namelist(self) -> list[str]:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.namelist()
+
+    def infolist(self) -> list[Any]:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.infolist()
+
+    def getinfo(self, name: str) -> Any:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.getinfo(name)
+
+    def close(self) -> None:
+        self._closed = True
+
+    def __enter__(self) -> _ReadOnlyArchive:
+        self._check_open()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise ValueError("Attempt to use ZIP archive that was already closed")
+
+
+class _ZipMemberHandle:
+    """Close the owning ZipFile when a member stream is closed."""
+
+    def __init__(self, member: Any, archive: Any) -> None:
+        self._member = member
+        self._archive = archive
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._member.close()
+        finally:
+            self._archive.close()
+            self._closed = True
+
+    @property
+    def closed(self) -> bool:
+        return self._closed or bool(getattr(self._member, "closed", False))
+
+    def __enter__(self) -> _ZipMemberHandle:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __iter__(self) -> Any:
+        return iter(self._member)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._member, name)
 
 
 def from_encrypted(
