@@ -34,6 +34,7 @@ the baseline number is meaningful and reproducible without network.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -213,6 +214,48 @@ def _probe_workbook_create_sheet(tmp_path: Path) -> None:
     ws = wb.create_sheet(title="Extra")
     assert "Extra" in wb.sheetnames
     assert wb["Extra"] is ws
+
+
+@_register("workbook_create_sheet_modify")
+def _probe_workbook_create_sheet_modify(tmp_path: Path) -> None:
+    import openpyxl
+    import wolfxl
+
+    src = tmp_path / "create_sheet_modify_src.xlsx"
+    seed = openpyxl.Workbook()
+    seed.active.title = "First"
+    seed.create_sheet("Second")
+    seed.save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb.create_sheet("Inserted", index=1)
+    ws["A1"] = "created"
+    out = tmp_path / "create_sheet_modify.xlsx"
+    wb.save(out)
+
+    rt = openpyxl.load_workbook(out)
+    assert rt.sheetnames == ["First", "Inserted", "Second"]
+    assert rt["Inserted"]["A1"].value == "created"
+
+
+@_register("workbook_remove_sheet_modify")
+def _probe_workbook_remove_sheet_modify(tmp_path: Path) -> None:
+    import openpyxl
+    import wolfxl
+
+    src = tmp_path / "remove_sheet_modify_src.xlsx"
+    seed = openpyxl.Workbook()
+    seed.active.title = "Keep"
+    seed.create_sheet("Drop")
+    seed.save(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb.remove(wb["Drop"])
+    out = tmp_path / "remove_sheet_modify.xlsx"
+    wb.save(out)
+
+    rt = openpyxl.load_workbook(out)
+    assert rt.sheetnames == ["Keep"]
 
 
 @_register("workbook_rename_sheet_modify")
@@ -596,6 +639,7 @@ def _probe_charts_surface_stock_projected(tmp_path: Path) -> None:
 
 @_register("charts_add_remove_replace")
 def _probe_charts_add_remove_replace(tmp_path: Path) -> None:
+    import openpyxl as _opx
     import wolfxl
     from wolfxl.chart import BarChart, Reference
 
@@ -610,6 +654,27 @@ def _probe_charts_add_remove_replace(tmp_path: Path) -> None:
     ws.add_chart(chart, "D2")
     assert hasattr(ws, "remove_chart")
     ws.remove_chart(chart)
+
+    src = tmp_path / "source_chart.xlsx"
+    op_wb = _opx.Workbook()
+    op_ws = op_wb.active
+    op_ws.title = "Data"
+    for row in [["x", "y"], [1, 10], [2, 20]]:
+        op_ws.append(row)
+    op_chart = _opx.chart.BarChart()
+    op_chart.title = "Original"
+    op_chart.add_data(
+        _opx.chart.Reference(op_ws, min_col=2, min_row=1, max_row=3),
+        titles_from_data=True,
+    )
+    op_ws.add_chart(op_chart, "D2")
+    op_wb.save(src)
+
+    loaded = wolfxl.load_workbook(src, modify=True)
+    loaded["Data"]._charts[0].title = "Changed"
+    out = tmp_path / "source_chart_title.xlsx"
+    loaded.save(out)
+    assert "Changed" in _zip_read_text(out, "xl/charts/chart1.xml")
 
 
 @_register("charts_chartsheet")
@@ -1340,23 +1405,26 @@ def _probe_protection_workbook(tmp_path: Path) -> None:
 
 @_register("external_links_collection")
 def _probe_external_links_collection(tmp_path: Path) -> None:
-    """Workbook-level external link collection. Tracked under G18 (S6).
-
-    The probe asserts that round-tripping a workbook with an external-link
-    formula preserves the ``xl/externalLinks/`` parts. Today wolfxl preserves
-    the parts on modify-save but does not expose a Python collection;
-    ``wb._external_links`` (or equivalent public surface) is what S6 ships.
-    """
     import wolfxl
 
-    wb = wolfxl.Workbook()
-    wb.active["A1"] = "='[ext.xlsx]Sheet1'!$A$1"
-    out = tmp_path / "ext.xlsx"
-    wb.save(out)
+    fixture = REPO_ROOT / "tests" / "fixtures" / "external_links_basic.xlsx"
+    data = fixture.read_bytes()
 
-    wb2 = wolfxl.load_workbook(out)
-    links = getattr(wb2, "_external_links", None) or getattr(wb2, "external_links", None)
-    assert links is not None and len(links) >= 0  # surface must exist
+    wb = wolfxl.load_workbook(fixture)
+    assert len(wb._external_links) == 1
+    assert wb._external_links[0].target == "ext.xlsx"
+
+    assert wolfxl.load_workbook(fixture, keep_links=False)._external_links == []
+
+    from_bytes = wolfxl.load_workbook(io.BytesIO(data))
+    assert len(from_bytes._external_links) == 1
+
+    stripped = tmp_path / "external_links_stripped.xlsx"
+    modify = wolfxl.load_workbook(fixture, modify=True, keep_links=False)
+    modify.save(stripped)
+    entries = _zip_listing(stripped)
+    assert not any(name.startswith("xl/externalLinks/") for name in entries)
+    assert "<externalReferences>" not in _zip_read_text(stripped, "xl/workbook.xml")
 
 
 @_register("external_links_authoring")

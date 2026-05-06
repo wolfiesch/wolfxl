@@ -77,7 +77,9 @@ use zip::ZipArchive;
 use crate::ooxml_util;
 use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
 use patcher_drawing::parse_queued_image_anchor;
-use patcher_models::{AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp};
+use patcher_models::{
+    AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp, SheetCreateOp,
+};
 use patcher_payload::{
     dict_to_border_spec, dict_to_format_spec, dict_to_threaded_entry, extract_bool,
     extract_cf_rule, extract_f64, extract_str, extract_u32, parse_workbook_security_payload,
@@ -268,6 +270,13 @@ pub struct XlsxPatcher {
     /// the cloned sheet is visible to downstream phases as if it
     /// had always been part of the source workbook.
     queued_sheet_copies: Vec<SheetCopyOp>,
+    /// Per-workbook blank sheet creation queue for modify mode.
+    queued_sheet_creates: Vec<SheetCreateOp>,
+    /// Per-workbook source sheet deletion queue for modify mode.
+    queued_sheet_deletes: Vec<String>,
+    /// Deleted sheet title -> original worksheet part path. Kept separate
+    /// because queue_sheet_delete removes the live sheet path eagerly.
+    deleted_sheet_paths: HashMap<String, String>,
     /// Sprint Θ Pod-A: pre-seeded `file_patches` entries produced by
     /// permissive-mode load-time normalization (e.g. rewriting an
     /// empty `<sheets/>` block in `xl/workbook.xml`). Empty in the
@@ -534,6 +543,9 @@ impl XlsxPatcher {
             queued_axis_shifts: Vec::new(),
             queued_range_moves: Vec::new(),
             queued_sheet_copies: Vec::new(),
+            queued_sheet_creates: Vec::new(),
+            queued_sheet_deletes: Vec::new(),
+            deleted_sheet_paths: HashMap::new(),
             permissive_seed_file_patches: file_patches,
             queued_images: HashMap::new(),
             queued_image_removes: HashMap::new(),
@@ -1183,6 +1195,63 @@ impl XlsxPatcher {
         rename_hash_key(&mut self.queued_page_breaks, old_name, new_name);
         self.queued_sheet_renames
             .push((old_name.to_string(), new_name.to_string()));
+        Ok(())
+    }
+
+    /// Queue creation of a blank worksheet in modify mode.
+    #[pyo3(signature = (title, index=None))]
+    fn queue_sheet_create(&mut self, title: &str, index: Option<usize>) -> PyResult<()> {
+        if title.is_empty() {
+            return Err(PyValueError::new_err(
+                "queue_sheet_create: sheet title must be non-empty",
+            ));
+        }
+        if self.sheet_paths.contains_key(title)
+            || self.queued_sheet_creates.iter().any(|op| op.title == title)
+        {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_create: sheet '{title}' already exists"
+            )));
+        }
+        self.queued_sheet_creates.push(SheetCreateOp {
+            title: title.to_string(),
+        });
+        self.sheet_paths.insert(
+            title.to_string(),
+            format!("__wolfxl_pending_sheet_create__/{title}"),
+        );
+        let insert_at = index
+            .unwrap_or(self.sheet_order.len())
+            .min(self.sheet_order.len());
+        self.sheet_order.insert(insert_at, title.to_string());
+        Ok(())
+    }
+
+    /// Queue deletion of an existing worksheet in modify mode.
+    fn queue_sheet_delete(&mut self, title: &str) -> PyResult<()> {
+        let Some(path) = self.sheet_paths.remove(title) else {
+            return Err(PyValueError::new_err(format!(
+                "queue_sheet_delete: sheet '{title}' not found in workbook"
+            )));
+        };
+        self.sheet_order.retain(|name| name != title);
+        self.deleted_sheet_paths.insert(title.to_string(), path);
+        self.queued_sheet_deletes.push(title.to_string());
+        self.queued_dv_patches.remove(title);
+        self.queued_cf_patches.remove(title);
+        self.value_patches.retain(|(sheet, _), _| sheet != title);
+        self.format_patches.retain(|(sheet, _), _| sheet != title);
+        self.queued_hyperlinks.remove(title);
+        self.queued_tables.remove(title);
+        self.queued_comments.remove(title);
+        self.queued_threaded_comments.remove(title);
+        self.queued_images.remove(title);
+        self.queued_image_removes.remove(title);
+        self.queued_charts.remove(title);
+        self.queued_pivot_tables.remove(title);
+        self.queued_autofilters.remove(title);
+        self.queued_sheet_setup.remove(title);
+        self.queued_page_breaks.remove(title);
         Ok(())
     }
 
@@ -2032,6 +2101,22 @@ impl XlsxPatcher {
         // phase to write into it (workbook.xml + workbook.xml.rels).
         // Phase 3 mutates it further with per-sheet rewrites.
         patcher_workbook::drain_permissive_seed_file_patches_phase(self, &mut save.file_patches);
+
+        // --- Phase 2.6: Sheet deletes / creates ---
+        //
+        // Source sheet removal must run before blank-sheet creation so a user
+        // can remove a sheet and recreate the same title in one save session.
+        if !self.queued_sheet_deletes.is_empty() {
+            patcher_workbook::apply_sheet_deletes_phase(self, &mut save.file_patches, &mut zip)?;
+        }
+        if !self.queued_sheet_creates.is_empty() {
+            patcher_workbook::apply_sheet_creates_phase(
+                self,
+                &mut save.file_patches,
+                &mut zip,
+                &mut save.part_id_allocator,
+            )?;
+        }
 
         // --- Phase 2.7: Sheet copies (RFC-035) ---
         //

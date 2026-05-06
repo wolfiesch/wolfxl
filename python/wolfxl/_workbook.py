@@ -370,12 +370,22 @@ class Workbook:
 
         from wolfxl import _external_links as _el
 
+        if not getattr(self, "_keep_links", True):
+            cached = _el.ExternalLinkCollection()
+            self._external_links_cache = cached
+            return cached
+
         source_path = getattr(self, "_source_path", None)
+        source_bytes = getattr(self, "_source_bytes", None)
+        if source_path:
+            cached = _el.load_external_links(source_path)
+        elif source_bytes:
+            cached = _el.load_external_links_from_bytes(source_bytes)
         # Write mode: no source ZIP exists yet, return an empty list.
-        if self._rust_writer is not None or not source_path:
+        elif self._rust_writer is not None:
             cached = _el.ExternalLinkCollection()
         else:
-            cached = _el.load_external_links(source_path)
+            cached = _el.ExternalLinkCollection()
         self._external_links_cache = cached
         return cached
 
@@ -787,7 +797,7 @@ class Workbook:
     # Write-mode operations
     # ------------------------------------------------------------------
 
-    def create_sheet(self, title: str) -> Worksheet:
+    def create_sheet(self, title: str = "Sheet", index: int | None = None) -> Worksheet:
         """Create and append a worksheet.
 
         Args:
@@ -800,7 +810,7 @@ class Workbook:
             RuntimeError: If the workbook is not in write mode.
             ValueError: If ``title`` already exists.
         """
-        return _workbook_sheets.create_sheet(self, title)
+        return _workbook_sheets.create_sheet(self, title, index)
 
     def copy_worksheet(
         self, source: Worksheet, *, name: str | None = None

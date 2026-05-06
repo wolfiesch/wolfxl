@@ -73,6 +73,8 @@ def build_xlsx_wb(
     data_only: bool,
     read_only: bool,
     source_path: str | None,
+    source_bytes: bytes | None = None,
+    keep_links: bool = True,
 ) -> Any:
     """Wire up read/modify-mode workbook fields shared by xlsx inputs.
 
@@ -99,6 +101,9 @@ def build_xlsx_wb(
     wb._evaluator = None
     wb._read_only = read_only
     wb._source_path = source_path
+    wb._source_bytes = source_bytes
+    wb._keep_links = keep_links
+    wb._strip_external_links_on_save = bool(rust_patcher is not None and not keep_links)
     wb._format = "xlsx"
     _initialize_sheet_proxies(wb, rust_reader)
     initialize_pending_state(wb)
@@ -209,6 +214,7 @@ def initialize_pending_state(wb: Any) -> None:
     wb._pending_range_moves = []
     wb._pending_sheet_copies = []
     wb._pending_chart_adds = {}
+    wb._pending_source_chart_ops = []
     wb._pending_pivot_caches = []
     wb._next_pivot_cache_id = 0
     wb._pending_slicer_caches = []

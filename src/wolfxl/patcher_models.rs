@@ -67,6 +67,13 @@ pub struct SheetCopyOp {
     pub deep_copy_images: bool,
 }
 
+/// One queued blank worksheet creation in modify mode.
+#[derive(Debug, Clone)]
+pub struct SheetCreateOp {
+    /// Destination sheet title.
+    pub title: String,
+}
+
 /// One queued axis-shift op (RFC-030/031).
 #[derive(Debug, Clone)]
 pub struct AxisShift {

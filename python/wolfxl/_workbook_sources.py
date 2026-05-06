@@ -19,6 +19,7 @@ def open_workbook_source(
     data: bytes | None,
     password: str | bytes | None,
     data_only: bool,
+    keep_links: bool,
     permissive: bool,
     modify: bool,
     read_only: bool,
@@ -47,6 +48,7 @@ def open_workbook_source(
                 data=data,
                 password=password,
                 data_only=data_only,
+                keep_links=keep_links,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
@@ -56,16 +58,24 @@ def open_workbook_source(
                 cls,
                 data,
                 data_only=data_only,
+                keep_links=keep_links,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
             )
         if modify:
-            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+            return from_patcher(
+                cls,
+                path,
+                data_only=data_only,
+                keep_links=keep_links,
+                permissive=permissive,
+            )
         return from_reader(
             cls,
             path,
             data_only=data_only,
+            keep_links=keep_links,
             permissive=permissive,
             read_only=read_only,
         )
@@ -96,6 +106,7 @@ def from_reader(
     path: str,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
     permissive: bool = False,
     read_only: bool = False,
 ) -> Any:
@@ -115,6 +126,7 @@ def from_reader(
         data_only=data_only,
         read_only=read_only,
         source_path=path,
+        keep_links=keep_links,
     )
 
 
@@ -124,6 +136,7 @@ def _open_plain_xlsx_source(
     path: str | None,
     data: bytes | bytearray | memoryview | None,
     data_only: bool,
+    keep_links: bool,
     permissive: bool,
     modify: bool,
     read_only: bool,
@@ -131,11 +144,18 @@ def _open_plain_xlsx_source(
     """Open an unencrypted XLSX path or byte buffer with the requested mode."""
     if path is not None:
         if modify:
-            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+            return from_patcher(
+                cls,
+                path,
+                data_only=data_only,
+                keep_links=keep_links,
+                permissive=permissive,
+            )
         return from_reader(
             cls,
             path,
             data_only=data_only,
+            keep_links=keep_links,
             permissive=permissive,
             read_only=read_only,
         )
@@ -143,6 +163,7 @@ def _open_plain_xlsx_source(
         cls,
         bytes(data),  # type: ignore[arg-type]
         data_only=data_only,
+        keep_links=keep_links,
         permissive=permissive,
         modify=modify,
         read_only=read_only,
@@ -156,6 +177,7 @@ def from_encrypted(
     data: bytes | bytearray | memoryview | None = None,
     password: str | bytes,
     data_only: bool = False,
+    keep_links: bool = True,
     permissive: bool = False,
     modify: bool = False,
     read_only: bool = False,
@@ -176,6 +198,7 @@ def from_encrypted(
             path=path,
             data=data,
             data_only=data_only,
+            keep_links=keep_links,
             permissive=permissive,
             modify=modify,
             read_only=read_only,
@@ -210,6 +233,7 @@ def from_encrypted(
                 path=path,
                 data=data,
                 data_only=data_only,
+                keep_links=keep_links,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
@@ -235,6 +259,7 @@ def from_encrypted(
         cls,
         decrypted_bytes,
         data_only=data_only,
+        keep_links=keep_links,
         permissive=permissive,
         modify=modify,
         read_only=read_only,
@@ -246,6 +271,7 @@ def from_bytes(
     data: bytes | bytearray | memoryview,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
     permissive: bool = False,
     modify: bool = False,
     read_only: bool = False,
@@ -274,13 +300,18 @@ def from_bytes(
 
         if modify:
             wb = from_patcher(
-                cls, tmp_path, data_only=data_only, permissive=permissive
+                cls,
+                tmp_path,
+                data_only=data_only,
+                keep_links=keep_links,
+                permissive=permissive,
             )
         else:
             wb = from_reader(
                 cls,
                 tmp_path,
                 data_only=data_only,
+                keep_links=keep_links,
                 permissive=permissive,
                 read_only=read_only,
             )
@@ -294,6 +325,8 @@ def from_bytes(
         data_only=data_only,
         read_only=read_only,
         source_path=None,
+        source_bytes=data_bytes,
+        keep_links=keep_links,
     )
 
 
@@ -302,6 +335,7 @@ def from_patcher(
     path: str,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
     permissive: bool = False,
 ) -> Any:
     """Open an existing .xlsx file in modify mode."""
@@ -320,6 +354,7 @@ def from_patcher(
         data_only=data_only,
         read_only=False,
         source_path=path,
+        keep_links=keep_links,
     )
 
 

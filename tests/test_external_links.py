@@ -201,6 +201,19 @@ def test_real_fixture_exposes_link(fixture_path: Path) -> None:
     assert link.rid == "rId2"  # the externalLink rel id in the workbook rels
 
 
+def test_keep_links_false_hides_external_links(fixture_path: Path) -> None:
+    wb = wolfxl.load_workbook(fixture_path, keep_links=False)
+    assert wb._external_links == []
+
+
+def test_bytes_backed_external_links_are_loaded(fixture_path: Path) -> None:
+    data = fixture_path.read_bytes()
+    for source in (data, io.BytesIO(data)):
+        wb = wolfxl.load_workbook(source)
+        assert len(wb._external_links) == 1
+        assert wb._external_links[0].target == "ext.xlsx"
+
+
 def test_modify_mode_preserves_external_link_bytes(
     fixture_path: Path, tmp_path: Path
 ) -> None:
@@ -294,6 +307,25 @@ def test_remove_external_link_prunes_parts_and_workbook_wiring(
     wb = wolfxl.load_workbook(fixture_path, modify=True)
     wb._external_links.clear()
     out = tmp_path / "removed.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        wb_xml = zf.read("xl/workbook.xml").decode("utf-8")
+        wb_rels = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        ct_xml = zf.read("[Content_Types].xml").decode("utf-8")
+
+    assert not any(name.startswith("xl/externalLinks/") for name in names)
+    assert "<externalReferences>" not in wb_xml
+    assert "relationships/externalLink" not in wb_rels
+    assert "/xl/externalLinks/" not in ct_xml
+
+
+def test_keep_links_false_modify_save_strips_external_links(
+    fixture_path: Path, tmp_path: Path
+) -> None:
+    wb = wolfxl.load_workbook(fixture_path, modify=True, keep_links=False)
+    out = tmp_path / "keep_links_false.xlsx"
     wb.save(out)
 
     with zipfile.ZipFile(out, "r") as zf:

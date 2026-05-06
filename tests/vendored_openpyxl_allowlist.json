@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "entries": [],
+  "categories": [
+    "openpyxl_internal",
+    "unsupported_out_of_scope",
+    "infra_mismatch",
+    "true_wolfxl_gap"
+  ]
+}

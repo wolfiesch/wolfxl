@@ -148,6 +148,24 @@ ENTRIES: list[Entry] = [
         "probe": "workbook_create_sheet",
     },
     {
+        "id": "workbook.create_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "wb.create_sheet(title, index=...) on loaded workbook",
+        "wolfxl": "wb.create_sheet(title, index=...) on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_create_sheet_modify",
+        "notes": "Modify-mode blank sheet creation updates workbook.xml, workbook rels, content-types, tab order, and accepts cell edits before save.",
+    },
+    {
+        "id": "workbook.remove_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "wb.remove(ws) on loaded workbook",
+        "wolfxl": "wb.remove(ws) on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_remove_sheet_modify",
+        "notes": "Modify-mode sheet removal prunes the workbook tab, workbook rel, worksheet part, local defined-name indexes, and reachable sheet subgraph parts.",
+    },
+    {
         "id": "workbook.rename_sheet_modify",
         "category": "workbook",
         "openpyxl": "ws.title = 'Renamed' on loaded workbook",
@@ -269,7 +287,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "ws.add_chart / remove_chart / replace_chart",
         "status": "supported",
         "probe": "charts_add_remove_replace",
-        "notes": "remove/replace shipped in v1.7.",
+        "notes": "Covers pending charts plus source-loaded worksheet chart removal, replacement, and title edits in modify mode.",
     },
     {
         "id": "charts.chartsheet",
@@ -559,7 +577,8 @@ ENTRIES: list[Entry] = [
         "notes": (
             "Inspection (target / sheet_names / cached_data), opaque "
             "modify-mode preservation when unchanged, and append/remove/edit "
-            "authoring."
+            "authoring. keep_links=False strips preserved source links, and "
+            "file-like/bytes-backed xlsx reads expose the same collection."
         ),
     },
     {

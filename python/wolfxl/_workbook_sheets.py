@@ -8,7 +8,7 @@ from wolfxl._worksheet import Worksheet
 
 
 def remove_sheet(wb: Any, worksheet: Worksheet) -> None:
-    """Remove ``worksheet`` from a write-mode workbook.
+    """Remove ``worksheet`` from a write or modify-mode workbook.
 
     Args:
         wb: Workbook-like object carrying writer and sheet state.
@@ -18,20 +18,23 @@ def remove_sheet(wb: Any, worksheet: Worksheet) -> None:
         RuntimeError: If ``wb`` is not in write mode.
         ValueError: If ``worksheet`` is not registered on ``wb``.
     """
-    if wb._rust_writer is None:  # noqa: SLF001
-        raise RuntimeError("remove requires write mode")
+    if wb._rust_writer is None and wb._rust_patcher is None:  # noqa: SLF001
+        raise RuntimeError("remove requires write mode or modify mode")
     if worksheet.title not in wb._sheets:  # noqa: SLF001
         raise ValueError(f"Worksheet '{worksheet.title}' is not in this workbook")
     title = worksheet.title
     wb._sheet_names.remove(title)  # noqa: SLF001
     wb._sheets.pop(title)  # noqa: SLF001
+    if wb._rust_patcher is not None:  # noqa: SLF001
+        wb._rust_patcher.queue_sheet_delete(title)  # noqa: SLF001
+        return
     remove_fn = getattr(wb._rust_writer, "remove_sheet", None)  # noqa: SLF001
     if remove_fn is not None:
         remove_fn(title)
 
 
-def create_sheet(wb: Any, title: str) -> Worksheet:
-    """Create and append a worksheet in write mode.
+def create_sheet(wb: Any, title: str, index: int | None = None) -> Worksheet:
+    """Create and append a worksheet in write or modify mode.
 
     Args:
         wb: Workbook-like object carrying writer and sheet state.
@@ -44,10 +47,17 @@ def create_sheet(wb: Any, title: str) -> Worksheet:
         RuntimeError: If ``wb`` is not in write mode.
         ValueError: If ``title`` is already used.
     """
-    if wb._rust_writer is None:  # noqa: SLF001
-        raise RuntimeError("create_sheet requires write mode")
     if title in wb._sheets or title in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
         raise ValueError(f"Sheet '{title}' already exists")
+    insert_at = _normalize_insert_index(wb, index)
+    if wb._rust_patcher is not None:  # noqa: SLF001
+        wb._rust_patcher.queue_sheet_create(title, insert_at)  # noqa: SLF001
+        wb._sheet_names.insert(insert_at, title)  # noqa: SLF001
+        ws = Worksheet(wb, title)
+        wb._sheets[title] = ws  # noqa: SLF001
+        return ws
+    if wb._rust_writer is None:  # noqa: SLF001
+        raise RuntimeError("create_sheet requires write or modify mode")
     # G20: streaming write-only mode dispatches to a different sheet
     # type — the eager Worksheet is materialisation-heavy, while
     # WriteOnlyWorksheet streams rows straight to a temp file.
@@ -55,15 +65,36 @@ def create_sheet(wb: Any, title: str) -> Worksheet:
         from wolfxl._worksheet_write_only import WriteOnlyWorksheet
 
         wb._rust_writer.add_sheet(title)  # noqa: SLF001
-        wb._sheet_names.append(title)  # noqa: SLF001
+        wb._sheet_names.insert(insert_at, title)  # noqa: SLF001
         ws = WriteOnlyWorksheet(wb, title)
         wb._sheets[title] = ws  # noqa: SLF001
+        _move_new_writer_sheet_to_index(wb, title, insert_at)
         return ws  # type: ignore[return-value]
     wb._rust_writer.add_sheet(title)  # noqa: SLF001
-    wb._sheet_names.append(title)  # noqa: SLF001
+    wb._sheet_names.insert(insert_at, title)  # noqa: SLF001
     ws = Worksheet(wb, title)
     wb._sheets[title] = ws  # noqa: SLF001
+    _move_new_writer_sheet_to_index(wb, title, insert_at)
     return ws
+
+
+def _normalize_insert_index(wb: Any, index: int | None) -> int:
+    if index is None:
+        return len(wb._sheet_names)  # noqa: SLF001
+    if not isinstance(index, int):
+        raise TypeError("create_sheet index must be an int")
+    if index < 0:
+        return 0
+    return min(index, len(wb._sheet_names))  # noqa: SLF001
+
+
+def _move_new_writer_sheet_to_index(wb: Any, title: str, index: int) -> None:
+    current = len(wb._sheet_names) - 1  # noqa: SLF001
+    if index == current:
+        return
+    move = getattr(wb._rust_writer, "move_sheet", None)  # noqa: SLF001
+    if move is not None:
+        move(title, index - current)
 
 
 def copy_worksheet(

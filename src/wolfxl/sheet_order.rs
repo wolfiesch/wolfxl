@@ -218,6 +218,67 @@ fn rename_sheet_event(
     Ok(out)
 }
 
+/// Remove `<sheet>` entries from `xl/workbook.xml` and keep sheet-scoped
+/// defined names aligned with the surviving tab indexes.
+pub fn merge_sheet_deletes(
+    workbook_xml: &[u8],
+    deletes: &[String],
+) -> Result<SheetOrderResult, String> {
+    let layout = scan_workbook_layout(workbook_xml)?;
+    if deletes.is_empty() {
+        return Ok(SheetOrderResult {
+            workbook_xml: workbook_xml.to_vec(),
+            new_order: layout
+                .sheet_entries
+                .iter()
+                .map(|e| e.name.clone())
+                .collect(),
+        });
+    }
+
+    let delete_set: std::collections::BTreeSet<&str> = deletes.iter().map(|s| s.as_str()).collect();
+    let mut deleted_positions: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut entries: Vec<SheetEntry> = Vec::new();
+    for entry in &layout.sheet_entries {
+        if delete_set.contains(entry.name.as_str()) {
+            deleted_positions.insert(entry.original_pos);
+        } else {
+            entries.push(entry.clone());
+        }
+    }
+
+    let mut remap: BTreeMap<u32, u32> = BTreeMap::new();
+    for (new_pos, entry) in entries.iter().enumerate() {
+        if entry.original_pos as usize != new_pos {
+            remap.insert(entry.original_pos, new_pos as u32);
+        }
+    }
+
+    let mut rewritten_sheets: Vec<u8> = Vec::with_capacity(layout.sheets_inner_len());
+    for entry in &entries {
+        rewritten_sheets.extend_from_slice(&entry.raw);
+    }
+    let with_sheets_rewritten = splice_sheets_inner(
+        workbook_xml,
+        layout.sheets_inner_start,
+        layout.sheets_inner_end,
+        &rewritten_sheets,
+    );
+
+    let without_deleted_defined_names =
+        remove_defined_names_for_deleted_sheets(&with_sheets_rewritten, &deleted_positions)?;
+    let final_bytes = if remap.is_empty() {
+        without_deleted_defined_names
+    } else {
+        rewrite_local_sheet_ids(&without_deleted_defined_names, &remap)?
+    };
+
+    Ok(SheetOrderResult {
+        workbook_xml: final_bytes,
+        new_order: entries.iter().map(|e| e.name.clone()).collect(),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Internal: layout scan
 // ---------------------------------------------------------------------------
@@ -414,6 +475,71 @@ fn rewrite_local_sheet_ids(src: &[u8], remap: &BTreeMap<u32, u32>) -> Result<Vec
         out.extend_from_slice(&src[cursor..*val_start]);
         out.extend_from_slice(new_val.as_bytes());
         cursor = *val_end;
+    }
+    out.extend_from_slice(&src[cursor..]);
+    Ok(out)
+}
+
+fn remove_defined_names_for_deleted_sheets(
+    src: &[u8],
+    deleted_positions: &std::collections::BTreeSet<u32>,
+) -> Result<Vec<u8>, String> {
+    if deleted_positions.is_empty() {
+        return Ok(src.to_vec());
+    }
+    let s = std::str::from_utf8(src)
+        .map_err(|e| format!("workbook.xml is not valid UTF-8 after sheet delete: {e}"))?;
+    let mut reader = XmlReader::from_str(s);
+    reader.config_mut().trim_text(false);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut removals: Vec<(usize, usize)> = Vec::new();
+    let mut active_defined_name: Option<(usize, u32)> = None;
+
+    loop {
+        let pre = reader.buffer_position() as usize;
+        let evt = reader.read_event_into(&mut buf);
+        let post = reader.buffer_position() as usize;
+        match evt {
+            Ok(Event::Empty(ref e)) if e.local_name().as_ref() == b"definedName" => {
+                if let Some((_, _, old)) = find_local_sheet_id_value(s.as_bytes(), pre) {
+                    if let Ok(parsed) = old.parse::<u32>() {
+                        if deleted_positions.contains(&parsed) {
+                            removals.push((pre, post));
+                        }
+                    }
+                }
+            }
+            Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"definedName" => {
+                if let Some((_, _, old)) = find_local_sheet_id_value(s.as_bytes(), pre) {
+                    if let Ok(parsed) = old.parse::<u32>() {
+                        if deleted_positions.contains(&parsed) {
+                            active_defined_name = Some((pre, parsed));
+                        }
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"definedName" => {
+                if let Some((start, _)) = active_defined_name.take() {
+                    removals.push((start, post));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("definedName delete scan error: {e}")),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if removals.is_empty() {
+        return Ok(src.to_vec());
+    }
+
+    removals.sort_by_key(|(start, _)| *start);
+    let mut out = Vec::with_capacity(src.len());
+    let mut cursor = 0;
+    for (start, end) in removals {
+        out.extend_from_slice(&src[cursor..start]);
+        cursor = end;
     }
     out.extend_from_slice(&src[cursor..]);
     Ok(out)
