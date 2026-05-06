@@ -178,6 +178,7 @@ def load_workbook(
         password=password,
         data_only=data_only,
         keep_links=keep_links,
+        keep_vba=keep_vba,
         permissive=permissive,
         modify=modify,
         read_only=read_only,

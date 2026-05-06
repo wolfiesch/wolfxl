@@ -12,6 +12,16 @@ from typing import Any, BinaryIO
 from wolfxl._workbook_state import same_existing_path
 
 
+def normalize_openpyxl_package_shape(wb: Any, filename: str) -> None:
+    """Apply source-backed openpyxl package-shape cleanup when relevant."""
+    from wolfxl._openpyxl_package_shape import normalize_openpyxl_package_shape as _normalize
+
+    keep_vba = bool(getattr(wb, "_keep_vba", False))
+    if not keep_vba and getattr(wb, "_rust_patcher", None) is not None:
+        keep_vba = getattr(wb, "vba_archive", None) is not None
+    _normalize(filename, keep_vba=keep_vba)
+
+
 def save_workbook(
     wb: Any,
     filename: str | os.PathLike[str] | BinaryIO,
@@ -109,6 +119,7 @@ def save_read_mode(wb: Any, filename: str) -> None:
     if source_path is None:
         raise RuntimeError("save requires write or modify mode")
     shutil.copyfile(source_path, filename)
+    normalize_openpyxl_package_shape(wb, filename)
 
 
 def save_write_only_mode(wb: Any, filename: str) -> None:
@@ -198,6 +209,7 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     flush_external_links_authoring(wb, filename)
     flush_source_chart_authoring(wb, filename)
     flush_chartsheets_authoring(wb, filename)
+    normalize_openpyxl_package_shape(wb, filename)
 
 
 def save_write_mode(wb: Any, filename: str) -> None:

@@ -75,6 +75,7 @@ def build_xlsx_wb(
     source_path: str | None,
     source_bytes: bytes | None = None,
     keep_links: bool = True,
+    keep_vba: bool = False,
 ) -> Any:
     """Wire up read/modify-mode workbook fields shared by xlsx inputs.
 
@@ -103,6 +104,7 @@ def build_xlsx_wb(
     wb._source_path = source_path
     wb._source_bytes = source_bytes
     wb._keep_links = keep_links
+    wb._keep_vba = keep_vba
     wb._strip_external_links_on_save = bool(rust_patcher is not None and not keep_links)
     wb._format = "xlsx"
     _initialize_sheet_proxies(wb, rust_reader)

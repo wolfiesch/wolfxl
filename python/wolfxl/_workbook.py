@@ -88,6 +88,7 @@ class Workbook:
         # Streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
+        self._keep_vba: bool = False
         # File format the workbook came from. Write
         # mode is xlsx by definition; the read/modify constructors set
         # this to "xlsx" / "xlsb" / "xls" as appropriate.

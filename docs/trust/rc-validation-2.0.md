@@ -8,8 +8,8 @@ checkpoint.
 | Gate | Result |
 |---|---:|
 | `uv run maturin develop` | Pass |
-| Full Python suite with optional deps | 2720 passed / 20 skipped |
-| Openpyxl compat oracle | 80 / 80 |
+| Full Python suite with optional deps (`openpyxl==3.1.5`, `pillow`) | 2658 passed / 42 skipped |
+| Openpyxl compat oracle | 79 / 79 |
 | XLS/XLSB optional slice with `python-calamine` | Pass |
 | External oracle fixture pack | Pass |
 | `cargo test --workspace -q` | Pass |
@@ -17,23 +17,19 @@ checkpoint.
 | `cargo check -q` | Pass |
 | `ruff check` focused on touched Python files | Pass |
 
-## Upstream Openpyxl Corpus
+## Upstream Openpyxl VBA Corpus
 
-The upstream openpyxl 3.1.5 test slice now collects cleanly under the
-`openpyxl -> wolfxl` shim and passes 65 / 67 tests.
+The upstream openpyxl 3.1.5 `test_vba.py` file now passes under the
+`openpyxl -> wolfxl` shim.
 
-The remaining failures are strict package-shape expectations for legacy VBA
-fixtures:
+| Upstream test | Result | Resolution |
+|---|---:|---|
+| `test_save_with_vba` | Pass | WolfXL now prunes unused shared strings and legacy form-control drawing parts to match openpyxl's saved package shape. |
+| `test_save_with_saved_comments` | Pass | WolfXL now relocates legacy `xl/commentsN.xml` parts to `xl/comments/commentN.xml` and rewrites rel/content-type references. |
+| `test_content_types` | Pass | Content-type overrides remain unique after normalization. |
+| `test_save_without_vba` | Pass | Read-mode macro saves continue to satisfy openpyxl's macro-removal expectation. |
 
-| Upstream test | Current delta | Release decision |
-|---|---|---|
-| `test_save_with_vba` | WolfXL preserves `xl/sharedStrings.xml` and `xl/drawings/drawing1.xml`; openpyxl rewrites/prunes them. | Review before release. Do not call the corpus green until accepted or fixed. |
-| `test_save_with_saved_comments` | WolfXL preserves `xl/sharedStrings.xml` and `xl/comments1.xml`; openpyxl rewrites comments to `xl/comments/comment1.xml`. | Review before release. Do not call the corpus green until accepted or fixed. |
-
-These are not known read/write API failures: the saved packages are valid
-ZIP/OOXML files and preserve more source content than openpyxl. They are still
-release-blocking evidence until we decide whether exact openpyxl package
-normalization is required for the 2.0 replacement claim.
+The previous strict package-shape blockers are fixed rather than allowlisted.
 
 ## Compatibility Hardening Landed In This RC Pass
 
@@ -44,6 +40,9 @@ normalization is required for the 2.0 replacement claim.
 - Added `LXML` / `DEFUSEDXML` top-level flags and `wolfxl.open` alias.
 - Accepted `load_workbook(..., keep_vba=...)`; `keep_vba=True` routes through
   modify mode so macro parts remain available for preservation.
+- Added openpyxl-compatible VBA package-shape normalization for source-backed
+  saves, including shared-string pruning, legacy control drawing pruning, and
+  saved-comment part relocation.
 - Added binary file-like save support.
 - Normalized nonstandard workbook-part names such as `xl/workbook10.xml` to a
   temporary standard workbook path before handing the package to the Rust
@@ -53,11 +52,7 @@ normalization is required for the 2.0 replacement claim.
 
 ## Stop Criteria Before Release
 
-Before cutting 2.0, make an explicit call on the two VBA package-shape deltas:
-
-1. Fix WolfXL to match openpyxl's pruning/renaming behavior for these legacy
-   macro fixtures, then rerun the upstream corpus to 67 / 67.
-2. Or document and allowlist them as intentional source-preservation behavior,
-   with a functional Excel/openpyxl round-trip proof for both fixture outputs.
-
-Do not publish release collateral until this decision is recorded.
+The VBA package-shape decision has been made in favor of exact openpyxl
+normalization and is now covered by local regression tests plus the upstream
+`test_vba.py` shim run. Before tagging 2.0, rerun the full release gate suite
+from a clean checkout and keep this document's counts current.
