@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -437,6 +438,7 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             "  try",
             "    set display alerts to false",
             "    set ask to update links to false",
+            "    set automation security to msoAutomationSecurityForceDisable",
             open_cmd,
             save_cmd,
             "    close active workbook saving no",
@@ -453,24 +455,11 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             "end tell",
         ]
     )
-    try:
-        proc = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        dialog = run_ooxml_app_smoke._excel_dialog_text()
-        run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
-        run_ooxml_app_smoke._close_excel_best_effort()
-        message = f"Microsoft Excel PDF export timed out after {timeout}s"
-        if dialog:
-            message = f"{message}; Excel dialog: {dialog[:500]}"
-        raise RuntimeError(message) from exc
+    proc = _run_excel_script_with_dialog_handling(script, timeout)
     dialog = run_ooxml_app_smoke._excel_dialog_text()
     run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
     run_ooxml_app_smoke._close_excel_best_effort()
+    _restore_excel_automation_security_best_effort()
     if proc.returncode != 0:
         detail = _format_subprocess_context(proc)
         if dialog:
@@ -490,6 +479,61 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
     return pdf
 
 
+def _run_excel_script_with_dialog_handling(
+    script: str,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(
+        ["osascript", "-e", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None:
+        run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+        if time.monotonic() >= deadline:
+            dialog = run_ooxml_app_smoke._excel_dialog_text()
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            _restore_excel_automation_security_best_effort()
+            message = f"Microsoft Excel PDF export timed out after {timeout}s"
+            if dialog:
+                message = f"{message}; Excel dialog: {dialog[:500]}"
+            raise RuntimeError(
+                f"{message}{_format_subprocess_context_text(stdout, stderr)}"
+            )
+        time.sleep(0.5)
+    stdout, stderr = proc.communicate()
+    return subprocess.CompletedProcess(
+        ["osascript", "-e", script],
+        proc.returncode,
+        stdout,
+        stderr,
+    )
+
+
+def _restore_excel_automation_security_best_effort() -> None:
+    script = """
+tell application "Microsoft Excel"
+  try
+    set automation security to msoAutomationSecurityByUI
+  end try
+end tell
+"""
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _excel_render_stage_dir(src: Path) -> Path:
     digest = hashlib.sha256(str(src.resolve()).encode()).hexdigest()[:16]
     stem = run_ooxml_fidelity_mutations._safe_stem(src.stem)
@@ -505,11 +549,15 @@ def _excel_render_stage_dir(src: Path) -> Path:
 
 
 def _format_subprocess_context(proc: subprocess.CompletedProcess[str]) -> str:
+    return _format_subprocess_context_text(proc.stdout, proc.stderr)
+
+
+def _format_subprocess_context_text(stdout: str, stderr: str) -> str:
     details = []
-    if proc.stdout.strip():
-        details.append(f"stdout={proc.stdout.strip()[:300]!r}")
-    if proc.stderr.strip():
-        details.append(f"stderr={proc.stderr.strip()[:300]!r}")
+    if stdout.strip():
+        details.append(f"stdout={stdout.strip()[:300]!r}")
+    if stderr.strip():
+        details.append(f"stderr={stderr.strip()[:300]!r}")
     if not details:
         return ""
     return f" ({'; '.join(details)})"

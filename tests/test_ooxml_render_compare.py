@@ -395,24 +395,16 @@ def test_excel_pdf_export_reports_timeout_dialog(tmp_path: Path, monkeypatch) ->
     src.write_bytes(b"not-used")
     output_dir = tmp_path / "out"
 
-    def fake_run(*_args, **_kwargs):
-        raise render_module.subprocess.TimeoutExpired(["osascript"], timeout=3)
+    def fake_run_script(_script, timeout):
+        raise RuntimeError(
+            f"Microsoft Excel PDF export timed out after {timeout}s; "
+            "Excel dialog: Grant File Access"
+        )
 
-    monkeypatch.setattr(render_module.subprocess, "run", fake_run)
     monkeypatch.setattr(
-        render_module.run_ooxml_app_smoke,
-        "_excel_dialog_text",
-        lambda: "Grant File Access",
-    )
-    monkeypatch.setattr(
-        render_module.run_ooxml_app_smoke,
-        "_dismiss_excel_safe_dialogs",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        render_module.run_ooxml_app_smoke,
-        "_close_excel_best_effort",
-        lambda: None,
+        render_module,
+        "_run_excel_script_with_dialog_handling",
+        fake_run_script,
     )
 
     try:

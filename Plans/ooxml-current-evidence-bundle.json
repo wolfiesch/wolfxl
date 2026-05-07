@@ -35,19 +35,19 @@
       ]
     },
     {
-      "name": "excel_render_representative_report",
-      "path": "/tmp/wolfxl-render-excel-representative.json",
-      "producer": "rm -rf /tmp/wolfxl-render-excel-representative-fixtures /tmp/wolfxl-render-excel-representative && mkdir -p /tmp/wolfxl-render-excel-representative-fixtures && for f in excelize-chart-points-formula-cf.xlsx openpyxl-table-validation-image-comment.xlsx real-excel-connections-basic.xlsx real-excel-control-props-basic.xlsx real-excel-external-link-basic.xlsx real-excel-p1-comments-validation-protection.xlsx real-excel-pivot-chart-slicers.xlsx real-excel-powerpivot-model-basic.xlsx; do cp tests/fixtures/external_oracle/$f /tmp/wolfxl-render-excel-representative-fixtures/; done && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-render-excel-representative-fixtures --output-dir /tmp/wolfxl-render-excel-representative --render-engine excel --timeout 120 --max-pages-per-fixture 3 > /tmp/wolfxl-render-excel-representative.json",
+      "name": "excel_render_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-full-pack.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 > /tmp/wolfxl-render-excel-full-pack.json",
       "expect": [
         {"path": "render_engine", "equals": "excel"},
-        {"path": "result_count", "equals": 8},
+        {"path": "result_count", "equals": 22},
         {"path": "failure_count", "equals": 0}
       ]
     },
     {
-      "name": "excel_render_coverage_gate",
-      "path": "/tmp/wolfxl-coverage-excel-render-representative.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-representative.json > /tmp/wolfxl-coverage-excel-render-representative.json",
+      "name": "excel_render_full_pack_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-render-full-pack.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json > /tmp/wolfxl-coverage-excel-render-full-pack.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
