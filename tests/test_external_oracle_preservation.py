@@ -57,6 +57,7 @@ _MUTATIONS = (
     "move_marker_range",
 )
 _EXPECTED_AUDIT_KINDS_BY_MUTATION = {
+    "style_cell": {"style_theme_semantic_drift"},
     "insert_tail_row": {"data_validations_semantic_drift"},
     "delete_marker_tail_row": {"data_validations_semantic_drift"},
 }

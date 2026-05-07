@@ -49,6 +49,17 @@ SURFACES = {
             "rename_first_sheet",
         ),
     },
+    "style_theme_color_preservation": {
+        "label": "Workbook style/theme/color dependency preservation",
+        "feature_keys": (),
+        "semantic_keys": ("style_theme",),
+        "structural_mutations": (
+            "marker_cell",
+            "copy_first_sheet",
+            "rename_first_sheet",
+            "move_formula_range",
+        ),
+    },
     "conditional_formatting_extension_preservation": {
         "label": "Conditional formatting extension preservation",
         "feature_keys": (),
@@ -345,6 +356,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "page_setup": "page_setup",
         "pivots": "pivot",
         "slicers": "slicer",
+        "style_theme": "style_theme",
         "structured_references": "structured_reference",
         "timelines": "timeline",
         "workbook_globals": "workbook_global",

@@ -399,6 +399,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "slicers": _slicer_fingerprint(archive, parts),
+        "style_theme": _style_theme_fingerprint(archive, parts),
         "structured_references": _structured_reference_fingerprint(archive, parts),
         "timelines": _timeline_fingerprint(archive, parts),
         "workbook_globals": _workbook_global_fingerprint(archive, parts),
@@ -664,6 +665,26 @@ def _extension_payload_fingerprint(
         extensions = _xml_extensions(root)
         if extensions:
             out[part] = extensions
+    return out
+
+
+def _style_theme_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, object]:
+    out: dict[str, object] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    for part in sorted(
+        p
+        for p in parts
+        if p == "xl/styles.xml" or p.startswith("xl/theme/theme")
+    ):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("xml", _xml_tree_fingerprint(root)),
+            ("rels", rels_by_owner.get(part, [])),
+        ]
     return out
 
 

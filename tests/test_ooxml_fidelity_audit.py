@@ -386,6 +386,22 @@ def test_detects_chart_style_color_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "chart_styles_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_workbook_style_theme_color_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_style_theme_entries("4F81BD"))
+    after_entries = dict(before_entries)
+    after_entries["xl/theme/theme1.xml"] = _theme_xml("C0504D")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "style_theme_semantic_drift" for issue in report["issues"])
+
+
 def test_detects_chart_axis_and_layout_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -701,6 +717,52 @@ def _chart_colors_xml(color: str) -> str:
 <cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle">
   <cs:schemeClr val="{color}"/>
 </cs:colorStyle>"""
+
+
+def _style_theme_entries(accent1: str) -> dict[str, str]:
+    entries = {
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill></fills>
+  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+</styleSheet>""",
+        "xl/theme/theme1.xml": _theme_xml(accent1),
+    }
+    entries["[Content_Types].xml"] = _base_entries()["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>\n'
+        '  <Override PartName="/xl/theme/theme1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>\n'
+        "</Types>",
+    )
+    entries["xl/_rels/workbook.xml.rels"] = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"
+    Target="styles.xml"/>
+  <Relationship Id="rId3"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme"
+    Target="theme/theme1.xml"/>
+</Relationships>"""
+    return entries
+
+
+def _theme_xml(accent1: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
+  <a:themeElements>
+    <a:clrScheme name="Office">
+      <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:accent1><a:srgbClr val="{accent1}"/></a:accent1>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>"""
 
 
 def _chart_axis_xml(axis_id: str) -> str:
