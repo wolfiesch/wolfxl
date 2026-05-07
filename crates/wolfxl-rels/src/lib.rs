@@ -84,6 +84,10 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
     pub const CHART: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
+    pub const CHART_STYLE: &str =
+        "http://schemas.microsoft.com/office/2011/relationships/chartStyle";
+    pub const CHART_COLOR_STYLE: &str =
+        "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle";
     pub const TABLE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
     pub const PIVOT_TABLE: &str =

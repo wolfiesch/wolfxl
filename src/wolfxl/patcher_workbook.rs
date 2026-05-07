@@ -533,6 +533,44 @@ fn max_sheet_id_and_count(workbook_xml: &[u8]) -> (u32, usize) {
     (max_id, count)
 }
 
+fn sheet_ids_by_name(workbook_xml: &[u8]) -> HashMap<String, u32> {
+    let mut reader = quick_xml::Reader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut ids = HashMap::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Start(e)) | Ok(quick_xml::events::Event::Empty(e))
+                if e.local_name().as_ref() == b"sheet" =>
+            {
+                let mut name = None;
+                let mut sheet_id = None;
+                for attr in e.attributes().with_checks(false).flatten() {
+                    let value = attr
+                        .unescape_value()
+                        .map(|v| v.into_owned())
+                        .unwrap_or_else(|_| {
+                            String::from_utf8_lossy(attr.value.as_ref()).into_owned()
+                        });
+                    match attr.key.as_ref() {
+                        b"name" => name = Some(value),
+                        b"sheetId" => sheet_id = value.parse::<u32>().ok(),
+                        _ => {}
+                    }
+                }
+                if let (Some(name), Some(sheet_id)) = (name, sheet_id) {
+                    ids.insert(name, sheet_id);
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    ids
+}
+
 fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
     let (open, rel_end) = find_open_tag_by_local_name(s, "workbook")
         .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
@@ -932,8 +970,14 @@ pub(super) fn rebuild_calc_chain_phase(
     let source_calc_chain_ext_lst = source_calc_chain
         .as_deref()
         .and_then(calcchain::extract_ext_lst);
+    let workbook_xml = get_bytes(file_patches, &patcher.file_adds, zip, "xl/workbook.xml");
+    let sheet_ids = workbook_xml
+        .as_deref()
+        .map(sheet_ids_by_name)
+        .unwrap_or_default();
 
-    // Walk sheets in tab order, scanning each.
+    // Walk sheets in tab order, scanning each while emitting calcChain's
+    // workbook sheetId value.
     let mut all_entries: Vec<calcchain::CalcChainEntry> = Vec::new();
     let order = patcher.sheet_order.clone();
     for (i, sheet_name) in order.iter().enumerate() {
@@ -945,8 +989,11 @@ pub(super) fn rebuild_calc_chain_phase(
             Some(b) => b,
             None => continue,
         };
-        let sheet_index_1based = (i as u32) + 1;
-        let entries = calcchain::scan_sheet_for_formulas(&sheet_xml, sheet_index_1based);
+        let sheet_id = sheet_ids
+            .get(sheet_name)
+            .copied()
+            .unwrap_or_else(|| (i as u32) + 1);
+        let entries = calcchain::scan_sheet_for_formulas(&sheet_xml, sheet_id);
         all_entries.extend(entries);
     }
 

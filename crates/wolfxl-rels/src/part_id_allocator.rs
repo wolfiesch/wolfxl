@@ -32,6 +32,8 @@
 //! | `xl/drawings/drawing<N>.xml`         | `next_drawing`  |
 //! | `xl/worksheets/sheet<N>.xml`         | `next_sheet`    |
 //! | `xl/charts/chart<N>.xml`             | `next_chart`    |
+//! | `xl/charts/style<N>.xml`             | `next_chart_style` |
+//! | `xl/charts/colors<N>.xml`            | `next_chart_color` |
 //!
 //! Any path with a non-numeric or missing suffix (e.g. `xl/tables/foo.xml`)
 //! is skipped — it does not contribute to any counter and does not panic.
@@ -58,6 +60,8 @@ pub struct PartIdAllocator {
     next_drawing: u32,
     next_sheet: u32,
     next_chart: u32,
+    next_chart_style: u32,
+    next_chart_color: u32,
     next_image: u32,
     // Sprint Ν Pod-γ (RFC-035 §10) — pivot deep-clone counters.
     next_pivot_table: u32,
@@ -85,6 +89,8 @@ impl PartIdAllocator {
             next_drawing: 1,
             next_sheet: 1,
             next_chart: 1,
+            next_chart_style: 1,
+            next_chart_color: 1,
             next_image: 1,
             next_pivot_table: 1,
             next_pivot_cache: 1,
@@ -128,6 +134,10 @@ impl PartIdAllocator {
             self.bump(Counter::Sheet, n);
         } else if let Some(n) = parse_n(path, "xl/charts/chart", ".xml") {
             self.bump(Counter::Chart, n);
+        } else if let Some(n) = parse_n(path, "xl/charts/style", ".xml") {
+            self.bump(Counter::ChartStyle, n);
+        } else if let Some(n) = parse_n(path, "xl/charts/colors", ".xml") {
+            self.bump(Counter::ChartColor, n);
         } else if let Some(n) = parse_n(path, "xl/pivotTables/pivotTable", ".xml") {
             self.bump(Counter::PivotTable, n);
         } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml") {
@@ -161,6 +171,8 @@ impl PartIdAllocator {
             Counter::Drawing => &mut self.next_drawing,
             Counter::Sheet => &mut self.next_sheet,
             Counter::Chart => &mut self.next_chart,
+            Counter::ChartStyle => &mut self.next_chart_style,
+            Counter::ChartColor => &mut self.next_chart_color,
             Counter::Image => &mut self.next_image,
             Counter::PivotTable => &mut self.next_pivot_table,
             Counter::PivotCache => &mut self.next_pivot_cache,
@@ -212,6 +224,22 @@ impl PartIdAllocator {
     pub fn alloc_chart(&mut self) -> u32 {
         let n = self.next_chart;
         self.next_chart += 1;
+        n
+    }
+
+    /// Allocate a fresh `styleN` suffix for `xl/charts/styleN.xml`;
+    /// returns `N` (>=1).
+    pub fn alloc_chart_style(&mut self) -> u32 {
+        let n = self.next_chart_style;
+        self.next_chart_style += 1;
+        n
+    }
+
+    /// Allocate a fresh `colorsN` suffix for `xl/charts/colorsN.xml`;
+    /// returns `N` (>=1).
+    pub fn alloc_chart_color(&mut self) -> u32 {
+        let n = self.next_chart_color;
+        self.next_chart_color += 1;
         n
     }
 
@@ -294,6 +322,8 @@ enum Counter {
     Drawing,
     Sheet,
     Chart,
+    ChartStyle,
+    ChartColor,
     Image,
     PivotTable,
     PivotCache,
@@ -438,10 +468,14 @@ mod tests {
             "xl/worksheets/sheet11.xml",
             "xl/charts/chart1.xml",
             "xl/charts/chart3.xml",
+            "xl/charts/style1.xml",
+            "xl/charts/colors4.xml",
         ];
         let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
         assert_eq!(a.alloc_sheet(), 12);
         assert_eq!(a.alloc_chart(), 4);
+        assert_eq!(a.alloc_chart_style(), 2);
+        assert_eq!(a.alloc_chart_color(), 5);
     }
 
     #[test]

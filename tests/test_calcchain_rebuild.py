@@ -11,7 +11,7 @@ Edge cases:
   any op).
 - Structural composition: ``insert_rows`` then save → calcChain
   references the SHIFTED cell coords, not the original.
-- ``i`` correctly tracks the source sheet's tab position.
+- ``i`` correctly tracks the workbook sheetId, including non-contiguous IDs.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ _NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
 def _read_calc_chain(path: Path) -> list[tuple[str, int]]:
-    """Return the [(cell_ref, sheet_index_1based), ...] entries from
+    """Return the [(cell_ref, workbook_sheet_id), ...] entries from
     ``xl/calcChain.xml`` inside the saved zip. Empty list if the file
     isn't there.
     """
@@ -61,15 +61,22 @@ def _calc_chain_present(path: Path) -> bool:
 
 def _inject_calc_chain(path: Path, calc_chain_xml: str) -> None:
     """Add or replace ``xl/calcChain.xml`` in an existing workbook zip."""
+    _replace_zip_part(path, "xl/calcChain.xml", calc_chain_xml)
+
+
+def _replace_zip_part(path: Path, part_name: str, payload: bytes | str) -> None:
+    """Add or replace a part in an existing workbook zip."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
     rewritten = path.with_suffix(".rewritten.xlsx")
     with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(
         rewritten, "w", compression=zipfile.ZIP_DEFLATED
     ) as dst:
         for info in src.infolist():
-            if info.filename == "xl/calcChain.xml":
+            if info.filename == part_name:
                 continue
             dst.writestr(info, src.read(info.filename))
-        dst.writestr("xl/calcChain.xml", calc_chain_xml)
+        dst.writestr(part_name, payload)
     rewritten.replace(path)
 
 
@@ -217,11 +224,11 @@ def test_modify_mode_zero_formulas_removes_calc_chain_metadata(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# Sheet-index ``i`` correctly tracks tab position.
+# Sheet-index ``i`` correctly tracks workbook sheetId.
 # ---------------------------------------------------------------------------
 
 
-def test_sheet_index_matches_tab_position(tmp_path: Path) -> None:
+def test_sheet_index_matches_workbook_sheet_id(tmp_path: Path) -> None:
     out = tmp_path / "out.xlsx"
     wb = Workbook()
     s1 = wb.active
@@ -238,9 +245,38 @@ def test_sheet_index_matches_tab_position(tmp_path: Path) -> None:
     wb.save(out)
     entries = _read_calc_chain(out)
     by_ref = dict(entries)
-    assert by_ref["A1"] == 1, f"A1 should map to sheet-index 1; entries={entries}"
-    assert by_ref["B2"] == 2, f"B2 should map to sheet-index 2; entries={entries}"
-    assert by_ref["C3"] == 3, f"C3 should map to sheet-index 3; entries={entries}"
+    assert by_ref["A1"] == 1, f"A1 should map to sheetId 1; entries={entries}"
+    assert by_ref["B2"] == 2, f"B2 should map to sheetId 2; entries={entries}"
+    assert by_ref["C3"] == 3, f"C3 should map to sheetId 3; entries={entries}"
+
+
+def test_modify_mode_calc_chain_uses_workbook_sheet_id_not_tab_position(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    _make_formula_fixture(src)
+
+    with zipfile.ZipFile(src, "r") as z:
+        workbook_xml = z.read("xl/workbook.xml").decode("utf-8")
+    workbook_xml = workbook_xml.replace(
+        'name="First" sheetId="1"',
+        'name="First" sheetId="2"',
+    ).replace(
+        'name="Second" sheetId="2"',
+        'name="Second" sheetId="4"',
+    )
+    _replace_zip_part(src, "xl/workbook.xml", workbook_xml)
+
+    wb = load_workbook(src, modify=True)
+    wb["First"]["C1"] = "edit"
+    wb.save(dst)
+
+    entries = _read_calc_chain(dst)
+    assert ("B1", 2) in entries, f"First!B1 should use sheetId 2; entries={entries}"
+    assert ("B2", 2) in entries, f"First!B2 should use sheetId 2; entries={entries}"
+    assert ("B5", 4) in entries, f"Second!B5 should use sheetId 4; entries={entries}"
+    assert ("B5", 2) not in entries, f"Second!B5 must not use tab position; {entries}"
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,8 @@ use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
 use wolfxl_rels::{
-    rt, walk_sheet_subgraph_with_nested, PartIdAllocator, Relationship, RelsGraph, TargetMode,
+    rt, walk_sheet_subgraph_with_nested, PartIdAllocator, RelId, Relationship, RelsGraph,
+    TargetMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -204,6 +205,8 @@ const CT_COMMENTS: &str =
 const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
 /// Sprint Μ Pod-γ (RFC-046 §7) — DrawingML chart content type.
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const CT_CHART_STYLE: &str = "application/vnd.ms-office.chartstyle+xml";
+const CT_CHART_COLOR_STYLE: &str = "application/vnd.ms-office.chartcolorstyle+xml";
 
 // ---------------------------------------------------------------------------
 // Planner entry point
@@ -439,17 +442,25 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                             let new_chart_rid =
                                 cloned.add(&nrel.rel_type, &new_rel_target, nrel.mode);
                             chart_rid_remap.insert(nrel.id.0.clone(), new_chart_rid.0);
-                            // If the chart has its own rels file
-                            // (rare — chart-to-image pipelines), we
-                            // copy it verbatim under the new suffix.
-                            // Cell-range targets do not appear in
-                            // chart rels, only in chart XML.
+                            // If the chart has its own rels file, clone
+                            // chart-local dependencies such as style/color
+                            // parts instead of sharing them across chart
+                            // parts; desktop Excel rejects some duplicated
+                            // chart dependency targets on open.
                             let chart_rels_src = wolfxl_rels::rels_path_for(&resolved_chart);
                             if let Some(rels_path_src) = chart_rels_src {
                                 if let Some(rb) = zip_parts.get(&rels_path_src) {
                                     let chart_rels_dst =
                                         format!("xl/charts/_rels/chart{new_chart_n}.xml.rels");
-                                    new_ancillary_parts.push((chart_rels_dst, rb.clone()));
+                                    let cloned_rels = clone_chart_rels_with_dependencies(
+                                        rb,
+                                        &resolved_chart,
+                                        zip_parts,
+                                        inputs.allocator,
+                                        &mut new_ancillary_parts,
+                                        &mut content_type_overrides_to_add,
+                                    );
+                                    new_ancillary_parts.push((chart_rels_dst, cloned_rels));
                                 }
                             }
                         } else {
@@ -506,6 +517,22 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                     },
                     &mut outputs,
                 );
+                let chart_rels_src = wolfxl_rels::rels_path_for(&resolved);
+                if let Some(rels_path_src) = chart_rels_src {
+                    if let Some(rb) = zip_parts.get(&rels_path_src) {
+                        let chart_rels_dst =
+                            format!("xl/charts/_rels/chart{new_chart_n}.xml.rels");
+                        let cloned_rels = clone_chart_rels_with_dependencies(
+                            rb,
+                            &resolved,
+                            zip_parts,
+                            inputs.allocator,
+                            &mut new_ancillary_parts,
+                            &mut content_type_overrides_to_add,
+                        );
+                        new_ancillary_parts.push((chart_rels_dst, cloned_rels));
+                    }
+                }
             }
             // ------ Pivot tables (Sprint Ν Pod-γ / RFC-035 §10) ------
             //
@@ -727,6 +754,81 @@ fn add_internal_part_clone(
         TargetMode::Internal,
     );
     outputs.rid_remap.insert(source_rel.id.0.clone(), new_rid.0);
+}
+
+fn clone_chart_rels_with_dependencies(
+    chart_rels_bytes: &[u8],
+    source_chart_path: &str,
+    zip_parts: &HashMap<String, Vec<u8>>,
+    allocator: &mut PartIdAllocator,
+    new_ancillary_parts: &mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &mut Vec<(String, String)>,
+) -> Vec<u8> {
+    let Ok(source_rels) = RelsGraph::parse(chart_rels_bytes) else {
+        return chart_rels_bytes.to_vec();
+    };
+    let mut cloned_rels = RelsGraph::new();
+    for rel in source_rels.iter() {
+        let mut target = rel.target.clone();
+        if rel.mode == TargetMode::Internal && rel.rel_type == rt::CHART_STYLE {
+            if let Some((new_path, new_target)) = clone_chart_sidecar_part(
+                source_chart_path,
+                &rel.target,
+                "style",
+                ".xml",
+                CT_CHART_STYLE,
+                zip_parts,
+                allocator.alloc_chart_style(),
+                new_ancillary_parts,
+                content_type_overrides_to_add,
+            ) {
+                allocator.observe(&new_path);
+                target = new_target;
+            }
+        } else if rel.mode == TargetMode::Internal && rel.rel_type == rt::CHART_COLOR_STYLE {
+            if let Some((new_path, new_target)) = clone_chart_sidecar_part(
+                source_chart_path,
+                &rel.target,
+                "colors",
+                ".xml",
+                CT_CHART_COLOR_STYLE,
+                zip_parts,
+                allocator.alloc_chart_color(),
+                new_ancillary_parts,
+                content_type_overrides_to_add,
+            ) {
+                allocator.observe(&new_path);
+                target = new_target;
+            }
+        }
+        cloned_rels.add_with_id(
+            RelId(rel.id.0.clone()),
+            &rel.rel_type,
+            &target,
+            rel.mode,
+        );
+    }
+    cloned_rels.serialize()
+}
+
+fn clone_chart_sidecar_part(
+    source_chart_path: &str,
+    source_target: &str,
+    prefix: &str,
+    suffix: &str,
+    content_type: &str,
+    zip_parts: &HashMap<String, Vec<u8>>,
+    new_n: u32,
+    new_ancillary_parts: &mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &mut Vec<(String, String)>,
+) -> Option<(String, String)> {
+    let resolved = resolve_relative(parent_dir(source_chart_path), source_target);
+    let bytes = zip_parts.get(&resolved)?.clone();
+    let new_path = format!("xl/charts/{prefix}{new_n}{suffix}");
+    let new_target = format!("{prefix}{new_n}{suffix}");
+    new_ancillary_parts.push((new_path.clone(), bytes));
+    content_type_overrides_to_add.push((format!("/{new_path}"), content_type.to_string()));
+    Some((new_path, new_target))
 }
 
 // ---------------------------------------------------------------------------
