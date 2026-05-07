@@ -184,6 +184,14 @@ Gap ledger:
      LibreOffice-normalized copy now passes Excel app smoke and remains active
      for pivot/chart/style/color/table evidence, but the normalization removed
      slicer parts. Treat slicer/timeline coverage as not cleared.
+   - Latest slicer fixture hunt: Excel's AppleScript dictionary exposes pivot
+     creation APIs and a `slicer` class, but no obvious scripted "add slicer"
+     command. A narrow local scan found only the ExcelBench Excelize slicer
+     source/diff/modified workbooks, and Microsoft Excel rejects all three
+     before WolfXL mutation. The next usable slicer/timeline fixture likely
+     needs to be authored manually in Excel, captured from a trusted
+     Excel-authored sample, or generated through a more capable Excel
+     automation path.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
