@@ -44,6 +44,20 @@ use quick_xml::Reader as XmlReader;
 
 const CT_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 
+pub(crate) const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+pub(crate) const CT_CHART: &str =
+    "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+
+pub(crate) fn image_content_type_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpeg" | "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cross-sheet aggregation op (Phase 2.5c — see `mod.rs::do_save`).
 // ---------------------------------------------------------------------------
@@ -58,6 +72,7 @@ pub enum ContentTypeOp {
     AddOverride(String, String),
     RemoveOverride(String),
     EnsureDefault(String, String),
+    RemoveOverridePrefix(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +210,10 @@ impl ContentTypesGraph {
             .push((extension.to_string(), content_type.to_string()));
     }
 
+    pub fn remove_override_prefix(&mut self, prefix: &str) {
+        self.overrides.retain(|(p, _)| !p.starts_with(prefix));
+    }
+
     /// Source-order accessors (used by tests; no live caller in slice).
     #[allow(dead_code)]
     pub fn defaults(&self) -> &[(String, String)] {
@@ -215,6 +234,7 @@ impl ContentTypesGraph {
             ContentTypeOp::AddOverride(part, ct) => self.add_override(part, ct),
             ContentTypeOp::RemoveOverride(part) => self.remove_override(part),
             ContentTypeOp::EnsureDefault(ext, ct) => self.ensure_default(ext, ct),
+            ContentTypeOp::RemoveOverridePrefix(prefix) => self.remove_override_prefix(prefix),
         }
     }
 

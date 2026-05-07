@@ -18,6 +18,7 @@ pub mod defined_names;
 pub mod hyperlinks;
 pub mod patcher_cells;
 pub mod patcher_drawing;
+pub mod patcher_external_links;
 pub mod patcher_models;
 pub mod patcher_payload;
 pub mod patcher_pivot;
@@ -78,7 +79,8 @@ use crate::ooxml_util;
 use conditional_formatting::{CfRulePatch, ConditionalFormattingPatch};
 use patcher_drawing::parse_queued_image_anchor;
 use patcher_models::{
-    AxisShift, QueuedChartAdd, QueuedImageAdd, RangeMove, SheetCopyOp, SheetCreateOp,
+    AxisShift, QueuedChartAdd, QueuedChartRemove, QueuedImageAdd, RangeMove, SheetCopyOp,
+    SheetCreateOp,
 };
 use patcher_payload::{
     dict_to_border_spec, dict_to_format_spec, dict_to_threaded_entry, extract_bool,
@@ -286,9 +288,7 @@ pub struct XlsxPatcher {
     /// rewritten bytes.
     permissive_seed_file_patches: HashMap<String, Vec<u8>>,
     /// Sprint Λ Pod-β (RFC-045) — per-sheet pending image adds.
-    /// Drained by Phase 2.5k during `do_save`. Supports the
-    /// "fresh drawing" case only — sheets that already have a
-    /// drawing rel raise NotImplementedError (v1.5 follow-up).
+    /// Drained by Phase 2.5k during `do_save`.
     queued_images: HashMap<String, Vec<QueuedImageAdd>>,
     /// Sprint S1 G06 — per-sheet pending image removals by index.
     /// Drained by Phase 2.5k during `do_save`, before image adds.
@@ -298,10 +298,12 @@ pub struct XlsxPatcher {
     /// A1-style anchor cell. Drained by Phase 2.5l during
     /// `do_save`, BEFORE Phase 3 (cell patches) so a chart's data
     /// range can compose with cell rewrites in the same save.
-    /// Phase 2.5l differs from 2.5k by handling BOTH the
-    /// "fresh-drawing" case AND the "merge-into-existing-drawing"
-    /// case (which Phase 2.5k still rejects).
+    /// Phase 2.5l handles both the "fresh-drawing" case and the
+    /// "merge-into-existing-drawing" case.
     queued_charts: HashMap<String, Vec<QueuedChartAdd>>,
+    /// Sprint 2 — per-sheet pending loaded chart removals.
+    /// Drained before chart additions so remove-and-replace composes.
+    queued_chart_removes: HashMap<String, Vec<QueuedChartRemove>>,
     /// Sprint Ν Pod-γ (RFC-047) — pending pivot-cache adds. Append
     /// order is the cache_id allocation order. Drained by Phase
     /// 2.5m during `do_save` (sequenced AFTER Phase 2.5l so chart
@@ -316,6 +318,8 @@ pub struct XlsxPatcher {
     /// immediately AFTER `apply_pivot_adds_phase`). Each edit names a
     /// cache definition part and the new `<worksheetSource>` values.
     queued_pivot_source_edits: Vec<patcher_pivot_edit::QueuedPivotSourceEdit>,
+    /// Drop workbook external-link parts/rels on the next modify-mode save.
+    drop_external_links: bool,
     /// Sprint Ν Pod-γ — workbook-scope cache_id allocator. Bumps
     /// monotonically as `queue_pivot_cache_add` is called. The
     /// counter starts at 0 (cache_id = `pivotCache.cacheId` attr;
@@ -550,9 +554,11 @@ impl XlsxPatcher {
             queued_images: HashMap::new(),
             queued_image_removes: HashMap::new(),
             queued_charts: HashMap::new(),
+            queued_chart_removes: HashMap::new(),
             queued_pivot_caches: Vec::new(),
             queued_pivot_tables: HashMap::new(),
             queued_pivot_source_edits: Vec::new(),
+            drop_external_links: false,
             next_pivot_cache_id: 0,
             queued_workbook_security: None,
             queued_autofilters: HashMap::new(),
@@ -1434,6 +1440,32 @@ impl XlsxPatcher {
         Ok(())
     }
 
+    fn queue_chart_remove(
+        &mut self,
+        sheet: &str,
+        drawing_path: &str,
+        chart_rid: &str,
+        chart_path: &str,
+    ) -> PyResult<()> {
+        if drawing_path.trim().is_empty()
+            || chart_rid.trim().is_empty()
+            || chart_path.trim().is_empty()
+        {
+            return Err(PyValueError::new_err(
+                "queue_chart_remove: drawing_path, chart_rid, and chart_path are required",
+            ));
+        }
+        self.queued_chart_removes
+            .entry(sheet.to_string())
+            .or_default()
+            .push(QueuedChartRemove {
+                drawing_path: drawing_path.to_string(),
+                chart_rid: chart_rid.to_string(),
+                chart_path: chart_path.to_string(),
+            });
+        Ok(())
+    }
+
     /// Sprint Ν Pod-γ (RFC-047) — queue a pivot cache add. Returns
     /// the allocated 0-based `cache_id` so the caller can wire it
     /// into pivot tables that reference this cache.
@@ -1510,6 +1542,11 @@ impl XlsxPatcher {
                 new_sheet,
                 force_refresh_on_load,
             });
+        Ok(())
+    }
+
+    fn queue_external_links_drop(&mut self) -> PyResult<()> {
+        self.drop_external_links = true;
         Ok(())
     }
 
@@ -1860,17 +1897,8 @@ impl XlsxPatcher {
 
     /// Save in-place (atomic tmp+rename).
     fn save_in_place(&mut self) -> PyResult<()> {
-        let tmp_path = format!("{}.wolfxl.tmp", self.file_path);
-        self.do_save(&tmp_path)?;
-
-        // Atomic rename
-        if let Err(e) = std::fs::rename(&tmp_path, &self.file_path) {
-            let _ = std::fs::remove_file(&self.file_path);
-            std::fs::rename(&tmp_path, &self.file_path).map_err(|e2| {
-                PyErr::new::<PyIOError, _>(format!("Failed to replace file: {e}; {e2}"))
-            })?;
-        }
-        Ok(())
+        let target = self.file_path.clone();
+        self.do_save(&target)
     }
 
     /// RFC-072 (G19): return the raw `xl/vbaProject.bin` bytes from the
@@ -2365,7 +2393,7 @@ impl XlsxPatcher {
             )?;
         }
 
-        // --- Phase 2.5l: Chart adds (Sprint Μ Pod-γ / RFC-046) ---
+        // --- Phase 2.5l: Chart removes/adds ---
         //
         // Mirrors Phase 2.5k's image-add flow but with two extra
         // capabilities:
@@ -2374,11 +2402,12 @@ impl XlsxPatcher {
         //     drawing's nested rels graph.
         //   * Sheets that already have a `drawing` rel get the new
         //     `<xdr:graphicFrame>` SAX-merged into the existing
-        //     drawing XML, instead of being rejected like 2.5k does
-        //     for images. (Phase 2.5l also handles the "no existing
-        //     drawing" case by allocating a fresh `drawingN.xml`.)
+        //     drawing XML.
         // Phase 2.5l runs BEFORE Phase 3 so cell-range formulas in
         // chart XML can compose with cell rewrites in the same save.
+        if !self.queued_chart_removes.is_empty() {
+            patcher_drawing::apply_chart_removes_phase(self, &mut save.file_patches, &mut zip)?;
+        }
         if !self.queued_charts.is_empty() {
             patcher_drawing::apply_chart_adds_phase(
                 self,
@@ -2556,6 +2585,13 @@ impl XlsxPatcher {
         //
         // Empty queue ⇒ identity: workbook.xml flows through
         // unchanged (no extra parse, no extra serialize).
+        if self.drop_external_links {
+            patcher_external_links::apply_external_links_drop_phase(
+                self,
+                &mut save.file_patches,
+                &mut zip,
+            )?;
+        }
         patcher_workbook::apply_workbook_xml_phases(self, &mut save.file_patches, &mut zip)?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether

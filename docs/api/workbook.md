@@ -13,7 +13,10 @@ Opens existing workbook.
 - `modify=False`: read mode
 - `modify=True`: modify mode (read + patch/save)
 
-Compatibility kwargs (`read_only`, `data_only`, `keep_links`) are currently accepted but ignored.
+- `read_only=True`: uses the streaming reader surface for row iteration workflows.
+- `data_only=True`: returns cached formula values where present.
+- `keep_links=True`: preserves external-link parts in modify-mode saves.
+- `keep_links=False`: hides external links when reading and drops external-link parts on modify-mode save.
 
 ## Properties
 

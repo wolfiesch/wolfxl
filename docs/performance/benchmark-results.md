@@ -1,11 +1,14 @@
 # Benchmark Results
 
-> **Reference**: WolfXL **v1.7.0** (Sprint Ξ).
-> **Status as of**: 2026-04-27.
+> **Reference**: WolfXL **v1.7.0** historical baseline.
+> **Status as of**: 2026-04-28.
 
-This page summarises the v1.7 performance posture vs openpyxl 3.1.x.
-For the live, continuously-updated dashboard see **ExcelBench** —
-the benchmark numbers below are pulled from the same harness.
+This page is historical context, not the final WolfXL 2.0 release proof.
+Use [Public Evidence Status](../trust/public-evidence.md) for the current
+claim policy and release-readiness checklist.
+
+The benchmark numbers below summarise the v1.7 posture vs openpyxl 3.1.x.
+For the current harness and timestamped snapshots see **ExcelBench**.
 
 - ExcelBench dashboard: [excelbench.vercel.app](https://excelbench.vercel.app)
 - ExcelBench repo: [github.com/SynthGL/ExcelBench](https://github.com/SynthGL/ExcelBench)

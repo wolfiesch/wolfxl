@@ -20,7 +20,7 @@ Usage::
 from __future__ import annotations
 
 import os
-from typing import IO
+from typing import IO, cast
 
 from wolfxl._cell import Cell
 from wolfxl.chartsheet import Chartsheet
@@ -170,18 +170,21 @@ def load_workbook(
             "expected xlsx/xlsb/xls"
         )
 
-    wb = open_workbook_source(
+    wb = cast(
         Workbook,
-        fmt=fmt,
-        path=path,
-        data=data,
-        password=password,
-        data_only=data_only,
+        open_workbook_source(
+            Workbook,
+            fmt=fmt,
+            path=path,
+            data=data,
+            password=password,
+            data_only=data_only,
         keep_links=keep_links,
         keep_vba=keep_vba,
         permissive=permissive,
         modify=modify,
         read_only=read_only,
+        ),
     )
 
     wb._rich_text = rich_text  # noqa: SLF001

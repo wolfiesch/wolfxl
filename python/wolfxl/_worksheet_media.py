@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
 
 _PENDING_IMAGE_DELETIONS: dict[int, list[int]] = {}
+_PENDING_CHART_DELETIONS: dict[int, list[dict[str, str]]] = {}
 
 
 def add_chart(ws: Worksheet, chart: Any, anchor: Any = None) -> None:
@@ -124,9 +125,11 @@ def remove_chart(ws: Worksheet, chart: Any) -> None:
             "chart was not added to this worksheet via add_chart() "
             "(or has already been removed)."
         ) from None
-    if ws._charts_cache is not None and chart in ws._charts_cache:  # noqa: SLF001
-        ws._charts_cache.remove(chart)  # noqa: SLF001
-    _queue_source_chart_op(ws, {"op": "remove", "meta": meta})
+    _pending_chart_deletions(ws).append(meta)
+    if ws._charts_cache is not None:  # noqa: SLF001
+        idx = _find_identity_index(ws._charts_cache, chart)  # noqa: SLF001
+        if idx is not None:
+            del ws._charts_cache[idx]  # noqa: SLF001
 
 
 def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
@@ -146,7 +149,9 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
             raise ValueError(
                 "old chart was not added to this worksheet via add_chart()"
             ) from None
-        anchor = new._anchor if new._anchor is not None else old._anchor  # noqa: SLF001
+        anchor = new._anchor if new._anchor is not None else _a1_from_anchor(old._anchor)  # noqa: SLF001
+        if anchor is None:
+            anchor = old._anchor  # noqa: SLF001
         if anchor is None:
             anchor = "E15"
         if isinstance(anchor, str):
@@ -154,8 +159,10 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
         new._anchor = anchor  # noqa: SLF001
         new._wolfxl_source_chart = meta  # noqa: SLF001
         new._wolfxl_source_title = _title_signature(new)  # noqa: SLF001
-        if ws._charts_cache is not None and old in ws._charts_cache:  # noqa: SLF001
-            ws._charts_cache[ws._charts_cache.index(old)] = new  # noqa: SLF001
+        if ws._charts_cache is not None:  # noqa: SLF001
+            old_index = _find_identity_index(ws._charts_cache, old)  # noqa: SLF001
+            if old_index is not None:
+                ws._charts_cache[old_index] = new  # noqa: SLF001
         _queue_source_chart_op(ws, {"op": "replace", "meta": meta, "chart": new})
         return
     anchor = new._anchor if new._anchor is not None else old._anchor  # noqa: SLF001
@@ -165,6 +172,12 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
         validate_a1_anchor(anchor)
     new._anchor = anchor  # noqa: SLF001
     ws._pending_charts[index] = new  # noqa: SLF001
+
+
+def pop_pending_chart_deletions(ws: Worksheet) -> list[dict[str, str]]:
+    """Drain queued source-chart deletions for *ws* in append order."""
+    pending = _PENDING_CHART_DELETIONS.pop(id(ws), [])
+    return list(pending)
 
 
 def get_charts(ws: Worksheet) -> list[Any]:
@@ -292,6 +305,9 @@ def _chart_from_payload(payload: dict[str, Any]) -> Any:
     if payload.get("style") is not None:
         chart.style = int(payload["style"])
     chart._anchor = _anchor_from_payload(payload.get("anchor"))  # noqa: SLF001
+    chart._source_drawing_path = payload.get("source_drawing_path")  # noqa: SLF001
+    chart._source_chart_rid = payload.get("source_chart_rid")  # noqa: SLF001
+    chart._source_chart_path = payload.get("source_chart_path")  # noqa: SLF001
     chart.ser = [
         _series_from_payload(str(payload.get("kind") or ""), series_payload)
         for series_payload in payload.get("series", [])
@@ -537,6 +553,38 @@ def get_images(ws: Worksheet) -> list[Any]:
 
 def _pending_image_deletions(ws: Worksheet) -> list[int]:
     return _PENDING_IMAGE_DELETIONS.setdefault(id(ws), [])
+
+
+def _pending_chart_deletions(ws: Worksheet) -> list[dict[str, str]]:
+    return _PENDING_CHART_DELETIONS.setdefault(id(ws), [])
+
+
+def _source_chart_meta(chart: Any) -> dict[str, str] | None:
+    drawing_path = getattr(chart, "_source_drawing_path", None)
+    chart_rid = getattr(chart, "_source_chart_rid", None)
+    chart_path = getattr(chart, "_source_chart_path", None)
+    if not drawing_path or not chart_rid or not chart_path:
+        return None
+    return {
+        "drawing_path": str(drawing_path),
+        "chart_rid": str(chart_rid),
+        "chart_path": str(chart_path),
+    }
+
+
+def _a1_from_anchor(anchor: Any) -> str | None:
+    if isinstance(anchor, str):
+        return anchor
+    marker = getattr(anchor, "_from", None)
+    if marker is None:
+        return None
+    col = int(getattr(marker, "col", 0)) + 1
+    row = int(getattr(marker, "row", 0)) + 1
+    letters = ""
+    while col:
+        col, rem = divmod(col - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return f"{letters}{row}"
 
 
 def _resolve_image_index(images: list[Any], index_or_image: int | Any) -> int:

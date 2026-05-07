@@ -24,6 +24,12 @@ pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
     wolfxl_rels::rels_path_for(sheet_path).unwrap_or_else(|| format!("_rels/{sheet_path}.rels"))
 }
 
+/// Maps any OOXML part path to its conventional relationship sidecar path.
+pub(crate) fn part_rels_path_for(part_path: &str) -> PyResult<String> {
+    wolfxl_rels::rels_path_for(part_path)
+        .ok_or_else(|| PyIOError::new_err(format!("part has no rels path: {part_path}")))
+}
+
 /// Parses the trailing integer from an OOXML part path.
 pub(crate) fn parse_n_from_part_path(path: &str, prefix: &str, suffix: &str) -> Option<u32> {
     let mid = path.strip_prefix(prefix)?.strip_suffix(suffix)?;
@@ -37,6 +43,22 @@ pub(crate) fn load_or_empty_rels(zip: &mut ZipArchive<File>, path: &str) -> PyRe
             .map_err(|e| PyIOError::new_err(format!("rels parse for '{path}': {e}"))),
         None => Ok(RelsGraph::new()),
     }
+}
+
+/// Loads the current rels graph, preferring queued replacements/adds over ZIP source.
+pub(crate) fn current_or_empty_rels(
+    patcher: &XlsxPatcher,
+    zip: &mut ZipArchive<File>,
+    path: &str,
+) -> PyResult<RelsGraph> {
+    if let Some(g) = patcher.rels_patches.get(path) {
+        return Ok(g.clone());
+    }
+    if let Some(bytes) = patcher.file_adds.get(path) {
+        return RelsGraph::parse(bytes)
+            .map_err(|e| PyIOError::new_err(format!("rels parse for '{path}': {e}")));
+    }
+    load_or_empty_rels(zip, path)
 }
 
 /// Returns true when the source ZIP contains an entry with the exact name.
@@ -673,9 +695,11 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
         || !patcher.queued_sheet_deletes.is_empty()
         || !patcher.queued_images.is_empty()
         || !patcher.queued_charts.is_empty()
+        || !patcher.queued_chart_removes.is_empty()
         || !patcher.queued_pivot_caches.is_empty()
         || !patcher.queued_pivot_tables.is_empty()
         || !patcher.queued_pivot_source_edits.is_empty()
+        || patcher.drop_external_links
         || !patcher.queued_sheet_setup.is_empty()
         || !patcher.queued_page_breaks.is_empty()
         || !patcher.queued_autofilters.is_empty()
@@ -686,9 +710,16 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
 }
 
 pub(super) fn copy_source_file_phase(patcher: &XlsxPatcher, output_path: &str) -> PyResult<()> {
-    std::fs::copy(&patcher.file_path, output_path)
-        .map_err(|e| PyIOError::new_err(format!("Copy failed: {e}")))?;
-    Ok(())
+    if std::path::Path::new(&patcher.file_path) == std::path::Path::new(output_path) {
+        return Ok(());
+    }
+    crate::atomic_save::write_zip_atomically(output_path, |out| {
+        let mut src = File::open(&patcher.file_path)
+            .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
+        std::io::copy(&mut src, out)
+            .map_err(|e| PyIOError::new_err(format!("Copy failed: {e}")))?;
+        Ok(())
+    })
 }
 
 pub(super) fn drain_permissive_seed_file_patches_phase(
@@ -824,83 +855,84 @@ pub(super) fn rewrite_zip_phase(
     file_patches: &HashMap<String, Vec<u8>>,
     output_path: &str,
 ) -> PyResult<()> {
-    let src = File::open(&patcher.file_path)
-        .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
-    let mut zip =
-        ZipArchive::new(src).map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+    crate::atomic_save::write_zip_atomically(output_path, |dst| {
+        let src = File::open(&patcher.file_path)
+            .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
+        let mut zip =
+            ZipArchive::new(src).map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+        ooxml_util::validate_zip_archive(&mut zip)?;
 
-    let dst = File::create(output_path)
-        .map_err(|e| PyIOError::new_err(format!("Cannot create '{output_path}': {e}")))?;
-    let mut out = ZipWriter::new(dst);
+        let mut out = ZipWriter::new(dst);
 
-    let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());
-    for i in 0..zip.len() {
-        let mut file = zip
-            .by_index(i)
-            .map_err(|e| PyIOError::new_err(format!("ZIP entry read error: {e}")))?;
-        let name = file.name().to_string();
-        source_names.insert(name.clone());
+        let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());
+        for i in 0..zip.len() {
+            let mut file = zip
+                .by_index(i)
+                .map_err(|e| PyIOError::new_err(format!("ZIP entry read error: {e}")))?;
+            let name = file.name().to_string();
+            source_names.insert(name.clone());
 
-        if patcher.file_deletes.contains(&name) {
-            continue;
-        }
+            if patcher.file_deletes.contains(&name) {
+                continue;
+            }
 
-        let mut opts = SimpleFileOptions::default().compression_method(file.compression());
-        if let Some(dt) = file.last_modified() {
-            opts = opts.last_modified_time(dt);
-        }
-        if let Some(mode) = file.unix_mode() {
-            opts = opts.unix_permissions(mode);
-        }
+            let mut opts = SimpleFileOptions::default().compression_method(file.compression());
+            if let Some(dt) = file.last_modified() {
+                opts = opts.last_modified_time(dt);
+            }
+            if let Some(mode) = file.unix_mode() {
+                opts = opts.unix_permissions(mode);
+            }
 
-        if file.is_dir() {
-            out.add_directory(&name, opts)
+            if file.is_dir() {
+                out.add_directory(&name, opts)
+                    .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+                continue;
+            }
+
+            let data = if let Some(patched) = file_patches.get(&name) {
+                patched.clone()
+            } else {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf)
+                    .map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+                buf
+            };
+
+            out.start_file(&name, opts)
                 .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
-            continue;
+            out.write_all(&data)
+                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
         }
 
-        let data = if let Some(patched) = file_patches.get(&name) {
-            patched.clone()
-        } else {
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
-            buf
-        };
-
-        out.start_file(&name, opts)
-            .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
-        out.write_all(&data)
-            .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
-    }
-
-    if !patcher.file_adds.is_empty() {
-        for new_path in patcher.file_adds.keys() {
-            assert!(
-                !source_names.contains(new_path),
-                "file_adds collision with source entry: {new_path}; \
+        if !patcher.file_adds.is_empty() {
+            for new_path in patcher.file_adds.keys() {
+                assert!(
+                    !source_names.contains(new_path),
+                    "file_adds collision with source entry: {new_path}; \
                  caller bug; use file_patches to REPLACE existing entries"
-            );
+                );
+            }
+            let mut new_paths: Vec<&String> = patcher.file_adds.keys().collect();
+            new_paths.sort();
+            let dt = epoch_or_now();
+            for new_path in new_paths {
+                let bytes = &patcher.file_adds[new_path];
+                let opts = SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated)
+                    .last_modified_time(dt);
+                out.start_file(new_path, opts)
+                    .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+                out.write_all(bytes)
+                    .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
+            }
         }
-        let mut new_paths: Vec<&String> = patcher.file_adds.keys().collect();
-        new_paths.sort();
-        let dt = epoch_or_now();
-        for new_path in new_paths {
-            let bytes = &patcher.file_adds[new_path];
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated)
-                .last_modified_time(dt);
-            out.start_file(new_path, opts)
-                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
-            out.write_all(bytes)
-                .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
-        }
-    }
 
-    out.finish()
-        .map_err(|e| PyIOError::new_err(format!("ZIP finalize error: {e}")))?;
+        out.finish()
+            .map_err(|e| PyIOError::new_err(format!("ZIP finalize error: {e}")))?;
 
-    Ok(())
+        Ok(())
+    })
 }
 
 pub(super) fn ensure_calc_chain_metadata(

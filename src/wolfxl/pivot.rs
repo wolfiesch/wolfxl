@@ -777,7 +777,15 @@ fn extract_opt_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>>
 
 fn extract_opt_f64(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
     match d.get_item(key)? {
-        Some(v) if !v.is_none() => Ok(Some(v.extract::<f64>()?)),
+        Some(v) if !v.is_none() => {
+            let n = v.extract::<f64>()?;
+            if !n.is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "{key}: non-finite floats are not representable in xlsx pivot caches"
+                )));
+            }
+            Ok(Some(n))
+        }
         _ => Ok(None),
     }
 }
@@ -803,6 +811,11 @@ fn extract_parsed_value(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<pp:
                 }
             }
             if let Ok(n) = v.extract::<f64>() {
+                if !n.is_finite() {
+                    return Err(PyValueError::new_err(format!(
+                        "{key}: non-finite floats are not representable in xlsx pivot caches"
+                    )));
+                }
                 return Ok(Some(pp::ParsedValue::Num(n)));
             }
             if let Ok(s) = v.extract::<String>() {

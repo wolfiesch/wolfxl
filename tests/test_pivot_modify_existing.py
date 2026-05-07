@@ -105,6 +105,32 @@ def test_modify_pivot_source_different_shape_sets_refresh_on_load(tmp_path: Path
     assert 'refreshOnLoad="1"' in body
 
 
+def test_modify_pivot_source_two_saves_refreshes_handle_metadata(tmp_path: Path) -> None:
+    """A second source edit in the same session compares against the first save."""
+    src = tmp_path / "pivot_two_saves.xlsx"
+    _build_pivot_workbook(src, max_row=5, max_col=2)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    pivot = wb2["Pivot"].pivot_tables[0]
+    pivot.source = Reference(
+        wb2.active, min_col=1, min_row=1, max_col=2, max_row=4
+    )
+    wb2.save(src)
+    assert pivot.source.max_row == 4
+
+    pivot.source = Reference(
+        wb2.active, min_col=1, min_row=1, max_col=2, max_row=5
+    )
+    wb2.save(src)
+
+    cache_entries = _list_pivot_cache_entries(src)
+    body = _read_zip_entry(src, cache_entries[0]).decode()
+    assert 'ref="A1:B5"' in body
+    # Second edit is same-shape relative to first edit, so it should not
+    # newly add a refresh marker due to stale original metadata.
+    assert 'refreshOnLoad="1"' not in body
+
+
 def test_modify_pivot_no_mutation_is_byte_identical(tmp_path: Path) -> None:
     """Loading + saving without a mutation must not touch pivot files."""
     src = tmp_path / "pivot_noop.xlsx"

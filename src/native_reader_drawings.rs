@@ -79,6 +79,9 @@ pub(crate) fn image_to_py(py: Python<'_>, image: &ImageInfo) -> PyResult<PyObjec
 /// `python/wolfxl/_worksheet_media.py`; keep this payload additive.
 pub(crate) fn chart_to_py(py: Python<'_>, chart: &ChartInfo) -> PyResult<PyObject> {
     let d = PyDict::new(py);
+    d.set_item("source_drawing_path", chart.source_drawing_path.as_deref())?;
+    d.set_item("source_chart_rid", chart.source_chart_rid.as_deref())?;
+    d.set_item("source_chart_path", chart.source_chart_path.as_deref())?;
     d.set_item("kind", &chart.kind)?;
     d.set_item("title", chart.title.as_deref())?;
     d.set_item("x_axis_title", chart.x_axis_title.as_deref())?;

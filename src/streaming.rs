@@ -2,7 +2,7 @@
 //!
 //! Activated by `load_workbook(path, read_only=True)` (or auto-trigger when
 //! a sheet has > 50k rows). Walks `xl/worksheets/sheetN.xml` one row at a
-//! time using a hand-rolled byte-scanner over the sheet XML, resolving
+//! time using an incremental XML reader over a disk-spooled sheet part, resolving
 //! shared-string-table (SST) references upfront. Style metadata is
 //! exposed as a `style_id` only — Python-side `StreamingCell` resolves the
 //! actual font/fill/etc. via the eager Rust reader code path
@@ -13,24 +13,25 @@
 //! - `StreamingSheetReader.open(path, sheet, ...)` — constructor.
 //! - `reader.read_next_row()` → `(row_index_1based, [(col_1based, value, style_id, type), ...])`.
 //! - `reader.read_next_values(min_col, max_col)` → padded value tuple.
-//! - `reader.close()` — eagerly drop the in-memory XML buffer.
+//! - `reader.close()` — eagerly closes the XML reader and removes the temp part.
 //!
 //! Memory profile: SST loaded once (typically <10MB even on huge
-//! workbooks); sheet XML loaded once (peak RSS scales with sheet XML
-//! size, not row × col count) — quick-xml-style streaming would force
-//! per-row file-handle reopens against ZipArchive's non-seekable
-//! inflate stream and is deferred to a future Pod.
+//! workbooks); sheet XML is spooled to a temp file and parsed incrementally,
+//! so peak RSS scales with the largest row/parser buffer rather than the full
+//! decompressed worksheet XML.
 
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 
 use pyo3::exceptions::{PyIOError, PyStopIteration, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
 use pyo3::IntoPyObjectExt;
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader as XmlReader;
+use tempfile::NamedTempFile;
 use zip::ZipArchive;
 
 use crate::ooxml_util;
@@ -127,10 +128,12 @@ fn resolve_sheet_xml_path(zip: &mut ZipArchive<File>, sheet: &str) -> PyResult<S
 /// Streaming sheet reader. See module docs.
 #[pyclass(unsendable, module = "wolfxl._rust")]
 pub struct StreamingSheetReader {
-    /// Owned XML buffer the scanner walks.
-    xml: Box<str>,
-    /// Byte cursor into `xml`.
-    cursor: usize,
+    /// Incremental XML reader over the disk-spooled sheet part.
+    reader: Option<XmlReader<BufReader<File>>>,
+    /// Scratch buffer reused for quick-xml events.
+    event_buf: Vec<u8>,
+    /// Temp file that owns the decompressed sheet XML while streaming.
+    temp_file: Option<NamedTempFile>,
     /// Shared-strings table loaded upfront from `xl/sharedStrings.xml`.
     sst: Vec<String>,
     /// Whether the reader has been exhausted.
@@ -170,14 +173,31 @@ impl StreamingSheetReader {
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open xlsx: {e}")))?;
         let mut zip = ZipArchive::new(file)
             .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to open zip: {e}")))?;
+        ooxml_util::validate_zip_archive(&mut zip)?;
 
         let sst = load_sst(&mut zip)?;
         let sheet_path = resolve_sheet_xml_path(&mut zip, sheet)?;
-        let xml = ooxml_util::zip_read_to_string(&mut zip, &sheet_path)?;
+        let mut sheet_entry = zip.by_name(&sheet_path).map_err(|e| {
+            PyErr::new::<PyIOError, _>(format!("Failed to open sheet part '{sheet_path}': {e}"))
+        })?;
+        let mut temp_file = NamedTempFile::new()
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("streaming temp file: {e}")))?;
+        std::io::copy(&mut sheet_entry, temp_file.as_file_mut())
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("spool sheet XML: {e}")))?;
+        temp_file
+            .as_file_mut()
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("rewind sheet XML: {e}")))?;
+        let reader_file = temp_file
+            .reopen()
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("reopen sheet XML: {e}")))?;
+        let mut reader = XmlReader::from_reader(BufReader::new(reader_file));
+        reader.config_mut().trim_text(false);
 
         Ok(Self {
-            xml: xml.into_boxed_str(),
-            cursor: 0,
+            reader: Some(reader),
+            event_buf: Vec::with_capacity(8192),
+            temp_file: Some(temp_file),
             sst,
             exhausted: false,
             min_row,
@@ -259,8 +279,9 @@ impl StreamingSheetReader {
     /// Eagerly drop the in-memory XML buffer (releases peak RSS).
     pub fn close(&mut self) {
         self.exhausted = true;
-        self.xml = String::new().into_boxed_str();
-        self.cursor = 0;
+        self.reader = None;
+        self.temp_file = None;
+        self.event_buf.clear();
     }
 
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -286,68 +307,40 @@ enum StepResult {
 
 impl StreamingSheetReader {
     fn parse_one_row(&mut self, py: Python<'_>) -> PyResult<StepResult> {
-        let bytes = self.xml.as_bytes();
-        let pos = self.cursor;
-
-        let row_start = match find_tag_open(bytes, pos, b"row") {
-            Some(i) => i,
+        let reader = match self.reader.as_mut() {
+            Some(reader) => reader,
             None => return Ok(StepResult::Done),
         };
-        let (attrs_str, open_end, self_closing) = read_open_tag(bytes, row_start)?;
-        let row_idx = parse_row_index(attrs_str)?;
 
-        let mut cells: Vec<ParsedCell> = Vec::new();
-
-        if self_closing {
-            self.cursor = open_end;
-        } else {
-            let close = find_close_tag(bytes, open_end, b"row").ok_or_else(|| {
-                PyErr::new::<PyIOError, _>(format!(
-                    "Streaming reader: unterminated <row r=\"{row_idx}\">"
-                ))
-            })?;
-            let mut p = open_end;
-            while p < close {
-                let next = match find_tag_open(&bytes[..close], p, b"c") {
-                    Some(i) => i,
-                    None => break,
-                };
-                let (c_attrs, c_open_end, c_self_closing) = read_open_tag(bytes, next)?;
-                let coord = read_attr(c_attrs, "r");
-                let style_id = read_attr(c_attrs, "s").and_then(|s| s.parse::<u32>().ok());
-                let t_attr = read_attr(c_attrs, "t").unwrap_or_else(|| "n".to_string());
-
-                let (value_obj, type_token, end_pos) = if c_self_closing {
-                    (py.None(), "blank", c_open_end)
-                } else {
-                    let c_close = find_close_tag(bytes, c_open_end, b"c").ok_or_else(|| {
-                        PyErr::new::<PyIOError, _>("Streaming reader: unterminated <c>".to_string())
-                    })?;
-                    let inner = &bytes[c_open_end..c_close];
-                    let (val, tok) = parse_cell_inner(py, inner, &t_attr, &self.sst)?;
-                    (val, tok, c_close + b"</c>".len())
-                };
-
-                let col = match coord.as_deref() {
-                    Some(c) => {
-                        let (_r, c0) = a1_to_row_col(c).map_err(PyErr::new::<PyValueError, _>)?;
-                        c0 + 1
-                    }
-                    None => cells.last().map(|c| c.col + 1).unwrap_or(1),
-                };
-
-                cells.push(ParsedCell {
-                    col,
-                    value: value_obj,
-                    style_id,
-                    cell_type: type_token,
-                });
-
-                p = end_pos;
+        loop {
+            self.event_buf.clear();
+            let event = reader
+                .read_event_into(&mut self.event_buf)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Streaming reader XML: {e}")))?;
+            match event {
+                Event::Start(e) if e.local_name().as_ref() == b"row" => {
+                    let row_idx = parse_row_index_from_start(&e)?;
+                    drop(e);
+                    let cells = read_cells_until_row_end(
+                        reader,
+                        &mut self.event_buf,
+                        py,
+                        &self.sst,
+                        row_idx,
+                    )?;
+                    return self.row_result(row_idx, cells);
+                }
+                Event::Empty(e) if e.local_name().as_ref() == b"row" => {
+                    let row_idx = parse_row_index_from_start(&e)?;
+                    return self.row_result(row_idx, Vec::new());
+                }
+                Event::Eof => return Ok(StepResult::Done),
+                _ => {}
             }
-            self.cursor = close + b"</row>".len();
         }
+    }
 
+    fn row_result(&mut self, row_idx: u32, mut cells: Vec<ParsedCell>) -> PyResult<StepResult> {
         if let Some(min) = self.min_row {
             if row_idx < min {
                 return Ok(StepResult::Skip);
@@ -411,11 +404,168 @@ impl StreamingSheetReader {
     }
 }
 
+fn read_cells_until_row_end(
+    reader: &mut XmlReader<BufReader<File>>,
+    buf: &mut Vec<u8>,
+    py: Python<'_>,
+    sst: &[String],
+    row_idx: u32,
+) -> PyResult<Vec<ParsedCell>> {
+    let mut cells: Vec<ParsedCell> = Vec::new();
+
+    loop {
+        buf.clear();
+        let event = reader
+            .read_event_into(buf)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("Streaming reader XML: {e}")))?;
+        match event {
+            Event::Start(e) if e.local_name().as_ref() == b"c" => {
+                let coord = attr_value(&e, b"r");
+                let style_id = attr_value(&e, b"s").and_then(|s| s.parse::<u32>().ok());
+                let t_attr = attr_value(&e, b"t").unwrap_or_else(|| "n".to_string());
+                drop(e);
+                let (value, cell_type) = read_cell_contents(reader, buf, py, &t_attr, sst)?;
+                let col = cell_column(coord.as_deref(), &cells)?;
+                cells.push(ParsedCell {
+                    col,
+                    value,
+                    style_id,
+                    cell_type,
+                });
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"c" => {
+                let coord = attr_value(&e, b"r");
+                let style_id = attr_value(&e, b"s").and_then(|s| s.parse::<u32>().ok());
+                let col = cell_column(coord.as_deref(), &cells)?;
+                cells.push(ParsedCell {
+                    col,
+                    value: py.None(),
+                    style_id,
+                    cell_type: "blank",
+                });
+            }
+            Event::End(e) if e.local_name().as_ref() == b"row" => return Ok(cells),
+            Event::Eof => {
+                return Err(PyErr::new::<PyIOError, _>(format!(
+                    "Streaming reader: unterminated <row r=\"{row_idx}\">"
+                )));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn read_cell_contents(
+    reader: &mut XmlReader<BufReader<File>>,
+    buf: &mut Vec<u8>,
+    py: Python<'_>,
+    t_attr: &str,
+    sst: &[String],
+) -> PyResult<(PyObjectOwned, &'static str)> {
+    let mut v_text: Option<String> = None;
+    let mut f_text: Option<String> = None;
+    let mut inline_text: Option<String> = None;
+    let mut in_v = false;
+    let mut in_f = false;
+    let mut in_t = false;
+
+    loop {
+        buf.clear();
+        let event = reader
+            .read_event_into(buf)
+            .map_err(|e| PyErr::new::<PyIOError, _>(format!("Streaming reader XML: {e}")))?;
+        match event {
+            Event::Start(e) => match e.local_name().as_ref() {
+                b"v" => in_v = true,
+                b"f" => in_f = true,
+                b"t" => in_t = true,
+                _ => {}
+            },
+            Event::Empty(e) => match e.local_name().as_ref() {
+                b"v" => {
+                    v_text.get_or_insert_with(String::new);
+                }
+                b"f" => {
+                    f_text.get_or_insert_with(String::new);
+                }
+                b"t" => {
+                    inline_text.get_or_insert_with(String::new);
+                }
+                _ => {}
+            },
+            Event::Text(t) => {
+                let text = t
+                    .unescape()
+                    .map_err(|e| PyErr::new::<PyIOError, _>(format!("cell text decode: {e}")))?;
+                if in_v {
+                    v_text.get_or_insert_with(String::new).push_str(&text);
+                } else if in_f {
+                    f_text.get_or_insert_with(String::new).push_str(&text);
+                } else if in_t {
+                    inline_text.get_or_insert_with(String::new).push_str(&text);
+                }
+            }
+            Event::End(e) => match e.local_name().as_ref() {
+                b"c" => {
+                    return build_cell_object(py, t_attr, f_text, v_text.or(inline_text), sst);
+                }
+                b"v" => in_v = false,
+                b"f" => in_f = false,
+                b"t" => in_t = false,
+                _ => {}
+            },
+            Event::Eof => {
+                return Err(PyErr::new::<PyIOError, _>(
+                    "Streaming reader: unterminated <c>".to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn cell_column(coord: Option<&str>, cells: &[ParsedCell]) -> PyResult<u32> {
+    match coord {
+        Some(c) => {
+            let (_r, c0) = a1_to_row_col(c).map_err(PyErr::new::<PyValueError, _>)?;
+            Ok(c0 + 1)
+        }
+        None => Ok(cells.last().map(|c| c.col + 1).unwrap_or(1)),
+    }
+}
+
+fn parse_row_index_from_start(e: &BytesStart<'_>) -> PyResult<u32> {
+    match attr_value(e, b"r") {
+        Some(s) => s.parse().map_err(|_| {
+            PyErr::new::<PyIOError, _>(format!("Streaming reader: bad row index {s:?}"))
+        }),
+        None => Err(PyErr::new::<PyIOError, _>(
+            "Streaming reader: <row> missing r= attribute".to_string(),
+        )),
+    }
+}
+
+fn attr_value(e: &BytesStart<'_>, name: &[u8]) -> Option<String> {
+    for attr in e.attributes().with_checks(false).flatten() {
+        let key = attr.key.as_ref();
+        let local = key.rsplit(|b| *b == b':').next().unwrap_or(key);
+        if local == name {
+            let value = attr
+                .unescape_value()
+                .map(|v| v.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(attr.value.as_ref()).into_owned());
+            return Some(value);
+        }
+    }
+    None
+}
+
 // ----------------------------------------------------------------------
 // Low-level XML scanning helpers.
 // ----------------------------------------------------------------------
 
 /// Return the index of the next `<TAG` (followed by space / `>` / `/`).
+#[cfg(test)]
 fn find_tag_open(bytes: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
     let needle_len = 1 + tag.len();
     let mut i = start;
@@ -432,6 +582,7 @@ fn find_tag_open(bytes: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
 }
 
 /// Return the index of the next `</TAG>` token.
+#[cfg(test)]
 fn find_close_tag(bytes: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
     let needle_len = 3 + tag.len();
     let mut i = start;
@@ -449,6 +600,7 @@ fn find_close_tag(bytes: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
 
 /// Parse the open tag starting at `bytes[start]` (which should be `<`).
 /// Returns `(attrs_substring, byte_index_after_open_tag, self_closing)`.
+#[cfg(test)]
 fn read_open_tag(bytes: &[u8], start: usize) -> PyResult<(&str, usize, bool)> {
     debug_assert_eq!(bytes.get(start), Some(&b'<'));
     let mut i = start + 1;
@@ -484,6 +636,7 @@ fn read_open_tag(bytes: &[u8], start: usize) -> PyResult<(&str, usize, bool)> {
 }
 
 /// Parse `r="A1"` from an attribute substring.
+#[cfg(test)]
 fn read_attr(attrs: &str, name: &str) -> Option<String> {
     // Build candidate offsets for `<sep>name=`.
     let mut idx: Option<usize> = None;
@@ -522,6 +675,7 @@ fn read_attr(attrs: &str, name: &str) -> Option<String> {
     )
 }
 
+#[cfg(test)]
 fn parse_row_index(attrs: &str) -> PyResult<u32> {
     match read_attr(attrs, "r") {
         Some(s) => s.parse().map_err(|_| {
@@ -533,6 +687,7 @@ fn parse_row_index(attrs: &str) -> PyResult<u32> {
     }
 }
 
+#[cfg(test)]
 fn parse_cell_inner(
     py: Python<'_>,
     inner: &[u8],
@@ -543,9 +698,16 @@ fn parse_cell_inner(
     let f_text = extract_inner_text(inner, b"f");
     let is_text = extract_is_text(inner);
 
-    let formula = f_text;
-    let raw_value = v_text.or(is_text);
+    build_cell_object(py, t_attr, f_text, v_text.or(is_text), sst)
+}
 
+fn build_cell_object(
+    py: Python<'_>,
+    t_attr: &str,
+    formula: Option<String>,
+    raw_value: Option<String>,
+    sst: &[String],
+) -> PyResult<(PyObjectOwned, &'static str)> {
     match t_attr {
         "s" => {
             let v = raw_value.unwrap_or_default();
@@ -621,6 +783,7 @@ fn build_formula_dict(py: Python<'_>, formula: &str, cached: &str) -> PyResult<P
     Ok(d.into_py_any(py)?)
 }
 
+#[cfg(test)]
 fn extract_inner_text(inner: &[u8], tag: &[u8]) -> Option<String> {
     let open = find_tag_open(inner, 0, tag)?;
     let (_, after_open, self_closing) = read_open_tag(inner, open).ok()?;
@@ -632,6 +795,7 @@ fn extract_inner_text(inner: &[u8], tag: &[u8]) -> Option<String> {
     Some(unescape_xml(raw))
 }
 
+#[cfg(test)]
 fn extract_is_text(inner: &[u8]) -> Option<String> {
     let is_open = find_tag_open(inner, 0, b"is")?;
     let (_, after_is, _) = read_open_tag(inner, is_open).ok()?;
@@ -656,6 +820,7 @@ fn extract_is_text(inner: &[u8]) -> Option<String> {
     Some(out)
 }
 
+#[cfg(test)]
 fn unescape_xml(b: &[u8]) -> String {
     if !b.contains(&b'&') {
         return String::from_utf8_lossy(b).into_owned();
@@ -715,6 +880,23 @@ mod tests {
     fn extract_is_inline() {
         let inner = b"<is><t>hello</t></is>";
         assert_eq!(extract_is_text(inner).as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn parse_row_index_basic() {
+        assert_eq!(parse_row_index(" r=\"12\"").unwrap(), 12);
+        assert!(parse_row_index(" r=\"bad\"").is_err());
+    }
+
+    #[test]
+    fn parse_cell_inner_number() {
+        pyo3::Python::initialize();
+        Python::attach(|py| {
+            let (obj, kind) = parse_cell_inner(py, b"<v>42</v>", "n", &[]).unwrap();
+            let value: i64 = obj.extract(py).unwrap();
+            assert_eq!(kind, "n");
+            assert_eq!(value, 42);
+        });
     }
 
     #[test]

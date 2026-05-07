@@ -15,6 +15,8 @@ from __future__ import annotations
 import datetime as dt
 import os
 from pathlib import Path
+import re
+import zipfile
 
 import openpyxl
 import pytest
@@ -107,6 +109,30 @@ def _build_synthetic_60k(path: Path) -> Path:
     return path
 
 
+def _build_fake_high_dimension(path: Path) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "BigDim"
+    ws["A1"] = "only-row"
+    raw_path = path.with_name("raw-high-dimension.xlsx")
+    wb.save(raw_path)
+    with (
+        zipfile.ZipFile(raw_path, "r") as src,
+        zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                data = re.sub(
+                    rb'(<dimension\b[^>]*\bref=")[^"]+(")',
+                    rb"\g<1>A1:A50001\2",
+                    data,
+                    count=1,
+                )
+            dst.writestr(info, data)
+    return path
+
+
 @pytest.fixture
 def basic_xlsx(tmp_path: Path) -> Path:
     return _build_basic(tmp_path / "basic.xlsx")
@@ -139,6 +165,49 @@ def test_streaming_values_only_yields_1000_rows(basic_xlsx: Path) -> None:
     assert len(rows) == 1000
     assert rows[0] == (11, 12, 13, 14, 15)
     assert rows[-1] == (10001, 10002, 10003, 10004, 10005)
+
+
+def test_read_only_values_only_does_not_hydrate_cells_or_bulk_read(
+    basic_xlsx: Path,
+) -> None:
+    class BulkGuard:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        def read_sheet_values_plain(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("streaming values_only must not use bulk eager read")
+
+        def read_sheet_values(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("streaming values_only must not use bulk eager read")
+
+        def read_sheet_bounds(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("read_only streaming must not use eager bounds read")
+
+        def read_sheet_dimensions(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("read_only streaming must not use eager dimensions read")
+
+    wb = wolfxl.load_workbook(basic_xlsx, read_only=True)
+    wb._rust_reader = BulkGuard(wb._rust_reader)  # noqa: SLF001
+    ws = wb["Sheet1"]
+    assert ws._cells == {}  # noqa: SLF001
+
+    rows = list(ws.iter_rows(values_only=True))
+
+    assert rows[0] == (11, 12, 13, 14, 15)
+    assert ws._cells == {}  # noqa: SLF001
+
+
+def test_read_only_values_property_does_not_hydrate_cells(basic_xlsx: Path) -> None:
+    wb = wolfxl.load_workbook(basic_xlsx, read_only=True)
+    ws = wb["Sheet1"]
+
+    first = next(ws.values)
+
+    assert first == (11, 12, 13, 14, 15)
+    assert ws._cells == {}  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +386,36 @@ def test_eager_mode_unchanged(basic_xlsx: Path) -> None:
 # ---------------------------------------------------------------------------
 # 10. Auto-trigger — a > 50k-row workbook streams even without read_only=True.
 # ---------------------------------------------------------------------------
+
+
+def test_auto_trigger_uses_dimension_head_not_eager_reader(tmp_path: Path) -> None:
+    class EagerGuard:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        def read_sheet_values_plain(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("auto-stream detection must not bulk-read values")
+
+        def read_sheet_values(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("auto-stream detection must not bulk-read values")
+
+        def read_sheet_bounds(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("auto-stream detection must not eagerly read bounds")
+
+        def read_sheet_dimensions(self, *args: object, **kwargs: object) -> object:
+            raise AssertionError("auto-stream detection must not eagerly read dimensions")
+
+    path = _build_fake_high_dimension(tmp_path / "fake-high-dimension.xlsx")
+    wb = wolfxl.load_workbook(path)
+    wb._rust_reader = EagerGuard(wb._rust_reader)  # noqa: SLF001
+    ws = wb["BigDim"]
+
+    assert should_auto_stream(ws) is True
+    assert next(ws.iter_rows(values_only=True)) == ("only-row",)
+    assert ws._cells == {}  # noqa: SLF001
 
 
 @pytest.mark.slow

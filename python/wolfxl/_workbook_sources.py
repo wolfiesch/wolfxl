@@ -502,6 +502,7 @@ def from_bytes(
     needs_tempfile = modify or bytes_open is None
 
     if needs_tempfile:
+        import os
         import tempfile
 
         with tempfile.NamedTemporaryFile(
@@ -510,25 +511,31 @@ def from_bytes(
             tmp.write(data_bytes)
             tmp_path = tmp.name
 
-        if modify:
-            wb = from_patcher(
-                cls,
-                tmp_path,
-                data_only=data_only,
-                keep_links=keep_links,
-                keep_vba=keep_vba,
-                permissive=permissive,
-            )
-        else:
-            wb = from_reader(
-                cls,
-                tmp_path,
-                data_only=data_only,
-                keep_links=keep_links,
-                keep_vba=keep_vba,
-                permissive=permissive,
-                read_only=read_only,
-            )
+        try:
+            if modify:
+                wb = from_patcher(
+                    cls,
+                    tmp_path,
+                    data_only=data_only,
+                    keep_links=keep_links,
+                    keep_vba=keep_vba,
+                    permissive=permissive,
+                )
+            else:
+                wb = from_reader(
+                    cls,
+                    tmp_path,
+                    data_only=data_only,
+                    keep_links=keep_links,
+                    keep_vba=keep_vba,
+                    permissive=permissive,
+                    read_only=read_only,
+                )
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            finally:
+                raise
         wb._tempfile_path = tmp_path
         return wb
 

@@ -90,7 +90,7 @@ def build_xlsx_wb(
     Returns:
         A workbook instance with sheet proxies and pending queues initialized.
     """
-    wb = object.__new__(cls)
+    wb: Any = object.__new__(cls)
     wb._rust_writer = None
     wb._rust_patcher = rust_patcher
     wb._rust_reader = rust_reader
@@ -121,7 +121,7 @@ def build_xlsb_xls_wb(
     source_path: str | None,
 ) -> Any:
     """Wire up read-mode workbook fields shared by xlsb and xls inputs."""
-    wb = object.__new__(cls)
+    wb: Any = object.__new__(cls)
     wb._rust_writer = None
     wb._rust_patcher = None
     wb._rust_reader = rust_book
@@ -133,6 +133,7 @@ def build_xlsb_xls_wb(
     wb._evaluator = None
     wb._read_only = False
     wb._source_path = source_path
+    wb._keep_links = True
     wb._format = fmt
     _initialize_sheet_proxies(wb, rust_book)
     initialize_pending_state(wb)

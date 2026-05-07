@@ -231,6 +231,29 @@ def test_serialize_pivot_cache_calc_field_byte_stable():
     assert a == b
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_serialize_pivot_cache_rejects_non_finite_shared_item_bounds(bad):
+    from wolfxl._rust import serialize_pivot_cache_dict
+
+    pc = _materialized_cache()
+    d = pc.to_rust_dict()
+    d["fields"][1]["shared_items"]["min_value"] = bad
+    with pytest.raises(ValueError, match="non-finite floats"):
+        serialize_pivot_cache_dict(d)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_serialize_pivot_records_rejects_non_finite_numeric_values(bad):
+    from wolfxl._rust import serialize_pivot_records_dict
+
+    pc = _materialized_cache()
+    cache_d = pc.to_rust_dict()
+    records_d = pc.to_rust_records_dict()
+    records_d["records"][0][1] = {"kind": "number", "value": bad}
+    with pytest.raises(ValueError, match="non-finite floats"):
+        serialize_pivot_records_dict(cache_d, records_d)
+
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------

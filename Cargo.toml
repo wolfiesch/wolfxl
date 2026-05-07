@@ -52,6 +52,7 @@ wolfxl-structural = { path = "crates/wolfxl-structural", version = "0.1" }
 wolfxl-classify = { path = "crates/wolfxl-classify", version = "0.1" }
 wolfxl-pivot = { path = "crates/wolfxl-pivot", version = "2.0.0" }
 wolfxl-autofilter = { path = "crates/wolfxl-autofilter", version = "2.0.0" }
+tempfile.workspace = true
 
 [build-dependencies]
 pyo3-build-config = "0.28"

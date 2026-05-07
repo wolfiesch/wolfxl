@@ -320,6 +320,7 @@ def _copy_worksheet_modify_mode(
     wb._sheets[new_title] = ws  # noqa: SLF001
     _copy_sheet_setup_state(source, ws)
     _copy_print_titles(source, ws)
+    _copy_pending_charts(source, ws)
     return ws
 
 
@@ -366,3 +367,13 @@ def _copy_print_titles(source: Worksheet, dst: Worksheet) -> None:
         dst._print_title_rows = source._print_title_rows  # noqa: SLF001
     if getattr(source, "_print_title_cols", None) is not None:
         dst._print_title_cols = source._print_title_cols  # noqa: SLF001
+
+
+def _copy_pending_charts(source: Worksheet, dst: Worksheet) -> None:
+    """Clone high-level charts queued on the source in the same save."""
+    pending = getattr(source, "_pending_charts", None)
+    if not pending:
+        return
+    import copy as _copy
+
+    dst._pending_charts.extend(_copy.deepcopy(pending))  # noqa: SLF001

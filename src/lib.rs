@@ -3,6 +3,7 @@ use pyo3::types::{PyDict, PyList};
 
 type PyObject = Py<PyAny>;
 
+mod atomic_save;
 mod calamine_xlsb_xls_backend;
 mod native_reader_backend;
 mod native_reader_cell_helpers;

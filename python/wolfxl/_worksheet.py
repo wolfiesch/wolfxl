@@ -795,6 +795,27 @@ class Worksheet:
         """
         materialize_bulk_writes(self)
 
+    def to_dataframe(
+        self,
+        *,
+        header: bool = True,
+        min_row: int | None = None,
+        max_row: int | None = None,
+        min_col: int | None = None,
+        max_col: int | None = None,
+    ) -> Any:
+        """Return worksheet values as a pandas DataFrame."""
+        from wolfxl.utils.dataframe import worksheet_to_dataframe
+
+        return worksheet_to_dataframe(
+            self,
+            header=header,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+        )
+
     @staticmethod
     def _extract_non_batchable(
         grid: list[list[Any]], start_row: int, start_col: int,

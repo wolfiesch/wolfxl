@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from wolfxl._workbook_state import CopyOptions as CopyOptions
 from wolfxl._workbook_state import initialize_pending_state
+from wolfxl._zip_safety import read_entry, validate_zipfile
 from wolfxl import _workbook_features
 from wolfxl import _workbook_calc
 from wolfxl import _workbook_metadata
@@ -88,6 +89,7 @@ class Workbook:
         # Streaming read flag (write mode never streams).
         self._read_only: bool = False
         self._source_path: str | None = None
+        self._keep_links: bool = True
         self._keep_vba: bool = False
         # File format the workbook came from. Write
         # mode is xlsx by definition; the read/modify constructors set
@@ -368,7 +370,6 @@ class Workbook:
         cached = getattr(self, "_external_links_cache", None)
         if cached is not None:
             return cached
-
         from wolfxl import _external_links as _el
 
         if not getattr(self, "_keep_links", True):
@@ -500,8 +501,9 @@ class Workbook:
             return None
         try:
             with zipfile.ZipFile(source_path) as zf:
-                styles_xml = zf.read("xl/styles.xml")
-        except (KeyError, OSError, zipfile.BadZipFile):
+                validate_zipfile(zf)
+                styles_xml = read_entry(zf, "xl/styles.xml")
+        except (KeyError, OSError, zipfile.BadZipFile, ValueError):
             self._style_names_cache = ["Normal"]
             return list(self._style_names_cache)
         root = ET.fromstring(styles_xml)

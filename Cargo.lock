@@ -1350,6 +1350,7 @@ dependencies = [
  "pyo3",
  "pyo3-build-config",
  "quick-xml 0.37.5",
+ "tempfile",
  "wolfxl-autofilter",
  "wolfxl-classify",
  "wolfxl-core",

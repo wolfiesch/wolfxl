@@ -433,6 +433,34 @@ pub fn rels_path_for(part_path: &str) -> Option<String> {
     }
 }
 
+/// Resolve a relative or absolute OOXML relationship target against a base
+/// directory.
+///
+/// `base_dir` is the directory containing the source part (for example
+/// `xl/worksheets` for `xl/worksheets/sheet1.xml`). Absolute package targets
+/// beginning with `/` resolve from the ZIP root.
+pub fn resolve_target(base_dir: &str, target: &str) -> String {
+    let (mut parts, target_iter): (Vec<&str>, _) = if let Some(stripped) = target.strip_prefix('/')
+    {
+        (Vec::new(), stripped.split('/'))
+    } else {
+        (
+            base_dir.split('/').filter(|p| !p.is_empty()).collect(),
+            target.split('/'),
+        )
+    };
+    for seg in target_iter {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -638,6 +666,22 @@ mod tests {
     fn rels_path_for_content_types_returns_none() {
         assert_eq!(rels_path_for("[Content_Types].xml"), None);
         assert_eq!(rels_path_for(""), None);
+    }
+
+    #[test]
+    fn resolve_target_normalizes_relative_paths() {
+        assert_eq!(
+            resolve_target("xl/worksheets", "../drawings/drawing1.xml"),
+            "xl/drawings/drawing1.xml"
+        );
+        assert_eq!(
+            resolve_target("xl/drawings", "../charts/chart1.xml"),
+            "xl/charts/chart1.xml"
+        );
+        assert_eq!(
+            resolve_target("xl/drawings", "/xl/media/image1.png"),
+            "xl/media/image1.png"
+        );
     }
 
     #[test]

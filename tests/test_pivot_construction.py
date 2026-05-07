@@ -78,6 +78,27 @@ def test_cache_value_constructors():
     assert CacheValue.error("#REF!").to_rust_dict() == {"kind": "error", "value": "#REF!"}
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_cache_value_number_rejects_non_finite(value):
+    with pytest.raises(ValueError, match="non-finite floats"):
+        CacheValue.number(value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_pivot_cache_materialize_rejects_non_finite_numbers(value):
+    data = {
+        "A1": "region", "B1": "revenue",
+        "A2": "North", "B2": value,
+    }
+    ws = _StubWorksheet("Sheet1", data)
+    src = Reference(worksheet=ws, min_col=1, min_row=1, max_col=2, max_row=2)
+    pc = PivotCache(source=src)
+    pc._cache_id = 0
+
+    with pytest.raises(ValueError, match="non-finite floats"):
+        pc._materialize(ws)
+
+
 def test_cache_value_date_normalizes_to_iso():
     from datetime import date
     cv = CacheValue.date(date(2026, 1, 15))
