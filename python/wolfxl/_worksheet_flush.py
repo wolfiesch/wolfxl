@@ -73,12 +73,13 @@ def _autofilter_has_state(autofilter: Any) -> bool:
 
 
 def _set_autofilter_native(writer: Any, sheet: str, autofilter: Any) -> None:
-    """Set one native autofilter, preserving the defensive save path."""
+    """Set one native autofilter."""
     try:
         writer.set_autofilter_native(sheet, autofilter.to_rust_dict())
-    except Exception:
-        # Defensive: do not poison the save path on a malformed filter spec.
-        pass
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to write autofilter for sheet {sheet!r}"
+        ) from exc
 
 
 def flush_compat_properties(ws: Worksheet, writer: Any) -> None:

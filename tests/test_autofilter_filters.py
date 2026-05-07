@@ -7,6 +7,7 @@ lives in the Rust crate's own tests.
 """
 from __future__ import annotations
 
+import pytest
 
 from wolfxl.worksheet.filters import (
     AutoFilter,
@@ -382,6 +383,20 @@ class TestSerializeAutofilterDict:
         b = _rust.serialize_autofilter_dict(af.to_rust_dict()).decode()
         assert "<sortState" in b
         assert '<sortCondition ref="A2:A100" descending="1"/>' in b
+
+
+def test_set_autofilter_native_wraps_writer_errors() -> None:
+    from wolfxl._worksheet_flush import _set_autofilter_native
+
+    class FailingWriter:
+        def set_autofilter_native(self, _sheet, _payload):
+            raise ValueError("bad filter")
+
+    af = AutoFilter(ref="A1:A10")
+    with pytest.raises(RuntimeError, match="failed to write autofilter for sheet 'Sheet'") as exc:
+        _set_autofilter_native(FailingWriter(), "Sheet", af)
+
+    assert isinstance(exc.value.__cause__, ValueError)
 
 
 class TestWorksheetAutoFilterIntegration:
