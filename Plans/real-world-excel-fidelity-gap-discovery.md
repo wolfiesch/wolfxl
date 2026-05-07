@@ -25,7 +25,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Corpus diversity audit | `scripts/audit_ooxml_corpus_buckets.py` inventories workbook provenance and feature buckets across fixture directories or ad hoc workbook drops | Current external-oracle run is `ready=true` over 22 workbooks with no missing buckets across Excel-authored, external-tool, macro/VBA, PowerPivot, slicer/timeline, embedded/control, external-link, chart, CF, table/validation, drawing/comment/media, and workbook-global coverage | It proves bucket diversity, not behavioral preservation by itself. It should be paired with mutation, render, app-smoke, and gap-radar gates |
 | App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP. It accepts `--mutation` so intentionally edited workbooks can be app-smoked too | Existing app reports contribute to the all-evidence gate with source and intentional app-open coverage for every current surface | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class. The mutation app-smoke evidence currently relies heavily on LibreOffice; Microsoft Excel mutation-smoke remains a stronger but slower optional gate |
 | Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes pages with `pdftoppm`, and compares page images with ImageMagick RMSE. It also accepts `--mutation` for intentional edit render-smoke runs where the changed workbook is expected to render, but not expected to pixel-match the original. It supports recursive fixture discovery, deterministic page sampling for very large PDFs, and a byte-identical-xlsx short circuit for no-op saves | Existing render reports contribute no-op and intentional render evidence to the all-evidence gate. A broader live SynthGL recursive run passed 31 of 32 workbooks with full render RMSE 0.0; the remaining giant workbook has exact byte-identical `.xlsx` output after no-op save. Guarded mode passes all 32 live SynthGL workbooks | No-op render comparisons are pixel equality checks. Intentional mutation runs are renderability checks, not a proof that every intentional edit's visual result is semantically perfect. It still does not compare Excel-rendered pixels or interactive slicer/timeline state |
-| Broader real-file corpus sweep | `scripts/run_ooxml_fidelity_mutations.py --recursive` can now walk nested workbook trees without flattening them first. Latest live SynthGL sweep covered `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` recursively | 32 live SynthGL workbooks pass no-op, marker-cell, and style-cell modify-save audits: 96 results, 0 failures. The same 32 workbooks also pass rename-first-sheet and move-formula-range structural audits: 64 results, 0 failures | This is broader than the pinned oracle pack, but still not a full real-world Excel corpus; rendered comparison over this corpus and richer feature-aware mutations remain open |
+| Broader real-file corpus sweep | `scripts/run_ooxml_fidelity_mutations.py --recursive` can now walk nested workbook trees without flattening them first. Latest live SynthGL sweep covered `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` recursively | 32 live SynthGL workbooks pass no-op, marker-cell, style-cell, rename-first-sheet, and move-formula-range audits in one 160-result sweep with 0 failures. Expected drift is limited to intentional style/theme changes from `style_cell` and formula-reference movement from `move_formula_range` | This is broader than the pinned oracle pack, but still not a full real-world Excel corpus; rendered comparison over this corpus and richer feature-aware mutations remain open |
 
 ## Risk matrix
 
@@ -273,10 +273,11 @@ Gap ledger:
      now supports `--recursive` discovery for nested fixture trees. The live
      SynthGL fixture tree at
      `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` has
-     32 `.xlsx` workbooks and passes no-op, marker-cell, and style-cell
-     modify-save audits with 96 results and 0 failures. The same corpus passes
-     rename-first-sheet and move-formula-range structural audits with 64
-     results and 0 failures.
+     32 `.xlsx` workbooks and passes a combined no-op, marker-cell,
+     style-cell, rename-first-sheet, and move-formula-range sweep with 160
+     results and 0 failures. `style_cell` and `move_formula_range` report
+     expected drift only for the intentionally introduced style/theme and
+     formula-reference changes.
    - Latest broader-corpus oracle-hardening bug found: a SynthGL workbook with
      drawing hyperlink targets like `#'Sheet1'!A1` exposed a false positive in
      the dangling-relationship audit. Fragment targets are in-workbook

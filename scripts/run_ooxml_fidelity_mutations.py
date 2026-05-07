@@ -107,6 +107,9 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "move_formula_range": {
         "worksheet_formulas_semantic_drift",
     },
+    "style_cell": {
+        "style_theme_semantic_drift",
+    },
 }
 EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     # Feature-add mutations should only accept semantic drift that contains
@@ -120,6 +123,9 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "move_formula_range": {
         "worksheet_formulas_semantic_drift": "Z2",
+    },
+    "style_cell": {
+        "style_theme_semantic_drift": "FF1F4E79",
     },
     "delete_first_row": {
         "external_links_semantic_drift": "worksheet_formulas",

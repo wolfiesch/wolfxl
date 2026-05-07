@@ -51,7 +51,7 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
     assert statuses == {
         "no_op": "passed",
         "marker_cell": "passed",
-        "style_cell": "passed",
+        "style_cell": "passed_with_expected_drift",
         "insert_tail_row": "passed",
         "insert_tail_col": "passed",
         "delete_marker_tail_row": "passed",
@@ -472,6 +472,79 @@ def test_runner_separates_expected_feature_add_drift(
         "add_data_validation": "passed_with_expected_drift",
         "add_conditional_formatting": "passed_with_expected_drift",
     }
+
+
+def test_runner_separates_expected_style_cell_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "style_theme_semantic_drift",
+                    "severity": "error",
+                    "part": "style_theme",
+                    "message": "expected style mutation contains color FF1F4E79",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("style_cell",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issue_count"] == 1
+    assert result["expected_issues"][0]["kind"] == "style_theme_semantic_drift"
+
+
+def test_runner_does_not_hide_style_loss_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "style_theme_semantic_drift",
+                    "severity": "error",
+                    "part": "style_theme",
+                    "message": "before had custom style after={}",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("style_cell",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["expected_issue_count"] == 0
+    assert result["issues"][0]["kind"] == "style_theme_semantic_drift"
 
 
 def test_runner_does_not_hide_feature_add_loss_drift(
