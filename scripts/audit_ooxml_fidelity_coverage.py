@@ -191,6 +191,7 @@ def audit_coverage(
     reports: Iterable[Path] = (),
     render_reports: Iterable[Path] = (),
     app_reports: Iterable[Path] = (),
+    recursive: bool = False,
     require_render: bool = False,
     require_intentional_render: bool = False,
     require_app: bool = False,
@@ -206,7 +207,9 @@ def audit_coverage(
     )
     app_passes, intentional_app_passes = _app_passes_by_fixture(app_report_paths)
     fixtures = []
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
+    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
+        fixture_dir, recursive=recursive
+    ):
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
@@ -264,6 +267,7 @@ def audit_coverage(
         "mutation_report_count": len(report_paths),
         "render_report_count": len(render_report_paths),
         "app_report_count": len(app_report_paths),
+        "recursive": recursive,
         "render_required": require_render,
         "intentional_render_required": require_intentional_render,
         "app_required": require_app,
@@ -615,6 +619,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Discover workbooks recursively for non-manifest fixture dirs.",
+    )
+    parser.add_argument(
         "--require-render",
         action="store_true",
         help=(
@@ -698,6 +707,7 @@ def main(argv: list[str] | None = None) -> int:
         reports=args.report,
         render_reports=args.render_report,
         app_reports=args.app_report,
+        recursive=args.recursive,
         require_render=args.require_render,
         require_intentional_render=args.require_intentional_render,
         require_app=args.require_app,

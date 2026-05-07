@@ -62,6 +62,42 @@ def test_coverage_audit_reports_missing_real_excel_and_structural_evidence(
     assert report["intentional_app_required"] is False
 
 
+def test_coverage_audit_can_discover_recursive_fixture_trees(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    nested_dir = fixture_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    fixture = nested_dir / "chart.xlsx"
+    _write_chart_fixture(fixture)
+    report_path = tmp_path / "mutation-report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": "nested/chart.xlsx",
+                        "mutation": "add_remove_chart",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(
+        fixture_dir,
+        reports=[report_path],
+        recursive=True,
+    )
+
+    assert report["recursive"] is True
+    assert report["fixture_count"] == 1
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert chart["fixtures"] == ["nested/chart.xlsx"]
+    assert chart["structural_mutation_fixtures"] == ["nested/chart.xlsx"]
+
+
 def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
