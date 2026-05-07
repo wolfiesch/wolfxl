@@ -151,6 +151,10 @@ def _buckets_for_workbook(
         buckets.add("macro_vba")
     if "data_model" in feature_keys:
         buckets.add("powerpivot_data_model")
+    if "python" in feature_keys:
+        buckets.add("python_in_excel")
+    if "sheet_metadata" in feature_keys:
+        buckets.add("sheet_metadata")
     if {"slicer", "timeline"} & feature_keys:
         buckets.add("slicer_or_timeline")
     if {"embedded_object", "drawing_object"} & feature_keys:

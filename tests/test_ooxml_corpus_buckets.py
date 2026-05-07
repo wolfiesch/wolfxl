@@ -79,6 +79,8 @@ def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) ->
         "excel_authored",
         "macro_vba",
         "powerpivot_data_model",
+        "python_in_excel",
+        "sheet_metadata",
         "slicer_or_timeline",
         "embedded_object_or_control",
         "external_link",
@@ -156,6 +158,21 @@ def _write_feature_rich_workbook(path: Path) -> None:
             "xl/ctrlProps/ctrlProp1.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List"/>""",
             "xl/model/item.data": b"model",
+            "xl/python.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<python xmlns="http://schemas.microsoft.com/office/spreadsheetml/2023/python">
+  <environmentDefinition id="{11111111-2222-3333-4444-555555555555}">
+    <initialization><code>import pandas as pd</code></initialization>
+  </environmentDefinition>
+</python>""",
+            "xl/metadata.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">
+  <futureMetadata name="XLDAPR" count="1">
+    <bk><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}">
+      <xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/>
+    </ext></extLst></bk>
+  </futureMetadata>
+</metadata>""",
             "xl/vbaProject.bin": b"vba",
         }
     )
