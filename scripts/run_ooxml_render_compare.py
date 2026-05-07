@@ -2,10 +2,10 @@
 """Rendered-output comparison for OOXML fidelity fixtures.
 
 For each fixture, this script performs a WolfXL mutation, exports the workbook
-through LibreOffice, rasterizes the PDFs, and compares corresponding page
-images with ImageMagick's RMSE metric for no-op saves. Intentional mutations
-are render-smoked instead of pixel-compared against the original workbook,
-because their visual output is expected to change.
+through LibreOffice or Microsoft Excel, rasterizes the PDFs, and compares
+corresponding page images with ImageMagick's RMSE metric for no-op saves.
+Intentional mutations are render-smoked instead of pixel-compared against the
+original workbook, because their visual output is expected to change.
 """
 
 from __future__ import annotations
@@ -30,7 +30,8 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 import wolfxl  # noqa: E402
 
 DEFAULT_RENDER_MUTATIONS = ("no_op",)
-RENDER_ENGINE = "libreoffice"
+DEFAULT_RENDER_ENGINE = "libreoffice"
+RENDER_ENGINES = ("libreoffice", "excel")
 PASSING_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
@@ -60,7 +61,10 @@ def run_render_compare(
     max_pages_per_fixture: int | None = None,
     pass_byte_identical_xlsx: bool = False,
     mutations: tuple[str, ...] = DEFAULT_RENDER_MUTATIONS,
+    render_engine: str = DEFAULT_RENDER_ENGINE,
 ) -> dict:
+    if render_engine not in RENDER_ENGINES:
+        raise ValueError(f"unsupported render engine: {render_engine}")
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[RenderCompareResult] = []
@@ -81,13 +85,14 @@ def run_render_compare(
                     max_pages_per_fixture=max_pages_per_fixture,
                     pass_byte_identical_xlsx=pass_byte_identical_xlsx,
                     mutation=mutation,
+                    render_engine=render_engine,
                 )
             )
 
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
-        "render_engine": RENDER_ENGINE,
+        "render_engine": render_engine,
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
         "max_pages_per_fixture": max_pages_per_fixture,
@@ -117,6 +122,7 @@ def _compare_fixture(
     max_pages_per_fixture: int | None,
     pass_byte_identical_xlsx: bool,
     mutation: str,
+    render_engine: str,
 ) -> RenderCompareResult:
     if not fixture_path.is_file():
         return RenderCompareResult(
@@ -150,11 +156,15 @@ def _compare_fixture(
                 ),
             )
 
-    soffice = run_ooxml_app_smoke._find_libreoffice()
     pdftoppm = shutil.which("pdftoppm")
     compare_cmd = _find_imagemagick_compare()
-    if soffice is None:
-        return _skipped(fixture_label, mutation, "soffice not found")
+    soffice = None
+    if render_engine == "libreoffice":
+        soffice = run_ooxml_app_smoke._find_libreoffice()
+        if soffice is None:
+            return _skipped(fixture_label, mutation, "soffice not found")
+    elif not Path(run_ooxml_app_smoke.EXCEL_APP).is_dir():
+        return _skipped(fixture_label, mutation, "Microsoft Excel not found")
     if pdftoppm is None:
         return _skipped(fixture_label, mutation, "pdftoppm not found")
     if compare_cmd is None:
@@ -195,7 +205,9 @@ def _compare_fixture(
                 message="byte-identical xlsx after no-op save; render equivalence inferred",
             )
 
-        after_pdf = _export_pdf(soffice, after_xlsx, work / "after-pdf", timeout)
+        after_pdf = _export_pdf(
+            render_engine, soffice, after_xlsx, work / "after-pdf", timeout
+        )
         after_page_count = _pdf_page_count(after_pdf)
         if mutation != "no_op":
             sampled = (
@@ -235,7 +247,9 @@ def _compare_fixture(
                 message=message,
             )
 
-        before_pdf = _export_pdf(soffice, before_xlsx, work / "before-pdf", timeout)
+        before_pdf = _export_pdf(
+            render_engine, soffice, before_xlsx, work / "before-pdf", timeout
+        )
         before_page_count = _pdf_page_count(before_pdf)
         if before_page_count != after_page_count:
             return RenderCompareResult(
@@ -342,7 +356,23 @@ def _skipped(fixture: str, mutation: str, message: str) -> RenderCompareResult:
     )
 
 
-def _export_pdf(soffice: str, src: Path, outdir: Path, timeout: int) -> Path:
+def _export_pdf(
+    render_engine: str,
+    soffice: str | None,
+    src: Path,
+    outdir: Path,
+    timeout: int,
+) -> Path:
+    if render_engine == "libreoffice":
+        if soffice is None:
+            raise RuntimeError("soffice not found")
+        return _export_pdf_libreoffice(soffice, src, outdir, timeout)
+    if render_engine == "excel":
+        return _export_pdf_excel(src, outdir, timeout)
+    raise ValueError(f"unsupported render engine: {render_engine}")
+
+
+def _export_pdf_libreoffice(soffice: str, src: Path, outdir: Path, timeout: int) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         [
@@ -373,6 +403,64 @@ def _export_pdf(soffice: str, src: Path, outdir: Path, timeout: int) -> Path:
     pdf = outdir / f"{src.stem}.pdf"
     if not pdf.is_file() or pdf.stat().st_size == 0:
         raise RuntimeError(f"LibreOffice did not produce a non-empty PDF at {pdf}")
+    return pdf
+
+
+def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
+    outdir.mkdir(parents=True, exist_ok=True)
+    pdf = outdir / f"{src.stem}.pdf"
+    if pdf.exists():
+        pdf.unlink()
+    open_cmd = (
+        "    open workbook workbook file name workbookPath "
+        "update links do not update links read only true "
+        "ignore read only recommended true add to mru false"
+    )
+    save_cmd = (
+        "    save workbook as active workbook filename pdfPath "
+        "file format PDF file format"
+    )
+    script = "\n".join(
+        [
+            f"set workbookPath to POSIX file {json.dumps(str(src.resolve()))}",
+            f"set pdfPath to POSIX file {json.dumps(str(pdf.resolve()))}",
+            'tell application "Microsoft Excel"',
+            "  set previousDisplayAlerts to display alerts",
+            "  set previousAskToUpdateLinks to ask to update links",
+            "  try",
+            "    set display alerts to false",
+            "    set ask to update links to false",
+            open_cmd,
+            save_cmd,
+            "    close active workbook saving no",
+            "    set ask to update links to previousAskToUpdateLinks",
+            "    set display alerts to previousDisplayAlerts",
+            "  on error errMsg number errNum",
+            "    try",
+            "      close active workbook saving no",
+            "    end try",
+            "    set ask to update links to previousAskToUpdateLinks",
+            "    set display alerts to previousDisplayAlerts",
+            "    error errMsg number errNum",
+            "  end try",
+            "end tell",
+        ]
+    )
+    proc = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+    run_ooxml_app_smoke._close_excel_best_effort()
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Microsoft Excel PDF export failed for {src.name}: "
+            f"exit {proc.returncode}: {proc.stderr[:500]}"
+        )
+    if not pdf.is_file() or pdf.stat().st_size == 0:
+        raise RuntimeError(f"Microsoft Excel did not produce a non-empty PDF at {pdf}")
     return pdf
 
 
@@ -548,6 +636,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--density", type=int, default=96)
     parser.add_argument("--max-normalized-rmse", type=float, default=0.001)
     parser.add_argument(
+        "--render-engine",
+        choices=RENDER_ENGINES,
+        default=DEFAULT_RENDER_ENGINE,
+        help="Spreadsheet app used to export workbooks to PDF before raster comparison.",
+    )
+    parser.add_argument(
         "--max-pages-per-fixture",
         type=int,
         default=None,
@@ -592,6 +686,7 @@ def main(argv: list[str] | None = None) -> int:
         max_pages_per_fixture=args.max_pages_per_fixture,
         pass_byte_identical_xlsx=args.pass_byte_identical_xlsx,
         mutations=tuple(args.mutations or DEFAULT_RENDER_MUTATIONS),
+        render_engine=args.render_engine,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

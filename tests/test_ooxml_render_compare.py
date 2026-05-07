@@ -105,7 +105,7 @@ def test_render_compare_reports_rmse_threshold_failure(tmp_path: Path, monkeypat
     monkeypatch.setattr(
         render_module,
         "_export_pdf",
-        lambda _soffice, src, _outdir, _timeout: before_pdf
+        lambda _engine, _soffice, src, _outdir, _timeout: before_pdf
         if src.name.startswith("before-")
         else after_pdf,
     )
@@ -166,7 +166,7 @@ def test_render_compare_samples_large_pdfs_when_page_limit_set(
     monkeypatch.setattr(
         render_module,
         "_export_pdf",
-        lambda _soffice, src, _outdir, _timeout: before_pdf
+        lambda _engine, _soffice, src, _outdir, _timeout: before_pdf
         if src.name.startswith("before-")
         else after_pdf,
     )
@@ -253,7 +253,7 @@ def test_render_compare_smokes_intentional_mutation_without_rmse(
     )
     monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
 
-    def fake_export(_soffice, src, _outdir, _timeout):
+    def fake_export(_engine, _soffice, src, _outdir, _timeout):
         exported.append(src.name)
         return after_pdf
 
@@ -289,6 +289,63 @@ def test_render_compare_smokes_intentional_mutation_without_rmse(
     assert result["after_pdf"] == str(after_pdf)
     assert result["max_normalized_rmse"] is None
     assert exported == ["after-simple.xlsx"]
+
+
+def test_render_compare_can_use_excel_render_engine(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "simple.xlsx")
+    fake_excel_app = tmp_path / "Microsoft Excel.app"
+    fake_excel_app.mkdir()
+    before_pdf = tmp_path / "before.pdf"
+    after_pdf = tmp_path / "after.pdf"
+    before_pdf.write_bytes(b"%PDF-before")
+    after_pdf.write_bytes(b"%PDF-after")
+    before_page = tmp_path / "before-1.png"
+    after_page = tmp_path / "after-1.png"
+    before_page.write_bytes(b"before")
+    after_page.write_bytes(b"after")
+    seen_engines: list[str] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "EXCEL_APP",
+        str(fake_excel_app),
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+
+    def fake_export(engine, soffice, src, _outdir, _timeout):
+        seen_engines.append(engine)
+        assert soffice is None
+        return before_pdf if src.name.startswith("before-") else after_pdf
+
+    monkeypatch.setattr(render_module, "_export_pdf", fake_export)
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 1)
+    monkeypatch.setattr(
+        render_module,
+        "_rasterize_pdf_pages",
+        lambda _pdftoppm, pdf, _prefix, _pages, _density, _timeout: [before_page]
+        if pdf == before_pdf
+        else [after_page],
+    )
+    monkeypatch.setattr(
+        render_module,
+        "_normalized_rmse",
+        lambda _compare_cmd, _before_page, _after_page, _timeout: 0.0,
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        render_engine="excel",
+    )
+
+    assert report["render_engine"] == "excel"
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "passed"
+    assert seen_engines == ["excel", "excel"]
 
 
 def test_sample_page_numbers_are_stable() -> None:
