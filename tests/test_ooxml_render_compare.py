@@ -49,6 +49,7 @@ def test_render_compare_skips_when_renderer_tools_missing(
     assert report["result_count"] == 1
     assert report["failure_count"] == 0
     assert report["results"][0]["status"] == "skipped"
+    assert report["results"][0]["mutation"] == "no_op"
     assert "soffice not found" in report["results"][0]["message"]
 
 
@@ -78,6 +79,7 @@ def test_render_compare_can_discover_recursive_fixture_trees(
     assert report["result_count"] == 1
     result = report["results"][0]
     assert result["fixture"] == "nested/deep/simple.xlsx"
+    assert result["mutation"] == "no_op"
     assert result["status"] == "skipped"
 
 
@@ -134,6 +136,7 @@ def test_render_compare_reports_rmse_threshold_failure(tmp_path: Path, monkeypat
     assert report["failure_count"] == 1
     result = report["results"][0]
     assert result["status"] == "failed"
+    assert result["mutation"] == "no_op"
     assert result["max_normalized_rmse"] == 0.25
     assert "render drift above threshold" in result["message"]
 
@@ -189,6 +192,7 @@ def test_render_compare_samples_large_pdfs_when_page_limit_set(
     assert report["failure_count"] == 0
     result = report["results"][0]
     assert result["status"] == "sampled_passed"
+    assert result["mutation"] == "no_op"
     assert result["page_count"] == 100
     assert result["compared_page_count"] == 3
     assert result["compared_pages"] == [1, 50, 100]
@@ -225,8 +229,65 @@ def test_render_compare_can_pass_byte_identical_no_op_without_render(
     assert report["failure_count"] == 0
     result = report["results"][0]
     assert result["status"] == "passed"
+    assert result["mutation"] == "no_op"
     assert result["max_normalized_rmse"] == 0.0
     assert "byte-identical xlsx" in result["message"]
+
+
+def test_render_compare_smokes_intentional_mutation_without_rmse(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "simple.xlsx")
+    after_pdf = tmp_path / "after.pdf"
+    after_pdf.write_bytes(b"%PDF-after")
+    after_page = tmp_path / "after-1.png"
+    after_page.write_bytes(b"after")
+    exported: list[str] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_find_libreoffice", lambda: "soffice"
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+
+    def fake_export(_soffice, src, _outdir, _timeout):
+        exported.append(src.name)
+        return after_pdf
+
+    monkeypatch.setattr(render_module, "_export_pdf", fake_export)
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 1)
+    monkeypatch.setattr(
+        render_module,
+        "_rasterize_pdf_pages",
+        lambda *_args, **_kwargs: [after_page],
+    )
+    monkeypatch.setattr(
+        render_module,
+        "_normalized_rmse",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("intentional mutation should not be RMSE-compared")
+        ),
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        mutations=("marker_cell",),
+    )
+
+    assert report["mutations"] == ["marker_cell"]
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["fixture"] == "simple.xlsx"
+    assert result["mutation"] == "marker_cell"
+    assert result["status"] == "rendered"
+    assert result["before_pdf"] is None
+    assert result["after_pdf"] == str(after_pdf)
+    assert result["max_normalized_rmse"] is None
+    assert exported == ["after-simple.xlsx"]
 
 
 def test_sample_page_numbers_are_stable() -> None:

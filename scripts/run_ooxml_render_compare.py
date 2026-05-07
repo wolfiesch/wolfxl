@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Rendered-output comparison for OOXML fidelity fixtures.
 
-For each fixture, this script performs a WolfXL no-op modify-save, exports the
-original and saved workbook to PDF through LibreOffice, rasterizes the PDFs,
-and compares corresponding page images with ImageMagick's RMSE metric.
+For each fixture, this script performs a WolfXL mutation, exports the workbook
+through LibreOffice, rasterizes the PDFs, and compares corresponding page
+images with ImageMagick's RMSE metric for no-op saves. Intentional mutations
+are render-smoked instead of pixel-compared against the original workbook,
+because their visual output is expected to change.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ import run_ooxml_app_smoke  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
 import wolfxl  # noqa: E402
 
-PASSING_STATUSES = {"passed", "sampled_passed", "skipped"}
+DEFAULT_RENDER_MUTATIONS = ("no_op",)
+PASSING_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
 
@@ -35,6 +38,7 @@ RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
 @dataclass
 class RenderCompareResult:
     fixture: str
+    mutation: str
     status: str
     before_pdf: str | None
     after_pdf: str | None
@@ -54,6 +58,7 @@ def run_render_compare(
     recursive: bool = False,
     max_pages_per_fixture: int | None = None,
     pass_byte_identical_xlsx: bool = False,
+    mutations: tuple[str, ...] = DEFAULT_RENDER_MUTATIONS,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -62,19 +67,21 @@ def run_render_compare(
         fixture_dir, recursive=recursive
     ):
         fixture_path = fixture_dir / entry.filename
-        results.append(
-            _compare_fixture(
-                fixture_path,
-                entry.filename,
-                entry.sha256,
-                output_dir,
-                timeout=timeout,
-                density=density,
-                max_normalized_rmse=max_normalized_rmse,
-                max_pages_per_fixture=max_pages_per_fixture,
-                pass_byte_identical_xlsx=pass_byte_identical_xlsx,
+        for mutation in mutations:
+            results.append(
+                _compare_fixture(
+                    fixture_path,
+                    entry.filename,
+                    entry.sha256,
+                    output_dir,
+                    timeout=timeout,
+                    density=density,
+                    max_normalized_rmse=max_normalized_rmse,
+                    max_pages_per_fixture=max_pages_per_fixture,
+                    pass_byte_identical_xlsx=pass_byte_identical_xlsx,
+                    mutation=mutation,
+                )
             )
-        )
 
     report = {
         "fixture_dir": str(fixture_dir),
@@ -84,6 +91,7 @@ def run_render_compare(
         "max_pages_per_fixture": max_pages_per_fixture,
         "pass_byte_identical_xlsx": pass_byte_identical_xlsx,
         "recursive": recursive,
+        "mutations": list(mutations),
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -106,10 +114,12 @@ def _compare_fixture(
     max_normalized_rmse: float,
     max_pages_per_fixture: int | None,
     pass_byte_identical_xlsx: bool,
+    mutation: str,
 ) -> RenderCompareResult:
     if not fixture_path.is_file():
         return RenderCompareResult(
             fixture=fixture_label,
+            mutation=mutation,
             status="failed",
             before_pdf=None,
             after_pdf=None,
@@ -124,6 +134,7 @@ def _compare_fixture(
         if actual_sha256 != expected_sha256:
             return RenderCompareResult(
                 fixture=fixture_label,
+                mutation=mutation,
                 status="failed",
                 before_pdf=None,
                 after_pdf=None,
@@ -141,15 +152,15 @@ def _compare_fixture(
     pdftoppm = shutil.which("pdftoppm")
     compare_cmd = _find_imagemagick_compare()
     if soffice is None:
-        return _skipped(fixture_label, "soffice not found")
+        return _skipped(fixture_label, mutation, "soffice not found")
     if pdftoppm is None:
-        return _skipped(fixture_label, "pdftoppm not found")
+        return _skipped(fixture_label, mutation, "pdftoppm not found")
     if compare_cmd is None:
-        return _skipped(fixture_label, "ImageMagick compare not found")
+        return _skipped(fixture_label, mutation, "ImageMagick compare not found")
 
     work = output_dir / run_ooxml_fidelity_mutations._safe_stem(
         Path(fixture_label).with_suffix("").as_posix()
-    )
+    ) / mutation
     work.mkdir(parents=True, exist_ok=True)
     before_xlsx = work / f"before-{fixture_path.name}"
     after_xlsx = work / f"after-{fixture_path.name}"
@@ -157,17 +168,21 @@ def _compare_fixture(
     shutil.copy2(fixture_path, after_xlsx)
 
     try:
-        workbook = wolfxl.load_workbook(after_xlsx, modify=True)
-        try:
-            workbook.save(after_xlsx)
-        finally:
-            close = getattr(workbook, "close", None)
-            if close is not None:
-                close()
+        run_ooxml_fidelity_mutations._prepare_mutation_baseline(
+            before_xlsx,
+            after_xlsx,
+            mutation,
+        )
+        run_ooxml_fidelity_mutations._apply_mutation(after_xlsx, mutation)
 
-        if pass_byte_identical_xlsx and _files_identical(before_xlsx, after_xlsx):
+        if (
+            mutation == "no_op"
+            and pass_byte_identical_xlsx
+            and _files_identical(before_xlsx, after_xlsx)
+        ):
             return RenderCompareResult(
                 fixture=fixture_label,
+                mutation=mutation,
                 status="passed",
                 before_pdf=None,
                 after_pdf=None,
@@ -178,13 +193,52 @@ def _compare_fixture(
                 message="byte-identical xlsx after no-op save; render equivalence inferred",
             )
 
-        before_pdf = _export_pdf(soffice, before_xlsx, work / "before-pdf", timeout)
         after_pdf = _export_pdf(soffice, after_xlsx, work / "after-pdf", timeout)
-        before_page_count = _pdf_page_count(before_pdf)
         after_page_count = _pdf_page_count(after_pdf)
+        if mutation != "no_op":
+            sampled = (
+                max_pages_per_fixture is not None
+                and after_page_count > max_pages_per_fixture
+            )
+            compared_pages = (
+                _sample_page_numbers(after_page_count, max_pages_per_fixture)
+                if sampled
+                else list(range(1, after_page_count + 1))
+            )
+            _rasterize_pdf_pages(
+                pdftoppm,
+                after_pdf,
+                work / "after-pages",
+                compared_pages,
+                density,
+                timeout,
+            )
+            status = "sampled_rendered" if sampled else "rendered"
+            message = (
+                f"rendered mutated workbook: compared {len(compared_pages)} "
+                f"of {after_page_count} pages"
+                if sampled
+                else f"rendered mutated workbook: page_count={after_page_count}"
+            )
+            return RenderCompareResult(
+                fixture=fixture_label,
+                mutation=mutation,
+                status=status,
+                before_pdf=None,
+                after_pdf=str(after_pdf),
+                page_count=after_page_count,
+                compared_page_count=len(compared_pages),
+                compared_pages=compared_pages,
+                max_normalized_rmse=None,
+                message=message,
+            )
+
+        before_pdf = _export_pdf(soffice, before_xlsx, work / "before-pdf", timeout)
+        before_page_count = _pdf_page_count(before_pdf)
         if before_page_count != after_page_count:
             return RenderCompareResult(
                 fixture=fixture_label,
+                mutation=mutation,
                 status="failed",
                 before_pdf=str(before_pdf),
                 after_pdf=str(after_pdf),
@@ -231,6 +285,7 @@ def _compare_fixture(
     except Exception as exc:
         return RenderCompareResult(
             fixture=fixture_label,
+            mutation=mutation,
             status="failed",
             before_pdf=None,
             after_pdf=None,
@@ -258,6 +313,7 @@ def _compare_fixture(
         message = f"ok: max_normalized_rmse={max_rmse:.8f}"
     return RenderCompareResult(
         fixture=fixture_label,
+        mutation=mutation,
         status=status,
         before_pdf=str(before_pdf),
         after_pdf=str(after_pdf),
@@ -269,9 +325,10 @@ def _compare_fixture(
     )
 
 
-def _skipped(fixture: str, message: str) -> RenderCompareResult:
+def _skipped(fixture: str, mutation: str, message: str) -> RenderCompareResult:
     return RenderCompareResult(
         fixture=fixture,
+        mutation=mutation,
         status="skipped",
         before_pdf=None,
         after_pdf=None,
@@ -510,6 +567,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Discover .xlsx fixtures recursively when no manifest.json is present.",
     )
+    parser.add_argument(
+        "--mutation",
+        action="append",
+        choices=run_ooxml_fidelity_mutations.SUPPORTED_MUTATIONS,
+        dest="mutations",
+        help=(
+            "Mutation to render. May be passed multiple times. Defaults to "
+            "no_op, which performs before/after pixel comparison. Intentional "
+            "mutations render-smoke the after workbook."
+        ),
+    )
     args = parser.parse_args(argv)
 
     report = run_render_compare(
@@ -521,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         recursive=args.recursive,
         max_pages_per_fixture=args.max_pages_per_fixture,
         pass_byte_identical_xlsx=args.pass_byte_identical_xlsx,
+        mutations=tuple(args.mutations or DEFAULT_RENDER_MUTATIONS),
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

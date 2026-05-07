@@ -56,6 +56,7 @@ def test_coverage_audit_reports_missing_real_excel_and_structural_evidence(
     assert report["mutation_report_count"] == 0
     assert report["render_report_count"] == 0
     assert report["render_required"] is False
+    assert report["intentional_render_required"] is False
 
 
 def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:
@@ -79,6 +80,20 @@ def test_require_render_cli_requires_render_report(tmp_path: Path, capsys) -> No
     captured = capsys.readouterr()
     assert code == 2
     assert "--require-render requires at least one --render-report" in captured.err
+    assert captured.out == ""
+
+
+def test_require_intentional_render_cli_requires_render_report(
+    tmp_path: Path, capsys
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+
+    code = coverage_module.main([str(fixture_dir), "--require-intentional-render"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--require-intentional-render requires at least one" in captured.err
     assert captured.out == ""
 
 
@@ -179,6 +194,7 @@ def test_coverage_audit_can_require_render_evidence(tmp_path: Path) -> None:
                 "results": [
                     {
                         "fixture": external.name,
+                        "mutation": "no_op",
                         "status": "passed",
                     }
                 ]
@@ -198,6 +214,76 @@ def test_coverage_audit_can_require_render_evidence(tmp_path: Path) -> None:
     assert report["render_required"] is True
     assert "render_no_op_pass" in report["required_evidence"]
     assert chart["render_fixtures"] == ["external-chart.xlsx"]
+    assert chart["missing"] == []
+
+
+def test_coverage_audit_can_require_intentional_render_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-chart.xlsx"
+    excel = fixture_dir / "excel-chart.xlsx"
+    _write_chart_fixture(external)
+    _write_chart_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_chart",
+                        "tool": "excelize",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_chart",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "add_remove_chart",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+    render_report = tmp_path / "render-report.json"
+    render_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "copy_first_sheet",
+                        "status": "rendered",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(
+        fixture_dir,
+        reports=[mutation_report],
+        render_reports=[render_report],
+        require_intentional_render=True,
+    )
+
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert report["intentional_render_required"] is True
+    assert "intentional_render_pass" in report["required_evidence"]
+    assert chart["intentional_render_fixtures"] == ["external-chart.xlsx"]
     assert chart["missing"] == []
 
 
@@ -255,6 +341,75 @@ def test_coverage_audit_reports_missing_render_when_required(tmp_path: Path) -> 
     chart = report["surfaces"]["chart_style_color_preservation"]
     assert chart["render_fixtures"] == []
     assert "render_no_op_pass" in chart["missing"]
+    assert report["ready"] is False
+
+
+def test_coverage_audit_reports_missing_intentional_render_when_required(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-chart.xlsx"
+    excel = fixture_dir / "excel-chart.xlsx"
+    _write_chart_fixture(external)
+    _write_chart_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_chart",
+                        "tool": "excelize",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_chart",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "add_remove_chart",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+    render_report = tmp_path / "render-report.json"
+    render_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "copy_first_sheet",
+                        "status": "failed",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(
+        fixture_dir,
+        reports=[mutation_report],
+        render_reports=[render_report],
+        require_intentional_render=True,
+    )
+
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert chart["intentional_render_fixtures"] == []
+    assert "intentional_render_pass" in chart["missing"]
     assert report["ready"] is False
 
 
