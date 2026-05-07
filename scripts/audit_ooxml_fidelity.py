@@ -30,6 +30,7 @@ FEATURE_PART_PREFIXES = {
     "chart_style": ("xl/charts/style", "xl/charts/colors"),
     "comment": ("xl/comments", "xl/threadedComments/", "xl/persons/"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
+    "connection": ("xl/connections.xml",),
     "custom_xml": ("customXml/", "xl/customXml/"),
     "drawing": ("xl/drawings/",),
     "embedded_object": ("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"),
@@ -367,6 +368,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "chart_sheets": _chart_sheet_fingerprint(archive, parts),
         "chart_styles": _chart_style_fingerprint(archive, parts),
         "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
+        "connections": _connection_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
         "page_setup": _page_setup_fingerprint(archive, parts),
@@ -510,6 +512,50 @@ def _data_validation_fingerprint(
             )
         if validations:
             out[part] = validations
+    return out
+
+
+def _connection_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    for part in sorted(_feature_xml_parts(parts, "xl/connections", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        connections: list[object] = []
+        for connection in _nodes_by_local(root, "connection"):
+            connections.append(
+                (
+                    _stable_attrs(
+                        connection,
+                        (
+                            "id",
+                            "name",
+                            "description",
+                            "type",
+                            "refreshedVersion",
+                            "background",
+                            "saveData",
+                            "deleted",
+                        ),
+                    ),
+                    [
+                        _stable_attrs(
+                            node,
+                            ("connection", "command", "commandType", "serverCommand"),
+                        )
+                        for node in _nodes_by_local(connection, "dbPr")
+                    ],
+                    [_xml_tree_fingerprint(node) for node in _nodes_by_local(connection, "extLst")],
+                )
+            )
+        out[part] = [
+            ("attrs", _stable_attrs(root, ("count",))),
+            ("rels", rels_by_owner.get(part, [])),
+            ("connections", connections),
+        ]
     return out
 
 

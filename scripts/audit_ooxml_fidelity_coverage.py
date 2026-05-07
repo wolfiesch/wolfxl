@@ -69,6 +69,16 @@ SURFACES = {
             "move_formula_range",
         ),
     },
+    "workbook_connections_query_metadata": {
+        "label": "Workbook connections / query metadata",
+        "feature_keys": ("connection",),
+        "semantic_keys": ("connections",),
+        "structural_mutations": (
+            "marker_cell",
+            "copy_first_sheet",
+            "move_formula_range",
+        ),
+    },
     "table_structured_refs_validations": {
         "label": "Tables / structured refs / validations",
         "feature_keys": ("table",),
@@ -307,6 +317,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "chart_sheets": "chart_sheet",
         "chart_styles": "chart_style",
         "conditional_formatting": "conditional_formatting",
+        "connections": "connection",
         "external_links": "external_link",
         "page_setup": "page_setup",
         "pivots": "pivot",

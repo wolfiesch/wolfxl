@@ -241,6 +241,22 @@ def test_fingerprints_workbook_global_state(tmp_path: Path) -> None:
     assert "calc_chain" in snapshot.feature_parts
 
 
+def test_detects_workbook_connection_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_connection_entries("Provider=A;Location=Sales", "Sales"))
+    after_entries = _base_entries()
+    after_entries.update(_connection_entries("Provider=B;Location=Sales", "Sales"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "connections_semantic_drift" for issue in report["issues"])
+
+
 def test_detects_chart_axis_layout_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -693,6 +709,26 @@ def _external_link_cache_entries(value: str) -> dict[str, str]:
   </externalBook>
 </externalLink>"""
     return entries
+
+
+def _connection_entries(connection: str, command: str) -> dict[str, str]:
+    return {
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections"
+    Target="connections.xml"/>
+</Relationships>""",
+        "xl/connections.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1">
+  <connection id="1" name="Query - Sales" type="5" refreshedVersion="7" background="1" saveData="1">
+    <dbPr connection="{connection}" command="{command}" commandType="1"/>
+  </connection>
+</connections>""",
+    }
 
 
 def _formula_xml(formula: str, *, cell: str = "A1") -> str:

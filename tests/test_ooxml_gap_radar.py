@@ -22,18 +22,18 @@ def _load_gap_radar_module() -> ModuleType:
 gap_radar = _load_gap_radar_module()
 
 
-def test_gap_radar_reports_unclassified_connection_surface(tmp_path: Path) -> None:
+def test_gap_radar_reports_unclassified_model_surface(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
-    fixture = fixture_dir / "connections.xlsx"
-    _write_connections_fixture(fixture)
+    fixture = fixture_dir / "model.xlsx"
+    _write_model_fixture(fixture)
     (fixture_dir / "manifest.json").write_text(
         json.dumps(
             {
                 "fixtures": [
                     {
                         "filename": fixture.name,
-                        "fixture_id": "connections",
+                        "fixture_id": "model",
                         "tool": "excel",
                     }
                 ]
@@ -45,13 +45,13 @@ def test_gap_radar_reports_unclassified_connection_surface(tmp_path: Path) -> No
 
     assert report["clear"] is False
     assert report["unknown_part_families"] == {
-        "xl/connections.xml": ["connections.xlsx"]
+        "xl/model/model.xml": ["model.xlsx"]
     }
     assert report["unknown_relationship_types"] == {
-        "connections": ["connections.xlsx"]
+        "model": ["model.xlsx"]
     }
     assert list(report["unknown_content_types"]) == [
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml"
+        "application/vnd.ms-excel.model+xml"
     ]
 
 
@@ -116,7 +116,7 @@ def _write_plain_fixture(path: Path) -> None:
             archive.writestr(name, content)
 
 
-def _write_connections_fixture(path: Path) -> None:
+def _write_model_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -125,7 +125,7 @@ def _write_connections_fixture(path: Path) -> None:
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  <Override PartName="/xl/connections.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml"/>
+  <Override PartName="/xl/model/model.xml" ContentType="application/vnd.ms-excel.model+xml"/>
 </Types>""",
         "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -140,16 +140,14 @@ def _write_connections_fixture(path: Path) -> None:
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections" Target="connections.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/model" Target="model/model.xml"/>
 </Relationships>""",
         "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>""",
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
-        "xl/connections.xml": """<?xml version="1.0" encoding="UTF-8"?>
-<connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1">
-  <connection id="1" name="Query - Sales" type="5" refreshedVersion="7"/>
-</connections>""",
+        "xl/model/model.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://schemas.microsoft.com/office/2009/05/relationships/model"/>""",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():

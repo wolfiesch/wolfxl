@@ -265,6 +265,38 @@
       ]
     },
     {
+      "filename": "openpyxl-connections-basic.xlsx",
+      "tool": "openpyxl",
+      "fixture_id": "openpyxl_connections_basic",
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/connections.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "OpenPyXL workbook with an injected OOXML workbook connections part. Covers external-tool workbook connection/query metadata preservation.",
+      "sha256": "e202b74a30854416f1ca69945bfffe1e51f58ee5e2582ee0d5689945014678af",
+      "size_bytes": 5340
+    },
+    {
+      "filename": "real-excel-connections-basic.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_connections_basic",
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/connections.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Microsoft Excel in-place save of openpyxl-connections-basic.xlsx. Workbook metadata reports Application=Microsoft Macintosh Excel and preserves xl/connections.xml for real-Excel workbook connection/query metadata coverage.",
+      "sha256": "01a8a68430d4de5c3ece1c3c489746d7f6279524e80836f27b44b88e991759e6",
+      "size_bytes": 8793
+    },
+    {
       "filename": "openpyxl-p1-structured-validation-protection-customxml.xlsx",
       "tool": "openpyxl",
       "fixture_id": "openpyxl_p1_structured_validation_protection_customxml",

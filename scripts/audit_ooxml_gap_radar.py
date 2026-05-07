@@ -48,6 +48,7 @@ CORE_REL_TYPES = {
     "sharedStrings",
     "metadata",
     "calcChain",
+    "connections",
     "hyperlink",
 }
 
