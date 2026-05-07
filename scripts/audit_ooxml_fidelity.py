@@ -369,6 +369,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
+        "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "slicers": _slicer_fingerprint(archive, parts),
         "structured_references": _structured_reference_fingerprint(archive, parts),
@@ -675,6 +676,38 @@ def _worksheet_formula_fingerprint(
     return out
 
 
+def _page_setup_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        entries = [
+            (
+                "page_margins",
+                [_all_stable_attrs(node) for node in _nodes_by_local(root, "pageMargins")],
+            ),
+            (
+                "page_setup",
+                [_all_stable_attrs(node) for node in _nodes_by_local(root, "pageSetup")],
+            ),
+            (
+                "print_options",
+                [_all_stable_attrs(node) for node in _nodes_by_local(root, "printOptions")],
+            ),
+            (
+                "header_footer",
+                [_xml_tree_fingerprint(node) for node in _nodes_by_local(root, "headerFooter")],
+            ),
+        ]
+        entries = [(label, value) for label, value in entries if value]
+        if entries:
+            out[part] = entries
+    return out
+
+
 def _structured_reference_fingerprint(
     archive: zipfile.ZipFile, parts: set[str]
 ) -> dict[str, list[object]]:
@@ -723,8 +756,7 @@ def _workbook_global_fingerprint(
     global_parts = sorted(
         part
         for part in parts
-        if part == "xl/calcChain.xml"
-        or part == "xl/vbaProject.bin"
+        if part == "xl/vbaProject.bin"
         or part.startswith("customXml/")
         or part.startswith("xl/customXml/")
         or part.startswith("xl/printerSettings/")

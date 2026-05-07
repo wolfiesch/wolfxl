@@ -163,7 +163,7 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
                 None,
                 f"stderr contained {keyword!r}: {proc.stderr[:500]}",
             )
-    converted = work / src.name
+    converted = _libreoffice_converted_path(work, src)
     ok, message = _validate_xlsx(converted)
     return AppSmokeResult(
         src.name,
@@ -173,6 +173,17 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
         str(converted) if converted.exists() else None,
         message,
     )
+
+
+def _libreoffice_converted_path(work: Path, src: Path) -> Path:
+    expected = work / src.name
+    if expected.exists():
+        return expected
+    xlsx = work / f"{src.stem}.xlsx"
+    if xlsx.exists():
+        return xlsx
+    matches = sorted(work.glob(f"{src.stem}.*"))
+    return matches[0] if matches else expected
 
 
 def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
@@ -191,9 +202,11 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
     out.unlink(missing_ok=True)
     script = f"""
 tell application "Microsoft Excel"
-  if (count of workbooks) > 0 then close every workbook saving no
-  open workbook workbook file name (POSIX file "{_applescript_escape(str(src.resolve()))}") update links do not update links
-  save workbook as active workbook filename (POSIX file "{_applescript_escape(str(out.resolve()))}") file format Excel XML file format
+  try
+    close every workbook saving no
+  end try
+  open workbook workbook file name "{_applescript_escape(str(src.resolve()))}" update links do not update links
+  save workbook as active workbook filename "{_applescript_escape(str(out.resolve()))}" file format Excel XML file format
   close active workbook saving no
 end tell
 """

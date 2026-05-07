@@ -80,6 +80,15 @@ def _copy_first_sheet(src: Path, dst: Path, name: str = "Copied Sheet") -> None:
     wb.save(dst)
 
 
+def _copy_save_reopen_remove_copy(src: Path, dst: Path, name: str = "Copied Sheet") -> None:
+    first_save = dst.with_name(f"{dst.stem}-with-copy{dst.suffix}")
+    _copy_first_sheet(src, first_save, name=name)
+
+    wb = load_workbook(first_save, modify=True)
+    wb.remove(wb[name])
+    wb.save(dst)
+
+
 # ---------------------------------------------------------------------------
 # Case 1 — copy_worksheet allocates a FRESH slicer{N}.xml.
 # ---------------------------------------------------------------------------
@@ -249,6 +258,36 @@ def test_real_excel_pivot_slicer_copy_clones_cache_parts(tmp_path: Path) -> None
     assert f'tabId="{copied_sheet_id.group(1)}"' in cache_xml
 
 
+def test_real_excel_pivot_slicer_remove_copy_prunes_orphaned_cache_parts(
+    tmp_path: Path,
+) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-pivot-chart-slicers.xlsx")
+    dst = tmp_path / "pivot-slicer-copy-removed.xlsx"
+
+    _copy_save_reopen_remove_copy(src, dst)
+
+    entries = _zip_listing(dst)
+    assert [
+        e for e in entries
+        if re.match(r"^xl/slicerCaches/slicerCache\d+\.xml$", e)
+    ] == ["xl/slicerCaches/slicerCache1.xml", "xl/slicerCaches/slicerCache2.xml"]
+    assert [
+        e for e in entries
+        if re.match(r"^xl/slicers/slicer\d+\.xml$", e)
+    ] == ["xl/slicers/slicer1.xml"]
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    workbook_rels = _zip_read(dst, "xl/_rels/workbook.xml.rels").decode()
+    content_types = _zip_read(dst, "[Content_Types].xml").decode()
+    assert workbook_xml.count("<x14:slicerCache ") == 2
+    assert "Slicer_REGION1" not in workbook_xml
+    assert "Slicer_YEAR1" not in workbook_xml
+    assert "slicerCache3.xml" not in workbook_rels
+    assert "slicerCache4.xml" not in workbook_rels
+    assert "/xl/slicerCaches/slicerCache3.xml" not in content_types
+    assert "/xl/slicerCaches/slicerCache4.xml" not in content_types
+
+
 def test_real_excel_timeline_copy_clones_timeline_cache_parts(tmp_path: Path) -> None:
     src = Path("tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx")
     dst = tmp_path / "timeline-copy.xlsx"
@@ -283,3 +322,30 @@ def test_real_excel_timeline_copy_clones_timeline_cache_parts(tmp_path: Path) ->
     copied_cache_xml = _zip_read(dst, "xl/timelineCaches/timelineCache2.xml").decode()
     assert 'name="NativeTimeline_ORDER_DATE1"' in copied_cache_xml
     assert f'tabId="{copied_sheet_id.group(1)}"' in copied_cache_xml
+
+
+def test_real_excel_timeline_remove_copy_prunes_orphaned_cache_parts(
+    tmp_path: Path,
+) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx")
+    dst = tmp_path / "timeline-copy-removed.xlsx"
+
+    _copy_save_reopen_remove_copy(src, dst)
+
+    entries = _zip_listing(dst)
+    assert [
+        e for e in entries
+        if re.match(r"^xl/timelineCaches/timelineCache\d+\.xml$", e)
+    ] == ["xl/timelineCaches/timelineCache1.xml"]
+    assert [
+        e for e in entries
+        if re.match(r"^xl/timelines/timeline\d+\.xml$", e)
+    ] == ["xl/timelines/timeline1.xml"]
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    workbook_rels = _zip_read(dst, "xl/_rels/workbook.xml.rels").decode()
+    content_types = _zip_read(dst, "[Content_Types].xml").decode()
+    assert workbook_xml.count("<x15:timelineCacheRef ") == 1
+    assert "NativeTimeline_ORDER_DATE1" not in workbook_xml
+    assert "timelineCache2.xml" not in workbook_rels
+    assert "/xl/timelineCaches/timelineCache2.xml" not in content_types

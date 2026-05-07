@@ -237,8 +237,8 @@ def test_fingerprints_workbook_global_state(tmp_path: Path) -> None:
 
     workbook_globals = snapshot.semantic_fingerprints["workbook_globals"]
     assert "xl/workbook.xml" in workbook_globals
-    assert "xl/calcChain.xml" in workbook_globals["package_parts"]
     assert "xl/printerSettings/printerSettings1.bin" in workbook_globals["package_parts"]
+    assert "calc_chain" in snapshot.feature_parts
 
 
 def test_detects_chart_axis_layout_semantic_drift(tmp_path: Path) -> None:

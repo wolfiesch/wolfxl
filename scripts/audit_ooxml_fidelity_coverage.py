@@ -107,15 +107,16 @@ SURFACES = {
         "feature_keys": (
             "calc_chain",
             "custom_xml",
+            "page_setup",
             "printer_settings",
             "vba",
         ),
-        "semantic_keys": ("workbook_globals",),
+        "semantic_keys": ("page_setup", "workbook_globals"),
         "required_feature_groups": {
             "defined_names_or_calc_chain": ("defined_name", "calc_chain"),
             "workbook_protection": ("workbook_protection",),
             "vba_or_custom_xml": ("vba", "custom_xml"),
-            "printer_or_page_setup": ("printer_settings",),
+            "printer_or_page_setup": ("printer_settings", "page_setup"),
         },
         "structural_mutations": (
             "delete_first_row",
@@ -264,6 +265,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "chart_styles": "chart_style",
         "conditional_formatting": "conditional_formatting",
         "external_links": "external_link",
+        "page_setup": "page_setup",
         "pivots": "pivot",
         "slicers": "slicer",
         "structured_references": "structured_reference",

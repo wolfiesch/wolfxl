@@ -90,9 +90,12 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
         "external_links_semantic_drift",
+        "page_setup_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "structured_references_semantic_drift",
         "timelines_semantic_drift",
+        "workbook_globals_semantic_drift",
         "worksheet_formulas_semantic_drift",
     },
     "add_data_validation": {

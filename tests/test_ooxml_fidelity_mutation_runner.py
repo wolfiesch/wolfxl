@@ -278,6 +278,24 @@ def test_runner_separates_expected_sheet_copy_drift(
                     "part": "data_validations",
                     "message": "expected copied data validation part",
                 },
+                {
+                    "kind": "page_setup_semantic_drift",
+                    "severity": "error",
+                    "part": "page_setup",
+                    "message": "expected copied page setup",
+                },
+                {
+                    "kind": "structured_references_semantic_drift",
+                    "severity": "error",
+                    "part": "structured_references",
+                    "message": "expected copied structured references",
+                },
+                {
+                    "kind": "workbook_globals_semantic_drift",
+                    "severity": "error",
+                    "part": "workbook_globals",
+                    "message": "expected copied workbook globals",
+                },
             ]
         }
 
@@ -293,13 +311,16 @@ def test_runner_separates_expected_sheet_copy_drift(
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 5
+    assert result["expected_issue_count"] == 8
     assert {issue["kind"] for issue in result["expected_issues"]} == {
         "chart_styles_semantic_drift",
         "charts_semantic_drift",
         "data_validations_semantic_drift",
+        "page_setup_semantic_drift",
         "slicers_semantic_drift",
+        "structured_references_semantic_drift",
         "timelines_semantic_drift",
+        "workbook_globals_semantic_drift",
     }
 
 

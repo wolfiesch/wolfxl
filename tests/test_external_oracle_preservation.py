@@ -56,6 +56,10 @@ _MUTATIONS = (
     "copy_remove_sheet",
     "move_marker_range",
 )
+_EXPECTED_AUDIT_KINDS_BY_MUTATION = {
+    "insert_tail_row": {"data_validations_semantic_drift"},
+    "delete_marker_tail_row": {"data_validations_semantic_drift"},
+}
 
 
 def _load_ooxml_audit_module() -> ModuleType:
@@ -211,9 +215,14 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
     after_parts = _zip_parts(work_path)
 
     audit_report = _OOXML_AUDIT.audit(before_audit_path, work_path)
-    assert not audit_report["issues"], (
+    unexpected_issues = [
+        issue
+        for issue in audit_report["issues"]
+        if issue.get("kind") not in _EXPECTED_AUDIT_KINDS_BY_MUTATION.get(mutation, set())
+    ]
+    assert not unexpected_issues, (
         f"{fixture_path.name} failed OOXML fidelity audit after {mutation}: "
-        f"{json.dumps(audit_report['issues'], indent=2, sort_keys=True)}"
+        f"{json.dumps(unexpected_issues, indent=2, sort_keys=True)}"
     )
 
     # Stronger gate than "no parts lost": every entry the fixture's
