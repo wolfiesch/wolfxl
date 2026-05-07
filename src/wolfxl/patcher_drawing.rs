@@ -1069,6 +1069,24 @@ pub(super) fn apply_chart_removes_phase(
                 )));
 
             if kept_anchor_count == 0 {
+                if should_preserve_empty_drawing_shell(&drawing_xml, &updated_xml) {
+                    if zip.by_name(&op.drawing_path).is_ok() {
+                        file_patches.insert(op.drawing_path.clone(), updated_xml);
+                    } else {
+                        patcher
+                            .file_adds
+                            .insert(op.drawing_path.clone(), updated_xml);
+                    }
+                    if drawing_rels.is_empty() {
+                        patcher.file_deletes.insert(drawing_rels_path.clone());
+                        file_patches.remove(&drawing_rels_path);
+                        patcher.file_adds.remove(&drawing_rels_path);
+                        patcher.rels_patches.remove(&drawing_rels_path);
+                    } else {
+                        patcher.rels_patches.insert(drawing_rels_path, drawing_rels);
+                    }
+                    continue;
+                }
                 let drawing_rel = sheet_rels
                     .iter()
                     .find(|r| r.rel_type == wolfxl_rels::rt::DRAWING)
@@ -1118,6 +1136,28 @@ pub(super) fn apply_chart_removes_phase(
         patcher.rels_patches.insert(sheet_rels_path, sheet_rels);
     }
     Ok(())
+}
+
+fn should_preserve_empty_drawing_shell(original_xml: &[u8], updated_xml: &[u8]) -> bool {
+    let Ok(original) = std::str::from_utf8(original_xml) else {
+        return false;
+    };
+    let Ok(updated) = std::str::from_utf8(updated_xml) else {
+        return false;
+    };
+    if drawing_root_has_relationship_namespace(original) {
+        return false;
+    }
+    find_start_tag_by_local_name(updated, "oneCellAnchor").is_none()
+        && find_start_tag_by_local_name(updated, "twoCellAnchor").is_none()
+        && find_start_tag_by_local_name(updated, "absoluteAnchor").is_none()
+}
+
+fn drawing_root_has_relationship_namespace(drawing_xml: &str) -> bool {
+    let Some(root) = root_start_tag_by_local_name(drawing_xml, "wsDr") else {
+        return false;
+    };
+    drawing_xml[root.start..=root.end].contains("xmlns:r=")
 }
 
 pub(super) fn apply_chart_adds_phase(

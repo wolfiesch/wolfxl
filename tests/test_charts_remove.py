@@ -262,6 +262,44 @@ def test_same_save_scratch_chart_remove_and_sheet_delete_preserves_source_drawin
         assert _chart_and_drawing_parts(path) == before, fixture.name
 
 
+def test_remove_transient_chart_preserves_empty_source_drawing(tmp_path: Path) -> None:
+    """Removing a WolfXL-added chart should keep a pre-existing empty drawing."""
+    import shutil
+
+    import wolfxl
+    from wolfxl.chart import BarChart, Reference
+
+    src = (
+        Path(__file__).parent
+        / "fixtures"
+        / "external_oracle"
+        / "npoi-formula-comment-merge-protection.xlsx"
+    )
+    path = tmp_path / src.name
+    shutil.copy2(src, path)
+    before = _chart_and_drawing_parts(path)
+
+    wb = wolfxl.load_workbook(path, modify=True)
+    ws = wb[wb.sheetnames[0]]
+    chart = BarChart()
+    chart.add_data(
+        Reference(ws, min_col=1, min_row=1, max_row=2),
+        titles_from_data=True,
+    )
+    ws.add_chart(chart, "C2")
+    wb.save(path)
+    wb.close()
+
+    wb = wolfxl.load_workbook(path, modify=True)
+    ws = wb[wb.sheetnames[0]]
+    assert len(ws._charts) == 1
+    ws.remove_chart(ws._charts[-1])
+    wb.save(path)
+    wb.close()
+
+    assert _chart_and_drawing_parts(path) == before
+
+
 def test_loaded_source_chart_title_edit_persists(tmp_path: Path) -> None:
     import wolfxl
 
