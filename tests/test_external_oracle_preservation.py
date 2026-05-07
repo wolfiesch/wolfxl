@@ -25,11 +25,14 @@ hashes there are not pinned.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
+import sys
 import zipfile
 from pathlib import Path
+from types import ModuleType
 
 import openpyxl
 import pytest
@@ -41,6 +44,20 @@ _PINNED_DIR = Path(__file__).resolve().parent / "fixtures" / "external_oracle"
 _MANIFEST_NAME = "manifest.json"
 _MARKER_CELL = "Z1"
 _MARKER_VALUE = "wolfxl_external_fixture_smoke"
+
+
+def _load_ooxml_audit_module() -> ModuleType:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_fidelity.py"
+    spec = importlib.util.spec_from_file_location("audit_ooxml_fidelity", script)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_OOXML_AUDIT = _load_ooxml_audit_module()
 
 
 def _fixture_dir() -> Path:
@@ -115,7 +132,9 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
             "otherwise restore from git."
         )
 
+    before_audit_path = tmp_path / f"before-{fixture_path.name}"
     work_path = tmp_path / fixture_path.name
+    shutil.copy2(fixture_path, before_audit_path)
     shutil.copy2(fixture_path, work_path)
 
     before_parts = _zip_parts(work_path)
@@ -127,6 +146,12 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
     workbook.close()
 
     after_parts = _zip_parts(work_path)
+
+    audit_report = _OOXML_AUDIT.audit(before_audit_path, work_path)
+    assert not audit_report["issues"], (
+        f"{fixture_path.name} failed OOXML fidelity audit after modify-save: "
+        f"{json.dumps(audit_report['issues'], indent=2, sort_keys=True)}"
+    )
 
     # Stronger gate than "no parts lost": every entry the fixture's
     # originating tool authored must still be present.
