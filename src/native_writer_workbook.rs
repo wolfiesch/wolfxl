@@ -23,15 +23,7 @@ pub(crate) fn move_sheet(wb: &mut Workbook, name: &str, offset: isize) -> PyResu
     wb.move_sheet(name, offset).map_err(PyValueError::new_err)
 }
 
-pub(crate) fn save_once(wb: &mut Workbook, saved: &mut bool, path: &str) -> PyResult<()> {
-    if *saved {
-        return Err(PyValueError::new_err(
-            "Workbook already saved (NativeWorkbook is consumed-on-save)",
-        ));
-    }
-    // Mark consumed before emit/write so a panic or failed write leaves the
-    // workbook un-retryable on potentially mutated state.
-    *saved = true;
+pub(crate) fn save(wb: &mut Workbook, path: &str) -> PyResult<()> {
     // G20: flush per-sheet streaming BufWriters so the splice phase
     // inside `emit_xlsx → sheet_xml::emit` reads consistent bytes.
     crate::native_writer_streaming::finalize_all_streaming(wb)?;

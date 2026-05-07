@@ -127,6 +127,9 @@ pub fn emit(
         super::hyperlinks::emit(&mut out, sheet);
     }
 
+    // Slot 20: <printOptions>; only emitted when set.
+    super::sheet_setup::emit_print_options(&mut out, sheet);
+
     // Slot 21: <pageMargins>; typed override or default.
     super::sheet_setup::emit_page_margins(&mut out, sheet);
 
@@ -252,6 +255,7 @@ pub fn emit_streaming_to<W: std::io::Write>(
     if !sheet.hyperlinks.is_empty() {
         super::hyperlinks::emit(&mut tail, sheet);
     }
+    super::sheet_setup::emit_print_options(&mut tail, sheet);
     super::sheet_setup::emit_page_margins(&mut tail, sheet);
     super::sheet_setup::emit_page_setup(&mut tail, sheet);
     super::sheet_setup::emit_header_footer(&mut tail, sheet);

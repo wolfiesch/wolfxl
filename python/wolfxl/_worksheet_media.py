@@ -116,15 +116,16 @@ def remove_chart(ws: Worksheet, chart: Any) -> None:
     """Remove a chart from this worksheet."""
     try:
         ws._pending_charts.remove(chart)  # noqa: SLF001
+        return
     except ValueError:
-        source_meta = _source_chart_meta(chart)
-        if source_meta is None:
-            raise ValueError(
-                "chart was not added to this worksheet via add_chart() "
-                "(or has already been removed)."
-            ) from None
-        _pending_chart_deletions(ws).append(source_meta)
-
+        pass
+    meta = getattr(chart, "_wolfxl_source_chart", None)
+    if meta is None:
+        raise ValueError(
+            "chart was not added to this worksheet via add_chart() "
+            "(or has already been removed)."
+        ) from None
+    _pending_chart_deletions(ws).append(meta)
     if ws._charts_cache is not None:  # noqa: SLF001
         idx = _find_identity_index(ws._charts_cache, chart)  # noqa: SLF001
         if idx is not None:
@@ -143,21 +144,26 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
     try:
         index = ws._pending_charts.index(old)  # noqa: SLF001
     except ValueError:
-        source_meta = _source_chart_meta(old)
-        if source_meta is None:
-            raise ValueError("old chart was not added to this worksheet via add_chart()") from None
+        meta = getattr(old, "_wolfxl_source_chart", None)
+        if meta is None:
+            raise ValueError(
+                "old chart was not added to this worksheet via add_chart()"
+            ) from None
         anchor = new._anchor if new._anchor is not None else _a1_from_anchor(old._anchor)  # noqa: SLF001
+        if anchor is None:
+            anchor = old._anchor  # noqa: SLF001
         if anchor is None:
             anchor = "E15"
         if isinstance(anchor, str):
             validate_a1_anchor(anchor)
         new._anchor = anchor  # noqa: SLF001
-        _pending_chart_deletions(ws).append(source_meta)
-        ws._pending_charts.append(new)  # noqa: SLF001
+        new._wolfxl_source_chart = meta  # noqa: SLF001
+        new._wolfxl_source_title = _title_signature(new)  # noqa: SLF001
         if ws._charts_cache is not None:  # noqa: SLF001
             old_index = _find_identity_index(ws._charts_cache, old)  # noqa: SLF001
             if old_index is not None:
                 ws._charts_cache[old_index] = new  # noqa: SLF001
+        _queue_source_chart_op(ws, {"op": "replace", "meta": meta, "chart": new})
         return
     anchor = new._anchor if new._anchor is not None else old._anchor  # noqa: SLF001
     if anchor is None:
@@ -183,14 +189,52 @@ def get_charts(ws: Worksheet) -> list[Any]:
 
     if ws._charts_cache is None:  # noqa: SLF001
         charts = []
-        for payload in reader.read_charts(ws._title):  # noqa: SLF001
+        source_refs = _source_chart_refs_for_ws(ws)
+        for idx, payload in enumerate(reader.read_charts(ws._title)):  # noqa: SLF001
             if isinstance(payload, dict):
                 chart = _chart_from_payload(payload)
                 if chart is not None:
+                    if idx < len(source_refs):
+                        chart._wolfxl_source_chart = source_refs[idx]  # noqa: SLF001
+                        chart._wolfxl_source_title = _title_signature(chart)  # noqa: SLF001
                     charts.append(chart)
         charts.extend(ws._pending_charts)  # noqa: SLF001
         ws._charts_cache = charts  # noqa: SLF001
     return ws._charts_cache  # noqa: SLF001
+
+
+def _source_chart_refs_for_ws(ws: Worksheet) -> list[dict[str, str]]:
+    workbook = ws._workbook  # noqa: SLF001
+    if getattr(workbook, "_rust_patcher", None) is None:
+        return []
+    from wolfxl import _source_charts
+
+    return _source_charts.source_chart_refs(
+        getattr(workbook, "_source_path", None), ws._title  # noqa: SLF001
+    )
+
+
+def _queue_source_chart_op(ws: Worksheet, op: dict[str, Any]) -> None:
+    workbook = ws._workbook  # noqa: SLF001
+    if getattr(workbook, "_rust_patcher", None) is None:
+        raise RuntimeError(
+            "source chart mutation requires modify mode — open the workbook "
+            "with load_workbook(..., modify=True)."
+        )
+    workbook._pending_source_chart_ops.append(op)  # noqa: SLF001
+
+
+def _title_signature(chart: Any) -> Any:
+    title = getattr(chart, "title", None)
+    if title is None:
+        return None
+    to_dict = getattr(title, "to_dict", None)
+    if to_dict is not None:
+        try:
+            return to_dict()
+        except Exception:
+            pass
+    return str(title)
 
 
 def _chart_from_payload(payload: dict[str, Any]) -> Any:

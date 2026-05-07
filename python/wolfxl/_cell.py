@@ -31,6 +31,7 @@ from wolfxl.styles.protection import Protection
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
 from wolfxl._worksheet_rich_text import runs_payload_to_cellrichtext
+from wolfxl.utils.cell import range_boundaries
 from wolfxl.utils.exceptions import IllegalCharacterError
 from wolfxl.utils.numbers import is_date_format
 
@@ -86,6 +87,8 @@ class Cell:
         "_dt_r",
         "_dt_r1",
         "_dt_r2",
+        "_dt_del1",
+        "_dt_del2",
     )
 
     def __init__(self, ws: Worksheet, row: int, col: int) -> None:
@@ -113,6 +116,8 @@ class Cell:
         self._dt_r: bool = False
         self._dt_r1: str | None = None
         self._dt_r2: str | None = None
+        self._dt_del1: bool = False
+        self._dt_del2: bool = False
 
     @property
     def coordinate(self) -> str:
@@ -554,6 +559,8 @@ class Cell:
                 dtr=payload.get("dtr", False),
                 r1=payload.get("r1"),
                 r2=payload.get("r2"),
+                del1=payload.get("del1", False),
+                del2=payload.get("del2", False),
             )
         return _UNSET
 
@@ -571,6 +578,8 @@ class Cell:
                 dtr=self._dt_r,
                 r1=self._dt_r1,
                 r2=self._dt_r2,
+                del1=self._dt_del1,
+                del2=self._dt_del2,
             )
         if self._formula_type == "array_child":
             return None
@@ -586,6 +595,8 @@ class Cell:
         self._dt_r = False
         self._dt_r1 = None
         self._dt_r2 = None
+        self._dt_del1 = False
+        self._dt_del2 = False
         self._ws._pending_array_formulas.pop((self._row, self._col), None)  # noqa: SLF001
 
     def _queue_array_formula(self, val: Any) -> None:
@@ -617,6 +628,8 @@ class Cell:
         self._dt_r = val.dtr
         self._dt_r1 = val.r1
         self._dt_r2 = val.r2
+        self._dt_del1 = val.del1
+        self._dt_del2 = val.del2
         self._value = val
         self._value_dirty = True
         ws._mark_dirty(self._row, self._col)  # noqa: SLF001
@@ -629,6 +642,8 @@ class Cell:
                 "dtr": val.dtr,
                 "r1": val.r1,
                 "r2": val.r2,
+                "del1": val.del1,
+                "del2": val.del2,
             },
         )
         ws._pending_rich_text.pop((self._row, self._col), None)  # noqa: SLF001
@@ -877,6 +892,8 @@ class Cell:
                 self._dt_r = bool(af_payload.get("dtr", False))
                 self._dt_r1 = af_payload.get("r1")
                 self._dt_r2 = af_payload.get("r2")
+                self._dt_del1 = bool(af_payload.get("del1", False))
+                self._dt_del2 = bool(af_payload.get("del2", False))
             elif kind == "spill_child":
                 self._formula_type = "array_child"
         payload = wb._rust_reader.read_cell_value(  # noqa: SLF001
@@ -924,12 +941,14 @@ class Cell:
         wb = self._ws._workbook  # noqa: SLF001
         if wb._rust_reader is None:  # noqa: SLF001
             return None
+        if _is_merged_subordinate(self):
+            return None
         payload = wb._rust_reader.read_cell_format(  # noqa: SLF001
             self._ws.title, self.coordinate,
         )
         if isinstance(payload, dict):
-            return payload.get("number_format")
-        return None
+            return payload.get("number_format") or "General"
+        return "General"
 
     def _read_protection(self) -> Protection | None:
         wb = self._ws._workbook  # noqa: SLF001
@@ -1005,3 +1024,24 @@ class _Sentinel:
 
 
 _UNSET = _Sentinel()
+
+
+def _is_merged_subordinate(cell: Cell) -> bool:
+    """Return True for cells inside a merged range but not its anchor."""
+    try:
+        ranges = cell._ws.merged_cells.ranges  # noqa: SLF001
+    except Exception:
+        return False
+    for ref in ranges:
+        try:
+            min_col, min_row, max_col, max_row = range_boundaries(str(ref))
+        except Exception:
+            continue
+        if None in (min_col, min_row, max_col, max_row):
+            continue
+        if (
+            int(min_row) <= cell.row <= int(max_row)
+            and int(min_col) <= cell.column <= int(max_col)
+        ):
+            return not (cell.row == int(min_row) and cell.column == int(min_col))
+    return False

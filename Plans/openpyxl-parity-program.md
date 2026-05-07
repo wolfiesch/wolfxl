@@ -46,7 +46,15 @@ test suite passing" number that monotonically rises sprint-over-sprint.
 
 ## Status table (live tracker)
 
-Status values: `proposed | in-progress | blocked | review | landed`.
+Status values: `proposed | in-progress | blocked | review | landed | out_of_scope`.
+
+`out_of_scope` was added 2026-05-04 to mark wolfxl-extras (G25-G28: legacy
+`.xlsb`/`.xls` writes, `.ods` ecosystem, VBA authoring). openpyxl itself
+exposes none of those surfaces, so wolfxl cannot have an openpyxl-parity gap
+on those rows. They remain in the tracker for roadmap visibility only and are
+**excluded from the program's ≥95% pass-rate denominator** and from any
+"close every gap" claim. Reclassifying any of them back to a real gap requires
+an RFC documenting why.
 
 Class legend: **∥** parallel-safe within sprint · **⊥** serialized · **🤖**
 codex-delegable (bounded spec + exemplar exists) · **🧠** needs Claude
@@ -79,13 +87,13 @@ structural effort, decision-gated.
 | G19 | VBA inspection API (read-only)                                      | P2  | ⊥ 🧠  | S6     | landed      | Claude  | parity/g19-vba-inspect | 2026-05-04 | 2026-05-04 | RFC-072. `Workbook.vba_archive` now returns `xl/vbaProject.bin` bytes for `.xlsm` files loaded via `load_workbook(path, modify=True)`; xlsx, write-mode, and non-modify reads still yield `None`. New PyO3 method `XlsxPatcher.get_vba_archive_bytes` lazily reads the part from the source ZIP (no eager buffering). Oracle probe `vba_inspect` registered (49/53 → +1 probe / +1 pass); 5 focused tests in `tests/test_vba_inspect.py` (xlsx None / xlsm bytes / round-trip byte-identical / write-mode None / non-modify None). Fixture `tests/fixtures/macro_basic.xlsm` (11.5KB) vendored from the rust_xlsxwriter MIT/Apache-2.0 sample corpus. v1.0 read-only; authoring deferred to G28. |
 | G20 | `write_only=True` streaming write mode                              | P1  | ⊥ 🧠  | S7     | landed      | Claude  | parity/g20-streaming-write-only | 2026-05-04 | 2026-05-04 | RFC-073. New `crates/wolfxl-writer/src/streaming.rs` (`StreamingSheet { temp_file, BufWriter, row_count, max_col }`) backed by `tempfile::NamedTempFile` for OS-managed cleanup; `IoFmtAdapter` bridges `fmt::Write` over `io::Write` so eager and streaming paths share `sheet_data::emit_row_to`. `Worksheet::streaming: Option<StreamingSheet>` is mutually exclusive with `rows`; `sheet_xml::emit` detects it at slot 6 and `std::io::copy`s the temp-file body into the `<sheetData>` accumulator. PyO3 bridge in `src/native_writer_streaming.rs` exposes `enable_streaming_sheet`, `append_streaming_row`, `finalize_streaming_sheets`, plus `intern_format` for cached style resolution. Python `WriteOnlyWorksheet` (`python/wolfxl/_worksheet_write_only.py`) and `WriteOnlyCell` factory route every `.append(row)` straight to the temp file, with id-keyed style caching so the FFI hops scale with unique styles, not row count. `Workbook(write_only=True)` skips the default sheet and tracks `_saved` so the second save raises `WorkbookAlreadySaved`. Forbidden-method matrix (random access, `iter_rows`, etc.) raises AttributeError. Oracle 50/53 → 52/54 (96.3%): existing `workbook_write_only_streaming` flipped `partial → supported`, new `workbook_write_only_bounded_memory` (100k × 10 numeric cells, peak RSS < 80 MiB in subprocess via psutil) registered as a `secondary_probes` fanout. 12 focused pytest cases in `tests/test_write_only.py`; 5 cargo integration tests in `crates/wolfxl-writer/tests/streaming_write.rs` (well-formedness, SST interning, save splice, empty `<sheetData/>`, byte-equality vs eager). Out of scope: charts/images/merged cells/conditional formatting/data validation in write-only sheets (matches openpyxl), modify-mode streaming, mixed write-only + eager sheets in one workbook. v1.5 follow-on (2026-05-04): `package_to<W: Write + Seek>(entries, dest)` and `emit_xlsx_to<W: Write + Seek>(wb, dest)` stream the archive directly into a `BufWriter<File>` opened by `save_once`, replacing the prior `emit_xlsx → Vec<u8> + fs::write` path. The buffered `package` / `emit_xlsx` wrappers remain for diff-tool callers and produce byte-identical archives (`zip::tests::package_to_matches_package_byte_for_byte`). Measured save-peak win: ~30 MiB at 1M rows × 5 cols (≈ size of compressed archive); the dominant memory cost during save is now the per-sheet emit `String` accumulator (~150 MiB for that workload), not the ZIP buffer. |
 | G21 | Slicer outside pivot context                                        | P2  | ⊥ 🤖  | S8     | proposed    |         |        |            |           | Exemplar: pivot-side slicer support |
-| G22 | Defined-name edge cases                                             | P2  | ∥ 🤖  | S8     | proposed    |         |        |            |           | Exemplar: RFC-021 |
+| G22 | Defined-name edge cases                                             | P2  | ∥ 🤖  | S8     | landed      | Codex   | parity-closure-phase2 | 2026-05-04 | 2026-05-04 | Full ECMA-376 §18.2.5 defined-name attribute surface (`hidden`, `comment`, and the 11 openpyxl-exposed edge attrs) now round-trips through write mode, modify mode, and the native reader. Oracle probe `defined_names.edge_cases` flipped `partial → supported`; post-Phase-2 oracle is 53 passed / 1 xfailed across 54 probes. |
 | G23 | Calc-chain edge cases                                               | P2  | ∥ 🤖  | S8     | proposed    |         |        |            |           |  |
-| G24 | Print settings depth audit                                          | P2  | ∥ 🤖  | S8     | proposed    |         |        |            |           | Exemplar: RFC-055 |
-| G25 | `.xlsb` write support                                               | P3  | ⊥ 🧠  | S9     | proposed    |         |        |            |           | Decision-gated before kickoff |
-| G26 | `.xls` write support                                                | P3  | ⊥ 🧠  | S9     | proposed    |         |        |            |           | Decision-gated before kickoff |
-| G27 | `.ods` read+write                                                   | P3  | ⊥ 🧠  | S10    | proposed    |         |        |            |           | Decision-gated before kickoff |
-| G28 | VBA generation (macro authoring)                                    | P3  | ⊥ 🧠  | S11    | proposed    |         |        |            |           | Decision-gated before kickoff |
+| G24 | Print settings depth audit                                          | P2  | ∥ 🤖  | S8     | landed      | Codex   | parity-closure-phase2 | 2026-05-04 | 2026-05-04 | Full PageSetup / PrintOptions / PageMargins surface now round-trips through write mode, modify mode, and native read. The expanded oracle probe covers 18 PageSetup attrs, 5 PrintOptions attrs, 6 PageMargins attrs, print area, and print titles, with openpyxl reading wolfxl output. |
+| G25 | `.xlsb` write support                                               | P3  | ⊥ 🧠  | S9     | out_of_scope | —      |        |            |           | wolfxl-extra (openpyxl does not support `.xlsb` writes either); recategorized 2026-05-04 — not an openpyxl-parity gap, excluded from the ≥95% pass-rate denominator. Decision-gated before any future kickoff. |
+| G26 | `.xls` write support                                                | P3  | ⊥ 🧠  | S9     | out_of_scope | —      |        |            |           | wolfxl-extra (openpyxl does not support `.xls` writes either); recategorized 2026-05-04 — not an openpyxl-parity gap, excluded from the ≥95% pass-rate denominator. Decision-gated before any future kickoff. |
+| G27 | `.ods` read+write                                                   | P3  | ⊥ 🧠  | S10    | out_of_scope | —      |        |            |           | wolfxl-extra (openpyxl does not support `.ods` either); recategorized 2026-05-04 — not an openpyxl-parity gap, excluded from the ≥95% pass-rate denominator. Decision-gated before any future kickoff. |
+| G28 | VBA generation (macro authoring)                                    | P3  | ⊥ 🧠  | S11    | out_of_scope | —      |        |            |           | wolfxl-extra (openpyxl does not support VBA authoring either); recategorized 2026-05-04 — not an openpyxl-parity gap, excluded from the ≥95% pass-rate denominator. Decision-gated before any future kickoff. |
 
 ## Baseline metrics (Sprint 0)
 
@@ -313,28 +321,44 @@ Acceptance:
 1. Edge cases covered in compat matrix.
 2. Compat oracle pass count up.
 
-### Sprint 9 - Legacy Writes (DECISION-GATED before kickoff)
+### Sprint 9 - Legacy Writes (OUT OF SCOPE - wolfxl-extra, not a parity gap)
 
-In scope: G25 (`.xlsb` write), G26 (`.xls` write).
+Originally scoped: G25 (`.xlsb` write), G26 (`.xls` write).
 
-Decision required: most users transcribe to `.xlsx` instead. Confirm scope
-before spending 4-6 sessions on `.xlsb` BIFF12 writer alone. Block on a
-documented user-need signal in `Plans/followups/`.
+**Recategorized 2026-05-04** as wolfxl-extras: openpyxl does not support
+`.xlsb` or `.xls` writes either, so wolfxl cannot have an openpyxl-parity gap
+on these surfaces. They remain decision-gated roadmap items for any future
+"beyond openpyxl" track. They do not count toward the program's ≥95%
+pass-rate denominator, and they are not surfaced in `docs/trust/limitations.md`
+(which now scopes itself to actual openpyxl-parity gaps).
 
-### Sprint 10 - `.ods` (DECISION-GATED)
+Decision required (unchanged): most users transcribe to `.xlsx` instead.
+Confirm a documented user-need signal in `Plans/followups/` before spending
+engineering effort on a BIFF12 writer.
 
-In scope: G27. ODS is OpenDocument, a different parser/writer ecosystem.
+### Sprint 10 - `.ods` (OUT OF SCOPE - wolfxl-extra, not a parity gap)
 
-Decision required: is wolfxl really the right home for ODS, or should users
-keep odfpy?
+Originally scoped: G27. ODS is OpenDocument, a different parser/writer
+ecosystem.
 
-### Sprint 11 - VBA Generation (DECISION-GATED)
+**Recategorized 2026-05-04** as a wolfxl-extra: openpyxl does not support
+`.ods` either, so this is not an openpyxl-parity gap. Tracked for roadmap
+visibility only.
 
-In scope: G28. Macro authoring from Python is rare and large.
+Decision required (unchanged): is wolfxl really the right home for ODS, or
+should users keep odfpy?
 
-Decision required: confirm there is a real user need before scoping. The
-audit's data on user-asked-for VBA-authoring is sparse; do not engineer ahead
-of demand.
+### Sprint 11 - VBA Generation (OUT OF SCOPE - wolfxl-extra, not a parity gap)
+
+Originally scoped: G28. Macro authoring from Python is rare and large.
+
+**Recategorized 2026-05-04** as a wolfxl-extra: openpyxl does not support VBA
+authoring either, so this is not an openpyxl-parity gap. Tracked for roadmap
+visibility only.
+
+Decision required (unchanged): confirm there is a real user need before
+scoping. The audit's data on user-asked-for VBA-authoring is sparse; do not
+engineer ahead of demand.
 
 ## Codex delegation strategy
 
@@ -468,6 +492,15 @@ not on the calendar until decision-required signals fire.
 
 ## Changelog
 
+- 2026-05-04 — Phase 1 of `Plans/parity-closure-empty-limitations.md`
+  recategorized G25-G28 (legacy `.xlsb` writes, `.xls` writes, `.ods`
+  read+write, VBA authoring) from `not_yet`/`partial` to `out_of_scope` in
+  both `docs/migration/_compat_spec.py` and the status table above. These are
+  wolfxl-extras (openpyxl exposes none of these surfaces), so they cannot be
+  openpyxl-parity gaps. Excluded from the ≥95% pass-rate denominator. The
+  `read.xls` spec entry was likewise flipped from `partial` →
+  `out_of_scope`. Matrix totals shifted: supported 64 (unchanged), partial 5
+  → 4, not_yet 5 → 1, out_of_scope 1 → 6 of 75.
 - 2026-05-03 — Plan file created (this session). S0 in progress: tracker +
   matrix spec + oracle harness skeleton landing under one Claude session.
 - 2026-05-03 — G13 landed (parity/g13-cf-color-scales). `ColorScaleRule`

@@ -3,7 +3,12 @@
 /// A single defined name. Workbook-scope names live on
 /// [`crate::model::workbook::Workbook::defined_names`]; sheet-scope names
 /// are also stored there with `scope_sheet_index` set to the owning sheet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Phase 2 (G22): the optional fields after `hidden` cover the rest of
+/// the ECMA-376 §18.2.5 `definedName` attribute surface that openpyxl
+/// exposes. Each maps 1:1 to an XML attribute on `<definedName>`.
+/// `None` means the attribute is omitted on emit (XML default).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefinedName {
     /// The name Excel shows in the Name Manager. Rules: starts with a
     /// letter or `_`, no spaces, ≤ 255 chars, not a cell reference.
@@ -25,6 +30,43 @@ pub struct DefinedName {
     /// Whether the name is hidden from the Name Manager (but still usable
     /// in formulas). Used by some apps for bookkeeping ranges.
     pub hidden: bool,
+
+    /// `comment` attribute — free-text comment shown in the Name Manager.
+    pub comment: Option<String>,
+
+    /// `customMenu` attribute — string Excel shows in a custom menu slot.
+    pub custom_menu: Option<String>,
+
+    /// `description` attribute — free-text description.
+    pub description: Option<String>,
+
+    /// `help` attribute — help text.
+    pub help: Option<String>,
+
+    /// `statusBar` attribute — status-bar prompt.
+    pub status_bar: Option<String>,
+
+    /// `shortcutKey` attribute — single-character keyboard shortcut.
+    pub shortcut_key: Option<String>,
+
+    /// `function` attribute — when `Some(true)`, the name is a function.
+    pub function: Option<bool>,
+
+    /// `functionGroupId` attribute — function group identifier.
+    pub function_group_id: Option<u32>,
+
+    /// `vbProcedure` attribute — when `Some(true)`, the name is a VB procedure.
+    pub vb_procedure: Option<bool>,
+
+    /// `xlm` attribute — when `Some(true)`, the name is an Excel 4.0 macro.
+    pub xlm: Option<bool>,
+
+    /// `publishToServer` attribute.
+    pub publish_to_server: Option<bool>,
+
+    /// `workbookParameter` attribute — when `Some(true)`, the name is a
+    /// workbook parameter.
+    pub workbook_parameter: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

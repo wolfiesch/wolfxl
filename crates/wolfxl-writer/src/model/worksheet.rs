@@ -114,6 +114,9 @@ pub struct Worksheet {
     /// `<pageMargins>` slot 21. Overrides the default margins.
     pub page_margins: Option<crate::parse::sheet_setup::PageMarginsSpec>,
 
+    /// `<printOptions>` slot 20.
+    pub print_options: Option<crate::parse::sheet_setup::PrintOptionsSpec>,
+
     /// `<pageSetup>` slot 22.
     pub page_setup: Option<crate::parse::sheet_setup::PageSetupSpec>,
 
@@ -163,6 +166,7 @@ impl Worksheet {
             views: None,
             protection: None,
             page_margins: None,
+            print_options: None,
             page_setup: None,
             header_footer: None,
             row_breaks: None,

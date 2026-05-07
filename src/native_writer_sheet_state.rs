@@ -78,6 +78,7 @@ pub(crate) fn apply_sheet_setup(ws: &mut Worksheet, payload: &Bound<'_, PyDict>)
     let specs = crate::wolfxl::sheet_setup::parse_sheet_setup_payload(payload)?;
     ws.views = specs.sheet_view;
     ws.protection = specs.sheet_protection;
+    ws.print_options = specs.print_options;
     ws.page_margins = specs.page_margins;
     ws.page_setup = specs.page_setup;
     ws.header_footer = specs.header_footer;

@@ -21,7 +21,7 @@ slicing) raises :class:`AttributeError` to match openpyxl's
 
 # Style resolution
 
-:class:`WriteOnlyCell` is a lightweight ``@dataclass(slots=True)``
+:class:`WriteOnlyCell` is a lightweight ``@dataclass``
 factory — NOT a ``Cell`` subclass. It holds the unresolved style
 attributes (``font``, ``fill``, ``border``, ``alignment``,
 ``number_format``). At append time the style resolves into a
@@ -68,7 +68,7 @@ _FORBIDDEN_ATTRS = frozenset(
 )
 
 
-@dataclass(slots=True)
+@dataclass
 class WriteOnlyCell:
     """Lightweight cell factory for streaming write-only mode.
 

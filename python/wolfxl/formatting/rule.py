@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass
+@dataclass(init=False)
 class Rule:
     """A generic conditional-formatting rule.
 
@@ -41,9 +41,69 @@ class Rule:
     formula: list[str] = field(default_factory=list)
     stopIfTrue: bool = False  # noqa: N815 - openpyxl public API
     dxfId: int | None = None  # noqa: N815 - openpyxl public API
+    aboveAverage: bool | None = None  # noqa: N815 - openpyxl public API
+    percent: bool | None = None
+    bottom: bool | None = None
+    text: str | None = None
+    timePeriod: str | None = None  # noqa: N815 - openpyxl public API
+    rank: int | None = None
+    stdDev: int | None = None  # noqa: N815 - openpyxl public API
+    equalAverage: bool | None = None  # noqa: N815 - openpyxl public API
     # ``color_scale`` / ``data_bar`` / ``icon_set`` metadata blobs are
     # preserved on round-trip but not decomposed here — T2 territory.
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        type: str,  # noqa: A002 - openpyxl public API
+        dxfId: int | None = None,  # noqa: N803
+        priority: int = 1,
+        stopIfTrue: bool | None = False,  # noqa: N803
+        aboveAverage: bool | None = None,  # noqa: N803
+        percent: bool | None = None,
+        bottom: bool | None = None,
+        operator: str | None = None,
+        text: str | None = None,
+        timePeriod: str | None = None,  # noqa: N803
+        rank: int | None = None,
+        stdDev: int | None = None,  # noqa: N803
+        equalAverage: bool | None = None,  # noqa: N803
+        formula: list[str] | tuple[str, ...] | str | None = None,
+        dxf: Any = None,
+        extra: dict[str, Any] | None = None,
+        **kw: Any,
+    ) -> None:
+        self.type = type
+        self.priority = priority
+        self.operator = operator
+        if formula is None:
+            self.formula = []
+        elif isinstance(formula, str):
+            self.formula = [formula]
+        else:
+            self.formula = [str(item) for item in formula]
+        self.stopIfTrue = bool(stopIfTrue) if stopIfTrue is not None else False
+        self.dxfId = dxfId
+        self.aboveAverage = aboveAverage
+        self.percent = percent
+        self.bottom = bottom
+        self.text = text
+        self.timePeriod = timePeriod
+        self.rank = rank
+        self.stdDev = stdDev
+        self.equalAverage = equalAverage
+        extras = dict(extra or {})
+        if dxf is not None:
+            extras["dxf"] = dxf
+        for key in ("colorScale", "dataBar", "iconSet", "extLst"):
+            if kw.get(key) is not None:
+                extras[key] = kw[key]
+        # Preserve unrecognized keyword payloads instead of rejecting
+        # openpyxl-shaped Rule construction that carries extension data.
+        for key, value in kw.items():
+            if key not in extras and value is not None:
+                extras[key] = value
+        self.extra = extras
 
     @property
     def dxf(self) -> "DifferentialStyle | None":
@@ -198,7 +258,9 @@ class DataBarRule(Rule):
         end_type: str | None = None,
         end_value: Any = None,
         color: str | None = None,
-        showValue: bool = True,  # noqa: N803
+        showValue: bool | None = None,  # noqa: N803
+        minLength: int | None = None,  # noqa: N803
+        maxLength: int | None = None,  # noqa: N803
         **kw: Any,
     ) -> None:
         extra = {
@@ -207,7 +269,9 @@ class DataBarRule(Rule):
             "end_type": end_type,
             "end_value": end_value,
             "color": color,
-            "show_value": showValue,
+            "show_value": True if showValue is None else showValue,
+            "min_length": minLength,
+            "max_length": maxLength,
         }
         super().__init__(type="dataBar", extra=extra, **kw)
 
@@ -220,7 +284,9 @@ class IconSetRule(Rule):
         icon_style: str | None = None,
         type: str | None = None,  # noqa: A002 - keyword openpyxl uses
         values: list[Any] | None = None,
-        showValue: bool = True,  # noqa: N803
+        showValue: bool | None = None,  # noqa: N803
+        percent: bool | None = None,
+        reverse: bool | None = None,
         **kw: Any,
     ) -> None:
         # openpyxl's IconSetRule positional ``type`` ("percent", "percentile",
@@ -229,7 +295,9 @@ class IconSetRule(Rule):
             "icon_style": icon_style,
             "value_type": type,
             "values": list(values or []),
-            "show_value": showValue,
+            "show_value": True if showValue is None else showValue,
+            "percent": percent,
+            "reverse": reverse,
         }
         super().__init__(type="iconSet", extra=extra, **kw)
 

@@ -457,6 +457,7 @@ pub(super) fn parse_page_setup(payload: &[u8]) -> Option<PageSetupInfo> {
         use_printer_defaults: Some(no_orientation),
         black_and_white: Some(flags & (1 << 3) != 0),
         draft: Some(flags & (1 << 4) != 0),
+        ..PageSetupInfo::default()
     })
 }
 
@@ -472,11 +473,11 @@ fn print_errors_as(value: u16) -> &'static str {
 pub(super) fn parse_print_options(payload: &[u8]) -> Option<PrintOptionsInfo> {
     let flags = payload.get(0..2).map(le_u16)?;
     Some(PrintOptionsInfo {
-        horizontal_centered: flags & 0x0001 != 0,
-        vertical_centered: flags & 0x0002 != 0,
-        headings: flags & 0x0008 != 0,
-        grid_lines: flags & 0x0004 != 0,
-        grid_lines_set: flags & 0x0010 != 0,
+        horizontal_centered: Some(flags & 0x0001 != 0),
+        vertical_centered: Some(flags & 0x0002 != 0),
+        headings: Some(flags & 0x0008 != 0),
+        grid_lines: Some(flags & 0x0004 != 0),
+        grid_lines_set: Some(flags & 0x0010 != 0),
     })
 }
 

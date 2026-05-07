@@ -11,7 +11,7 @@ use wolfxl_reader::{
 };
 
 use crate::native_reader_backend::{NativeXlsbBook, NativeXlsxBook};
-use crate::native_reader_dimensions::is_merged_subordinate;
+use crate::native_reader_dimensions::{is_merged_subordinate, row_col_to_a1_1based};
 use crate::native_reader_traits::NativeStyleResolver;
 use crate::util::a1_to_row_col;
 
@@ -141,6 +141,15 @@ pub(crate) fn read_cell_array_formula_xlsx(
     serialize_array_formula(py, info, false)
 }
 
+pub(crate) fn read_sheet_array_formulas_xlsx(
+    book: &mut NativeXlsxBook,
+    py: Python<'_>,
+    sheet: &str,
+) -> PyResult<PyObject> {
+    let data = book.ensure_sheet(sheet)?;
+    serialize_sheet_array_formulas(py, &data.array_formulas, false)
+}
+
 pub(crate) fn read_cell_array_formula_xlsb(
     book: &mut NativeXlsbBook,
     py: Python<'_>,
@@ -160,6 +169,30 @@ pub(crate) fn read_cell_array_formula_xlsb(
     };
     // XLSB applies formula-prefix to array text; XLSX does not.
     serialize_array_formula(py, info, true)
+}
+
+pub(crate) fn read_sheet_array_formulas_xlsb(
+    book: &mut NativeXlsbBook,
+    py: Python<'_>,
+    sheet: &str,
+) -> PyResult<PyObject> {
+    let data = book.ensure_sheet(sheet)?;
+    serialize_sheet_array_formulas(py, &data.array_formulas, true)
+}
+
+fn serialize_sheet_array_formulas(
+    py: Python<'_>,
+    formulas: &std::collections::HashMap<(u32, u32), ArrayFormulaInfo>,
+    prefix_text: bool,
+) -> PyResult<PyObject> {
+    let out = PyDict::new(py);
+    for ((row, col), info) in formulas {
+        out.set_item(
+            row_col_to_a1_1based(*row, *col),
+            serialize_array_formula(py, info.clone(), prefix_text)?,
+        )?;
+    }
+    Ok(out.into())
 }
 
 fn serialize_array_formula(
@@ -188,6 +221,8 @@ fn serialize_array_formula(
             dtr,
             r1,
             r2,
+            del1,
+            del2,
         } => {
             d.set_item("kind", "data_table")?;
             d.set_item("ref", ref_range)?;
@@ -196,6 +231,8 @@ fn serialize_array_formula(
             d.set_item("dtr", dtr)?;
             d.set_item("r1", r1)?;
             d.set_item("r2", r2)?;
+            d.set_item("del1", del1)?;
+            d.set_item("del2", del2)?;
         }
         ArrayFormulaInfo::SpillChild => {
             d.set_item("kind", "spill_child")?;

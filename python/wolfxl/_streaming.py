@@ -363,8 +363,8 @@ class StreamingCell:
             return None
         payload = reader.read_cell_format(self._ws.title, self.coordinate)
         if isinstance(payload, dict):
-            return payload.get("number_format")
-        return None
+            return payload.get("number_format") or "General"
+        return "General"
 
     # ------------------------------------------------------------------
     # Mutation — strictly rejected. Sprint Ι Pod-β contract.
@@ -395,6 +395,12 @@ class StreamingCell:
     def __repr__(self) -> str:
         """Return a compact debug representation for this streaming cell."""
         return f"<StreamingCell {self.coordinate} value={self._value!r}>"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            getattr(other, "coordinate", None) == self.coordinate
+            and getattr(other, "value", None) == self.value
+        )
 
 
 def _resolve_bounds(
@@ -475,6 +481,7 @@ def stream_iter_rows(
 
     try:
         if values_only:
+            counter = mn_r if mn_r is not None else 1
             # Switch to ``read_next_row`` rather than ``read_next_values``
             # so we have access to each cell's style_id. The slight extra
             # work (vs Rust-side tuple padding) is offset by skipping a
@@ -484,17 +491,15 @@ def stream_iter_rows(
                 if row is None:
                     break
                 row_idx, cells = row
-                if mn_c is not None and mx_c is not None:
-                    cmin, cmax = mn_c, mx_c
-                else:
-                    if not cells:
-                        yield ()
-                        continue
-                    cols = [c[0] for c in cells]
-                    cmin = mn_c if mn_c is not None else min(cols)
-                    cmax = mx_c if mx_c is not None else max(cols)
+                cmin = mn_c if mn_c is not None else 1
+                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                empty_row = (None,) * max(0, cmax + 1 - cmin)
+                while counter < row_idx:
+                    yield empty_row
+                    counter += 1
                 if cmax < cmin:
                     yield ()
+                    counter = row_idx + 1
                     continue
                 by_col = {c[0]: c for c in cells}
                 row_out: list[Any] = []
@@ -515,7 +520,16 @@ def stream_iter_rows(
                         )
                     row_out.append(py_val)
                 yield tuple(row_out)
+                counter = row_idx + 1
+            if mx_r is not None:
+                cmin = mn_c if mn_c is not None else 1
+                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                empty_row = (None,) * max(0, cmax + 1 - cmin)
+                while counter <= mx_r:
+                    yield empty_row
+                    counter += 1
         else:
+            counter = mn_r if mn_r is not None else 1
             while True:
                 row = reader.read_next_row()
                 if row is None:
@@ -523,17 +537,18 @@ def stream_iter_rows(
                 row_idx, cells = row
                 # Determine emitted column bounds: explicit min/max wins,
                 # else span observed cells.
-                if mn_c is not None and mx_c is not None:
-                    cmin, cmax = mn_c, mx_c
-                else:
-                    if not cells:
-                        yield ()
-                        continue
-                    cols = [c[0] for c in cells]
-                    cmin = mn_c if mn_c is not None else min(cols)
-                    cmax = mx_c if mx_c is not None else max(cols)
+                cmin = mn_c if mn_c is not None else 1
+                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                while counter < row_idx:
+                    empty_row = tuple(
+                        StreamingCell(ws, counter, col, None, None, "blank")
+                        for col in range(cmin, cmax + 1)
+                    )
+                    yield empty_row
+                    counter += 1
                 if cmax < cmin:
                     yield ()
+                    counter = row_idx + 1
                     continue
                 by_col = {c[0]: c for c in cells}
                 row_out: list[Any] = []
@@ -549,6 +564,16 @@ def stream_iter_rows(
                             StreamingCell(ws, row_idx, col, value, style_id, cell_type)
                         )
                 yield tuple(row_out)
+                counter = row_idx + 1
+            if mx_r is not None:
+                cmin = mn_c if mn_c is not None else 1
+                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                while counter <= mx_r:
+                    yield tuple(
+                        StreamingCell(ws, counter, col, None, None, "blank")
+                        for col in range(cmin, cmax + 1)
+                    )
+                    counter += 1
     finally:
         reader.close()
 

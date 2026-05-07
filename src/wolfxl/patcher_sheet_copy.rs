@@ -185,8 +185,7 @@ pub(super) fn apply_sheet_copies_phase(
                     name: dn.name,
                     formula: dn.formula,
                     local_sheet_id: Some(dn.local_sheet_id),
-                    hidden: None,
-                    comment: None,
+                    ..Default::default()
                 });
         }
 

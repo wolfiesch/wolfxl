@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import openpyxl
 import pytest
 
 
@@ -91,6 +92,30 @@ def _build_workbook_with_image_and_chart(path: Path) -> Path:
     return path
 
 
+def _build_openpyxl_chart_fixture(path: Path) -> None:
+    from openpyxl.chart import BarChart, Reference
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    rows = [
+        ["Region", "Q1", "Q2"],
+        ["NA", 100, 110],
+        ["EU", 80, 95],
+    ]
+    for row in rows:
+        ws.append(row)
+    chart = BarChart()
+    chart.title = "Original"
+    chart.add_data(
+        Reference(ws, min_col=2, min_row=1, max_col=3, max_row=3),
+        titles_from_data=True,
+    )
+    ws.add_chart(chart, "E2")
+    wb.save(path)
+
+
+
 def test_remove_chart_drops_pending(tmp_path: Path) -> None:
     """Removing a pending chart yields a workbook with no chart parts."""
     wb, ws, bar = _build_workbook_with_pending_chart()
@@ -119,6 +144,65 @@ def test_remove_chart_unknown_raises() -> None:
     ghost = BarChart()
     with pytest.raises(ValueError, match="not added"):
         ws.remove_chart(ghost)
+
+
+def test_remove_loaded_source_chart_persists(tmp_path: Path) -> None:
+    import wolfxl
+
+    src = tmp_path / "source_chart.xlsx"
+    _build_openpyxl_chart_fixture(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Data"]
+    chart = ws._charts[0]
+    ws.remove_chart(chart)
+    out = tmp_path / "removed_source_chart.xlsx"
+    wb.save(out)
+
+    reloaded = openpyxl.load_workbook(out)
+    assert reloaded["Data"]._charts == []
+    with zipfile.ZipFile(out) as zf:
+        assert not any(name.startswith("xl/charts/chart") for name in zf.namelist())
+
+
+def test_replace_loaded_source_chart_persists(tmp_path: Path) -> None:
+    import wolfxl
+    from wolfxl.chart import LineChart, Reference
+
+    src = tmp_path / "source_chart_replace.xlsx"
+    _build_openpyxl_chart_fixture(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    ws = wb["Data"]
+    old = ws._charts[0]
+    line = LineChart()
+    line.title = "Replacement"
+    line.add_data(Reference(ws, min_col=2, min_row=1, max_col=3, max_row=3), titles_from_data=True)
+    ws.replace_chart(old, line)
+    out = tmp_path / "replaced_source_chart.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out) as zf:
+        chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
+    assert "<c:lineChart>" in chart_xml
+    assert "<c:barChart>" not in chart_xml
+
+
+def test_loaded_source_chart_title_edit_persists(tmp_path: Path) -> None:
+    import wolfxl
+
+    src = tmp_path / "source_chart_title.xlsx"
+    _build_openpyxl_chart_fixture(src)
+
+    wb = wolfxl.load_workbook(src, modify=True)
+    wb["Data"]._charts[0].title = "Changed"
+    out = tmp_path / "title_changed.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out) as zf:
+        chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
+    assert "Changed" in chart_xml
+    assert "Original" not in chart_xml
 
 
 def test_replace_chart_swaps_in_place(tmp_path: Path) -> None:

@@ -125,6 +125,7 @@ fn build_fixture() -> (Workbook, u32) {
         scope_sheet_index: None,
         builtin: None,
         hidden: false,
+        ..Default::default()
     });
 
     (wb, style_id)

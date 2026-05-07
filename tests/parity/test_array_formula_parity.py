@@ -63,6 +63,21 @@ def test_openpyxl_writes_array_wolfxl_reads(tmp_path: Path) -> None:
     # openpyxl emits the body with leading "=" — wolfxl strips it on
     # parse.  Accept either.
     assert "B1:B3*2" in a1.text
+    assert rb.active.array_formulae == {"A1": "A1:A3"}
+
+
+def test_wolfxl_matches_openpyxl_array_formulae_property(tmp_path: Path) -> None:
+    """openpyxl 3.1.x exposes spill metadata via ``Worksheet.array_formulae``."""
+    p = tmp_path / "array_formulae.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = ArrayFormula("A1:A3")
+    wb.save(str(p))
+
+    rb = wolfxl.load_workbook(str(p))
+    assert rb.active.array_formulae == {"A1": "A1:A3"}
+
+    op = openpyxl.load_workbook(str(p))
+    assert op.active.array_formulae == {"A1": "A1:A3"}
 
 
 def test_wolfxl_writes_data_table_openpyxl_reads(tmp_path: Path) -> None:
@@ -84,6 +99,24 @@ def test_wolfxl_writes_data_table_openpyxl_reads(tmp_path: Path) -> None:
         # either bool or string truthy.
         assert val.dt2D in (True, "1", 1)
     # Either way, the file must round-trip cleanly without raising.
+
+
+def test_data_table_del_flags_round_trip_with_openpyxl(tmp_path: Path) -> None:
+    p = tmp_path / "dt_del_flags.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["B2"] = DataTableFormula(ref="B2:F11", del1=True, del2=True)
+    wb.save(str(p))
+
+    rb = wolfxl.load_workbook(str(p))
+    val = rb.active["B2"].value
+    assert isinstance(val, DataTableFormula)
+    assert val.del1 is True
+    assert val.del2 is True
+
+    op = openpyxl.load_workbook(str(p))
+    op_val = op.active["B2"].value
+    assert str(op_val.del1).lower() in {"1", "true"}
+    assert str(op_val.del2).lower() in {"1", "true"}
 
 
 def test_round_trip_preserves_neighbors_modify_mode(tmp_path: Path) -> None:

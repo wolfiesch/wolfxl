@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from wolfxl import Workbook
-from wolfxl.worksheet.page_setup import PageMargins, PageSetup
+from wolfxl.worksheet.page_setup import PageMargins, PageSetup, PrintOptions
 
 
 class TestPageSetupDefaults:
@@ -51,6 +51,10 @@ class TestPageSetupValidation:
         with pytest.raises(ValueError, match="errors"):
             PageSetup(errors="oops")
 
+    def test_invalid_page_order_raises(self):
+        with pytest.raises(ValueError, match="pageOrder"):
+            PageSetup(pageOrder="sideways")
+
 
 class TestPageSetupAliases:
     def test_paper_size_alias(self):
@@ -70,6 +74,13 @@ class TestPageSetupAliases:
         ps.fit_to_height = 2
         assert ps.fitToHeight == 2
 
+    def test_paper_height_width_and_page_order_aliases(self):
+        ps = PageSetup(paperHeight="297mm", paperWidth="210mm")
+        assert ps.paper_height == "297mm"
+        assert ps.paper_width == "210mm"
+        ps.page_order = "overThenDown"
+        assert ps.pageOrder == "overThenDown"
+
 
 class TestPageSetupRustDict:
     def test_default_orientation_emits_none(self):
@@ -83,6 +94,40 @@ class TestPageSetupRustDict:
     def test_paper_size_round_trip(self):
         d = PageSetup(paperSize=9).to_rust_dict()
         assert d["paper_size"] == 9
+
+    def test_g24_extended_attrs_in_rust_dict(self):
+        d = PageSetup(
+            paperHeight="297mm",
+            paperWidth="210mm",
+            pageOrder="overThenDown",
+            copies=3,
+        ).to_rust_dict()
+        assert d["paper_height"] == "297mm"
+        assert d["paper_width"] == "210mm"
+        assert d["page_order"] == "overThenDown"
+        assert d["copies"] == 3
+
+
+class TestPrintOptions:
+    def test_defaults_match_openpyxl_none_shape(self):
+        po = PrintOptions()
+        assert po.horizontalCentered is None
+        assert po.verticalCentered is None
+        assert po.headings is None
+        assert po.gridLines is None
+        assert po.gridLinesSet is None
+        assert po.is_default()
+
+    def test_aliases_and_rust_dict(self):
+        po = PrintOptions()
+        po.horizontal_centered = True
+        po.vertical_centered = False
+        po.gridLines = True
+        d = po.to_rust_dict()
+        assert d["horizontal_centered"] is True
+        assert d["vertical_centered"] is False
+        assert d["grid_lines"] is True
+        assert not po.is_default()
 
 
 class TestWorksheetPageSetupAccessor:

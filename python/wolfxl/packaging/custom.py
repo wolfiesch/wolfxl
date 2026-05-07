@@ -6,6 +6,10 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from wolfxl.xml import LXML
+from wolfxl.xml.constants import CPROPS_FMTID, CUSTPROPS_NS, VTYPES_NS
+from wolfxl.xml.functions import Element, SubElement
+
 
 @dataclass
 class _TypedProperty:
@@ -95,6 +99,47 @@ class CustomPropertyList:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} containing {self.props}"
+
+    def to_tree(self) -> Element:
+        """Serialize custom properties to the OOXML custom-properties part."""
+        if LXML:
+            root = Element("Properties", nsmap={None: CUSTPROPS_NS, "vt": VTYPES_NS})
+        else:
+            root = Element("Properties", {"xmlns": CUSTPROPS_NS, "xmlns:vt": VTYPES_NS})
+        for pid, prop in enumerate(self.props, 2):
+            node = SubElement(
+                root,
+                "property",
+                {
+                    "fmtid": CPROPS_FMTID,
+                    "pid": str(pid),
+                    "name": prop.name,
+                },
+            )
+            tag, text = _value_node(prop)
+            child = SubElement(node, f"{{{VTYPES_NS}}}{tag}")
+            child.text = text
+        return root
+
+
+def _value_node(prop: _TypedProperty) -> tuple[str, str]:
+    class_name = prop.__class__.__name__
+    if class_name == "IntProperty":
+        return "i4", str(prop.value)
+    if class_name == "FloatProperty":
+        return "r8", str(prop.value)
+    if class_name == "BoolProperty":
+        return "bool", "true" if prop.value else "false"
+    if class_name == "DateTimeProperty":
+        value = prop.value
+        if isinstance(value, dt.datetime):
+            text = value.replace(microsecond=0).isoformat()
+            if value.tzinfo is None:
+                text += "Z"
+        else:
+            text = str(value)
+        return "filetime", text
+    return "lpwstr", "" if prop.value is None else str(prop.value)
 
 
 __all__ = [

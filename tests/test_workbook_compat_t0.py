@@ -35,6 +35,17 @@ def test_index_returns_sheet_position() -> None:
     assert wb.get_sheet_names() == wb.sheetnames
 
 
+def test_create_sheet_auto_generates_duplicate_names_like_openpyxl() -> None:
+    wb = wolfxl.Workbook()
+
+    assert wb.create_sheet().title == "Sheet1"
+    assert wb.create_sheet("Sheet").title == "Sheet2"
+    assert wb.create_sheet("Data").title == "Data"
+    assert wb.create_sheet("data").title == "data1"
+    assert wb.create_sheet("Data1").title == "Data11"
+    assert wb.create_sheet("").title == "Sheet3"
+
+
 def test_create_named_range_alias() -> None:
     wb = wolfxl.Workbook()
     ws = wb.active
@@ -80,10 +91,14 @@ def test_add_named_style_persists_name_on_save(tmp_path: Path) -> None:
     assert rt.style_names == ["Normal", "Metric"]
 
 
-def test_create_chartsheet_raises_clear_error() -> None:
+def test_create_chartsheet_returns_chartsheet() -> None:
     wb = wolfxl.Workbook()
-    with pytest.raises(NotImplementedError, match="create_chartsheet"):
-        wb.create_chartsheet("Chart")
+    cs = wb.create_chartsheet("Chart")
+    assert cs.title == "Chart"
+    assert wb["Chart"] is cs
+    assert wb.chartsheets == [cs]
+    assert wb.sheetnames == ["Sheet", "Chart"]
+    assert wb.worksheets == [wb["Sheet"]]
 
 
 def test_read_only_false_for_write_mode() -> None:

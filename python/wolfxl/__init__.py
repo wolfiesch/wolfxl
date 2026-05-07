@@ -23,7 +23,10 @@ import os
 from typing import IO, cast
 
 from wolfxl._cell import Cell
+from wolfxl.chartsheet import Chartsheet
+from wolfxl._external_links import ExternalFileLink, ExternalLink
 from wolfxl._rust import __version__, classify_format
+from wolfxl.xml import DEFUSEDXML, LXML
 
 # File-format detector (xlsx / xlsb / xls / ods / unknown), distinct from the
 # existing ``classify_format`` cell-format classifier. Re-exported here so
@@ -43,9 +46,14 @@ __all__ = [
     "Alignment",
     "Border",
     "Cell",
+    "Chartsheet",
     "Color",
     "CopyOptions",
+    "DEFUSEDXML",
+    "ExternalFileLink",
+    "ExternalLink",
     "Font",
+    "LXML",
     "PatternFill",
     "Side",
     "Workbook",
@@ -67,6 +75,7 @@ def load_workbook(
     ),
     read_only: bool = False,
     data_only: bool = False,
+    keep_vba: bool = False,
     keep_links: bool = True,
     modify: bool = False,
     permissive: bool = False,
@@ -81,6 +90,9 @@ def load_workbook(
         read_only: Enable the streaming row reader for ``.xlsx`` files.
             Streaming cells are immutable.
         data_only: Return cached formula results when present.
+        keep_vba: Preserve VBA/macro package parts on save. This opens OOXML
+            workbooks through the modify-mode patcher, matching openpyxl's
+            ``keep_vba=True`` save contract.
         keep_links: Compatibility shim accepted for openpyxl-shaped call sites.
         modify: Enable read-modify-write mode for ``.xlsx`` files. Modified
             cells and supported metadata are saved while preserving unchanged
@@ -124,6 +136,9 @@ def load_workbook(
 
     # Format-specific guards — surface clear errors *before* we try to
     # materialise a backend that doesn't exist for the requested mode.
+    if keep_vba and not modify:
+        modify = True
+
     if fmt in ("xlsb", "xls"):
         if modify:
             raise NotImplementedError(
@@ -164,17 +179,16 @@ def load_workbook(
             data=data,
             password=password,
             data_only=data_only,
-            permissive=permissive,
-            modify=modify,
-            read_only=read_only,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
+        permissive=permissive,
+        modify=modify,
+        read_only=read_only,
         ),
     )
 
-    wb._keep_links = bool(keep_links)  # noqa: SLF001
-    if not keep_links:
-        wb._external_links_cache = []  # noqa: SLF001
-        patcher = getattr(wb, "_rust_patcher", None)
-        if patcher is not None and hasattr(patcher, "queue_external_links_drop"):
-            patcher.queue_external_links_drop()
     wb._rich_text = rich_text  # noqa: SLF001
     return wb
+
+
+open = load_workbook

@@ -110,6 +110,7 @@ from wolfxl._worksheet_write_buffers import (
     materialize_bulk_writes,
     write_rows as _write_rows,
 )
+from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
@@ -179,7 +180,7 @@ class Worksheet:
         # Print/view/protection lazy slots.
         "_page_setup", "_page_margins", "_print_options", "_header_footer",
         "_sheet_properties", "_sheet_view", "_protection",
-        "_print_title_rows", "_print_title_cols",
+        "_print_title_rows", "_print_title_cols", "_print_titles_dirty",
         # Pending slicer presentations.
         "_pending_slicers",
         # Page breaks and sheetFormatPr lazy slots.
@@ -201,8 +202,12 @@ class Worksheet:
         old = self._title
         if old == value:
             return
-        if value in wb._sheets:  # noqa: SLF001
+        if value in wb._sheets or value in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
             raise ValueError(f"Sheet '{value}' already exists")
+        if wb._rust_patcher is not None:  # noqa: SLF001
+            queue_rename = getattr(wb._rust_patcher, "queue_sheet_rename", None)  # noqa: SLF001
+            if queue_rename is not None:
+                queue_rename(old, value)
         # Update workbook bookkeeping.
         idx = wb._sheet_names.index(old)  # noqa: SLF001
         wb._sheet_names[idx] = value  # noqa: SLF001
@@ -395,7 +400,32 @@ class Worksheet:
     @property
     def array_formulae(self) -> dict[str, str]:
         """Return array formula ranges by master cell."""
-        return {}
+        out: dict[str, str] = {}
+        reader = getattr(self._workbook, "_rust_reader", None)  # noqa: SLF001
+        if reader is not None and hasattr(reader, "read_sheet_array_formulas"):
+            payloads = reader.read_sheet_array_formulas(self._title)  # noqa: SLF001
+            if isinstance(payloads, dict):
+                for coord, payload in payloads.items():
+                    try:
+                        row_col = a1_to_rowcol(coord)
+                    except ValueError:
+                        row_col = None
+                    cell = self._cells.get(row_col) if row_col is not None else None  # noqa: SLF001
+                    if cell is not None and getattr(cell, "_value_dirty", False):
+                        continue
+                    if isinstance(payload, dict) and payload.get("kind") == "array":
+                        ref = payload.get("ref")
+                        if ref:
+                            out[coord] = ref
+        for (row, col), (kind, payload) in self._pending_array_formulas.items():  # noqa: SLF001
+            if kind == "array":
+                ref = payload.get("ref")
+                if ref:
+                    out[rowcol_to_a1(row, col)] = ref
+        for (row, col), cell in self._cells.items():  # noqa: SLF001
+            if getattr(cell, "_formula_type", None) == "array" and cell._array_ref:  # noqa: SLF001
+                out[rowcol_to_a1(row, col)] = cell._array_ref  # noqa: SLF001
+        return out
 
     @property
     def column_groups(self) -> list[Any]:
@@ -548,6 +578,7 @@ class Worksheet:
         reader = getattr(self._workbook, "_rust_reader", None)
         if (
             self._print_title_rows is None
+            and not self._print_titles_dirty
             and reader is not None
             and hasattr(reader, "read_print_titles")
         ):
@@ -573,6 +604,7 @@ class Worksheet:
         reader = getattr(self._workbook, "_rust_reader", None)
         if (
             self._print_title_cols is None
+            and not self._print_titles_dirty
             and reader is not None
             and hasattr(reader, "read_print_titles")
         ):
@@ -1516,17 +1548,17 @@ class Worksheet:
         In modify mode the list is populated lazily by walking the
         sheet's relationship graph and parsing the on-disk pivot
         table parts. Each entry is a
-        :class:`~wolfxl.pivot.PivotTableHandle` whose ``.source``
-        attribute can be reassigned to mutate the underlying
-        ``<cacheSource><worksheetSource>`` element on save.
+        :class:`~wolfxl.pivot.PivotTableHandle` whose ``.source`` and
+        layout fields can be reassigned to mutate the underlying pivot
+        table/cache XML on save.
 
         In construction mode the list is empty: pivots queued via
         :meth:`add_pivot_table` are tracked separately on
         ``_pending_pivot_tables`` until save.
 
-        Out-of-scope per RFC-070 §3 (Option B): mutating
-        field-placement, filters, or aggregation. Only ``.source``
-        round-trips today.
+        Layout edits that can change derived cache records mark the
+        linked cache refresh-on-open; source edits with matching shape
+        stay byte-stable.
         """
         if self._pivot_handles_cache is not None:
             return self._pivot_handles_cache

@@ -137,9 +137,13 @@ pub(crate) fn page_setup_to_py(py: Python<'_>, setup: &PageSetupInfo) -> PyResul
     d.set_item("cell_comments", setup.cell_comments.as_deref())?;
     d.set_item("errors", setup.errors.as_deref())?;
     d.set_item("use_first_page_number", setup.use_first_page_number)?;
+    d.set_item("paper_height", setup.paper_height.as_deref())?;
+    d.set_item("paper_width", setup.paper_width.as_deref())?;
+    d.set_item("page_order", setup.page_order.as_deref())?;
     d.set_item("use_printer_defaults", setup.use_printer_defaults)?;
     d.set_item("black_and_white", setup.black_and_white)?;
     d.set_item("draft", setup.draft)?;
+    d.set_item("copies", setup.copies)?;
     Ok(d.into())
 }
 

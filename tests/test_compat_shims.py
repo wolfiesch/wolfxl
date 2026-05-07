@@ -14,6 +14,9 @@ pointed error. These tests pin the error behavior so we don't regress.
 from __future__ import annotations
 
 import importlib
+from io import BytesIO
+from xml.etree import ElementTree as ET
+import zipfile
 
 import pytest
 
@@ -72,8 +75,16 @@ def test_utils_cell_lazy_reexports() -> None:
     "module_path",
     [
         "wolfxl.styles",
+        "wolfxl.styles.cell_style",
+        "wolfxl.styles.styleable",
         "wolfxl.styles.named_styles",
         "wolfxl.styles.differential",
+        "wolfxl.xml",
+        "wolfxl.xml.constants",
+        "wolfxl.xml.functions",
+        "wolfxl.reader",
+        "wolfxl.reader.excel",
+        "wolfxl.cell.read_only",
         "wolfxl.utils.cell",
         "wolfxl.utils.dataframe",
         "wolfxl.comments",
@@ -88,12 +99,120 @@ def test_utils_cell_lazy_reexports() -> None:
         "wolfxl.formatting",
         "wolfxl.formatting.rule",
         "wolfxl.workbook",
+        "wolfxl.workbook._writer",
         "wolfxl.workbook.defined_name",
+        "wolfxl.packaging.manifest",
         "wolfxl.pivot",
     ],
 )
 def test_module_imports(module_path: str) -> None:
     importlib.import_module(module_path)
+
+
+def test_openpyxl_corpus_import_paths_are_real() -> None:
+    """Upstream corpus collection imports these openpyxl-shaped paths."""
+    from wolfxl import DEFUSEDXML, LXML
+    from wolfxl.cell.read_only import EMPTY_CELL
+    from wolfxl.packaging.manifest import Manifest
+    from wolfxl.reader.excel import load_workbook
+    from wolfxl.styles.styleable import StyleArray
+    from wolfxl.xml.constants import CPROPS_TYPE, SHEET_MAIN_NS
+    from wolfxl.xml.functions import Element, tostring
+
+    style = StyleArray([0, 0, 0, 7, 0, 0, 0, 0, 0])
+    assert style.numFmtId == 7
+    style.fontId = 3
+    assert tuple(style[:4]) == (3, 0, 0, 7)
+    assert EMPTY_CELL.value is None
+    assert load_workbook is wolfxl.load_workbook
+    assert isinstance(LXML, bool)
+    assert isinstance(DEFUSEDXML, bool)
+    assert SHEET_MAIN_NS.endswith("/main")
+    assert CPROPS_TYPE == "application/vnd.openxmlformats-officedocument.custom-properties+xml"
+    assert tostring(Element("root")).startswith(b"<root")
+    assert Manifest().path == "[Content_Types].xml"
+
+
+def test_save_accepts_binary_file_like_objects(tmp_path) -> None:
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "file-like"
+
+    fp = BytesIO()
+    wb.save(fp)
+
+    fp.seek(0)
+    with zipfile.ZipFile(fp) as zf:
+        assert "xl/workbook.xml" in zf.namelist()
+
+
+def test_load_workbook_accepts_keep_vba_keyword(tmp_path) -> None:
+    path = tmp_path / "plain.xlsx"
+    wolfxl.Workbook().save(path)
+
+    wb = wolfxl.load_workbook(path, keep_vba=False)
+    assert wb.sheetnames == ["Sheet"]
+
+
+def test_read_only_cell_number_format_and_is_date() -> None:
+    from wolfxl.cell.read_only import ReadOnlyCell
+    from wolfxl.styles.styleable import StyleArray
+
+    workbook = type("Book", (), {"_cell_styles": [StyleArray(), StyleArray([0, 0, 0, 14, 0, 0, 0, 0, 0])]})()
+    sheet = type("Sheet", (), {"parent": workbook, "title": "Sheet"})()
+
+    plain = ReadOnlyCell(sheet, 1, 1, 42, style_id=0)
+    dated = ReadOnlyCell(sheet, 1, 2, 42, style_id=1)
+
+    assert plain.number_format == "General"
+    assert plain.is_date is False
+    assert dated.number_format == "mm-dd-yy"
+    assert dated.is_date is True
+
+
+def test_dirty_read_mode_save_promotes_to_modify_mode(tmp_path) -> None:
+    path = tmp_path / "source.xlsx"
+    wb = wolfxl.Workbook()
+    wb.active["A1"] = "old"
+    wb.save(path)
+
+    loaded = wolfxl.load_workbook(path)
+    loaded.active["A1"] = "new"
+    out = tmp_path / "saved.xlsx"
+    loaded.save(out)
+
+    assert wolfxl.load_workbook(out).active["A1"].value == "new"
+
+
+def test_nonstandard_absolute_workbook_target_loads(tmp_path) -> None:
+    source = tmp_path / "source.xlsx"
+    wolfxl.Workbook().save(source)
+    shifted = tmp_path / "shifted.xlsx"
+
+    with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(shifted, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            member = info.filename
+            data = src.read(member)
+            if member == "xl/workbook.xml":
+                member = "xl/workbook2.xml"
+            elif member == "xl/_rels/workbook.xml.rels":
+                member = "xl/_rels/workbook2.xml.rels"
+            elif member == "_rels/.rels":
+                data = _rewrite_office_document_target(data, "/xl/workbook2.xml")
+            elif member == "[Content_Types].xml":
+                data = data.replace(b'PartName="/xl/workbook.xml"', b'PartName="/xl/workbook2.xml"')
+            info.filename = member
+            dst.writestr(info, data)
+
+    wb = wolfxl.load_workbook(shifted)
+    assert wb.sheetnames == ["Sheet"]
+
+
+def _rewrite_office_document_target(data: bytes, target: str) -> bytes:
+    root = ET.fromstring(data)
+    for rel in root:
+        if rel.get("Type", "").endswith("/officeDocument"):
+            rel.set("Target", target)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 # ---------------- stubs raise at construction ----------------

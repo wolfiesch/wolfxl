@@ -158,6 +158,138 @@ pub(crate) fn build_drawing_rels_xml(images: &[QueuedImageAdd], image_indices: &
     String::from_utf8(g.serialize()).expect("rels serialize is utf8")
 }
 
+/// Append one anchor per queued image to an existing drawing XML body.
+pub(crate) fn append_pic_anchors(
+    drawing_xml: &[u8],
+    queued: &[QueuedImageAdd],
+    image_rids: &[String],
+) -> Result<Vec<u8>, String> {
+    debug_assert_eq!(queued.len(), image_rids.len());
+    let body = std::str::from_utf8(drawing_xml).map_err(|e| e.to_string())?;
+    let use_xdr_prefix = body.contains("<xdr:wsDr") || body.contains("xmlns:xdr=");
+    let existing_count: u32 = (body.matches("<xdr:graphicFrame").count()
+        + body.matches("<graphicFrame").count()
+        + body.matches("<xdr:pic").count()
+        + body.matches("<pic").count()) as u32;
+    let mut new_anchors = String::with_capacity(queued.len() * 512);
+    for (i, (img, rid)) in queued.iter().zip(image_rids.iter()).enumerate() {
+        new_anchors.push_str(&render_pic_anchor_styled(
+            img,
+            rid,
+            existing_count + (i + 1) as u32,
+            use_xdr_prefix,
+        ));
+    }
+    let pos_opt = body.rfind("</xdr:wsDr>").or_else(|| body.rfind("</wsDr>"));
+    if let Some(pos) = pos_opt {
+        let mut out = String::with_capacity(body.len() + new_anchors.len());
+        out.push_str(&body[..pos]);
+        out.push_str(&new_anchors);
+        out.push_str(&body[pos..]);
+        Ok(out.into_bytes())
+    } else {
+        let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+        let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let mut out = String::with_capacity(new_anchors.len() + 256);
+        out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n");
+        out.push_str(&format!(
+            "<xdr:wsDr xmlns:xdr=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\">"
+        ));
+        out.push_str(&new_anchors);
+        out.push_str("</xdr:wsDr>");
+        Ok(out.into_bytes())
+    }
+}
+
+fn render_pic_anchor_styled(
+    img: &QueuedImageAdd,
+    image_rid: &str,
+    unique_id: u32,
+    use_xdr_prefix: bool,
+) -> String {
+    let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let emu_per_px: i64 = 9525;
+    let p = if use_xdr_prefix { "xdr:" } else { "" };
+    let root_xmlns = if use_xdr_prefix {
+        String::new()
+    } else {
+        format!(" xmlns=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\"")
+    };
+
+    let mut out = String::with_capacity(768);
+    match &img.anchor {
+        QueuedImageAnchor::OneCell {
+            from_col,
+            from_row,
+            from_col_off,
+            from_row_off,
+        } => {
+            out.push_str(&format!("<{p}oneCellAnchor{root_xmlns}>"));
+            out.push_str(&format!(
+                "<{p}from><{p}col>{from_col}</{p}col><{p}colOff>{from_col_off}</{p}colOff>\
+                 <{p}row>{from_row}</{p}row><{p}rowOff>{from_row_off}</{p}rowOff></{p}from>"
+            ));
+            let cx = img.width_px as i64 * emu_per_px;
+            let cy = img.height_px as i64 * emu_per_px;
+            out.push_str(&format!("<{p}ext cx=\"{cx}\" cy=\"{cy}\"/>"));
+        }
+        QueuedImageAnchor::TwoCell {
+            from_col,
+            from_row,
+            from_col_off,
+            from_row_off,
+            to_col,
+            to_row,
+            to_col_off,
+            to_row_off,
+            edit_as,
+        } => {
+            out.push_str(&format!(
+                "<{p}twoCellAnchor editAs=\"{edit_as}\"{root_xmlns}>"
+            ));
+            out.push_str(&format!(
+                "<{p}from><{p}col>{from_col}</{p}col><{p}colOff>{from_col_off}</{p}colOff>\
+                 <{p}row>{from_row}</{p}row><{p}rowOff>{from_row_off}</{p}rowOff></{p}from>"
+            ));
+            out.push_str(&format!(
+                "<{p}to><{p}col>{to_col}</{p}col><{p}colOff>{to_col_off}</{p}colOff>\
+                 <{p}row>{to_row}</{p}row><{p}rowOff>{to_row_off}</{p}rowOff></{p}to>"
+            ));
+        }
+        QueuedImageAnchor::Absolute {
+            x_emu,
+            y_emu,
+            cx_emu,
+            cy_emu,
+        } => {
+            out.push_str(&format!("<{p}absoluteAnchor{root_xmlns}>"));
+            out.push_str(&format!("<{p}pos x=\"{x_emu}\" y=\"{y_emu}\"/>"));
+            out.push_str(&format!("<{p}ext cx=\"{cx_emu}\" cy=\"{cy_emu}\"/>"));
+        }
+    }
+
+    let cx = img.width_px as i64 * emu_per_px;
+    let cy = img.height_px as i64 * emu_per_px;
+    out.push_str(&format!(
+        "<{p}pic xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\">\
+         <{p}nvPicPr><{p}cNvPr id=\"{unique_id}\" name=\"Picture {unique_id}\" descr=\"Picture {unique_id}\"/>\
+         <{p}cNvPicPr><a:picLocks noChangeAspect=\"1\"/></{p}cNvPicPr></{p}nvPicPr>\
+         <{p}blipFill><a:blip r:embed=\"{image_rid}\"/><a:stretch><a:fillRect/></a:stretch></{p}blipFill>\
+         <{p}spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>\
+         <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></{p}spPr></{p}pic>"
+    ));
+    out.push_str(&format!("<{p}clientData/>"));
+    match &img.anchor {
+        QueuedImageAnchor::OneCell { .. } => out.push_str(&format!("</{p}oneCellAnchor>")),
+        QueuedImageAnchor::TwoCell { .. } => out.push_str(&format!("</{p}twoCellAnchor>")),
+        QueuedImageAnchor::Absolute { .. } => out.push_str(&format!("</{p}absoluteAnchor>")),
+    }
+    out
+}
+
 /// Splice a `<drawing r:id="rIdN"/>` element into a sheet XML body.
 pub(crate) fn splice_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, &'static str> {
     if sheet_xml.contains("<drawing ") || sheet_xml.contains("<drawing/>") {
@@ -399,6 +531,7 @@ fn remove_sheet_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, String
 }
 
 /// Best-effort extract `N` from `xl/drawings/drawingN.xml`.
+#[cfg(test)]
 pub(crate) fn drawing_n_from_path(path: &str) -> Option<u32> {
     let fname = path.rsplit('/').next()?;
     let core = fname.strip_suffix(".xml")?;
@@ -466,121 +599,6 @@ pub(crate) fn append_graphic_frames(
         out.push_str("</xdr:wsDr>");
         Ok(out.into_bytes())
     }
-}
-
-pub(crate) fn append_image_pictures(
-    drawing_xml: &[u8],
-    queued: &[QueuedImageAdd],
-    image_rids: &[String],
-) -> Result<Vec<u8>, String> {
-    debug_assert_eq!(queued.len(), image_rids.len());
-    let body = std::str::from_utf8(drawing_xml).map_err(|e| e.to_string())?;
-    let use_xdr_prefix = body.contains("<xdr:wsDr") || body.contains("xmlns:xdr=");
-    let existing_count: u32 =
-        (body.matches("<graphicFrame").count() + body.matches("<pic").count()) as u32;
-    let mut new_anchors = String::with_capacity(queued.len() * 512);
-    for (i, (img, rid)) in queued.iter().zip(image_rids.iter()).enumerate() {
-        new_anchors.push_str(&render_image_anchor_styled(
-            img,
-            rid,
-            existing_count + (i + 1) as u32,
-            use_xdr_prefix,
-        ));
-    }
-    let pos_opt = body.rfind("</xdr:wsDr>").or_else(|| body.rfind("</wsDr>"));
-    if let Some(pos) = pos_opt {
-        let mut out = String::with_capacity(body.len() + new_anchors.len());
-        out.push_str(&body[..pos]);
-        out.push_str(&new_anchors);
-        out.push_str(&body[pos..]);
-        Ok(out.into_bytes())
-    } else {
-        Ok(build_drawing_xml(queued).into_bytes())
-    }
-}
-
-fn render_image_anchor_styled(
-    img: &QueuedImageAdd,
-    rid: &str,
-    unique_id: u32,
-    use_xdr_prefix: bool,
-) -> String {
-    let emu_per_px: i64 = 9525;
-    let cx = img.width_px as i64 * emu_per_px;
-    let cy = img.height_px as i64 * emu_per_px;
-    let xdr_ns = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
-    let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
-    let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-    let p = if use_xdr_prefix { "xdr:" } else { "" };
-    let root_xmlns = if use_xdr_prefix {
-        String::new()
-    } else {
-        format!(" xmlns=\"{xdr_ns}\" xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\"")
-    };
-
-    let mut out = String::with_capacity(640);
-    match &img.anchor {
-        QueuedImageAnchor::OneCell {
-            from_col,
-            from_row,
-            from_col_off,
-            from_row_off,
-        } => {
-            out.push_str(&format!("<{p}oneCellAnchor{root_xmlns}>"));
-            out.push_str(&format!(
-                "<{p}from><{p}col>{from_col}</{p}col><{p}colOff>{from_col_off}</{p}colOff>\
-                 <{p}row>{from_row}</{p}row><{p}rowOff>{from_row_off}</{p}rowOff></{p}from>"
-            ));
-            out.push_str(&format!("<{p}ext cx=\"{cx}\" cy=\"{cy}\"/>"));
-        }
-        QueuedImageAnchor::TwoCell {
-            from_col,
-            from_row,
-            from_col_off,
-            from_row_off,
-            to_col,
-            to_row,
-            to_col_off,
-            to_row_off,
-            edit_as,
-        } => {
-            out.push_str(&format!(
-                "<{p}twoCellAnchor editAs=\"{edit_as}\"{root_xmlns}>"
-            ));
-            out.push_str(&format!(
-                "<{p}from><{p}col>{from_col}</{p}col><{p}colOff>{from_col_off}</{p}colOff>\
-                 <{p}row>{from_row}</{p}row><{p}rowOff>{from_row_off}</{p}rowOff></{p}from>"
-            ));
-            out.push_str(&format!(
-                "<{p}to><{p}col>{to_col}</{p}col><{p}colOff>{to_col_off}</{p}colOff>\
-                 <{p}row>{to_row}</{p}row><{p}rowOff>{to_row_off}</{p}rowOff></{p}to>"
-            ));
-        }
-        QueuedImageAnchor::Absolute {
-            x_emu,
-            y_emu,
-            cx_emu,
-            cy_emu,
-        } => {
-            out.push_str(&format!("<{p}absoluteAnchor{root_xmlns}>"));
-            out.push_str(&format!("<{p}pos x=\"{x_emu}\" y=\"{y_emu}\"/>"));
-            out.push_str(&format!("<{p}ext cx=\"{cx_emu}\" cy=\"{cy_emu}\"/>"));
-        }
-    }
-    out.push_str(&format!(
-        "<{p}pic><{p}nvPicPr><{p}cNvPr id=\"{unique_id}\" name=\"Picture {unique_id}\" descr=\"Picture {unique_id}\"/>\
-         <{p}cNvPicPr><a:picLocks noChangeAspect=\"1\" xmlns:a=\"{a_ns}\"/></{p}cNvPicPr></{p}nvPicPr>\
-         <{p}blipFill><a:blip xmlns:a=\"{a_ns}\" xmlns:r=\"{r_ns}\" r:embed=\"{rid}\"/><a:stretch xmlns:a=\"{a_ns}\"><a:fillRect/></a:stretch></{p}blipFill>\
-         <{p}spPr><a:xfrm xmlns:a=\"{a_ns}\"><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>\
-         <a:prstGeom xmlns:a=\"{a_ns}\" prst=\"rect\"><a:avLst/></a:prstGeom></{p}spPr></{p}pic>"
-    ));
-    out.push_str(&format!("<{p}clientData/>"));
-    match &img.anchor {
-        QueuedImageAnchor::OneCell { .. } => out.push_str(&format!("</{p}oneCellAnchor>")),
-        QueuedImageAnchor::TwoCell { .. } => out.push_str(&format!("</{p}twoCellAnchor>")),
-        QueuedImageAnchor::Absolute { .. } => out.push_str(&format!("</{p}absoluteAnchor>")),
-    }
-    out
 }
 
 fn render_graphic_frame_anchor(chart: &QueuedChartAdd, chart_rid: &str, unique_id: u32) -> String {
@@ -789,6 +807,11 @@ pub(super) fn apply_image_adds_phase(
         let mut rels_graph =
             patcher_workbook::current_or_empty_rels(patcher, zip, &sheet_rels_path)?;
 
+        let existing_drawing_target = rels_graph
+            .iter()
+            .find(|r| r.rel_type == wolfxl_rels::rt::DRAWING)
+            .map(|r| r.target.clone());
+
         let image_indices: Vec<u32> = queued
             .iter()
             .map(|_| part_id_allocator.alloc_image())
@@ -799,37 +822,37 @@ pub(super) fn apply_image_adds_phase(
             patcher.file_adds.insert(media_path, img.data.clone());
         }
 
-        let mut drawing_override: Option<String> = None;
-        let drawing_n: u32;
-        if let Some(drawing_rel) = rels_graph
-            .iter()
-            .find(|r| r.rel_type == wolfxl_rels::rt::DRAWING)
-            .cloned()
-        {
+        let mut seen_exts: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut ops: Vec<content_types::ContentTypeOp> = Vec::new();
+        for img in &queued {
+            if seen_exts.insert(img.ext.clone()) {
+                let ct = content_types::image_content_type_for_ext(&img.ext);
+                ops.push(content_types::ContentTypeOp::EnsureDefault(
+                    img.ext.clone(),
+                    ct.to_string(),
+                ));
+            }
+        }
+
+        if let Some(target) = existing_drawing_target {
             let sheet_dir = sheet_path
                 .rsplit_once('/')
                 .map(|(d, _)| d)
                 .unwrap_or("")
                 .to_string();
-            let drawing_path = resolve_relative_path(&sheet_dir, &drawing_rel.target);
-            drawing_n = drawing_n_from_path(&drawing_path)
-                .unwrap_or_else(|| part_id_allocator.alloc_drawing());
+            let drawing_path = resolve_relative_path(&sheet_dir, &target);
             let drawing_rels_path = patcher_workbook::part_rels_path_for(&drawing_path)?;
             let mut drawing_rels =
                 patcher_workbook::current_or_empty_rels(patcher, zip, &drawing_rels_path)?;
-            let image_rids: Vec<String> = queued
-                .iter()
-                .zip(image_indices.iter())
-                .map(|(img, &n)| {
-                    drawing_rels
-                        .add(
-                            wolfxl_rels::rt::IMAGE,
-                            &format!("../media/image{n}.{}", img.ext),
-                            wolfxl_rels::TargetMode::Internal,
-                        )
-                        .0
-                })
-                .collect();
+            let mut image_rids: Vec<String> = Vec::with_capacity(queued.len());
+            for (img, &n) in queued.iter().zip(image_indices.iter()) {
+                let rid = drawing_rels.add(
+                    wolfxl_rels::rt::IMAGE,
+                    &format!("../media/image{n}.{}", img.ext),
+                    wolfxl_rels::TargetMode::Internal,
+                );
+                image_rids.push(rid.0);
+            }
             let existing_drawing_xml = patcher_workbook::current_part_bytes(
                 file_patches,
                 &patcher.file_adds,
@@ -837,8 +860,8 @@ pub(super) fn apply_image_adds_phase(
                 &drawing_path,
             )
             .unwrap_or_default();
-            let merged = append_image_pictures(&existing_drawing_xml, &queued, &image_rids)
-                .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge image drawing: {e}")))?;
+            let merged = append_pic_anchors(&existing_drawing_xml, &queued, &image_rids)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("merge drawing: {e}")))?;
             if zip.by_name(&drawing_path).is_ok() {
                 file_patches.insert(drawing_path.clone(), merged);
             } else {
@@ -846,7 +869,7 @@ pub(super) fn apply_image_adds_phase(
             }
             patcher.rels_patches.insert(drawing_rels_path, drawing_rels);
         } else {
-            drawing_n = part_id_allocator.alloc_drawing();
+            let drawing_n = part_id_allocator.alloc_drawing();
             let drawing_xml = build_drawing_xml(&queued);
             let drawing_rels_xml = build_drawing_rels_xml(&queued, &image_indices);
             let drawing_path = format!("xl/drawings/drawing{drawing_n}.xml");
@@ -863,9 +886,6 @@ pub(super) fn apply_image_adds_phase(
                 &format!("../drawings/drawing{drawing_n}.xml"),
                 wolfxl_rels::TargetMode::Internal,
             );
-            patcher
-                .rels_patches
-                .insert(sheet_rels_path.clone(), rels_graph.clone());
 
             let sheet_xml = if let Some(b) = file_patches.get(&sheet_path) {
                 String::from_utf8_lossy(b).into_owned()
@@ -877,34 +897,17 @@ pub(super) fn apply_image_adds_phase(
             let after = splice_drawing_ref(&sheet_xml, &drawing_rid.0)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("splice drawing: {e}")))?;
             file_patches.insert(sheet_path.clone(), after.into_bytes());
-            drawing_override = Some(format!("/xl/drawings/drawing{drawing_n}.xml"));
-        }
 
-        patcher.rels_patches.insert(sheet_rels_path, rels_graph);
-
-        // 7. Queue content-type ops.
-        //    - one Default Extension per distinct extension
-        //    - one Override per drawing part
-        let mut seen_exts: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut ops: Vec<content_types::ContentTypeOp> = Vec::new();
-        for img in &queued {
-            if seen_exts.insert(img.ext.clone()) {
-                let ct = content_types::image_content_type_for_ext(&img.ext);
-                ops.push(content_types::ContentTypeOp::EnsureDefault(
-                    img.ext.clone(),
-                    ct.to_string(),
-                ));
-            }
-        }
-        if let Some(part) = drawing_override {
             ops.push(content_types::ContentTypeOp::AddOverride(
-                part,
+                format!("/xl/drawings/drawing{drawing_n}.xml"),
                 content_types::CT_DRAWING.to_string(),
             ));
         }
+
+        patcher.rels_patches.insert(sheet_rels_path, rels_graph);
         patcher
             .queued_content_type_ops
-            .entry(format!("__rfc045_drawing_{drawing_n}__"))
+            .entry(format!("__rfc045_images_{sheet_name}__"))
             .or_default()
             .extend(ops);
     }
@@ -1338,6 +1341,31 @@ mod tests {
         assert!(s.contains("<xdr:oneCellAnchor/>"));
         assert!(s.contains("<xdr:graphicFrame"));
         assert!(s.contains("r:id=\"rId7\""));
+        assert!(s.ends_with("</xdr:wsDr>"));
+    }
+
+    #[test]
+    fn append_pic_anchor_inserts_before_close() {
+        let original = b"<?xml version=\"1.0\"?><xdr:wsDr xmlns:xdr=\"x\" xmlns:a=\"a\" xmlns:r=\"r\"><xdr:oneCellAnchor><xdr:pic><xdr:blipFill><a:blip r:embed=\"rId1\"/></xdr:blipFill></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>";
+        let imgs = vec![QueuedImageAdd {
+            data: vec![],
+            ext: "png".into(),
+            width_px: 10,
+            height_px: 5,
+            anchor: QueuedImageAnchor::OneCell {
+                from_col: 3,
+                from_row: 4,
+                from_col_off: 0,
+                from_row_off: 0,
+            },
+        }];
+        let rids = vec!["rId2".to_string()];
+        let merged = append_pic_anchors(original, &imgs, &rids).unwrap();
+        let s = std::str::from_utf8(&merged).unwrap();
+        assert!(s.contains("r:embed=\"rId1\""));
+        assert!(s.contains("r:embed=\"rId2\""));
+        assert!(s.contains("<xdr:col>3</xdr:col>"));
+        assert_eq!(s.matches("<xdr:pic").count(), 2);
         assert!(s.ends_with("</xdr:wsDr>"));
     }
 

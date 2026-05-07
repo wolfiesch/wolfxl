@@ -765,9 +765,8 @@ _GAP_ENTRIES: tuple[SurfaceEntry, ...] = (
             "bytes (no Pillow dependency), exposes ``.format``, "
             "``.width``, ``.height``, ``.anchor``. Pairs with "
             "``Worksheet.add_image`` for both write- and modify-mode "
-            "image insertion. Modify-mode appending to a sheet that "
-            "already has a drawing part raises NotImplementedError "
-            "(v1.5 limit; tracked as RFC-045 follow-up)."
+            "image insertion, including appending into sheets that "
+            "already have drawing parts."
         ),
         wolfxl_supported=True,
         write_api=True,

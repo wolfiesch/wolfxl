@@ -252,9 +252,13 @@ def _page_setup_from_payload(payload: Any) -> Any:
         cellComments=payload.get("cell_comments"),
         errors=payload.get("errors"),
         useFirstPageNumber=payload.get("use_first_page_number"),
+        paperHeight=payload.get("paper_height"),
+        paperWidth=payload.get("paper_width"),
+        pageOrder=payload.get("page_order"),
         usePrinterDefaults=payload.get("use_printer_defaults"),
         blackAndWhite=payload.get("black_and_white"),
         draft=payload.get("draft"),
+        copies=payload.get("copies"),
     )
 
 
@@ -264,11 +268,11 @@ def _print_options_from_payload(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return PrintOptions()
     return PrintOptions(
-        horizontalCentered=bool(payload.get("horizontal_centered", False)),
-        verticalCentered=bool(payload.get("vertical_centered", False)),
-        headings=bool(payload.get("headings", False)),
-        gridLines=bool(payload.get("grid_lines", False)),
-        gridLinesSet=bool(payload.get("grid_lines_set", True)),
+        horizontalCentered=payload.get("horizontal_centered"),
+        verticalCentered=payload.get("vertical_centered"),
+        headings=payload.get("headings"),
+        gridLines=payload.get("grid_lines"),
+        gridLinesSet=payload.get("grid_lines_set"),
     )
 
 
@@ -576,22 +580,43 @@ def to_rust_sheet_format_dict(ws: Worksheet) -> dict[str, Any] | None:
 
 def set_print_title_rows(ws: Worksheet, value: str | None) -> None:
     """Set repeat rows for printed pages."""
+    _ensure_print_titles_loaded(ws)
     if value is not None:
         from wolfxl.worksheet.print_settings import RowRange
 
         ws._print_title_rows = str(RowRange.from_string(value))  # noqa: SLF001
     else:
         ws._print_title_rows = None  # noqa: SLF001
+    ws._print_titles_dirty = True  # noqa: SLF001
 
 
 def set_print_title_cols(ws: Worksheet, value: str | None) -> None:
     """Set repeat columns for printed pages."""
+    _ensure_print_titles_loaded(ws)
     if value is not None:
         from wolfxl.worksheet.print_settings import ColRange
 
         ws._print_title_cols = str(ColRange.from_string(value))  # noqa: SLF001
     else:
         ws._print_title_cols = None  # noqa: SLF001
+    ws._print_titles_dirty = True  # noqa: SLF001
+
+
+def _ensure_print_titles_loaded(ws: Worksheet) -> None:
+    """Load both print-title selectors before mutating one side."""
+    if (
+        ws._print_titles_dirty  # noqa: SLF001
+        or ws._print_title_rows is not None  # noqa: SLF001
+        or ws._print_title_cols is not None  # noqa: SLF001
+    ):
+        return
+    reader = getattr(ws._workbook, "_rust_reader", None)  # noqa: SLF001
+    if reader is None or not hasattr(reader, "read_print_titles"):
+        return
+    payload = reader.read_print_titles(ws._title)  # noqa: SLF001
+    if isinstance(payload, dict):
+        ws._print_title_rows = payload.get("rows")  # noqa: SLF001
+        ws._print_title_cols = payload.get("cols")  # noqa: SLF001
 
 
 def to_rust_setup_dict(ws: Worksheet) -> dict[str, Any]:
@@ -605,6 +630,11 @@ def to_rust_setup_dict(ws: Worksheet) -> dict[str, Any]:
     payload["page_margins"] = (
         ws._page_margins.to_rust_dict()  # noqa: SLF001
         if ws._page_margins is not None and not ws._page_margins.is_default()  # noqa: SLF001
+        else None
+    )
+    payload["print_options"] = (
+        ws._print_options.to_rust_dict()  # noqa: SLF001
+        if ws._print_options is not None and not ws._print_options.is_default()  # noqa: SLF001
         else None
     )
     payload["header_footer"] = (

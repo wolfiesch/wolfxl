@@ -20,6 +20,12 @@ def get_item(ws: Worksheet, key: Any) -> Any:
     if isinstance(key, slice):
         if key.start is None or key.stop is None:
             raise ValueError("Row slice bounds must be specified")
+        if isinstance(key.start, str) or isinstance(key.stop, str):
+            if not isinstance(key.start, str) or not isinstance(key.stop, str):
+                raise TypeError("A1 slice bounds must both be strings")
+            min_row, min_col = a1_to_rowcol(key.start)
+            max_row, max_col = a1_to_rowcol(key.stop)
+            return get_rect(ws, min_row, min_col, max_row, max_col)
         return get_row_tuple(ws, key.start, key.stop)
 
     if isinstance(key, str):

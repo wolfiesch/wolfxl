@@ -10,11 +10,14 @@ use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::ooxml_util;
-use wolfxl_rels::RelsGraph;
+use wolfxl_rels::{RelId, RelsGraph};
 
 use super::{
     calcchain, content_types, defined_names, properties, security, sheet_order, XlsxPatcher,
 };
+
+const CT_WORKSHEET: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 
 /// Maps a sheet XML path to its relationship sidecar path.
 pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
@@ -183,6 +186,233 @@ pub(crate) fn splice_into_sheets_block(
     Err(PyIOError::new_err(
         "Phase 2.7: workbook.xml has no <sheets> block",
     ))
+}
+
+pub(super) fn apply_sheet_deletes_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    if patcher.queued_sheet_deletes.is_empty() {
+        return Ok(());
+    }
+
+    let workbook_rels_path = "xl/_rels/workbook.xml.rels".to_string();
+    if !patcher.rels_patches.contains_key(&workbook_rels_path) {
+        let g = load_or_empty_rels(zip, &workbook_rels_path)?;
+        patcher.rels_patches.insert(workbook_rels_path.clone(), g);
+    }
+
+    let workbook_xml =
+        match current_part_bytes(file_patches, &patcher.file_adds, zip, "xl/workbook.xml") {
+            Some(b) => b,
+            None => {
+                return Err(PyIOError::new_err(
+                    "sheet-delete: xl/workbook.xml missing from source ZIP",
+                ));
+            }
+        };
+    let workbook_xml_text = std::str::from_utf8(&workbook_xml)
+        .map_err(|e| PyIOError::new_err(format!("sheet-delete workbook.xml utf8: {e}")))?;
+    let sheet_rids = ooxml_util::parse_workbook_sheet_rids(workbook_xml_text)
+        .map_err(|e| PyIOError::new_err(format!("sheet-delete workbook.xml parse: {e}")))?;
+
+    let deletes = patcher.queued_sheet_deletes.clone();
+    for title in &deletes {
+        if let Some((_, rid)) = sheet_rids.iter().find(|(name, _)| name == title) {
+            if let Some(graph) = patcher.rels_patches.get_mut(&workbook_rels_path) {
+                graph.remove(&RelId(rid.clone()));
+            }
+        }
+        let Some(sheet_path) = patcher.deleted_sheet_paths.get(title).cloned() else {
+            continue;
+        };
+        let sheet_rels_path = sheet_rels_path_for(&sheet_path);
+        let source_rels = if let Some(g) = patcher.rels_patches.get(&sheet_rels_path) {
+            g.clone()
+        } else {
+            load_or_empty_rels(zip, &sheet_rels_path)?
+        };
+        let subgraph = wolfxl_rels::walk_sheet_subgraph_with_nested(
+            &source_rels,
+            &sheet_path,
+            |part_path: &str| {
+                let rels_path = wolfxl_rels::rels_path_for(part_path)?;
+                let bytes = current_part_bytes(file_patches, &patcher.file_adds, zip, &rels_path)?;
+                RelsGraph::parse(&bytes).ok()
+            },
+        );
+        for part in subgraph.reachable_parts {
+            patcher.file_deletes.insert(part.clone());
+            if let Some(rels_path) = wolfxl_rels::rels_path_for(&part) {
+                patcher.file_deletes.insert(rels_path);
+            }
+            patcher
+                .queued_content_type_ops
+                .entry("__sheet_delete__".to_string())
+                .or_default()
+                .push(content_types::ContentTypeOp::RemoveOverride(format!(
+                    "/{part}"
+                )));
+        }
+        patcher.file_deletes.insert(sheet_rels_path);
+    }
+
+    let result = sheet_order::merge_sheet_deletes(&workbook_xml, &deletes)
+        .map_err(|e| PyIOError::new_err(format!("sheet-delete merge: {e}")))?;
+    file_patches.insert("xl/workbook.xml".to_string(), result.workbook_xml);
+    patcher.sheet_order = result.new_order;
+    patcher.queued_sheet_deletes.clear();
+    patcher.deleted_sheet_paths.clear();
+    Ok(())
+}
+
+pub(super) fn apply_sheet_creates_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    part_id_allocator: &mut wolfxl_rels::PartIdAllocator,
+) -> PyResult<()> {
+    if patcher.queued_sheet_creates.is_empty() {
+        return Ok(());
+    }
+
+    let workbook_rels_path = "xl/_rels/workbook.xml.rels".to_string();
+    if !patcher.rels_patches.contains_key(&workbook_rels_path) {
+        let g = load_or_empty_rels(zip, &workbook_rels_path)?;
+        patcher.rels_patches.insert(workbook_rels_path.clone(), g);
+    }
+
+    let desired_order = patcher.sheet_order.clone();
+    let queued_titles: HashSet<String> = patcher
+        .queued_sheet_creates
+        .iter()
+        .map(|op| op.title.clone())
+        .collect();
+    let mut created_titles: HashSet<String> = HashSet::new();
+    let ops = patcher.queued_sheet_creates.clone();
+    for op in ops {
+        if !desired_order.contains(&op.title) {
+            continue;
+        }
+        let sheet_n = part_id_allocator.alloc_sheet();
+        let sheet_path = format!("xl/worksheets/sheet{sheet_n}.xml");
+        let target = format!("worksheets/sheet{sheet_n}.xml");
+        let rid = {
+            let graph = patcher
+                .rels_patches
+                .get_mut(&workbook_rels_path)
+                .expect("workbook rels graph loaded above");
+            graph.add(
+                wolfxl_rels::rt::WORKSHEET,
+                &target,
+                wolfxl_rels::TargetMode::Internal,
+            )
+        };
+
+        let workbook_xml =
+            match current_part_bytes(file_patches, &patcher.file_adds, zip, "xl/workbook.xml") {
+                Some(b) => b,
+                None => {
+                    return Err(PyIOError::new_err(
+                        "sheet-create: xl/workbook.xml missing from source ZIP",
+                    ));
+                }
+            };
+        let sheet_id = next_sheet_id(&workbook_xml);
+        let sheet_element = format!(
+            "<sheet name=\"{}\" sheetId=\"{}\" r:id=\"{}\"/>",
+            xml_escape_attr(&op.title),
+            sheet_id,
+            xml_escape_attr(&rid.0)
+        )
+        .into_bytes();
+        let mut workbook_xml = splice_into_sheets_block(&workbook_xml, &sheet_element)?;
+
+        let desired_idx = desired_order
+            .iter()
+            .take_while(|name| *name != &op.title)
+            .filter(|name| !queued_titles.contains(*name) || created_titles.contains(*name))
+            .count();
+        let last_idx = next_sheet_count(&workbook_xml).saturating_sub(1);
+        if desired_idx != last_idx {
+            let offset = desired_idx as i32 - last_idx as i32;
+            let result =
+                sheet_order::merge_sheet_moves(&workbook_xml, &[(op.title.clone(), offset)])
+                    .map_err(|e| PyIOError::new_err(format!("sheet-create order: {e}")))?;
+            workbook_xml = result.workbook_xml;
+        }
+        file_patches.insert("xl/workbook.xml".to_string(), workbook_xml);
+        patcher
+            .file_adds
+            .insert(sheet_path.clone(), minimal_worksheet_xml());
+        patcher
+            .sheet_paths
+            .insert(op.title.clone(), sheet_path.clone());
+        patcher
+            .queued_content_type_ops
+            .entry("__sheet_create__".to_string())
+            .or_default()
+            .push(content_types::ContentTypeOp::AddOverride(
+                format!("/{sheet_path}"),
+                CT_WORKSHEET.to_string(),
+            ));
+        created_titles.insert(op.title.clone());
+    }
+
+    patcher.sheet_order = desired_order;
+    patcher.queued_sheet_creates.clear();
+    Ok(())
+}
+
+fn minimal_worksheet_xml() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/></worksheet>"#.to_vec()
+}
+
+fn next_sheet_id(workbook_xml: &[u8]) -> u32 {
+    max_sheet_id_and_count(workbook_xml)
+        .0
+        .saturating_add(1)
+        .max(1)
+}
+
+fn next_sheet_count(workbook_xml: &[u8]) -> usize {
+    max_sheet_id_and_count(workbook_xml).1
+}
+
+fn max_sheet_id_and_count(workbook_xml: &[u8]) -> (u32, usize) {
+    let mut reader = quick_xml::Reader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut max_id = 0_u32;
+    let mut count = 0_usize;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Start(e)) | Ok(quick_xml::events::Event::Empty(e))
+                if e.local_name().as_ref() == b"sheet" =>
+            {
+                count += 1;
+                for attr in e.attributes().with_checks(false).flatten() {
+                    if attr.key.as_ref() == b"sheetId" {
+                        let value = attr
+                            .unescape_value()
+                            .map(|v| v.into_owned())
+                            .unwrap_or_else(|_| {
+                                String::from_utf8_lossy(attr.value.as_ref()).into_owned()
+                            });
+                        if let Ok(parsed) = value.parse::<u32>() {
+                            max_id = max_id.max(parsed);
+                        }
+                    }
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    (max_id, count)
 }
 
 fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
@@ -374,7 +604,8 @@ pub(super) fn apply_document_properties_phase(
 }
 
 // These phases all mutate xl/workbook.xml, so keep the in-progress bytes flowing
-// security -> sheet order -> defined names before publishing the final patch.
+// security -> sheet renames -> sheet order -> defined names before publishing
+// the final patch.
 pub(super) fn apply_workbook_xml_phases(
     patcher: &mut XlsxPatcher,
     file_patches: &mut HashMap<String, Vec<u8>>,
@@ -392,6 +623,19 @@ pub(super) fn apply_workbook_xml_phases(
                 .map_err(|e| PyIOError::new_err(format!("workbook-security merge: {e}")))?;
             workbook_xml_in_progress = Some(updated);
         }
+    }
+
+    if !patcher.queued_sheet_renames.is_empty() {
+        let wb_bytes: Vec<u8> = match workbook_xml_in_progress.take() {
+            Some(b) => b,
+            None => match file_patches.get("xl/workbook.xml") {
+                Some(b) => b.clone(),
+                None => ooxml_util::zip_read_to_string(zip, "xl/workbook.xml")?.into_bytes(),
+            },
+        };
+        let updated = sheet_order::merge_sheet_renames(&wb_bytes, &patcher.queued_sheet_renames)
+            .map_err(|e| PyIOError::new_err(format!("sheet-rename merge: {e}")))?;
+        workbook_xml_in_progress = Some(updated);
     }
 
     if !patcher.queued_sheet_moves.is_empty() {
@@ -442,10 +686,13 @@ pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {
         || !patcher.queued_defined_names.is_empty()
         || !patcher.queued_tables.is_empty()
         || !patcher.queued_comments.is_empty()
+        || !patcher.queued_sheet_renames.is_empty()
         || !patcher.queued_sheet_moves.is_empty()
         || !patcher.queued_axis_shifts.is_empty()
         || !patcher.queued_range_moves.is_empty()
         || !patcher.queued_sheet_copies.is_empty()
+        || !patcher.queued_sheet_creates.is_empty()
+        || !patcher.queued_sheet_deletes.is_empty()
         || !patcher.queued_images.is_empty()
         || !patcher.queued_charts.is_empty()
         || !patcher.queued_chart_removes.is_empty()
@@ -547,7 +794,11 @@ pub(super) fn rebuild_calc_chain_phase(
     }
 
     const CALC_CHAIN_PATH: &str = "xl/calcChain.xml";
-    let source_has_calc_chain = zip.by_name(CALC_CHAIN_PATH).is_ok();
+    let source_calc_chain = get_bytes(file_patches, &patcher.file_adds, zip, CALC_CHAIN_PATH);
+    let source_has_calc_chain = source_calc_chain.is_some();
+    let source_calc_chain_ext_lst = source_calc_chain
+        .as_deref()
+        .and_then(calcchain::extract_ext_lst);
 
     // Walk sheets in tab order, scanning each.
     let mut all_entries: Vec<calcchain::CalcChainEntry> = Vec::new();
@@ -566,7 +817,10 @@ pub(super) fn rebuild_calc_chain_phase(
         all_entries.extend(entries);
     }
 
-    match calcchain::render_calc_chain(&all_entries) {
+    match calcchain::render_calc_chain_with_ext_lst(
+        &all_entries,
+        source_calc_chain_ext_lst.as_deref(),
+    ) {
         Some(bytes) => {
             // Route the rewrite based on whether the source ZIP
             // already had a calcChain.xml entry.

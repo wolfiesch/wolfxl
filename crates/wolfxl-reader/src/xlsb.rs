@@ -569,6 +569,10 @@ fn resolve_xlsb_named_ranges(
                 name: raw.name,
                 scope,
                 refers_to,
+                // BIFF12 doesn't carry the ECMA-376 extra attrs; G22 fields
+                // default to None/false so the public NamedRange has a
+                // consistent shape across xlsx/xlsb readers.
+                ..Default::default()
             }
         })
         .collect()
@@ -1965,6 +1969,7 @@ mod tests {
                 use_printer_defaults: Some(false),
                 black_and_white: Some(true),
                 draft: Some(false),
+                ..PageSetupInfo::default()
             })
         );
     }
@@ -1998,11 +2003,11 @@ mod tests {
         assert_eq!(
             worksheet_meta::parse_print_options(&[0x1f, 0x00]),
             Some(PrintOptionsInfo {
-                horizontal_centered: true,
-                vertical_centered: true,
-                headings: true,
-                grid_lines: true,
-                grid_lines_set: true,
+                horizontal_centered: Some(true),
+                vertical_centered: Some(true),
+                headings: Some(true),
+                grid_lines: Some(true),
+                grid_lines_set: Some(true),
             })
         );
     }
@@ -2018,11 +2023,11 @@ mod tests {
         assert_eq!(
             sheet.print_options,
             Some(PrintOptionsInfo {
-                horizontal_centered: false,
-                vertical_centered: false,
-                headings: false,
-                grid_lines: false,
-                grid_lines_set: true,
+                horizontal_centered: Some(false),
+                vertical_centered: Some(false),
+                headings: Some(false),
+                grid_lines: Some(false),
+                grid_lines_set: Some(true),
             })
         );
     }
@@ -2557,6 +2562,7 @@ mod tests {
             name: "Revenue".to_string(),
             scope: "workbook".to_string(),
             refers_to: "Data!$A$1".to_string(),
+            ..Default::default()
         }];
         let context = formula::FormulaContext {
             sheets: &[],
@@ -2726,6 +2732,7 @@ mod tests {
                 name: "GlobalRange".to_string(),
                 scope: "workbook".to_string(),
                 refers_to: "Data!$A$1:$A$2".to_string(),
+                ..Default::default()
             }]
         );
     }
@@ -2759,6 +2766,7 @@ mod tests {
                 name: "LocalConstant".to_string(),
                 scope: "sheet".to_string(),
                 refers_to: "Other!7".to_string(),
+                ..Default::default()
             }
         );
     }

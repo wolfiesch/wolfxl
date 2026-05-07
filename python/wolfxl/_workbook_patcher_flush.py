@@ -324,25 +324,102 @@ def queue_sheet_move_to_patcher(wb: Any, name: str, offset: int) -> None:
 def flush_defined_names_to_patcher(wb: Any) -> None:
     """Drain pending workbook defined-name writes into the Rust patcher."""
     patcher = wb._rust_patcher  # noqa: SLF001
-    if patcher is None or not wb._pending_defined_names:  # noqa: SLF001
+    if patcher is None:
+        return
+    _queue_print_titles_to_patcher(wb, patcher)
+    if not wb._pending_defined_names:  # noqa: SLF001
         return
     for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
         patcher.queue_defined_name(_defined_name_payload(defined_name))
     wb._pending_defined_names.clear()  # noqa: SLF001
 
 
+def _queue_print_titles_to_patcher(wb: Any, patcher: Any) -> None:
+    """Queue worksheet repeat-row/column titles as reserved defined names."""
+    from wolfxl.worksheet.print_settings import ColRange, PrintTitles, RowRange
+
+    for sheet_idx, sheet_name in enumerate(wb._sheet_names):  # noqa: SLF001
+        ws = wb._sheets.get(sheet_name)  # noqa: SLF001
+        if ws is None:
+            continue
+        rows = getattr(ws, "_print_title_rows", None)
+        cols = getattr(ws, "_print_title_cols", None)
+        if rows is None and cols is None:
+            if getattr(ws, "_print_titles_dirty", False):
+                patcher.queue_defined_name(
+                    {
+                        "name": "_xlnm.Print_Titles",
+                        "local_sheet_id": sheet_idx,
+                        "delete": True,
+                    }
+                )
+            continue
+        if _has_pending_print_titles_for_sheet(wb, sheet_idx):
+            continue
+        titles = PrintTitles(
+            rows=RowRange.from_string(rows) if rows is not None else None,
+            cols=ColRange.from_string(cols) if cols is not None else None,
+        )
+        formula = titles.to_definedname_value(sheet_name)
+        if formula is None:
+            continue
+        patcher.queue_defined_name(
+            {
+                "name": "_xlnm.Print_Titles",
+                "formula": formula,
+                "local_sheet_id": sheet_idx,
+            }
+        )
+
+
+def _has_pending_print_titles_for_sheet(wb: Any, sheet_idx: int) -> bool:
+    """Return whether user-defined names already carry this sheet's titles."""
+    return any(
+        defined_name.name == "_xlnm.Print_Titles"
+        and defined_name.localSheetId == sheet_idx
+        for defined_name in wb._pending_defined_names.values()  # noqa: SLF001
+    )
+
+
 def _defined_name_payload(defined_name: Any) -> dict[str, Any]:
-    """Build the Rust patcher payload for a workbook defined name."""
+    """Build the Rust patcher payload for a workbook defined name.
+
+    Phase 2 (G22) — full ECMA-376 §18.2.5 attribute surface. ``None``
+    fields are omitted so the Rust patcher's ``serialize_upsert_over_existing``
+    treats them as "preserve source"; an explicit ``False`` for a
+    ``true``-emitted bool attr (e.g. ``vbProcedure``) drives a remove on
+    upsert, matching openpyxl's "absent attr means default".
+    """
     payload: dict[str, Any] = {
         "name": defined_name.name,
         "formula": defined_name.value,
     }
     if defined_name.localSheetId is not None:
         payload["local_sheet_id"] = defined_name.localSheetId
-    if defined_name.hidden:
-        payload["hidden"] = True
+    # `hidden` is always a `bool` on the Python class (default False, never
+    # None), so send it explicitly. The patcher upsert path treats
+    # `Some(false)` as "remove the attr from the source XML" — without an
+    # explicit False here, an existing `hidden="1"` would survive a
+    # `dn.hidden = False` modify-mode write. (Codex review, Phase 2.)
+    payload["hidden"] = bool(defined_name.hidden)
     if defined_name.comment is not None:
         payload["comment"] = defined_name.comment
+    for src_attr, payload_key in (
+        ("custom_menu", "custom_menu"),
+        ("description", "description"),
+        ("help", "help"),
+        ("status_bar", "status_bar"),
+        ("shortcut_key", "shortcut_key"),
+        ("function", "function"),
+        ("function_group_id", "function_group_id"),
+        ("vb_procedure", "vb_procedure"),
+        ("xlm", "xlm"),
+        ("publish_to_server", "publish_to_server"),
+        ("workbook_parameter", "workbook_parameter"),
+    ):
+        v = getattr(defined_name, src_attr, None)
+        if v is not None:
+            payload[payload_key] = v
     return payload
 
 
@@ -421,11 +498,13 @@ def _has_sheet_setup_updates(ws: Any) -> bool:
     return not (
         ws._page_setup is None  # noqa: SLF001
         and ws._page_margins is None  # noqa: SLF001
+        and (
+            ws._print_options is None  # noqa: SLF001
+            or ws._print_options.is_default()  # noqa: SLF001
+        )
         and ws._header_footer is None  # noqa: SLF001
         and ws._sheet_view is None  # noqa: SLF001
         and ws._protection is None  # noqa: SLF001
-        and getattr(ws, "_print_title_rows", None) is None
-        and getattr(ws, "_print_title_cols", None) is None
     )
 
 

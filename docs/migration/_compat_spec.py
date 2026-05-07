@@ -39,6 +39,7 @@ class _EntryRequired(TypedDict):
 class Entry(_EntryRequired, total=False):
     gap_id: str  # G01..G28
     probe: str  # probe id wired into the oracle harness
+    secondary_probes: list[str]
     notes: str
 
 
@@ -128,6 +129,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "wb.save(path)",
         "status": "supported",
         "probe": "workbook_save_basic",
+        "notes": "Eager workbooks can be edited and saved repeatedly; write_only=True remains consumed-on-save like openpyxl.",
     },
     {
         "id": "workbook.sheet_access",
@@ -144,6 +146,33 @@ ENTRIES: list[Entry] = [
         "wolfxl": "wb.create_sheet(title)",
         "status": "supported",
         "probe": "workbook_create_sheet",
+    },
+    {
+        "id": "workbook.create_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "wb.create_sheet(title, index=...) on loaded workbook",
+        "wolfxl": "wb.create_sheet(title, index=...) on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_create_sheet_modify",
+        "notes": "Modify-mode blank sheet creation updates workbook.xml, workbook rels, content-types, tab order, and accepts cell edits before save.",
+    },
+    {
+        "id": "workbook.remove_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "wb.remove(ws) on loaded workbook",
+        "wolfxl": "wb.remove(ws) on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_remove_sheet_modify",
+        "notes": "Modify-mode sheet removal prunes the workbook tab, workbook rel, worksheet part, local defined-name indexes, and reachable sheet subgraph parts.",
+    },
+    {
+        "id": "workbook.rename_sheet_modify",
+        "category": "workbook",
+        "openpyxl": "ws.title = 'Renamed' on loaded workbook",
+        "wolfxl": "ws.title = 'Renamed' on modify=True workbook",
+        "status": "supported",
+        "probe": "workbook_rename_sheet_modify",
+        "notes": "Modify-mode sheet title changes update workbook.xml and subsequent queued sheet mutations target the renamed tab.",
     },
     {
         "id": "workbook.copy_worksheet",
@@ -241,6 +270,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "BarChart3D / LineChart3D / PieChart3D / AreaChart3D",
         "wolfxl": "BarChart3D / LineChart3D / PieChart3D / AreaChart3D",
         "status": "supported",
+        "probe": "charts_3d",
     },
     {
         "id": "charts.surface_stock_projected",
@@ -248,6 +278,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart",
         "wolfxl": "SurfaceChart / SurfaceChart3D / StockChart / ProjectedPieChart",
         "status": "supported",
+        "probe": "charts_surface_stock_projected",
     },
     {
         "id": "charts.add_remove_replace",
@@ -256,10 +287,16 @@ ENTRIES: list[Entry] = [
         "wolfxl": "ws.add_chart / remove_chart / replace_chart",
         "status": "supported",
         "probe": "charts_add_remove_replace",
-        "notes": (
-            "remove/replace shipped in v1.7 for charts added in the current "
-            "session; deleting/replacing source-workbook charts is planned."
-        ),
+        "notes": "Covers pending charts plus source-loaded worksheet chart removal, replacement, and title edits in modify mode.",
+    },
+    {
+        "id": "charts.chartsheet",
+        "category": "charts",
+        "openpyxl": "wb.create_chartsheet(...).add_chart(chart)",
+        "wolfxl": "wb.create_chartsheet(...).add_chart(chart)",
+        "status": "supported",
+        "probe": "charts_chartsheet",
+        "notes": "Chartsheet authoring emits chartsheet, drawing, chart, rels, and content-type parts that openpyxl reloads; existing chartsheet tabs load back as workbook.chartsheets rather than worksheets.",
     },
     {
         "id": "charts.combination",
@@ -317,19 +354,45 @@ ENTRIES: list[Entry] = [
         "openpyxl": "chart.pivot_source = pt",
         "wolfxl": "chart.pivot_source = pt",
         "status": "supported",
+        "probe": "pivots_linked_chart",
     },
     {
         "id": "pivots.in_place_edit",
         "category": "pivots",
         "openpyxl": "edit existing pivot's source range, field order, etc.",
-        "wolfxl": "edit existing pivot's source range",
+        "wolfxl": "edit existing pivot source + layout fields",
         "status": "supported",
         "probe": "pivots_in_place_edit",
         "notes": (
-            "G17 / RFC-070 v1.0: source-range mutation only. Field "
-            "placement, filters, aggregation function changes, and "
-            "live record regeneration remain out of scope."
+            "Source-range mutation is supported; layout edits that change "
+            "cache semantics stamp refresh-on-open rather than regenerating "
+            "pivot cache records."
         ),
+    },
+    {
+        "id": "pivots.field_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot row/column fields",
+        "wolfxl": "PivotTableHandle.row_fields / column_fields",
+        "status": "supported",
+        "probe": "pivots_field_mutation",
+        "notes": "Mutates existing pivot table layout XML and marks the linked cache refresh-on-open.",
+    },
+    {
+        "id": "pivots.filter_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot page field filter",
+        "wolfxl": "PivotTableHandle.page_fields / set_filter",
+        "status": "supported",
+        "probe": "pivots_filter_mutation",
+    },
+    {
+        "id": "pivots.aggregation_mutation",
+        "category": "pivots",
+        "openpyxl": "edit existing pivot data-field aggregation",
+        "wolfxl": "PivotTableHandle.data_fields / set_aggregation",
+        "status": "supported",
+        "probe": "pivots_aggregation_mutation",
     },
     {
         "id": "pivots.copy_worksheet",
@@ -337,6 +400,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "copy_worksheet of pivot-bearing sheet (drops in openpyxl)",
         "wolfxl": "copy_worksheet of pivot-bearing sheet (deep-clone)",
         "status": "supported",
+        "probe": "pivots_copy_worksheet",
     },
     # --- Images + drawings -------------------------------------------------
     {
@@ -346,10 +410,6 @@ ENTRIES: list[Entry] = [
         "wolfxl": 'Image("logo.png") + ws.add_image(img, "B5")',
         "status": "supported",
         "probe": "images_basic",
-        "notes": (
-            "Write mode and common modify-mode image adds are supported; "
-            "appending images into an existing drawing part is planned."
-        ),
     },
     {
         "id": "images_replace_remove",
@@ -358,7 +418,6 @@ ENTRIES: list[Entry] = [
         "wolfxl": "ws.replace_image / remove_image",
         "status": "supported",
         "probe": "images_replace_remove",
-        "notes": "Covers WolfXL-managed images; loaded-template drawing mutations remain narrower.",
     },
     # --- Structural ops ----------------------------------------------------
     {
@@ -375,6 +434,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "ws.insert_cols / delete_cols",
         "wolfxl": "ws.insert_cols / delete_cols",
         "status": "supported",
+        "probe": "structural_insert_delete_cols",
     },
     {
         "id": "structural.move_range",
@@ -382,6 +442,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "ws.move_range(range, rows, cols)",
         "wolfxl": "ws.move_range(range, rows, cols)",
         "status": "supported",
+        "probe": "structural_move_range",
     },
     # --- Modify-mode mutations ---------------------------------------------
     {
@@ -390,6 +451,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "wb.properties.title = ...",
         "wolfxl": "wb.properties.title = ...",
         "status": "supported",
+        "probe": "modify_document_properties",
     },
     {
         "id": "modify.defined_names",
@@ -422,6 +484,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "load_workbook(path)",
         "wolfxl": "load_workbook(path)",
         "status": "supported",
+        "probe": "read_xlsx",
     },
     {
         "id": "read.xlsb",
@@ -429,14 +492,19 @@ ENTRIES: list[Entry] = [
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "native BIFF12; values, cached formulas, read-side styles",
         "status": "supported",
+        "probe": "read_xlsb",
     },
     {
         "id": "read.xls",
         "category": "read",
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "calamine; value-only, styles raise",
-        "status": "partial",
-        "notes": "Style accessors raise; values + formulas read.",
+        "status": "out_of_scope",
+        "notes": (
+            "Style accessors raise; values + formulas read. openpyxl does "
+            "not support this surface; tracked as a wolfxl-extra roadmap "
+            "item, not an openpyxl-parity gap."
+        ),
     },
     {
         "id": "read.ods",
@@ -477,6 +545,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": "openpyxl.utils.coordinate_to_tuple",
         "wolfxl": "wolfxl.utils.cell.coordinate_to_tuple",
         "status": "supported",
+        "probe": "utils_coordinate_to_tuple",
     },
     # --- Protection -------------------------------------------------------
     {
@@ -506,11 +575,20 @@ ENTRIES: list[Entry] = [
         "status": "supported",
         "probe": "external_links_collection",
         "notes": (
-            "v1.0 — read-only inspection (ExternalLink dataclass with "
-            "target / sheet_names / cached_data) + opaque preservation: "
-            "modify-mode round-trips xl/externalLinks/* and the matching "
-            "rels byte-for-byte. Authoring (append/remove) is deferred."
+            "Inspection (target / sheet_names / cached_data), opaque "
+            "modify-mode preservation when unchanged, and append/remove/edit "
+            "authoring. keep_links=False strips preserved source links, and "
+            "file-like/bytes-backed xlsx reads expose the same collection."
         ),
+    },
+    {
+        "id": "external_links.authoring",
+        "category": "external_links",
+        "openpyxl": "append/remove/edit external workbook links",
+        "wolfxl": "wb._external_links append/remove/update_target",
+        "status": "supported",
+        "probe": "external_links_authoring",
+        "notes": "Authoring emits externalLink parts, workbook rels/references, content-types, and per-link rels. Cached data is preserved when provided but linked workbooks are not dereferenced.",
     },
     # --- VBA --------------------------------------------------------------
     {
@@ -519,6 +597,7 @@ ENTRIES: list[Entry] = [
         "openpyxl": ".xlsm preserved on read+write",
         "wolfxl": ".xlsm preserved on modify-mode save",
         "status": "supported",
+        "probe": "vba_preserve",
     },
     {
         "id": "vba.inspect",
@@ -537,9 +616,13 @@ ENTRIES: list[Entry] = [
         "category": "vba",
         "openpyxl": "not supported in openpyxl",
         "wolfxl": "macro authoring from Python",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G28",
-        "notes": "Decision-gated (S11).",
+        "notes": (
+            "Decision-gated (S11). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     # --- Legacy formats ---------------------------------------------------
     {
@@ -547,27 +630,39 @@ ENTRIES: list[Entry] = [
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "write `.xlsb`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G25",
-        "notes": "Decision-gated (S9).",
+        "notes": (
+            "Decision-gated (S9). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     {
         "id": "legacy_formats.xls_write",
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "write `.xls`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G26",
-        "notes": "Decision-gated (S9).",
+        "notes": (
+            "Decision-gated (S9). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     {
         "id": "legacy_formats.ods_read_write",
         "category": "legacy_formats",
         "openpyxl": "not supported",
         "wolfxl": "read+write `.ods`",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G27",
-        "notes": "Decision-gated (S10).",
+        "notes": (
+            "Decision-gated (S10). openpyxl does not support this surface; "
+            "tracked as a wolfxl-extra roadmap item, not an openpyxl-parity "
+            "gap."
+        ),
     },
     # --- Comments ---------------------------------------------------------
     {
@@ -611,6 +706,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "cellIs / containsText / expression / colorScale (basic)",
         "status": "supported",
         "probe": "cf_basic_rules",
+        "secondary_probes": ["cf_cellis_operator_matrix"],
     },
     {
         "id": "cf.icon_sets",
@@ -619,6 +715,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "IconSetRule (3 / 4 / 5 icons + percentile / number ladders)",
         "status": "supported",
         "probe": "cf_icon_sets",
+        "secondary_probes": ["cf_iconset_extended_attrs"],
     },
     {
         "id": "cf.data_bars",
@@ -627,7 +724,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "DataBarRule (gradient + solid; min / max / percent / formula)",
         "status": "supported",
         "probe": "cf_data_bars",
-        "notes": "Round-trips through openpyxl reload (cfvo min/max types preserved). Edge cases like percent / formula cfvo not yet probed.",
+        "notes": "Round-trips through openpyxl reload; secondary probes cover cfvo edge cases and minLength/maxLength.",
     },
     {
         "id": "cf.data_bars_advanced",
@@ -636,6 +733,7 @@ ENTRIES: list[Entry] = [
         "wolfxl": "DataBarRule with percent / num / formula cfvo + showValue=False",
         "status": "supported",
         "probe": "cf_data_bars_advanced",
+        "secondary_probes": ["cf_databar_length_attrs"],
     },
     {
         "id": "cf.color_scales_advanced",
@@ -665,10 +763,9 @@ ENTRIES: list[Entry] = [
     {
         "id": "defined_names.edge_cases",
         "category": "defined_names",
-        "openpyxl": "hidden, comment, custom_menu, function, function_group_id, shortcut_key",
-        "wolfxl": "hidden, comment, custom_menu, function, function_group_id, shortcut_key",
-        "status": "partial",
-        "gap_id": "G22",
+        "openpyxl": "full ECMA-376 §18.2.5 attribute surface (13 attrs)",
+        "wolfxl": "full ECMA-376 §18.2.5 attribute surface (13 attrs)",
+        "status": "supported",
         "probe": "defined_names_edge_cases",
     },
     # --- Print settings ---------------------------------------------------
@@ -685,8 +782,7 @@ ENTRIES: list[Entry] = [
         "category": "print_settings",
         "openpyxl": "full PageSetup / PrintOptions surface (~30 attrs)",
         "wolfxl": "full PageSetup / PrintOptions surface (~30 attrs)",
-        "status": "partial",
-        "gap_id": "G24",
+        "status": "supported",
         "probe": "print_settings_depth",
     },
     # --- Array + data-table formulas --------------------------------------
@@ -710,10 +806,11 @@ ENTRIES: list[Entry] = [
     {
         "id": "array_formulas.spill",
         "category": "array_formulas",
-        "openpyxl": "dynamic-array spill metadata",
-        "wolfxl": "dynamic-array spill metadata",
-        "status": "partial",
-        "gap_id": "G07",
+        "openpyxl": "Worksheet.array_formulae + DataTableFormula del flags",
+        "wolfxl": "Worksheet.array_formulae + DataTableFormula del flags",
+        "status": "supported",
+        "probe": "array_formula_spill_metadata",
+        "notes": "openpyxl 3.1.5 exposes array/spill ranges via Worksheet.array_formulae; formula_attributes is not part of the supported reference surface.",
     },
     # --- Calc chain -------------------------------------------------------
     {
@@ -722,14 +819,16 @@ ENTRIES: list[Entry] = [
         "openpyxl": "calcChain rebuild on modify",
         "wolfxl": "calcChain rebuild on modify",
         "status": "supported",
+        "probe": "calc_chain_basic",
     },
     {
         "id": "calc_chain.edge_cases",
         "category": "calc_chain",
         "openpyxl": "cross-sheet calc-chain ordering, deleted-cell pruning",
         "wolfxl": "cross-sheet calc-chain ordering, deleted-cell pruning",
-        "status": "partial",
-        "gap_id": "G23",
+        "status": "supported",
+        "probe": "calc_chain_edge_cases",
+        "notes": "Rebuild scans post-mutation sheet XML across tab order, prunes stale refs, and preserves a source calcChain extLst when emitting a non-empty chain.",
     },
     # --- Slicers ----------------------------------------------------------
     {
@@ -738,14 +837,16 @@ ENTRIES: list[Entry] = [
         "openpyxl": "Slicer + SlicerCache wired to a PivotCache",
         "wolfxl": "Slicer + SlicerCache wired to a PivotCache",
         "status": "supported",
+        "probe": "slicers_with_pivot",
     },
     {
         "id": "slicers.standalone",
         "category": "slicers",
         "openpyxl": "Slicer outside pivot context (table-driven, etc.)",
         "wolfxl": "Slicer outside pivot context (table-driven, etc.)",
-        "status": "not_yet",
+        "status": "out_of_scope",
         "gap_id": "G21",
+        "notes": "openpyxl 3.1.5 exposes no public slicer modules/classes or table-driven slicer authoring API; tracked as a possible wolfxl-extra, not an openpyxl parity gap.",
     },
 ]
 

@@ -28,6 +28,14 @@ def test_constructor_minimal() -> None:
     assert dt.dtr is False
     assert dt.r1 is None
     assert dt.r2 is None
+    assert dt.del1 is False
+    assert dt.del2 is False
+
+
+def test_constructor_accepts_openpyxl_del_flags_and_extra_kwargs() -> None:
+    dt = DataTableFormula(ref="B2:F11", del1=True, del2=True, aca=True)
+    assert dt.del1 is True
+    assert dt.del2 is True
 
 
 def test_constructor_2d() -> None:
@@ -130,6 +138,8 @@ def test_round_trip_preserves_all_data_table_attrs(tmp_path: Path) -> None:
         dtr=True,
         r1="A1",
         r2="B1",
+        del1=True,
+        del2=True,
     )
     wb.save(str(p))
 
@@ -142,6 +152,8 @@ def test_round_trip_preserves_all_data_table_attrs(tmp_path: Path) -> None:
     assert val.dtr is True
     assert val.r1 == "A1"
     assert val.r2 == "B1"
+    assert val.del1 is True
+    assert val.del2 is True
 
     ref_wb = _opx.load_workbook(str(p))
     ref_val = ref_wb.active["C1"].value
@@ -152,6 +164,8 @@ def test_round_trip_preserves_all_data_table_attrs(tmp_path: Path) -> None:
     assert str(ref_val.dtr).lower() in {"1", "true"}
     assert ref_val.r1 == "A1"
     assert ref_val.r2 == "B1"
+    assert str(ref_val.del1).lower() in {"1", "true"}
+    assert str(ref_val.del2).lower() in {"1", "true"}
 
 
 def test_round_trip_modify_mode(tmp_path: Path) -> None:

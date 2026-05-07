@@ -353,6 +353,88 @@ def test_databar_no_dxf(tmp_path: Path) -> None:
     assert out_dxf == src_dxf, f"dataBar must not allocate dxf: {src_dxf} → {out_dxf}"
 
 
+def test_databar_modify_round_trip_extended_attrs(tmp_path: Path) -> None:
+    """DataBar min/max length attrs survive modify-save and openpyxl reload."""
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        DataBarRule(
+            start_type="formula",
+            start_value="$A$1",
+            end_type="formula",
+            end_value="$A$10",
+            color="FF4472C4",
+            minLength=5,
+            maxLength=90,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    block = _cf_block_for_sqref(sheet_xml, "A1:A10")
+    assert block is not None
+    assert 'type="dataBar"' in block
+    assert 'minLength="5"' in block
+    assert 'maxLength="90"' in block
+
+    reopened = openpyxl.load_workbook(out)
+    rules = list(reopened.active.conditional_formatting)[0].rules
+    data_bar = rules[0].dataBar
+    assert data_bar.minLength == 5
+    assert data_bar.maxLength == 90
+    assert [cfvo.type for cfvo in data_bar.cfvo] == ["formula", "formula"]
+    assert [cfvo.val for cfvo in data_bar.cfvo] == ["$A$1", "$A$10"]
+
+
+def test_iconset_modify_round_trip_extended_attrs(tmp_path: Path) -> None:
+    """IconSet rules survive modify-save with openpyxl-shaped attrs."""
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        IconSetRule(
+            "4Rating",
+            "num",
+            [1, 3, 5, 7],
+            showValue=False,
+            percent=False,
+            reverse=True,
+        ),
+    )
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    block = _cf_block_for_sqref(sheet_xml, "A1:A10")
+    assert block is not None
+    assert 'type="iconSet"' in block
+    assert 'iconSet="4Rating"' in block
+    assert 'showValue="0"' in block
+    assert 'percent="0"' in block
+    assert 'reverse="1"' in block
+    assert "dxfId" not in block, f"iconSet must not carry dxfId: {block}"
+
+    reopened = openpyxl.load_workbook(out)
+    rules = list(reopened.active.conditional_formatting)[0].rules
+    icon_set = rules[0].iconSet
+    assert icon_set.iconSet == "4Rating"
+    assert icon_set.showValue is False
+    assert icon_set.percent is False
+    assert icon_set.reverse is True
+    assert [cfvo.type for cfvo in icon_set.cfvo] == ["num"] * 4
+    assert [cfvo.val for cfvo in icon_set.cfvo] == [1.0, 3.0, 5.0, 7.0]
+
+
 def test_expression_rule_escapes_formula(tmp_path: Path) -> None:
     """formula="A1>B1" must serialize as ``<formula>A1&gt;B1</formula>``."""
     src = tmp_path / "src.xlsx"
@@ -482,12 +564,8 @@ def test_cf_no_pending_no_op(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     )
 
 
-def test_unsupported_rule_kind_raises(tmp_path: Path) -> None:
-    """Stub CF kinds (containsText, beginsWith, etc.) raise pointing at §10.
-
-    G11 promoted ``iconSet`` to a supported kind, so this test now uses
-    a still-stubbed openpyxl rule type instead.
-    """
+def test_unknown_rule_kind_raises(tmp_path: Path) -> None:
+    """Unknown CF kinds still raise before they can poison OOXML output."""
     from wolfxl.formatting.rule import Rule
 
     src = tmp_path / "src.xlsx"
@@ -495,11 +573,59 @@ def test_unsupported_rule_kind_raises(tmp_path: Path) -> None:
 
     wb = Workbook._from_patcher(str(src))
     ws = wb["Sheet1"]
-    with pytest.raises(NotImplementedError, match="026-conditional-formatting"):
-        ws.conditional_formatting.add(
-            "A1:A10", Rule(type="containsText", formula=["foo"])
-        )
+    with pytest.raises(NotImplementedError, match="not yet supported"):
+        ws.conditional_formatting.add("A1:A10", Rule(type="unknownRule"))
     wb.close()
+
+
+def test_generic_rule_kinds_round_trip_in_modify_mode(tmp_path: Path) -> None:
+    """Openpyxl's generic ``Rule`` taxonomy writes through modify mode."""
+    from wolfxl.formatting.rule import DifferentialStyle, Rule
+    from wolfxl.styles import PatternFill
+
+    src = tmp_path / "src.xlsx"
+    _make_clean_fixture(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.conditional_formatting.add(
+        "A1:A10",
+        Rule(
+            type="containsText",
+            operator="containsText",
+            text="foo",
+            formula=['NOT(ISERROR(SEARCH("foo",A1)))'],
+            dxf=DifferentialStyle(
+                fill=PatternFill(fill_type="solid", fgColor="FFFF0000")
+            ),
+        ),
+    )
+    ws.conditional_formatting.add(
+        "B1:B10",
+        Rule(type="top10", rank=3, percent=True, bottom=False),
+    )
+    ws.conditional_formatting.add(
+        "C1:C10",
+        Rule(type="aboveAverage", aboveAverage=False, stdDev=1),
+    )
+
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    assert 'type="containsText"' in sheet_xml
+    assert 'operator="containsText"' in sheet_xml
+    assert 'text="foo"' in sheet_xml
+    assert 'dxfId="' in sheet_xml
+    assert '<formula>NOT(ISERROR(SEARCH("foo",A1)))</formula>' in sheet_xml
+    assert 'type="top10"' in sheet_xml
+    assert 'rank="3"' in sheet_xml
+    assert 'percent="1"' in sheet_xml
+    assert 'bottom="0"' in sheet_xml
+    assert 'type="aboveAverage"' in sheet_xml
+    assert 'aboveAverage="0"' in sheet_xml
+    assert 'stdDev="1"' in sheet_xml
 
 
 # ---------------------------------------------------------------------------

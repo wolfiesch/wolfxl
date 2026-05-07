@@ -44,6 +44,7 @@ def _flush_properties(wb: Any, writer: Any) -> None:
 
 def _flush_defined_names(wb: Any, writer: Any) -> None:
     """Push pending defined names to the native writer."""
+    _flush_print_titles(wb, writer)
     if wb._pending_defined_names:  # noqa: SLF001
         primary_sheet = wb._sheet_names[0] if wb._sheet_names else "Sheet"  # noqa: SLF001
         for defined_name in wb._pending_defined_names.values():  # noqa: SLF001
@@ -65,9 +66,62 @@ def _flush_defined_names(wb: Any, writer: Any) -> None:
                     "comment": defined_name.comment,
                     "local_sheet_id": defined_name.localSheetId,
                     "hidden": defined_name.hidden,
+                    # G22 — full ECMA-376 attribute surface.
+                    "custom_menu": defined_name.custom_menu,
+                    "description": defined_name.description,
+                    "help": defined_name.help,
+                    "status_bar": defined_name.status_bar,
+                    "shortcut_key": defined_name.shortcut_key,
+                    "function": defined_name.function,
+                    "function_group_id": defined_name.function_group_id,
+                    "vb_procedure": defined_name.vb_procedure,
+                    "xlm": defined_name.xlm,
+                    "publish_to_server": defined_name.publish_to_server,
+                    "workbook_parameter": defined_name.workbook_parameter,
                 },
             )
         wb._pending_defined_names.clear()  # noqa: SLF001
+
+
+def _flush_print_titles(wb: Any, writer: Any) -> None:
+    """Push worksheet repeat-row/column titles as reserved defined names."""
+    from wolfxl.worksheet.print_settings import ColRange, PrintTitles, RowRange
+
+    for sheet_idx, sheet_name in enumerate(wb._sheet_names):  # noqa: SLF001
+        ws = wb._sheets.get(sheet_name)  # noqa: SLF001
+        if ws is None:
+            continue
+        rows = getattr(ws, "_print_title_rows", None)
+        cols = getattr(ws, "_print_title_cols", None)
+        if rows is None and cols is None:
+            continue
+        if _has_pending_print_titles_for_sheet(wb, sheet_idx):
+            continue
+        titles = PrintTitles(
+            rows=RowRange.from_string(rows) if rows is not None else None,
+            cols=ColRange.from_string(cols) if cols is not None else None,
+        )
+        formula = titles.to_definedname_value(sheet_name)
+        if formula is None:
+            continue
+        writer.add_named_range(
+            sheet_name,
+            {
+                "name": "_xlnm.Print_Titles",
+                "refers_to": formula,
+                "scope": "sheet",
+                "local_sheet_id": sheet_idx,
+            },
+        )
+
+
+def _has_pending_print_titles_for_sheet(wb: Any, sheet_idx: int) -> bool:
+    """Return whether user-defined names already carry this sheet's titles."""
+    return any(
+        defined_name.name == "_xlnm.Print_Titles"
+        and defined_name.localSheetId == sheet_idx
+        for defined_name in wb._pending_defined_names.values()  # noqa: SLF001
+    )
 
 
 def _flush_named_styles(wb: Any, writer: Any) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Any
 
 from wolfxl._workbook_state import (
@@ -19,6 +20,8 @@ def open_workbook_source(
     data: bytes | None,
     password: str | bytes | None,
     data_only: bool,
+    keep_links: bool,
+    keep_vba: bool,
     permissive: bool,
     modify: bool,
     read_only: bool,
@@ -47,6 +50,8 @@ def open_workbook_source(
                 data=data,
                 password=password,
                 data_only=data_only,
+                keep_links=keep_links,
+                keep_vba=keep_vba,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
@@ -56,16 +61,27 @@ def open_workbook_source(
                 cls,
                 data,
                 data_only=data_only,
+                keep_links=keep_links,
+                keep_vba=keep_vba,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
             )
         if modify:
-            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+            return from_patcher(
+                cls,
+                path,
+                data_only=data_only,
+                keep_links=keep_links,
+                keep_vba=keep_vba,
+                permissive=permissive,
+            )
         return from_reader(
             cls,
             path,
             data_only=data_only,
+            keep_links=keep_links,
+            keep_vba=keep_vba,
             permissive=permissive,
             read_only=read_only,
         )
@@ -96,11 +112,19 @@ def from_reader(
     path: str,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
+    keep_vba: bool = False,
     permissive: bool = False,
     read_only: bool = False,
 ) -> Any:
     """Open an existing .xlsx file in read mode."""
     from wolfxl import _rust
+
+    original_path = path
+    temp_path = None
+    path = _normalize_nonstandard_workbook_part(path) or path
+    if path != original_path:
+        temp_path = path
 
     reader_cls = _xlsx_reader_class(
         _rust,
@@ -108,14 +132,21 @@ def from_reader(
         read_only=read_only,
         permissive=permissive,
     )
-    return build_xlsx_wb(
+    wb = build_xlsx_wb(
         cls,
         rust_reader=reader_cls.open(path, permissive),
         rust_patcher=None,
         data_only=data_only,
         read_only=read_only,
         source_path=path,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
     )
+    if temp_path is not None:
+        wb._tempfile_path = temp_path
+    if read_only:
+        _attach_read_only_archive(wb, path)
+    return wb
 
 
 def _open_plain_xlsx_source(
@@ -124,6 +155,8 @@ def _open_plain_xlsx_source(
     path: str | None,
     data: bytes | bytearray | memoryview | None,
     data_only: bool,
+    keep_links: bool,
+    keep_vba: bool,
     permissive: bool,
     modify: bool,
     read_only: bool,
@@ -131,11 +164,20 @@ def _open_plain_xlsx_source(
     """Open an unencrypted XLSX path or byte buffer with the requested mode."""
     if path is not None:
         if modify:
-            return from_patcher(cls, path, data_only=data_only, permissive=permissive)
+            return from_patcher(
+                cls,
+                path,
+                data_only=data_only,
+                keep_links=keep_links,
+                keep_vba=keep_vba,
+                permissive=permissive,
+            )
         return from_reader(
             cls,
             path,
             data_only=data_only,
+            keep_links=keep_links,
+            keep_vba=keep_vba,
             permissive=permissive,
             read_only=read_only,
         )
@@ -143,10 +185,196 @@ def _open_plain_xlsx_source(
         cls,
         bytes(data),  # type: ignore[arg-type]
         data_only=data_only,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
         permissive=permissive,
         modify=modify,
         read_only=read_only,
     )
+
+
+def _normalize_nonstandard_workbook_part(path: str) -> str | None:
+    """Return a temp XLSX path when the workbook part is not ``xl/workbook.xml``."""
+    import os
+    import tempfile
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    tmp_path = None
+    try:
+        with zipfile.ZipFile(path, "r") as src:
+            names = set(src.namelist())
+            if "xl/workbook.xml" in names:
+                return None
+            rels = ET.fromstring(src.read("_rels/.rels"))
+            target = None
+            for rel in rels:
+                if rel.get("Type", "").endswith("/officeDocument"):
+                    target = rel.get("Target")
+                    break
+            if target:
+                target = target.lstrip("/")
+            if not target or target not in names:
+                return None
+            tmp = tempfile.NamedTemporaryFile(prefix="wolfxl-normalized-", suffix=".xlsx", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            target_rels = _workbook_rels_for_part(target)
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as dst:
+                for info in src.infolist():
+                    member = info.filename
+                    data = src.read(member)
+                    if member == target:
+                        member = "xl/workbook.xml"
+                    elif member == target_rels:
+                        member = "xl/_rels/workbook.xml.rels"
+                    elif member == "_rels/.rels":
+                        data = _rewrite_root_rels_target(data)
+                    elif member == "[Content_Types].xml":
+                        data = _rewrite_content_types_workbook_part(data, target)
+                    info.filename = member
+                    dst.writestr(info, data)
+            return tmp_path
+    except Exception:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return None
+
+
+def _workbook_rels_for_part(target: str) -> str:
+    part = PurePosixPath(target)
+    return str(part.parent / "_rels" / f"{part.name}.rels")
+
+
+def _rewrite_root_rels_target(data: bytes) -> bytes:
+    from xml.etree import ElementTree as ET
+
+    root = ET.fromstring(data)
+    for rel in root:
+        if rel.get("Type", "").endswith("/officeDocument"):
+            rel.set("Target", "xl/workbook.xml")
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _rewrite_content_types_workbook_part(data: bytes, old_target: str) -> bytes:
+    from xml.etree import ElementTree as ET
+
+    root = ET.fromstring(data)
+    old_part = "/" + old_target.lstrip("/")
+    for child in root:
+        if child.get("PartName") == old_part:
+            child.set("PartName", "/xl/workbook.xml")
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _attach_read_only_archive(wb: Any, path: str) -> None:
+    try:
+        wb._archive = _ReadOnlyArchive(path)
+    except Exception:
+        wb._archive = None
+
+
+class _ReadOnlyArchive:
+    """ZipFile-shaped archive that does not keep the source path locked."""
+
+    def __init__(self, path: str) -> None:
+        self.filename = path
+        self.mode = "r"
+        self._closed = False
+
+    def open(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        import zipfile
+
+        self._check_open()
+        archive = zipfile.ZipFile(self.filename, "r")
+        try:
+            member = archive.open(name, *args, **kwargs)
+        except Exception:
+            archive.close()
+            raise
+        return _ZipMemberHandle(member, archive)
+
+    def read(self, name: str, *args: Any, **kwargs: Any) -> bytes:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.read(name, *args, **kwargs)
+
+    def namelist(self) -> list[str]:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.namelist()
+
+    def infolist(self) -> list[Any]:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.infolist()
+
+    def getinfo(self, name: str) -> Any:
+        import zipfile
+
+        self._check_open()
+        with zipfile.ZipFile(self.filename, "r") as archive:
+            return archive.getinfo(name)
+
+    def close(self) -> None:
+        self._closed = True
+
+    def __enter__(self) -> _ReadOnlyArchive:
+        self._check_open()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise ValueError("Attempt to use ZIP archive that was already closed")
+
+
+class _ZipMemberHandle:
+    """Close the owning ZipFile when a member stream is closed."""
+
+    def __init__(self, member: Any, archive: Any) -> None:
+        self._member = member
+        self._archive = archive
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._member.close()
+        finally:
+            self._archive.close()
+            self._closed = True
+
+    @property
+    def closed(self) -> bool:
+        return self._closed or bool(getattr(self._member, "closed", False))
+
+    def __enter__(self) -> _ZipMemberHandle:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __iter__(self) -> Any:
+        return iter(self._member)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._member, name)
 
 
 def from_encrypted(
@@ -156,6 +384,8 @@ def from_encrypted(
     data: bytes | bytearray | memoryview | None = None,
     password: str | bytes,
     data_only: bool = False,
+    keep_links: bool = True,
+    keep_vba: bool = False,
     permissive: bool = False,
     modify: bool = False,
     read_only: bool = False,
@@ -176,6 +406,8 @@ def from_encrypted(
             path=path,
             data=data,
             data_only=data_only,
+            keep_links=keep_links,
+            keep_vba=keep_vba,
             permissive=permissive,
             modify=modify,
             read_only=read_only,
@@ -210,6 +442,8 @@ def from_encrypted(
                 path=path,
                 data=data,
                 data_only=data_only,
+                keep_links=keep_links,
+                keep_vba=keep_vba,
                 permissive=permissive,
                 modify=modify,
                 read_only=read_only,
@@ -235,6 +469,8 @@ def from_encrypted(
         cls,
         decrypted_bytes,
         data_only=data_only,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
         permissive=permissive,
         modify=modify,
         read_only=read_only,
@@ -246,6 +482,8 @@ def from_bytes(
     data: bytes | bytearray | memoryview,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
+    keep_vba: bool = False,
     permissive: bool = False,
     modify: bool = False,
     read_only: bool = False,
@@ -276,13 +514,20 @@ def from_bytes(
         try:
             if modify:
                 wb = from_patcher(
-                    cls, tmp_path, data_only=data_only, permissive=permissive
+                    cls,
+                    tmp_path,
+                    data_only=data_only,
+                    keep_links=keep_links,
+                    keep_vba=keep_vba,
+                    permissive=permissive,
                 )
             else:
                 wb = from_reader(
                     cls,
                     tmp_path,
                     data_only=data_only,
+                    keep_links=keep_links,
+                    keep_vba=keep_vba,
                     permissive=permissive,
                     read_only=read_only,
                 )
@@ -301,6 +546,9 @@ def from_bytes(
         data_only=data_only,
         read_only=read_only,
         source_path=None,
+        source_bytes=data_bytes,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
     )
 
 
@@ -309,6 +557,8 @@ def from_patcher(
     path: str,
     *,
     data_only: bool = False,
+    keep_links: bool = True,
+    keep_vba: bool = False,
     permissive: bool = False,
 ) -> Any:
     """Open an existing .xlsx file in modify mode."""
@@ -327,6 +577,8 @@ def from_patcher(
         data_only=data_only,
         read_only=False,
         source_path=path,
+        keep_links=keep_links,
+        keep_vba=keep_vba,
     )
 
 

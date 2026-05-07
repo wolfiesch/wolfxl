@@ -58,16 +58,44 @@ fn emit_user_defined_names(out: &mut String, defined_names: &[DefinedName]) {
             None => String::new(),
         };
 
-        let hidden_attr = if dn.hidden {
-            " hidden=\"1\"".to_string()
-        } else {
-            String::new()
-        };
+        // ECMA-376 §18.2.5 attribute order matches openpyxl's emit order
+        // so wolfxl-written workbooks diff cleanly against openpyxl-written
+        // ones. Attribute is omitted when its value is the XML default.
+        let mut extra = String::new();
+        emit_opt_str(&mut extra, "comment", dn.comment.as_deref());
+        emit_opt_str(&mut extra, "customMenu", dn.custom_menu.as_deref());
+        emit_opt_str(&mut extra, "description", dn.description.as_deref());
+        emit_opt_str(&mut extra, "help", dn.help.as_deref());
+        emit_opt_str(&mut extra, "statusBar", dn.status_bar.as_deref());
+        emit_opt_str(&mut extra, "shortcutKey", dn.shortcut_key.as_deref());
+        if dn.hidden {
+            extra.push_str(" hidden=\"1\"");
+        }
+        emit_opt_bool_true(&mut extra, "function", dn.function);
+        emit_opt_bool_true(&mut extra, "vbProcedure", dn.vb_procedure);
+        emit_opt_bool_true(&mut extra, "xlm", dn.xlm);
+        if let Some(id) = dn.function_group_id {
+            extra.push_str(&format!(" functionGroupId=\"{id}\""));
+        }
+        emit_opt_bool_true(&mut extra, "publishToServer", dn.publish_to_server);
+        emit_opt_bool_true(&mut extra, "workbookParameter", dn.workbook_parameter);
 
         let formula_escaped = xml_escape::text(&dn.formula);
         out.push_str(&format!(
-            "<definedName name=\"{name_escaped}\"{local_attr}{hidden_attr}>{formula_escaped}</definedName>"
+            "<definedName name=\"{name_escaped}\"{local_attr}{extra}>{formula_escaped}</definedName>"
         ));
+    }
+}
+
+fn emit_opt_str(out: &mut String, attr: &str, value: Option<&str>) {
+    if let Some(v) = value {
+        out.push_str(&format!(" {attr}=\"{}\"", xml_escape::attr(v)));
+    }
+}
+
+fn emit_opt_bool_true(out: &mut String, attr: &str, value: Option<bool>) {
+    if value == Some(true) {
+        out.push_str(&format!(" {attr}=\"1\""));
     }
 }
 
@@ -251,6 +279,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -278,6 +307,7 @@ mod tests {
             scope_sheet_index: Some(1),
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -359,6 +389,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -380,6 +411,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -411,6 +443,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -446,6 +479,7 @@ mod tests {
             scope_sheet_index: Some(0),
             builtin: Some(BuiltinName::PrintArea),
             hidden: false,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);
@@ -582,6 +616,7 @@ mod tests {
             scope_sheet_index: None,
             builtin: None,
             hidden: true,
+            ..Default::default()
         });
         let bytes = emit(&wb);
         parse_ok(&bytes);

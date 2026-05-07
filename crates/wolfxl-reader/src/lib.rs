@@ -464,19 +464,23 @@ pub struct PageSetupInfo {
     pub cell_comments: Option<String>,
     pub errors: Option<String>,
     pub use_first_page_number: Option<bool>,
+    pub paper_height: Option<String>,
+    pub paper_width: Option<String>,
+    pub page_order: Option<String>,
     pub use_printer_defaults: Option<bool>,
     pub black_and_white: Option<bool>,
     pub draft: Option<bool>,
+    pub copies: Option<u32>,
 }
 
 /// Parsed worksheet print options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrintOptionsInfo {
-    pub horizontal_centered: bool,
-    pub vertical_centered: bool,
-    pub headings: bool,
-    pub grid_lines: bool,
-    pub grid_lines_set: bool,
+    pub horizontal_centered: Option<bool>,
+    pub vertical_centered: Option<bool>,
+    pub headings: Option<bool>,
+    pub grid_lines: Option<bool>,
+    pub grid_lines_set: Option<bool>,
 }
 
 /// Parsed worksheet header/footer settings.
@@ -548,9 +552,25 @@ impl PageSetupInfo {
             cell_comments: attr_value(e, b"cellComments"),
             errors: attr_value(e, b"errors"),
             use_first_page_number: attr_bool(e, b"useFirstPageNumber"),
+            paper_height: attr_value(e, b"paperHeight"),
+            paper_width: attr_value(e, b"paperWidth"),
+            page_order: attr_value(e, b"pageOrder"),
             use_printer_defaults: attr_bool(e, b"usePrinterDefaults"),
             black_and_white: attr_bool(e, b"blackAndWhite"),
             draft: attr_bool(e, b"draft"),
+            copies: attr_u32(e, b"copies"),
+        }
+    }
+}
+
+impl PrintOptionsInfo {
+    fn from_start(e: &BytesStart<'_>) -> Self {
+        Self {
+            horizontal_centered: attr_bool(e, b"horizontalCentered"),
+            vertical_centered: attr_bool(e, b"verticalCentered"),
+            headings: attr_bool(e, b"headings"),
+            grid_lines: attr_bool(e, b"gridLines"),
+            grid_lines_set: attr_bool(e, b"gridLinesSet"),
         }
     }
 }
@@ -892,11 +912,29 @@ pub struct Table {
 }
 
 /// Parsed workbook defined name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Phase 2 (G22) extends the struct to carry the full ECMA-376
+/// `definedName` attribute surface that openpyxl exposes. `comment`
+/// and `hidden` were previously parsed by the writer but never surfaced
+/// from the reader; everything else is new in Phase 2.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamedRange {
     pub name: String,
     pub scope: String,
     pub refers_to: String,
+    pub comment: Option<String>,
+    pub hidden: bool,
+    pub custom_menu: Option<String>,
+    pub description: Option<String>,
+    pub help: Option<String>,
+    pub status_bar: Option<String>,
+    pub shortcut_key: Option<String>,
+    pub function: Option<bool>,
+    pub function_group_id: Option<u32>,
+    pub vb_procedure: Option<bool>,
+    pub xlm: Option<bool>,
+    pub publish_to_server: Option<bool>,
+    pub workbook_parameter: Option<bool>,
 }
 
 /// Parsed worksheet print-title ranges.
@@ -1052,6 +1090,8 @@ pub enum ArrayFormulaInfo {
         dtr: bool,
         r1: Option<String>,
         r2: Option<String>,
+        del1: bool,
+        del2: bool,
     },
     SpillChild,
 }
@@ -1370,6 +1410,25 @@ impl NativeXlsxBook {
         data.threaded_comments = threaded_comments;
         Ok(data)
     }
+
+    /// Parse charts attached to a chartsheet tab.
+    pub fn chartsheet_charts(&self, sheet_name: &str) -> Result<Vec<ChartInfo>> {
+        let Some(info) = self
+            .sheets
+            .iter()
+            .find(|s| s.name == sheet_name && s.path.contains("chartsheets/"))
+        else {
+            return Err(ReaderError::SheetNotFound(sheet_name.to_string()));
+        };
+        let mut zip = zip_from_bytes(&self.bytes)?;
+        let rels = read_part_optional(&mut zip, &sheet_rels_path(&info.path))?
+            .map(|xml| {
+                RelsGraph::parse(xml.as_bytes())
+                    .map_err(|e| ReaderError::Xml(format!("failed to parse chartsheet rels: {e}")))
+            })
+            .transpose()?;
+        read_charts(&mut zip, &info.path, rels.as_ref())
+    }
 }
 
 #[derive(Debug)]
@@ -1577,6 +1636,8 @@ fn parse_workbook(
     let mut current_name: Option<String> = None;
     let mut current_local_id: Option<usize> = None;
     let mut current_name_text = String::new();
+    // G22 — accumulate the rest of the ECMA-376 `<definedName>` attrs.
+    let mut current_dn_attrs: RawNamedRangeAttrs = RawNamedRangeAttrs::default();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -1615,6 +1676,21 @@ fn parse_workbook(
                     current_local_id =
                         attr_value(&e, b"localSheetId").and_then(|v| v.parse::<usize>().ok());
                     current_name_text.clear();
+                    current_dn_attrs = RawNamedRangeAttrs {
+                        comment: attr_value(&e, b"comment"),
+                        hidden: attr_bool_default(&e, b"hidden", false),
+                        custom_menu: attr_value(&e, b"customMenu"),
+                        description: attr_value(&e, b"description"),
+                        help: attr_value(&e, b"help"),
+                        status_bar: attr_value(&e, b"statusBar"),
+                        shortcut_key: attr_value(&e, b"shortcutKey"),
+                        function: attr_bool(&e, b"function"),
+                        function_group_id: attr_u32(&e, b"functionGroupId"),
+                        vb_procedure: attr_bool(&e, b"vbProcedure"),
+                        xlm: attr_bool(&e, b"xlm"),
+                        publish_to_server: attr_bool(&e, b"publishToServer"),
+                        workbook_parameter: attr_bool(&e, b"workbookParameter"),
+                    };
                 }
                 _ => {}
             },
@@ -1631,24 +1707,28 @@ fn parse_workbook(
                     in_defined_name = false;
                     if let Some(name) = current_name.take() {
                         let refers_to = current_name_text.trim().to_string();
+                        let attrs = std::mem::take(&mut current_dn_attrs);
                         if name == "_xlnm.Print_Area" && !refers_to.is_empty() {
-                            raw_print_areas.push(RawNamedRange {
+                            raw_print_areas.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         } else if name == "_xlnm.Print_Titles" && !refers_to.is_empty() {
-                            raw_print_titles.push(RawNamedRange {
+                            raw_print_titles.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         } else if !name.starts_with("_xlnm.") && !refers_to.is_empty() {
-                            raw_names.push(RawNamedRange {
+                            raw_names.push(RawNamedRange::from_attrs(
                                 name,
-                                local_id: current_local_id.take(),
+                                current_local_id.take(),
                                 refers_to,
-                            });
+                                attrs,
+                            ));
                         }
                     }
                 }
@@ -1683,11 +1763,49 @@ fn parse_workbook(
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct RawNamedRange {
     name: String,
     local_id: Option<usize>,
     refers_to: String,
+    /// Phase 2 (G22) — extra ECMA-376 attrs preserved through resolve.
+    /// Held as a sub-struct so xlsb.rs can also build raw entries with
+    /// `RawNamedRange { name, local_id, refers_to, attrs: Default::default() }`
+    /// without spelling out the dozen extra fields.
+    attrs: RawNamedRangeAttrs,
+}
+
+impl RawNamedRange {
+    fn from_attrs(
+        name: String,
+        local_id: Option<usize>,
+        refers_to: String,
+        attrs: RawNamedRangeAttrs,
+    ) -> Self {
+        Self {
+            name,
+            local_id,
+            refers_to,
+            attrs,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct RawNamedRangeAttrs {
+    comment: Option<String>,
+    hidden: bool,
+    custom_menu: Option<String>,
+    description: Option<String>,
+    help: Option<String>,
+    status_bar: Option<String>,
+    shortcut_key: Option<String>,
+    function: Option<bool>,
+    function_group_id: Option<u32>,
+    vb_procedure: Option<bool>,
+    xlm: Option<bool>,
+    publish_to_server: Option<bool>,
+    workbook_parameter: Option<bool>,
 }
 
 impl WorkbookProtection {
@@ -1819,6 +1937,19 @@ fn resolve_named_ranges(sheet_refs: &[SheetRef], raw_names: Vec<RawNamedRange>) 
                 name: raw.name,
                 scope,
                 refers_to,
+                comment: raw.attrs.comment,
+                hidden: raw.attrs.hidden,
+                custom_menu: raw.attrs.custom_menu,
+                description: raw.attrs.description,
+                help: raw.attrs.help,
+                status_bar: raw.attrs.status_bar,
+                shortcut_key: raw.attrs.shortcut_key,
+                function: raw.attrs.function,
+                function_group_id: raw.attrs.function_group_id,
+                vb_procedure: raw.attrs.vb_procedure,
+                xlm: raw.attrs.xlm,
+                publish_to_server: raw.attrs.publish_to_server,
+                workbook_parameter: raw.attrs.workbook_parameter,
             }
         })
         .collect()
@@ -2697,6 +2828,7 @@ fn parse_worksheet(
     let mut sheet_protection = None;
     let mut page_margins = None;
     let mut page_setup = None;
+    let mut print_options = None;
     let mut header_footer = None;
     let mut row_breaks = None;
     let mut column_breaks = None;
@@ -2792,6 +2924,9 @@ fn parse_worksheet(
                 }
                 b"pageMargins" => {
                     page_margins = parse_page_margins(&e);
+                }
+                b"printOptions" => {
+                    print_options = Some(PrintOptionsInfo::from_start(&e));
                 }
                 b"pageSetup" => {
                     page_setup = Some(PageSetupInfo::from_start(&e));
@@ -2994,6 +3129,9 @@ fn parse_worksheet(
                 }
                 b"pageMargins" => {
                     page_margins = parse_page_margins(&e);
+                }
+                b"printOptions" => {
+                    print_options = Some(PrintOptionsInfo::from_start(&e));
                 }
                 b"pageSetup" => {
                     page_setup = Some(PageSetupInfo::from_start(&e));
@@ -3226,7 +3364,7 @@ fn parse_worksheet(
         auto_filter,
         page_margins,
         page_setup,
-        print_options: None::<PrintOptionsInfo>,
+        print_options,
         header_footer,
         row_breaks,
         column_breaks,
@@ -5574,6 +5712,8 @@ struct CellBuilder {
     formula_dtr: bool,
     formula_r1: Option<String>,
     formula_r2: Option<String>,
+    formula_del1: bool,
+    formula_del2: bool,
     inline_runs: Vec<RichTextRun>,
     inline_current_run: Option<RichTextRun>,
     inline_current_props: Option<InlineFontProps>,
@@ -5614,6 +5754,8 @@ impl CellBuilder {
             formula_dtr: false,
             formula_r1: None,
             formula_r2: None,
+            formula_del1: false,
+            formula_del2: false,
             inline_runs: Vec::new(),
             inline_current_run: None,
             inline_current_props: None,
@@ -5630,6 +5772,8 @@ impl CellBuilder {
         self.formula_dtr = attr_truthy(attr_value(e, b"dtr").as_deref());
         self.formula_r1 = attr_value(e, b"r1");
         self.formula_r2 = attr_value(e, b"r2");
+        self.formula_del1 = attr_truthy(attr_value(e, b"del1").as_deref());
+        self.formula_del2 = attr_truthy(attr_value(e, b"del2").as_deref());
     }
 
     fn push_text(&mut self, target: TextTarget, text: &str) {
@@ -5740,6 +5884,8 @@ impl CellBuilder {
                 dtr: self.formula_dtr,
                 r1: self.formula_r1.clone(),
                 r2: self.formula_r2.clone(),
+                del1: self.formula_del1,
+                del2: self.formula_del2,
             }),
             _ => None,
         };
@@ -6153,11 +6299,13 @@ mod tests {
                     name: "GlobalName".to_string(),
                     scope: "workbook".to_string(),
                     refers_to: "Visible!$A$1".to_string(),
+                    ..Default::default()
                 },
                 NamedRange {
                     name: "LocalName".to_string(),
                     scope: "sheet".to_string(),
                     refers_to: "Hidden!$B$2".to_string(),
+                    ..Default::default()
                 },
             ]
         );

@@ -271,6 +271,8 @@ pub(crate) fn dict_to_conditional_format(
 
     let operator: Option<String> = cfg.get_item("operator")?.and_then(|v| v.extract().ok());
     let formula: Option<String> = cfg.get_item("formula")?.and_then(|v| v.extract().ok());
+    let formula_a: Option<String> = cfg.get_item("formula_a")?.and_then(|v| v.extract().ok());
+    let formula_b: Option<String> = cfg.get_item("formula_b")?.and_then(|v| v.extract().ok());
     let stop_if_true: bool = cfg
         .get_item("stop_if_true")?
         .and_then(|v| v.extract::<bool>().ok())
@@ -315,20 +317,25 @@ pub(crate) fn dict_to_conditional_format(
                 _ => CellIsOperator::Equal,
             };
 
-            let fstr = formula.as_deref().unwrap_or("").trim_start_matches('=');
-            let (formula_a, formula_b) =
-                if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
-                    if let Some(idx) = fstr.find(',') {
-                        (
-                            fstr[..idx].trim().to_string(),
-                            Some(fstr[idx + 1..].trim().to_string()),
-                        )
-                    } else {
-                        (fstr.to_string(), None)
-                    }
+            let formula_a = formula_a.or(formula);
+            let fstr = formula_a.as_deref().unwrap_or("").trim_start_matches('=');
+            let (formula_a, formula_b) = if let Some(formula_b) = formula_b {
+                (
+                    fstr.to_string(),
+                    Some(formula_b.trim_start_matches('=').to_string()),
+                )
+            } else if matches!(op, CellIsOperator::Between | CellIsOperator::NotBetween) {
+                if let Some(idx) = fstr.find(',') {
+                    (
+                        fstr[..idx].trim().to_string(),
+                        Some(fstr[idx + 1..].trim().to_string()),
+                    )
                 } else {
                     (fstr.to_string(), None)
-                };
+                }
+            } else {
+                (fstr.to_string(), None)
+            };
 
             ConditionalKind::CellIs {
                 operator: op,
@@ -359,6 +366,10 @@ pub(crate) fn dict_to_conditional_format(
                 .get_item("show_value")?
                 .and_then(|v| v.extract::<bool>().ok())
                 .unwrap_or(true);
+            let min_length: Option<u32> =
+                cfg.get_item("min_length")?.and_then(|v| v.extract().ok());
+            let max_length: Option<u32> =
+                cfg.get_item("max_length")?.and_then(|v| v.extract().ok());
             ConditionalKind::DataBar {
                 color_rgb: color,
                 min: build_threshold(
@@ -372,6 +383,8 @@ pub(crate) fn dict_to_conditional_format(
                     ConditionalThreshold::Max,
                 )?,
                 show_value,
+                min_length,
+                max_length,
             }
         }
         "colorScale" | "color_scale" => ConditionalKind::ColorScale {
@@ -433,14 +446,27 @@ pub(crate) fn dict_to_conditional_format(
                 .get_item("show_value")?
                 .and_then(|v| v.extract::<bool>().ok())
                 .unwrap_or(true);
+            let percent: Option<bool> = cfg.get_item("percent")?.and_then(|v| v.extract().ok());
+            let reverse: Option<bool> = cfg.get_item("reverse")?.and_then(|v| v.extract().ok());
             ConditionalKind::IconSet {
                 set_name,
                 thresholds,
                 show_value,
+                percent,
+                reverse,
             }
         }
-        _ => ConditionalKind::Expression {
-            formula: "FALSE()".to_string(),
+        "containsText" | "notContainsText" | "beginsWith" | "endsWith" | "duplicateValues"
+        | "uniqueValues" | "top10" | "aboveAverage" | "containsBlanks" | "notContainsBlanks"
+        | "containsErrors" | "notContainsErrors" | "timePeriod" => ConditionalKind::Generic {
+            type_name: rule_type.clone(),
+            attrs: generic_cf_attrs(cfg, &rule_type)?,
+            formulas: generic_cf_formulas(cfg)?,
+        },
+        _ => ConditionalKind::Generic {
+            type_name: rule_type.clone(),
+            attrs: generic_cf_attrs(cfg, &rule_type)?,
+            formulas: generic_cf_formulas(cfg)?,
         },
     };
 
@@ -461,6 +487,75 @@ pub(crate) fn dict_to_conditional_format(
         sqref: range,
         rules: vec![rule],
     }))
+}
+
+fn generic_cf_attrs(cfg: &Bound<'_, PyDict>, rule_type: &str) -> PyResult<Vec<(String, String)>> {
+    let mut attrs: Vec<(String, String)> = Vec::new();
+    if let Some(operator) = dict_get_string(cfg, "operator")? {
+        attrs.push(("operator".to_string(), operator));
+    }
+    if let Some(text) = dict_get_string(cfg, "text")? {
+        attrs.push(("text".to_string(), text));
+    }
+    if let Some(time_period) =
+        dict_get_string(cfg, "time_period")?.or(dict_get_string(cfg, "timePeriod")?)
+    {
+        attrs.push(("timePeriod".to_string(), time_period));
+    }
+    if let Some(rank) = dict_get_string(cfg, "rank")? {
+        attrs.push(("rank".to_string(), rank));
+    }
+    if let Some(std_dev) = dict_get_string(cfg, "std_dev")?.or(dict_get_string(cfg, "stdDev")?) {
+        attrs.push(("stdDev".to_string(), std_dev));
+    }
+    if let Some(value) = extract_bool(cfg, "above_average")?.or(extract_bool(cfg, "aboveAverage")?)
+    {
+        attrs.push(("aboveAverage".to_string(), bool_attr(value)));
+    } else if rule_type == "aboveAverage" {
+        attrs.push(("aboveAverage".to_string(), "1".to_string()));
+    }
+    if let Some(value) = extract_bool(cfg, "equal_average")?.or(extract_bool(cfg, "equalAverage")?)
+    {
+        attrs.push(("equalAverage".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(cfg, "percent")? {
+        attrs.push(("percent".to_string(), bool_attr(value)));
+    }
+    if let Some(value) = extract_bool(cfg, "bottom")? {
+        attrs.push(("bottom".to_string(), bool_attr(value)));
+    }
+    Ok(attrs)
+}
+
+fn generic_cf_formulas(cfg: &Bound<'_, PyDict>) -> PyResult<Vec<String>> {
+    if let Some(v) = cfg.get_item("formulas")? {
+        if let Ok(items) = v.extract::<Vec<String>>() {
+            return Ok(items
+                .into_iter()
+                .map(|s| s.trim_start_matches('=').to_string())
+                .filter(|s| !s.is_empty())
+                .collect());
+        }
+    }
+    let mut formulas = Vec::new();
+    for key in ["formula_a", "formula_b", "formula"] {
+        if let Some(value) = dict_get_string(cfg, key)? {
+            formulas.push(value.trim_start_matches('=').to_string());
+        }
+    }
+    Ok(formulas)
+}
+
+fn bool_attr(value: bool) -> String {
+    if value {
+        "1".to_string()
+    } else {
+        "0".to_string()
+    }
+}
+
+fn extract_bool(cfg: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    Ok(cfg.get_item(key)?.and_then(|v| v.extract::<bool>().ok()))
 }
 
 /// Map a cfvo type string + optional value into a `ConditionalThreshold`.

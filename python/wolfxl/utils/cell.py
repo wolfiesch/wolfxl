@@ -22,7 +22,7 @@ _RANGE_EXPR = r"""
 [$]?(?P<max_row>\d+)?)?
 """
 _ABSOLUTE_RE = re.compile("^" + _RANGE_EXPR + "$", re.VERBOSE)
-_COORD_RE = re.compile(r"^[$]?([A-Za-z]{1,3})[$]?(\d+)$")
+_COORD_RE = re.compile(r"^([A-Za-z]{1,3})(\d+)$")
 
 _DECIMAL_TO_ALPHA = [""] + list(ascii_uppercase)
 _ALPHA_TO_DECIMAL = {letter: pos for pos, letter in enumerate(ascii_uppercase, 1)}
