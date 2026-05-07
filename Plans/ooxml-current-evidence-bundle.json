@@ -83,13 +83,24 @@
       ]
     },
     {
-      "name": "excel_render_full_pack_with_structural_intentional_coverage_gate",
-      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-structural-intentional.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-structural-intentional.json",
+      "name": "excel_render_intentional_move_formula_range_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation move_formula_range > /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["move_formula_range"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_full_pack_with_structural_formula_intentional_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-structural-formula-intentional.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-structural-formula-intentional.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
-        {"path": "render_report_count", "equals": 3},
+        {"path": "render_report_count", "equals": 4},
         {"path": "render_engine_required", "equals": "excel"},
         {"path": "intentional_render_required", "equals": true},
         {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
