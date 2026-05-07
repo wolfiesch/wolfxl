@@ -55,6 +55,7 @@ class Snapshot:
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
     feature_parts: dict[str, list[str]]
+    semantic_fingerprints: dict[str, dict[str, object]]
 
 
 def snapshot(path: Path) -> Snapshot:
@@ -68,6 +69,7 @@ def snapshot(path: Path) -> Snapshot:
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
             feature_parts=_classify_feature_parts(parts),
+            semantic_fingerprints=_read_semantic_fingerprints(archive),
         )
 
 
@@ -92,6 +94,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
+    _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
     return {
         "before": _snapshot_summary(before_snapshot),
@@ -197,6 +200,27 @@ def _audit_feature_hotspots(
             )
 
 
+def _audit_semantic_fingerprints(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    for feature, before_fingerprint in sorted(before.semantic_fingerprints.items()):
+        if not before_fingerprint:
+            continue
+        after_fingerprint = after.semantic_fingerprints.get(feature, {})
+        if after_fingerprint != before_fingerprint:
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": f"{feature}_semantic_drift",
+                    "part": feature,
+                    "message": (
+                        f"{feature} semantic fingerprint changed after save: "
+                        f"before={before_fingerprint!r} after={after_fingerprint!r}"
+                    ),
+                }
+            )
+
+
 def _read_content_overrides(archive: zipfile.ZipFile) -> dict[str, str]:
     try:
         xml = archive.read("[Content_Types].xml")
@@ -284,6 +308,274 @@ def _read_cf_dxf_refs(archive: zipfile.ZipFile) -> list[tuple[str, int]]:
     return refs
 
 
+def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str, object]]:
+    parts = set(archive.namelist())
+    return {
+        "charts": _chart_fingerprint(archive, parts),
+        "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
+        "external_links": _external_link_fingerprint(archive, parts),
+        "pivots": _pivot_fingerprint(archive, parts),
+        "slicers": _slicer_fingerprint(archive, parts),
+    }
+
+
+def _chart_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_feature_xml_parts(parts, "xl/charts/", ".xml")):
+        if _is_chart_style_part(part):
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("formulas", _texts_by_local(root, "f")),
+            ("pivot_sources", _pivot_source_names(root)),
+            ("dPt_count", len(_nodes_by_local(root, "dPt"))),
+            ("style_vals", _vals_by_path(root, ("style",))),
+        ]
+    return out
+
+
+def _conditional_formatting_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        blocks: list[object] = []
+        for block in _nodes_by_local(root, "conditionalFormatting"):
+            rules: list[object] = []
+            for rule in _children_by_local(block, "cfRule"):
+                rules.append(
+                    (
+                        _stable_attrs(rule, ("type", "priority", "operator", "dxfId")),
+                        _texts_by_local(rule, "formula"),
+                    )
+                )
+            blocks.append((_attr(block, "sqref"), rules))
+        if blocks:
+            out[part] = blocks
+    return out
+
+
+def _external_link_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    rel_targets = _rels_target_lookup(archive)
+    for part in sorted(_feature_xml_parts(parts, "xl/externalLinks/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        external_books: list[object] = []
+        for book in _nodes_by_local(root, "externalBook"):
+            rid = _relationship_id(book)
+            external_books.append(
+                (
+                    rid,
+                    rel_targets.get((part, rid)),
+                    _texts_by_local(book, "sheetName"),
+                    _defined_name_refs(book),
+                )
+            )
+        out[part] = external_books
+    return out
+
+
+def _pivot_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_feature_xml_parts(parts, "xl/pivotTables/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("attrs", _stable_attrs(root, ("name", "cacheId", "dataOnRows"))),
+            ("data_fields", _pivot_data_fields(root)),
+            ("row_fields", _pivot_field_indices(root, "rowFields", "field")),
+            ("col_fields", _pivot_field_indices(root, "colFields", "field")),
+            ("page_fields", _pivot_field_indices(root, "pageFields", "pageField")),
+        ]
+    for part in sorted(_feature_xml_parts(parts, "xl/pivotCache/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        source = _first_node_by_local(root, "worksheetSource")
+        out[part] = [
+            ("cacheSource", _stable_attrs(source, ("ref", "sheet", "name"))),
+            ("refreshOnLoad", _attr(root, "refreshOnLoad")),
+            ("fields", _pivot_cache_fields(root)),
+        ]
+    return out
+
+
+def _slicer_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_feature_xml_parts(parts, "xl/slicerCaches/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("attrs", _stable_attrs(root, ("name", "pivotCacheId"))),
+            ("data", _stable_attrs(_first_node_by_local(root, "data"), ("pivotCacheId",))),
+            ("items", _slicer_items(root)),
+        ]
+    for part in sorted(_feature_xml_parts(parts, "xl/slicers/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("attrs", _stable_attrs(root, ("name", "cache", "caption", "style"))),
+            (
+                "slicers",
+                [
+                    _stable_attrs(node, ("name", "cache", "caption"))
+                    for node in _nodes_by_local(root, "slicer")
+                ],
+            ),
+        ]
+    return out
+
+
+def _read_xml_or_none(archive: zipfile.ZipFile, part: str) -> ElementTree.Element | None:
+    try:
+        return ElementTree.fromstring(archive.read(part))
+    except (KeyError, ElementTree.ParseError):
+        return None
+
+
+def _feature_xml_parts(parts: set[str], prefix: str, suffix: str) -> Iterable[str]:
+    return (part for part in parts if part.startswith(prefix) and part.endswith(suffix))
+
+
+def _is_chart_style_part(part: str) -> bool:
+    name = posixpath.basename(part)
+    return name.startswith("style") or name.startswith("colors")
+
+
+def _nodes_by_local(root: ElementTree.Element, name: str) -> list[ElementTree.Element]:
+    return [node for node in root.iter() if _local_name(node.tag) == name]
+
+
+def _first_node_by_local(
+    root: ElementTree.Element, name: str
+) -> ElementTree.Element | None:
+    nodes = _nodes_by_local(root, name)
+    return nodes[0] if nodes else None
+
+
+def _children_by_local(root: ElementTree.Element, name: str) -> list[ElementTree.Element]:
+    return [node for node in list(root) if _local_name(node.tag) == name]
+
+
+def _texts_by_local(root: ElementTree.Element, name: str) -> list[str]:
+    return [text for node in _nodes_by_local(root, name) if (text := _text(node))]
+
+
+def _vals_by_path(root: ElementTree.Element, names: tuple[str, ...]) -> list[str]:
+    return [
+        val
+        for node in root.iter()
+        if _local_name(node.tag) in names and (val := _attr(node, "val")) is not None
+    ]
+
+
+def _pivot_source_names(root: ElementTree.Element) -> list[str]:
+    names: list[str] = []
+    for pivot_source in _nodes_by_local(root, "pivotSource"):
+        names.extend(_texts_by_local(pivot_source, "name"))
+    return names
+
+
+def _defined_name_refs(root: ElementTree.Element) -> list[tuple[str | None, str | None]]:
+    return [
+        (_attr(node, "name"), _attr(node, "refersTo"))
+        for node in _nodes_by_local(root, "definedName")
+    ]
+
+
+def _pivot_data_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
+    return [
+        _stable_attrs(node, ("name", "fld", "subtotal", "baseField", "baseItem"))
+        for node in _nodes_by_local(root, "dataField")
+    ]
+
+
+def _pivot_field_indices(
+    root: ElementTree.Element, container_name: str, child_name: str
+) -> list[str | None]:
+    container = _first_node_by_local(root, container_name)
+    if container is None:
+        return []
+    return [
+        _attr(child, "x") or _attr(child, "fld")
+        for child in _children_by_local(container, child_name)
+    ]
+
+
+def _pivot_cache_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
+    return [
+        _stable_attrs(node, ("name", "numFmtId"))
+        for node in _nodes_by_local(root, "cacheField")
+    ]
+
+
+def _slicer_items(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
+    return [
+        _stable_attrs(node, ("n", "c", "x", "s"))
+        for node in _nodes_by_local(root, "i")
+    ]
+
+
+def _rels_target_lookup(archive: zipfile.ZipFile) -> dict[tuple[str, str], str]:
+    lookup: dict[tuple[str, str], str] = {}
+    for rel in _read_relationships(archive):
+        owner = _source_part_for_rels(rel.rels_part)
+        if owner:
+            lookup[(owner, rel.rel_id)] = rel.target
+    return lookup
+
+
+def _relationship_id(node: ElementTree.Element) -> str | None:
+    for key, value in node.attrib.items():
+        if key.endswith("}id") or key == "id":
+            return value
+    return None
+
+
+def _stable_attrs(
+    node: ElementTree.Element | None, names: Iterable[str]
+) -> tuple[tuple[str, str | None], ...]:
+    if node is None:
+        return tuple((name, None) for name in names)
+    return tuple((name, _attr(node, name)) for name in names)
+
+
+def _attr(node: ElementTree.Element | None, name: str) -> str | None:
+    if node is None:
+        return None
+    for key, value in node.attrib.items():
+        if _local_name(key) == name:
+            return value
+    return None
+
+
+def _text(node: ElementTree.Element) -> str | None:
+    value = (node.text or "").strip()
+    return value or None
+
+
+def _local_name(name: str) -> str:
+    return name.rsplit("}", 1)[-1] if "}" in name else name
+
+
 def _worksheet_parts(parts: Iterable[str]) -> Iterable[str]:
     pattern = re.compile(r"^xl/worksheets/sheet\d+\.xml$")
     return (part for part in parts if pattern.match(part))
@@ -312,6 +604,10 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()
+        },
+        "semantic_fingerprint_counts": {
+            feature: len(fingerprint)
+            for feature, fingerprint in snapshot_.semantic_fingerprints.items()
         },
     }
 

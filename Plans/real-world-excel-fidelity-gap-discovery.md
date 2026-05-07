@@ -19,7 +19,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
 | External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI | Modify-save preserves important authored parts and still opens | Every relationship, style reference, or feature extension has identical meaning |
-| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, and CF dxf bounds | The external-oracle pack now catches broken dependency graphs | It is not yet a full semantic validator for every feature family |
+| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and first-pass semantic fingerprints for charts, CF, external links, pivots, and slicers | The external-oracle pack now catches broken dependency graphs and obvious feature-meaning drift | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix
 
@@ -61,13 +61,13 @@ Gap ledger:
 
 ## Concrete next gates
 
-1. Extend `scripts/audit_ooxml_fidelity.py` from package-level invariants to
-   feature-level semantic summaries:
-   - pivot tables: cache IDs, cache definitions, records rels, refresh flags.
-   - slicers: slicer cache names, pivot cache IDs, workbook extension entries.
-   - charts: chart style/color parts, pivotSource, series formulas, dPt counts.
-   - conditional formatting: `sqref`, priority order, formula text, dxf refs.
-   - external links: workbook rel entries, externalLinkPath targets, cached sheets.
+1. Extend `scripts/audit_ooxml_fidelity.py` from first-pass semantic fingerprints
+   to deeper feature-level summaries:
+   - pivot tables: cache records, table rel targets, calculated fields/items.
+   - slicers: workbook `extLst` entries, table slicers, timelines.
+   - charts: chart style/color parts, axis IDs, chart sheets, rendered output.
+   - conditional formatting: x14 extensions, pivot-scoped CF, formula translation.
+   - external links: cached sheet data, formula references to linked workbooks.
 2. Add a mutation runner that applies the same safe edit set to every fixture
    and stores before/after audit JSON.
 3. Expand fixture sources:
