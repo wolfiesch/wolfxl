@@ -49,6 +49,7 @@ _MUTATIONS = (
     "marker_cell",
     "style_cell",
     "insert_tail_row",
+    "insert_tail_col",
     "move_marker_range",
 )
 
@@ -163,6 +164,11 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
         worksheet.insert_rows(row_idx, amount=1)
         worksheet.cell(row=row_idx, column=1).value = _MARKER_VALUE
+    elif mutation == "insert_tail_col":
+        worksheet = workbook[sheet_name]
+        col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+        worksheet.insert_cols(col_idx, amount=1)
+        worksheet.cell(row=1, column=col_idx).value = _MARKER_VALUE
     elif mutation == "move_marker_range":
         worksheet = workbook[sheet_name]
         worksheet["Z1"] = _MARKER_VALUE

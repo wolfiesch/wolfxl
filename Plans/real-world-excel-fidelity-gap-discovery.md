@@ -18,7 +18,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row-structure and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
+| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and first-pass semantic fingerprints for charts, CF, external links, pivots, and slicers | The external-oracle pack now catches broken dependency graphs and obvious feature-meaning drift | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix
@@ -72,15 +72,15 @@ Gap ledger:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
    - Current safe/default mutations: no-op modify-save, marker-cell modify-save,
-     style-cell modify-save, tail-row insert, and marker-range move.
-   - Latest pinned-pack sweep: 35 results, 0 failures across 7 fixtures and 5
+     style-cell modify-save, tail-row insert, tail-column insert, and
+     marker-range move.
+   - Latest pinned-pack sweep: 42 results, 0 failures across 7 fixtures and 6
      default mutations.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations: column insert/delete, interior row delete, sheet
-     rename/copy, and feature add/remove where the expected semantic drift can
-     be declared.
+   - Next mutations: interior row/column delete, sheet rename/copy, and feature
+     add/remove where the expected semantic drift can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;

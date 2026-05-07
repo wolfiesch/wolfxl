@@ -50,6 +50,26 @@ def test_insert_rows_preserves_prefixed_worksheet_end_tags(tmp_path: Path) -> No
     assert "</worksheet>" not in sheet_xml
 
 
+def test_insert_cols_preserves_prefixed_worksheet_end_tags(tmp_path: Path) -> None:
+    src = tmp_path / "prefixed.xlsx"
+    _make_prefixed_namespace_workbook(src)
+
+    workbook = wolfxl.load_workbook(src, modify=True)
+    workbook["Data"].insert_cols(1, amount=1)
+    workbook.save(src)
+    workbook.close()
+
+    roundtrip = openpyxl.load_workbook(src)
+    assert roundtrip["Data"]["B1"].value == "Region"
+    roundtrip.close()
+
+    with zipfile.ZipFile(src) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+    assert "<x:worksheet" in sheet_xml
+    assert "</x:worksheet>" in sheet_xml
+    assert "</worksheet>" not in sheet_xml
+
+
 def test_move_range_preserves_prefixed_worksheet_elements(tmp_path: Path) -> None:
     src = tmp_path / "prefixed.xlsx"
     _make_prefixed_namespace_workbook(src)

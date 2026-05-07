@@ -25,6 +25,7 @@ DEFAULT_MUTATIONS = (
     "marker_cell",
     "style_cell",
     "insert_tail_row",
+    "insert_tail_col",
     "move_marker_range",
 )
 SUPPORTED_MUTATIONS = (*DEFAULT_MUTATIONS, "rename_first_sheet")
@@ -237,6 +238,11 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
             worksheet.insert_rows(row_idx, amount=1)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
+        elif mutation == "insert_tail_col":
+            worksheet = workbook[workbook.sheetnames[0]]
+            col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+            worksheet.insert_cols(col_idx, amount=1)
+            worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
         elif mutation == "move_marker_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE
