@@ -18,7 +18,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, tail-row-delete, tail-column-delete, copy-remove-sheet, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure, row/column delete, sheet copy/remove, and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
+| External-oracle fixture pack | 8 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, plus one synthetic external-link OOXML oracle, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, tail-row-delete, tail-column-delete, copy-remove-sheet, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure, row/column delete, sheet copy/remove, range-move, and external-link relationship mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 | Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass | The gap-discovery plan now has a strict, machine-readable "not clear yet" gate instead of relying on prose status | It only audits evidence presence; it does not invent missing real Excel or external-link fixtures |
 
@@ -130,15 +130,24 @@ Gap ledger:
      `data_validations_semantic_drift` as unexpected. The runner now declares
      data-validation range movement as expected only for structural mutations,
      while feature-add mutations still require the new range marker.
-   - Latest strict P0 structural sweep: 28 results, 0 failures across the 7
+   - Latest external-link evidence slice: the pinned external-oracle pack now
+     includes `synthetic-external-link-basic.xlsx`, a targeted OOXML fixture
+     with workbook external-link rels, external-link cached sheet data, and an
+     external-reference formula.
+   - Latest external-link oracle-hardening bug found: structural row/column
+     delete and sheet copy intentionally change the external-reference formula
+     set, which also changes the external-link semantic fingerprint because
+     the fingerprint includes linked workbook formulas. The mutation runner
+     now accepts `external_links_semantic_drift` for structural mutations only
+     when the message shows `worksheet_formulas` drift; external-link target
+     and cached-data drift remain unexpected.
+   - Latest strict P0 structural sweep: 40 results, 0 failures across the 8
      external-oracle fixtures for first-row delete, first-column delete,
-     first-sheet copy, and first-sheet rename.
+     first-sheet copy, first-sheet rename, and formula-range move.
    - Latest coverage audit result: `ready=false`. Pivot/slicer, chart/style,
-     and conditional-formatting P0 surfaces have external-tool fixture evidence
-     plus structural mutation passes but still lack real Excel-authored
-     fixtures. External-link relationship edges currently lack external-tool
-     fixture evidence, real Excel fixture evidence, and structural mutation
-     passes in the external-oracle pack.
+     conditional-formatting, and external-link P0 surfaces now have
+     external-tool or targeted synthetic fixture evidence plus structural
+     mutation passes, but all four still lack real Excel-authored fixtures.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.

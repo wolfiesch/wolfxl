@@ -1,10 +1,11 @@
 """Pre-release modify-save preservation test over the pinned external-oracle fixture pack.
 
 The pack lives in `tests/fixtures/external_oracle/` and contains workbooks
-authored by Excelize, ClosedXML, NPOI, ExcelJS, and Apache POI — features
-that openpyxl rarely *constructs* deeply (pivots, slicers, charts, complex
-conditional formatting, drawings, comments, tables, validations). For each
-fixture, the test:
+authored by Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, plus targeted
+synthetic OOXML fixtures for surfaces missing from those external tools.
+These cover features that openpyxl rarely *constructs* deeply (pivots,
+slicers, charts, complex conditional formatting, drawings, comments, tables,
+validations, external links). For each fixture, the test:
 
 1. Verifies the on-disk SHA256 matches the pinned manifest entry — guards
    against accidental modification of the in-tree pack.

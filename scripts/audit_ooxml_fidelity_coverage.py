@@ -44,7 +44,7 @@ SURFACES = {
     },
     "conditional_formatting_extension_preservation": {
         "label": "Conditional formatting extension preservation",
-        "feature_keys": ("conditional_formatting",),
+        "feature_keys": (),
         "semantic_keys": ("conditional_formatting",),
         "structural_mutations": (
             "delete_first_row",

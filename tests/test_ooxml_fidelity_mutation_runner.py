@@ -262,6 +262,52 @@ def test_runner_separates_expected_sheet_copy_drift(
     }
 
 
+def test_runner_accepts_structural_external_link_formula_drift_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "external_links_semantic_drift",
+                    "severity": "error",
+                    "part": "external_links",
+                    "message": "expected worksheet_formulas drift after sheet copy",
+                },
+                {
+                    "kind": "external_links_semantic_drift",
+                    "severity": "error",
+                    "part": "external_links",
+                    "message": "unexpected target changed from a.xlsx to b.xlsx",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("copy_first_sheet",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert [issue["message"] for issue in result["expected_issues"]] == [
+        "expected worksheet_formulas drift after sheet copy",
+    ]
+    assert [issue["message"] for issue in result["issues"]] == [
+        "unexpected target changed from a.xlsx to b.xlsx",
+    ]
+
+
 def test_runner_separates_expected_feature_add_drift(
     tmp_path: Path, monkeypatch
 ) -> None:

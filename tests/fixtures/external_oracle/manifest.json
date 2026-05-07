@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Generated 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json). Each entry's expected_parts list comes from the originating tool's authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
-  "source_harness": "ExcelBench results_dev_external/fixtures (2026-04-28 generation)",
+  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Seeded 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json), with targeted synthetic OOXML fixtures added for surfaces missing from that harness. Each entry's expected_parts list comes from the originating tool's authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
+  "source_harness": "ExcelBench results_dev_external/fixtures (2026-04-28 generation) plus targeted synthetic OOXML fixtures",
   "fixtures": [
     {
       "filename": "apache-poi-table-validation-image-comment.xlsx",
@@ -101,6 +101,20 @@
         "xl/comments1.xml",
         "xl/drawings/vmlDrawing1.vml",
         "xl/worksheets/sheet1.xml"
+      ]
+    },
+    {
+      "filename": "synthetic-external-link-basic.xlsx",
+      "tool": "synthetic-ooxml",
+      "fixture_id": "synthetic_external_link_basic",
+      "sha256": "920c181d9710b6a3bb1b6c660292d40ae554bbb9d25a22860827a79742e8204f",
+      "size_bytes": 2735,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/externalLinks/externalLink1.xml",
+        "xl/externalLinks/_rels/externalLink1.xml.rels"
       ]
     }
   ]

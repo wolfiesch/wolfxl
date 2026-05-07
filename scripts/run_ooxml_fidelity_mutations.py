@@ -66,6 +66,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
+        "external_links_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -74,6 +75,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
+        "external_links_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -82,6 +84,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
+        "external_links_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -108,6 +111,15 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "move_formula_range": {
         "worksheet_formulas_semantic_drift": "Z2",
+    },
+    "delete_first_row": {
+        "external_links_semantic_drift": "worksheet_formulas",
+    },
+    "delete_first_col": {
+        "external_links_semantic_drift": "worksheet_formulas",
+    },
+    "copy_first_sheet": {
+        "external_links_semantic_drift": "worksheet_formulas",
     },
 }
 REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
