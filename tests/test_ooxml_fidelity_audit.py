@@ -196,6 +196,51 @@ def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
 
 
+def test_fingerprints_structured_references_without_external_links(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "structured-ref.xlsx"
+    entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><f>SUM(Table1[Amount])</f></c></row>
+    <row r="2"><c r="A2"><f>'[Book.xlsx]Sheet1'!A1</f></c></row>
+  </sheetData>
+</worksheet>"""
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    structured = snapshot.semantic_fingerprints["structured_references"]
+    assert "xl/worksheets/sheet1.xml" in structured
+    assert len(structured["xl/worksheets/sheet1.xml"]) == 1
+    assert structured["xl/worksheets/sheet1.xml"][0][2] == "SUM(Table1[Amount])"
+
+
+def test_fingerprints_workbook_global_state(tmp_path: Path) -> None:
+    workbook = tmp_path / "workbook-globals.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        "<sheets>",
+        '<definedNames><definedName name="ReportRange">Sheet1!$A$1</definedName></definedNames>'
+        '<workbookProtection lockStructure="1"/>'
+        '<calcPr calcMode="manual"/>'
+        "<sheets>",
+    )
+    entries["xl/calcChain.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"""
+    entries["xl/printerSettings/printerSettings1.bin"] = b"printer-settings"
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    workbook_globals = snapshot.semantic_fingerprints["workbook_globals"]
+    assert "xl/workbook.xml" in workbook_globals
+    assert "xl/calcChain.xml" in workbook_globals["package_parts"]
+    assert "xl/printerSettings/printerSettings1.bin" in workbook_globals["package_parts"]
+
+
 def test_detects_chart_axis_layout_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"

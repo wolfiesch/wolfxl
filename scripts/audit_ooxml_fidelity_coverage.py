@@ -68,6 +68,63 @@ SURFACES = {
             "move_formula_range",
         ),
     },
+    "table_structured_refs_validations": {
+        "label": "Tables / structured refs / validations",
+        "feature_keys": ("table",),
+        "semantic_keys": ("data_validations", "structured_references"),
+        "required_feature_groups": {
+            "table": ("table",),
+            "data_validation": ("data_validation",),
+            "structured_reference": ("structured_reference",),
+        },
+        "structural_mutations": (
+            "delete_first_row",
+            "delete_first_col",
+            "copy_first_sheet",
+            "rename_first_sheet",
+            "move_formula_range",
+        ),
+    },
+    "drawings_comments_embedded_objects": {
+        "label": "Drawings / comments / embedded objects",
+        "feature_keys": ("drawing", "comment", "image_media", "embedded_object"),
+        "semantic_keys": (),
+        "required_feature_groups": {
+            "drawing": ("drawing",),
+            "comment": ("comment",),
+            "image_or_media": ("image_media",),
+            "embedded_object": ("embedded_object",),
+        },
+        "structural_mutations": (
+            "copy_first_sheet",
+            "rename_first_sheet",
+            "delete_first_row",
+            "delete_first_col",
+        ),
+    },
+    "workbook_global_state": {
+        "label": "Workbook global state",
+        "feature_keys": (
+            "calc_chain",
+            "custom_xml",
+            "printer_settings",
+            "vba",
+        ),
+        "semantic_keys": ("workbook_globals",),
+        "required_feature_groups": {
+            "defined_names_or_calc_chain": ("defined_name", "calc_chain"),
+            "workbook_protection": ("workbook_protection",),
+            "vba_or_custom_xml": ("vba", "custom_xml"),
+            "printer_or_page_setup": ("printer_settings",),
+        },
+        "structural_mutations": (
+            "delete_first_row",
+            "delete_first_col",
+            "copy_first_sheet",
+            "rename_first_sheet",
+            "move_formula_range",
+        ),
+    },
 }
 
 
@@ -201,6 +258,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         if values
     }
     semantic_to_feature = {
+        "data_validations": "data_validation",
         "charts": "chart",
         "chart_sheets": "chart_sheet",
         "chart_styles": "chart_style",
@@ -208,11 +266,17 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "external_links": "external_link",
         "pivots": "pivot",
         "slicers": "slicer",
+        "structured_references": "structured_reference",
         "timelines": "timeline",
+        "workbook_globals": "workbook_global",
+        "worksheet_formulas": "worksheet_formula",
     }
     for semantic_key, feature_key in semantic_to_feature.items():
-        if snapshot.semantic_fingerprints.get(semantic_key):
+        fingerprint = snapshot.semantic_fingerprints.get(semantic_key)
+        if fingerprint:
             keys.add(feature_key)
+            if semantic_key == "workbook_globals":
+                keys.update(_workbook_global_feature_keys(fingerprint))
     return sorted(keys)
 
 
@@ -230,6 +294,31 @@ def _surfaces_for_snapshot(snapshot: object) -> list[str]:
         if has_feature_part or has_semantic_fingerprint:
             out.append(surface)
     return out
+
+
+def _workbook_global_feature_keys(fingerprint: dict[str, object]) -> set[str]:
+    keys: set[str] = set()
+    workbook_entries = fingerprint.get("xl/workbook.xml")
+    if isinstance(workbook_entries, list):
+        for label, value in workbook_entries:
+            if label == "defined_names" and value:
+                keys.add("defined_name")
+            elif label == "workbook_protection" and value:
+                keys.add("workbook_protection")
+            elif label in {"calc_pr", "workbook_views", "extensions"} and value:
+                keys.add(f"workbook_{label}")
+    package_parts = fingerprint.get("package_parts")
+    if isinstance(package_parts, list):
+        for part in package_parts:
+            if part == "xl/calcChain.xml":
+                keys.add("calc_chain")
+            elif part == "xl/vbaProject.bin":
+                keys.add("vba")
+            elif str(part).startswith(("customXml/", "xl/customXml/")):
+                keys.add("custom_xml")
+            elif str(part).startswith("xl/printerSettings/"):
+                keys.add("printer_settings")
+    return keys
 
 
 def _surface_result(
@@ -389,20 +478,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-render",
         action="store_true",
-        help="Require at least one passing no-op render comparison for each P0 surface.",
+        help=(
+            "Require at least one passing no-op render comparison for each "
+            "fidelity surface."
+        ),
     )
     parser.add_argument(
         "--require-intentional-render",
         action="store_true",
         help=(
             "Require at least one passing non-no-op mutation render smoke for "
-            "each P0 surface."
+            "each fidelity surface."
         ),
     )
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit non-zero when any P0 surface lacks required evidence.",
+        help="Exit non-zero when any fidelity surface lacks required evidence.",
     )
     args = parser.parse_args(argv)
 

@@ -24,13 +24,19 @@ CT_NS = "{http://schemas.openxmlformats.org/package/2006/content-types}"
 MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 FEATURE_PART_PREFIXES = {
+    "calc_chain": ("xl/calcChain.xml",),
     "chart": ("xl/charts/",),
     "chart_sheet": ("xl/chartsheets/",),
     "chart_style": ("xl/charts/style", "xl/charts/colors"),
+    "comment": ("xl/comments", "xl/threadedComments/", "xl/persons/"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
+    "custom_xml": ("customXml/", "xl/customXml/"),
     "drawing": ("xl/drawings/",),
+    "embedded_object": ("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"),
     "external_link": ("xl/externalLinks/",),
+    "image_media": ("xl/media/",),
     "pivot": ("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"),
+    "printer_settings": ("xl/printerSettings/",),
     "slicer": ("xl/slicers/", "xl/slicerCaches/"),
     "table": ("xl/tables/",),
     "timeline": ("xl/timelines/", "xl/timelineCaches/"),
@@ -365,7 +371,9 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "external_links": _external_link_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "slicers": _slicer_fingerprint(archive, parts),
+        "structured_references": _structured_reference_fingerprint(archive, parts),
         "timelines": _timeline_fingerprint(archive, parts),
+        "workbook_globals": _workbook_global_fingerprint(archive, parts),
         "worksheet_formulas": _worksheet_formula_fingerprint(archive, parts),
     }
 
@@ -667,6 +675,65 @@ def _worksheet_formula_fingerprint(
     return out
 
 
+def _structured_reference_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part, formulas in _worksheet_formula_fingerprint(archive, parts).items():
+        structured = [
+            formula
+            for formula in formulas
+            if isinstance(formula, tuple)
+            and len(formula) == 3
+            and isinstance(formula[2], str)
+            and _is_structured_reference_formula(formula[2])
+        ]
+        if structured:
+            out[part] = structured
+    return out
+
+
+def _workbook_global_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, object]:
+    out: dict[str, object] = {}
+    workbook_root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if workbook_root is not None:
+        defined_names = [
+            (
+                _stable_attrs(
+                    node,
+                    ("name", "localSheetId", "hidden", "function", "vbProcedure"),
+                ),
+                _text(node),
+            )
+            for node in _nodes_by_local(workbook_root, "definedName")
+        ]
+        protection = _first_node_by_local(workbook_root, "workbookProtection")
+        calc_pr = _first_node_by_local(workbook_root, "calcPr")
+        extensions = _xml_extensions(workbook_root)
+        workbook_entries = [
+            ("defined_names", defined_names),
+            ("workbook_protection", _all_stable_attrs(protection)),
+            ("calc_pr", _all_stable_attrs(calc_pr)),
+            ("extensions", extensions),
+        ]
+        if any(value for _, value in workbook_entries):
+            out["xl/workbook.xml"] = workbook_entries
+    global_parts = sorted(
+        part
+        for part in parts
+        if part == "xl/calcChain.xml"
+        or part == "xl/vbaProject.bin"
+        or part.startswith("customXml/")
+        or part.startswith("xl/customXml/")
+        or part.startswith("xl/printerSettings/")
+    )
+    if global_parts:
+        out["package_parts"] = global_parts
+    return out
+
+
 def _read_xml_or_none(archive: zipfile.ZipFile, part: str) -> ElementTree.Element | None:
     try:
         return ElementTree.fromstring(archive.read(part))
@@ -838,6 +905,10 @@ def _is_external_workbook_formula(formula: str) -> bool:
     return bool(re.search(r"\[[^\]]+\][^!]*!", formula))
 
 
+def _is_structured_reference_formula(formula: str) -> bool:
+    return "[" in formula and "]" in formula and not _is_external_workbook_formula(formula)
+
+
 def _pivot_data_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
     return [
         _stable_attrs(node, ("name", "fld", "subtotal", "baseField", "baseItem"))
@@ -947,7 +1018,9 @@ def _xml_tree_fingerprint(node: ElementTree.Element) -> object:
     )
 
 
-def _all_stable_attrs(node: ElementTree.Element) -> tuple[tuple[str, str], ...]:
+def _all_stable_attrs(node: ElementTree.Element | None) -> tuple[tuple[str, str], ...]:
+    if node is None:
+        return tuple()
     return tuple(sorted((_local_name(key), value) for key, value in node.attrib.items()))
 
 
