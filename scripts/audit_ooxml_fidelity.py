@@ -796,10 +796,17 @@ def _worksheet_formulas(
             continue
         formulas = _texts_by_local(root, "f")
         if external_only:
-            formulas = [formula for formula in formulas if "[" in formula and "]" in formula]
+            formulas = [formula for formula in formulas if _is_external_workbook_formula(formula)]
         if formulas:
             out[part] = formulas
     return out
+
+
+def _is_external_workbook_formula(formula: str) -> bool:
+    # External workbook refs look like [Book.xlsx]Sheet!A1 or
+    # '[Book.xlsx]Sheet 1'!A1. Structured table refs also use brackets
+    # (Table1[Column]) but do not carry a sheet bang after the closing bracket.
+    return bool(re.search(r"\[[^\]]+\][^!]*!", formula))
 
 
 def _pivot_data_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:

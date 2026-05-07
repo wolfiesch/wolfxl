@@ -18,10 +18,10 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 10 active pinned workbooks from ClosedXML, Excelize, NPOI, openpyxl, one synthetic external-link OOXML oracle, one Excel-authored chart/CF workbook, one Excel-authored external-link workbook, and one Excel-normalized pivot/CF workbook. The Apache POI and ExcelJS image/comment/table sources are preserved under `tests/fixtures/external_oracle/rejected/` because Excel rejects them before WolfXL mutation | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, and external-link relationship mutations. Active fixtures now pass both LibreOffice and Microsoft Excel open/save smoke | This is a strong current evidence gate, not exhaustive proof. Native Excel-authored slicer/timeline/pivot-chart fixtures, rendered comparisons, and broader real-file corpora still need coverage |
+| External-oracle fixture pack | 12 active pinned workbooks from ClosedXML, Excelize, NPOI, openpyxl, one synthetic external-link OOXML oracle, one Excel-authored chart/CF workbook, one Excel-authored external-link workbook, one Excel-normalized pivot/CF workbook, and two public Excel-authored MyExcelOnline slicer workbooks. The Apache POI and ExcelJS image/comment/table sources are preserved under `tests/fixtures/external_oracle/rejected/` because Excel rejects them before WolfXL mutation | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, and external-link relationship mutations. Active fixtures now pass both LibreOffice and Microsoft Excel open/save smoke, including Excel-authored table slicer and pivot-chart slicer fixtures | This is a strong current evidence gate, not exhaustive proof. External-tool slicer/timeline evidence, rendered comparisons, and broader real-file corpora still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
-| Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass. It now records concrete feature keys and requires slicer/timeline evidence separately from pivot-table evidence | The gap-discovery plan now has a strict, machine-readable "not clear yet" gate instead of relying on prose status. It correctly reports pivot evidence as present and slicer/timeline evidence as missing | It only audits evidence presence; it does not invent missing real Excel slicer/timeline fixtures or rendered comparisons |
-| App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | LibreOffice and Microsoft Excel now open/re-save all 10 active external-oracle fixtures cleanly. The previous app-smoke failures are classified: two Excel-rejected image/comment/table sources are quarantined, and the Excelize pivot source is normalized through LibreOffice | The active app-smoke pack no longer contains slicer parts because LibreOffice normalization removed them. Slicer/timeline coverage remains an explicit open gap |
+| Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass. It records concrete feature keys and requires slicer/timeline evidence separately from pivot-table evidence | The gap-discovery plan now has a strict, machine-readable "not clear yet" gate instead of relying on prose status. It correctly reports pivot evidence and real Excel slicer evidence as present | It only audits evidence presence; it does not invent missing external-tool slicer/timeline fixtures or rendered comparisons |
+| App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | LibreOffice and Microsoft Excel now open/re-save all 12 active external-oracle fixtures cleanly. The previous app-smoke failures are classified: two Excel-rejected image/comment/table sources are quarantined, and the Excelize pivot source is normalized through LibreOffice | The active pack now has real Excel slicer evidence, but no active external-tool slicer/timeline fixture that also passes Microsoft Excel app smoke |
 
 ## Risk matrix
 
@@ -163,17 +163,17 @@ Gap ledger:
      evidence gate for pivot preservation, but it is not a substitute for a
      richer workbook authored from scratch in Excel with slicers, timelines,
      and pivot charts.
-   - Latest active structural sweep: 50 results, 0 failures across the 10
+   - Latest active structural sweep: 60 results, 0 failures across the 12
      active external-oracle fixtures for first-row delete, first-column delete,
      first-sheet copy, first-sheet rename, and formula-range move.
    - Latest coverage audit result: `ready=false`. The hardened audit now
      separates slicer/timeline feature evidence from pivot-table evidence.
-     Pivot-table, chart/style/color, conditional-formatting, and external-link
-     evidence is present; slicer/timeline fixtures, real Excel evidence, and
-     structural mutation passes are still missing from the active pack.
+     Pivot-table, chart/style/color, conditional-formatting, external-link, and
+     real Excel slicer evidence is present; an active external-tool
+     slicer/timeline fixture is still missing.
    - Latest app-smoke evidence slice: added
      `scripts/run_ooxml_app_smoke.py`. LibreOffice and Microsoft Excel both
-     open/save the 10 active fixtures with 10 results and 0 failures.
+     open/save the 12 active fixtures with 12 results and 0 failures.
      Microsoft Excel rejected the previous Apache POI and ExcelJS
      image/comment/table sources even after PNG CRC repair and LibreOffice
      normalization, so they are preserved under
@@ -192,12 +192,27 @@ Gap ledger:
      needs to be authored manually in Excel, captured from a trusted
      Excel-authored sample, or generated through a more capable Excel
      automation path.
+   - Latest real Excel slicer evidence slice: the active pack now includes
+     `real-excel-table-slicers.xlsx` from MyExcelOnline's public free practice
+     workbook for Excel table slicers and
+     `real-excel-pivot-chart-slicers.xlsx` from MyExcelOnline's public free
+     practice workbook for pivot charts and slicers. Both workbooks report
+     `Application=Microsoft Excel`, contain slicer/slicer-cache parts, pass
+     Microsoft Excel and LibreOffice app smoke, and pass the structural
+     mutation sweep. The pivot-chart slicer fixture also carries pivot table,
+     pivot cache, chart, drawing, and table parts.
+   - Latest external-link oracle-hardening bug found: table structured
+     references such as `Table1[REGION]` were being misclassified as external
+     workbook formulas because the external-link fingerprint only looked for
+     bracket characters. The audit now requires a workbook bracket followed by
+     a sheet bang, and a regression test keeps structured references out of
+     external-link evidence.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations/evidence: add native Excel-authored slicer/timeline and
-     pivot-chart fixtures, then add richer chart/pivot/slicer structural edits
-     where the expected semantic drift can be declared.
+   - Next mutations/evidence: add an active external-tool slicer/timeline
+     fixture that Microsoft Excel accepts, then add richer chart/pivot/slicer
+     structural edits where the expected semantic drift can be declared.
 3. Expand fixture sources:
    - richer native Excel-authored workbooks with slicers, timelines, pivot
      charts, chart style/color parts, and conditional-formatting extensions;

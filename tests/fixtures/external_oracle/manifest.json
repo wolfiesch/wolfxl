@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Seeded 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json), with targeted synthetic OOXML and Excel-compatible replacement fixtures added for surfaces missing from that harness. Each active entry is expected to open/save in Microsoft Excel or is explicitly documented as normalized from an external source. Each entry's expected_parts list comes from the authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
+  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Seeded 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json), with targeted synthetic OOXML, public Excel-authored slicer workbooks, and Excel-compatible replacement fixtures added for surfaces missing from that harness. Each active entry is expected to open/save in Microsoft Excel or is explicitly documented as normalized from an external source. Each entry's expected_parts list comes from the authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
   "source_harness": "ExcelBench results_dev_external/fixtures (2026-04-28 generation) plus targeted synthetic OOXML fixtures",
   "fixtures": [
     {
@@ -104,6 +104,59 @@
         "xl/externalLinks/externalLink1.xml",
         "xl/externalLinks/_rels/externalLink1.xml.rels"
       ]
+    },
+    {
+      "filename": "real-excel-table-slicers.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_table_slicers_myexcelonline",
+      "sha256": "08f7746560b731ad0a0d3ecd6065f2a8764887d61b8a99e598b6c2704681fb51",
+      "size_bytes": 38902,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/slicerCaches/slicerCache1.xml",
+        "xl/slicerCaches/slicerCache2.xml",
+        "xl/slicers/slicer1.xml",
+        "xl/tables/table1.xml",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/calcChain.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Public free practice workbook from https://www.myexcelonline.com/blog/excel-table-slicers/ (Download workbook Table-Slicers.xlsx). Workbook metadata reports Application=Microsoft Excel and creator John Michaloudis;www.myexcelonline.com/blog. Covers Excel-authored table slicer and slicer-cache preservation."
+    },
+    {
+      "filename": "real-excel-pivot-chart-slicers.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_pivot_chart_slicers_myexcelonline",
+      "sha256": "61a2cce8968f4f0c7024fd4c10ad208a5fedffe5980dd27bbfba128e4be1d472",
+      "size_bytes": 53871,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/sheet2.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "xl/slicerCaches/slicerCache1.xml",
+        "xl/slicerCaches/slicerCache2.xml",
+        "xl/slicers/slicer1.xml",
+        "xl/tables/table1.xml",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/charts/chart1.xml",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/pivotTables/_rels/pivotTable1.xml.rels",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+        "xl/pivotCache/pivotCacheRecords1.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Public free practice workbook from https://www.myexcelonline.com/blog/pivot-charts-slicers/ (Download excel workbook Pivot-Charts-Slicers.xlsx). Workbook metadata reports Application=Microsoft Excel and creator John Michaloudis;www.myexcelonline.com/blog. Covers Excel-authored pivot table, pivot chart, slicers, and slicer-cache preservation."
     },
     {
       "filename": "real-excel-chart-cf-basic.xlsx",

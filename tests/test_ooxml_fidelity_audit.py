@@ -363,6 +363,22 @@ def test_detects_external_formula_reference_semantic_drift(tmp_path: Path) -> No
     )
 
 
+def test_structured_reference_formula_is_not_external_link(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = _formula_xml(
+        "SUBTOTAL(103,Table1[REGION])"
+    )
+
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    before_snapshot = audit_module.snapshot(before)
+
+    assert before_snapshot.semantic_fingerprints["external_links"] == {}
+
+
 def test_detects_internal_worksheet_formula_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
