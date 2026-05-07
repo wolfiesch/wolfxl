@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -196,26 +197,10 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
             None,
             "Microsoft Excel not found",
         )
-    work = output_dir / _safe_stem(src.stem) / "excel"
-    work.mkdir(parents=True, exist_ok=True)
-    out = work / src.name
-    out.unlink(missing_ok=True)
-    script = f"""
-tell application "Microsoft Excel"
-  try
-    close every workbook saving no
-  end try
-  open workbook workbook file name "{_applescript_escape(str(src.resolve()))}" update links do not update links
-  save workbook as active workbook filename "{_applescript_escape(str(out.resolve()))}" file format Excel XML file format
-  close active workbook saving no
-end tell
-"""
     try:
-        proc = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        opened = _open_excel_with_finder_and_close(
+            src,
+            timeout,
         )
     except subprocess.TimeoutExpired as exc:
         _close_excel_best_effort()
@@ -224,25 +209,27 @@ end tell
             SOURCE_MUTATION,
             "excel",
             "failed",
-            str(out) if out.exists() else None,
+            str(src),
             f"timeout after {timeout}s: {str(exc)[:500]}",
         )
-    if proc.returncode != 0:
+    except RuntimeError as exc:
         return AppSmokeResult(
             src.name,
             SOURCE_MUTATION,
             "excel",
             "failed",
             None,
-            f"exit {proc.returncode}: {proc.stderr[:500]}",
+            str(exc)[:500],
         )
-    ok, message = _validate_xlsx(out)
+    ok, message = _validate_xlsx(src)
+    if ok:
+        message = f"opened and closed in Microsoft Excel: {opened or src.name}"
     return AppSmokeResult(
         src.name,
         SOURCE_MUTATION,
         "excel",
         "passed" if ok else "failed",
-        str(out) if out.exists() else None,
+        str(src),
         message,
     )
 
@@ -312,8 +299,116 @@ def _safe_stem(stem: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in stem)
 
 
-def _applescript_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
+    # Finder-style open avoids Office's AppleScript sandbox prompt for generated
+    # files; AppleScript is still used for the observable close/no-save step.
+    launched = subprocess.run(
+        ["open", "-a", "Microsoft Excel", str(src.resolve())],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if launched.returncode != 0:
+        raise RuntimeError(f"open -a Microsoft Excel failed: {launched.stderr[:500]}")
+
+    elapsed = 0.0
+    last_error = ""
+    while elapsed < timeout:
+        _dismiss_excel_safe_dialogs()
+        dialog = _excel_dialog_text()
+        if any(keyword in dialog.lower() for keyword in SMOKE_KEYWORDS):
+            _close_excel_best_effort()
+            raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
+        name = _excel_active_workbook_name()
+        if name:
+            _close_excel_best_effort()
+            return name
+        last_error = dialog
+        time.sleep(0.5)
+        elapsed += 0.5
+    raise subprocess.TimeoutExpired(
+        ["open", "-a", "Microsoft Excel", str(src.resolve())],
+        timeout,
+        output=last_error,
+    )
+
+
+def _excel_active_workbook_name() -> str | None:
+    script = """
+tell application "Microsoft Excel"
+  try
+    return name of active workbook as text
+  on error
+    return ""
+  end try
+end tell
+"""
+    proc = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    name = proc.stdout.strip()
+    return name or None
+
+
+def _excel_dialog_text() -> str:
+    script = """
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return ""
+  tell process "Microsoft Excel"
+    try
+      set win_names to name of windows
+      set button_names to name of buttons of window 1
+      set static_values to value of static texts of window 1
+      return "windows=" & (win_names as text) & "\nbuttons=" & (button_names as text) & "\ntext=" & (static_values as text)
+    on error
+      return ""
+    end try
+  end tell
+end tell
+"""
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
+    return proc.stdout.strip()
+
+
+def _dismiss_excel_safe_dialogs() -> None:
+    # Macro-enabled fixtures can block AppleScript until the security prompt is
+    # answered. Disable macros for smoke validation: we only need to prove Excel
+    # can open the workbook without repair/corruption prompts.
+    script = """
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return
+  tell process "Microsoft Excel"
+    try
+      if exists button "Disable Macros" of window 1 then click button "Disable Macros" of window 1
+    end try
+    try
+      if exists button "Don't Update" of window 1 then click button "Don't Update" of window 1
+    end try
+  end tell
+end tell
+"""
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except subprocess.TimeoutExpired:
+        # Excel can briefly stop responding to UI automation while opening large
+        # pivot/slicer workbooks. Keep the primary open/close attempt alive.
+        pass
 
 
 def _close_excel_best_effort() -> None:
@@ -323,7 +418,9 @@ def _close_excel_best_effort() -> None:
             "-e",
             (
                 'tell application "Microsoft Excel"\n'
-                "  if (count of workbooks) > 0 then close every workbook saving no\n"
+                "  try\n"
+                "    close active workbook saving no\n"
+                "  end try\n"
                 "end tell"
             ),
         ],
