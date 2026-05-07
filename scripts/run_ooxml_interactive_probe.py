@@ -22,7 +22,11 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 SOURCE_MUTATION = run_ooxml_app_smoke.SOURCE_MUTATION
 PASSING_STATUSES = {"passed"}
-SUPPORTED_PROBES = ("macro_project_presence",)
+SUPPORTED_PROBES = ("macro_project_presence", "embedded_control_openability")
+PROBE_FEATURE_KEYS = {
+    "macro_project_presence": "vba",
+    "embedded_control_openability": "embedded_object",
+}
 
 
 @dataclass
@@ -52,7 +56,8 @@ def run_interactive_probes(
             continue
         feature_keys = _feature_keys(fixture_path)
         for probe in probes:
-            if probe == "macro_project_presence" and "vba" not in feature_keys:
+            feature_key = PROBE_FEATURE_KEYS[probe]
+            if feature_key not in feature_keys:
                 continue
             results.append(
                 _run_probe(
@@ -96,7 +101,7 @@ def _run_probe(
     mutation: str,
     timeout: int,
 ) -> InteractiveProbeResult:
-    if probe != "macro_project_presence":
+    if probe not in SUPPORTED_PROBES:
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
@@ -136,7 +141,7 @@ def _run_probe(
             )
         probe_path = prepared
 
-    if not _has_vba_project(probe_path):
+    if not _probe_part_present(probe_path, probe):
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
@@ -144,7 +149,7 @@ def _run_probe(
             app="excel",
             status="failed",
             output=str(probe_path),
-            message="missing xl/vbaProject.bin before Excel open",
+            message=f"{_probe_part_label(probe)} missing before Excel open",
         )
     smoke = run_ooxml_app_smoke._smoke_excel(probe_path, work / "excel", timeout)
     if smoke.status != "passed":
@@ -157,7 +162,7 @@ def _run_probe(
             output=smoke.output,
             message=smoke.message,
         )
-    if not _has_vba_project(probe_path):
+    if not _probe_part_present(probe_path, probe):
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
@@ -165,8 +170,9 @@ def _run_probe(
             app="excel",
             status="failed",
             output=str(probe_path),
-            message="xl/vbaProject.bin missing after Excel open",
+            message=f"{_probe_part_label(probe)} missing after Excel open",
         )
+    part_label = _probe_part_label(probe)
     return InteractiveProbeResult(
         fixture=fixture_label,
         probe=probe,
@@ -174,16 +180,32 @@ def _run_probe(
         app="excel",
         status="passed",
         output=str(probe_path),
-        message="Microsoft Excel opened workbook and xl/vbaProject.bin is present",
+        message=f"Microsoft Excel opened workbook and {part_label} is present",
     )
 
 
-def _has_vba_project(path: Path) -> bool:
+def _probe_part_present(path: Path, probe: str) -> bool:
     try:
         with zipfile.ZipFile(path) as archive:
-            return "xl/vbaProject.bin" in archive.namelist()
+            names = set(archive.namelist())
     except zipfile.BadZipFile:
         return False
+    if probe == "macro_project_presence":
+        return "xl/vbaProject.bin" in names
+    if probe == "embedded_control_openability":
+        return any(
+            name.startswith(("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"))
+            for name in names
+        )
+    return False
+
+
+def _probe_part_label(probe: str) -> str:
+    if probe == "macro_project_presence":
+        return "xl/vbaProject.bin"
+    if probe == "embedded_control_openability":
+        return "embedded/control OOXML parts"
+    return "required OOXML parts"
 
 
 def main(argv: list[str] | None = None) -> int:

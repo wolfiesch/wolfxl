@@ -189,6 +189,79 @@ def test_macro_probe_runner_fails_when_vba_project_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
+def test_embedded_control_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "control.xlsx"
+    assert report["results"][0]["probe"] == "embedded_control_openability"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["embedded_control_openability"]["status"] == "clear"
+
+
+def test_embedded_control_probe_runner_fails_when_control_part_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def remove_control_during_smoke(src: Path, _output_dir: Path, _timeout: int):
+        _rewrite_without_prefixes(src, ("xl/ctrlProps/",))
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_control_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
 def _write_manifest(fixture_dir: Path, filename: str) -> None:
     fixture_dir.joinpath("manifest.json").write_text(
         json.dumps(
@@ -215,6 +288,15 @@ def _write_plain_workbook(path: Path) -> None:
 def _write_vba_workbook(path: Path) -> None:
     entries = _base_entries()
     entries["xl/vbaProject.bin"] = b"vba-project"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_embedded_control_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Button"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
@@ -249,11 +331,15 @@ def _base_entries() -> dict[str, str | bytes]:
 
 
 def _rewrite_without_vba(path: Path) -> None:
+    _rewrite_without_prefixes(path, ("xl/vbaProject.bin",))
+
+
+def _rewrite_without_prefixes(path: Path, prefixes: tuple[str, ...]) -> None:
     with zipfile.ZipFile(path) as archive:
         entries = {
             name: archive.read(name)
             for name in archive.namelist()
-            if name != "xl/vbaProject.bin"
+            if not any(name.startswith(prefix) for prefix in prefixes)
         }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
