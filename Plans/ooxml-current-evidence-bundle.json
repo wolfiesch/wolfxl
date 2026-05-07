@@ -319,6 +319,45 @@
       ]
     },
     {
+      "name": "umya_full_excel_source_app_open_triage",
+      "path": "/tmp/wolfxl-app-smoke-excel-umya-source-triage.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-app-smoke-excel-umya-source-triage --app excel --timeout 45 --mutation source > /tmp/wolfxl-app-smoke-excel-umya-source-triage.json",
+      "expect": [
+        {"path": "result_count", "equals": 61},
+        {"path": "failure_count", "equals": 6},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]}
+      ]
+    },
+    {
+      "name": "umya_source_valid_55_excel_app_open_add_dv",
+      "path": "/tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv.json",
+      "producer": "rm -rf /tmp/wolfxl-umya-excel-source-valid-55 /tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv && mkdir -p /tmp/wolfxl-umya-excel-source-valid-55 && jq -r '.results[] | select(.status == \"passed\") | .fixture' /tmp/wolfxl-app-smoke-excel-umya-source-triage.json | while IFS= read -r fixture; do cp \"/Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files/$fixture\" /tmp/wolfxl-umya-excel-source-valid-55/; done && uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-umya-excel-source-valid-55 --output-dir /tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv --app excel --timeout 45 --mutation add_data_validation > /tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv.json",
+      "expect": [
+        {"path": "result_count", "equals": 55},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["add_data_validation"]}
+      ]
+    },
+    {
+      "name": "umya_source_valid_55_excel_app_open_coverage",
+      "path": "/tmp/wolfxl-coverage-umya-source-valid-55-app-smoke.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json --app-report /tmp/wolfxl-app-smoke-excel-umya-source-triage.json --app-report /tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv.json > /tmp/wolfxl-coverage-umya-source-valid-55-app-smoke.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 61},
+        {"path": "app_report_count", "equals": 2},
+        {"path": "surfaces.chart_style_color_preservation.intentional_app_open_fixtures", "length_at_least": 4},
+        {"path": "surfaces.conditional_formatting_extension_preservation.intentional_app_open_fixtures", "length_at_least": 6},
+        {"path": "surfaces.external_link_relationship_edges.intentional_app_open_fixtures", "length_at_least": 1},
+        {"path": "surfaces.table_structured_refs_validations.intentional_app_open_fixtures", "length_at_least": 5},
+        {"path": "surfaces.workbook_global_state.intentional_app_open_fixtures", "length_at_least": 50},
+        {"path": "surfaces.sheet_metadata_preservation.intentional_app_open_fixtures", "length_at_least": 2},
+        {"path": "surfaces.ooxml_extension_payload_preservation.intentional_app_open_fixtures", "length_at_least": 50}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
