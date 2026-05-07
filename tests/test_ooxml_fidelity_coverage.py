@@ -138,6 +138,61 @@ def test_coverage_audit_does_not_count_plain_worksheet_as_cf_surface(
     )
 
 
+def test_coverage_audit_does_not_count_pivot_as_slicer_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-pivot.xlsx"
+    excel = fixture_dir / "excel-pivot.xlsx"
+    _write_pivot_fixture(external)
+    _write_pivot_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_pivot",
+                        "tool": "closedxml",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_pivot",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "rename_first_sheet",
+                        "status": "passed",
+                    },
+                    {
+                        "fixture": excel.name,
+                        "mutation": "rename_first_sheet",
+                        "status": "passed",
+                    },
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir, reports=[mutation_report])
+
+    pivot_slicer = report["surfaces"]["pivot_slicer_preservation"]
+    assert pivot_slicer["feature_groups"]["pivot"]["clear"] is True
+    assert pivot_slicer["feature_groups"]["slicer_or_timeline"]["clear"] is False
+    assert "slicer_or_timeline_fixture" in pivot_slicer["missing"]
+
+
 def _write_chart_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -205,3 +260,27 @@ def _write_plain_fixture(path: Path) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
+
+
+def _write_pivot_fixture(path: Path) -> None:
+    _write_plain_fixture(path)
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "xl/pivotTables/pivotTable1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      name="PivotTable1" cacheId="1" dataOnRows="0">
+  <location ref="A3:B6" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>
+  <rowFields count="1"><field x="0"/></rowFields>
+  <dataFields count="1"><dataField name="Sum of Amount" fld="1" subtotal="sum"/></dataFields>
+</pivotTableDefinition>""",
+        )
+        archive.writestr(
+            "xl/pivotCache/pivotCacheDefinition1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      refreshOnLoad="1">
+  <cacheSource type="worksheet"><worksheetSource ref="A1:B4" sheet="Sheet1"/></cacheSource>
+  <cacheFields count="2"><cacheField name="Account"/><cacheField name="Amount"/></cacheFields>
+</pivotCacheDefinition>""",
+        )

@@ -1,25 +1,8 @@
 {
   "schema_version": 1,
-  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Seeded 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json), with targeted synthetic OOXML fixtures added for surfaces missing from that harness. Each entry's expected_parts list comes from the originating tool's authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
+  "description": "Pinned external-oracle fixture pack for tests/test_external_oracle_preservation.py. Seeded 2026-05-04 from the ExcelBench external-oracle harness (results_dev_external/fixtures/manifest.json), with targeted synthetic OOXML and Excel-compatible replacement fixtures added for surfaces missing from that harness. Each active entry is expected to open/save in Microsoft Excel or is explicitly documented as normalized from an external source. Each entry's expected_parts list comes from the authored OOXML; the modify-save preservation test asserts each part still exists in the workbook AFTER wolfxl saves a one-cell mutation.",
   "source_harness": "ExcelBench results_dev_external/fixtures (2026-04-28 generation) plus targeted synthetic OOXML fixtures",
   "fixtures": [
-    {
-      "filename": "apache-poi-table-validation-image-comment.xlsx",
-      "tool": "apache-poi",
-      "fixture_id": "apache_poi_table_validation_image_comment",
-      "sha256": "304149d6d104c14f19e6b15a8a51c19de44610c392723fe83dea4c817b870549",
-      "size_bytes": 6758,
-      "expected_parts": [
-        "xl/workbook.xml",
-        "xl/sharedStrings.xml",
-        "xl/comments1.xml",
-        "xl/drawings/vmlDrawing0.vml",
-        "xl/drawings/drawing1.xml",
-        "xl/media/image1.png",
-        "xl/tables/table1.xml",
-        "xl/worksheets/sheet1.xml"
-      ]
-    },
     {
       "filename": "closedxml-pivot-cf-table.xlsx",
       "tool": "closedxml",
@@ -32,6 +15,26 @@
         "pivotCache/pivotCacheDefinition1.xml",
         "xl/worksheets/sheet1.xml"
       ]
+    },
+    {
+      "filename": "openpyxl-table-validation-image-comment.xlsx",
+      "tool": "openpyxl",
+      "fixture_id": "openpyxl_table_validation_image_comment",
+      "sha256": "aa7dff111dd1edb85621a6dcb428dfcbd3b5308b792c2d7864cca463a9158264",
+      "size_bytes": 7785,
+      "expected_parts": [
+        "xl/comments/comment1.xml",
+        "xl/drawings/commentsDrawing1.vml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/drawings/drawing1.xml",
+        "xl/media/image1.png",
+        "xl/styles.xml",
+        "xl/tables/table1.xml",
+        "xl/workbook.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/worksheets/sheet1.xml"
+      ],
+      "notes": "Excel-compatible replacement for Apache POI/ExcelJS source fixtures that Microsoft Excel rejected before WolfXL mutation; covers table, data validation, comment, drawing, and image preservation."
     },
     {
       "filename": "closedxml-rich-comment-protection.xlsx",
@@ -60,35 +63,20 @@
     },
     {
       "filename": "excelize-sales-pivot-slicer-chart.xlsx",
-      "tool": "excelize",
-      "fixture_id": "excelize_sales_pivot_slicer_chart",
-      "sha256": "2e631f2440c0dbd43c0fd829201b52e4091477690be5fa29c4c232a2ee0f5dc0",
-      "size_bytes": 14070,
+      "tool": "libreoffice-normalized-excelize",
+      "fixture_id": "libreoffice_normalized_excelize_sales_pivot_slicer_chart",
+      "sha256": "aa9f8713749717f37f93c75ca833228f193d485e9f1e80e43d50aa2c6876858e",
+      "size_bytes": 16215,
       "expected_parts": [
         "xl/tables/table1.xml",
         "xl/pivotTables/pivotTable1.xml",
         "xl/pivotCache/pivotCacheDefinition1.xml",
-        "xl/slicers/slicer1.xml",
-        "xl/slicerCaches/slicerCache1.xml",
         "xl/charts/chart1.xml",
+        "xl/charts/style1.xml",
+        "xl/charts/colors1.xml",
         "xl/drawings/drawing1.xml"
-      ]
-    },
-    {
-      "filename": "exceljs-table-validation-image-comment.xlsx",
-      "tool": "exceljs",
-      "fixture_id": "exceljs_table_validation_image_comment",
-      "sha256": "66415dd0e4f95cc73a3f2379aceb8c1dcde9d70fe45ed5610ef670d68c018dd5",
-      "size_bytes": 11077,
-      "expected_parts": [
-        "xl/sharedStrings.xml",
-        "xl/comments1.xml",
-        "xl/drawings/vmlDrawing1.vml",
-        "xl/drawings/drawing1.xml",
-        "xl/media/image1.png",
-        "xl/tables/table1.xml",
-        "xl/worksheets/sheet1.xml"
-      ]
+      ],
+      "notes": "Excelize-authored source normalized through LibreOffice because Microsoft Excel rejected the original source fixture before WolfXL mutation. The normalized active fixture preserves pivot, chart, style, color, table, and drawing parts, but LibreOffice removed the original slicer parts; slicer coverage remains a known follow-up for native Excel-authored fixtures."
     },
     {
       "filename": "npoi-formula-comment-merge-protection.xlsx",

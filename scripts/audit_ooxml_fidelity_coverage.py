@@ -25,6 +25,10 @@ SURFACES = {
         "label": "Pivot/slicer preservation across modify saves",
         "feature_keys": ("pivot", "slicer", "timeline"),
         "semantic_keys": ("pivots", "slicers", "timelines"),
+        "required_feature_groups": {
+            "pivot": ("pivot",),
+            "slicer_or_timeline": ("slicer", "timeline"),
+        },
         "structural_mutations": (
             "delete_first_row",
             "delete_first_col",
@@ -71,6 +75,7 @@ class FixtureCoverage:
     fixture_id: str | None
     tool: str | None
     source_class: str
+    feature_keys: list[str]
     surfaces: list[str]
     passed_mutations: list[str]
 
@@ -86,13 +91,16 @@ def audit_coverage(
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
-        surfaces = _surfaces_for_fixture(path)
+        snapshot = audit_ooxml_fidelity.snapshot(path)
+        feature_keys = _feature_keys_for_snapshot(snapshot)
+        surfaces = _surfaces_for_snapshot(snapshot)
         fixtures.append(
             FixtureCoverage(
                 filename=entry.filename,
                 fixture_id=entry.fixture_id,
                 tool=entry.tool,
                 source_class=_source_class(entry.tool),
+                feature_keys=feature_keys,
                 surfaces=surfaces,
                 passed_mutations=sorted(passed_mutations.get(entry.filename, set())),
             )
@@ -131,8 +139,29 @@ def _passed_mutations_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]
     return out
 
 
-def _surfaces_for_fixture(path: Path) -> list[str]:
-    snapshot = audit_ooxml_fidelity.snapshot(path)
+def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
+    keys = {
+        key
+        for key, values in snapshot.feature_parts.items()
+        if values
+    }
+    semantic_to_feature = {
+        "charts": "chart",
+        "chart_sheets": "chart_sheet",
+        "chart_styles": "chart_style",
+        "conditional_formatting": "conditional_formatting",
+        "external_links": "external_link",
+        "pivots": "pivot",
+        "slicers": "slicer",
+        "timelines": "timeline",
+    }
+    for semantic_key, feature_key in semantic_to_feature.items():
+        if snapshot.semantic_fingerprints.get(semantic_key):
+            keys.add(feature_key)
+    return sorted(keys)
+
+
+def _surfaces_for_snapshot(snapshot: object) -> list[str]:
     out: list[str] = []
     for surface, config in SURFACES.items():
         has_feature_part = any(
@@ -176,6 +205,52 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
         missing.append("real_excel_fixture")
     if not structural:
         missing.append("structural_mutation_pass")
+    feature_groups = config.get("required_feature_groups", {})
+    group_results = {}
+    for group, keys in feature_groups.items():
+        group_matching = [
+            fixture
+            for fixture in matching
+            if any(key in fixture["feature_keys"] for key in keys)
+        ]
+        group_external = [
+            fixture["filename"]
+            for fixture in group_matching
+            if fixture["source_class"] == "external_tool"
+        ]
+        group_real_excel = [
+            fixture["filename"]
+            for fixture in group_matching
+            if fixture["source_class"] == "real_excel"
+        ]
+        group_structural = [
+            fixture["filename"]
+            for fixture in group_matching
+            if any(
+                mutation in fixture["passed_mutations"]
+                for mutation in config["structural_mutations"]
+            )
+        ]
+        group_missing = []
+        if not group_matching:
+            group_missing.append("fixture")
+        if not group_external:
+            group_missing.append("external_tool_fixture")
+        if not group_real_excel:
+            group_missing.append("real_excel_fixture")
+        if not group_structural:
+            group_missing.append("structural_mutation_pass")
+        if group_missing:
+            missing.extend(f"{group}_{item}" for item in group_missing)
+        group_results[group] = {
+            "feature_keys": list(keys),
+            "fixtures": [fixture["filename"] for fixture in group_matching],
+            "external_tool_fixtures": group_external,
+            "real_excel_fixtures": group_real_excel,
+            "structural_mutation_fixtures": group_structural,
+            "missing": group_missing,
+            "clear": not group_missing,
+        }
     return {
         "label": config["label"],
         "fixture_count": len(matching),
@@ -184,6 +259,7 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
         "real_excel_fixtures": real_excel,
         "structural_mutation_fixtures": structural,
         "accepted_structural_mutations": list(config["structural_mutations"]),
+        "feature_groups": group_results,
         "missing": missing,
         "clear": not missing,
     }
