@@ -375,3 +375,16 @@ def test_normalized_rmse_parses_imagemagick_metric(tmp_path: Path, monkeypatch) 
         render_module._normalized_rmse(("compare",), before_page, after_page, timeout=1)
         == 0.001883
     )
+
+
+def test_subprocess_context_formats_available_output() -> None:
+    completed = render_module.subprocess.CompletedProcess(
+        ["osascript"],
+        0,
+        stdout="hello\n",
+        stderr="warning\n",
+    )
+
+    assert render_module._format_subprocess_context(completed) == (
+        " (stdout='hello'; stderr='warning')"
+    )

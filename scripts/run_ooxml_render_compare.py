@@ -460,8 +460,22 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             f"exit {proc.returncode}: {proc.stderr[:500]}"
         )
     if not pdf.is_file() or pdf.stat().st_size == 0:
-        raise RuntimeError(f"Microsoft Excel did not produce a non-empty PDF at {pdf}")
+        detail = _format_subprocess_context(proc)
+        raise RuntimeError(
+            f"Microsoft Excel did not produce a non-empty PDF at {pdf}{detail}"
+        )
     return pdf
+
+
+def _format_subprocess_context(proc: subprocess.CompletedProcess[str]) -> str:
+    details = []
+    if proc.stdout.strip():
+        details.append(f"stdout={proc.stdout.strip()[:300]!r}")
+    if proc.stderr.strip():
+        details.append(f"stderr={proc.stderr.strip()[:300]!r}")
+    if not details:
+        return ""
+    return f" ({'; '.join(details)})"
 
 
 def _files_identical(left: Path, right: Path) -> bool:
