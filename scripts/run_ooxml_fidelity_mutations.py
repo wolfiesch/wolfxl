@@ -30,7 +30,12 @@ DEFAULT_MUTATIONS = (
     "delete_marker_tail_col",
     "move_marker_range",
 )
-SUPPORTED_MUTATIONS = (*DEFAULT_MUTATIONS, "rename_first_sheet")
+SUPPORTED_MUTATIONS = (
+    *DEFAULT_MUTATIONS,
+    "delete_first_row",
+    "delete_first_col",
+    "rename_first_sheet",
+)
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
 MARKER_VALUE = "wolfxl_ooxml_fidelity_mutation"
@@ -45,6 +50,21 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
+    },
+    # Deleting the first row/column intentionally moves feature ranges. The
+    # package-fidelity gate should still fail on part/relationship loss, while
+    # declared semantic fingerprint shifts remain visible as expected issues.
+    "delete_first_row": {
+        "charts_semantic_drift",
+        "conditional_formatting_semantic_drift",
+        "pivots_semantic_drift",
+        "slicers_semantic_drift",
+    },
+    "delete_first_col": {
+        "charts_semantic_drift",
+        "conditional_formatting_semantic_drift",
+        "pivots_semantic_drift",
+        "slicers_semantic_drift",
     },
 }
 
@@ -263,6 +283,10 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             workbook = wolfxl.load_workbook(path, modify=True)
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet.delete_cols(col_idx, amount=1)
+        elif mutation == "delete_first_row":
+            workbook[workbook.sheetnames[0]].delete_rows(1, amount=1)
+        elif mutation == "delete_first_col":
+            workbook[workbook.sheetnames[0]].delete_cols(1, amount=1)
         elif mutation == "move_marker_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE

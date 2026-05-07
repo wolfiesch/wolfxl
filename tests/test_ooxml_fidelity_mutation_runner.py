@@ -121,3 +121,42 @@ def test_runner_separates_expected_rename_drift(
     assert result["issue_count"] == 0
     assert result["expected_issue_count"] == 1
     assert result["expected_issues"][0]["kind"] == "charts_semantic_drift"
+
+
+def test_runner_separates_expected_interior_delete_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "conditional_formatting_semantic_drift",
+                    "severity": "error",
+                    "part": "conditional_formatting",
+                    "message": "expected range change after row delete",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issue_count"] == 1
+    assert result["expected_issues"][0]["kind"] == (
+        "conditional_formatting_semantic_drift"
+    )

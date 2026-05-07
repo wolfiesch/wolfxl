@@ -76,12 +76,15 @@ Gap ledger:
      row/column delete, and marker-range move.
    - Latest pinned-pack sweep: 56 results, 0 failures across 7 fixtures and 8
      default mutations.
+   - Latest opt-in semantic sweeps: sheet rename passes 7 results with no
+     drift; first-row/first-column delete passes 14 results with expected
+     conditional-formatting range drift and no unexpected package-fidelity
+     failure.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations: interior row/column delete with declared expected drift,
-     sheet rename/copy, and feature add/remove where the expected semantic
-     drift can be declared.
+   - Next mutations: sheet copy/remove and feature add/remove where the
+     expected semantic drift can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;
