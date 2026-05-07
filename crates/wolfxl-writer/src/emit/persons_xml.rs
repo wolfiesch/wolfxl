@@ -84,7 +84,9 @@ mod tests {
         parse_ok(&bytes);
         let text = String::from_utf8(bytes).unwrap();
         assert!(
-            text.contains("xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\""),
+            text.contains(
+                "xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\""
+            ),
             "namespace: {text}"
         );
         assert!(text.contains("displayName=\"Alice\""));

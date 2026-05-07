@@ -96,10 +96,8 @@ pub struct ExistingThreadedComment {
 
 pub const NS_THREADED: &str =
     "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
-pub const CT_THREADED: &str =
-    "application/vnd.ms-excel.threadedcomments+xml";
-pub const CT_PERSON_LIST: &str =
-    "application/vnd.ms-excel.person+xml";
+pub const CT_THREADED: &str = "application/vnd.ms-excel.threadedcomments+xml";
+pub const CT_PERSON_LIST: &str = "application/vnd.ms-excel.person+xml";
 
 // ---------------------------------------------------------------------------
 // Extract: threadedCommentsN.xml
@@ -236,10 +234,7 @@ fn attr(e: &quick_xml::events::BytesStart<'_>, name: &[u8]) -> Option<String> {
             // The value bytes are already UTF-8 in any well-formed OOXML
             // document; we still call `unescape_value` to resolve XML
             // entities like `&amp;` and `&quot;`.
-            return raw
-                .unescape_value()
-                .ok()
-                .map(|cow| cow.into_owned());
+            return raw.unescape_value().ok().map(|cow| cow.into_owned());
         }
     }
     None
@@ -265,8 +260,7 @@ pub fn merge_threaded_comments(
 
     // Track which cells we've already emitted from existing so we can
     // splice the queued replacement in the original position.
-    let mut handled_cells: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut handled_cells: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for entry in existing {
         let coord = entry.cell_ref.clone();
@@ -325,10 +319,7 @@ fn entry_to_existing(e: &ThreadedCommentEntry) -> ExistingThreadedComment {
 /// Merge the existing personList with queued additions. Idempotent on
 /// `id`: repeating an already-present GUID is a no-op. New entries
 /// preserve queue order.
-pub fn merge_persons(
-    existing: Vec<PersonPatch>,
-    ops: &[PersonPatch],
-) -> Vec<PersonPatch> {
+pub fn merge_persons(existing: Vec<PersonPatch>, ops: &[PersonPatch]) -> Vec<PersonPatch> {
     let mut out = existing;
     for queued in ops {
         if queued.id.is_empty() {
@@ -460,7 +451,11 @@ pub fn build_threaded_for_sheet(
 
     let rid = match existing_rid.clone() {
         Some(r) => r,
-        None => rels.add(rt::THREADED_COMMENTS, &target_relative, TargetMode::Internal),
+        None => rels.add(
+            rt::THREADED_COMMENTS,
+            &target_relative,
+            TargetMode::Internal,
+        ),
     };
     let bytes = build_threaded_comments_xml(&merged);
     (bytes, Some(rid))
@@ -494,7 +489,11 @@ pub fn build_persons_for_workbook(
 
     let rid = match existing_rid.clone() {
         Some(r) => r,
-        None => wb_rels.add(rt::PERSON_LIST, "persons/personList.xml", TargetMode::Internal),
+        None => wb_rels.add(
+            rt::PERSON_LIST,
+            "persons/personList.xml",
+            TargetMode::Internal,
+        ),
     };
     let bytes = build_persons_xml(&merged);
     (bytes, Some(rid))
@@ -546,14 +545,12 @@ mod tests {
 
     #[test]
     fn extract_persons_round_trip() {
-        let bytes = build_persons_xml(&[
-            PersonPatch {
-                id: "{A}".into(),
-                display_name: "Alice".into(),
-                user_id: "alice@x.com".into(),
-                provider_id: "AD".into(),
-            },
-        ]);
+        let bytes = build_persons_xml(&[PersonPatch {
+            id: "{A}".into(),
+            display_name: "Alice".into(),
+            user_id: "alice@x.com".into(),
+            provider_id: "AD".into(),
+        }]);
         let parsed = extract_persons(&bytes);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].id, "{A}");
