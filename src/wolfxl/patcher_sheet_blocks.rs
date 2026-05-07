@@ -72,11 +72,13 @@ pub(super) fn apply_conditional_formatting_phase(
 
         let existing = super::conditional_formatting::extract_existing_cf_blocks(&xml);
         let pmax = super::conditional_formatting::scan_max_cf_priority(&xml);
-        let result = super::conditional_formatting::build_cf_blocks(
+        let element_prefix = super::conditional_formatting::main_xml_prefix(&xml, b"worksheet");
+        let result = super::conditional_formatting::build_cf_blocks_with_prefix(
             &existing,
             patches,
             pmax,
             running_dxf_count,
+            &element_prefix,
         );
         running_dxf_count += result.new_dxfs.len() as u32;
         new_dxfs_total.extend(result.new_dxfs);
@@ -87,15 +89,16 @@ pub(super) fn apply_conditional_formatting_phase(
     }
 
     if !new_dxfs_total.is_empty() {
-        let new_dxfs_xml: String = new_dxfs_total
-            .iter()
-            .map(super::conditional_formatting::dxf_to_xml)
-            .collect::<Vec<_>>()
-            .join("");
         let base = match styles_xml.take() {
             Some(s) => s,
             None => styles_loaded.unwrap_or_else(minimal_styles_xml),
         };
+        let element_prefix = super::conditional_formatting::main_xml_prefix(&base, b"styleSheet");
+        let new_dxfs_xml: String = new_dxfs_total
+            .iter()
+            .map(|dxf| super::conditional_formatting::dxf_to_xml_with_prefix(dxf, &element_prefix))
+            .collect::<Vec<_>>()
+            .join("");
         let updated = super::conditional_formatting::ensure_dxfs_section(&base, &new_dxfs_xml);
         *styles_xml = Some(updated);
     }

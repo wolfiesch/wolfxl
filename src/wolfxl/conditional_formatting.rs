@@ -401,11 +401,28 @@ pub fn count_dxfs(styles_xml: &str) -> u32 {
 /// has no rules (or all rules are stub variants the caller filtered
 /// out), no `<conditionalFormatting>` element is emitted for it
 /// (RFC §8 risk #5 — Excel "repairs" empty wrappers on open).
+#[allow(dead_code)]
 pub fn build_cf_blocks(
     existing_blocks: &[Vec<u8>],
     patches: &[ConditionalFormattingPatch],
     existing_priority_max: u32,
     existing_dxf_count: u32,
+) -> CfResult {
+    build_cf_blocks_with_prefix(
+        existing_blocks,
+        patches,
+        existing_priority_max,
+        existing_dxf_count,
+        "",
+    )
+}
+
+pub fn build_cf_blocks_with_prefix(
+    existing_blocks: &[Vec<u8>],
+    patches: &[ConditionalFormattingPatch],
+    existing_priority_max: u32,
+    existing_dxf_count: u32,
+    element_prefix: &str,
 ) -> CfResult {
     let mut out: Vec<u8> = Vec::with_capacity(256);
     let mut new_dxfs: Vec<DxfPatch> = Vec::new();
@@ -630,21 +647,77 @@ pub fn build_cf_blocks(
             continue;
         }
 
+        let conditional_formatting_open = prefixed_tag(element_prefix, "conditionalFormatting");
+        let conditional_formatting_close =
+            prefixed_close_tag(element_prefix, "conditionalFormatting");
+        let rules_xml = if element_prefix.is_empty() {
+            rules_buf
+        } else {
+            prefix_generated_cf_tags(&rules_buf, element_prefix)
+        };
         out.extend_from_slice(
             format!(
-                "<conditionalFormatting sqref=\"{}\">",
+                "<{} sqref=\"{}\">",
+                conditional_formatting_open,
                 attr_escape(&patch.sqref)
             )
             .as_bytes(),
         );
-        out.extend_from_slice(&rules_buf);
-        out.extend_from_slice(b"</conditionalFormatting>");
+        out.extend_from_slice(&rules_xml);
+        out.extend_from_slice(conditional_formatting_close.as_bytes());
     }
 
     CfResult {
         block_bytes: out,
         new_dxfs,
     }
+}
+
+pub fn main_xml_prefix(xml: &str, root_local_name: &[u8]) -> String {
+    let mut reader = XmlReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                if e.local_name().as_ref() == root_local_name {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    if let Some((prefix, _)) = name.split_once(':') {
+                        return format!("{prefix}:");
+                    }
+                    return String::new();
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return String::new(),
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn prefixed_tag(prefix: &str, local: &str) -> String {
+    format!("{prefix}{local}")
+}
+
+fn prefixed_close_tag(prefix: &str, local: &str) -> String {
+    format!("</{prefix}{local}>")
+}
+
+fn prefix_generated_cf_tags(xml: &[u8], prefix: &str) -> Vec<u8> {
+    let mut s = String::from_utf8_lossy(xml).into_owned();
+    for tag in [
+        "cfRule",
+        "formula",
+        "colorScale",
+        "cfvo",
+        "color",
+        "dataBar",
+        "iconSet",
+    ] {
+        s = s.replace(&format!("<{tag}"), &format!("<{prefix}{tag}"));
+        s = s.replace(&format!("</{tag}>"), &format!("</{prefix}{tag}>"));
+    }
+    s.into_bytes()
 }
 
 fn emit_cfvo(out: &mut Vec<u8>, cfvo: &CfvoPatch) {
@@ -679,45 +752,59 @@ fn emit_cfvo(out: &mut Vec<u8>, cfvo: &CfvoPatch) {
 /// Empty `DxfPatch::default()` produces `<dxf/>`. Callers should avoid
 /// pushing empty patches into `new_dxfs`; this function tolerates them
 /// rather than panicking.
+#[allow(dead_code)]
 pub fn dxf_to_xml(patch: &DxfPatch) -> String {
+    dxf_to_xml_with_prefix(patch, "")
+}
+
+pub fn dxf_to_xml_with_prefix(patch: &DxfPatch, element_prefix: &str) -> String {
     let mut s = String::with_capacity(64);
-    s.push_str("<dxf>");
+    let dxf = prefixed_tag(element_prefix, "dxf");
+    let font = prefixed_tag(element_prefix, "font");
+    let b = prefixed_tag(element_prefix, "b");
+    let i = prefixed_tag(element_prefix, "i");
+    let color = prefixed_tag(element_prefix, "color");
+    let fill = prefixed_tag(element_prefix, "fill");
+    let pattern_fill = prefixed_tag(element_prefix, "patternFill");
+    let fg_color = prefixed_tag(element_prefix, "fgColor");
+    let border = prefixed_tag(element_prefix, "border");
+    s.push_str(&format!("<{dxf}>"));
 
     let has_font =
         patch.font_bold.is_some() || patch.font_italic.is_some() || patch.font_color_rgb.is_some();
     if has_font {
-        s.push_str("<font>");
+        s.push_str(&format!("<{font}>"));
         if patch.font_bold == Some(true) {
-            s.push_str("<b/>");
+            s.push_str(&format!("<{b}/>"));
         } else if patch.font_bold == Some(false) {
-            s.push_str("<b val=\"0\"/>");
+            s.push_str(&format!("<{b} val=\"0\"/>"));
         }
         if patch.font_italic == Some(true) {
-            s.push_str("<i/>");
+            s.push_str(&format!("<{i}/>"));
         } else if patch.font_italic == Some(false) {
-            s.push_str("<i val=\"0\"/>");
+            s.push_str(&format!("<{i} val=\"0\"/>"));
         }
         if let Some(ref c) = patch.font_color_rgb {
-            s.push_str(&format!("<color rgb=\"{}\"/>", attr_escape(c)));
+            s.push_str(&format!("<{color} rgb=\"{}\"/>", attr_escape(c)));
         }
-        s.push_str("</font>");
+        s.push_str(&format!("</{font}>"));
     }
 
     let has_fill = patch.fill_pattern_type.is_some() || patch.fill_fg_color_rgb.is_some();
     if has_fill {
-        s.push_str("<fill><patternFill");
+        s.push_str(&format!("<{fill}><{pattern_fill}"));
         if let Some(ref pt) = patch.fill_pattern_type {
             s.push_str(&format!(" patternType=\"{}\"", attr_escape(pt)));
         }
         if let Some(ref c) = patch.fill_fg_color_rgb {
             s.push_str(&format!(
-                "><fgColor rgb=\"{}\"/></patternFill>",
+                "><{fg_color} rgb=\"{}\"/></{pattern_fill}>",
                 attr_escape(c)
             ));
         } else {
             s.push_str("/>");
         }
-        s.push_str("</fill>");
+        s.push_str(&format!("</{fill}>"));
     }
 
     let has_border = patch.border_top_style.is_some()
@@ -725,22 +812,23 @@ pub fn dxf_to_xml(patch: &DxfPatch) -> String {
         || patch.border_left_style.is_some()
         || patch.border_right_style.is_some();
     if has_border {
-        s.push_str("<border>");
-        push_border_side(&mut s, "left", &patch.border_left_style);
-        push_border_side(&mut s, "right", &patch.border_right_style);
-        push_border_side(&mut s, "top", &patch.border_top_style);
-        push_border_side(&mut s, "bottom", &patch.border_bottom_style);
-        s.push_str("</border>");
+        s.push_str(&format!("<{border}>"));
+        push_border_side(&mut s, element_prefix, "left", &patch.border_left_style);
+        push_border_side(&mut s, element_prefix, "right", &patch.border_right_style);
+        push_border_side(&mut s, element_prefix, "top", &patch.border_top_style);
+        push_border_side(&mut s, element_prefix, "bottom", &patch.border_bottom_style);
+        s.push_str(&format!("</{border}>"));
     }
 
-    s.push_str("</dxf>");
+    s.push_str(&format!("</{dxf}>"));
     s
 }
 
-fn push_border_side(s: &mut String, name: &str, style: &Option<String>) {
+fn push_border_side(s: &mut String, prefix: &str, name: &str, style: &Option<String>) {
+    let tag = prefixed_tag(prefix, name);
     match style {
-        Some(v) => s.push_str(&format!("<{} style=\"{}\"/>", name, attr_escape(v))),
-        None => s.push_str(&format!("<{}/>", name)),
+        Some(v) => s.push_str(&format!("<{} style=\"{}\"/>", tag, attr_escape(v))),
+        None => s.push_str(&format!("<{}/>", tag)),
     }
 }
 
@@ -778,18 +866,30 @@ pub fn ensure_dxfs_section(styles_xml: &str, new_dxfs_xml: &str) -> String {
         return s;
     }
 
-    // Section absent — insert before </styleSheet>.
-    let close_pos = match styles_xml.find("</styleSheet>") {
+    // Section absent — insert at the schema-valid location. In styles.xml,
+    // dxfs must come after cellStyles and before tableStyles/colors/extLst.
+    let prefix = main_xml_prefix(styles_xml, b"styleSheet");
+    let insert_pos = match find_dxfs_insert_pos(styles_xml, &prefix) {
         Some(p) => p,
         None => return styles_xml.to_string(),
     };
+    let dxfs = prefixed_tag(&prefix, "dxfs");
     let mut result = String::with_capacity(styles_xml.len() + new_dxfs_xml.len() + 32);
-    result.push_str(&styles_xml[..close_pos]);
-    result.push_str(&format!("<dxfs count=\"{}\">", new_count));
+    result.push_str(&styles_xml[..insert_pos]);
+    result.push_str(&format!("<{dxfs} count=\"{}\">", new_count));
     result.push_str(new_dxfs_xml);
-    result.push_str("</dxfs>");
-    result.push_str(&styles_xml[close_pos..]);
+    result.push_str(&format!("</{dxfs}>"));
+    result.push_str(&styles_xml[insert_pos..]);
     result
+}
+
+fn find_dxfs_insert_pos(styles_xml: &str, prefix: &str) -> Option<usize> {
+    for tag in ["tableStyles", "colors", "extLst"] {
+        if let Some(pos) = styles_xml.find(&format!("<{prefix}{tag}")) {
+            return Some(pos);
+        }
+    }
+    styles_xml.find(&format!("</{prefix}styleSheet>"))
 }
 
 fn expand_self_closing_dxfs_section(
@@ -843,23 +943,22 @@ fn update_or_insert_count_attr(tag: &str, count: u32) -> String {
 }
 
 fn count_dxf_substrings(s: &str) -> u32 {
-    let bytes = s.as_bytes();
-    let needle = b"<dxf";
-    let mut count: u32 = 0;
-    let mut i = 0;
-    while i + needle.len() <= bytes.len() {
-        if &bytes[i..i + needle.len()] == needle {
-            // Filter out `<dxfs` (which also starts with `<dxf`).
-            let next = bytes.get(i + needle.len()).copied().unwrap_or(b' ');
-            if next != b's' {
-                count += 1;
+    let mut reader = XmlReader::from_str(s);
+    reader.config_mut().trim_text(false);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut count = 0;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                if e.local_name().as_ref() == b"dxf" {
+                    count += 1;
+                }
             }
-            i += needle.len();
-        } else {
-            i += 1;
+            Ok(Event::Eof) | Err(_) => return count,
+            _ => {}
         }
+        buf.clear();
     }
-    count
 }
 
 /// Split a concatenation of `<dxf>...</dxf>` (and `<dxf/>`) elements
@@ -1299,6 +1398,25 @@ mod tests {
     }
 
     #[test]
+    fn ensure_dxfs_inserts_before_colors_when_absent() {
+        let xml = r#"<?xml version="1.0"?><styleSheet><fonts count="1"><font/></fonts><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><colors><indexedColors/></colors></styleSheet>"#;
+        let new_xml = "<dxf><font><b/></font></dxf>";
+        let out = ensure_dxfs_section(xml, new_xml);
+        let dxfs_pos = out.find("<dxfs").expect("dxfs");
+        let colors_pos = out.find("<colors").expect("colors");
+        assert!(dxfs_pos < colors_pos, "got: {out}");
+    }
+
+    #[test]
+    fn ensure_dxfs_uses_styles_prefix_when_absent() {
+        let xml = r#"<?xml version="1.0"?><x:styleSheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:fonts count="1"><x:font/></x:fonts></x:styleSheet>"#;
+        let new_xml = "<x:dxf><x:font><x:b/></x:font></x:dxf>";
+        let out = ensure_dxfs_section(xml, new_xml);
+        assert!(out.contains("<x:dxfs count=\"1\"><x:dxf>"), "got: {out}");
+        assert!(out.ends_with("</x:styleSheet>"));
+    }
+
+    #[test]
     fn ensure_dxfs_appends_when_present() {
         let xml = r#"<?xml version="1.0"?><styleSheet><dxfs count="1"><dxf><font><i/></font></dxf></dxfs></styleSheet>"#;
         let new_xml = "<dxf><font><b/></font></dxf>";
@@ -1324,5 +1442,42 @@ mod tests {
         let new_xml = "<dxf><font><b/></font></dxf><dxf/>";
         let out = ensure_dxfs_section(xml, new_xml);
         assert!(out.contains("<dxfs count=\"3\">"), "got: {out}");
+    }
+
+    #[test]
+    fn dxf_to_xml_with_prefix_prefixes_children() {
+        let xml = dxf_to_xml_with_prefix(
+            &DxfPatch {
+                font_bold: Some(true),
+                ..DxfPatch::default()
+            },
+            "x:",
+        );
+        assert_eq!(xml, "<x:dxf><x:font><x:b/></x:font></x:dxf>");
+    }
+
+    #[test]
+    fn build_cf_blocks_with_prefix_prefixes_generated_tags() {
+        let patches = vec![ConditionalFormattingPatch {
+            sqref: "A1:A2".to_string(),
+            rules: vec![CfRulePatch {
+                kind: CfRuleKind::CellIs {
+                    operator: "greaterThan".to_string(),
+                    formula_a: "0".to_string(),
+                    formula_b: None,
+                },
+                dxf: Some(DxfPatch {
+                    font_bold: Some(true),
+                    ..DxfPatch::default()
+                }),
+                stop_if_true: false,
+            }],
+        }];
+        let result = build_cf_blocks_with_prefix(&[], &patches, 0, 0, "x:");
+        let xml = String::from_utf8(result.block_bytes).unwrap();
+        assert!(xml.starts_with("<x:conditionalFormatting"), "got: {xml}");
+        assert!(xml.contains("<x:cfRule"));
+        assert!(xml.contains("<x:formula>0</x:formula>"));
+        assert!(xml.ends_with("</x:conditionalFormatting>"));
     }
 }
