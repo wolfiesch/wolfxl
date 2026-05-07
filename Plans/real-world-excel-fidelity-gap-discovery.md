@@ -68,8 +68,12 @@ Gap ledger:
    - charts: chart style/color parts, axis IDs, chart sheets, rendered output.
    - conditional formatting: x14 extensions, pivot-scoped CF, formula translation.
    - external links: cached sheet data, formula references to linked workbooks.
-2. Add a mutation runner that applies the same safe edit set to every fixture
-   and stores before/after audit JSON.
+2. Extend the mutation runner beyond safe edits:
+   - Current command:
+     `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
+   - Current safe mutations: no-op modify-save and marker-cell modify-save.
+   - Next mutations: style edit, row/column insert/delete, sheet rename/copy,
+     and feature add/remove where the expected semantic drift can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;
