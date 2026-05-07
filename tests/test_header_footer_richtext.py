@@ -16,7 +16,6 @@ import pytest
 import wolfxl
 from wolfxl import load_workbook
 from wolfxl.worksheet.header_footer import (
-    HeaderFooter,
     HeaderFooterItem,
     _HeaderFooterPart,
 )

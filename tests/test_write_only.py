@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 import wolfxl
-from wolfxl._worksheet_write_only import WriteOnlyCell, WriteOnlyWorksheet
+from wolfxl._worksheet_write_only import WriteOnlyCell
 from wolfxl.utils.exceptions import WorkbookAlreadySaved
 
 
