@@ -5,6 +5,7 @@ import json
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from types import ModuleType
 
 
@@ -26,6 +27,24 @@ def _load_interactive_module() -> ModuleType:
 
 
 interactive = _load_interactive_module()
+
+
+def _load_probe_runner_module() -> ModuleType:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_ooxml_interactive_probe.py"
+    )
+    spec = importlib.util.spec_from_file_location("run_ooxml_interactive_probe", script)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+probe_runner = _load_probe_runner_module()
 
 
 def test_interactive_audit_marks_absent_probes_not_applicable(tmp_path: Path) -> None:
@@ -105,6 +124,71 @@ def test_interactive_strict_cli_fails_when_probe_missing(
     assert payload["ready"] is False
 
 
+def test_macro_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(fixture_dir, output_dir)
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "macro.xlsm"
+    assert report["results"][0]["probe"] == "macro_project_presence"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["macro_project_presence"]["status"] == "clear"
+
+
+def test_macro_probe_runner_fails_when_vba_project_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+
+    def remove_vba_during_smoke(src: Path, _output_dir: Path, _timeout: int):
+        _rewrite_without_vba(src)
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_vba_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(fixture_dir, output_dir)
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
 def _write_manifest(fixture_dir: Path, filename: str) -> None:
     fixture_dir.joinpath("manifest.json").write_text(
         json.dumps(
@@ -162,3 +246,15 @@ def _base_entries() -> dict[str, str | bytes]:
         "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>""",
     }
+
+
+def _rewrite_without_vba(path: Path) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {
+            name: archive.read(name)
+            for name in archive.namelist()
+            if name != "xl/vbaProject.bin"
+        }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
