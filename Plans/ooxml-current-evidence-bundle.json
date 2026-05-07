@@ -245,6 +245,29 @@
       ]
     },
     {
+      "name": "umya_test_files_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick --mutation no_op --mutation marker_cell --mutation add_conditional_formatting > /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json",
+      "expect": [
+        {"path": "result_count", "equals": 183},
+        {"path": "failure_count", "equals": 0},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "add_conditional_formatting"]}
+      ]
+    },
+    {
+      "name": "umya_test_files_quick_mutation_coverage",
+      "path": "/tmp/wolfxl-coverage-umya-quick-mutations.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json > /tmp/wolfxl-coverage-umya-quick-mutations.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 61},
+        {"path": "mutation_report_count", "equals": 1},
+        {"path": "surfaces.style_theme_color_preservation.status", "equals": "clear"},
+        {"path": "surfaces.sheet_metadata_preservation.status", "equals": "clear"},
+        {"path": "surfaces.ooxml_extension_payload_preservation.status", "equals": "clear"}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import zipfile
 from pathlib import Path
 from types import ModuleType
 
@@ -578,6 +579,108 @@ def test_runner_does_not_hide_feature_add_loss_drift(
 
     assert report["failure_count"] == 1
     assert report["results"][0]["status"] == "failed"
+
+
+def test_runner_allows_add_conditional_formatting_dxf_style_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "conditional_formatting_semantic_drift",
+                    "severity": "error",
+                    "part": "conditional_formatting",
+                    "message": "expected added conditional format at AC2:AC10",
+                },
+                {
+                    "kind": "style_theme_semantic_drift",
+                    "severity": "error",
+                    "part": "style_theme",
+                    "message": "expected additive dxfs drift",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("add_conditional_formatting",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "conditional_formatting_semantic_drift",
+        "style_theme_semantic_drift",
+    }
+
+
+def test_runner_does_not_hide_add_conditional_formatting_style_loss(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, after: Path) -> dict:
+        _remove_style_font(after)
+        return {
+            "issues": [
+                {
+                    "kind": "style_theme_semantic_drift",
+                    "severity": "error",
+                    "part": "style_theme",
+                    "message": "before had custom style after={}",
+                },
+            ]
+        }
+
+    def _remove_style_font(path: Path) -> None:
+        tmp_path = path.with_suffix(".rewritten.xlsx")
+        with zipfile.ZipFile(path) as source_archive:
+            root = runner_module._read_styles_root(source_archive)
+            assert root is not None
+            fonts = runner_module._first_child_by_local_name(root, "fonts")
+            assert fonts is not None
+            fonts.clear()
+            with zipfile.ZipFile(tmp_path, "w") as target_archive:
+                for entry in source_archive.infolist():
+                    if entry.filename == "xl/styles.xml":
+                        target_archive.writestr(
+                            entry, runner_module.ElementTree.tostring(root)
+                        )
+                    else:
+                        target_archive.writestr(
+                            entry, source_archive.read(entry.filename)
+                        )
+        tmp_path.replace(path)
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("add_conditional_formatting",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["expected_issue_count"] == 0
+    assert result["issues"][0]["kind"] == "style_theme_semantic_drift"
 
 
 def test_runner_does_not_hide_missing_formula_translation_drift(

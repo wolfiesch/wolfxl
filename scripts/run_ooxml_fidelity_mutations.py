@@ -8,6 +8,8 @@ import hashlib
 import json
 import shutil
 import sys
+from copy import deepcopy
+from xml.etree import ElementTree
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -103,6 +105,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     },
     "add_conditional_formatting": {
         "conditional_formatting_semantic_drift",
+        "style_theme_semantic_drift",
     },
     "move_formula_range": {
         "worksheet_formulas_semantic_drift",
@@ -312,7 +315,10 @@ def _run_single_mutation(
         )
 
     issues, expected_issues = _split_expected_issues(
-        list(audit_report["issues"]), mutation
+        list(audit_report["issues"]),
+        mutation,
+        before_path=before_path,
+        after_path=after_path,
     )
     missing_expected_issues = _missing_required_expected_issues(
         expected_issues, mutation
@@ -478,28 +484,108 @@ def _prepare_mutation_baseline(before_path: Path, after_path: Path, mutation: st
 
 
 def _split_expected_issues(
-    issues: list[dict], mutation: str
+    issues: list[dict],
+    mutation: str,
+    before_path: Path | None = None,
+    after_path: Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     expected_kinds = EXPECTED_ISSUE_KINDS_BY_MUTATION.get(mutation, set())
     unexpected: list[dict] = []
     expected: list[dict] = []
     for issue in issues:
-        if _is_expected_issue(issue, mutation, expected_kinds):
+        if _is_expected_issue(
+            issue,
+            mutation,
+            expected_kinds,
+            before_path=before_path,
+            after_path=after_path,
+        ):
             expected.append(issue)
         else:
             unexpected.append(issue)
     return unexpected, expected
 
 
-def _is_expected_issue(issue: dict, mutation: str, expected_kinds: set[str]) -> bool:
+def _is_expected_issue(
+    issue: dict,
+    mutation: str,
+    expected_kinds: set[str],
+    before_path: Path | None = None,
+    after_path: Path | None = None,
+) -> bool:
     kind = issue.get("kind")
     if kind not in expected_kinds:
         return False
+    if (
+        mutation == "add_conditional_formatting"
+        and kind == "style_theme_semantic_drift"
+    ):
+        return _is_expected_conditional_formatting_dxf_addition(
+            before_path, after_path
+        )
     expected_markers = EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
     marker = expected_markers.get(kind)
     if marker is None:
         return True
     return marker in issue.get("message", "")
+
+
+def _is_expected_conditional_formatting_dxf_addition(
+    before_path: Path | None, after_path: Path | None
+) -> bool:
+    if before_path is None or after_path is None:
+        return False
+    try:
+        with (
+            zipfile.ZipFile(before_path) as before_archive,
+            zipfile.ZipFile(after_path) as after_archive,
+        ):
+            before_root = _read_styles_root(before_archive)
+            after_root = _read_styles_root(after_archive)
+    except (OSError, KeyError, ElementTree.ParseError, zipfile.BadZipFile):
+        return False
+    if before_root is None or after_root is None:
+        return False
+    before_dxf_count = _dxf_count(before_root)
+    after_dxf_count = _dxf_count(after_root)
+    if after_dxf_count != before_dxf_count + 1:
+        return False
+    return _strip_dxfs_fingerprint(before_root) == _strip_dxfs_fingerprint(after_root)
+
+
+def _read_styles_root(archive: zipfile.ZipFile) -> ElementTree.Element | None:
+    try:
+        return ElementTree.fromstring(archive.read("xl/styles.xml"))
+    except KeyError:
+        return None
+
+
+def _dxf_count(root: ElementTree.Element) -> int:
+    dxfs = _first_child_by_local_name(root, "dxfs")
+    if dxfs is None:
+        return 0
+    return sum(1 for child in list(dxfs) if _local_name(child.tag) == "dxf")
+
+
+def _strip_dxfs_fingerprint(root: ElementTree.Element) -> bytes:
+    root_copy = deepcopy(root)
+    for child in list(root_copy):
+        if _local_name(child.tag) == "dxfs":
+            root_copy.remove(child)
+    return ElementTree.tostring(root_copy, encoding="utf-8")
+
+
+def _first_child_by_local_name(
+    root: ElementTree.Element, local_name: str
+) -> ElementTree.Element | None:
+    for child in list(root):
+        if _local_name(child.tag) == local_name:
+            return child
+    return None
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _missing_required_expected_issues(
