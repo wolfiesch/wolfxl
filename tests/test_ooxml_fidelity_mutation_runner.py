@@ -61,6 +61,45 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
     }
 
 
+def test_runner_supports_add_remove_chart_mutation(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("add_remove_chart",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "passed"
+
+
+def test_runner_requires_formula_move_translation_drift(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("move_formula_range",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issue_count"] == 1
+    assert result["expected_issues"][0]["kind"] == "worksheet_formulas_semantic_drift"
+    assert "Z2" in result["expected_issues"][0]["message"]
+
+
 def test_runner_reports_manifest_hash_mismatch(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -282,3 +321,29 @@ def test_runner_does_not_hide_feature_add_loss_drift(
 
     assert report["failure_count"] == 1
     assert report["results"][0]["status"] == "failed"
+
+
+def test_runner_does_not_hide_missing_formula_translation_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {"issues": []}
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("move_formula_range",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["issues"][0]["kind"] == "missing_required_expected_drift"

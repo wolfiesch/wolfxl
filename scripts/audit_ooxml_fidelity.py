@@ -337,6 +337,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "pivots": _pivot_fingerprint(archive, parts),
         "slicers": _slicer_fingerprint(archive, parts),
         "timelines": _timeline_fingerprint(archive, parts),
+        "worksheet_formulas": _worksheet_formula_fingerprint(archive, parts),
     }
 
 
@@ -612,6 +613,31 @@ def _timeline_fingerprint(
     return out
 
 
+def _worksheet_formula_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        formulas: list[object] = []
+        for cell in _nodes_by_local(root, "c"):
+            formula = _first_child_by_local(cell, "f")
+            if formula is None:
+                continue
+            formulas.append(
+                (
+                    _stable_attrs(cell, ("r",)),
+                    _stable_attrs(formula, ("t", "ref", "si", "ca", "bx")),
+                    _text(formula),
+                )
+            )
+        if formulas:
+            out[part] = formulas
+    return out
+
+
 def _read_xml_or_none(archive: zipfile.ZipFile, part: str) -> ElementTree.Element | None:
     try:
         return ElementTree.fromstring(archive.read(part))
@@ -641,6 +667,13 @@ def _first_node_by_local(
 
 def _children_by_local(root: ElementTree.Element, name: str) -> list[ElementTree.Element]:
     return [node for node in list(root) if _local_name(node.tag) == name]
+
+
+def _first_child_by_local(
+    root: ElementTree.Element, name: str
+) -> ElementTree.Element | None:
+    children = _children_by_local(root, name)
+    return children[0] if children else None
 
 
 def _texts_by_local(root: ElementTree.Element, name: str) -> list[str]:

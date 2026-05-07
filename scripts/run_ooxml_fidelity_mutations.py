@@ -37,14 +37,17 @@ SUPPORTED_MUTATIONS = (
     "delete_first_col",
     "copy_first_sheet",
     "rename_first_sheet",
+    "add_remove_chart",
     "add_data_validation",
     "add_conditional_formatting",
+    "move_formula_range",
 )
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
 MARKER_VALUE = "wolfxl_ooxml_fidelity_mutation"
 STYLE_CELL = "AA1"
 RENAMED_SHEET = "WolfXL Fidelity Rename"
+SCRATCH_CHART_SHEET = "WolfXL Chart Scratch"
 MANIFEST_NAME = "manifest.json"
 EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     # Renaming a sheet is an intentional workbook semantic change. Feature
@@ -54,6 +57,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
+        "worksheet_formulas_semantic_drift",
     },
     # Deleting the first row/column intentionally moves feature ranges. The
     # package-fidelity gate should still fail on part/relationship loss, while
@@ -63,24 +67,30 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "worksheet_formulas_semantic_drift",
     },
     "delete_first_col": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "worksheet_formulas_semantic_drift",
     },
     "copy_first_sheet": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "worksheet_formulas_semantic_drift",
     },
     "add_data_validation": {
         "data_validations_semantic_drift",
     },
     "add_conditional_formatting": {
         "conditional_formatting_semantic_drift",
+    },
+    "move_formula_range": {
+        "worksheet_formulas_semantic_drift",
     },
 }
 EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
@@ -92,6 +102,16 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "add_conditional_formatting": {
         "conditional_formatting_semantic_drift": "AC2:AC10",
+    },
+    "move_formula_range": {
+        "worksheet_formulas_semantic_drift": "Z2",
+    },
+}
+REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
+    # This mutation is an oracle for formula translation. Passing requires the
+    # audit to observe the formula move and the translated reference.
+    "move_formula_range": {
+        "worksheet_formulas_semantic_drift": "Z2",
     },
 }
 
@@ -227,6 +247,7 @@ def _run_single_mutation(
         )
 
     try:
+        _prepare_mutation_baseline(before_path, after_path, mutation)
         _apply_mutation(after_path, mutation)
         audit_report = audit_ooxml_fidelity.audit(before_path, after_path)
         _assert_zip_integrity(after_path)
@@ -247,6 +268,10 @@ def _run_single_mutation(
     issues, expected_issues = _split_expected_issues(
         list(audit_report["issues"]), mutation
     )
+    missing_expected_issues = _missing_required_expected_issues(
+        expected_issues, mutation
+    )
+    issues.extend(missing_expected_issues)
     status = "passed"
     if issues:
         status = "failed"
@@ -328,8 +353,33 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             worksheet["Z1"] = MARKER_VALUE
             worksheet["AA1"] = f"{MARKER_VALUE}_right"
             worksheet.move_range("Z1:AA1", rows=1, cols=0)
+        elif mutation == "move_formula_range":
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet.move_range("Z1:AA1", rows=1, cols=0, translate=True)
         elif mutation == "rename_first_sheet":
             workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
+        elif mutation == "add_remove_chart":
+            from wolfxl.chart import BarChart, Reference
+
+            if SCRATCH_CHART_SHEET in workbook.sheetnames:
+                workbook.remove(workbook[SCRATCH_CHART_SHEET])
+            worksheet = workbook.create_sheet(SCRATCH_CHART_SHEET)
+            worksheet["A1"] = "value"
+            worksheet["A2"] = 1
+            chart = BarChart()
+            data = Reference(worksheet, min_col=1, min_row=1, max_row=2)
+            chart.add_data(data, titles_from_data=True)
+            worksheet.add_chart(chart, "C2")
+            workbook.save(path)
+            workbook.close()
+            workbook = wolfxl.load_workbook(path, modify=True)
+            worksheet = workbook[SCRATCH_CHART_SHEET]
+            worksheet.remove_chart(worksheet._charts[-1])
+            workbook.save(path)
+            workbook.close()
+            workbook = wolfxl.load_workbook(path, modify=True)
+            worksheet = workbook[SCRATCH_CHART_SHEET]
+            workbook.remove(worksheet)
         elif mutation == "add_data_validation":
             from wolfxl.worksheet.datavalidation import DataValidation
 
@@ -365,6 +415,22 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             close()
 
 
+def _prepare_mutation_baseline(before_path: Path, after_path: Path, mutation: str) -> None:
+    if mutation != "move_formula_range":
+        return
+    for path in (before_path, after_path):
+        workbook = wolfxl.load_workbook(path, modify=True)
+        try:
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet["Z1"] = 10
+            worksheet["AA1"] = "=Z1"
+            workbook.save(path)
+        finally:
+            close = getattr(workbook, "close", None)
+            if close is not None:
+                close()
+
+
 def _split_expected_issues(
     issues: list[dict], mutation: str
 ) -> tuple[list[dict], list[dict]]:
@@ -388,6 +454,31 @@ def _is_expected_issue(issue: dict, mutation: str, expected_kinds: set[str]) -> 
     if marker is None:
         return True
     return marker in issue.get("message", "")
+
+
+def _missing_required_expected_issues(
+    expected_issues: list[dict], mutation: str
+) -> list[dict]:
+    required = REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
+    missing: list[dict] = []
+    for kind, marker in required.items():
+        if any(
+            issue.get("kind") == kind and marker in issue.get("message", "")
+            for issue in expected_issues
+        ):
+            continue
+        missing.append(
+            {
+                "severity": "error",
+                "kind": "missing_required_expected_drift",
+                "part": mutation,
+                "message": (
+                    f"{mutation} expected {kind} containing marker {marker!r}, "
+                    "but the audit did not report it"
+                ),
+            }
+        )
+    return missing
 
 
 def _assert_zip_integrity(path: Path) -> None:

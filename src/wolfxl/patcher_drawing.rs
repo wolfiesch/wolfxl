@@ -292,17 +292,25 @@ fn render_pic_anchor_styled(
 
 /// Splice a `<drawing r:id="rIdN"/>` element into a sheet XML body.
 pub(crate) fn splice_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, &'static str> {
-    if sheet_xml.contains("<drawing ") || sheet_xml.contains("<drawing/>") {
+    if find_start_tag_by_local_name(sheet_xml, "drawing").is_some() {
         return Err("sheet already has a <drawing> element");
     }
-    let elem = format!("<drawing r:id=\"{rid}\"/>");
-    let with_drawing = if let Some(idx) = sheet_xml.find("<legacyDrawing") {
+    let Some(worksheet) = root_start_tag_by_local_name(sheet_xml, "worksheet") else {
+        return Err("sheet xml has no <worksheet> root tag");
+    };
+    let prefix = worksheet
+        .name
+        .rsplit_once(':')
+        .map(|(p, _)| format!("{p}:"))
+        .unwrap_or_default();
+    let elem = format!("<{prefix}drawing r:id=\"{rid}\"/>");
+    let with_drawing = if let Some(idx) = find_start_tag_by_local_name(sheet_xml, "legacyDrawing") {
         let mut out = String::with_capacity(sheet_xml.len() + elem.len());
         out.push_str(&sheet_xml[..idx]);
         out.push_str(&elem);
         out.push_str(&sheet_xml[idx..]);
         out
-    } else if let Some(idx) = sheet_xml.rfind("</worksheet>") {
+    } else if let Some(idx) = find_end_tag_by_local_name(sheet_xml, "worksheet") {
         let mut out = String::with_capacity(sheet_xml.len() + elem.len());
         out.push_str(&sheet_xml[..idx]);
         out.push_str(&elem);
@@ -317,14 +325,12 @@ pub(crate) fn splice_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, &
 /// Ensure the `<worksheet>` root element declares the `r` prefix.
 pub(crate) fn ensure_xmlns_r_on_worksheet(sheet_xml: &str) -> String {
     let r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-    let start = match sheet_xml.find("<worksheet") {
-        Some(i) => i,
+    let worksheet = match root_start_tag_by_local_name(sheet_xml, "worksheet") {
+        Some(tag) => tag,
         None => return sheet_xml.to_string(),
     };
-    let end = match sheet_xml[start..].find('>') {
-        Some(e) => start + e,
-        None => return sheet_xml.to_string(),
-    };
+    let start = worksheet.start;
+    let end = worksheet.end;
     let open_tag = &sheet_xml[start..=end];
     if open_tag.contains("xmlns:r=") {
         return sheet_xml.to_string();
@@ -339,6 +345,84 @@ pub(crate) fn ensure_xmlns_r_on_worksheet(sheet_xml: &str) -> String {
     out.push_str(&inserted);
     out.push_str(&sheet_xml[end + 1..]);
     out
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StartTag<'a> {
+    start: usize,
+    end: usize,
+    name: &'a str,
+}
+
+fn root_start_tag_by_local_name<'a>(source: &'a str, local_name: &str) -> Option<StartTag<'a>> {
+    let mut idx = 0;
+    while let Some(rel) = source[idx..].find('<') {
+        let start = idx + rel;
+        let after = source[start + 1..].chars().next()?;
+        if after == '?' || after == '!' || after == '/' {
+            idx = start + 1;
+            continue;
+        }
+        let tag = parse_start_tag(source, start)?;
+        return (local_part(tag.name) == local_name).then_some(tag);
+    }
+    None
+}
+
+fn find_start_tag_by_local_name(source: &str, local_name: &str) -> Option<usize> {
+    let mut idx = 0;
+    while let Some(rel) = source[idx..].find('<') {
+        let start = idx + rel;
+        let Some(after) = source[start + 1..].chars().next() else {
+            return None;
+        };
+        if after == '?' || after == '!' || after == '/' {
+            idx = start + 1;
+            continue;
+        }
+        let Some(tag) = parse_start_tag(source, start) else {
+            return None;
+        };
+        if local_part(tag.name) == local_name {
+            return Some(start);
+        }
+        idx = tag.end + 1;
+    }
+    None
+}
+
+fn find_end_tag_by_local_name(source: &str, local_name: &str) -> Option<usize> {
+    let mut out = None;
+    let mut idx = 0;
+    while let Some(rel) = source[idx..].find("</") {
+        let start = idx + rel;
+        let name_start = start + 2;
+        let name_end = source[name_start..]
+            .find(|c: char| c == '>' || c.is_whitespace())
+            .map(|rel| name_start + rel)?;
+        if local_part(&source[name_start..name_end]) == local_name {
+            out = Some(start);
+        }
+        idx = name_end + 1;
+    }
+    out
+}
+
+fn parse_start_tag<'a>(source: &'a str, start: usize) -> Option<StartTag<'a>> {
+    let end = source[start..].find('>').map(|rel| start + rel)?;
+    let name_start = start + 1;
+    let name_end = source[name_start..]
+        .find(|c: char| c == '>' || c == '/' || c.is_whitespace())
+        .map(|rel| name_start + rel)?;
+    Some(StartTag {
+        start,
+        end,
+        name: &source[name_start..name_end],
+    })
+}
+
+fn local_part(name: &str) -> &str {
+    name.rsplit_once(':').map(|(_, local)| local).unwrap_or(name)
 }
 
 /// Parse an A1-style coordinate into zero-based `(col, row)`.
@@ -514,13 +598,18 @@ fn remove_sheet_drawing_ref(sheet_xml: &str, rid: &str) -> Result<String, String
         .find(&rid_token)
         .ok_or_else(|| format!("sheet drawing ref {rid} not found"))?;
     let start = sheet_xml[..rid_pos]
-        .rfind("<drawing")
+        .rfind('<')
         .ok_or_else(|| "sheet drawing tag start not found".to_string())?;
+    let tag = parse_start_tag(sheet_xml, start)
+        .ok_or_else(|| "sheet drawing tag parse failed".to_string())?;
+    if local_part(tag.name) != "drawing" {
+        return Err("sheet drawing tag start not found".to_string());
+    }
     let tail = &sheet_xml[rid_pos..];
     let end = if let Some(rel) = tail.find("/>") {
         rid_pos + rel + 2
-    } else if let Some(rel) = tail.find("</drawing>") {
-        rid_pos + rel + "</drawing>".len()
+    } else if let Some(rel) = tail.find(&format!("</{}>", tag.name)) {
+        rid_pos + rel + tag.name.len() + 3
     } else {
         return Err("sheet drawing tag end not found".into());
     };
@@ -1231,6 +1320,20 @@ mod tests {
     }
 
     #[test]
+    fn splice_drawing_handles_prefixed_worksheet_root() {
+        let xml = r#"<?xml version="1.0"?><x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData/><x:legacyDrawing r:id="rId2"/></x:worksheet>"#;
+        let out = splice_drawing_ref(xml, "rId5").unwrap();
+        assert!(out.contains("<x:drawing r:id=\"rId5\"/><x:legacyDrawing"));
+        assert!(out.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""));
+    }
+
+    #[test]
+    fn splice_drawing_errors_when_prefixed_drawing_already_present() {
+        let xml = r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData/><x:drawing r:id="rId7"/></x:worksheet>"#;
+        assert!(splice_drawing_ref(xml, "rId1").is_err());
+    }
+
+    #[test]
     fn splice_drawing_errors_when_already_present() {
         let xml =
             r#"<?xml version="1.0"?><worksheet><sheetData/><drawing r:id="rId7"/></worksheet>"#;
@@ -1371,5 +1474,13 @@ mod tests {
         let out = remove_sheet_drawing_ref(xml, "rId7").unwrap();
         assert!(!out.contains("rId7"));
         assert!(out.contains("<legacyDrawing r:id=\"rId9\"/>"));
+    }
+
+    #[test]
+    fn remove_sheet_drawing_ref_drops_prefixed_tag() {
+        let xml = r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData/><x:drawing r:id="rId7"/><x:legacyDrawing r:id="rId9"/></x:worksheet>"#;
+        let out = remove_sheet_drawing_ref(xml, "rId7").unwrap();
+        assert!(!out.contains("rId7"));
+        assert!(out.contains("<x:legacyDrawing r:id=\"rId9\"/>"));
     }
 }

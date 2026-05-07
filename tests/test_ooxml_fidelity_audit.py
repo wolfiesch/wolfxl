@@ -363,6 +363,44 @@ def test_detects_external_formula_reference_semantic_drift(tmp_path: Path) -> No
     )
 
 
+def test_detects_internal_worksheet_formula_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = _formula_xml("A1+A2", cell="C1")
+    after_entries = dict(before_entries)
+    after_entries["xl/worksheets/sheet1.xml"] = _formula_xml("A1+A3", cell="C1")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "worksheet_formulas_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
+def test_detects_formula_cell_coordinate_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = _formula_xml("Z1", cell="AA1")
+    after_entries = dict(before_entries)
+    after_entries["xl/worksheets/sheet1.xml"] = _formula_xml("Z1", cell="AA2")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "worksheet_formulas_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
 def test_detects_pivot_and_slicer_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -558,10 +596,10 @@ def _external_link_cache_entries(value: str) -> dict[str, str]:
     return entries
 
 
-def _formula_xml(formula: str) -> str:
+def _formula_xml(formula: str, *, cell: str = "A1") -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData><row r="1"><c r="A1"><f>{formula}</f></c></row></sheetData>
+  <sheetData><row r="1"><c r="{cell}"><f>{formula}</f></c></row></sheetData>
 </worksheet>"""
 
 

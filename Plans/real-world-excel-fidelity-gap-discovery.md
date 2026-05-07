@@ -19,7 +19,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
 | External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, tail-row-delete, tail-column-delete, copy-remove-sheet, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure, row/column delete, sheet copy/remove, and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
-| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
+| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix
 
@@ -74,8 +74,9 @@ Gap ledger:
      and worksheet formulas that reference linked workbooks.
    - Done: chart axis IDs, axis metadata, manual layout, series summaries,
      and chart-sheet fingerprints.
-   - Still needed: rendered output comparison and formula translation
-     semantics after structural edits.
+   - Done: worksheet formula cell-coordinate and formula-text fingerprints,
+     plus an opt-in formula move translation oracle.
+   - Still needed: rendered output comparison.
 2. Extend the mutation runner beyond safe edits:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
@@ -89,6 +90,12 @@ Gap ledger:
    - Latest feature-add opt-in sweep: add-data-validation and
      add-conditional-formatting pass 14 results across 7 fixtures with only
      declared additive semantic drift.
+   - Latest feature-remove opt-in sweep: add-remove-chart now passes 7 results
+     across the pinned external-oracle pack by adding/removing a scratch-sheet
+     chart subgraph and then removing the scratch sheet in staged saves.
+   - Latest formula-translation opt-in sweep: move-formula-range now seeds a
+     formula baseline on both sides of the audit and requires observed
+     translated-formula semantic drift.
    - Latest opt-in semantic sweeps: sheet rename passes 7 results with no
      drift; first-row/first-column delete passes 14 results with expected
      conditional-formatting range drift and no unexpected package-fidelity
@@ -102,6 +109,18 @@ Gap ledger:
      image media and left cloned sheet parts behind; the delete cleanup now
      honors in-progress relationship graphs and skips parts still referenced by
      kept workbook parts.
+   - Latest drawing bugs found: scratch chart add/remove against ClosedXML
+     prefixed worksheet XML exposed unprefixed `<worksheet>`, `<drawing>`, and
+     `<legacyDrawing>` assumptions in drawing splice/remove helpers; the helpers
+     now preserve the worksheet prefix.
+   - Known open drawing edge: adding then removing a chart in an NPOI workbook
+     that already has an empty source drawing part deletes that empty drawing
+     part and sheet drawing rel. Track this as a separate source-drawing
+     preservation gap instead of hiding it under the scratch-chart no-op gate.
+   - Known open composition edge: removing a scratch chart and deleting its
+     scratch sheet in the same save can cross-delete existing chart/drawing
+     parts in chart-bearing source workbooks; the current gate stages those
+     operations while this remains tracked separately.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
