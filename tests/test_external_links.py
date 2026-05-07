@@ -328,6 +328,34 @@ def test_modify_mode_keep_links_false_drops_multiple_external_links(
     assert "externalLink+xml" not in content_types
 
 
+def test_keep_links_false_composes_with_sheet_create_rels(tmp_path: Path) -> None:
+    fixture = _build_two_external_links_fixture(tmp_path / "source_with_links.xlsx")
+    wb = wolfxl.load_workbook(fixture, modify=True, keep_links=False)
+    added = wb.create_sheet("Added")
+    added["A1"] = "kept"
+    out = tmp_path / "links_dropped_sheet_added.xlsx"
+    wb.save(out)
+    wb.close()
+
+    with zipfile.ZipFile(out, "r") as zf:
+        names = set(zf.namelist())
+        workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+        workbook_rels = zf.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        content_types = zf.read("[Content_Types].xml").decode("utf-8")
+
+    assert not any(name.startswith("xl/externalLinks/") for name in names)
+    assert "externalReferences" not in workbook_xml
+    assert "/relationships/externalLink" not in workbook_rels
+    assert "externalLink+xml" not in content_types
+    assert 'name="Added"' in workbook_xml
+    assert "worksheets/sheet2.xml" in workbook_rels
+    assert "xl/worksheets/sheet2.xml" in names
+
+    reloaded = wolfxl.load_workbook(out, read_only=True)
+    assert reloaded["Added"]["A1"].value == "kept"
+    assert reloaded._external_links == []
+
+
 def test_external_links_alias_is_same_list(fixture_path: Path) -> None:
     """``wb.external_links`` and ``wb._external_links`` return the same list.
 
