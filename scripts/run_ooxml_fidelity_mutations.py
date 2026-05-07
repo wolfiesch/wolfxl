@@ -20,10 +20,24 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_fidelity  # noqa: E402
 import wolfxl  # noqa: E402
 
-DEFAULT_MUTATIONS = ("no_op", "marker_cell")
+DEFAULT_MUTATIONS = ("no_op", "marker_cell", "style_cell")
+SUPPORTED_MUTATIONS = (*DEFAULT_MUTATIONS, "rename_first_sheet")
+PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
 MARKER_VALUE = "wolfxl_ooxml_fidelity_mutation"
+STYLE_CELL = "AA1"
+RENAMED_SHEET = "WolfXL Fidelity Rename"
 MANIFEST_NAME = "manifest.json"
+EXPECTED_ISSUE_KINDS_BY_MUTATION = {
+    # Renaming a sheet is an intentional workbook semantic change. Feature
+    # formulas and pivot cache worksheetSource sheet attrs may legitimately
+    # change to keep pointing at the same sheet under its new title.
+    "rename_first_sheet": {
+        "charts_semantic_drift",
+        "conditional_formatting_semantic_drift",
+        "pivots_semantic_drift",
+    },
+}
 
 
 @dataclass
@@ -41,6 +55,8 @@ class MutationResult:
     status: str
     issue_count: int
     issues: list[dict]
+    expected_issue_count: int
+    expected_issues: list[dict]
     before: str
     after: str
     error: str | None = None
@@ -87,6 +103,8 @@ def run_sweep(
                     status="missing_fixture",
                     issue_count=0,
                     issues=[],
+                    expected_issue_count=0,
+                    expected_issues=[],
                     before=str(fixture_path),
                     after="",
                     error=f"fixture missing: {fixture_path}",
@@ -110,7 +128,9 @@ def run_sweep(
         "output_dir": str(output_dir.resolve()),
         "mutations": list(mutations),
         "result_count": len(results),
-        "failure_count": sum(1 for result in results if result.status != "passed"),
+        "failure_count": sum(
+            1 for result in results if result.status not in PASSING_STATUSES
+        ),
         "results": [asdict(result) for result in results],
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
@@ -143,6 +163,8 @@ def _run_single_mutation(
             status="hash_mismatch",
             issue_count=0,
             issues=[],
+            expected_issue_count=0,
+            expected_issues=[],
             before=str(before_path),
             after=str(after_path),
             error=hash_error,
@@ -159,18 +181,29 @@ def _run_single_mutation(
             status="error",
             issue_count=0,
             issues=[],
+            expected_issue_count=0,
+            expected_issues=[],
             before=str(before_path),
             after=str(after_path),
             error=str(exc),
         )
 
-    issues = list(audit_report["issues"])
+    issues, expected_issues = _split_expected_issues(
+        list(audit_report["issues"]), mutation
+    )
+    status = "passed"
+    if issues:
+        status = "failed"
+    elif expected_issues:
+        status = "passed_with_expected_drift"
     return MutationResult(
         fixture=fixture_path.name,
         mutation=mutation,
-        status="passed" if not issues else "failed",
+        status=status,
         issue_count=len(issues),
         issues=issues,
+        expected_issue_count=len(expected_issues),
+        expected_issues=expected_issues,
         before=str(before_path),
         after=str(after_path),
     )
@@ -183,6 +216,18 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             pass
         elif mutation == "marker_cell":
             workbook[workbook.sheetnames[0]][MARKER_CELL] = MARKER_VALUE
+        elif mutation == "style_cell":
+            from wolfxl.styles import Font, PatternFill
+
+            cell = workbook[workbook.sheetnames[0]][STYLE_CELL]
+            cell.value = MARKER_VALUE
+            cell.font = Font(bold=True, color="FF1F4E79")
+            cell.fill = PatternFill(
+                fill_type="solid",
+                fgColor="FFEAF2F8",
+            )
+        elif mutation == "rename_first_sheet":
+            workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
         else:
             raise ValueError(f"unknown mutation: {mutation}")
         workbook.save(path)
@@ -190,6 +235,20 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         close = getattr(workbook, "close", None)
         if close is not None:
             close()
+
+
+def _split_expected_issues(
+    issues: list[dict], mutation: str
+) -> tuple[list[dict], list[dict]]:
+    expected_kinds = EXPECTED_ISSUE_KINDS_BY_MUTATION.get(mutation, set())
+    unexpected: list[dict] = []
+    expected: list[dict] = []
+    for issue in issues:
+        if issue.get("kind") in expected_kinds:
+            expected.append(issue)
+        else:
+            unexpected.append(issue)
+    return unexpected, expected
 
 
 def _assert_zip_integrity(path: Path) -> None:
@@ -210,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mutation",
         action="append",
-        choices=DEFAULT_MUTATIONS,
+        choices=SUPPORTED_MUTATIONS,
         dest="mutations",
         help="Mutation to run. May be passed multiple times.",
     )

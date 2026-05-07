@@ -43,7 +43,8 @@ _PINNED_DIR = Path(__file__).resolve().parent / "fixtures" / "external_oracle"
 _MANIFEST_NAME = "manifest.json"
 _MARKER_CELL = "Z1"
 _MARKER_VALUE = "wolfxl_external_fixture_smoke"
-_MUTATIONS = ("no_op", "marker_cell")
+_STYLE_CELL = "AA1"
+_MUTATIONS = ("no_op", "marker_cell", "style_cell")
 
 
 def _load_ooxml_audit_module() -> ModuleType:
@@ -144,6 +145,13 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
     sheet_name = workbook.sheetnames[0]
     if mutation == "marker_cell":
         workbook[sheet_name][_MARKER_CELL] = _MARKER_VALUE
+    elif mutation == "style_cell":
+        from wolfxl.styles import Font, PatternFill
+
+        cell = workbook[sheet_name][_STYLE_CELL]
+        cell.value = _MARKER_VALUE
+        cell.font = Font(bold=True, color="FF1F4E79")
+        cell.fill = PatternFill(fill_type="solid", fgColor="FFEAF2F8")
     workbook.save(work_path)
     workbook.close()
 
