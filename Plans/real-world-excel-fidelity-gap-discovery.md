@@ -22,7 +22,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not by itself a full Excel-rendered semantic validator or real-Excel corpus proof |
 | Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass. It records concrete feature keys and requires slicer/timeline evidence separately from pivot-table evidence | The current strict P0 evidence gate is green: pivot/slicer, chart/style/color, conditional-formatting, and external-link rows all have external-tool evidence, real Excel evidence, and structural mutation passes. The slicer/timeline group now includes direct timeline evidence from `real-excel-timeline-slicer.xlsx` | It only audits evidence presence; it does not prove rendered visual fidelity or broader corpus coverage |
 | App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | Microsoft Excel and LibreOffice now open/re-save all 14 active external-oracle fixtures cleanly | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class |
-| Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes each page with `pdftoppm`, and compares page images with ImageMagick RMSE. It now supports recursive fixture discovery | The current active pack has no LibreOffice-rendered pixel drift after no-op WolfXL modify-save: 14 fixtures, 0 failures, max normalized RMSE 0.0 at 96 DPI. A broader live SynthGL recursive run passed 31 of 32 workbooks with max RMSE 0.0 | It is a no-op render gate only; it does not yet compare Excel-rendered pixels, intentional structural edit renders, or interactive slicer/timeline state. The live SynthGL run still has one harness-scale timeout: `number_memory/sigman_revenue_support.xlsx` exports to a 14,926-page PDF and does not finish full-page rasterization at 96 DPI within 900 seconds |
+| Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes pages with `pdftoppm`, and compares page images with ImageMagick RMSE. It now supports recursive fixture discovery, deterministic page sampling for very large PDFs, and a byte-identical-xlsx short circuit for no-op saves | The current active pack has no LibreOffice-rendered pixel drift after no-op WolfXL modify-save: 14 fixtures, 0 failures, max normalized RMSE 0.0 at 96 DPI. A broader live SynthGL recursive run passed 31 of 32 workbooks with full render RMSE 0.0; the remaining giant workbook has exact byte-identical `.xlsx` output after no-op save. Guarded mode passes all 32 live SynthGL workbooks | It is a no-op render/package-identity gate only; it does not yet compare Excel-rendered pixels, intentional structural edit renders, or interactive slicer/timeline state. Exhaustive full-page rasterization of `number_memory/sigman_revenue_support.xlsx` is not practical at 96 DPI because it exports to a 14,926-page PDF, so guarded no-op identity is the appropriate proof for that case |
 | Broader real-file corpus sweep | `scripts/run_ooxml_fidelity_mutations.py --recursive` can now walk nested workbook trees without flattening them first. Latest live SynthGL sweep covered `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` recursively | 32 live SynthGL workbooks pass no-op, marker-cell, and style-cell modify-save audits: 96 results, 0 failures. The same 32 workbooks also pass rename-first-sheet and move-formula-range structural audits: 64 results, 0 failures | This is broader than the pinned oracle pack, but still not a full real-world Excel corpus; rendered comparison over this corpus and richer feature-aware mutations remain open |
 
 ## Risk matrix
@@ -226,15 +226,16 @@ Gap ledger:
      active 14-fixture pack passes with 14 results, 0 failures, and max
      normalized RMSE 0.0 at 96 DPI.
    - Latest broader render slice: the render comparison runner now supports
-     recursive discovery. The live SynthGL fixture tree passes no-op
-     LibreOffice-render comparison for 31 of 32 workbooks, all with max RMSE
-     0.0. The remaining workbook,
-     `number_memory/sigman_revenue_support.xlsx`, is not a visual drift
-     failure but remains unproven by exhaustive full-page raster comparison:
-     LibreOffice exports it to a 14,926-page PDF, and `pdftoppm` cannot
-     complete full 96-DPI rasterization within a 900-second per-command timeout
-     on this machine. A targeted 96-DPI sample of pages 1, 7,463, and 14,926
-     compares at RMSE 0.0.
+     recursive discovery, deterministic page sampling, and an explicit
+     byte-identical-xlsx pass for no-op saves. The live SynthGL fixture tree
+     passes no-op LibreOffice-render comparison for 31 of 32 workbooks, all
+     with max RMSE 0.0. The remaining workbook,
+     `number_memory/sigman_revenue_support.xlsx`, exports to a 14,926-page
+     PDF, so exhaustive full-page rasterization is not practical at 96 DPI.
+     It is not a visual drift failure: the before/after `.xlsx` files are
+     byte-identical after no-op save, and a targeted 96-DPI sample of pages 1,
+     7,463, and 14,926 compares at RMSE 0.0. Guarded recursive render mode now
+     passes all 32 live SynthGL workbooks.
    - Latest broader-corpus evidence slice: `scripts/run_ooxml_fidelity_mutations.py`
      now supports `--recursive` discovery for nested fixture trees. The live
      SynthGL fixture tree at

@@ -108,8 +108,13 @@ def test_render_compare_reports_rmse_threshold_failure(tmp_path: Path, monkeypat
     )
     monkeypatch.setattr(
         render_module,
-        "_rasterize_pdf",
-        lambda _pdftoppm, pdf, _prefix, _density, _timeout: [before_page]
+        "_pdf_page_count",
+        lambda _pdf: 1,
+    )
+    monkeypatch.setattr(
+        render_module,
+        "_rasterize_pdf_pages",
+        lambda _pdftoppm, pdf, _prefix, _pages, _density, _timeout: [before_page]
         if pdf == before_pdf
         else [after_page],
     )
@@ -131,6 +136,104 @@ def test_render_compare_reports_rmse_threshold_failure(tmp_path: Path, monkeypat
     assert result["status"] == "failed"
     assert result["max_normalized_rmse"] == 0.25
     assert "render drift above threshold" in result["message"]
+
+
+def test_render_compare_samples_large_pdfs_when_page_limit_set(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "large.xlsx")
+    before_pdf = tmp_path / "before.pdf"
+    after_pdf = tmp_path / "after.pdf"
+    before_pdf.write_bytes(b"%PDF-before")
+    after_pdf.write_bytes(b"%PDF-after")
+    before_page = tmp_path / "before-1.png"
+    after_page = tmp_path / "after-1.png"
+    before_page.write_bytes(b"before")
+    after_page.write_bytes(b"after")
+    seen_pages: list[list[int]] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_find_libreoffice", lambda: "soffice"
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+    monkeypatch.setattr(
+        render_module,
+        "_export_pdf",
+        lambda _soffice, src, _outdir, _timeout: before_pdf
+        if src.name.startswith("before-")
+        else after_pdf,
+    )
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 100)
+
+    def fake_rasterize(_pdftoppm, pdf, _prefix, pages, _density, _timeout):
+        seen_pages.append(pages)
+        return [before_page] if pdf == before_pdf else [after_page]
+
+    monkeypatch.setattr(render_module, "_rasterize_pdf_pages", fake_rasterize)
+    monkeypatch.setattr(
+        render_module,
+        "_normalized_rmse",
+        lambda _compare_cmd, _before_page, _after_page, _timeout: 0.0,
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        max_pages_per_fixture=3,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "sampled_passed"
+    assert result["page_count"] == 100
+    assert result["compared_page_count"] == 3
+    assert result["compared_pages"] == [1, 50, 100]
+    assert seen_pages == [[1, 50, 100], [1, 50, 100]]
+
+
+def test_render_compare_can_pass_byte_identical_no_op_without_render(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "simple.xlsx")
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_find_libreoffice", lambda: "soffice"
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+    monkeypatch.setattr(
+        render_module,
+        "_export_pdf",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("render should be skipped")
+        ),
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        pass_byte_identical_xlsx=True,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed"
+    assert result["max_normalized_rmse"] == 0.0
+    assert "byte-identical xlsx" in result["message"]
+
+
+def test_sample_page_numbers_are_stable() -> None:
+    assert render_module._sample_page_numbers(1, 3) == [1]
+    assert render_module._sample_page_numbers(100, 1) == [1]
+    assert render_module._sample_page_numbers(100, 2) == [1, 100]
+    assert render_module._sample_page_numbers(100, 5) == [1, 26, 50, 75, 100]
 
 
 def test_normalized_rmse_parses_imagemagick_metric(tmp_path: Path, monkeypatch) -> None:

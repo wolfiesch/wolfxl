@@ -27,7 +27,7 @@ import run_ooxml_app_smoke  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
 import wolfxl  # noqa: E402
 
-PASSING_STATUSES = {"passed", "skipped"}
+PASSING_STATUSES = {"passed", "sampled_passed", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
 
@@ -39,6 +39,8 @@ class RenderCompareResult:
     before_pdf: str | None
     after_pdf: str | None
     page_count: int | None
+    compared_page_count: int | None
+    compared_pages: list[int]
     max_normalized_rmse: float | None
     message: str
 
@@ -50,6 +52,8 @@ def run_render_compare(
     density: int = 96,
     max_normalized_rmse: float = 0.001,
     recursive: bool = False,
+    max_pages_per_fixture: int | None = None,
+    pass_byte_identical_xlsx: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -67,6 +71,8 @@ def run_render_compare(
                 timeout=timeout,
                 density=density,
                 max_normalized_rmse=max_normalized_rmse,
+                max_pages_per_fixture=max_pages_per_fixture,
+                pass_byte_identical_xlsx=pass_byte_identical_xlsx,
             )
         )
 
@@ -75,6 +81,8 @@ def run_render_compare(
         "output_dir": str(output_dir.resolve()),
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
+        "max_pages_per_fixture": max_pages_per_fixture,
+        "pass_byte_identical_xlsx": pass_byte_identical_xlsx,
         "recursive": recursive,
         "result_count": len(results),
         "failure_count": sum(
@@ -96,6 +104,8 @@ def _compare_fixture(
     timeout: int,
     density: int,
     max_normalized_rmse: float,
+    max_pages_per_fixture: int | None,
+    pass_byte_identical_xlsx: bool,
 ) -> RenderCompareResult:
     if not fixture_path.is_file():
         return RenderCompareResult(
@@ -104,6 +114,8 @@ def _compare_fixture(
             before_pdf=None,
             after_pdf=None,
             page_count=None,
+            compared_page_count=None,
+            compared_pages=[],
             max_normalized_rmse=None,
             message=f"fixture missing: {fixture_path}",
         )
@@ -116,6 +128,8 @@ def _compare_fixture(
                 before_pdf=None,
                 after_pdf=None,
                 page_count=None,
+                compared_page_count=None,
+                compared_pages=[],
                 max_normalized_rmse=None,
                 message=(
                     f"sha256 mismatch: expected {expected_sha256}, "
@@ -151,27 +165,63 @@ def _compare_fixture(
             if close is not None:
                 close()
 
+        if pass_byte_identical_xlsx and _files_identical(before_xlsx, after_xlsx):
+            return RenderCompareResult(
+                fixture=fixture_label,
+                status="passed",
+                before_pdf=None,
+                after_pdf=None,
+                page_count=None,
+                compared_page_count=None,
+                compared_pages=[],
+                max_normalized_rmse=0.0,
+                message="byte-identical xlsx after no-op save; render equivalence inferred",
+            )
+
         before_pdf = _export_pdf(soffice, before_xlsx, work / "before-pdf", timeout)
         after_pdf = _export_pdf(soffice, after_xlsx, work / "after-pdf", timeout)
-        before_pages = _rasterize_pdf(
-            pdftoppm, before_pdf, work / "before-pages", density, timeout
-        )
-        after_pages = _rasterize_pdf(
-            pdftoppm, after_pdf, work / "after-pages", density, timeout
-        )
-        if len(before_pages) != len(after_pages):
+        before_page_count = _pdf_page_count(before_pdf)
+        after_page_count = _pdf_page_count(after_pdf)
+        if before_page_count != after_page_count:
             return RenderCompareResult(
                 fixture=fixture_label,
                 status="failed",
                 before_pdf=str(before_pdf),
                 after_pdf=str(after_pdf),
                 page_count=None,
+                compared_page_count=None,
+                compared_pages=[],
                 max_normalized_rmse=None,
                 message=(
-                    f"page-count mismatch: before={len(before_pages)} "
-                    f"after={len(after_pages)}"
+                    f"page-count mismatch: before={before_page_count} "
+                    f"after={after_page_count}"
                 ),
             )
+        sampled = (
+            max_pages_per_fixture is not None
+            and before_page_count > max_pages_per_fixture
+        )
+        compared_pages = (
+            _sample_page_numbers(before_page_count, max_pages_per_fixture)
+            if sampled
+            else list(range(1, before_page_count + 1))
+        )
+        before_pages = _rasterize_pdf_pages(
+            pdftoppm,
+            before_pdf,
+            work / "before-pages",
+            compared_pages,
+            density,
+            timeout,
+        )
+        after_pages = _rasterize_pdf_pages(
+            pdftoppm,
+            after_pdf,
+            work / "after-pages",
+            compared_pages,
+            density,
+            timeout,
+        )
         max_rmse = 0.0
         for before_page, after_page in zip(before_pages, after_pages, strict=True):
             max_rmse = max(
@@ -185,6 +235,8 @@ def _compare_fixture(
             before_pdf=None,
             after_pdf=None,
             page_count=None,
+            compared_page_count=None,
+            compared_pages=[],
             max_normalized_rmse=None,
             message=str(exc)[:1000],
         )
@@ -195,6 +247,12 @@ def _compare_fixture(
             f"render drift above threshold: max_normalized_rmse={max_rmse:.8f} "
             f"threshold={max_normalized_rmse:.8f}"
         )
+    elif sampled:
+        status = "sampled_passed"
+        message = (
+            f"sampled ok: compared {len(compared_pages)} of {before_page_count} pages; "
+            f"max_normalized_rmse={max_rmse:.8f}"
+        )
     else:
         status = "passed"
         message = f"ok: max_normalized_rmse={max_rmse:.8f}"
@@ -203,7 +261,9 @@ def _compare_fixture(
         status=status,
         before_pdf=str(before_pdf),
         after_pdf=str(after_pdf),
-        page_count=len(before_pages),
+        page_count=before_page_count,
+        compared_page_count=len(compared_pages),
+        compared_pages=compared_pages,
         max_normalized_rmse=max_rmse,
         message=message,
     )
@@ -216,6 +276,8 @@ def _skipped(fixture: str, message: str) -> RenderCompareResult:
         before_pdf=None,
         after_pdf=None,
         page_count=None,
+        compared_page_count=None,
+        compared_pages=[],
         max_normalized_rmse=None,
         message=message,
     )
@@ -255,6 +317,20 @@ def _export_pdf(soffice: str, src: Path, outdir: Path, timeout: int) -> Path:
     return pdf
 
 
+def _files_identical(left: Path, right: Path) -> bool:
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    chunk_size = 1024 * 1024
+    with left.open("rb") as left_file, right.open("rb") as right_file:
+        while True:
+            left_chunk = left_file.read(chunk_size)
+            right_chunk = right_file.read(chunk_size)
+            if left_chunk != right_chunk:
+                return False
+            if not left_chunk:
+                return True
+
+
 def _rasterize_pdf(
     pdftoppm: str,
     pdf: Path,
@@ -279,6 +355,90 @@ def _rasterize_pdf(
     if not pages:
         raise RuntimeError(f"pdftoppm produced no page images for {pdf}")
     return pages
+
+
+def _rasterize_pdf_pages(
+    pdftoppm: str,
+    pdf: Path,
+    prefix: Path,
+    pages: list[int],
+    density: int,
+    timeout: int,
+) -> list[Path]:
+    if not pages:
+        raise RuntimeError(f"no pages selected for {pdf}")
+    if pages == list(range(1, len(pages) + 1)):
+        return _rasterize_pdf(pdftoppm, pdf, prefix, density, timeout)
+
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    for stale in prefix.parent.glob(f"{prefix.name}-*.png"):
+        stale.unlink()
+    out: list[Path] = []
+    for page in pages:
+        page_prefix = prefix.parent / f"{prefix.name}-{page}"
+        proc = subprocess.run(
+            [
+                pdftoppm,
+                "-png",
+                "-r",
+                str(density),
+                "-f",
+                str(page),
+                "-l",
+                str(page),
+                str(pdf),
+                str(page_prefix),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"pdftoppm failed for {pdf.name} page {page}: "
+                f"exit {proc.returncode}: {proc.stderr[:500]}"
+            )
+        rendered = sorted(page_prefix.parent.glob(f"{page_prefix.name}-*.png"))
+        if not rendered:
+            raise RuntimeError(f"pdftoppm produced no page image for {pdf} page {page}")
+        out.append(rendered[-1])
+    return out
+
+
+def _pdf_page_count(pdf: Path) -> int:
+    pdfinfo = shutil.which("pdfinfo")
+    if pdfinfo is None:
+        raise RuntimeError("pdfinfo not found")
+    proc = subprocess.run(
+        [pdfinfo, str(pdf)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"pdfinfo failed for {pdf.name}: exit {proc.returncode}: {proc.stderr[:500]}"
+        )
+    match = re.search(r"^Pages:\s+(\d+)\s*$", proc.stdout, re.MULTILINE)
+    if match is None:
+        raise RuntimeError(f"could not parse pdfinfo page count for {pdf}")
+    return int(match.group(1))
+
+
+def _sample_page_numbers(page_count: int, max_pages: int | None) -> list[int]:
+    if max_pages is None or page_count <= max_pages:
+        return list(range(1, page_count + 1))
+    if max_pages <= 0:
+        raise ValueError("max_pages_per_fixture must be positive")
+    if max_pages == 1:
+        return [1]
+    if max_pages == 2:
+        return [1, page_count]
+    step = (page_count - 1) / (max_pages - 1)
+    pages = {1, page_count}
+    for idx in range(max_pages):
+        pages.add(round(1 + idx * step))
+    return sorted(pages)
 
 
 def _normalized_rmse(
@@ -329,6 +489,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--density", type=int, default=96)
     parser.add_argument("--max-normalized-rmse", type=float, default=0.001)
     parser.add_argument(
+        "--max-pages-per-fixture",
+        type=int,
+        default=None,
+        help=(
+            "When a rendered PDF has more pages than this, compare a deterministic "
+            "sample instead of rasterizing every page."
+        ),
+    )
+    parser.add_argument(
+        "--pass-byte-identical-xlsx",
+        action="store_true",
+        help=(
+            "Return pass before rendering when the no-op saved workbook is "
+            "byte-identical to the original copy."
+        ),
+    )
+    parser.add_argument(
         "--recursive",
         action="store_true",
         help="Discover .xlsx fixtures recursively when no manifest.json is present.",
@@ -342,6 +519,8 @@ def main(argv: list[str] | None = None) -> int:
         density=args.density,
         max_normalized_rmse=args.max_normalized_rmse,
         recursive=args.recursive,
+        max_pages_per_fixture=args.max_pages_per_fixture,
+        pass_byte_identical_xlsx=args.pass_byte_identical_xlsx,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
