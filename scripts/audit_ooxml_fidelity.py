@@ -32,6 +32,7 @@ FEATURE_PART_PREFIXES = {
     "comment": ("xl/comments", "xl/threadedComments/", "xl/persons/"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
     "connection": ("xl/connections.xml",),
+    "custom_property": ("xl/customProperty",),
     "custom_xml": ("customXml/", "xl/customXml/"),
     "data_model": ("xl/model/",),
     "doc_metadata": ("docMetadata/",),
@@ -969,6 +970,7 @@ def _workbook_global_fingerprint(
         if part == "xl/vbaProject.bin"
         or part.startswith("customXml/")
         or part.startswith("xl/customXml/")
+        or part.startswith("xl/customProperty")
         or part.startswith("xl/printerSettings/")
     )
     if global_parts:

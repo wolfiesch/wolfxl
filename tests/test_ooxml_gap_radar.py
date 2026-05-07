@@ -188,6 +188,36 @@ def test_gap_radar_classifies_real_world_metadata_and_extension_surfaces(
     assert report["unknown_extension_uri_count"] == 0
 
 
+def test_gap_radar_classifies_powerpivot_custom_property_surfaces(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "powerpivot.xlsx"
+    _write_powerpivot_custom_property_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "powerpivot",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uri_count"] == 0
+
+
 def _write_plain_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -216,6 +246,79 @@ def _write_plain_fixture(path: Path) -> None:
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>""",
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_powerpivot_custom_property_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/xl/customProperty1.bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.customProperty"/>
+  <Override PartName="/xl/pivotTables/pivotTable1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>
+  <Override PartName="/xl/pivotCache/pivotCacheDefinition1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>
+  <Override PartName="/xl/slicerCaches/slicerCache1.xml" ContentType="application/vnd.ms-excel.slicerCache+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+  <extLst>
+    <ext uri="{841E416B-1EF1-43b6-AB56-02D37102CBD5}"><pivotCaches/></ext>
+    <ext uri="{983426D0-5260-488c-9760-48F4B6AC55F4}"><pivotTableReferences/></ext>
+  </extLst>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>""",
+        "xl/worksheets/_rels/sheet1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customProperty" Target="../customProperty1.bin"/>
+</Relationships>""",
+        "xl/theme/theme1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office"/>""",
+        "xl/theme/_rels/theme1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.jpeg"/>
+</Relationships>""",
+        "xl/pivotTables/pivotTable1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <extLst>
+    <ext uri="{44433962-1CF7-4059-B4EE-95C3D5FFCF73}"><pivotTableData/></ext>
+    <ext uri="{C510F80B-63DE-4267-81D5-13C33094786E}"><pivotTableServerFormats/></ext>
+  </extLst>
+</pivotTableDefinition>""",
+        "xl/pivotCache/pivotCacheDefinition1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <extLst><ext uri="{ABF5C744-AB39-4b91-8756-CFA1BBC848D5}"><pivotCacheIdVersion/></ext></extLst>
+</pivotCacheDefinition>""",
+        "xl/slicerCaches/slicerCache1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <extLst><ext uri="{03082B11-2C62-411c-B77F-237D8FCFBE4C}"><slicerCachePivotTables/></ext></extLst>
+</slicerCacheDefinition>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+        "xl/customProperty1.bin": b"<Connections/>",
+        "xl/media/image1.jpeg": b"jpeg",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():

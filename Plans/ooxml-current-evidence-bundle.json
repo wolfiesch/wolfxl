@@ -386,6 +386,64 @@
       ]
     },
     {
+      "name": "powerpivot_contoso_sidecar_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso --mutation marker_cell --mutation copy_first_sheet --mutation move_formula_range > /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json",
+      "expect": [
+        {"path": "result_count", "equals": 3},
+        {"path": "failure_count", "equals": 0},
+        {"path": "mutations", "equals": ["marker_cell", "copy_first_sheet", "move_formula_range"]}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_excel_app_open",
+      "path": "/tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker --app excel --timeout 120 --mutation source --mutation marker_cell > /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
+      "expect": [
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source", "marker_cell"]}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_excel_render",
+      "path": "/tmp/wolfxl-render-excel-powerpivot-contoso-marker.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-render-excel-powerpivot-contoso-marker --render-engine excel --timeout 180 --max-pages-per-fixture 2 --mutation marker_cell > /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["marker_cell"]}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_coverage",
+      "path": "/tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/powerpivot_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json --app-report /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json --render-report /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json > /tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "surfaces.powerpivot_data_model_preservation.status", "equals": "clear"},
+        {"path": "surfaces.powerpivot_data_model_preservation.structural_mutation_fixtures", "length_at_least": 1},
+        {"path": "surfaces.powerpivot_data_model_preservation.intentional_app_open_fixtures", "length_at_least": 1},
+        {"path": "surfaces.powerpivot_data_model_preservation.intentional_render_fixtures", "length_at_least": 1}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-powerpivot-contoso-sidecar.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py tests/fixtures/powerpivot_variants --json --strict > /tmp/wolfxl-gap-radar-powerpivot-contoso-sidecar.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
