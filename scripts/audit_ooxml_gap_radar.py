@@ -53,6 +53,7 @@ CORE_REL_TYPES = {
 }
 
 KNOWN_EXTENSION_URIS = {
+    "{02D57815-91ED-43cb-92C2-25804820EDAC}",
     "{05A4C25C-085E-4340-85A3-A5531E510DB2}",
     "{0605FD5F-26C8-4aeb-8148-2DB25E43C511}",
     "{140A7094-0E35-4892-8432-C4D2E57EDEB5}",
@@ -69,6 +70,7 @@ KNOWN_EXTENSION_URIS = {
     "{79F54976-1DA5-4618-B147-4CDE4B953A38}",
     "{7E03D99C-DC04-49d9-9315-930204A7B6E9}",
     "{876F7934-8845-4945-9796-88D515C7AA90}",
+    "{909E8E84-426E-40DD-AFC4-6F175D3DCCD1}",
     "{91240B29-F687-4F45-9708-019B960494DF}",
     "{9260A510-F301-46a8-8635-F512D64BE5F5}",
     "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}",
@@ -76,6 +78,7 @@ KNOWN_EXTENSION_URIS = {
     "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}",
     "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}",
     "{B97F6D7D-B522-45F9-BDA1-12C45D357490}",
+    "{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}",
     "{BBE1A952-AA13-448e-AADC-164F8A28A991}",
     "{C3380CC4-5D6E-409C-BE32-E72D297353CC}",
     "{CE6537A1-D6FC-4f65-9D91-7224C49458BB}",
@@ -87,10 +90,11 @@ KNOWN_EXTENSION_URIS = {
     "{F057638F-6D5F-4e77-A914-E7F072B9BCA8}",
     "{FCE2AD5D-F65C-4FA6-A056-5C36A1767C68}",
     "{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}",
+    "{56B9EC1D-385E-4148-901F-78D8002777C0}",
 }
 
 
-def audit_gap_radar(fixture_dir: Path) -> dict:
+def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
     fixture_dir = fixture_dir.resolve()
     fixtures = []
     unknown_part_fixtures: dict[str, set[str]] = {}
@@ -98,7 +102,9 @@ def audit_gap_radar(fixture_dir: Path) -> dict:
     unknown_content_type_fixtures: dict[str, set[str]] = {}
     unknown_extension_uri_fixtures: dict[str, set[str]] = {}
 
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
+    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
+        fixture_dir, recursive=recursive
+    ):
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
@@ -123,6 +129,7 @@ def audit_gap_radar(fixture_dir: Path) -> dict:
     return {
         "fixture_dir": str(fixture_dir),
         "fixture_count": len(fixtures),
+        "recursive": recursive,
         "fixtures": fixtures,
         "unknown_part_families": _sorted_mapping(unknown_part_fixtures),
         "unknown_relationship_types": _sorted_mapping(unknown_rel_fixtures),
@@ -241,6 +248,7 @@ def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
         ("comments", "threadedComment", "person", "vmlDrawing"),
         ("drawing", "image", "printerSettings"),
         ("externalLink", "externalLinkPath", "xlPathMissing"),
+        ("Python", "sheetMetadata"),
         ("table",),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
         ("powerPivotData", "model"),
@@ -265,6 +273,11 @@ def _sorted_mapping(mapping: dict[str, set[str]]) -> dict[str, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixture_dir", type=Path)
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Discover .xlsx fixtures recursively when no manifest.json is present.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     parser.add_argument(
         "--strict",
@@ -273,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    report = audit_gap_radar(args.fixture_dir)
+    report = audit_gap_radar(args.fixture_dir, recursive=args.recursive)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

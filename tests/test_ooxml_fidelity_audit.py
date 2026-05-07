@@ -261,6 +261,24 @@ def test_detects_workbook_global_package_payload_drift(tmp_path: Path) -> None:
     )
 
 
+def test_detects_python_and_sheet_metadata_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_python_metadata_entries("import pandas as pd", "1"))
+    after_entries = _base_entries()
+    after_entries.update(_python_metadata_entries("import polars as pl", "0"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+    kinds = {issue["kind"] for issue in report["issues"]}
+
+    assert "python_semantic_drift" in kinds
+    assert "sheet_metadata_semantic_drift" in kinds
+
+
 def test_detects_workbook_connection_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -1001,6 +1019,40 @@ def _workbook_global_package_entries(vba_payload: bytes, custom_value: str) -> d
         '  <Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>\n'
         '  <Override PartName="/customXml/item1.xml" ContentType="application/xml"/>\n'
         '  <Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>\n'
+        "</Types>",
+    )
+    return entries
+
+
+def _python_metadata_entries(code: str, dynamic: str) -> dict[str, str]:
+    entries = {
+        "xl/python.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<python xmlns="http://schemas.microsoft.com/office/spreadsheetml/2023/python">
+  <environmentDefinition id="{{11111111-2222-3333-4444-555555555555}}">
+    <initialization><code>{code}</code></initialization>
+  </environmentDefinition>
+</python>""",
+        "xl/metadata.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">
+  <futureMetadata name="XLDAPR" count="1">
+    <bk><extLst><ext uri="{{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}}">
+      <xda:dynamicArrayProperties fDynamic="{dynamic}" fCollapsed="0"/>
+    </ext></extLst></bk>
+  </futureMetadata>
+</metadata>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2023/09/relationships/Python" Target="python.xml"/>
+</Relationships>""",
+    }
+    entries["[Content_Types].xml"] = _base_entries()["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Override PartName="/xl/python.xml" ContentType="application/vnd.ms-excel.python+xml"/>\n'
+        '  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>\n'
         "</Types>",
     )
     return entries

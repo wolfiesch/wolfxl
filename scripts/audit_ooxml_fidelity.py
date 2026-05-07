@@ -40,6 +40,8 @@ FEATURE_PART_PREFIXES = {
     "image_media": ("xl/media/",),
     "pivot": ("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"),
     "printer_settings": ("xl/printerSettings/",),
+    "python": ("xl/python.xml",),
+    "sheet_metadata": ("xl/metadata.xml",),
     "slicer": ("xl/slicers/", "xl/slicerCaches/"),
     "table": ("xl/tables/",),
     "timeline": ("xl/timelines/", "xl/timelineCaches/"),
@@ -399,6 +401,8 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "external_links": _external_link_fingerprint(archive, parts),
         "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
+        "python": _xml_part_fingerprint(archive, parts, ("xl/python.xml",)),
+        "sheet_metadata": _xml_part_fingerprint(archive, parts, ("xl/metadata.xml",)),
         "slicers": _slicer_fingerprint(archive, parts),
         "style_theme": _style_theme_fingerprint(archive, parts),
         "structured_references": _structured_reference_fingerprint(archive, parts),
@@ -704,6 +708,24 @@ def _extension_payload_fingerprint(
         extensions = _xml_extensions(root)
         if extensions:
             out[part] = extensions
+    return out
+
+
+def _xml_part_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str], part_names: tuple[str, ...]
+) -> dict[str, object]:
+    rels_by_owner = _relationships_by_owner(archive)
+    out: dict[str, object] = {}
+    for part in part_names:
+        if part not in parts:
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("xml", _xml_tree_fingerprint(root)),
+            ("rels", rels_by_owner.get(part, [])),
+        ]
     return out
 
 
