@@ -307,6 +307,44 @@ def test_generic_extension_payload_allows_added_copied_parts(tmp_path: Path) -> 
     )
 
 
+def test_detects_drawing_comment_object_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_drawing_object_entries(anchor_row="0", media=b"image-a"))
+    after_entries = dict(before_entries)
+    after_entries["xl/drawings/drawing1.xml"] = _drawing_anchor_xml("1")
+    after_entries["xl/media/image1.png"] = b"image-b"
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "drawing_objects_semantic_drift" for issue in report["issues"])
+
+
+def test_drawing_comment_object_fingerprint_allows_added_copied_parts(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_drawing_object_entries(anchor_row="0", media=b"image-a"))
+    after_entries = dict(before_entries)
+    after_entries["xl/drawings/drawing2.xml"] = _drawing_anchor_xml("0")
+    after_entries["xl/media/image2.png"] = b"image-a"
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(
+        issue["kind"] == "drawing_objects_semantic_drift" for issue in report["issues"]
+    )
+
+
 def test_fingerprints_data_model_content_default_and_workbook_relationship(
     tmp_path: Path,
 ) -> None:
@@ -885,6 +923,46 @@ def _drawing_extension_xml(creation_id: str) -> str:
         </xdr:cNvPr>
       </xdr:nvSpPr>
     </xdr:sp>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>"""
+
+
+def _drawing_object_entries(anchor_row: str, media: bytes) -> dict[str, str | bytes]:
+    entries = {
+        "xl/drawings/drawing1.xml": _drawing_anchor_xml(anchor_row),
+        "xl/media/image1.png": media,
+        "xl/comments1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <authors><author>WolfXL</author></authors>
+  <commentList><comment ref="A1" authorId="0"><text><t>Original note</t></text></comment></commentList>
+</comments>""",
+        "xl/drawings/commentsDrawing1.vml": """<?xml version="1.0" encoding="UTF-8"?>
+<xml xmlns:v="urn:schemas-microsoft-com:vml">
+  <v:shape id="_x0000_s1025" type="#_x0000_t202"/>
+</xml>""",
+        "xl/embeddings/oleObject1.bin": b"ole-object",
+    }
+    entries["[Content_Types].xml"] = _base_entries()["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Default Extension="png" ContentType="image/png"/>\n'
+        '  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>\n'
+        '  <Override PartName="/xl/drawings/drawing1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>\n'
+        '  <Override PartName="/xl/comments1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>\n'
+        "</Types>",
+    )
+    return entries
+
+
+def _drawing_anchor_xml(anchor_row: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:twoCellAnchor>
+    <xdr:from><xdr:col>0</xdr:col><xdr:row>{anchor_row}</xdr:row></xdr:from>
+    <xdr:to><xdr:col>2</xdr:col><xdr:row>4</xdr:row></xdr:to>
+    <xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1"/></xdr:nvPicPr></xdr:pic>
   </xdr:twoCellAnchor>
 </xdr:wsDr>"""
 

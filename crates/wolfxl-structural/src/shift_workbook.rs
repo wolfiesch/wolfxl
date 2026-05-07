@@ -542,12 +542,54 @@ mod tests {
     }
 
     #[test]
+    fn vml_shift_does_not_match_shapetype_as_shape() {
+        let vml = r#"<xml><v:shapetype id="_x0000_t202"/><v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 5, 0, 2, 0, 7, 0"));
+    }
+
+    #[test]
+    fn shifts_unprefixed_vml_shape_anchor() {
+        let vml = r#"<xml><shapetype id="_x0000_t202"/><shape><ClientData><Anchor>0, 0, 4, 0, 2, 0, 6, 0</Anchor></ClientData></shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<shape>"));
+        assert!(s.contains("<Anchor>0, 0, 5, 0, 2, 0, 7, 0</Anchor>"));
+    }
+
+    #[test]
     fn drops_vml_shape_when_anchor_tombstoned() {
         let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 4, 0</x:Anchor></x:ClientData></v:shape>"#;
         let p = ShiftPlan::delete(Axis::Row, 5, 1);
         let out = shift_vml_xml(vml.as_bytes(), &p);
         let s = String::from_utf8_lossy(&out);
         assert!(!s.contains("v:shape"));
+    }
+
+    #[test]
+    fn shrinks_vml_row_anchor_when_bottom_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 3, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Row, 7, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 3, 0, 2, 0, 5, 0"));
+    }
+
+    #[test]
+    fn shrinks_vml_col_anchor_when_right_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>1, 0, 3, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Col, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("1, 0, 3, 0, 3, 0, 6, 0"));
     }
 
     #[test]

@@ -248,7 +248,7 @@ def _audit_semantic_fingerprints(
         if not before_fingerprint:
             continue
         after_fingerprint = after.semantic_fingerprints.get(feature, {})
-        if feature == "extensions":
+        if feature in {"drawing_objects", "extensions"}:
             after_fingerprint = {
                 part: after_fingerprint.get(part)
                 for part in before_fingerprint
@@ -394,6 +394,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "connections": _connection_fingerprint(archive, parts),
         "data_model": _data_model_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
+        "drawing_objects": _drawing_object_fingerprint(archive, parts),
         "extensions": _extension_payload_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
         "page_setup": _page_setup_fingerprint(archive, parts),
@@ -621,6 +622,44 @@ def _data_model_fingerprint(
             for part in model_parts
         ],
     }
+    return out
+
+
+def _drawing_object_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, object]:
+    out: dict[str, object] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    for part in sorted(parts):
+        if not part.startswith(
+            (
+                "xl/drawings/",
+                "xl/comments",
+                "xl/threadedComments/",
+                "xl/persons/",
+                "xl/media/",
+                "xl/embeddings/",
+                "xl/ctrlProps/",
+                "xl/activeX/",
+            )
+        ):
+            continue
+        if part.endswith(".rels"):
+            continue
+        if part.endswith((".xml", ".vml")):
+            root = _read_xml_or_none(archive, part)
+            if root is None:
+                continue
+            out[part] = [
+                ("xml", _xml_tree_fingerprint(root)),
+                ("rels", rels_by_owner.get(part, [])),
+            ]
+        else:
+            payload = archive.read(part)
+            out[part] = [
+                ("bytes", len(payload), hashlib.sha256(payload).hexdigest()),
+                ("rels", rels_by_owner.get(part, [])),
+            ]
     return out
 
 

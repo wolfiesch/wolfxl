@@ -131,7 +131,7 @@ SURFACES = {
     "drawings_comments_embedded_objects": {
         "label": "Drawings / comments / embedded objects",
         "feature_keys": ("drawing", "comment", "image_media", "embedded_object"),
-        "semantic_keys": (),
+        "semantic_keys": ("drawing_objects",),
         "required_feature_groups": {
             "drawing": ("drawing",),
             "comment": ("comment",),
@@ -139,10 +139,9 @@ SURFACES = {
             "embedded_object": ("embedded_object",),
         },
         "structural_mutations": (
+            "marker_cell",
             "copy_first_sheet",
             "rename_first_sheet",
-            "delete_first_row",
-            "delete_first_col",
         ),
     },
     "workbook_global_state": {
@@ -351,6 +350,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "conditional_formatting": "conditional_formatting",
         "connections": "connection",
         "data_model": "data_model",
+        "drawing_objects": "drawing_object",
         "external_links": "external_link",
         "extensions": "extension_payload",
         "page_setup": "page_setup",
