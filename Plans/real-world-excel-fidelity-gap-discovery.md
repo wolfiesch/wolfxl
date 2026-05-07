@@ -230,9 +230,11 @@ Gap ledger:
      LibreOffice-render comparison for 31 of 32 workbooks, all with max RMSE
      0.0. The remaining workbook,
      `number_memory/sigman_revenue_support.xlsx`, is not a visual drift
-     failure but remains unproven by this gate: LibreOffice exports it to a
-     14,926-page PDF, and `pdftoppm` cannot complete full 96-DPI rasterization
-     within a 900-second per-command timeout on this machine.
+     failure but remains unproven by exhaustive full-page raster comparison:
+     LibreOffice exports it to a 14,926-page PDF, and `pdftoppm` cannot
+     complete full 96-DPI rasterization within a 900-second per-command timeout
+     on this machine. A targeted 96-DPI sample of pages 1, 7,463, and 14,926
+     compares at RMSE 0.0.
    - Latest broader-corpus evidence slice: `scripts/run_ooxml_fidelity_mutations.py`
      now supports `--recursive` discovery for nested fixture trees. The live
      SynthGL fixture tree at
