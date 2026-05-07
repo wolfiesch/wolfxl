@@ -217,6 +217,34 @@
       ]
     },
     {
+      "name": "umya_test_files_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-umya-test-files-classified.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --json --strict > /tmp/wolfxl-gap-radar-umya-test-files-classified.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 61},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "umya_test_files_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-umya-test-files.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --json > /tmp/wolfxl-corpus-buckets-umya-test-files.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 63},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 50},
+        {"path": "bucket_fixtures.external_tool_authored", "length_at_least": 9},
+        {"path": "bucket_fixtures.macro_vba", "length_at_least": 2},
+        {"path": "bucket_fixtures.external_link", "length_at_least": 2},
+        {"path": "bucket_fixtures.chart_or_chart_style", "length_at_least": 6},
+        {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 2}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",

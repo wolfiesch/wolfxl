@@ -158,6 +158,36 @@ def test_gap_radar_classifies_python_and_sheet_metadata_surface(tmp_path: Path) 
     assert report["unknown_extension_uri_count"] == 0
 
 
+def test_gap_radar_classifies_real_world_metadata_and_extension_surfaces(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "metadata.xlsx"
+    _write_metadata_extension_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "metadata",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uri_count"] == 0
+
+
 def _write_plain_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -188,6 +218,72 @@ def _write_plain_fixture(path: Path) -> None:
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_metadata_extension_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="wmf" ContentType="image/x-wmf"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/theme/theme.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/docMetadata/LabelInfo.xml" ContentType="application/vnd.ms-office.classificationlabels+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels" Target="docMetadata/LabelInfo.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail" Target="docProps/thumbnail.wmf"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2018/relationships/jsaProject" Target="jsaProject.bin"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <sheetData/>
+  <extLst>
+    <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"><x14:dataValidations count="0"/></ext>
+  </extLst>
+</worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+        "xl/theme/theme.xml": """<?xml version="1.0" encoding="UTF-8"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office"/>""",
+        "xl/drawings/drawing1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main">
+  <xdr:extLst>
+    <xdr:ext uri="{AF507438-7753-43E0-B8FC-AC1667EBCBE1}"><a14:hiddenEffects/></xdr:ext>
+    <xdr:ext uri="{53640926-AAD7-44D8-BBD7-CCE9431645EC}"><a14:shadowObscured/></xdr:ext>
+  </xdr:extLst>
+</xdr:wsDr>""",
+        "xl/charts/chart1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+              xmlns:c16="http://schemas.microsoft.com/office/drawing/2014/chart">
+  <c:extLst><c:ext uri="{E28EC0CA-F0BB-4C9C-879D-F8772B89E7AC}"><c16:pivotOptions16/></c:ext></c:extLst>
+</c:chartSpace>""",
+        "docMetadata/LabelInfo.xml": """<?xml version="1.0" encoding="UTF-8"?><LabelInfo/>""",
+        "docProps/thumbnail.wmf": b"wmf",
+        "xl/jsaProject.bin": b"jsa",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("docProps/", b"")
+        archive.writestr("xl/theme/", b"")
         for name, content in entries.items():
             archive.writestr(name, content)
 

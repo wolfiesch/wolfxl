@@ -26,6 +26,7 @@ CORE_PART_PATTERNS = (
     re.compile(r"^\[Content_Types\]\.xml$"),
     re.compile(r"^_rels/\.rels$"),
     re.compile(r"^docProps/[^/]+\.xml$"),
+    re.compile(r"^docProps/thumbnail\.wmf$"),
     re.compile(r"^package/services/metadata/core-properties/[^/]+\.psmdcp$"),
     re.compile(r"^xl/workbook\.xml$"),
     re.compile(r"^xl/_rels/workbook\.xml\.rels$"),
@@ -33,7 +34,7 @@ CORE_PART_PATTERNS = (
     re.compile(r"^xl/worksheets/_rels/sheet\d+\.xml\.rels$"),
     re.compile(r"^xl/styles\.xml$"),
     re.compile(r"^xl/sharedStrings\.xml$"),
-    re.compile(r"^xl/theme/theme\d+\.xml$"),
+    re.compile(r"^xl/theme/theme(?:\d+)?\.xml$"),
     re.compile(r"^xl/metadata\.xml$"),
 )
 
@@ -41,10 +42,12 @@ CORE_REL_TYPES = {
     "core-properties",
     "extended-properties",
     "custom-properties",
+    "classificationlabels",
     "officeDocument",
     "worksheet",
     "styles",
     "theme",
+    "thumbnail",
     "sharedStrings",
     "metadata",
     "calcChain",
@@ -61,6 +64,7 @@ KNOWN_EXTENSION_URIS = {
     "{2F2917AC-EB37-4324-AD4E-5DD8C200BD13}",
     "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}",
     "{46BE6895-7355-4a93-B00E-2C351335B9C9}",
+    "{53640926-AAD7-44D8-BBD7-CCE9431645EC}",
     "{63B3BB69-23CF-44E3-9099-C40C66FF867C}",
     "{725AE2AE-9491-48be-B2B4-4EB974FC3084}",
     "{747A6164-185A-40DC-8AA5-F01512510D54}",
@@ -75,16 +79,19 @@ KNOWN_EXTENSION_URIS = {
     "{9260A510-F301-46a8-8635-F512D64BE5F5}",
     "{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}",
     "{A8765BA9-456A-4dab-B4F3-ACF838C121DE}",
+    "{AF507438-7753-43E0-B8FC-AC1667EBCBE1}",
     "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}",
     "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}",
     "{B97F6D7D-B522-45F9-BDA1-12C45D357490}",
     "{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}",
     "{BBE1A952-AA13-448e-AADC-164F8A28A991}",
     "{C3380CC4-5D6E-409C-BE32-E72D297353CC}",
+    "{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}",
     "{CE6537A1-D6FC-4f65-9D91-7224C49458BB}",
     "{D0CA8CA8-9F24-4464-BF8E-62219DCF47F9}",
     "{D14903EA-33C4-47F7-8F05-3474C54BE107}",
     "{DE250136-89BD-433C-8126-D09CA5730AF9}",
+    "{E28EC0CA-F0BB-4C9C-879D-F8772B89E7AC}",
     "{E67621CE-5B39-4880-91FE-76760E9C1902}",
     "{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}",
     "{F057638F-6D5F-4e77-A914-E7F072B9BCA8}",
@@ -154,7 +161,9 @@ def _fixture_unknowns(path: Path) -> dict:
         unknown_parts = sorted(
             part
             for part in parts
-            if part not in classified_parts and not _is_core_part(part)
+            if not part.endswith("/")
+            and part not in classified_parts
+            and not _is_core_part(part)
         )
         unknown_families = sorted({_part_family(part) for part in unknown_parts})
         unknown_relationship_types = sorted(
@@ -249,6 +258,7 @@ def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
         ("drawing", "image", "printerSettings"),
         ("externalLink", "externalLinkPath", "xlPathMissing"),
         ("Python", "sheetMetadata"),
+        ("jsaProject",),
         ("table",),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
         ("powerPivotData", "model"),
