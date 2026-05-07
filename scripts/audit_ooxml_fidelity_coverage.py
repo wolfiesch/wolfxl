@@ -18,6 +18,7 @@ import audit_ooxml_fidelity  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
 
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
+PASSING_RENDER_STATUSES = {"passed", "sampled_passed"}
 REAL_EXCEL_TOOLS = {"excel", "microsoft-excel", "excel-365", "excel-2021"}
 
 SURFACES = {
@@ -78,15 +79,20 @@ class FixtureCoverage:
     feature_keys: list[str]
     surfaces: list[str]
     passed_mutations: list[str]
+    render_passes: list[str]
 
 
 def audit_coverage(
     fixture_dir: Path,
     reports: Iterable[Path] = (),
+    render_reports: Iterable[Path] = (),
+    require_render: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     report_paths = list(reports)
+    render_report_paths = list(render_reports)
     passed_mutations = _passed_mutations_by_fixture(report_paths)
+    render_passes = _render_passes_by_fixture(render_report_paths)
     fixtures = []
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
         path = fixture_dir / entry.filename
@@ -104,22 +110,28 @@ def audit_coverage(
                 feature_keys=feature_keys,
                 surfaces=surfaces,
                 passed_mutations=sorted(passed_mutations.get(entry.filename, set())),
+                render_passes=sorted(render_passes.get(entry.filename, set())),
             )
         )
 
     fixture_dicts = [asdict(fixture) for fixture in fixtures]
     surface_results = {
-        name: _surface_result(name, fixture_dicts)
+        name: _surface_result(name, fixture_dicts, require_render=require_render)
         for name in SURFACES
     }
+    required_evidence = [
+        "external_tool_fixture",
+        "real_excel_fixture",
+        "structural_mutation_pass",
+    ]
+    if require_render:
+        required_evidence.append("render_no_op_pass")
     return {
         "fixture_dir": str(fixture_dir),
-        "required_evidence": [
-            "external_tool_fixture",
-            "real_excel_fixture",
-            "structural_mutation_pass",
-        ],
+        "required_evidence": required_evidence,
         "mutation_report_count": len(report_paths),
+        "render_report_count": len(render_report_paths),
+        "render_required": require_render,
         "fixture_count": len(fixtures),
         "fixtures": fixture_dicts,
         "surfaces": surface_results,
@@ -138,6 +150,20 @@ def _passed_mutations_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]
             mutation = result.get("mutation")
             if fixture and mutation:
                 out.setdefault(str(fixture), set()).add(str(mutation))
+    return out
+
+
+def _render_passes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for report_path in reports:
+        payload = json.loads(Path(report_path).read_text())
+        for result in payload.get("results", []):
+            if result.get("status") not in PASSING_RENDER_STATUSES:
+                continue
+            fixture = result.get("fixture")
+            status = result.get("status")
+            if fixture and status:
+                out.setdefault(str(fixture), set()).add(str(status))
     return out
 
 
@@ -179,7 +205,7 @@ def _surfaces_for_snapshot(snapshot: object) -> list[str]:
     return out
 
 
-def _surface_result(surface: str, fixtures: list[dict]) -> dict:
+def _surface_result(surface: str, fixtures: list[dict], require_render: bool) -> dict:
     config = SURFACES[surface]
     matching = [fixture for fixture in fixtures if surface in fixture["surfaces"]]
     external = [
@@ -200,6 +226,11 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
             for mutation in config["structural_mutations"]
         )
     ]
+    rendered = [
+        fixture["filename"]
+        for fixture in matching
+        if fixture["render_passes"]
+    ]
     missing = []
     if not external:
         missing.append("external_tool_fixture")
@@ -207,6 +238,8 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
         missing.append("real_excel_fixture")
     if not structural:
         missing.append("structural_mutation_pass")
+    if require_render and not rendered:
+        missing.append("render_no_op_pass")
     feature_groups = config.get("required_feature_groups", {})
     group_results = {}
     for group, keys in feature_groups.items():
@@ -233,6 +266,11 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
                 for mutation in config["structural_mutations"]
             )
         ]
+        group_rendered = [
+            fixture["filename"]
+            for fixture in group_matching
+            if fixture["render_passes"]
+        ]
         group_missing = []
         if not group_matching:
             group_missing.append("fixture")
@@ -242,6 +280,8 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
             group_missing.append("real_excel_fixture")
         if not group_structural:
             group_missing.append("structural_mutation_pass")
+        if require_render and not group_rendered:
+            group_missing.append("render_no_op_pass")
         if group_missing:
             missing.extend(f"{group}_{item}" for item in group_missing)
         group_results[group] = {
@@ -250,6 +290,7 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
             "external_tool_fixtures": group_external,
             "real_excel_fixtures": group_real_excel,
             "structural_mutation_fixtures": group_structural,
+            "render_fixtures": group_rendered,
             "missing": group_missing,
             "clear": not group_missing,
         }
@@ -260,6 +301,7 @@ def _surface_result(surface: str, fixtures: list[dict]) -> dict:
         "external_tool_fixtures": external,
         "real_excel_fixtures": real_excel,
         "structural_mutation_fixtures": structural,
+        "render_fixtures": rendered,
         "accepted_structural_mutations": list(config["structural_mutations"]),
         "feature_groups": group_results,
         "missing": missing,
@@ -287,6 +329,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Mutation runner report.json. May be passed multiple times.",
     )
     parser.add_argument(
+        "--render-report",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Rendered comparison render-compare-report.json. May be passed "
+            "multiple times."
+        ),
+    )
+    parser.add_argument(
+        "--require-render",
+        action="store_true",
+        help="Require at least one passing no-op render comparison for each P0 surface.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit non-zero when any P0 surface lacks required evidence.",
@@ -301,8 +358,21 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.require_render and not args.render_report:
+        print(
+            "error: --require-render requires at least one --render-report from "
+            "run_ooxml_render_compare.py so rendered no-op evidence can be "
+            "evaluated.",
+            file=sys.stderr,
+        )
+        return 2
 
-    report = audit_coverage(args.fixture_dir, args.report)
+    report = audit_coverage(
+        args.fixture_dir,
+        reports=args.report,
+        render_reports=args.render_report,
+        require_render=args.require_render,
+    )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if args.strict and not report["ready"] else 0
 
