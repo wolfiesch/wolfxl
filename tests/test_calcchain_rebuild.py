@@ -193,6 +193,29 @@ def test_modify_mode_no_formulas_removes_calc_chain(tmp_path: Path) -> None:
     )
 
 
+def test_modify_mode_zero_formulas_removes_calc_chain_metadata(tmp_path: Path) -> None:
+    src = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "external_oracle"
+        / "real-excel-external-link-basic.xlsx"
+    )
+    dst = tmp_path / "real_excel_external_link_row_deleted.xlsx"
+
+    wb = load_workbook(src, modify=True)
+    wb["Report"].delete_rows(1)
+    wb.save(dst)
+
+    with zipfile.ZipFile(dst, "r") as z:
+        names = set(z.namelist())
+        workbook_rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        content_types = z.read("[Content_Types].xml").decode("utf-8")
+
+    assert "xl/calcChain.xml" not in names
+    assert "relationships/calcChain" not in workbook_rels
+    assert "/xl/calcChain.xml" not in content_types
+
+
 # ---------------------------------------------------------------------------
 # Sheet-index ``i`` correctly tracks tab position.
 # ---------------------------------------------------------------------------

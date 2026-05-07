@@ -308,6 +308,68 @@ def test_runner_accepts_structural_external_link_formula_drift_only(
     ]
 
 
+def test_runner_accepts_structural_delete_calc_chain_volatility_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "missing_part",
+                    "severity": "error",
+                    "part": "xl/calcChain.xml",
+                    "message": "missing part after save: xl/calcChain.xml",
+                },
+                {
+                    "kind": "missing_relationship",
+                    "severity": "error",
+                    "part": "xl/_rels/workbook.xml.rels",
+                    "message": (
+                        "missing relationship after save: "
+                        "xl/_rels/workbook.xml.rels rId6 "
+                        "http://schemas.openxmlformats.org/officeDocument/2006/"
+                        "relationships/calcChain -> calcChain.xml"
+                    ),
+                },
+                {
+                    "kind": "missing_part",
+                    "severity": "error",
+                    "part": "xl/charts/chart1.xml",
+                    "message": "missing part after save: xl/charts/chart1.xml",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert [issue["message"] for issue in result["expected_issues"]] == [
+        "missing part after save: xl/calcChain.xml",
+        (
+            "missing relationship after save: xl/_rels/workbook.xml.rels rId6 "
+            "http://schemas.openxmlformats.org/officeDocument/2006/"
+            "relationships/calcChain -> calcChain.xml"
+        ),
+    ]
+    assert [issue["message"] for issue in result["issues"]] == [
+        "missing part after save: xl/charts/chart1.xml",
+    ]
+
+
 def test_runner_separates_expected_feature_add_drift(
     tmp_path: Path, monkeypatch
 ) -> None:

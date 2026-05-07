@@ -23,6 +23,12 @@ import wolfxl
 from wolfxl import ExternalLink
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "external_links_basic.xlsx"
+REAL_EXCEL_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "external_oracle"
+    / "real-excel-external-link-basic.xlsx"
+)
 
 
 def _build_external_link_fixture() -> bytes:
@@ -261,6 +267,18 @@ def test_bytes_backed_external_links_are_loaded(fixture_path: Path) -> None:
         wb = wolfxl.load_workbook(source)
         assert len(wb._external_links) == 1
         assert wb._external_links[0].target == "ext.xlsx"
+
+
+def test_real_excel_xl_path_missing_external_link_target_loads() -> None:
+    wb = wolfxl.load_workbook(REAL_EXCEL_FIXTURE_PATH)
+
+    assert len(wb._external_links) == 1
+    link = wb._external_links[0]
+    assert link.target == "wolfxl_excel_link_source.xlsx"
+    assert link.file_link is not None
+    assert link.file_link.target == "wolfxl_excel_link_source.xlsx"
+    assert link.file_link.target_mode == "External"
+    assert link.sheet_names == ["Sheet1"]
 
 
 def test_modify_mode_preserves_external_link_bytes(

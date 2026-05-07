@@ -116,6 +116,21 @@
         "xl/externalLinks/externalLink1.xml",
         "xl/externalLinks/_rels/externalLink1.xml.rels"
       ]
+    },
+    {
+      "filename": "real-excel-external-link-basic.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_external_link_basic",
+      "sha256": "7fc9432bbad733caafc08c1d8b4f244591296f3181e650549a6a51548c235713",
+      "size_bytes": 10094,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/externalLinks/externalLink1.xml",
+        "xl/externalLinks/_rels/externalLink1.xml.rels",
+        "xl/calcChain.xml"
+      ]
     }
   ]
 }

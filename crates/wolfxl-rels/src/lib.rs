@@ -102,6 +102,8 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink";
     pub const EXTERNAL_LINK_PATH: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath";
+    pub const MS_EXTERNAL_LINK_PATH_PREFIX: &str =
+        "http://schemas.microsoft.com/office/2006/relationships/xlExternalLinkPath/";
 
     // RFC-068 / G08 — threaded comments. Microsoft's `/2018/...` namespace.
     pub const THREADED_COMMENTS: &str =

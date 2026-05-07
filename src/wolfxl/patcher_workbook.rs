@@ -973,11 +973,8 @@ pub(super) fn rebuild_calc_chain_phase(
             if source_has_calc_chain {
                 patcher.file_deletes.insert(CALC_CHAIN_PATH.to_string());
                 file_patches.remove(CALC_CHAIN_PATH);
+                remove_calc_chain_metadata(patcher, file_patches, zip)?;
             }
-            // No-op for content-types / workbook rels: leaving stale
-            // metadata is benign because the part is gone, and many
-            // Excel-generated files keep both ends in sync naturally
-            // (we only remove our own rebuild output).
         }
     }
     Ok(())
@@ -1119,6 +1116,60 @@ pub(super) fn ensure_calc_chain_metadata(
             );
             file_patches.insert(wb_rels_path.to_string(), graph.serialize());
         }
+    }
+
+    Ok(())
+}
+
+fn remove_calc_chain_metadata(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    // Content types.
+    let ct_xml: Vec<u8> = if let Some(b) = file_patches.get("[Content_Types].xml") {
+        b.clone()
+    } else {
+        ooxml_util::zip_read_to_string(zip, "[Content_Types].xml")?
+            .as_bytes()
+            .to_vec()
+    };
+    let mut content_types = content_types::ContentTypesGraph::parse(&ct_xml)
+        .map_err(|e| PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}")))?;
+    content_types.remove_override("/xl/calcChain.xml");
+    file_patches.insert("[Content_Types].xml".to_string(), content_types.serialize());
+
+    // Workbook rels.
+    let wb_rels_path = "xl/_rels/workbook.xml.rels";
+    let wb_rels_bytes_opt: Option<Vec<u8>> = if let Some(b) = file_patches.get(wb_rels_path) {
+        Some(b.clone())
+    } else if let Some(g) = patcher.rels_patches.get(wb_rels_path) {
+        Some(g.serialize())
+    } else if let Ok(mut entry) = zip.by_name(wb_rels_path) {
+        let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+        if std::io::copy(&mut entry, &mut buf).is_ok() {
+            Some(buf)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(bytes) = wb_rels_bytes_opt {
+        let mut graph =
+            wolfxl_rels::RelsGraph::parse(&bytes).unwrap_or_else(|_| wolfxl_rels::RelsGraph::new());
+        let calc_chain_ids: Vec<wolfxl_rels::RelId> = graph
+            .iter()
+            .filter(|r| {
+                r.rel_type == calcchain::REL_CALC_CHAIN
+                    && (r.target == "calcChain.xml" || r.target == "/xl/calcChain.xml")
+            })
+            .map(|r| r.id.clone())
+            .collect();
+        for id in calc_chain_ids {
+            graph.remove(&id);
+        }
+        file_patches.insert(wb_rels_path.to_string(), graph.serialize());
     }
 
     Ok(())

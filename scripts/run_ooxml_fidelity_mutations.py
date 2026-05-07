@@ -67,6 +67,8 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
         "external_links_semantic_drift",
+        "missing_part",
+        "missing_relationship",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -76,6 +78,8 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
         "external_links_semantic_drift",
+        "missing_part",
+        "missing_relationship",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -114,9 +118,13 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "delete_first_row": {
         "external_links_semantic_drift": "worksheet_formulas",
+        "missing_part": "xl/calcChain.xml",
+        "missing_relationship": "relationships/calcChain",
     },
     "delete_first_col": {
         "external_links_semantic_drift": "worksheet_formulas",
+        "missing_part": "xl/calcChain.xml",
+        "missing_relationship": "relationships/calcChain",
     },
     "copy_first_sheet": {
         "external_links_semantic_drift": "worksheet_formulas",

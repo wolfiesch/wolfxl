@@ -155,7 +155,7 @@ pub fn parse_rels(xml: &[u8]) -> Result<ExternalLinkRels, String> {
         RelsGraph::parse(xml).map_err(|e| format!("external link rels parse error: {e}"))?;
     let mut out = ExternalLinkRels::default();
     for r in graph.iter() {
-        if r.rel_type == rt::EXTERNAL_LINK_PATH {
+        if is_external_link_path_rel(&r.rel_type) {
             out.target = Some(r.target.clone());
             out.target_mode = Some(r.mode);
             out.rid = Some(r.id.0.clone());
@@ -163,6 +163,10 @@ pub fn parse_rels(xml: &[u8]) -> Result<ExternalLinkRels, String> {
         }
     }
     Ok(out)
+}
+
+fn is_external_link_path_rel(rel_type: &str) -> bool {
+    rel_type == rt::EXTERNAL_LINK_PATH || rel_type.starts_with(rt::MS_EXTERNAL_LINK_PATH_PREFIX)
 }
 
 fn local_name(name: &[u8]) -> &[u8] {
