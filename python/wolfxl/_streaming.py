@@ -28,6 +28,7 @@ import zipfile
 from wolfxl._utils import a1_to_rowcol
 from wolfxl._utils import column_letter as _column_letter
 from wolfxl._utils import rowcol_to_a1
+from wolfxl._zip_safety import read_entry, validate_zipfile
 from wolfxl.utils.datetime import from_excel
 from wolfxl.utils.numbers import is_date_format
 
@@ -61,8 +62,8 @@ def _resolve_package_target(base_dir: str, target: str) -> str:
 
 def _sheet_path_from_workbook(zf: zipfile.ZipFile, sheet_title: str) -> str | None:
     try:
-        workbook_xml = zf.read("xl/workbook.xml")
-        rels_xml = zf.read("xl/_rels/workbook.xml.rels")
+        workbook_xml = read_entry(zf, "xl/workbook.xml")
+        rels_xml = read_entry(zf, "xl/_rels/workbook.xml.rels")
     except (KeyError, OSError, zipfile.BadZipFile):
         return None
 
@@ -166,6 +167,7 @@ def _bounds_from_dimension_ref(ref: str) -> tuple[int, int, int, int] | None:
 def _source_dimension_bounds(path: str, sheet_title: str) -> tuple[int, int, int, int] | None:
     try:
         with zipfile.ZipFile(path) as zf:
+            validate_zipfile(zf)
             sheet_path = _sheet_path_from_workbook(zf, sheet_title)
             if sheet_path is None:
                 return None
@@ -178,6 +180,7 @@ def _source_dimension_bounds(path: str, sheet_title: str) -> tuple[int, int, int
 def _source_dimension_max_row(path: str, sheet_title: str) -> int | None:
     try:
         with zipfile.ZipFile(path) as zf:
+            validate_zipfile(zf)
             sheet_path = _sheet_path_from_workbook(zf, sheet_title)
             if sheet_path is None:
                 return None

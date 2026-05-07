@@ -6012,7 +6012,7 @@ fn validate_zip_entry_metadata(name: &str, size: u64, compressed_size: u64) -> R
             "OOXML package part {name} has invalid compressed size"
         )));
     }
-    if compressed_size > 0 && size / compressed_size > max_zip_compression_ratio() {
+    if compressed_size > 0 && size > compressed_size.saturating_mul(max_zip_compression_ratio()) {
         return Err(ReaderError::Unsupported(format!(
             "OOXML package part {name} exceeds compression ratio limit"
         )));

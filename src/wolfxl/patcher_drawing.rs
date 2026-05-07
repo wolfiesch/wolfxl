@@ -969,30 +969,6 @@ pub(super) fn apply_chart_removes_phase(
             drawing_rels.remove(&wolfxl_rels::RelId(op.chart_rid.clone()));
             patcher.file_deletes.insert(op.chart_path.clone());
             let chart_rels_path = patcher_workbook::part_rels_path_for(&op.chart_path)?;
-            let chart_rels =
-                patcher_workbook::current_or_empty_rels(patcher, zip, &chart_rels_path)?;
-            if !chart_rels.is_empty() {
-                let chart_dir = op.chart_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                for rel in chart_rels.iter() {
-                    if rel.mode == wolfxl_rels::TargetMode::External {
-                        continue;
-                    }
-                    let target_path = resolve_relative_path(chart_dir, &rel.target);
-                    patcher.file_deletes.insert(target_path.clone());
-                    if let Ok(target_rels_path) = patcher_workbook::part_rels_path_for(&target_path)
-                    {
-                        patcher.file_deletes.insert(target_rels_path);
-                    }
-                    patcher
-                        .queued_content_type_ops
-                        .entry("__chart_removes__".to_string())
-                        .or_default()
-                        .push(content_types::ContentTypeOp::RemoveOverride(format!(
-                            "/{}",
-                            target_path
-                        )));
-                }
-            }
             patcher.file_deletes.insert(chart_rels_path);
             patcher
                 .queued_content_type_ops

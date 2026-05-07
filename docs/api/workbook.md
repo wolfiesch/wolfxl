@@ -16,7 +16,7 @@ Opens existing workbook.
 - `read_only=True`: uses the streaming reader surface for row iteration workflows.
 - `data_only=True`: returns cached formula values where present.
 - `keep_links=True`: preserves external-link parts in modify-mode saves.
-- `keep_links=False`: not yet implemented; raises `NotImplementedError`.
+- `keep_links=False`: hides external links when reading and drops external-link parts on modify-mode save.
 
 ## Properties
 

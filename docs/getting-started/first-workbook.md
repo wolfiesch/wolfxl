@@ -49,5 +49,5 @@ wb.close()
 
 ## Notes
 
-- `read_only` and `data_only` are implemented for compatible read workflows; `keep_links=True` preserves links, while `keep_links=False` is not implemented yet.
+- `read_only` and `data_only` are implemented for compatible read workflows; `keep_links=True` preserves external links, while `keep_links=False` hides them and drops external-link parts on modify-mode save.
 - Save operations flush dirty cells in batch.

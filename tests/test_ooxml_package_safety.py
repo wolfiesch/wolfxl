@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import wolfxl
+from wolfxl._zip_safety import _validate_info
 
 
 def _write_zip(path: Path, entries: dict[str, bytes]) -> None:
@@ -35,6 +36,16 @@ def test_rejects_zip_bomb_ratio(
 
     with pytest.raises(Exception, match="compression ratio"):
         wolfxl.load_workbook(path)
+
+
+def test_rejects_fractional_zip_bomb_ratio(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = zipfile.ZipInfo("xl/workbook.xml")
+    info.file_size = 11
+    info.compress_size = 10
+    monkeypatch.setenv("WOLFXL_MAX_ZIP_COMPRESSION_RATIO", "1")
+
+    with pytest.raises(ValueError, match="compression ratio"):
+        _validate_info(info)
 
 
 def test_rejects_unsafe_part_path(tmp_path: Path) -> None:

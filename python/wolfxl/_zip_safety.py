@@ -87,7 +87,7 @@ def _validate_info(info: zipfile.ZipInfo) -> None:
         )
     if info.file_size > 0 and info.compress_size == 0:
         raise ValueError(f"OOXML package part {info.filename} has invalid compressed size")
-    if info.compress_size > 0 and info.file_size // info.compress_size > _max_ratio():
+    if info.compress_size > 0 and info.file_size > _max_ratio() * info.compress_size:
         raise ValueError(
             f"OOXML package part {info.filename} exceeds compression ratio limit"
         )

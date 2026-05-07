@@ -855,13 +855,13 @@ pub(super) fn rewrite_zip_phase(
     file_patches: &HashMap<String, Vec<u8>>,
     output_path: &str,
 ) -> PyResult<()> {
-    let src = File::open(&patcher.file_path)
-        .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
-    let mut zip =
-        ZipArchive::new(src).map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
-    ooxml_util::validate_zip_archive(&mut zip)?;
-
     crate::atomic_save::write_zip_atomically(output_path, |dst| {
+        let src = File::open(&patcher.file_path)
+            .map_err(|e| PyIOError::new_err(format!("Cannot open '{}': {e}", patcher.file_path)))?;
+        let mut zip =
+            ZipArchive::new(src).map_err(|e| PyIOError::new_err(format!("ZIP read error: {e}")))?;
+        ooxml_util::validate_zip_archive(&mut zip)?;
+
         let mut out = ZipWriter::new(dst);
 
         let mut source_names: HashSet<String> = HashSet::with_capacity(zip.len());

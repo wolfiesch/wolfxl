@@ -124,7 +124,7 @@ pub fn validate_zip_entry_metadata(name: &str, size: u64, compressed_size: u64) 
             "OOXML package part {name} has invalid compressed size"
         )));
     }
-    if compressed_size > 0 && size / compressed_size > max_compression_ratio() {
+    if compressed_size > 0 && size > compressed_size.saturating_mul(max_compression_ratio()) {
         return Err(PyErr::new::<PyIOError, _>(format!(
             "OOXML package part {name} exceeds compression ratio limit"
         )));
@@ -222,5 +222,16 @@ pub fn zip_read_to_string_opt(zip: &mut ZipArchive<File>, name: &str) -> PyResul
         Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
             "Zip error reading {name}: {e}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_zip_entry_metadata;
+
+    #[test]
+    fn compression_ratio_rejects_fractional_over_limit() {
+        let result = validate_zip_entry_metadata("xl/workbook.xml", 10_001, 10);
+        assert!(result.is_err());
     }
 }
