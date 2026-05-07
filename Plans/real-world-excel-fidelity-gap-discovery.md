@@ -104,8 +104,8 @@ Gap ledger:
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations: feature add/remove where the expected semantic drift can
-     be declared.
+   - Next mutations: feature remove and richer chart/pivot/slicer structural
+     edits where the expected semantic drift can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;
