@@ -25,6 +25,7 @@ guards this.
 
 from __future__ import annotations
 
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -192,6 +193,36 @@ def test_modify_mode_remove_sheet_prunes_tab_and_part(tmp_path: Path) -> None:
     reloaded = openpyxl.load_workbook(out)
     assert reloaded.sheetnames == ["First"]
     assert "Second" not in reloaded.sheetnames
+
+
+def test_modify_mode_remove_pivot_sheet_keeps_shared_pivot_cache_graph(
+    tmp_path: Path,
+) -> None:
+    """Deleting a pivot sheet must not strand workbook-level pivot cache rels."""
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "external_oracle"
+        / "closedxml-pivot-cf-table.xlsx"
+    )
+    src = tmp_path / fixture.name
+    shutil.copy2(fixture, src)
+
+    wb = load_workbook(src, modify=True)
+    wb.remove(wb["Pivot"])
+    wb.save(src)
+    wb.close()
+
+    reloaded = openpyxl.load_workbook(src)
+    assert reloaded.sheetnames == ["Data"]
+    reloaded.close()
+
+    with zipfile.ZipFile(src) as archive:
+        names = set(archive.namelist())
+
+    assert "pivotCache/pivotCacheDefinition1.xml" in names
+    assert "pivotCache/pivotCacheRecords1.xml" in names
+    assert "xl/pivotTables/pivotTable.xml" not in names
 
 
 def test_modify_mode_rename_then_edit_uses_new_title(tmp_path: Path) -> None:

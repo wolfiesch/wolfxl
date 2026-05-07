@@ -28,6 +28,7 @@ DEFAULT_MUTATIONS = (
     "insert_tail_col",
     "delete_marker_tail_row",
     "delete_marker_tail_col",
+    "copy_remove_sheet",
     "move_marker_range",
 )
 SUPPORTED_MUTATIONS = (
@@ -296,6 +297,13 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             workbook[workbook.sheetnames[0]].delete_cols(1, amount=1)
         elif mutation == "copy_first_sheet":
             workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+        elif mutation == "copy_remove_sheet":
+            clone = workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+            clone_title = clone.title
+            workbook.save(path)
+            workbook.close()
+            workbook = wolfxl.load_workbook(path, modify=True)
+            workbook.remove(workbook[clone_title])
         elif mutation == "move_marker_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE

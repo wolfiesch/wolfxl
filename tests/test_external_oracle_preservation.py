@@ -52,6 +52,7 @@ _MUTATIONS = (
     "insert_tail_col",
     "delete_marker_tail_row",
     "delete_marker_tail_col",
+    "copy_remove_sheet",
     "move_marker_range",
 )
 
@@ -191,6 +192,13 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         sheet_name = workbook.sheetnames[0]
         worksheet = workbook[sheet_name]
         worksheet.delete_cols(col_idx, amount=1)
+    elif mutation == "copy_remove_sheet":
+        clone = workbook.copy_worksheet(workbook[sheet_name])
+        clone_title = clone.title
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        workbook.remove(workbook[clone_title])
     elif mutation == "move_marker_range":
         worksheet = workbook[sheet_name]
         worksheet["Z1"] = _MARKER_VALUE

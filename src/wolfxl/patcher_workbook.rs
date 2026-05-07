@@ -265,7 +265,13 @@ pub(super) fn apply_sheet_deletes_phase(
                 RelsGraph::parse(&bytes).ok()
             },
         );
+        let deleted_parts: HashSet<String> = subgraph.reachable_parts.iter().cloned().collect();
+        let retained_parts =
+            retained_deleted_subgraph_parts(&deleted_parts, patcher, file_patches, zip)?;
         for part in subgraph.reachable_parts {
+            if retained_parts.contains(&part) {
+                continue;
+            }
             patcher.file_deletes.insert(part.clone());
             if let Some(rels_path) = wolfxl_rels::rels_path_for(&part) {
                 patcher.file_deletes.insert(rels_path);
@@ -288,6 +294,95 @@ pub(super) fn apply_sheet_deletes_phase(
     patcher.queued_sheet_deletes.clear();
     patcher.deleted_sheet_paths.clear();
     Ok(())
+}
+
+fn retained_deleted_subgraph_parts(
+    deleted_parts: &HashSet<String>,
+    patcher: &XlsxPatcher,
+    file_patches: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<HashSet<String>> {
+    let mut rels_paths: HashSet<String> = HashSet::new();
+    for i in 0..zip.len() {
+        let Ok(entry) = zip.by_index(i) else {
+            continue;
+        };
+        let name = entry.name().to_string();
+        if name.ends_with(".rels") {
+            rels_paths.insert(name);
+        }
+    }
+    rels_paths.extend(patcher.rels_patches.keys().cloned());
+    rels_paths.extend(
+        file_patches
+            .keys()
+            .filter(|p| p.ends_with(".rels"))
+            .cloned(),
+    );
+    rels_paths.extend(
+        patcher
+            .file_adds
+            .keys()
+            .filter(|p| p.ends_with(".rels"))
+            .cloned(),
+    );
+
+    let mut retained: HashSet<String> = HashSet::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rels_path in &rels_paths {
+            let Some(owner_part) = owner_part_for_rels_path(rels_path) else {
+                continue;
+            };
+            let owner_is_kept =
+                !deleted_parts.contains(&owner_part) || retained.contains(&owner_part);
+            if !owner_is_kept {
+                continue;
+            }
+            let graph = if let Some(graph) = patcher.rels_patches.get(rels_path) {
+                graph.clone()
+            } else {
+                let Some(bytes) =
+                    current_part_bytes(file_patches, &patcher.file_adds, zip, rels_path)
+                else {
+                    continue;
+                };
+                let Ok(graph) = RelsGraph::parse(&bytes) else {
+                    continue;
+                };
+                graph
+            };
+            let owner_dir = owner_part
+                .rsplit_once('/')
+                .map(|(dir, _)| dir)
+                .unwrap_or("");
+            for rel in graph.iter() {
+                if rel.mode == wolfxl_rels::TargetMode::External {
+                    continue;
+                }
+                let target = wolfxl_rels::resolve_target(owner_dir, &rel.target);
+                if deleted_parts.contains(&target) && retained.insert(target) {
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    Ok(retained)
+}
+
+fn owner_part_for_rels_path(rels_path: &str) -> Option<String> {
+    if rels_path == "_rels/.rels" {
+        return Some(String::new());
+    }
+    let (dir, file) = rels_path.rsplit_once("/_rels/")?;
+    let part_file = file.strip_suffix(".rels")?;
+    if dir.is_empty() {
+        Some(part_file.to_string())
+    } else {
+        Some(format!("{dir}/{part_file}"))
+    }
 }
 
 pub(super) fn apply_sheet_creates_phase(
