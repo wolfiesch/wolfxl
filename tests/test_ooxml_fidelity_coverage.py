@@ -53,6 +53,19 @@ def test_coverage_audit_reports_missing_real_excel_and_structural_evidence(
     assert chart["external_tool_fixtures"] == ["chart.xlsx"]
     assert chart["missing"] == ["real_excel_fixture", "structural_mutation_pass"]
     assert report["ready"] is False
+    assert report["mutation_report_count"] == 0
+
+
+def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+
+    code = coverage_module.main([str(fixture_dir), "--strict"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--strict requires at least one --report" in captured.err
+    assert captured.out == ""
 
 
 def test_coverage_audit_accepts_real_excel_and_structural_evidence(

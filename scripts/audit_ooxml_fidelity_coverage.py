@@ -85,7 +85,8 @@ def audit_coverage(
     reports: Iterable[Path] = (),
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
-    passed_mutations = _passed_mutations_by_fixture(reports)
+    report_paths = list(reports)
+    passed_mutations = _passed_mutations_by_fixture(report_paths)
     fixtures = []
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
         path = fixture_dir / entry.filename
@@ -118,6 +119,7 @@ def audit_coverage(
             "real_excel_fixture",
             "structural_mutation_pass",
         ],
+        "mutation_report_count": len(report_paths),
         "fixture_count": len(fixtures),
         "fixtures": fixture_dicts,
         "surfaces": surface_results,
@@ -290,6 +292,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Exit non-zero when any P0 surface lacks required evidence.",
     )
     args = parser.parse_args(argv)
+
+    if args.strict and not args.report:
+        print(
+            "error: --strict requires at least one --report from "
+            "run_ooxml_fidelity_mutations.py so structural mutation evidence "
+            "can be evaluated.",
+            file=sys.stderr,
+        )
+        return 2
 
     report = audit_coverage(args.fixture_dir, args.report)
     print(json.dumps(report, indent=2, sort_keys=True))

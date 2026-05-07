@@ -897,95 +897,20 @@ fn clone_table_part(
                     .write_event(Event::Decl(d))
                     .map_err(|e| SheetCopyError::Xml(format!("table decl: {e}")))?;
             }
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"table" => {
-                let mut new_e = BytesStart::new(
-                    std::str::from_utf8(e.name().as_ref())
-                        .map_err(|er| SheetCopyError::Xml(format!("table tag utf8: {er}")))?
-                        .to_owned(),
-                );
-                let mut want_name = true;
-                let mut want_display = true;
-                let mut want_id = true;
-                for a in e.attributes().with_checks(false).flatten() {
-                    let key = a.key.as_ref().to_vec();
-                    let value = a
-                        .unescape_value()
-                        .map(|v| v.into_owned())
-                        .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
-                    match key.as_slice() {
-                        b"name" => {
-                            original_name = Some(value.clone());
-                            let new_name = dedup_table_name(&value, taken_names);
-                            renamed = Some(new_name.clone());
-                            new_e.push_attribute(Attribute {
-                                key: QName(b"name"),
-                                value: new_name.into_bytes().into(),
-                            });
-                            want_name = false;
-                        }
-                        b"displayName" => {
-                            // Mirror the deduped name onto displayName too
-                            // (per ECMA-376, they share the uniqueness
-                            // constraint).
-                            let target = renamed.clone().unwrap_or_else(|| {
-                                // We may hit displayName before name in
-                                // attribute order; defer until after.
-                                value.clone()
-                            });
-                            new_e.push_attribute(Attribute {
-                                key: QName(b"displayName"),
-                                value: target.into_bytes().into(),
-                            });
-                            want_display = false;
-                        }
-                        b"id" => {
-                            new_e.push_attribute(Attribute {
-                                key: QName(b"id"),
-                                value: new_n.to_string().into_bytes().into(),
-                            });
-                            want_id = false;
-                        }
-                        _ => {
-                            new_e.push_attribute(Attribute {
-                                key: QName(&key),
-                                value: value.into_bytes().into(),
-                            });
-                        }
-                    }
-                }
-                if want_id {
-                    new_e.push_attribute(Attribute {
-                        key: QName(b"id"),
-                        value: new_n.to_string().into_bytes().into(),
-                    });
-                }
-                if want_name {
-                    let nm = renamed.clone().unwrap_or_else(|| format!("Table{new_n}"));
-                    new_e.push_attribute(Attribute {
-                        key: QName(b"name"),
-                        value: nm.into_bytes().into(),
-                    });
-                }
-                if want_display {
-                    let nm = renamed.clone().unwrap_or_else(|| format!("Table{new_n}"));
-                    new_e.push_attribute(Attribute {
-                        key: QName(b"displayName"),
-                        value: nm.into_bytes().into(),
-                    });
-                }
-                let ev = match reader.read_event_into(&mut Vec::new()) {
-                    // We pre-fetched the next event into another buffer to
-                    // detect Empty vs Start; revert to writing as the same
-                    // kind we saw in the outer match.
-                    _ => Event::Empty(new_e.clone()),
-                };
-                let _ = ev; // unused — we always rewrite as a Start here
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"table" => {
+                let (new_e, new_name, old_name) = clone_table_start(&e, taken_names, new_n)?;
+                renamed = Some(new_name);
+                original_name = old_name;
                 writer
-                    .write_event(if buf.is_empty() {
-                        Event::Empty(new_e.clone())
-                    } else {
-                        Event::Start(new_e)
-                    })
+                    .write_event(Event::Start(new_e))
+                    .map_err(|e| SheetCopyError::Xml(format!("table root: {e}")))?;
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"table" => {
+                let (new_e, new_name, old_name) = clone_table_start(&e, taken_names, new_n)?;
+                renamed = Some(new_name);
+                original_name = old_name;
+                writer
+                    .write_event(Event::Empty(new_e))
                     .map_err(|e| SheetCopyError::Xml(format!("table root: {e}")))?;
             }
             Ok(Event::Eof) => break,
@@ -1009,6 +934,97 @@ fn clone_table_part(
     });
     let _ = original_name;
     Ok((bytes, new_name))
+}
+
+fn clone_table_start(
+    e: &BytesStart<'_>,
+    taken_names: &HashSet<String>,
+    new_n: u32,
+) -> Result<(BytesStart<'static>, String, Option<String>), SheetCopyError> {
+    let mut attrs: Vec<(Vec<u8>, String)> = Vec::new();
+    let mut source_name: Option<String> = None;
+    let mut source_display_name: Option<String> = None;
+    for a in e.attributes().with_checks(false).flatten() {
+        let key = a.key.as_ref().to_vec();
+        let value = a
+            .unescape_value()
+            .map(|v| v.into_owned())
+            .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        match key.as_slice() {
+            b"name" => source_name = Some(value.clone()),
+            b"displayName" => source_display_name = Some(value.clone()),
+            _ => {}
+        }
+        attrs.push((key, value));
+    }
+
+    let original_name = source_name.or(source_display_name);
+    let new_name = original_name
+        .as_ref()
+        .map(|name| dedup_table_name(name, taken_names))
+        .unwrap_or_else(|| format!("Table{new_n}"));
+
+    let mut new_e = BytesStart::new(
+        std::str::from_utf8(e.name().as_ref())
+            .map_err(|er| SheetCopyError::Xml(format!("table tag utf8: {er}")))?
+            .to_owned(),
+    );
+    let mut wrote_name = false;
+    let mut wrote_display_name = false;
+    let mut wrote_id = false;
+
+    for (key, value) in attrs {
+        match key.as_slice() {
+            b"name" => {
+                new_e.push_attribute(Attribute {
+                    key: QName(b"name"),
+                    value: new_name.clone().into_bytes().into(),
+                });
+                wrote_name = true;
+            }
+            b"displayName" => {
+                new_e.push_attribute(Attribute {
+                    key: QName(b"displayName"),
+                    value: new_name.clone().into_bytes().into(),
+                });
+                wrote_display_name = true;
+            }
+            b"id" => {
+                new_e.push_attribute(Attribute {
+                    key: QName(b"id"),
+                    value: new_n.to_string().into_bytes().into(),
+                });
+                wrote_id = true;
+            }
+            _ => {
+                new_e.push_attribute(Attribute {
+                    key: QName(&key),
+                    value: value.into_bytes().into(),
+                });
+            }
+        }
+    }
+
+    if !wrote_id {
+        new_e.push_attribute(Attribute {
+            key: QName(b"id"),
+            value: new_n.to_string().into_bytes().into(),
+        });
+    }
+    if !wrote_name {
+        new_e.push_attribute(Attribute {
+            key: QName(b"name"),
+            value: new_name.clone().into_bytes().into(),
+        });
+    }
+    if !wrote_display_name {
+        new_e.push_attribute(Attribute {
+            key: QName(b"displayName"),
+            value: new_name.clone().into_bytes().into(),
+        });
+    }
+
+    Ok((new_e, new_name, original_name))
 }
 
 // ---------------------------------------------------------------------------
@@ -1720,6 +1736,53 @@ mod tests {
         assert!(
             new_sheet.contains(&format!(r#"r:id="{new_rid}""#)),
             "{new_sheet}"
+        );
+    }
+
+    #[test]
+    fn clone_with_table_preserves_autofilter_child() {
+        let mut alloc = PartIdAllocator::from_zip_parts(
+            ["xl/worksheets/sheet1.xml", "xl/tables/table1.xml"]
+                .iter()
+                .copied(),
+        );
+        let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
+        zip_parts.insert(
+            "xl/worksheets/sheet1.xml".into(),
+            sheet_xml_with_table_part("rId1"),
+        );
+        zip_parts.insert(
+            "xl/tables/table1.xml".into(),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="SalesTable" displayName="SalesTable" ref="A1:E31"><autoFilter ref="A1:E31"></autoFilter><tableColumns count="5"><tableColumn id="1" name="Month"></tableColumn><tableColumn id="2" name="Year"></tableColumn><tableColumn id="3" name="Type"></tableColumn><tableColumn id="4" name="Sales"></tableColumn><tableColumn id="5" name="Region"></tableColumn></tableColumns></table>"#.to_vec(),
+        );
+        let workbook_bytes = one_sheet_workbook(&[], &[]);
+        let mut existing_table_names: HashSet<String> = HashSet::new();
+        existing_table_names.insert("SalesTable".into());
+        let source_rels = rels_with(&[(rt::TABLE, "../tables/table1.xml", TargetMode::Internal)]);
+
+        let mutations = plan_sheet_copy(SheetCopyInputs {
+            src_title: "Template".into(),
+            dst_title: "Template Copy".into(),
+            src_sheet_path: "xl/worksheets/sheet1.xml".into(),
+            source_zip_parts: &zip_parts,
+            source_rels: &source_rels,
+            workbook_xml: &workbook_bytes,
+            allocator: &mut alloc,
+            existing_table_names: &existing_table_names,
+            deep_copy_images: false,
+        })
+        .expect("plan ok");
+
+        let table_part = mutations
+            .new_ancillary_parts
+            .iter()
+            .find(|(p, _)| p == "xl/tables/table2.xml")
+            .expect("table2.xml emitted");
+        let body = std::str::from_utf8(&table_part.1).unwrap();
+        assert!(
+            body.contains(r#"<autoFilter ref="A1:E31"></autoFilter><tableColumns"#),
+            "{body}"
         );
     }
 
