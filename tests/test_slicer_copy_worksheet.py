@@ -6,10 +6,9 @@ Per RFC-061 §6:
     sheet is cloned, the destination sheet must get its own
     ``xl/slicers/slicer{N}.xml`` part (a fresh suffix) and its own
     sheet-rel of type ``SLICER`` pointing at the new part.
-  * Slicer **caches** are workbook-scoped — the cloned slicer
-    presentation's ``cache="..."`` attribute is matched by NAME, not
-    by rId, so the cache is automatically shared with no rewrite
-    needed.
+  * Real desktop Excel deep-clones workbook-scoped slicer caches when
+    the copied slicer is tied to a pivot/table on the copied sheet. The
+    cloned presentation must point at the fresh cache name.
 
 These tests pin that contract so future RFC-035 edits can't
 silently flip slicer semantics.
@@ -75,6 +74,12 @@ def _zip_read(p: Path, member: str) -> bytes:
         return z.read(member)
 
 
+def _copy_first_sheet(src: Path, dst: Path, name: str = "Copied Sheet") -> None:
+    wb = load_workbook(src, modify=True)
+    wb.copy_worksheet(wb.worksheets[0], name=name)
+    wb.save(dst)
+
+
 # ---------------------------------------------------------------------------
 # Case 1 — copy_worksheet allocates a FRESH slicer{N}.xml.
 # ---------------------------------------------------------------------------
@@ -102,11 +107,11 @@ def test_copy_worksheet_with_slicer_allocates_new_slicer_part(
 
 
 # ---------------------------------------------------------------------------
-# Case 2 — Slicer CACHE stays SHARED (workbook-scope, RFC-061 §6).
+# Case 2 — Slicer cache is deep-cloned for desktop-Excel fidelity.
 # ---------------------------------------------------------------------------
 
 
-def test_copy_worksheet_with_slicer_keeps_cache_shared(tmp_path: Path) -> None:
+def test_copy_worksheet_with_slicer_clones_cache(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     dst = tmp_path / "dst.xlsx"
     _make_slicer_workbook_fixture(src)
@@ -120,9 +125,7 @@ def test_copy_worksheet_with_slicer_keeps_cache_shared(tmp_path: Path) -> None:
         e for e in entries
         if re.match(r"^xl/slicerCaches/slicerCache\d+\.xml$", e)
     ]
-    assert len(cache_parts) == 1, (
-        f"slicer cache must stay workbook-shared; got {cache_parts}"
-    )
+    assert len(cache_parts) == 2, f"expected cloned slicer cache, got {cache_parts}"
 
 
 # ---------------------------------------------------------------------------
@@ -167,12 +170,11 @@ def test_copy_worksheet_with_slicer_emits_distinct_sheet_rel(
 
 
 # ---------------------------------------------------------------------------
-# Case 4 — Cloned slicer presentation references the SAME cache name
-# (workbook-scope).
+# Case 4 — Cloned slicer presentation references the cloned cache name.
 # ---------------------------------------------------------------------------
 
 
-def test_cloned_slicer_xml_shares_cache_name(tmp_path: Path) -> None:
+def test_cloned_slicer_xml_uses_cloned_cache_name(tmp_path: Path) -> None:
     src = tmp_path / "src.xlsx"
     dst = tmp_path / "dst.xlsx"
     _make_slicer_workbook_fixture(src)
@@ -192,9 +194,7 @@ def test_cloned_slicer_xml_shares_cache_name(tmp_path: Path) -> None:
         m = re.search(r'cache="(\w+)"', xml)
         if m:
             cache_refs.append(m.group(1))
-    assert len(cache_refs) == 2 and cache_refs[0] == cache_refs[1] == "Slicer_region", (
-        f"cloned slicer must reference the same cache name: {cache_refs}"
-    )
+    assert cache_refs == ["Slicer_region", "Slicer_region1"]
 
 
 # ---------------------------------------------------------------------------
@@ -219,3 +219,67 @@ def test_cloned_slicer_emits_content_type_override(tmp_path: Path) -> None:
     assert len(overrides) == 2, (
         f"expected 2 slicer Overrides post-copy, got {len(overrides)}: {ct}"
     )
+
+
+def test_real_excel_pivot_slicer_copy_clones_cache_parts(tmp_path: Path) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-pivot-chart-slicers.xlsx")
+    dst = tmp_path / "pivot-slicer-copy.xlsx"
+
+    _copy_first_sheet(src, dst)
+
+    entries = _zip_listing(dst)
+    cache_parts = [
+        e for e in entries
+        if re.match(r"^xl/slicerCaches/slicerCache\d+\.xml$", e)
+    ]
+    assert len(cache_parts) == 4
+
+    copied_slicer_xml = _zip_read(dst, "xl/slicers/slicer2.xml").decode()
+    assert 'name="REGION 1"' in copied_slicer_xml
+    assert 'cache="Slicer_REGION1"' in copied_slicer_xml
+    assert 'cache="Slicer_YEAR1"' in copied_slicer_xml
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    assert workbook_xml.count("<x14:slicerCache ") == 4
+    assert '<definedName name="Slicer_REGION1">#N/A</definedName>' in workbook_xml
+
+    copied_sheet_id = re.search(r'name="Copied Sheet" sheetId="(\d+)"', workbook_xml)
+    assert copied_sheet_id is not None
+    cache_xml = _zip_read(dst, "xl/slicerCaches/slicerCache3.xml").decode()
+    assert f'tabId="{copied_sheet_id.group(1)}"' in cache_xml
+
+
+def test_real_excel_timeline_copy_clones_timeline_cache_parts(tmp_path: Path) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx")
+    dst = tmp_path / "timeline-copy.xlsx"
+
+    _copy_first_sheet(src, dst)
+
+    entries = _zip_listing(dst)
+    timeline_parts = [
+        e for e in entries
+        if re.match(r"^xl/timelines/timeline\d+\.xml$", e)
+    ]
+    timeline_cache_parts = [
+        e for e in entries
+        if re.match(r"^xl/timelineCaches/timelineCache\d+\.xml$", e)
+    ]
+    assert timeline_parts == ["xl/timelines/timeline1.xml", "xl/timelines/timeline2.xml"]
+    assert timeline_cache_parts == [
+        "xl/timelineCaches/timelineCache1.xml",
+        "xl/timelineCaches/timelineCache2.xml",
+    ]
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    copied_sheet_id = re.search(r'name="Copied Sheet" sheetId="(\d+)"', workbook_xml)
+    assert copied_sheet_id is not None
+    assert int(copied_sheet_id.group(1)) > 4
+    assert workbook_xml.count("<x15:timelineCacheRef ") == 2
+    assert '<definedName name="NativeTimeline_ORDER_DATE1">#N/A</definedName>' in workbook_xml
+
+    copied_timeline_xml = _zip_read(dst, "xl/timelines/timeline2.xml").decode()
+    assert 'name="ORDER DATE 1"' in copied_timeline_xml
+    assert 'cache="NativeTimeline_ORDER_DATE1"' in copied_timeline_xml
+    copied_cache_xml = _zip_read(dst, "xl/timelineCaches/timelineCache2.xml").decode()
+    assert 'name="NativeTimeline_ORDER_DATE1"' in copied_cache_xml
+    assert f'tabId="{copied_sheet_id.group(1)}"' in copied_cache_xml

@@ -10,8 +10,11 @@ use zip::ZipArchive;
 use super::patcher_workbook::{
     current_part_bytes, load_or_empty_rels, sheet_rels_path_for, splice_into_sheets_block,
 };
-use super::{comments, content_types, defined_names, tables, XlsxPatcher};
+use super::{comments, content_types, defined_names, pivot_slicer, tables, XlsxPatcher};
 use wolfxl_rels::RelsGraph;
+
+const RT_TIMELINE_CACHE: &str =
+    "http://schemas.microsoft.com/office/2011/relationships/timelineCache";
 
 pub(super) fn apply_sheet_copies_phase(
     patcher: &mut XlsxPatcher,
@@ -81,6 +84,30 @@ pub(super) fn apply_sheet_copies_phase(
                 }
             }
         }
+        if let Some(bytes) =
+            current_part_bytes(file_patches, &patcher.file_adds, zip, &workbook_rels_path)
+        {
+            source_zip_parts.insert(workbook_rels_path.clone(), bytes.clone());
+            if let Ok(workbook_rels) = RelsGraph::parse(&bytes) {
+                for rel in workbook_rels.iter() {
+                    if (rel.rel_type == wolfxl_pivot::rt::SLICER_CACHE
+                        || rel.rel_type == RT_TIMELINE_CACHE)
+                        && rel.mode == wolfxl_rels::TargetMode::Internal
+                    {
+                        let part_path = if rel.target.starts_with('/') {
+                            rel.target.trim_start_matches('/').to_string()
+                        } else {
+                            format!("xl/{}", rel.target)
+                        };
+                        if let Some(part_bytes) =
+                            current_part_bytes(file_patches, &patcher.file_adds, zip, &part_path)
+                        {
+                            source_zip_parts.insert(part_path, part_bytes);
+                        }
+                    }
+                }
+            }
+        }
 
         let workbook_xml =
             match current_part_bytes(file_patches, &patcher.file_adds, zip, "xl/workbook.xml") {
@@ -132,6 +159,92 @@ pub(super) fn apply_sheet_copies_phase(
 
         let new_workbook_xml = splice_into_sheets_block(&workbook_xml, &sheets_append)?;
         file_patches.insert("xl/workbook.xml".to_string(), new_workbook_xml);
+
+        let mut workbook_slicer_refs: Vec<pivot_slicer::WorkbookSlicerCacheRef> = Vec::new();
+        if !mutations.workbook_slicer_cache_rels_to_add.is_empty() {
+            let g = patcher
+                .rels_patches
+                .get_mut(&workbook_rels_path)
+                .expect("workbook rels graph loaded above");
+            for (cache_name, rel_type, target) in &mutations.workbook_slicer_cache_rels_to_add {
+                let rid = g.add(rel_type, target, wolfxl_rels::TargetMode::Internal);
+                workbook_slicer_refs.push(pivot_slicer::WorkbookSlicerCacheRef {
+                    name: cache_name.clone(),
+                    rid: rid.0,
+                });
+            }
+        }
+        if !workbook_slicer_refs.is_empty() {
+            let wb_xml = file_patches
+                .get("xl/workbook.xml")
+                .cloned()
+                .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook patch missing"))?;
+            let updated =
+                pivot_slicer::splice_workbook_slicer_caches(&wb_xml, &workbook_slicer_refs)
+                    .map_err(|e| {
+                        PyIOError::new_err(format!("Phase 2.7: splice copied slicer caches: {e}"))
+                    })?;
+            file_patches.insert("xl/workbook.xml".to_string(), updated);
+            for cache_ref in &workbook_slicer_refs {
+                let already_queued = patcher
+                    .queued_defined_names
+                    .iter()
+                    .any(|q| q.name == cache_ref.name && q.local_sheet_id.is_none());
+                if !already_queued {
+                    patcher
+                        .queued_defined_names
+                        .push(defined_names::DefinedNameMut {
+                            name: cache_ref.name.clone(),
+                            formula: "#N/A".to_string(),
+                            local_sheet_id: None,
+                            ..Default::default()
+                        });
+                }
+            }
+        }
+
+        let mut workbook_timeline_refs: Vec<pivot_slicer::WorkbookTimelineCacheRef> = Vec::new();
+        if !mutations.workbook_timeline_cache_rels_to_add.is_empty() {
+            let g = patcher
+                .rels_patches
+                .get_mut(&workbook_rels_path)
+                .expect("workbook rels graph loaded above");
+            for (cache_name, rel_type, target) in &mutations.workbook_timeline_cache_rels_to_add {
+                let rid = g.add(rel_type, target, wolfxl_rels::TargetMode::Internal);
+                workbook_timeline_refs.push(pivot_slicer::WorkbookTimelineCacheRef {
+                    name: cache_name.clone(),
+                    rid: rid.0,
+                });
+            }
+        }
+        if !workbook_timeline_refs.is_empty() {
+            let wb_xml = file_patches
+                .get("xl/workbook.xml")
+                .cloned()
+                .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook patch missing"))?;
+            let updated =
+                pivot_slicer::splice_workbook_timeline_caches(&wb_xml, &workbook_timeline_refs)
+                    .map_err(|e| {
+                        PyIOError::new_err(format!("Phase 2.7: splice copied timeline caches: {e}"))
+                    })?;
+            file_patches.insert("xl/workbook.xml".to_string(), updated);
+            for cache_ref in &workbook_timeline_refs {
+                let already_queued = patcher
+                    .queued_defined_names
+                    .iter()
+                    .any(|q| q.name == cache_ref.name && q.local_sheet_id.is_none());
+                if !already_queued {
+                    patcher
+                        .queued_defined_names
+                        .push(defined_names::DefinedNameMut {
+                            name: cache_ref.name.clone(),
+                            formula: "#N/A".to_string(),
+                            local_sheet_id: None,
+                            ..Default::default()
+                        });
+                }
+            }
+        }
 
         patcher
             .file_adds

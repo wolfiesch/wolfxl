@@ -147,6 +147,12 @@ pub struct SheetCopyMutations {
     /// string used in `workbook_sheets_append` so the caller can do a
     /// single replace-all pass after allocating the actual rId.
     pub workbook_rels_to_add: Vec<(String, String, String)>,
+    /// Workbook-level slicer-cache rels to add, plus the slicer-cache
+    /// name that must be referenced from workbook.xml `<x14:slicerCaches>`.
+    pub workbook_slicer_cache_rels_to_add: Vec<(String, String, String)>,
+    /// Workbook-level timeline-cache rels to add, plus the timeline-cache
+    /// name that must be referenced from workbook.xml `<x15:timelineCacheRefs>`.
+    pub workbook_timeline_cache_rels_to_add: Vec<(String, String, String)>,
     /// Sheet-scoped defined-name clones (RFC-035 §5.4).
     pub defined_names_to_add: Vec<DefinedNameClone>,
     /// Newly allocated table `name`/`displayName` values added to
@@ -207,6 +213,11 @@ const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_CHART_STYLE: &str = "application/vnd.ms-office.chartstyle+xml";
 const CT_CHART_COLOR_STYLE: &str = "application/vnd.ms-office.chartcolorstyle+xml";
+const CT_TIMELINE: &str = "application/vnd.ms-excel.timeline+xml";
+const CT_TIMELINE_CACHE: &str = "application/vnd.ms-excel.timelineCache+xml";
+const RT_TIMELINE: &str = "http://schemas.microsoft.com/office/2011/relationships/timeline";
+const RT_TIMELINE_CACHE: &str =
+    "http://schemas.microsoft.com/office/2011/relationships/timelineCache";
 
 // ---------------------------------------------------------------------------
 // Planner entry point
@@ -218,6 +229,7 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     // ---- Validate ----------------------------------------------------------
     let SheetMetadata {
         sheet_titles,
+        sheet_ids,
         defined_names,
     } = parse_workbook_metadata(inputs.workbook_xml)?;
 
@@ -234,6 +246,11 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     }
 
     let new_idx = sheet_titles.len() as u32; // appended at end
+    let source_sheet_id = sheet_ids
+        .get(src_idx as usize)
+        .copied()
+        .unwrap_or(src_idx + 1);
+    let new_sheet_id = sheet_ids.iter().copied().max().unwrap_or(0) + 1;
 
     let src_sheet_xml = inputs
         .source_zip_parts
@@ -266,6 +283,18 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     let mut new_ancillary_parts: Vec<(String, Vec<u8>)> = Vec::new();
     let mut content_type_overrides_to_add: Vec<(String, String)> = Vec::new();
     let mut new_table_names: Vec<String> = Vec::new();
+    let mut table_id_remap: HashMap<String, String> = HashMap::new();
+    let mut table_name_remap: HashMap<String, String> = HashMap::new();
+    let mut slicer_cache_name_remap: HashMap<String, String> = HashMap::new();
+    let mut slicer_name_remap: HashMap<String, String> = HashMap::new();
+    let mut workbook_slicer_cache_rels_to_add: Vec<(String, String, String)> = Vec::new();
+    let mut workbook_timeline_cache_rels_to_add: Vec<(String, String, String)> = Vec::new();
+    let mut taken_slicer_cache_names = workbook_slicer_cache_names(zip_parts);
+    let mut taken_slicer_names = slicer_names_from_parts(zip_parts);
+    let mut taken_timeline_cache_names = workbook_timeline_cache_names(zip_parts);
+    let mut taken_timeline_names = timeline_names_from_parts(zip_parts);
+    let mut timeline_cache_name_remap: HashMap<String, String> = HashMap::new();
+    let mut timeline_name_remap: HashMap<String, String> = HashMap::new();
 
     // For tracking the "set already used in this session" to dedup tables
     // when one copy clones two tables with the same base name.
@@ -283,6 +312,21 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
         }
     }
 
+    let mut table_clone_ids: HashMap<String, u32> = HashMap::new();
+    for source_rel in inputs.source_rels.iter() {
+        if source_rel.rel_type != rt::TABLE {
+            continue;
+        }
+        let new_n = inputs.allocator.alloc_table();
+        table_clone_ids.insert(source_rel.id.0.clone(), new_n);
+        let resolved = resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+        if let Some(src_bytes) = zip_parts.get(&resolved) {
+            if let Some(old_id) = table_id_from_xml(src_bytes) {
+                table_id_remap.insert(old_id, new_n.to_string());
+            }
+        }
+    }
+
     // Walk the source sheet's edges in source order and clone each part.
     for source_rel in inputs.source_rels.iter() {
         let old_rid = source_rel.id.0.clone();
@@ -291,12 +335,18 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
             t if t == rt::TABLE => {
                 let resolved =
                     resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
-                let new_n = inputs.allocator.alloc_table();
+                let new_n = table_clone_ids
+                    .get(&old_rid)
+                    .copied()
+                    .unwrap_or_else(|| inputs.allocator.alloc_table());
                 let new_part_path = format!("xl/tables/table{new_n}.xml");
                 // Clone bytes with name + id dedup.
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
-                let (cloned_bytes, new_name) =
+                let (cloned_bytes, new_name, old_name) =
                     clone_table_part(&src_bytes, &mut taken_names, new_n)?;
+                if let Some(old_name) = old_name {
+                    table_name_remap.insert(old_name, new_name.clone());
+                }
                 new_ancillary_parts.push((new_part_path.clone(), cloned_bytes));
                 new_table_names.push(new_name.clone());
                 taken_names.insert(new_name);
@@ -520,8 +570,7 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 let chart_rels_src = wolfxl_rels::rels_path_for(&resolved);
                 if let Some(rels_path_src) = chart_rels_src {
                     if let Some(rb) = zip_parts.get(&rels_path_src) {
-                        let chart_rels_dst =
-                            format!("xl/charts/_rels/chart{new_chart_n}.xml.rels");
+                        let chart_rels_dst = format!("xl/charts/_rels/chart{new_chart_n}.xml.rels");
                         let cloned_rels = clone_chart_rels_with_dependencies(
                             rb,
                             &resolved,
@@ -615,6 +664,21 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                 let new_n = inputs.allocator.alloc_slicer();
                 let new_part_path = format!("xl/slicers/slicer{new_n}.xml");
                 let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
+                let (src_bytes, new_cache_refs) = clone_slicer_caches_for_presentation(
+                    &src_bytes,
+                    zip_parts,
+                    inputs.allocator,
+                    &table_id_remap,
+                    source_sheet_id,
+                    new_sheet_id,
+                    &mut taken_slicer_cache_names,
+                    &mut taken_slicer_names,
+                    &mut slicer_cache_name_remap,
+                    &mut slicer_name_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
+                workbook_slicer_cache_rels_to_add.extend(new_cache_refs);
                 let new_target = format!("../slicers/slicer{new_n}.xml");
                 let mut outputs = SheetRelCloneOutputs {
                     dest_rels: &mut dest_rels,
@@ -628,6 +692,45 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                         bytes: src_bytes,
                         new_part_path,
                         content_type: Some(wolfxl_pivot::ct::SLICER),
+                        new_target,
+                    },
+                    &mut outputs,
+                );
+            }
+            // ------ Timeline presentations (Excel pivot timelines) ------
+            t if t == RT_TIMELINE => {
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let new_n = inputs.allocator.alloc_timeline();
+                let new_part_path = format!("xl/timelines/timeline{new_n}.xml");
+                let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
+                let (src_bytes, new_cache_refs) = clone_timeline_cache_for_presentation(
+                    &src_bytes,
+                    zip_parts,
+                    inputs.allocator,
+                    source_sheet_id,
+                    new_sheet_id,
+                    &mut taken_timeline_cache_names,
+                    &mut taken_timeline_names,
+                    &mut timeline_cache_name_remap,
+                    &mut timeline_name_remap,
+                    &mut new_ancillary_parts,
+                    &mut content_type_overrides_to_add,
+                );
+                workbook_timeline_cache_rels_to_add.extend(new_cache_refs);
+                let new_target = format!("../timelines/timeline{new_n}.xml");
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: src_bytes,
+                        new_part_path,
+                        content_type: Some(CT_TIMELINE),
                         new_target,
                     },
                     &mut outputs,
@@ -671,6 +774,25 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     } else {
         new_sheet_xml
     };
+    let new_sheet_xml = if table_name_remap.is_empty() {
+        new_sheet_xml
+    } else {
+        rewrite_table_formula_refs(&new_sheet_xml, &table_name_remap)
+    };
+    if !slicer_name_remap.is_empty() {
+        for (path, bytes) in &mut new_ancillary_parts {
+            if path.starts_with("xl/drawings/drawing") && path.ends_with(".xml") {
+                *bytes = rewrite_drawing_object_names(bytes, &slicer_name_remap);
+            }
+        }
+    }
+    if !timeline_name_remap.is_empty() {
+        for (path, bytes) in &mut new_ancillary_parts {
+            if path.starts_with("xl/drawings/drawing") && path.ends_with(".xml") {
+                *bytes = rewrite_drawing_object_names(bytes, &timeline_name_remap);
+            }
+        }
+    }
 
     // ---- Sheet-scoped defined-name clones ---------------------------------
     let defined_names_to_add: Vec<DefinedNameClone> = defined_names
@@ -690,7 +812,7 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     // ---- New <sheet> entry for workbook.xml -------------------------------
     let placeholder_rid = format!("__SHEET_RID_PLACEHOLDER_{new_sheet_n}__");
     let workbook_sheets_append =
-        render_sheet_entry(&inputs.dst_title, new_sheet_n, &placeholder_rid);
+        render_sheet_entry(&inputs.dst_title, new_sheet_id, &placeholder_rid);
     let workbook_rels_to_add = vec![(
         placeholder_rid,
         rt::WORKSHEET.to_string(),
@@ -714,6 +836,8 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
         content_type_overrides_to_add,
         workbook_sheets_append,
         workbook_rels_to_add,
+        workbook_slicer_cache_rels_to_add,
+        workbook_timeline_cache_rels_to_add,
         defined_names_to_add,
         new_table_names,
         rid_remap,
@@ -801,12 +925,7 @@ fn clone_chart_rels_with_dependencies(
                 target = new_target;
             }
         }
-        cloned_rels.add_with_id(
-            RelId(rel.id.0.clone()),
-            &rel.rel_type,
-            &target,
-            rel.mode,
-        );
+        cloned_rels.add_with_id(RelId(rel.id.0.clone()), &rel.rel_type, &target, rel.mode);
     }
     cloned_rels.serialize()
 }
@@ -840,6 +959,8 @@ struct SheetMetadata {
     /// Sheet titles in document order (the position is the
     /// `localSheetId`).
     sheet_titles: Vec<String>,
+    /// Workbook `<sheet sheetId="...">` values in document order.
+    sheet_ids: Vec<u32>,
     defined_names: Vec<ParsedDefinedName>,
 }
 
@@ -864,7 +985,11 @@ fn parse_workbook_metadata(workbook_xml: &[u8]) -> Result<SheetMetadata, SheetCo
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => match e.local_name().as_ref() {
                 b"sheet" => {
                     let name = attr_value(&e, b"name").unwrap_or_default();
+                    let sheet_id = attr_value(&e, b"sheetId")
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or((meta.sheet_titles.len() as u32) + 1);
                     meta.sheet_titles.push(name);
+                    meta.sheet_ids.push(sheet_id);
                 }
                 b"definedName" => {
                     let name = attr_value(&e, b"name").unwrap_or_default();
@@ -984,7 +1109,7 @@ fn clone_table_part(
     src_bytes: &[u8],
     taken_names: &mut HashSet<String>,
     new_n: u32,
-) -> Result<(Vec<u8>, String), SheetCopyError> {
+) -> Result<(Vec<u8>, String, Option<String>), SheetCopyError> {
     let mut reader = XmlReader::from_reader(src_bytes);
     reader.config_mut().trim_text(false);
     let mut writer = XmlWriter::new(Vec::with_capacity(src_bytes.len()));
@@ -1034,8 +1159,7 @@ fn clone_table_part(
         taken_names.insert(synth.clone());
         synth
     });
-    let _ = original_name;
-    Ok((bytes, new_name))
+    Ok((bytes, new_name, original_name))
 }
 
 fn clone_table_start(
@@ -1127,6 +1251,538 @@ fn clone_table_start(
     }
 
     Ok((new_e, new_name, original_name))
+}
+
+fn table_id_from_xml(src_bytes: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(src_bytes);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"table" => {
+                return attr_value(&e, b"id");
+            }
+            Ok(Event::Eof) => return None,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn workbook_slicer_cache_names(zip_parts: &HashMap<String, Vec<u8>>) -> HashSet<String> {
+    zip_parts
+        .iter()
+        .filter(|(path, _)| {
+            path.starts_with("xl/slicerCaches/slicerCache") && path.ends_with(".xml")
+        })
+        .filter_map(|(_, bytes)| slicer_cache_name_from_xml(bytes))
+        .collect()
+}
+
+fn slicer_names_from_parts(zip_parts: &HashMap<String, Vec<u8>>) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for (path, bytes) in zip_parts {
+        if !(path.starts_with("xl/slicers/slicer") && path.ends_with(".xml")) {
+            continue;
+        }
+        let mut reader = XmlReader::from_reader(bytes.as_slice());
+        reader.config_mut().trim_text(false);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                    if e.local_name().as_ref() == b"slicer" =>
+                {
+                    if let Some(name) = attr_value(&e, b"name") {
+                        names.insert(name);
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
+    names
+}
+
+fn slicer_cache_name_from_xml(src_bytes: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(src_bytes);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.local_name().as_ref() == b"slicerCacheDefinition" =>
+            {
+                return attr_value(&e, b"name");
+            }
+            Ok(Event::Eof) => return None,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn clone_slicer_caches_for_presentation(
+    slicer_xml: &[u8],
+    zip_parts: &HashMap<String, Vec<u8>>,
+    allocator: &mut PartIdAllocator,
+    table_id_remap: &HashMap<String, String>,
+    source_sheet_id: u32,
+    new_sheet_id: u32,
+    taken_cache_names: &mut HashSet<String>,
+    taken_slicer_names: &mut HashSet<String>,
+    cache_name_remap: &mut HashMap<String, String>,
+    slicer_name_remap: &mut HashMap<String, String>,
+    new_ancillary_parts: &mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &mut Vec<(String, String)>,
+) -> (Vec<u8>, Vec<(String, String, String)>) {
+    let cache_parts = slicer_cache_parts_by_name(zip_parts);
+    let mut workbook_refs = Vec::new();
+    let mut reader = XmlReader::from_reader(slicer_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"slicer" => {
+                let Some(old_cache_name) = attr_value(&e, b"cache") else {
+                    buf.clear();
+                    continue;
+                };
+                let Some((_cache_part, cache_bytes)) = cache_parts.get(&old_cache_name) else {
+                    buf.clear();
+                    continue;
+                };
+                if !cache_name_remap.contains_key(&old_cache_name) {
+                    let cloned_cache =
+                        if let Some(source_table_id) = table_slicer_cache_table_id(cache_bytes) {
+                            let Some(new_table_id) = table_id_remap.get(&source_table_id) else {
+                                buf.clear();
+                                continue;
+                            };
+                            let new_cache_name =
+                                unique_with_numeric_suffix(&old_cache_name, taken_cache_names, "");
+                            taken_cache_names.insert(new_cache_name.clone());
+                            let cloned_cache = rewrite_table_slicer_cache(
+                                cache_bytes,
+                                &old_cache_name,
+                                &new_cache_name,
+                                &source_table_id,
+                                new_table_id,
+                            );
+                            cache_name_remap.insert(old_cache_name.clone(), new_cache_name);
+                            cloned_cache
+                        } else if let Some(source_tab_id) = pivot_slicer_cache_tab_id(cache_bytes) {
+                            if source_tab_id != source_sheet_id.to_string() {
+                                buf.clear();
+                                continue;
+                            }
+                            let new_cache_name =
+                                unique_with_numeric_suffix(&old_cache_name, taken_cache_names, "");
+                            taken_cache_names.insert(new_cache_name.clone());
+                            let cloned_cache = rewrite_pivot_slicer_cache(
+                                cache_bytes,
+                                &old_cache_name,
+                                &new_cache_name,
+                                &source_tab_id,
+                                &new_sheet_id.to_string(),
+                            );
+                            cache_name_remap.insert(old_cache_name.clone(), new_cache_name);
+                            cloned_cache
+                        } else {
+                            buf.clear();
+                            continue;
+                        };
+                    let new_cache_name = cache_name_remap
+                        .get(&old_cache_name)
+                        .cloned()
+                        .unwrap_or_else(|| old_cache_name.clone());
+                    let new_cache_n = allocator.alloc_slicer_cache();
+                    let new_cache_path = format!("xl/slicerCaches/slicerCache{new_cache_n}.xml");
+                    allocator.observe(&new_cache_path);
+                    new_ancillary_parts.push((new_cache_path.clone(), cloned_cache));
+                    content_type_overrides_to_add.push((
+                        format!("/{new_cache_path}"),
+                        wolfxl_pivot::ct::SLICER_CACHE.to_string(),
+                    ));
+                    workbook_refs.push((
+                        new_cache_name.clone(),
+                        wolfxl_pivot::rt::SLICER_CACHE.to_string(),
+                        format!("slicerCaches/slicerCache{new_cache_n}.xml"),
+                    ));
+                }
+                if let Some(old_slicer_name) = attr_value(&e, b"name") {
+                    slicer_name_remap
+                        .entry(old_slicer_name.clone())
+                        .or_insert_with(|| {
+                            let new_name = unique_with_numeric_suffix(
+                                &old_slicer_name,
+                                taken_slicer_names,
+                                " ",
+                            );
+                            taken_slicer_names.insert(new_name.clone());
+                            new_name
+                        });
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    let rewritten = rewrite_slicer_presentation(slicer_xml, cache_name_remap, slicer_name_remap);
+    (rewritten, workbook_refs)
+}
+
+fn slicer_cache_parts_by_name(
+    zip_parts: &HashMap<String, Vec<u8>>,
+) -> HashMap<String, (String, Vec<u8>)> {
+    let mut out = HashMap::new();
+    for (path, bytes) in zip_parts {
+        if !(path.starts_with("xl/slicerCaches/slicerCache") && path.ends_with(".xml")) {
+            continue;
+        }
+        if let Some(name) = slicer_cache_name_from_xml(bytes) {
+            out.insert(name, (path.clone(), bytes.clone()));
+        }
+    }
+    out
+}
+
+fn table_slicer_cache_table_id(src_bytes: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(src_bytes);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.local_name().as_ref() == b"tableSlicerCache" =>
+            {
+                return attr_value(&e, b"tableId");
+            }
+            Ok(Event::Eof) => return None,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn pivot_slicer_cache_tab_id(src_bytes: &[u8]) -> Option<String> {
+    first_attr_on_local_element(src_bytes, b"pivotTable", b"tabId")
+}
+
+fn workbook_timeline_cache_names(zip_parts: &HashMap<String, Vec<u8>>) -> HashSet<String> {
+    zip_parts
+        .iter()
+        .filter(|(path, _)| {
+            path.starts_with("xl/timelineCaches/timelineCache") && path.ends_with(".xml")
+        })
+        .filter_map(|(_, bytes)| timeline_cache_name_from_xml(bytes))
+        .collect()
+}
+
+fn timeline_names_from_parts(zip_parts: &HashMap<String, Vec<u8>>) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for (path, bytes) in zip_parts {
+        if !(path.starts_with("xl/timelines/timeline") && path.ends_with(".xml")) {
+            continue;
+        }
+        if let Some(name) = first_attr_on_local_element(bytes, b"timeline", b"name") {
+            names.insert(name);
+        }
+    }
+    names
+}
+
+fn timeline_cache_name_from_xml(src_bytes: &[u8]) -> Option<String> {
+    first_attr_on_local_element(src_bytes, b"timelineCacheDefinition", b"name")
+}
+
+fn timeline_cache_parts_by_name(
+    zip_parts: &HashMap<String, Vec<u8>>,
+) -> HashMap<String, (String, Vec<u8>)> {
+    let mut out = HashMap::new();
+    for (path, bytes) in zip_parts {
+        if !(path.starts_with("xl/timelineCaches/timelineCache") && path.ends_with(".xml")) {
+            continue;
+        }
+        if let Some(name) = timeline_cache_name_from_xml(bytes) {
+            out.insert(name, (path.clone(), bytes.clone()));
+        }
+    }
+    out
+}
+
+fn clone_timeline_cache_for_presentation(
+    timeline_xml: &[u8],
+    zip_parts: &HashMap<String, Vec<u8>>,
+    allocator: &mut PartIdAllocator,
+    source_sheet_id: u32,
+    new_sheet_id: u32,
+    taken_cache_names: &mut HashSet<String>,
+    taken_timeline_names: &mut HashSet<String>,
+    cache_name_remap: &mut HashMap<String, String>,
+    timeline_name_remap: &mut HashMap<String, String>,
+    new_ancillary_parts: &mut Vec<(String, Vec<u8>)>,
+    content_type_overrides_to_add: &mut Vec<(String, String)>,
+) -> (Vec<u8>, Vec<(String, String, String)>) {
+    let cache_parts = timeline_cache_parts_by_name(zip_parts);
+    let mut workbook_refs = Vec::new();
+    let mut reader = XmlReader::from_reader(timeline_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"timeline" => {
+                let Some(old_cache_name) = attr_value(&e, b"cache") else {
+                    buf.clear();
+                    continue;
+                };
+                let Some((_cache_part, cache_bytes)) = cache_parts.get(&old_cache_name) else {
+                    buf.clear();
+                    continue;
+                };
+                if !cache_name_remap.contains_key(&old_cache_name) {
+                    let Some(source_tab_id) = pivot_slicer_cache_tab_id(cache_bytes) else {
+                        buf.clear();
+                        continue;
+                    };
+                    if source_tab_id != source_sheet_id.to_string() {
+                        buf.clear();
+                        continue;
+                    }
+                    let new_cache_name =
+                        unique_with_numeric_suffix(&old_cache_name, taken_cache_names, "");
+                    taken_cache_names.insert(new_cache_name.clone());
+                    let cloned_cache = rewrite_pivot_slicer_cache(
+                        cache_bytes,
+                        &old_cache_name,
+                        &new_cache_name,
+                        &source_tab_id,
+                        &new_sheet_id.to_string(),
+                    );
+                    let new_cache_n = allocator.alloc_timeline_cache();
+                    let new_cache_path =
+                        format!("xl/timelineCaches/timelineCache{new_cache_n}.xml");
+                    allocator.observe(&new_cache_path);
+                    new_ancillary_parts.push((new_cache_path.clone(), cloned_cache));
+                    content_type_overrides_to_add
+                        .push((format!("/{new_cache_path}"), CT_TIMELINE_CACHE.to_string()));
+                    workbook_refs.push((
+                        new_cache_name.clone(),
+                        RT_TIMELINE_CACHE.to_string(),
+                        format!("timelineCaches/timelineCache{new_cache_n}.xml"),
+                    ));
+                    cache_name_remap.insert(old_cache_name.clone(), new_cache_name);
+                }
+                if let Some(old_timeline_name) = attr_value(&e, b"name") {
+                    timeline_name_remap
+                        .entry(old_timeline_name.clone())
+                        .or_insert_with(|| {
+                            let new_name = unique_with_numeric_suffix(
+                                &old_timeline_name,
+                                taken_timeline_names,
+                                " ",
+                            );
+                            taken_timeline_names.insert(new_name.clone());
+                            new_name
+                        });
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    let rewritten =
+        rewrite_timeline_presentation(timeline_xml, cache_name_remap, timeline_name_remap);
+    (rewritten, workbook_refs)
+}
+
+fn unique_with_numeric_suffix(base: &str, taken: &HashSet<String>, sep: &str) -> String {
+    let mut suffix = 1_u32;
+    loop {
+        let candidate = format!("{base}{sep}{suffix}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn rewrite_table_slicer_cache(
+    cache_xml: &[u8],
+    old_name: &str,
+    new_name: &str,
+    old_table_id: &str,
+    new_table_id: &str,
+) -> Vec<u8> {
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert(
+        "name".to_string(),
+        HashMap::from([(old_name.to_string(), new_name.to_string())]),
+    );
+    attr_maps.insert(
+        "tableId".to_string(),
+        HashMap::from([(old_table_id.to_string(), new_table_id.to_string())]),
+    );
+    rewrite_attributes_by_local_name(cache_xml, &attr_maps)
+}
+
+fn rewrite_pivot_slicer_cache(
+    cache_xml: &[u8],
+    old_name: &str,
+    new_name: &str,
+    old_tab_id: &str,
+    new_tab_id: &str,
+) -> Vec<u8> {
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert(
+        "name".to_string(),
+        HashMap::from([(old_name.to_string(), new_name.to_string())]),
+    );
+    attr_maps.insert(
+        "tabId".to_string(),
+        HashMap::from([(old_tab_id.to_string(), new_tab_id.to_string())]),
+    );
+    rewrite_attributes_by_local_name(cache_xml, &attr_maps)
+}
+
+fn rewrite_slicer_presentation(
+    slicer_xml: &[u8],
+    cache_name_remap: &HashMap<String, String>,
+    slicer_name_remap: &HashMap<String, String>,
+) -> Vec<u8> {
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert("cache".to_string(), cache_name_remap.clone());
+    attr_maps.insert("name".to_string(), slicer_name_remap.clone());
+    rewrite_attributes_by_local_name(slicer_xml, &attr_maps)
+}
+
+fn rewrite_timeline_presentation(
+    timeline_xml: &[u8],
+    cache_name_remap: &HashMap<String, String>,
+    timeline_name_remap: &HashMap<String, String>,
+) -> Vec<u8> {
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert("cache".to_string(), cache_name_remap.clone());
+    attr_maps.insert("name".to_string(), timeline_name_remap.clone());
+    rewrite_attributes_by_local_name(timeline_xml, &attr_maps)
+}
+
+fn rewrite_drawing_object_names(xml: &[u8], name_remap: &HashMap<String, String>) -> Vec<u8> {
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert("name".to_string(), name_remap.clone());
+    rewrite_attributes_by_local_name(xml, &attr_maps)
+}
+
+fn rewrite_table_formula_refs(xml: &[u8], table_name_remap: &HashMap<String, String>) -> Vec<u8> {
+    if table_name_remap.is_empty() {
+        return xml.to_vec();
+    }
+    let Ok(mut s) = String::from_utf8(xml.to_vec()) else {
+        return xml.to_vec();
+    };
+    for (old_name, new_name) in table_name_remap {
+        s = s.replace(&format!("{old_name}["), &format!("{new_name}["));
+    }
+    s.into_bytes()
+}
+
+fn first_attr_on_local_element(src_bytes: &[u8], element: &[u8], attr: &[u8]) -> Option<String> {
+    let mut reader = XmlReader::from_reader(src_bytes);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == element => {
+                return attr_value(&e, attr);
+            }
+            Ok(Event::Eof) => return None,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn rewrite_attributes_by_local_name(
+    xml: &[u8],
+    attr_maps: &HashMap<String, HashMap<String, String>>,
+) -> Vec<u8> {
+    if attr_maps.values().all(HashMap::is_empty) {
+        return xml.to_vec();
+    }
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let Ok(new_e) = rewrite_element_attrs_by_local_name(&e, attr_maps) else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Start(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let Ok(new_e) = rewrite_element_attrs_by_local_name(&e, attr_maps) else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Empty(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(other) => {
+                if writer.write_event(other).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Err(_) => return xml.to_vec(),
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+fn rewrite_element_attrs_by_local_name(
+    e: &BytesStart<'_>,
+    attr_maps: &HashMap<String, HashMap<String, String>>,
+) -> Result<BytesStart<'static>, SheetCopyError> {
+    let mut new_e = BytesStart::new(
+        std::str::from_utf8(e.name().as_ref())
+            .map_err(|er| SheetCopyError::Xml(format!("element name utf8: {er}")))?
+            .to_owned(),
+    );
+    for a in e.attributes().with_checks(false).flatten() {
+        let key = a.key.as_ref().to_vec();
+        let local_key = key.rsplit(|b| *b == b':').next().unwrap_or(key.as_slice());
+        let local_key = String::from_utf8_lossy(local_key).into_owned();
+        let value = a
+            .unescape_value()
+            .map(|v| v.into_owned())
+            .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        let new_value = attr_maps
+            .get(&local_key)
+            .and_then(|m| m.get(&value))
+            .cloned()
+            .unwrap_or(value);
+        new_e.push_attribute(Attribute {
+            key: QName(&key),
+            value: new_value.into_bytes().into(),
+        });
+    }
+    Ok(new_e)
 }
 
 // ---------------------------------------------------------------------------

@@ -69,6 +69,10 @@ pub struct PartIdAllocator {
     // Sprint Ο Pod 3.5 (RFC-061 §3.1) — slicer deep-clone counters.
     next_slicer: u32,
     next_slicer_cache: u32,
+    // Real Excel fidelity — timeline presentations/caches are separate
+    // workbook-scoped part families from slicers.
+    next_timeline: u32,
+    next_timeline_cache: u32,
     // Sprint Σ G08 (RFC-068 §5) — threaded-comment counter.
     next_threaded_comments: u32,
 }
@@ -96,6 +100,8 @@ impl PartIdAllocator {
             next_pivot_cache: 1,
             next_slicer: 1,
             next_slicer_cache: 1,
+            next_timeline: 1,
+            next_timeline_cache: 1,
             next_threaded_comments: 1,
         }
     }
@@ -149,6 +155,10 @@ impl PartIdAllocator {
             self.bump(Counter::Slicer, n);
         } else if let Some(n) = parse_n(path, "xl/slicerCaches/slicerCache", ".xml") {
             self.bump(Counter::SlicerCache, n);
+        } else if let Some(n) = parse_n(path, "xl/timelines/timeline", ".xml") {
+            self.bump(Counter::Timeline, n);
+        } else if let Some(n) = parse_n(path, "xl/timelineCaches/timelineCache", ".xml") {
+            self.bump(Counter::TimelineCache, n);
         } else if let Some(n) = parse_n(path, "xl/threadedComments/threadedComments", ".xml") {
             self.bump(Counter::ThreadedComments, n);
         } else if path.starts_with("xl/media/image") {
@@ -178,6 +188,8 @@ impl PartIdAllocator {
             Counter::PivotCache => &mut self.next_pivot_cache,
             Counter::Slicer => &mut self.next_slicer,
             Counter::SlicerCache => &mut self.next_slicer_cache,
+            Counter::Timeline => &mut self.next_timeline,
+            Counter::TimelineCache => &mut self.next_timeline_cache,
             Counter::ThreadedComments => &mut self.next_threaded_comments,
         };
         if n + 1 > *slot {
@@ -289,6 +301,20 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `timeline{N}` suffix; returns `N` (≥1).
+    pub fn alloc_timeline(&mut self) -> u32 {
+        let n = self.next_timeline;
+        self.next_timeline += 1;
+        n
+    }
+
+    /// Allocate a fresh `timelineCache{N}` suffix; returns `N` (≥1).
+    pub fn alloc_timeline_cache(&mut self) -> u32 {
+        let n = self.next_timeline_cache;
+        self.next_timeline_cache += 1;
+        n
+    }
+
     /// Allocate a fresh `threadedComments{N}` suffix; returns `N` (≥1).
     /// Used by RFC-068 G08 step 5 in modify mode for sheets that gain
     /// their first threaded-comment part.
@@ -319,6 +345,8 @@ enum Counter {
     VmlDrawing,
     Slicer,
     SlicerCache,
+    Timeline,
+    TimelineCache,
     Drawing,
     Sheet,
     Chart,
