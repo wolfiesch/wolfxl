@@ -30,11 +30,13 @@ EXCEL_APP = "/Applications/Microsoft Excel.app"
 MANIFEST_NAME = "manifest.json"
 SMOKE_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 PASSING_STATUSES = {"passed", "skipped"}
+SOURCE_MUTATION = "source"
 
 
 @dataclass
 class AppSmokeResult:
     fixture: str
+    mutation: str
     app: str
     status: str
     output: str | None
@@ -46,6 +48,7 @@ def run_smoke(
     output_dir: Path,
     apps: Iterable[str],
     timeout: int = 90,
+    mutations: Iterable[str] = (SOURCE_MUTATION,),
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +59,7 @@ def run_smoke(
             results.append(
                 AppSmokeResult(
                     fixture=entry.filename,
+                    mutation=SOURCE_MUTATION,
                     app="discover",
                     status="failed",
                     output=None,
@@ -63,18 +67,43 @@ def run_smoke(
                 )
             )
             continue
-        for app in apps:
-            if app == "libreoffice":
-                results.append(_smoke_libreoffice(fixture_path, output_dir, timeout))
-            elif app == "excel":
-                results.append(_smoke_excel(fixture_path, output_dir, timeout))
-            else:
-                raise ValueError(f"unknown app: {app}")
+        for mutation in mutations:
+            smoke_path, mutation_error = _fixture_for_mutation(
+                fixture_path,
+                entry.filename,
+                output_dir,
+                mutation,
+            )
+            if mutation_error is not None:
+                for app in apps:
+                    results.append(
+                        AppSmokeResult(
+                            fixture=entry.filename,
+                            mutation=mutation,
+                            app=app,
+                            status="failed",
+                            output=None,
+                            message=mutation_error,
+                        )
+                    )
+                continue
+            for app in apps:
+                app_output_dir = output_dir / _safe_stem(mutation)
+                if app == "libreoffice":
+                    result = _smoke_libreoffice(smoke_path, app_output_dir, timeout)
+                elif app == "excel":
+                    result = _smoke_excel(smoke_path, app_output_dir, timeout)
+                else:
+                    raise ValueError(f"unknown app: {app}")
+                result.fixture = entry.filename
+                result.mutation = mutation
+                results.append(result)
 
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "apps": list(apps),
+        "mutations": list(mutations),
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -90,7 +119,14 @@ def run_smoke(
 def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
     soffice = _find_libreoffice()
     if soffice is None:
-        return AppSmokeResult(src.name, "libreoffice", "skipped", None, "soffice not found")
+        return AppSmokeResult(
+            src.name,
+            SOURCE_MUTATION,
+            "libreoffice",
+            "skipped",
+            None,
+            "soffice not found",
+        )
     work = output_dir / _safe_stem(src.stem) / "libreoffice"
     work.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
@@ -110,6 +146,7 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
     if proc.returncode != 0:
         return AppSmokeResult(
             src.name,
+            SOURCE_MUTATION,
             "libreoffice",
             "failed",
             None,
@@ -120,6 +157,7 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
         if keyword in stderr_lc:
             return AppSmokeResult(
                 src.name,
+                SOURCE_MUTATION,
                 "libreoffice",
                 "failed",
                 None,
@@ -129,6 +167,7 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
     ok, message = _validate_xlsx(converted)
     return AppSmokeResult(
         src.name,
+        SOURCE_MUTATION,
         "libreoffice",
         "passed" if ok else "failed",
         str(converted) if converted.exists() else None,
@@ -138,7 +177,14 @@ def _smoke_libreoffice(src: Path, output_dir: Path, timeout: int) -> AppSmokeRes
 
 def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
     if not Path(EXCEL_APP).is_dir():
-        return AppSmokeResult(src.name, "excel", "skipped", None, "Microsoft Excel not found")
+        return AppSmokeResult(
+            src.name,
+            SOURCE_MUTATION,
+            "excel",
+            "skipped",
+            None,
+            "Microsoft Excel not found",
+        )
     work = output_dir / _safe_stem(src.stem) / "excel"
     work.mkdir(parents=True, exist_ok=True)
     out = work / src.name
@@ -162,6 +208,7 @@ end tell
         _close_excel_best_effort()
         return AppSmokeResult(
             src.name,
+            SOURCE_MUTATION,
             "excel",
             "failed",
             str(out) if out.exists() else None,
@@ -170,6 +217,7 @@ end tell
     if proc.returncode != 0:
         return AppSmokeResult(
             src.name,
+            SOURCE_MUTATION,
             "excel",
             "failed",
             None,
@@ -178,6 +226,7 @@ end tell
     ok, message = _validate_xlsx(out)
     return AppSmokeResult(
         src.name,
+        SOURCE_MUTATION,
         "excel",
         "passed" if ok else "failed",
         str(out) if out.exists() else None,
@@ -203,6 +252,39 @@ def _validate_xlsx(path: Path) -> tuple[bool, str]:
     if missing:
         return False, f"missing required OOXML parts: {missing}"
     return True, "ok"
+
+
+def _fixture_for_mutation(
+    fixture_path: Path,
+    fixture_label: str,
+    output_dir: Path,
+    mutation: str,
+) -> tuple[Path, str | None]:
+    if mutation == SOURCE_MUTATION:
+        return fixture_path, None
+    work = (
+        output_dir
+        / "_mutations"
+        / run_ooxml_fidelity_mutations._safe_stem(
+            Path(fixture_label).with_suffix("").as_posix()
+        )
+        / mutation
+    )
+    work.mkdir(parents=True, exist_ok=True)
+    before_path = work / f"before-{fixture_path.name}"
+    after_path = work / f"after-{fixture_path.name}"
+    shutil.copy2(fixture_path, before_path)
+    shutil.copy2(fixture_path, after_path)
+    try:
+        run_ooxml_fidelity_mutations._prepare_mutation_baseline(
+            before_path,
+            after_path,
+            mutation,
+        )
+        run_ooxml_fidelity_mutations._apply_mutation(after_path, mutation)
+    except Exception as exc:
+        return after_path, f"mutation {mutation!r} failed: {str(exc)[:500]}"
+    return after_path, None
 
 
 def _find_libreoffice() -> str | None:
@@ -250,10 +332,27 @@ def main(argv: list[str] | None = None) -> int:
         help="App smoke to run. May be passed multiple times.",
     )
     parser.add_argument("--timeout", type=int, default=90)
+    parser.add_argument(
+        "--mutation",
+        action="append",
+        choices=(SOURCE_MUTATION, *run_ooxml_fidelity_mutations.SUPPORTED_MUTATIONS),
+        dest="mutations",
+        help=(
+            "Workbook mutation to smoke. May be passed multiple times. "
+            "Defaults to source fixtures without mutation."
+        ),
+    )
     args = parser.parse_args(argv)
 
     apps = tuple(args.apps or ("libreoffice",))
-    report = run_smoke(args.fixture_dir, args.output_dir, apps, timeout=args.timeout)
+    mutations = tuple(args.mutations or (SOURCE_MUTATION,))
+    report = run_smoke(
+        args.fixture_dir,
+        args.output_dir,
+        apps,
+        timeout=args.timeout,
+        mutations=mutations,
+    )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
 

@@ -67,6 +67,7 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
         return smoke_module.AppSmokeResult(
             fixture=src.name,
+            mutation="source",
             app="libreoffice",
             status="failed",
             output=None,
@@ -84,4 +85,46 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
 
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
+    assert report["mutations"] == ["source"]
     assert (output_dir / "app-smoke-report.json").is_file()
+
+
+def test_run_smoke_can_apply_mutation_before_app_smoke(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+    seen_sources: list[Path] = []
+
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+        seen_sources.append(src)
+        return smoke_module.AppSmokeResult(
+            fixture=src.name,
+            mutation="source",
+            app="libreoffice",
+            status="passed",
+            output=str(src),
+            message="ok",
+        )
+
+    monkeypatch.setattr(smoke_module, "_smoke_libreoffice", fake_smoke)
+
+    report = smoke_module.run_smoke(
+        fixture_dir,
+        output_dir,
+        apps=("libreoffice",),
+        timeout=1,
+        mutations=("marker_cell",),
+    )
+
+    assert report["result_count"] == 1
+    assert report["failure_count"] == 0
+    assert report["mutations"] == ["marker_cell"]
+    result = report["results"][0]
+    assert result["fixture"] == "simple.xlsx"
+    assert result["mutation"] == "marker_cell"
+    assert seen_sources[0].name == "after-simple.xlsx"
+    assert seen_sources[0].is_file()
