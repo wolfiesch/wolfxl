@@ -116,6 +116,36 @@ def test_coverage_audit_uses_application_for_recursive_source_class(
     assert chart["real_excel_fixtures"] == ["nested/chart.xlsx"]
 
 
+def test_coverage_audit_manifest_tool_overrides_application_source_class(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "openpyxl-chart.xlsx"
+    _write_chart_fixture(fixture)
+    _add_application_name(fixture, "Microsoft Excel")
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "openpyxl_chart",
+                        "tool": "openpyxl",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir)
+
+    assert report["fixtures"][0]["application"] == "Microsoft Excel"
+    assert report["fixtures"][0]["source_class"] == "external_tool"
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert chart["external_tool_fixtures"] == ["openpyxl-chart.xlsx"]
+
+
 def test_coverage_audit_tracks_present_python_and_sheet_metadata(
     tmp_path: Path,
 ) -> None:

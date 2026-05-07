@@ -648,12 +648,17 @@ def _application_name(path: Path) -> str | None:
 
 
 def _source_class(tool: str | None, application: str | None = None) -> str:
-    values = [value.strip().lower() for value in (tool, application) if value]
-    if not values:
+    if tool:
+        normalized_tool = tool.strip().lower()
+        if normalized_tool in REAL_EXCEL_TOOLS:
+            return "real_excel"
+        return "external_tool"
+    if not application:
         return "unknown"
-    if any(value in REAL_EXCEL_TOOLS for value in values):
+    normalized_application = application.strip().lower()
+    if normalized_application in REAL_EXCEL_TOOLS:
         return "real_excel"
-    if any("excel" in value and "excelize" not in value for value in values):
+    if "excel" in normalized_application and "excelize" not in normalized_application:
         return "real_excel"
     return "external_tool"
 
