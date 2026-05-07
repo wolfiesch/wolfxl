@@ -388,3 +388,37 @@ def test_subprocess_context_formats_available_output() -> None:
     assert render_module._format_subprocess_context(completed) == (
         " (stdout='hello'; stderr='warning')"
     )
+
+
+def test_excel_pdf_export_reports_timeout_dialog(tmp_path: Path, monkeypatch) -> None:
+    src = tmp_path / "book.xlsx"
+    src.write_bytes(b"not-used")
+    output_dir = tmp_path / "out"
+
+    def fake_run(*_args, **_kwargs):
+        raise render_module.subprocess.TimeoutExpired(["osascript"], timeout=3)
+
+    monkeypatch.setattr(render_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "_excel_dialog_text",
+        lambda: "Grant File Access",
+    )
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "_dismiss_excel_safe_dialogs",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "_close_excel_best_effort",
+        lambda: None,
+    )
+
+    try:
+        render_module._export_pdf_excel(src, output_dir, timeout=3)
+    except RuntimeError as exc:
+        assert "timed out after 3s" in str(exc)
+        assert "Grant File Access" in str(exc)
+    else:
+        raise AssertionError("expected Excel export timeout")

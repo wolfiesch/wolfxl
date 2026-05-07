@@ -411,6 +411,13 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
     pdf = outdir / f"{src.stem}.pdf"
     if pdf.exists():
         pdf.unlink()
+    stage_dir = _excel_render_stage_dir(src)
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    staged_src = stage_dir / src.name
+    staged_pdf = stage_dir / f"{src.stem}.pdf"
+    shutil.copy2(src, staged_src)
     open_cmd = (
         "    open workbook workbook file name workbookPath "
         "update links do not update links read only true "
@@ -422,8 +429,8 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
     )
     script = "\n".join(
         [
-            f"set workbookPath to POSIX file {json.dumps(str(src.resolve()))}",
-            f"set pdfPath to POSIX file {json.dumps(str(pdf.resolve()))}",
+            f"set workbookPath to POSIX file {json.dumps(str(staged_src.resolve()))}",
+            f"set pdfPath to POSIX file {json.dumps(str(staged_pdf.resolve()))}",
             'tell application "Microsoft Excel"',
             "  set previousDisplayAlerts to display alerts",
             "  set previousAskToUpdateLinks to ask to update links",
@@ -446,25 +453,55 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             "end tell",
         ]
     )
-    proc = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        proc = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        dialog = run_ooxml_app_smoke._excel_dialog_text()
+        run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+        run_ooxml_app_smoke._close_excel_best_effort()
+        message = f"Microsoft Excel PDF export timed out after {timeout}s"
+        if dialog:
+            message = f"{message}; Excel dialog: {dialog[:500]}"
+        raise RuntimeError(message) from exc
+    dialog = run_ooxml_app_smoke._excel_dialog_text()
     run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
     run_ooxml_app_smoke._close_excel_best_effort()
     if proc.returncode != 0:
+        detail = _format_subprocess_context(proc)
+        if dialog:
+            detail = f"{detail} Excel dialog: {dialog[:500]}"
         raise RuntimeError(
             f"Microsoft Excel PDF export failed for {src.name}: "
-            f"exit {proc.returncode}: {proc.stderr[:500]}"
+            f"exit {proc.returncode}: {proc.stderr[:500]}{detail}"
         )
-    if not pdf.is_file() or pdf.stat().st_size == 0:
+    if not staged_pdf.is_file() or staged_pdf.stat().st_size == 0:
         detail = _format_subprocess_context(proc)
+        if dialog:
+            detail = f"{detail} Excel dialog: {dialog[:500]}"
         raise RuntimeError(
-            f"Microsoft Excel did not produce a non-empty PDF at {pdf}{detail}"
+            f"Microsoft Excel did not produce a non-empty PDF at {staged_pdf}{detail}"
         )
+    shutil.copy2(staged_pdf, pdf)
     return pdf
+
+
+def _excel_render_stage_dir(src: Path) -> Path:
+    digest = hashlib.sha256(str(src.resolve()).encode()).hexdigest()[:16]
+    stem = run_ooxml_fidelity_mutations._safe_stem(src.stem)
+    return (
+        Path.home()
+        / "Library"
+        / "Containers"
+        / "com.microsoft.Excel"
+        / "Data"
+        / "wolfxl-render-compare"
+        / f"{stem}-{digest}"
+    )
 
 
 def _format_subprocess_context(proc: subprocess.CompletedProcess[str]) -> str:
