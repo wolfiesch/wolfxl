@@ -19,9 +19,10 @@ renumbered, orphaned, or left pointing at the wrong part.
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
 | External-oracle fixture pack | 14 active pinned workbooks from ClosedXML, Excelize, NPOI, openpyxl, one synthetic external-link OOXML oracle, one Excel-authored chart/CF workbook, one Excel-authored external-link workbook, one Excel-normalized pivot/CF workbook, one Excelize 2.10 pivot-slicer workbook, two public Excel-authored MyExcelOnline slicer workbooks, and one public Excel-authored MyExcelOnline timeline workbook. The Apache POI and ExcelJS image/comment/table sources are preserved under `tests/fixtures/external_oracle/rejected/` because Excel rejects them before WolfXL mutation | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, and external-link relationship mutations. Active fixtures now pass Microsoft Excel open/save smoke, including external-tool slicer, Excel-authored slicer, and Excel-authored timeline fixtures | This is a strong current evidence gate, not exhaustive proof. Rendered comparisons, richer structural edits, and broader real-file corpora still need coverage |
-| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
+| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not by itself a full Excel-rendered semantic validator or real-Excel corpus proof |
 | Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass. It records concrete feature keys and requires slicer/timeline evidence separately from pivot-table evidence | The current strict P0 evidence gate is green: pivot/slicer, chart/style/color, conditional-formatting, and external-link rows all have external-tool evidence, real Excel evidence, and structural mutation passes. The slicer/timeline group now includes direct timeline evidence from `real-excel-timeline-slicer.xlsx` | It only audits evidence presence; it does not prove rendered visual fidelity or broader corpus coverage |
 | App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | Microsoft Excel and LibreOffice now open/re-save all 14 active external-oracle fixtures cleanly | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class |
+| Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each active fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes each page with `pdftoppm`, and compares page images with ImageMagick RMSE | The current active pack has no LibreOffice-rendered pixel drift after no-op WolfXL modify-save: 14 fixtures, 0 failures, max normalized RMSE 0.0 at 96 DPI | It is a no-op render gate only; it does not yet compare Excel-rendered pixels, intentional structural edit renders, interactive slicer/timeline state, or a broad real-file corpus |
 
 ## Risk matrix
 
@@ -217,6 +218,12 @@ Gap ledger:
      `copy_first_sheet` as expected structural drift, matching the existing
      chart, pivot, slicer, CF, data-validation, formula, and external-link
      sheet-copy handling.
+   - Latest rendered comparison slice: added
+     `scripts/run_ooxml_render_compare.py`, which renders before/after
+     no-op modify-save pairs through LibreOffice PDF export, rasterizes pages
+     with `pdftoppm`, and compares page images with ImageMagick RMSE. The
+     active 14-fixture pack passes with 14 results, 0 failures, and max
+     normalized RMSE 0.0 at 96 DPI.
    - Latest external-link oracle-hardening bug found: table structured
      references such as `Table1[REGION]` were being misclassified as external
      workbook formulas because the external-link fingerprint only looked for
@@ -227,9 +234,9 @@ Gap ledger:
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
    - Next mutations/evidence: add richer chart/pivot/slicer/timeline
-     structural edits where the expected semantic drift can be declared, then
-     move from package-level evidence into rendered comparison and broader
-     real-file corpus sweeps.
+     structural edits where the expected semantic drift can be declared, add
+     rendered comparison for selected intentional structural edits, and broaden
+     the real-file corpus sweep beyond the pinned active pack.
 3. Expand fixture sources:
    - richer native Excel-authored workbooks with slicers, timelines, pivot
      charts, chart style/color parts, and conditional-formatting extensions;
