@@ -7,8 +7,8 @@
       "filename": "apache-poi-table-validation-image-comment.xlsx",
       "tool": "apache-poi",
       "fixture_id": "apache_poi_table_validation_image_comment",
-      "sha256": "936446f87806b15370ffc9bf8952ab3ba87f99b4aac96a851130efedbdccd5a5",
-      "size_bytes": 7014,
+      "sha256": "304149d6d104c14f19e6b15a8a51c19de44610c392723fe83dea4c817b870549",
+      "size_bytes": 6758,
       "expected_parts": [
         "xl/workbook.xml",
         "xl/sharedStrings.xml",
@@ -78,7 +78,7 @@
       "filename": "exceljs-table-validation-image-comment.xlsx",
       "tool": "exceljs",
       "fixture_id": "exceljs_table_validation_image_comment",
-      "sha256": "f0e870b37711be8d4e26e142595e0ed8a54e1c42f7563aa678f719518eb1b6f5",
+      "sha256": "66415dd0e4f95cc73a3f2379aceb8c1dcde9d70fe45ed5610ef670d68c018dd5",
       "size_bytes": 11077,
       "expected_parts": [
         "xl/sharedStrings.xml",

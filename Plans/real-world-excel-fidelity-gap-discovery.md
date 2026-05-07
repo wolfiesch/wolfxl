@@ -21,6 +21,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | External-oracle fixture pack | 11 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, one synthetic external-link OOXML oracle, one Excel-authored chart/CF workbook, one Excel-authored external-link workbook, and one Excel-normalized pivot/CF workbook. The pack is checked under safe/default modify-save mutations plus first-row delete, first-column delete, first-sheet copy, first-sheet rename, and formula-range move | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, and external-link relationship mutations. All four named P0 rows now have external-tool, real Excel/Excel-normalized, and structural mutation evidence | This is a strong current evidence gate, not exhaustive proof. Native Excel-authored slicer/timeline/pivot-chart fixtures, rendered comparisons, and broader real-file corpora still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 | Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass | The gap-discovery plan now has a strict, machine-readable "not clear yet" gate instead of relying on prose status | It only audits evidence presence; it does not invent missing real Excel or external-link fixtures |
+| App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | LibreOffice now opens/re-saves all 11 external-oracle fixtures cleanly after repairing invalid PNG CRCs in two external-tool image fixtures. Microsoft Excel opens/re-saves 8 of 11 fixtures cleanly | Excel still rejects three source fixtures before any WolfXL mutation: Apache POI image/comment/table, ExcelJS image/comment/table, and Excelize pivot/slicer/chart. Those are source-workbook app-compatibility gaps to replace or normalize before claiming exhaustive Excel-app coverage |
 
 ## Risk matrix
 
@@ -170,11 +171,24 @@ Gap ledger:
      all have external-tool fixture evidence, real Excel or Excel-normalized
      fixture evidence, and structural mutation passes under the current
      machine-readable standard.
+   - Latest app-smoke evidence slice: added
+     `scripts/run_ooxml_app_smoke.py`. LibreOffice headless now open/saves the
+     full 11-fixture pack with 11 results and 0 failures. This initially found
+     invalid embedded PNG CRCs in the Apache POI and ExcelJS image fixtures;
+     those fixture media CRCs are repaired and their manifest hashes are
+     repinned.
+   - Latest Excel app-smoke result: Microsoft Excel open/saves 8 of the 11
+     fixtures. It rejects `apache-poi-table-validation-image-comment.xlsx`,
+     `exceljs-table-validation-image-comment.xlsx`, and
+     `excelize-sales-pivot-slicer-chart.xlsx` with AppleScript parameter
+     errors before any WolfXL mutation. Treat those as source-fixture
+     app-compatibility gaps, not cleared evidence.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations: feature remove and richer chart/pivot/slicer structural
-     edits where the expected semantic drift can be declared.
+   - Next mutations/evidence: replace or normalize the three Excel-rejected
+     source fixtures, then add feature remove and richer chart/pivot/slicer
+     structural edits where the expected semantic drift can be declared.
 3. Expand fixture sources:
    - richer native Excel-authored workbooks with slicers, timelines, pivot
      charts, chart style/color parts, and conditional-formatting extensions;
