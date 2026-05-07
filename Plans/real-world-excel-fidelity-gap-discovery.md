@@ -18,11 +18,12 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 14 active pinned workbooks from ClosedXML, Excelize, NPOI, openpyxl, one synthetic external-link OOXML oracle, one Excel-authored chart/CF workbook, one Excel-authored external-link workbook, one Excel-normalized pivot/CF workbook, one Excelize 2.10 pivot-slicer workbook, two public Excel-authored MyExcelOnline slicer workbooks, and one public Excel-authored MyExcelOnline timeline workbook. The Apache POI and ExcelJS image/comment/table sources are preserved under `tests/fixtures/external_oracle/rejected/` because Excel rejects them before WolfXL mutation | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, and external-link relationship mutations. Active fixtures now pass Microsoft Excel open/save smoke, including external-tool slicer, Excel-authored slicer, and Excel-authored timeline fixtures | This is a strong current evidence gate, not exhaustive proof. Rendered comparisons, richer structural edits, and broader real-file corpora still need coverage |
-| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not by itself a full Excel-rendered semantic validator or real-Excel corpus proof |
-| Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation and render reports to the P0 evidence standard: external-tool fixture, real Excel fixture, structural mutation pass, optional no-op render pass, and optional intentional mutation render pass. It records concrete feature keys, requires slicer/timeline evidence separately from pivot-table evidence, rejects `--strict` runs that omit mutation reports, and supports `--require-render` plus `--require-intentional-render` for render-backed strict gates | The current strict P0 evidence gate is green when fed the latest 98-result structural mutation report. The current render-required strict gate is also green when fed the active 14-fixture no-op render report and the 42-result intentional render report: pivot/slicer, chart/style/color, conditional-formatting, and external-link rows all have external-tool evidence, real Excel evidence, structural mutation passes, no-op render passes, and intentional mutation render passes. The slicer/timeline group now includes direct timeline evidence from `real-excel-timeline-slicer.xlsx` | It audits evidence presence, no-op render evidence, and intentional mutation renderability. It still does not prove Excel-rendered pixels, full semantic visual equivalence after intentional edits, or broader real-file corpus coverage |
-| App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP. It now accepts `--mutation` so intentionally edited workbooks can be app-smoked too | Microsoft Excel and LibreOffice open/re-save all 14 active external-oracle source fixtures cleanly. LibreOffice also open/re-saves the 42 active-pack intentional mutation variants for marker-cell edit, first-sheet copy, and formula-range move with 0 failures | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class. The mutation app-smoke evidence currently uses LibreOffice; Microsoft Excel mutation-smoke remains a stronger but slower optional gate |
-| Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes pages with `pdftoppm`, and compares page images with ImageMagick RMSE. It also accepts `--mutation` for intentional edit render-smoke runs where the changed workbook is expected to render, but not expected to pixel-match the original. It supports recursive fixture discovery, deterministic page sampling for very large PDFs, and a byte-identical-xlsx short circuit for no-op saves | The current active pack has no LibreOffice-rendered pixel drift after no-op WolfXL modify-save: 14 fixtures, 0 failures, max normalized RMSE 0.0 at 96 DPI. The same pack now has intentional render evidence for marker-cell edit, first-sheet copy, and formula-range move: 42 results, 0 failures. A broader live SynthGL recursive run passed 31 of 32 workbooks with full render RMSE 0.0; the remaining giant workbook has exact byte-identical `.xlsx` output after no-op save. Guarded mode passes all 32 live SynthGL workbooks | No-op render comparisons are pixel equality checks. Intentional mutation runs are renderability checks, not a proof that every intentional edit's visual result is semantically perfect. It still does not compare Excel-rendered pixels or interactive slicer/timeline state. Exhaustive full-page rasterization of `number_memory/sigman_revenue_support.xlsx` is not practical at 96 DPI because it exports to a 14,926-page PDF, so guarded no-op identity is the appropriate proof for that case |
+| External-oracle fixture pack | 22 active pinned workbooks: 11 Excel-authored, 3 openpyxl, 2 ClosedXML, 2 Excelize, 1 LibreOffice-normalized Excelize, 1 NPOI, 1 synthetic OOXML external-link oracle, and 1 umya-spreadsheet fixture. The active pack now includes real Excel slicer, timeline, external-link, chart/CF, macro, control-prop, connection, and PowerPivot/data-model fixtures. The Apache POI and ExcelJS image/comment/table sources remain under `tests/fixtures/external_oracle/rejected/` because Excel rejects them before WolfXL mutation | Modify-save preserves important authored parts and still opens under safe value/style edits, structural edits, sheet copy/rename/remove, range moves, external-link relationship mutations, drawing/comment/object payload preservation, and durable workbook-global payload preservation | This is a strong current evidence gate, not exhaustive proof. It is still a curated corpus, not a random or customer-scale Excel corpus |
+| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, workbook connections, PowerPivot data models, pivots, slicers, timelines, drawings/comments/embedded objects, style/theme/color dependencies, and durable workbook-global payloads such as VBA, custom XML, and printer settings | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0/P1 surfaces when those parts are present in the fixture | It is not by itself a full Excel-rendered semantic validator, a proof of interactive slicer/timeline behavior, or a complete real-file corpus proof |
+| Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation, render, and app reports to the evidence standard: external-tool fixture, real Excel fixture, structural mutation pass, no-op render pass, intentional mutation render pass, source app-open pass, and intentional app-open pass. It records concrete feature keys, requires slicer/timeline evidence separately from pivot-table evidence, rejects `--strict` runs that omit mutation reports, and supports render/app required gates | The current all-evidence coverage report is `ready=true` over 22 fixtures, 11 surfaces, 3 mutation reports, 2 render reports, and 2 app reports. All named surfaces are clear: pivot/slicer, chart/style/color, conditional-formatting extensions, external links/relationship edges, workbook connections, PowerPivot/data model, OOXML extension payloads, tables/structured refs/validations, drawings/comments/embedded objects, workbook global state, and style/theme/color preservation | It audits evidence presence and no-op/intentional renderability. It still does not prove Excel-rendered pixels, full visual semantic equivalence after every intentional edit, or broader real-file corpus coverage |
+| Gap radar | `scripts/audit_ooxml_gap_radar.py` inventories unknown package part families, relationship types, content types, and hidden `ext uri` payloads inside known XML parts. The current pinned pack is clear across all four unknown buckets: 0 unknown part families, 0 unknown rel types, 0 unknown content types, and 0 unknown extension URIs | The currently pinned corpus has no unclassified package-level or extension-URI surface according to the repo's known-surface allowlists | It only proves the pinned corpus is classified. A new real-world workbook can still introduce a new known-looking part with novel semantics or a future extension URI that must be triaged |
+| App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP. It accepts `--mutation` so intentionally edited workbooks can be app-smoked too | Existing app reports contribute to the all-evidence gate with source and intentional app-open coverage for every current surface | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class. The mutation app-smoke evidence currently relies heavily on LibreOffice; Microsoft Excel mutation-smoke remains a stronger but slower optional gate |
+| Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes pages with `pdftoppm`, and compares page images with ImageMagick RMSE. It also accepts `--mutation` for intentional edit render-smoke runs where the changed workbook is expected to render, but not expected to pixel-match the original. It supports recursive fixture discovery, deterministic page sampling for very large PDFs, and a byte-identical-xlsx short circuit for no-op saves | Existing render reports contribute no-op and intentional render evidence to the all-evidence gate. A broader live SynthGL recursive run passed 31 of 32 workbooks with full render RMSE 0.0; the remaining giant workbook has exact byte-identical `.xlsx` output after no-op save. Guarded mode passes all 32 live SynthGL workbooks | No-op render comparisons are pixel equality checks. Intentional mutation runs are renderability checks, not a proof that every intentional edit's visual result is semantically perfect. It still does not compare Excel-rendered pixels or interactive slicer/timeline state |
 | Broader real-file corpus sweep | `scripts/run_ooxml_fidelity_mutations.py --recursive` can now walk nested workbook trees without flattening them first. Latest live SynthGL sweep covered `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` recursively | 32 live SynthGL workbooks pass no-op, marker-cell, and style-cell modify-save audits: 96 results, 0 failures. The same 32 workbooks also pass rename-first-sheet and move-formula-range structural audits: 64 results, 0 failures | This is broader than the pinned oracle pack, but still not a full real-world Excel corpus; rendered comparison over this corpus and richer feature-aware mutations remain open |
 
 ## Risk matrix
@@ -80,7 +81,16 @@ Gap ledger:
      and chart-sheet fingerprints.
    - Done: worksheet formula cell-coordinate and formula-text fingerprints,
      plus an opt-in formula move translation oracle.
-   - Still needed: rendered output comparison.
+   - Done: drawing/comment/embedded-object payload fingerprints, including
+     VML comment drawings, drawing XML, media, embeddings, control props,
+     ActiveX payloads, threaded comments, people, and related rels.
+   - Done: durable workbook-global payload fingerprints for VBA binaries,
+     custom XML, and printer settings. Calc-chain remains tracked as volatile
+     package/relationship evidence rather than a byte-stable semantic payload.
+   - Done: rendered output comparison and intentional render smoke through
+     `scripts/run_ooxml_render_compare.py`.
+   - Still needed: Excel-rendered pixel comparison, interactive slicer/timeline
+     state validation, and broader real-file corpus diversity.
 2. Extend the mutation runner beyond safe edits:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
@@ -182,7 +192,7 @@ Gap ledger:
      the current P0 evidence rows all have external-tool fixture evidence, real
      Excel fixture evidence, structural mutation passes, no-op render passes,
      and intentional mutation render passes.
-   - Latest app-smoke evidence slice: added
+   - Earlier app-smoke evidence slice: added
      `scripts/run_ooxml_app_smoke.py`. Microsoft Excel and LibreOffice both
      open/save the 14 active fixtures with 14 results and 0 failures.
      Microsoft Excel rejected the previous Apache POI and ExcelJS
@@ -190,7 +200,7 @@ Gap ledger:
      normalization, so they are preserved under
      `tests/fixtures/external_oracle/rejected/` and replaced in the active
      pack with `openpyxl-table-validation-image-comment.xlsx`.
-   - Latest intentional app-smoke slice: `scripts/run_ooxml_app_smoke.py`
+   - Earlier intentional app-smoke slice: `scripts/run_ooxml_app_smoke.py`
      now accepts `--mutation` and writes mutation-scoped output artifacts. The
      active 14-fixture pack passes LibreOffice open/save smoke for marker-cell
      edit, first-sheet copy, and formula-range move with 42 results and 0
@@ -314,3 +324,62 @@ Gap ledger:
 
 Anything less should be described as "no known gap in the currently covered
 surface," not as exhaustive Excel fidelity.
+
+## Completion audit - 2026-05-07
+
+Objective restated as concrete deliverables:
+
+1. Detect and preserve pivot/slicer/timeline dependencies across modify saves.
+2. Detect and preserve chart/style/color/theme dependencies.
+3. Detect and preserve conditional-formatting extension payloads.
+4. Detect and preserve external-link and workbook relationship edge cases.
+5. Detect and preserve P1 real-world Excel surfaces: tables/structured refs,
+   validations, drawings/comments/embedded objects, workbook connections,
+   PowerPivot data models, OOXML extension payloads, and workbook globals.
+6. Maintain a discovery loop that can find newly introduced real-world Excel
+   surface area, not just regressions in known fixtures.
+7. Separate "currently covered surface is green" from "there are no possible
+   unfound gaps."
+
+Prompt-to-artifact checklist:
+
+| Requirement | Repo artifact or command | Current evidence | Completion judgment |
+|---|---|---|---|
+| Pivot/slicer preservation across modify saves | `scripts/audit_ooxml_fidelity.py`, `scripts/audit_ooxml_fidelity_coverage.py`, `tests/fixtures/external_oracle/manifest.json` | Coverage report `/tmp/wolfxl-coverage-all-evidence-workbook-globals-payload-final.json`: `pivot_slicer_preservation` clear, 8 fixtures, external-tool and real-Excel sources present | Covered for pinned corpus; not exhaustive for every interactive slicer/timeline state |
+| Chart/style/color dependency preservation | Chart, chart-sheet, chart-style, style/theme fingerprints plus render reports | Coverage report: `chart_style_color_preservation` clear, 5 fixtures, no missing evidence | Covered for pinned corpus; Excel-rendered pixels remain stronger future evidence |
+| Conditional formatting extension preservation | CF/x14 semantic fingerprints and `dxfId` bounds | Coverage report: `conditional_formatting_extension_preservation` clear, 5 fixtures, no missing evidence | Covered for pinned corpus |
+| External links and workbook relationship edge cases | Relationship graph audit, external-link target/cache/formula fingerprints, gap radar rel-type inventory | Coverage report: `external_link_relationship_edges` clear, 3 fixtures. Gap radar clear for unknown rel types | Covered for pinned corpus; new relationship types need radar triage |
+| Workbook connections / query metadata | Connection fingerprint and real/openpyxl connection fixtures | Coverage report: `workbook_connections_query_metadata` clear, 3 fixtures | Covered for pinned corpus |
+| PowerPivot / workbook data model | Data-model binary/default/content relationship fingerprint | Coverage report: `powerpivot_data_model_preservation` clear, 1 real-Excel fixture | Covered narrowly; needs more real-world data-model variants |
+| OOXML extension payload preservation | Generic extension payload fingerprint plus extension-URI radar | Coverage report: `ooxml_extension_payload_preservation` clear, 16 fixtures. Gap radar clear for 0 unknown extension URIs | Covered for known extension URIs in pinned corpus |
+| Tables / structured refs / validations | Table feature parts, structured-reference and validation fingerprints | Coverage report: `table_structured_refs_validations` clear, 11 fixtures | Covered for pinned corpus; richer table-filter/totals scenarios remain useful |
+| Drawings / comments / embedded objects | Drawing-object fingerprint and VML structural fix | Coverage report: `drawings_comments_embedded_objects` clear, 15 fixtures. Drawing mutation sweep: 66 results, 0 failures | Covered for non-destructive object preservation; destructive geometry edits remain classified as expected drift, not unchanged-payload proof |
+| Workbook global state | Defined names/protection/page setup plus durable package payload fingerprints | Coverage report: `workbook_global_state` clear, 21 fixtures. Workbook-global sweep: 88 results, 0 failures | Covered for durable payloads in pinned corpus; calc-chain is intentionally treated as volatile |
+| Hidden future surface discovery | `scripts/audit_ooxml_gap_radar.py` | Latest radar: 22 fixtures, clear true, 0 unknown part families, rel types, content types, extension URIs | Good tripwire for new package/extension surface, not a semantic proof for every known-looking XML pattern |
+| Whole-pack preservation under common edits | `tests/test_external_oracle_preservation.py` | `198 passed` after the latest changes | Strong pinned-pack regression gate |
+| Combined all-evidence gate | `scripts/audit_ooxml_fidelity_coverage.py --strict --require-render --require-intentional-render --require-app --require-intentional-app` | Latest report: `ready=True`, 22 fixtures, 11 surfaces, 3 mutation reports, 2 render reports, 2 app reports | Strong current-state gate |
+
+Current conclusion:
+
+- The repo can honestly claim: **no known fidelity gap in the currently pinned
+  and classified real-world OOXML surface.**
+- The repo should not claim: **no real-world Excel fidelity gaps exist.** That
+  would require broader corpus diversity, Excel-rendered pixel comparison,
+  interactive slicer/timeline validation, and more adversarial feature-specific
+  mutations than the current pack can provide.
+
+Next evidence slices before declaring a higher-confidence "no known gaps":
+
+1. Add a larger external workbook corpus sweep with provenance buckets:
+   Excel-authored, Microsoft-template, finance-model, BI/reporting, macro,
+   PowerPivot, slicer/timeline, embedded-object/control, and external-link
+   workbooks.
+2. Add a Microsoft Excel render/app mutation gate for a small representative
+   subset, especially slicer/timeline, PowerPivot, macro, external-link, and
+   embedded-object workbooks.
+3. Add interactive state probes where package/render evidence is weak:
+   slicer selections, timeline selections, pivot refresh state, external-link
+   update prompts, macro/project presence, and embedded-control openability.
+4. Keep the gap radar strict: every newly seen part family, relationship type,
+   content type, or extension URI must become either an allowlisted known
+   surface with a semantic fingerprint or an explicit gap.
