@@ -48,6 +48,7 @@ def test_bundle_audit_accepts_expected_report_values(tmp_path: Path) -> None:
                     {
                         "name": "coverage",
                         "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
                         "expect": [
                             {"path": "ready", "equals": True},
                             {"path": "fixture_count", "at_least": 20},
@@ -66,6 +67,8 @@ def test_bundle_audit_accepts_expected_report_values(tmp_path: Path) -> None:
 
     assert audit["ready"] is True
     assert audit["issue_count"] == 0
+    assert audit["producer_count"] == 1
+    assert audit["reports"][0]["producer"] == "uv run --no-sync python scripts/example.py"
 
 
 def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None:
@@ -79,6 +82,7 @@ def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None
                     {
                         "name": "coverage",
                         "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
                         "expect": [
                             {"path": "ready", "equals": True},
                             {"path": "fixture_count", "equals": 22},
@@ -87,6 +91,7 @@ def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None
                     {
                         "name": "missing",
                         "path": str(tmp_path / "missing.json"),
+                        "producer": "uv run --no-sync python scripts/missing.py",
                         "expect": [
                             {"path": "ready", "equals": True},
                         ],
@@ -106,6 +111,40 @@ def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None
     assert "report file is missing" in messages
 
 
+def test_bundle_audit_reports_missing_producer(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(json.dumps({"ready": True}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "expect": [
+                            {"path": "ready", "equals": True},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is False
+    assert audit["producer_count"] == 0
+    assert audit["issues"] == [
+        {
+            "report": "coverage",
+            "path": str(report_path),
+            "check": "producer",
+            "message": "producer command is missing",
+        }
+    ]
+
+
 def test_bundle_strict_cli_fails_for_stale_evidence(tmp_path: Path, capsys) -> None:
     report_path = tmp_path / "coverage.json"
     report_path.write_text(json.dumps({"ready": False}))
@@ -117,6 +156,7 @@ def test_bundle_strict_cli_fails_for_stale_evidence(tmp_path: Path, capsys) -> N
                     {
                         "name": "coverage",
                         "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
                         "expect": [
                             {"path": "ready", "equals": True},
                         ],

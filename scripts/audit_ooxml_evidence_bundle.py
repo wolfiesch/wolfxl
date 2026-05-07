@@ -27,12 +27,23 @@ def audit_bundle(manifest_path: Path) -> dict:
     for report in manifest.get("reports", []):
         name = str(report["name"])
         path = _resolve_path(str(report["path"]), base_dir)
+        producer = report.get("producer")
         result = {
             "name": name,
             "path": str(path),
+            "producer": producer,
             "exists": path.is_file(),
             "checks": [],
         }
+        if not isinstance(producer, str) or not producer.strip():
+            issues.append(
+                BundleIssue(
+                    report=name,
+                    path=str(path),
+                    check="producer",
+                    message="producer command is missing",
+                )
+            )
         if not path.is_file():
             issues.append(
                 BundleIssue(
@@ -61,6 +72,11 @@ def audit_bundle(manifest_path: Path) -> dict:
     return {
         "manifest": str(manifest_path),
         "report_count": len(report_results),
+        "producer_count": sum(
+            1
+            for report in report_results
+            if isinstance(report.get("producer"), str) and report["producer"].strip()
+        ),
         "issue_count": len(issues),
         "ready": not issues,
         "reports": report_results,

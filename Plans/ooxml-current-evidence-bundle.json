@@ -4,6 +4,7 @@
     {
       "name": "combined_all_evidence_gate",
       "path": "/tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-app --require-intentional-app --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-noop-p1-all-final.json --render-report /tmp/wolfxl-render-intentional-p1-all-final.json --render-report /tmp/wolfxl-render-noop-connections.json --render-report /tmp/wolfxl-render-intentional-connections.json --render-report /tmp/wolfxl-render-noop-powerpivot.json --render-report /tmp/wolfxl-render-intentional-powerpivot.json --app-report /tmp/wolfxl-app-smoke-excel-source-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-connections.json --app-report /tmp/wolfxl-app-smoke-excel-intentional-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-intentional-p1-all-final2.json --app-report /tmp/wolfxl-app-smoke-powerpivot-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-intentional.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-intentional.json > /tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
@@ -20,6 +21,7 @@
     {
       "name": "interactive_evidence_gate",
       "path": "/tmp/wolfxl-interactive-evidence-external-oracle-all.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --report /tmp/wolfxl-interactive-probe-macro-excel.json --report /tmp/wolfxl-interactive-probe-embedded-control-excel.json --report /tmp/wolfxl-interactive-probe-external-link-excel.json --report /tmp/wolfxl-interactive-probe-pivot-excel.json --report /tmp/wolfxl-interactive-probe-slicer-excel.json --report /tmp/wolfxl-interactive-probe-timeline-excel.json --strict > /tmp/wolfxl-interactive-evidence-external-oracle-all.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
@@ -35,6 +37,7 @@
     {
       "name": "external_oracle_corpus_diversity",
       "path": "/tmp/wolfxl-corpus-buckets-external-oracle-final.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py tests/fixtures/external_oracle --json --strict > /tmp/wolfxl-corpus-buckets-external-oracle-final.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "workbook_count", "equals": 22},
@@ -44,6 +47,7 @@
     {
       "name": "external_oracle_gap_radar",
       "path": "/tmp/wolfxl-gap-radar-external-oracle-python-classified.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py tests/fixtures/external_oracle --json --strict > /tmp/wolfxl-gap-radar-external-oracle-python-classified.json",
       "expect": [
         {"path": "clear", "equals": true},
         {"path": "fixture_count", "equals": 22},
@@ -56,6 +60,7 @@
     {
       "name": "synthgl_recursive_gap_radar",
       "path": "/tmp/wolfxl-gap-radar-synthgl-fixtures-recursive-classified-final.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --json --strict > /tmp/wolfxl-gap-radar-synthgl-fixtures-recursive-classified-final.json",
       "expect": [
         {"path": "clear", "equals": true},
         {"path": "fixture_count", "equals": 32},
@@ -68,6 +73,7 @@
     {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "recursive", "equals": true},
@@ -80,6 +86,7 @@
     {
       "name": "synthgl_recursive_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --json > /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "workbook_count", "equals": 32},
