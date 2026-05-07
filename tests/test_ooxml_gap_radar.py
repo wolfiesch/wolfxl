@@ -53,6 +53,37 @@ def test_gap_radar_reports_unclassified_future_surface(tmp_path: Path) -> None:
     assert list(report["unknown_content_types"]) == [
         "application/vnd.example.future+xml"
     ]
+    assert report["unknown_extension_uri_count"] == 0
+
+
+def test_gap_radar_reports_unknown_extension_uri_in_known_part(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "future-ext.xlsx"
+    _write_future_extension_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "future_ext",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is False
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uris"] == {
+        "{11111111-2222-3333-4444-555555555555}": ["future-ext.xlsx"]
+    }
 
 
 def test_gap_radar_is_clear_for_plain_core_workbook(tmp_path: Path) -> None:
@@ -80,6 +111,7 @@ def test_gap_radar_is_clear_for_plain_core_workbook(tmp_path: Path) -> None:
     assert report["unknown_part_family_count"] == 0
     assert report["unknown_relationship_type_count"] == 0
     assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uri_count"] == 0
 
 
 def _write_plain_fixture(path: Path) -> None:
@@ -148,6 +180,44 @@ def _write_future_fixture(path: Path) -> None:
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
         "xl/future/future.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <future xmlns="http://schemas.example.invalid/future"/>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_future_extension_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <sheetData/>
+  <extLst><ext uri="{11111111-2222-3333-4444-555555555555}"><x14:futureThing/></ext></extLst>
+</worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
