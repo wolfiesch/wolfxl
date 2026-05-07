@@ -211,7 +211,13 @@ pub(crate) fn read_sheet_values_plain_xlsb(
             match cell {
                 Some(cell) => {
                     let number_format = book.number_format_for_cell(&cell);
-                    inner.append(cell_to_plain(py, &cell, data_only, number_format, date1904)?)?;
+                    inner.append(cell_to_plain(
+                        py,
+                        &cell,
+                        data_only,
+                        number_format,
+                        date1904,
+                    )?)?;
                 }
                 None => inner.append(py.None())?,
             }

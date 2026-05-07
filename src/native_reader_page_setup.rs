@@ -315,4 +315,3 @@ pub(crate) fn break_to_py(py: Python<'_>, item: &BreakInfo) -> PyResult<PyObject
     d.set_item("pt", item.pt)?;
     Ok(d.into())
 }
-

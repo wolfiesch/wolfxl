@@ -196,7 +196,10 @@ fn gradient_fill_to_xml(grad: &GradientFillSpec) -> String {
     // We always emit `type` when not "linear" so Excel parses correctly.
     let mut attrs = String::new();
     if !grad.gradient_type.is_empty() && grad.gradient_type != "linear" {
-        attrs.push_str(&format!(" type=\"{}\"", xml_escape::attr(&grad.gradient_type)));
+        attrs.push_str(&format!(
+            " type=\"{}\"",
+            xml_escape::attr(&grad.gradient_type)
+        ));
     }
     if grad.gradient_type == "path" {
         for (name, val) in [

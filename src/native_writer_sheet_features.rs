@@ -167,7 +167,9 @@ pub(crate) fn dict_to_threaded_comment(
         .get_item("created")?
         .and_then(|v| v.extract::<String>().ok())
         .and_then(|s| if s.is_empty() { None } else { Some(s) });
-    let text: Option<String> = cfg.get_item("text")?.and_then(|v| v.extract::<String>().ok());
+    let text: Option<String> = cfg
+        .get_item("text")?
+        .and_then(|v| v.extract::<String>().ok());
 
     let (Some(id), Some(cell_ref), Some(person_id), Some(created), Some(text)) =
         (id, cell_ref, person_id, created, text)
@@ -350,8 +352,7 @@ pub(crate) fn dict_to_conditional_format(
                 .unwrap_or_else(|| "FF638EC6".to_string());
             let start_type: Option<String> =
                 cfg.get_item("start_type")?.and_then(|v| v.extract().ok());
-            let end_type: Option<String> =
-                cfg.get_item("end_type")?.and_then(|v| v.extract().ok());
+            let end_type: Option<String> = cfg.get_item("end_type")?.and_then(|v| v.extract().ok());
             let start_value = cfg.get_item("start_value")?;
             let end_value = cfg.get_item("end_value")?;
             let show_value: bool = cfg
@@ -389,13 +390,15 @@ pub(crate) fn dict_to_conditional_format(
                 .unwrap_or_else(|| "percent".to_string());
             let raw_values: Vec<String> = if let Some(v) = cfg.get_item("values")? {
                 if let Ok(nums) = v.extract::<Vec<f64>>() {
-                    nums.into_iter().map(|n| {
-                        if n == (n as i64) as f64 && n.abs() < 1e15 {
-                            format!("{}", n as i64)
-                        } else {
-                            format!("{}", n)
-                        }
-                    }).collect()
+                    nums.into_iter()
+                        .map(|n| {
+                            if n == (n as i64) as f64 && n.abs() < 1e15 {
+                                format!("{}", n as i64)
+                            } else {
+                                format!("{}", n)
+                            }
+                        })
+                        .collect()
                 } else if let Ok(strs) = v.extract::<Vec<String>>() {
                     strs
                 } else {
@@ -407,17 +410,21 @@ pub(crate) fn dict_to_conditional_format(
             let thresholds: Vec<ConditionalThreshold> = raw_values
                 .into_iter()
                 .map(|val| match value_type.as_str() {
-                    "percent" => val.parse::<f64>()
+                    "percent" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percent)
                         .unwrap_or(ConditionalThreshold::Percent(0.0)),
-                    "percentile" => val.parse::<f64>()
+                    "percentile" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percentile)
                         .unwrap_or(ConditionalThreshold::Percentile(0.0)),
-                    "num" | "number" => val.parse::<f64>()
+                    "num" | "number" => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Number)
                         .unwrap_or(ConditionalThreshold::Number(0.0)),
                     "formula" => ConditionalThreshold::Formula(val),
-                    _ => val.parse::<f64>()
+                    _ => val
+                        .parse::<f64>()
                         .map(ConditionalThreshold::Percent)
                         .unwrap_or(ConditionalThreshold::Percent(0.0)),
                 })
@@ -493,10 +500,7 @@ fn cfvo_to_threshold(
 }
 
 /// Pull a string out of the cfg dict, treating empty strings as absent.
-fn dict_get_string(
-    cfg: &Bound<'_, PyDict>,
-    key: &str,
-) -> PyResult<Option<String>> {
+fn dict_get_string(cfg: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
     let value: Option<String> = cfg.get_item(key)?.and_then(|v| {
         // Accept str directly or coerce numeric values via PyAny.
         if let Ok(s) = v.extract::<String>() {

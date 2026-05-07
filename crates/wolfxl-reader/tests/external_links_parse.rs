@@ -74,7 +74,8 @@ fn part_preserves_whitespace_in_v() {
 fn rels_external_link_path_with_relative_target() {
     // Excel emits relative paths for sibling files; Open packaging
     // does NOT URL-decode the target so we keep it verbatim.
-    let xml = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    let xml =
+        br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId42"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath"
     Target="../some%20folder/data.xlsx" TargetMode="External"/>
@@ -87,7 +88,8 @@ fn rels_external_link_path_with_relative_target() {
 
 #[test]
 fn rels_only_first_external_link_path_wins() {
-    let xml = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    let xml =
+        br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath"
     Target="first.xlsx" TargetMode="External"/>
@@ -102,7 +104,8 @@ fn rels_only_first_external_link_path_wins() {
 
 #[test]
 fn rels_ignores_non_external_link_path_rels() {
-    let xml = br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    let xml =
+        br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
     Target="https://example.com" TargetMode="External"/>

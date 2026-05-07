@@ -1,8 +1,8 @@
 //! Styles reader logic: fonts, fills, borders, alignment, named-style and
 //! cell-level format readers.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use wolfxl_reader::{
@@ -419,10 +419,7 @@ pub(crate) fn gradient_to_pydict<'py>(
     Ok(d)
 }
 
-pub(crate) fn populate_alignment(
-    d: &Bound<'_, PyDict>,
-    alignment: &AlignmentInfo,
-) -> PyResult<()> {
+pub(crate) fn populate_alignment(d: &Bound<'_, PyDict>, alignment: &AlignmentInfo) -> PyResult<()> {
     if let Some(value) = &alignment.horizontal {
         d.set_item("h_align", value)?;
     }
@@ -479,4 +476,3 @@ pub(crate) fn set_border_side(
     d.set_item(key, edge)?;
     Ok(())
 }
-

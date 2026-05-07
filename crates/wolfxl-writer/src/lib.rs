@@ -109,7 +109,10 @@ pub fn emit_xlsx_to<W: std::io::Write + std::io::Seek>(
     for (idx, sheet) in wb.sheets.iter().enumerate() {
         let path = format!("xl/worksheets/sheet{}.xml", idx + 1);
         if sheet.streaming.is_some() {
-            sheet_ops.push(EmitOp::SheetStream { path, sheet_idx: idx });
+            sheet_ops.push(EmitOp::SheetStream {
+                path,
+                sheet_idx: idx,
+            });
         } else {
             let bytes = sheet_xml::emit(sheet, idx as u32, &mut wb.sst, &wb.styles);
             sheet_ops.push(EmitOp::Bytes(ZipEntry { path, bytes }));
@@ -367,7 +370,9 @@ fn package_emit_ops<W: std::io::Write + std::io::Seek>(
                 if let Some(dt) = epoch_override {
                     opts = opts.last_modified_time(dt);
                 }
-                writer.start_file(entry.path.clone(), opts).map_err(zip_to_io)?;
+                writer
+                    .start_file(entry.path.clone(), opts)
+                    .map_err(zip_to_io)?;
                 std::io::Write::write_all(&mut writer, &entry.bytes)?;
             }
             EmitOp::SheetStream { path, sheet_idx } => {

@@ -26,10 +26,7 @@ pub fn emit(out: &mut String, sheet: &Worksheet) {
             // authors can place high-priority CF rules before lower ones
             // regardless of insertion order. Falls back to positional
             // index (1-based) when not set, preserving prior behaviour.
-            let priority = rule
-                .priority
-                .map(|p| p as usize)
-                .unwrap_or(priority_0 + 1);
+            let priority = rule.priority.map(|p| p as usize).unwrap_or(priority_0 + 1);
 
             match &rule.kind {
                 ConditionalKind::CellIs {
@@ -295,10 +292,7 @@ mod tests {
         }
     }
 
-    fn rule_with_priority(
-        kind: ConditionalKind,
-        priority: Option<u32>,
-    ) -> ConditionalRule {
+    fn rule_with_priority(kind: ConditionalKind, priority: Option<u32>) -> ConditionalRule {
         ConditionalRule {
             kind,
             dxf_id: None,

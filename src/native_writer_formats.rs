@@ -79,9 +79,7 @@ fn parse_gradient_dict(gd: &Bound<'_, PyDict>) -> PyResult<Option<GradientFillSp
 
     // Stops: accept either "stops" (preferred wolfxl shape) or "stop"
     // (openpyxl-compatible alias). Each entry is a dict {position, color}.
-    let stops_any = gd
-        .get_item("stops")?
-        .or(gd.get_item("stop")?);
+    let stops_any = gd.get_item("stops")?.or(gd.get_item("stop")?);
     let mut stops: Vec<GradientStopSpec> = Vec::new();
     if let Some(seq) = stops_any {
         for item in seq.try_iter()? {

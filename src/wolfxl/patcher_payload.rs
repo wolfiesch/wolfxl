@@ -76,10 +76,7 @@ pub(crate) fn dict_to_format_spec(d: &Bound<'_, PyDict>) -> PyResult<FormatSpec>
 }
 
 pub(crate) fn dict_to_border_spec(d: &Bound<'_, PyDict>) -> PyResult<styles::BorderSpec> {
-    fn extract_side(
-        d: &Bound<'_, PyDict>,
-        key: &str,
-    ) -> PyResult<(styles::BorderSideSpec, bool)> {
+    fn extract_side(d: &Bound<'_, PyDict>, key: &str) -> PyResult<(styles::BorderSideSpec, bool)> {
         if let Some(side) = d.get_item(key)? {
             if let Ok(sd) = side.cast::<PyDict>() {
                 let style = extract_str(sd, "style")?;

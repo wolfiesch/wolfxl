@@ -265,10 +265,9 @@ pub fn rewrite_cache_source(
 
     // Locate `<pivotCacheDefinition ...>` open tag and
     // `<worksheetSource .../>` element by manual scanning.
-    let def_span = find_open_tag(xml, b"pivotCacheDefinition")
-        .ok_or(MutateError::NoCacheDefinition)?;
-    let ws_span = find_open_tag(xml, b"worksheetSource")
-        .ok_or(MutateError::NoWorksheetSource)?;
+    let def_span =
+        find_open_tag(xml, b"pivotCacheDefinition").ok_or(MutateError::NoCacheDefinition)?;
+    let ws_span = find_open_tag(xml, b"worksheetSource").ok_or(MutateError::NoWorksheetSource)?;
 
     // Build new tag bytes.
     let new_def_tag = if force_refresh_on_load {
@@ -285,10 +284,8 @@ pub fn rewrite_cache_source(
     if let Some(s) = new_sheet {
         ws_overrides.push((b"sheet" as &[u8], s.to_string()));
     }
-    let ws_overrides_static: Vec<(&[u8], &str)> = ws_overrides
-        .iter()
-        .map(|(k, v)| (*k, v.as_str()))
-        .collect();
+    let ws_overrides_static: Vec<(&[u8], &str)> =
+        ws_overrides.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let new_ws_tag =
         rebuild_tag_with_overrides(&xml[ws_span.start..ws_span.end], &ws_overrides_static);
 
@@ -412,7 +409,11 @@ fn strip_prefix(name: &[u8]) -> &[u8] {
 fn rebuild_tag_with_overrides(tag_bytes: &[u8], overrides: &[(&[u8], &str)]) -> Vec<u8> {
     let inner = &tag_bytes[1..tag_bytes.len() - 1];
     let self_close = inner.last() == Some(&b'/');
-    let scan_end = if self_close { inner.len() - 1 } else { inner.len() };
+    let scan_end = if self_close {
+        inner.len() - 1
+    } else {
+        inner.len()
+    };
     let scan = &inner[..scan_end];
 
     let (name_bytes, name_end) = read_tag_name(scan);
@@ -428,9 +429,7 @@ fn rebuild_tag_with_overrides(tag_bytes: &[u8], overrides: &[(&[u8], &str)]) -> 
     let mut p = 0usize;
     while p < attrs_section.len() {
         // Skip whitespace.
-        while p < attrs_section.len()
-            && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r')
-        {
+        while p < attrs_section.len() && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r') {
             p += 1;
         }
         if p >= attrs_section.len() {
@@ -449,9 +448,7 @@ fn rebuild_tag_with_overrides(tag_bytes: &[u8], overrides: &[(&[u8], &str)]) -> 
         }
         let attr_name = &attrs_section[n_start..n_end];
         // Skip whitespace + '='.
-        while p < attrs_section.len()
-            && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r')
-        {
+        while p < attrs_section.len() && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r') {
             p += 1;
         }
         if p >= attrs_section.len() || attrs_section[p] != b'=' {
@@ -461,9 +458,7 @@ fn rebuild_tag_with_overrides(tag_bytes: &[u8], overrides: &[(&[u8], &str)]) -> 
             continue;
         }
         p += 1;
-        while p < attrs_section.len()
-            && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r')
-        {
+        while p < attrs_section.len() && matches!(attrs_section[p], b' ' | b'\t' | b'\n' | b'\r') {
             p += 1;
         }
         if p >= attrs_section.len() {
@@ -600,7 +595,8 @@ mod tests {
 
     #[test]
     fn rewrite_sets_refresh_on_load() {
-        let out = rewrite_cache_source(SAMPLE_CACHE, "A1:C5", Some("Sheet"), true).expect("rewrite");
+        let out =
+            rewrite_cache_source(SAMPLE_CACHE, "A1:C5", Some("Sheet"), true).expect("rewrite");
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains(r#"refreshOnLoad="1""#));
         assert!(s.contains(r#"ref="A1:C5""#));
@@ -611,11 +607,14 @@ mod tests {
 
     #[test]
     fn rewrite_preserves_unrelated_attrs() {
-        let out = rewrite_cache_source(SAMPLE_CACHE, "A1:B5", Some("Sheet"), false).expect("rewrite");
+        let out =
+            rewrite_cache_source(SAMPLE_CACHE, "A1:B5", Some("Sheet"), false).expect("rewrite");
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains(r#"r:id="rId1""#));
         assert!(s.contains(r#"recordCount="2""#));
-        assert!(s.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#));
+        assert!(s.contains(
+            r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+        ));
     }
 
     #[test]
