@@ -1,0 +1,91 @@
+{
+  "description": "Current OOXML fidelity evidence reports referenced by Plans/real-world-excel-fidelity-gap-discovery.md. These paths are generated artifacts, mostly under /tmp; rerun the producing scripts when this bundle fails.",
+  "reports": [
+    {
+      "name": "combined_all_evidence_gate",
+      "path": "/tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "mutation_report_count", "at_least": 4},
+        {"path": "render_report_count", "at_least": 6},
+        {"path": "app_report_count", "at_least": 8},
+        {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
+        {"path": "surfaces.chart_style_color_preservation.clear", "equals": true},
+        {"path": "surfaces.conditional_formatting_extension_preservation.clear", "equals": true},
+        {"path": "surfaces.external_link_relationship_edges.clear", "equals": true},
+        {"path": "surfaces.powerpivot_data_model_preservation.clear", "equals": true}
+      ]
+    },
+    {
+      "name": "interactive_evidence_gate",
+      "path": "/tmp/wolfxl-interactive-evidence-external-oracle-all.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 6},
+        {"path": "probes.slicer_selection_state.clear", "equals": true},
+        {"path": "probes.timeline_selection_state.clear", "equals": true},
+        {"path": "probes.pivot_refresh_state.clear", "equals": true},
+        {"path": "probes.external_link_update_prompt.clear", "equals": true},
+        {"path": "probes.macro_project_presence.clear", "equals": true},
+        {"path": "probes.embedded_control_openability.clear", "equals": true}
+      ]
+    },
+    {
+      "name": "external_oracle_corpus_diversity",
+      "path": "/tmp/wolfxl-corpus-buckets-external-oracle-final.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "workbook_count", "equals": 22},
+        {"path": "missing_buckets", "equals": []}
+      ]
+    },
+    {
+      "name": "external_oracle_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-external-oracle-python-classified.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-synthgl-fixtures-recursive-classified-final.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 32},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_mutation_coverage",
+      "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_count", "equals": 32},
+        {"path": "mutation_report_count", "equals": 1},
+        {"path": "surfaces.python_in_excel_metadata.status", "equals": "clear"},
+        {"path": "surfaces.sheet_metadata_preservation.status", "equals": "clear"}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 32},
+        {"path": "bucket_fixtures.python_in_excel", "length_at_least": 1},
+        {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 2}
+      ]
+    }
+  ]
+}
