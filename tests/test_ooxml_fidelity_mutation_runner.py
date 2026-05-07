@@ -255,6 +255,12 @@ def test_runner_separates_expected_sheet_copy_drift(
                     "message": "expected copied chart part",
                 },
                 {
+                    "kind": "chart_styles_semantic_drift",
+                    "severity": "error",
+                    "part": "chart_styles",
+                    "message": "expected copied chart style sidecar",
+                },
+                {
                     "kind": "slicers_semantic_drift",
                     "severity": "error",
                     "part": "slicers",
@@ -287,8 +293,9 @@ def test_runner_separates_expected_sheet_copy_drift(
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 4
+    assert result["expected_issue_count"] == 5
     assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "chart_styles_semantic_drift",
         "charts_semantic_drift",
         "data_validations_semantic_drift",
         "slicers_semantic_drift",

@@ -85,6 +85,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "worksheet_formulas_semantic_drift",
     },
     "copy_first_sheet": {
+        "chart_styles_semantic_drift",
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
