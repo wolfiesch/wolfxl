@@ -268,6 +268,34 @@
       ]
     },
     {
+      "name": "umya_test_files_structural_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural --mutation style_cell --mutation copy_first_sheet --mutation rename_first_sheet --mutation move_formula_range --mutation add_data_validation > /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json",
+      "expect": [
+        {"path": "result_count", "equals": 305},
+        {"path": "failure_count", "equals": 0},
+        {"path": "mutations", "equals": ["style_cell", "copy_first_sheet", "rename_first_sheet", "move_formula_range", "add_data_validation"]}
+      ]
+    },
+    {
+      "name": "umya_test_files_quick_plus_structural_mutation_coverage",
+      "path": "/tmp/wolfxl-coverage-umya-quick-plus-structural-mutations.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json > /tmp/wolfxl-coverage-umya-quick-plus-structural-mutations.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 61},
+        {"path": "mutation_report_count", "equals": 2},
+        {"path": "surfaces.chart_style_color_preservation.structural_mutation_fixtures", "length_at_least": 4},
+        {"path": "surfaces.conditional_formatting_extension_preservation.structural_mutation_fixtures", "length_at_least": 7},
+        {"path": "surfaces.external_link_relationship_edges.structural_mutation_fixtures", "length_at_least": 2},
+        {"path": "surfaces.pivot_slicer_preservation.feature_groups.pivot.structural_mutation_fixtures", "length_at_least": 2},
+        {"path": "surfaces.table_structured_refs_validations.structural_mutation_fixtures", "length_at_least": 7},
+        {"path": "surfaces.style_theme_color_preservation.status", "equals": "clear"},
+        {"path": "surfaces.sheet_metadata_preservation.status", "equals": "clear"},
+        {"path": "surfaces.ooxml_extension_payload_preservation.status", "equals": "clear"}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
