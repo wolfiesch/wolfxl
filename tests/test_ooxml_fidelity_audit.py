@@ -158,6 +158,42 @@ def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_chart_axis_layout_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_axis_layout_xml(
+        cat_axis="10", val_axis="20", layout_x="0.10"
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/charts/chart1.xml"] = _chart_axis_layout_xml(
+        cat_axis="10", val_axis="30", layout_x="0.20"
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
+
+
+def test_detects_chart_sheet_relationship_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_chartsheet_entries("rId1", "../drawings/drawing1.xml"))
+    after_entries = dict(before_entries)
+    after_entries.update(_chartsheet_entries("rId2", "../drawings/drawing2.xml"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "chart_sheets_semantic_drift" for issue in report["issues"])
+
+
 def test_detects_chart_style_color_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -174,6 +210,38 @@ def test_detects_chart_style_color_semantic_drift(tmp_path: Path) -> None:
     report = audit_module.audit(before, after)
 
     assert any(issue["kind"] == "chart_styles_semantic_drift" for issue in report["issues"])
+
+
+def test_detects_chart_axis_and_layout_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_axis_xml(axis_id="1")
+    after_entries = dict(before_entries)
+    after_entries["xl/charts/chart1.xml"] = _chart_axis_xml(axis_id="2")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
+
+
+def test_detects_chart_sheet_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/chartsheets/sheet1.xml"] = _chart_sheet_xml("rId1")
+    after_entries = dict(before_entries)
+    after_entries["xl/chartsheets/sheet1.xml"] = _chart_sheet_xml("rId2")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "chart_sheets_semantic_drift" for issue in report["issues"])
 
 
 def test_detects_conditional_formatting_sqref_semantic_drift(
@@ -360,6 +428,39 @@ def _chart_xml(formula: str) -> str:
 </c:chartSpace>"""
 
 
+def _chart_axis_layout_xml(cat_axis: str, val_axis: str, layout_x: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:chart><c:plotArea>
+    <c:layout><c:manualLayout><c:x val="{layout_x}"/></c:manualLayout></c:layout>
+    <c:barChart><c:ser><c:idx val="0"/><c:order val="0"/>
+      <c:val><c:numRef><c:f>Sheet1!$A$1:$A$5</c:f></c:numRef></c:val>
+    </c:ser><c:axId val="{cat_axis}"/><c:axId val="{val_axis}"/></c:barChart>
+    <c:catAx><c:axId val="{cat_axis}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:crossAx val="{val_axis}"/></c:catAx>
+    <c:valAx><c:axId val="{val_axis}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:crossAx val="{cat_axis}"/></c:valAx>
+  </c:plotArea></c:chart>
+</c:chartSpace>"""
+
+
+def _chartsheet_entries(rid: str, target: str) -> dict[str, str]:
+    return {
+        "xl/chartsheets/sheet1.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetViews><sheetView workbookViewId="0" tabSelected="1"/></sheetViews>
+  <drawing r:id="{rid}"/>
+</chartsheet>""",
+        "xl/chartsheets/_rels/sheet1.xml.rels": f"""<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="{rid}"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
+    Target="{target}"/>
+</Relationships>""",
+        "xl/drawings/drawing1.xml": "<wsDr/>",
+        "xl/drawings/drawing2.xml": "<wsDr/>",
+    }
+
+
 def _chart_style_xml(color: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle">
@@ -372,6 +473,26 @@ def _chart_colors_xml(color: str) -> str:
 <cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle">
   <cs:schemeClr val="{color}"/>
 </cs:colorStyle>"""
+
+
+def _chart_axis_xml(axis_id: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:chart><c:plotArea>
+    <c:barChart><c:ser><c:idx val="0"/><c:order val="0"/><c:val><c:numRef><c:f>Sheet1!$A$1:$A$5</c:f></c:numRef></c:val></c:ser><c:axId val="{axis_id}"/></c:barChart>
+    <c:catAx><c:axId val="{axis_id}"/><c:axPos val="b"/><c:scaling><c:orientation val="minMax"/></c:scaling></c:catAx>
+    <c:layout><c:manualLayout><c:x val="0.1"/></c:manualLayout></c:layout>
+  </c:plotArea></c:chart>
+</c:chartSpace>"""
+
+
+def _chart_sheet_xml(drawing_rid: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetViews><sheetView workbookViewId="0"/></sheetViews>
+  <drawing r:id="{drawing_rid}"/>
+</chartsheet>"""
 
 
 def _cf_xml(sqref: str) -> str:

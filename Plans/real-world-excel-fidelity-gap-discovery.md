@@ -72,9 +72,10 @@ Gap ledger:
      subtrees, data-validation ranges/formulas, and CF `dxfId` bounds.
    - Done: external-link targets, cached sheet data, sheet names, defined names,
      and worksheet formulas that reference linked workbooks.
-   - Still needed: axis-ID/plot-layout summaries, chart sheets, rendered
-     output comparison, and formula translation semantics after structural
-     edits.
+   - Done: chart axis IDs, axis metadata, manual layout, series summaries,
+     and chart-sheet fingerprints.
+   - Still needed: rendered output comparison and formula translation
+     semantics after structural edits.
 2. Extend the mutation runner beyond safe edits:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`

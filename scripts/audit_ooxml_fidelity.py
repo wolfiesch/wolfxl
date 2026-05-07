@@ -25,6 +25,7 @@ MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 FEATURE_PART_PREFIXES = {
     "chart": ("xl/charts/",),
+    "chart_sheet": ("xl/chartsheets/",),
     "chart_style": ("xl/charts/style", "xl/charts/colors"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
     "drawing": ("xl/drawings/",),
@@ -328,6 +329,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
     parts = set(archive.namelist())
     return {
         "charts": _chart_fingerprint(archive, parts),
+        "chart_sheets": _chart_sheet_fingerprint(archive, parts),
         "chart_styles": _chart_style_fingerprint(archive, parts),
         "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
@@ -354,7 +356,44 @@ def _chart_fingerprint(
             ("pivot_sources", _pivot_source_names(root)),
             ("dPt_count", len(_nodes_by_local(root, "dPt"))),
             ("style_vals", _vals_by_path(root, ("style",))),
+            ("chart_types", _chart_types(root)),
+            ("axis_ids", _chart_axis_ids(root)),
+            ("axes", _chart_axes(root)),
+            ("manual_layouts", _manual_layouts(root)),
+            ("series", _chart_series(root)),
             ("rels", rels_by_owner.get(part, [])),
+        ]
+    return out
+
+
+def _chart_sheet_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    for part in sorted(_feature_xml_parts(parts, "xl/chartsheets/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        out[part] = [
+            ("rels", rels_by_owner.get(part, [])),
+            (
+                "drawing_ids",
+                [
+                    _relationship_id(node)
+                    for node in _nodes_by_local(root, "drawing")
+                    + _nodes_by_local(root, "chartsheetDrawing")
+                ],
+            ),
+            ("views", [_all_stable_attrs(node) for node in _nodes_by_local(root, "sheetView")]),
+            (
+                "protection",
+                _stable_attrs(
+                    _first_node_by_local(root, "sheetProtection"),
+                    ("sheet", "objects", "scenarios"),
+                ),
+            ),
+            ("extensions", _xml_extensions(root)),
         ]
     return out
 
@@ -623,6 +662,67 @@ def _pivot_source_names(root: ElementTree.Element) -> list[str]:
     return names
 
 
+def _chart_types(root: ElementTree.Element) -> list[str]:
+    plot_area = _first_node_by_local(root, "plotArea")
+    if plot_area is None:
+        return []
+    return [
+        _local_name(node.tag)
+        for node in list(plot_area)
+        if _local_name(node.tag).endswith("Chart")
+    ]
+
+
+def _chart_axis_ids(root: ElementTree.Element) -> list[str | None]:
+    return [_attr(node, "val") for node in _nodes_by_local(root, "axId")]
+
+
+def _chart_axes(root: ElementTree.Element) -> list[object]:
+    axes: list[object] = []
+    for node in root.iter():
+        local = _local_name(node.tag)
+        if local not in {"catAx", "valAx", "dateAx", "serAx"}:
+            continue
+        axes.append(
+            (
+                local,
+                _axis_child_val(node, "axId"),
+                _axis_child_val(node, "crossAx"),
+                _axis_child_val(node, "axPos"),
+                _axis_child_val(node, "orientation"),
+                _axis_child_val(node, "crosses"),
+                _axis_child_val(node, "crossBetween"),
+                _stable_attrs(_first_node_by_local(node, "numFmt"), ("formatCode", "sourceLinked")),
+                _texts_by_local(node, "t"),
+            )
+        )
+    return axes
+
+
+def _manual_layouts(root: ElementTree.Element) -> list[object]:
+    return [
+        _xml_tree_fingerprint(node)
+        for node in _nodes_by_local(root, "manualLayout")
+    ]
+
+
+def _chart_series(root: ElementTree.Element) -> list[object]:
+    return [
+        (
+            _axis_child_val(node, "idx"),
+            _axis_child_val(node, "order"),
+            _texts_by_local(node, "f"),
+            len(_nodes_by_local(node, "dPt")),
+        )
+        for node in _nodes_by_local(root, "ser")
+    ]
+
+
+def _axis_child_val(root: ElementTree.Element, name: str) -> str | None:
+    node = _first_node_by_local(root, name)
+    return _attr(node, "val")
+
+
 def _defined_name_refs(root: ElementTree.Element) -> list[tuple[str | None, str | None]]:
     return [
         (_attr(node, "name"), _attr(node, "refersTo"))
@@ -763,6 +863,10 @@ def _extension_fingerprints(
         if any(_local_name(node.tag) in interesting_names for node in ext.iter()):
             out.append(_xml_tree_fingerprint(ext))
     return out
+
+
+def _xml_extensions(root: ElementTree.Element) -> list[object]:
+    return [_xml_tree_fingerprint(node) for node in _nodes_by_local(root, "ext")]
 
 
 def _xml_tree_fingerprint(node: ElementTree.Element) -> object:
