@@ -410,6 +410,152 @@ def test_pivot_probe_runner_fails_when_pivot_part_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
+def test_slicer_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "slicer.xlsx"
+    assert report["results"][0]["probe"] == "slicer_selection_state"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["slicer_selection_state"]["status"] == "clear"
+
+
+def test_slicer_probe_runner_fails_when_slicer_part_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def remove_slicer_during_smoke(src: Path, _output_dir: Path, _timeout: int):
+        _rewrite_without_prefixes(src, ("xl/slicers/", "xl/slicerCaches/"))
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_slicer_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
+def test_timeline_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "timeline.xlsx"
+    assert report["results"][0]["probe"] == "timeline_selection_state"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["timeline_selection_state"]["status"] == "clear"
+
+
+def test_timeline_probe_runner_fails_when_timeline_part_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def remove_timeline_during_smoke(src: Path, _output_dir: Path, _timeout: int):
+        _rewrite_without_prefixes(src, ("xl/timelines/", "xl/timelineCaches/"))
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_timeline_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
 def _write_manifest(fixture_dir: Path, filename: str) -> None:
     fixture_dir.joinpath("manifest.json").write_text(
         json.dumps(
@@ -480,6 +626,28 @@ def _write_pivot_workbook(path: Path) -> None:
   <location ref="A3:B6" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>
   <rowFields count="1"><field x="0"/></rowFields>
 </pivotTableDefinition>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_slicer_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region"/>"""
+    entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region" cache="Slicer_Region"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_timeline_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/timelineCaches/timelineCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date"/>"""
+    entries["xl/timelines/timeline1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date" cache="Timeline_Date"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

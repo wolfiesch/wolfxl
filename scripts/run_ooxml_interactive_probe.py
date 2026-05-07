@@ -27,12 +27,16 @@ SUPPORTED_PROBES = (
     "embedded_control_openability",
     "external_link_update_prompt",
     "pivot_refresh_state",
+    "slicer_selection_state",
+    "timeline_selection_state",
 )
 PROBE_FEATURE_KEYS = {
     "macro_project_presence": "vba",
     "embedded_control_openability": "embedded_object",
     "external_link_update_prompt": "external_link",
     "pivot_refresh_state": "pivot",
+    "slicer_selection_state": "slicer",
+    "timeline_selection_state": "timeline",
 }
 
 
@@ -211,6 +215,12 @@ def _probe_part_present(path: Path, probe: str) -> bool:
             name.startswith(("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"))
             for name in names
         )
+    if probe == "slicer_selection_state":
+        return any(name.startswith(("xl/slicers/", "xl/slicerCaches/")) for name in names)
+    if probe == "timeline_selection_state":
+        return any(
+            name.startswith(("xl/timelines/", "xl/timelineCaches/")) for name in names
+        )
     return False
 
 
@@ -223,6 +233,10 @@ def _probe_part_label(probe: str) -> str:
         return "external-link OOXML parts"
     if probe == "pivot_refresh_state":
         return "pivot cache/table OOXML parts"
+    if probe == "slicer_selection_state":
+        return "slicer/slicer-cache OOXML parts"
+    if probe == "timeline_selection_state":
+        return "timeline/timeline-cache OOXML parts"
     return "required OOXML parts"
 
 
