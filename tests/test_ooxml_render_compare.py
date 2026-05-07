@@ -52,6 +52,35 @@ def test_render_compare_skips_when_renderer_tools_missing(
     assert "soffice not found" in report["results"][0]["message"]
 
 
+def test_render_compare_can_discover_recursive_fixture_trees(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    nested_dir = fixture_dir / "nested" / "deep"
+    nested_dir.mkdir(parents=True)
+    _make_fixture(nested_dir / "simple.xlsx")
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "_find_libreoffice",
+        lambda: None,
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        recursive=True,
+    )
+
+    assert report["recursive"] is True
+    assert report["result_count"] == 1
+    result = report["results"][0]
+    assert result["fixture"] == "nested/deep/simple.xlsx"
+    assert result["status"] == "skipped"
+
+
 def test_render_compare_reports_rmse_threshold_failure(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

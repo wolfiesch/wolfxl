@@ -49,15 +49,19 @@ def run_render_compare(
     timeout: int = 90,
     density: int = 96,
     max_normalized_rmse: float = 0.001,
+    recursive: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[RenderCompareResult] = []
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
+    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
+        fixture_dir, recursive=recursive
+    ):
         fixture_path = fixture_dir / entry.filename
         results.append(
             _compare_fixture(
                 fixture_path,
+                entry.filename,
                 entry.sha256,
                 output_dir,
                 timeout=timeout,
@@ -71,6 +75,7 @@ def run_render_compare(
         "output_dir": str(output_dir.resolve()),
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
+        "recursive": recursive,
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -85,6 +90,7 @@ def run_render_compare(
 
 def _compare_fixture(
     fixture_path: Path,
+    fixture_label: str,
     expected_sha256: str | None,
     output_dir: Path,
     timeout: int,
@@ -93,7 +99,7 @@ def _compare_fixture(
 ) -> RenderCompareResult:
     if not fixture_path.is_file():
         return RenderCompareResult(
-            fixture=fixture_path.name,
+            fixture=fixture_label,
             status="failed",
             before_pdf=None,
             after_pdf=None,
@@ -105,7 +111,7 @@ def _compare_fixture(
         actual_sha256 = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
         if actual_sha256 != expected_sha256:
             return RenderCompareResult(
-                fixture=fixture_path.name,
+                fixture=fixture_label,
                 status="failed",
                 before_pdf=None,
                 after_pdf=None,
@@ -121,13 +127,15 @@ def _compare_fixture(
     pdftoppm = shutil.which("pdftoppm")
     compare_cmd = _find_imagemagick_compare()
     if soffice is None:
-        return _skipped(fixture_path.name, "soffice not found")
+        return _skipped(fixture_label, "soffice not found")
     if pdftoppm is None:
-        return _skipped(fixture_path.name, "pdftoppm not found")
+        return _skipped(fixture_label, "pdftoppm not found")
     if compare_cmd is None:
-        return _skipped(fixture_path.name, "ImageMagick compare not found")
+        return _skipped(fixture_label, "ImageMagick compare not found")
 
-    work = output_dir / run_ooxml_fidelity_mutations._safe_stem(fixture_path.stem)
+    work = output_dir / run_ooxml_fidelity_mutations._safe_stem(
+        Path(fixture_label).with_suffix("").as_posix()
+    )
     work.mkdir(parents=True, exist_ok=True)
     before_xlsx = work / f"before-{fixture_path.name}"
     after_xlsx = work / f"after-{fixture_path.name}"
@@ -153,7 +161,7 @@ def _compare_fixture(
         )
         if len(before_pages) != len(after_pages):
             return RenderCompareResult(
-                fixture=fixture_path.name,
+                fixture=fixture_label,
                 status="failed",
                 before_pdf=str(before_pdf),
                 after_pdf=str(after_pdf),
@@ -172,7 +180,7 @@ def _compare_fixture(
             )
     except Exception as exc:
         return RenderCompareResult(
-            fixture=fixture_path.name,
+            fixture=fixture_label,
             status="failed",
             before_pdf=None,
             after_pdf=None,
@@ -191,7 +199,7 @@ def _compare_fixture(
         status = "passed"
         message = f"ok: max_normalized_rmse={max_rmse:.8f}"
     return RenderCompareResult(
-        fixture=fixture_path.name,
+        fixture=fixture_label,
         status=status,
         before_pdf=str(before_pdf),
         after_pdf=str(after_pdf),
@@ -320,6 +328,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--density", type=int, default=96)
     parser.add_argument("--max-normalized-rmse", type=float, default=0.001)
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Discover .xlsx fixtures recursively when no manifest.json is present.",
+    )
     args = parser.parse_args(argv)
 
     report = run_render_compare(
@@ -328,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         density=args.density,
         max_normalized_rmse=args.max_normalized_rmse,
+        recursive=args.recursive,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
