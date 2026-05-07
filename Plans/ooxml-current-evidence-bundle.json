@@ -465,6 +465,27 @@
       ]
     },
     {
+      "name": "slicer_shared_two_pivots_sidecar_destructive_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots-destructive.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots-destructive --mutation delete_first_row --mutation delete_first_col > /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots-destructive.json",
+      "expect": [
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "mutations", "equals": ["delete_first_row", "delete_first_col"]}
+      ]
+    },
+    {
+      "name": "slicer_shared_two_pivots_sidecar_destructive_excel_app_open",
+      "path": "/tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-delete-row-col.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-delete-row-col --app excel --timeout 120 --mutation delete_first_row --mutation delete_first_col > /tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-delete-row-col.json",
+      "expect": [
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["delete_first_row", "delete_first_col"]}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_source",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-source.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-source --render-engine excel --timeout 180 --max-pages-per-fixture 2 > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-source.json",
@@ -487,12 +508,37 @@
       ]
     },
     {
+      "name": "slicer_shared_two_pivots_sidecar_excel_render_delete_row",
+      "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-row-rerun.json",
+      "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-row-rerun --render-engine excel --timeout 180 --max-pages-per-fixture 2 --mutation delete_first_row > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-row-rerun.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["delete_first_row"]}
+      ]
+    },
+    {
+      "name": "slicer_shared_two_pivots_sidecar_excel_render_delete_col",
+      "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-col-rerun.json",
+      "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-col-rerun --render-engine excel --timeout 180 --max-pages-per-fixture 2 --mutation delete_first_col > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-col-rerun.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["delete_first_col"]}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_coverage",
       "path": "/tmp/wolfxl-coverage-slicer-shared-two-pivots-sidecar.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/slicer_timeline_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots.json --app-report /tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-source-marker.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-source.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-marker.json > /tmp/wolfxl-coverage-slicer-shared-two-pivots-sidecar.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/slicer_timeline_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots.json --report /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots-destructive.json --app-report /tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-source-marker.json --app-report /tmp/wolfxl-app-smoke-excel-slicer-shared-two-pivots-delete-row-col.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-source.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-marker.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-row-rerun.json --render-report /tmp/wolfxl-render-excel-slicer-shared-two-pivots-delete-col-rerun.json > /tmp/wolfxl-coverage-slicer-shared-two-pivots-sidecar.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "fixture_count", "equals": 1},
+        {"path": "mutation_report_count", "equals": 2},
+        {"path": "render_report_count", "equals": 4},
+        {"path": "app_report_count", "equals": 2},
         {"path": "surfaces.pivot_slicer_preservation.real_excel_fixtures", "length_at_least": 1},
         {"path": "surfaces.pivot_slicer_preservation.structural_mutation_fixtures", "length_at_least": 1},
         {"path": "surfaces.pivot_slicer_preservation.app_open_fixtures", "length_at_least": 1},
