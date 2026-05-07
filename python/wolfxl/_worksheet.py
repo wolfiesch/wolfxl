@@ -171,7 +171,7 @@ class Worksheet:
         # Pending image queue.
         "_pending_images",
         # Pending chart queue.
-        "_pending_charts",
+        "_pending_charts", "_pending_chart_deletions",
         # Pending pivot table queue.
         "_pending_pivot_tables",
         # G17 / RFC-070 — lazy cache of PivotTableHandle objects

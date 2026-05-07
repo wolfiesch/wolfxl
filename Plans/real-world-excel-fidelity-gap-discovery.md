@@ -113,14 +113,15 @@ Gap ledger:
      prefixed worksheet XML exposed unprefixed `<worksheet>`, `<drawing>`, and
      `<legacyDrawing>` assumptions in drawing splice/remove helpers; the helpers
      now preserve the worksheet prefix.
+   - Latest chart-remove composition bug found: same-save scratch chart removal
+     plus scratch sheet deletion could leak queued chart deletions across
+     worksheets/workbooks after an intermediate save error; chart deletions now
+     live on the worksheet object and an external-oracle regression preserves
+     source chart/drawing parts across all 7 pinned fixtures.
    - Known open drawing edge: adding then removing a chart in an NPOI workbook
      that already has an empty source drawing part deletes that empty drawing
      part and sheet drawing rel. Track this as a separate source-drawing
      preservation gap instead of hiding it under the scratch-chart no-op gate.
-   - Known open composition edge: removing a scratch chart and deleting its
-     scratch sheet in the same save can cross-delete existing chart/drawing
-     parts in chart-bearing source workbooks; the current gate stages those
-     operations while this remains tracked separately.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.

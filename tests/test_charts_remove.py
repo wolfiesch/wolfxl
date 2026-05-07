@@ -143,6 +143,14 @@ def _build_openpyxl_chart_fixture(path: Path) -> None:
     wb.save(path)
 
 
+def _chart_and_drawing_parts(path: Path) -> list[str]:
+    with zipfile.ZipFile(path) as zf:
+        return sorted(
+            name
+            for name in zf.namelist()
+            if name.startswith("xl/charts/") or name.startswith("xl/drawings/")
+        )
+
 
 def test_remove_chart_drops_pending(tmp_path: Path) -> None:
     """Removing a pending chart yields a workbook with no chart parts."""
@@ -214,6 +222,44 @@ def test_replace_loaded_source_chart_persists(tmp_path: Path) -> None:
         chart_xml = zf.read("xl/charts/chart1.xml").decode("utf-8")
     assert "<c:lineChart>" in chart_xml
     assert "<c:barChart>" not in chart_xml
+
+
+def test_same_save_scratch_chart_remove_and_sheet_delete_preserves_source_drawings(
+    tmp_path: Path,
+) -> None:
+    """Scratch chart cleanup must not delete unrelated source drawing parts."""
+    import shutil
+
+    import wolfxl
+    from wolfxl.chart import BarChart, Reference
+
+    fixture_dir = Path(__file__).parent / "fixtures" / "external_oracle"
+    for fixture in sorted(fixture_dir.glob("*.xlsx")):
+        path = tmp_path / fixture.name
+        shutil.copy2(fixture, path)
+        before = _chart_and_drawing_parts(path)
+
+        wb = wolfxl.load_workbook(path, modify=True)
+        scratch = wb.create_sheet("WolfXL Chart Scratch")
+        scratch["A1"] = "value"
+        scratch["A2"] = 1
+        chart = BarChart()
+        chart.add_data(
+            Reference(scratch, min_col=1, min_row=1, max_row=2),
+            titles_from_data=True,
+        )
+        scratch.add_chart(chart, "C2")
+        wb.save(path)
+        wb.close()
+
+        wb = wolfxl.load_workbook(path, modify=True)
+        scratch = wb["WolfXL Chart Scratch"]
+        scratch.remove_chart(scratch._charts[-1])
+        wb.remove(scratch)
+        wb.save(path)
+        wb.close()
+
+        assert _chart_and_drawing_parts(path) == before, fixture.name
 
 
 def test_loaded_source_chart_title_edit_persists(tmp_path: Path) -> None:
