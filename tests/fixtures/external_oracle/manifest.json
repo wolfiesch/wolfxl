@@ -184,6 +184,34 @@
       "notes": "Public free practice workbook from https://www.myexcelonline.com/blog/pivot-charts-slicers/ (Download excel workbook Pivot-Charts-Slicers.xlsx). Workbook metadata reports Application=Microsoft Excel and creator John Michaloudis;www.myexcelonline.com/blog. Covers Excel-authored pivot table, pivot chart, slicers, and slicer-cache preservation."
     },
     {
+      "filename": "real-excel-timeline-slicer.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_timeline_slicer_myexcelonline",
+      "sha256": "cfe1164c9ee37537a683cbbc5b1cfcd50b60b068aa61b607929b8803d9b006a7",
+      "size_bytes": 88657,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/sheet2.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "xl/timelineCaches/timelineCache1.xml",
+        "xl/timelines/timeline1.xml",
+        "xl/tables/table1.xml",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/pivotTables/_rels/pivotTable1.xml.rels",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+        "xl/pivotCache/pivotCacheRecords1.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Public free practice workbook from https://www.myexcelonline.com/blog/timeline-slicers-in-microsoft-excel/ (direct workbook Timeline-Slicers.xlsx). Workbook metadata reports Application=Microsoft Excel and creator Bryan and Esther;MyExcelOnline. Covers Excel-authored pivot timeline and timeline-cache preservation."
+    },
+    {
       "filename": "real-excel-chart-cf-basic.xlsx",
       "tool": "excel",
       "fixture_id": "real_excel_chart_cf_basic",

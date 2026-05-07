@@ -234,6 +234,12 @@ def test_runner_separates_expected_sheet_copy_drift(
                     "message": "expected copied slicer part",
                 },
                 {
+                    "kind": "timelines_semantic_drift",
+                    "severity": "error",
+                    "part": "timelines",
+                    "message": "expected copied timeline part",
+                },
+                {
                     "kind": "data_validations_semantic_drift",
                     "severity": "error",
                     "part": "data_validations",
@@ -254,11 +260,12 @@ def test_runner_separates_expected_sheet_copy_drift(
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 3
+    assert result["expected_issue_count"] == 4
     assert {issue["kind"] for issue in result["expected_issues"]} == {
         "charts_semantic_drift",
         "data_validations_semantic_drift",
         "slicers_semantic_drift",
+        "timelines_semantic_drift",
     }
 
 
