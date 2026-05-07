@@ -57,6 +57,59 @@ def test_smoke_skips_libreoffice_when_missing(tmp_path: Path, monkeypatch) -> No
     assert result.app == "libreoffice"
 
 
+def test_smoke_excel_rejects_unrelated_active_workbook(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "simple.xlsx"
+    _make_fixture(fixture)
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+    monkeypatch.setattr(
+        smoke_module,
+        "_open_excel_with_finder_and_close",
+        lambda _src, _timeout: "Book1",
+    )
+
+    result = smoke_module._smoke_excel(fixture, tmp_path / "out", timeout=1)
+
+    assert result.status == "failed"
+    assert "opened 'Book1', expected 'simple.xlsx'" in result.message
+
+
+def test_smoke_excel_accepts_expected_active_workbook(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "simple.xlsx"
+    _make_fixture(fixture)
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+    monkeypatch.setattr(
+        smoke_module,
+        "_open_excel_with_finder_and_close",
+        lambda src, _timeout: src.name,
+    )
+
+    result = smoke_module._smoke_excel(fixture, tmp_path / "out", timeout=1)
+
+    assert result.status == "passed"
+    assert result.message == "opened and closed in Microsoft Excel: simple.xlsx"
+
+
+def test_excel_active_workbook_name_treats_missing_value_as_none(monkeypatch) -> None:
+    class FakeProc:
+        stdout = "missing value\n"
+
+    monkeypatch.setattr(
+        smoke_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: FakeProc(),
+    )
+
+    assert smoke_module._excel_active_workbook_name() is None
+
+
 def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

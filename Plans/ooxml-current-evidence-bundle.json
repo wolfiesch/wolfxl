@@ -122,6 +122,43 @@
       ]
     },
     {
+      "name": "excel_app_open_source_full_pack_verified_report",
+      "path": "/tmp/wolfxl-app-smoke-excel-source-full-pack-verified.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-app-smoke-excel-source-full-pack-verified --app excel --timeout 180 --mutation source > /tmp/wolfxl-app-smoke-excel-source-full-pack-verified.json",
+      "expect": [
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]}
+      ]
+    },
+    {
+      "name": "excel_app_open_marker_full_pack_verified_report",
+      "path": "/tmp/wolfxl-app-smoke-excel-marker-full-pack-verified.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-app-smoke-excel-marker-full-pack-verified --app excel --timeout 180 --mutation marker_cell > /tmp/wolfxl-app-smoke-excel-marker-full-pack-verified.json",
+      "expect": [
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["marker_cell"]}
+      ]
+    },
+    {
+      "name": "excel_app_open_full_pack_verified_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-app-open-full-pack-verified.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-app --require-intentional-app --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --app-report /tmp/wolfxl-app-smoke-excel-source-full-pack-verified.json --app-report /tmp/wolfxl-app-smoke-excel-marker-full-pack-verified.json > /tmp/wolfxl-coverage-excel-app-open-full-pack-verified.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "app_report_count", "equals": 2},
+        {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
+        {"path": "surfaces.chart_style_color_preservation.clear", "equals": true},
+        {"path": "surfaces.conditional_formatting_extension_preservation.clear", "equals": true},
+        {"path": "surfaces.external_link_relationship_edges.clear", "equals": true},
+        {"path": "surfaces.powerpivot_data_model_preservation.clear", "equals": true}
+      ]
+    },
+    {
       "name": "external_oracle_corpus_diversity",
       "path": "/tmp/wolfxl-corpus-buckets-external-oracle-final.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py tests/fixtures/external_oracle --json --strict > /tmp/wolfxl-corpus-buckets-external-oracle-final.json",

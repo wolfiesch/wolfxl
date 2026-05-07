@@ -221,6 +221,15 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
             None,
             str(exc)[:500],
         )
+    if opened != src.name:
+        return AppSmokeResult(
+            src.name,
+            SOURCE_MUTATION,
+            "excel",
+            "failed",
+            str(src),
+            f"Microsoft Excel opened {opened!r}, expected {src.name!r}",
+        )
     ok, message = _validate_xlsx(src)
     if ok:
         message = f"opened and closed in Microsoft Excel: {opened or src.name}"
@@ -350,6 +359,8 @@ end tell
         timeout=5,
     )
     name = proc.stdout.strip()
+    if name == "missing value":
+        return None
     return name or None
 
 
