@@ -296,6 +296,29 @@
       ]
     },
     {
+      "name": "umya_source_valid_excel_app_open_source_and_dv",
+      "path": "/tmp/wolfxl-app-smoke-excel-umya-source-valid-source-dv.json",
+      "producer": "rm -rf /tmp/wolfxl-umya-app-smoke-source-valid /tmp/wolfxl-app-smoke-excel-umya-source-valid-source-dv && mkdir -p /tmp/wolfxl-umya-app-smoke-source-valid && cp /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files/issue_178.xlsx /tmp/wolfxl-umya-app-smoke-source-valid/ && cp /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files/pr_204.xlsx /tmp/wolfxl-umya-app-smoke-source-valid/ && cp /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files/wps_comment.xlsx /tmp/wolfxl-umya-app-smoke-source-valid/ && uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-umya-app-smoke-source-valid --output-dir /tmp/wolfxl-app-smoke-excel-umya-source-valid-source-dv --app excel --timeout 120 --mutation source --mutation add_data_validation > /tmp/wolfxl-app-smoke-excel-umya-source-valid-source-dv.json",
+      "expect": [
+        {"path": "result_count", "equals": 6},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source", "add_data_validation"]}
+      ]
+    },
+    {
+      "name": "umya_source_valid_excel_app_open_coverage",
+      "path": "/tmp/wolfxl-coverage-umya-source-valid-app-smoke.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /tmp/wolfxl-umya-app-smoke-source-valid --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json --app-report /tmp/wolfxl-app-smoke-excel-umya-source-valid-source-dv.json > /tmp/wolfxl-coverage-umya-source-valid-app-smoke.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 3},
+        {"path": "app_report_count", "equals": 1},
+        {"path": "surfaces.sheet_metadata_preservation.app_open_fixtures", "length_at_least": 1},
+        {"path": "surfaces.ooxml_extension_payload_preservation.app_open_fixtures", "length_at_least": 3}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
