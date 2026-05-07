@@ -50,6 +50,8 @@ _MUTATIONS = (
     "style_cell",
     "insert_tail_row",
     "insert_tail_col",
+    "delete_marker_tail_row",
+    "delete_marker_tail_col",
     "move_marker_range",
 )
 
@@ -169,6 +171,26 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
         worksheet.insert_cols(col_idx, amount=1)
         worksheet.cell(row=1, column=col_idx).value = _MARKER_VALUE
+    elif mutation == "delete_marker_tail_row":
+        worksheet = workbook[sheet_name]
+        row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+        worksheet.cell(row=row_idx, column=1).value = _MARKER_VALUE
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        sheet_name = workbook.sheetnames[0]
+        worksheet = workbook[sheet_name]
+        worksheet.delete_rows(row_idx, amount=1)
+    elif mutation == "delete_marker_tail_col":
+        worksheet = workbook[sheet_name]
+        col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+        worksheet.cell(row=1, column=col_idx).value = _MARKER_VALUE
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        sheet_name = workbook.sheetnames[0]
+        worksheet = workbook[sheet_name]
+        worksheet.delete_cols(col_idx, amount=1)
     elif mutation == "move_marker_range":
         worksheet = workbook[sheet_name]
         worksheet["Z1"] = _MARKER_VALUE

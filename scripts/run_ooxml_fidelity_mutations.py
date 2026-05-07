@@ -26,6 +26,8 @@ DEFAULT_MUTATIONS = (
     "style_cell",
     "insert_tail_row",
     "insert_tail_col",
+    "delete_marker_tail_row",
+    "delete_marker_tail_col",
     "move_marker_range",
 )
 SUPPORTED_MUTATIONS = (*DEFAULT_MUTATIONS, "rename_first_sheet")
@@ -243,6 +245,24 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
             worksheet.insert_cols(col_idx, amount=1)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
+        elif mutation == "delete_marker_tail_row":
+            worksheet = workbook[workbook.sheetnames[0]]
+            row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+            worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
+            workbook.save(path)
+            workbook.close()
+            workbook = wolfxl.load_workbook(path, modify=True)
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet.delete_rows(row_idx, amount=1)
+        elif mutation == "delete_marker_tail_col":
+            worksheet = workbook[workbook.sheetnames[0]]
+            col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+            worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
+            workbook.save(path)
+            workbook.close()
+            workbook = wolfxl.load_workbook(path, modify=True)
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet.delete_cols(col_idx, amount=1)
         elif mutation == "move_marker_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE

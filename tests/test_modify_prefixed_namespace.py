@@ -70,6 +70,46 @@ def test_insert_cols_preserves_prefixed_worksheet_end_tags(tmp_path: Path) -> No
     assert "</worksheet>" not in sheet_xml
 
 
+def test_delete_rows_preserves_prefixed_worksheet_end_tags(tmp_path: Path) -> None:
+    src = tmp_path / "prefixed.xlsx"
+    _make_prefixed_namespace_workbook(src)
+
+    workbook = wolfxl.load_workbook(src, modify=True)
+    workbook["Data"].delete_rows(1, amount=1)
+    workbook.save(src)
+    workbook.close()
+
+    roundtrip = openpyxl.load_workbook(src)
+    assert roundtrip["Data"]["A1"].value == "NextRow"
+    roundtrip.close()
+
+    with zipfile.ZipFile(src) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+    assert "<x:worksheet" in sheet_xml
+    assert "</x:worksheet>" in sheet_xml
+    assert "</worksheet>" not in sheet_xml
+
+
+def test_delete_cols_preserves_prefixed_worksheet_end_tags(tmp_path: Path) -> None:
+    src = tmp_path / "prefixed.xlsx"
+    _make_prefixed_namespace_workbook(src)
+
+    workbook = wolfxl.load_workbook(src, modify=True)
+    workbook["Data"].delete_cols(1, amount=1)
+    workbook.save(src)
+    workbook.close()
+
+    roundtrip = openpyxl.load_workbook(src)
+    assert roundtrip["Data"]["A1"].value == "NextCol"
+    roundtrip.close()
+
+    with zipfile.ZipFile(src) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode()
+    assert "<x:worksheet" in sheet_xml
+    assert "</x:worksheet>" in sheet_xml
+    assert "</worksheet>" not in sheet_xml
+
+
 def test_move_range_preserves_prefixed_worksheet_elements(tmp_path: Path) -> None:
     src = tmp_path / "prefixed.xlsx"
     _make_prefixed_namespace_workbook(src)
@@ -99,6 +139,8 @@ def _make_prefixed_namespace_workbook(path: Path) -> None:
     sheet = workbook.active
     sheet.title = "Data"
     sheet["A1"] = "Region"
+    sheet["A2"] = "NextRow"
+    sheet["B1"] = "NextCol"
     workbook.save(path)
 
     ET.register_namespace("x", MAIN_NS)
