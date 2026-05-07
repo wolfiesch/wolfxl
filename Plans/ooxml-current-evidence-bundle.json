@@ -358,6 +358,34 @@
       ]
     },
     {
+      "name": "umya_source_valid_55_excel_render_add_dv",
+      "path": "/tmp/wolfxl-render-excel-umya-source-valid-55-add-dv.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-umya-excel-source-valid-55 --output-dir /tmp/wolfxl-render-excel-umya-source-valid-55-add-dv --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation add_data_validation > /tmp/wolfxl-render-excel-umya-source-valid-55-add-dv.json",
+      "expect": [
+        {"path": "result_count", "equals": 55},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation"]}
+      ]
+    },
+    {
+      "name": "umya_source_valid_55_excel_app_render_coverage",
+      "path": "/tmp/wolfxl-coverage-umya-source-valid-55-app-render.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-structural.json --app-report /tmp/wolfxl-app-smoke-excel-umya-source-triage.json --app-report /tmp/wolfxl-app-smoke-excel-umya-source-valid-55-add-dv.json --render-report /tmp/wolfxl-render-excel-umya-source-valid-55-add-dv.json > /tmp/wolfxl-coverage-umya-source-valid-55-app-render.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 61},
+        {"path": "render_report_count", "equals": 1},
+        {"path": "surfaces.chart_style_color_preservation.intentional_render_fixtures", "length_at_least": 4},
+        {"path": "surfaces.conditional_formatting_extension_preservation.intentional_render_fixtures", "length_at_least": 6},
+        {"path": "surfaces.external_link_relationship_edges.intentional_render_fixtures", "length_at_least": 1},
+        {"path": "surfaces.table_structured_refs_validations.intentional_render_fixtures", "length_at_least": 5},
+        {"path": "surfaces.workbook_global_state.intentional_render_fixtures", "length_at_least": 50},
+        {"path": "surfaces.sheet_metadata_preservation.intentional_render_fixtures", "length_at_least": 2},
+        {"path": "surfaces.ooxml_extension_payload_preservation.intentional_render_fixtures", "length_at_least": 50}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",

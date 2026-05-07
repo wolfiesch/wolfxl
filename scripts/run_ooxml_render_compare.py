@@ -613,8 +613,6 @@ def _rasterize_pdf_pages(
 ) -> list[Path]:
     if not pages:
         raise RuntimeError(f"no pages selected for {pdf}")
-    if pages == list(range(1, len(pages) + 1)):
-        return _rasterize_pdf(pdftoppm, pdf, prefix, density, timeout)
 
     prefix.parent.mkdir(parents=True, exist_ok=True)
     for stale in prefix.parent.glob(f"{prefix.name}-*.png"):

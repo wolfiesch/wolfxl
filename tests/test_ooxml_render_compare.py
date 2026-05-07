@@ -355,6 +355,51 @@ def test_sample_page_numbers_are_stable() -> None:
     assert render_module._sample_page_numbers(100, 5) == [1, 26, 50, 75, 100]
 
 
+def test_rasterize_pdf_pages_honors_single_page_sample(
+    tmp_path: Path, monkeypatch
+) -> None:
+    pdf = tmp_path / "many-pages.pdf"
+    pdf.write_bytes(b"%PDF")
+    calls: list[list[str]] = []
+
+    class Completed:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(args, **_kwargs):
+        calls.append(list(args))
+        prefix = Path(args[-1])
+        (prefix.parent / f"{prefix.name}-1.png").write_bytes(b"page")
+        return Completed()
+
+    monkeypatch.setattr(render_module.subprocess, "run", fake_run)
+
+    pages = render_module._rasterize_pdf_pages(
+        "pdftoppm",
+        pdf,
+        tmp_path / "out-pages",
+        [1],
+        density=96,
+        timeout=1,
+    )
+
+    assert len(pages) == 1
+    assert calls == [
+        [
+            "pdftoppm",
+            "-png",
+            "-r",
+            "96",
+            "-f",
+            "1",
+            "-l",
+            "1",
+            str(pdf),
+            str(tmp_path / "out-pages-1"),
+        ]
+    ]
+
+
 def test_normalized_rmse_parses_imagemagick_metric(tmp_path: Path, monkeypatch) -> None:
     before_page = tmp_path / "before.png"
     after_page = tmp_path / "after.png"
