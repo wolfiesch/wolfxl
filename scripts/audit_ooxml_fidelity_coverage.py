@@ -79,6 +79,17 @@ SURFACES = {
             "move_formula_range",
         ),
     },
+    "powerpivot_data_model_preservation": {
+        "label": "PowerPivot / workbook data model preservation",
+        "feature_keys": ("data_model",),
+        "semantic_keys": ("data_model",),
+        "required_source_classes": ("real_excel",),
+        "structural_mutations": (
+            "marker_cell",
+            "copy_first_sheet",
+            "move_formula_range",
+        ),
+    },
     "table_structured_refs_validations": {
         "label": "Tables / structured refs / validations",
         "feature_keys": ("table",),
@@ -318,6 +329,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "chart_styles": "chart_style",
         "conditional_formatting": "conditional_formatting",
         "connections": "connection",
+        "data_model": "data_model",
         "external_links": "external_link",
         "page_setup": "page_setup",
         "pivots": "pivot",
@@ -387,6 +399,9 @@ def _surface_result(
 ) -> dict:
     config = SURFACES[surface]
     matching = [fixture for fixture in fixtures if surface in fixture["surfaces"]]
+    required_source_classes = config.get(
+        "required_source_classes", ("external_tool", "real_excel")
+    )
     external = [
         fixture["filename"]
         for fixture in matching
@@ -426,9 +441,9 @@ def _surface_result(
         if fixture["intentional_app_passes"]
     ]
     missing = []
-    if not external:
+    if "external_tool" in required_source_classes and not external:
         missing.append("external_tool_fixture")
-    if not real_excel:
+    if "real_excel" in required_source_classes and not real_excel:
         missing.append("real_excel_fixture")
     if not structural:
         missing.append("structural_mutation_pass")
@@ -489,9 +504,9 @@ def _surface_result(
         group_missing = []
         if not group_matching:
             group_missing.append("fixture")
-        if not group_external:
+        if "external_tool" in required_source_classes and not group_external:
             group_missing.append("external_tool_fixture")
-        if not group_real_excel:
+        if "real_excel" in required_source_classes and not group_real_excel:
             group_missing.append("real_excel_fixture")
         if not group_structural:
             group_missing.append("structural_mutation_pass")
@@ -530,6 +545,7 @@ def _surface_result(
         "app_open_fixtures": app_opened,
         "intentional_app_open_fixtures": intentional_app_opened,
         "accepted_structural_mutations": list(config["structural_mutations"]),
+        "required_source_classes": list(required_source_classes),
         "feature_groups": group_results,
         "missing": missing,
         "clear": not missing,

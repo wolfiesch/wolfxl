@@ -9,6 +9,7 @@ dependency has been dropped, orphaned, or left pointing at a missing part.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import posixpath
 import re
@@ -32,6 +33,7 @@ FEATURE_PART_PREFIXES = {
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
     "connection": ("xl/connections.xml",),
     "custom_xml": ("customXml/", "xl/customXml/"),
+    "data_model": ("xl/model/",),
     "drawing": ("xl/drawings/",),
     "embedded_object": ("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"),
     "external_link": ("xl/externalLinks/",),
@@ -275,6 +277,21 @@ def _read_content_overrides(archive: zipfile.ZipFile) -> dict[str, str]:
     return overrides
 
 
+def _read_content_defaults(archive: zipfile.ZipFile) -> dict[str, str]:
+    try:
+        xml = archive.read("[Content_Types].xml")
+    except KeyError:
+        return {}
+    root = ElementTree.fromstring(xml)
+    defaults: dict[str, str] = {}
+    for node in root.findall(f"{CT_NS}Default"):
+        extension = node.attrib.get("Extension")
+        content_type = node.attrib.get("ContentType")
+        if extension and content_type:
+            defaults[extension] = content_type
+    return defaults
+
+
 def _read_xml_parse_errors(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
     errors: list[tuple[str, str]] = []
     for part in sorted(
@@ -369,6 +386,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "chart_styles": _chart_style_fingerprint(archive, parts),
         "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
         "connections": _connection_fingerprint(archive, parts),
+        "data_model": _data_model_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
         "page_setup": _page_setup_fingerprint(archive, parts),
@@ -556,6 +574,45 @@ def _connection_fingerprint(
             ("rels", rels_by_owner.get(part, [])),
             ("connections", connections),
         ]
+    return out
+
+
+def _data_model_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, object]:
+    model_parts = sorted(part for part in parts if part.startswith("xl/model/"))
+    if not model_parts:
+        return {}
+
+    defaults = _read_content_defaults(archive)
+    rels_by_owner = _relationships_by_owner(archive)
+    out: dict[str, object] = {
+        "xl/workbook.xml": [
+            (
+                "rels",
+                [
+                    rel
+                    for rel in rels_by_owner.get("xl/workbook.xml", [])
+                    if rel[1].endswith("/powerPivotData")
+                    or rel[1].endswith("/model")
+                    or str(rel[2]).startswith("model/")
+                ],
+            )
+        ],
+        "content_defaults": {
+            ext: content_type
+            for ext, content_type in sorted(defaults.items())
+            if any(part.rsplit(".", 1)[-1] == ext for part in model_parts)
+        },
+        "parts": [
+            (
+                part,
+                len(payload := archive.read(part)),
+                hashlib.sha256(payload).hexdigest(),
+            )
+            for part in model_parts
+        ],
+    }
     return out
 
 

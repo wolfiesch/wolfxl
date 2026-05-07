@@ -609,6 +609,51 @@ def test_coverage_audit_does_not_count_pivot_as_slicer_evidence(
     assert "slicer_or_timeline_fixture" in pivot_slicer["missing"]
 
 
+def test_powerpivot_data_model_surface_accepts_real_excel_source(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    excel = fixture_dir / "excel-data-model.xlsx"
+    _write_data_model_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_data_model",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": excel.name,
+                        "mutation": "marker_cell",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir, reports=[mutation_report])
+
+    data_model = report["surfaces"]["powerpivot_data_model_preservation"]
+    assert data_model["required_source_classes"] == ["real_excel"]
+    assert data_model["real_excel_fixtures"] == ["excel-data-model.xlsx"]
+    assert data_model["external_tool_fixtures"] == []
+    assert data_model["structural_mutation_fixtures"] == ["excel-data-model.xlsx"]
+    assert data_model["missing"] == []
+
+
 def _write_chart_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -700,3 +745,40 @@ def _write_pivot_fixture(path: Path) -> None:
   <cacheFields count="2"><cacheField name="Account"/><cacheField name="Amount"/></cacheFields>
 </pivotCacheDefinition>""",
         )
+
+
+def _write_data_model_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="data" ContentType="application/vnd.openxmlformats-officedocument.model+data"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/powerPivotData" Target="model/item.data"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+        "xl/model/item.data": b"powerpivot-model",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)

@@ -257,6 +257,47 @@ def test_detects_workbook_connection_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "connections_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_data_model_binary_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_data_model_entries(b"powerpivot-model-a"))
+    after_entries = _base_entries()
+    after_entries.update(_data_model_entries(b"powerpivot-model-b"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "data_model_semantic_drift" for issue in report["issues"])
+
+
+def test_fingerprints_data_model_content_default_and_workbook_relationship(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "data-model.xlsx"
+    entries = _base_entries()
+    entries.update(_data_model_entries(b"powerpivot-model"))
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    fingerprint = snapshot.semantic_fingerprints["data_model"]
+    assert "data_model" in snapshot.feature_parts
+    assert fingerprint["content_defaults"] == {
+        "data": "application/vnd.openxmlformats-officedocument.model+data"
+    }
+    assert fingerprint["xl/workbook.xml"][0][1] == [
+        (
+            "rId3",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/powerPivotData",
+            "model/item.data",
+            None,
+        )
+    ]
+
+
 def test_detects_chart_axis_layout_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -729,6 +770,25 @@ def _connection_entries(connection: str, command: str) -> dict[str, str]:
   </connection>
 </connections>""",
     }
+
+
+def _data_model_entries(payload: bytes) -> dict[str, str | bytes]:
+    entries = _connection_entries("Provider=MSOLAP;Data Source=$Embedded$", "Model")
+    entries["[Content_Types].xml"] = _base_entries()["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Default Extension="data" '
+        'ContentType="application/vnd.openxmlformats-officedocument.model+data"/>\n'
+        "</Types>",
+    )
+    entries["xl/_rels/workbook.xml.rels"] = entries["xl/_rels/workbook.xml.rels"].replace(
+        "</Relationships>",
+        '  <Relationship Id="rId3"\n'
+        '    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/powerPivotData"\n'
+        '    Target="model/item.data"/>\n'
+        "</Relationships>",
+    )
+    entries["xl/model/item.data"] = payload
+    return entries
 
 
 def _formula_xml(formula: str, *, cell: str = "A1") -> str:

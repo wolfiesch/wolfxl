@@ -385,6 +385,24 @@
       "notes": "Copied from /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files/issue_208.xlsx. Workbook metadata reports Application=Microsoft Excel and covers real-Excel control-property preservation for the embedded-object/control P1 row.",
       "sha256": "4e7eb582eec866173e0612ec544763644d51f4659cf86a25f70955c1d88d09e0",
       "size_bytes": 11870
+    },
+    {
+      "filename": "real-excel-powerpivot-model-basic.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_powerpivot_model_basic",
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/connections.xml",
+        "xl/model/item.data",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Microsoft Download Center PowerPivotExamplesExcel2013.zip sample workbook LCA BI - Financial Report Usage.xlsx, renamed for fixture clarity. Workbook metadata reports Application=Microsoft Excel and covers PowerPivot/data-model package preservation via xl/model/item.data and workbook powerPivotData relationship.",
+      "sha256": "7566b44366091d3c10d91ab2240931bfcb3606b4ee3e8c829382273fe5574ef2",
+      "size_bytes": 685039
     }
   ]
 }

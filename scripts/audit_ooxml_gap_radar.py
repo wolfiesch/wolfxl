@@ -182,6 +182,7 @@ def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
         ("externalLink", "externalLinkPath", "xlPathMissing"),
         ("table",),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
+        ("powerPivotData", "model"),
         ("slicer", "slicerCache", "timeline", "timelineCache"),
         ("vbaProject", "control", "ctrlProp", "activeXControl", "oleObject"),
         ("customXml", "customXmlProps"),
