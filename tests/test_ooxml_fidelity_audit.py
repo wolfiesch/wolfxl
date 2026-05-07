@@ -273,6 +273,40 @@ def test_detects_data_model_binary_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "data_model_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_generic_extension_payload_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/drawings/drawing1.xml"] = _drawing_extension_xml("shape-a")
+    after_entries = dict(before_entries)
+    after_entries["xl/drawings/drawing1.xml"] = _drawing_extension_xml("shape-b")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "extensions_semantic_drift" for issue in report["issues"])
+
+
+def test_generic_extension_payload_allows_added_copied_parts(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/drawings/drawing1.xml"] = _drawing_extension_xml("shape-a")
+    after_entries = dict(before_entries)
+    after_entries["xl/drawings/drawing2.xml"] = _drawing_extension_xml("shape-a")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(
+        issue["kind"] == "extensions_semantic_drift" for issue in report["issues"]
+    )
+
+
 def test_fingerprints_data_model_content_default_and_workbook_relationship(
     tmp_path: Path,
 ) -> None:
@@ -770,6 +804,27 @@ def _connection_entries(connection: str, command: str) -> dict[str, str]:
   </connection>
 </connections>""",
     }
+
+
+def _drawing_extension_xml(creation_id: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main">
+  <xdr:twoCellAnchor>
+    <xdr:sp>
+      <xdr:nvSpPr>
+        <xdr:cNvPr id="2" name="Shape 1">
+          <a:extLst>
+            <a:ext uri="{{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}}">
+              <a16:creationId id="{creation_id}"/>
+            </a:ext>
+          </a:extLst>
+        </xdr:cNvPr>
+      </xdr:nvSpPr>
+    </xdr:sp>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>"""
 
 
 def _data_model_entries(payload: bytes) -> dict[str, str | bytes]:

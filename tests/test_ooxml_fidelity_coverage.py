@@ -654,6 +654,57 @@ def test_powerpivot_data_model_surface_accepts_real_excel_source(
     assert data_model["missing"] == []
 
 
+def test_extension_payload_surface_requires_source_and_mutation_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-extension.xlsx"
+    excel = fixture_dir / "excel-extension.xlsx"
+    _write_extension_fixture(external)
+    _write_extension_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_extension",
+                        "tool": "excelize",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_extension",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "marker_cell",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir, reports=[mutation_report])
+
+    extensions = report["surfaces"]["ooxml_extension_payload_preservation"]
+    assert extensions["external_tool_fixtures"] == ["external-extension.xlsx"]
+    assert extensions["real_excel_fixtures"] == ["excel-extension.xlsx"]
+    assert extensions["structural_mutation_fixtures"] == ["external-extension.xlsx"]
+    assert extensions["missing"] == []
+
+
 def _write_chart_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -778,6 +829,44 @@ def _write_data_model_fixture(path: Path) -> None:
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
         "xl/model/item.data": b"powerpivot-model",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_extension_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <sheetData/>
+  <extLst>
+    <ext uri="{B025F937-C7B1-47D3-B67F-A62EFF666E3E}">
+      <x14:id>extension-fixture</x14:id>
+    </ext>
+  </extLst>
+</worksheet>""",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():

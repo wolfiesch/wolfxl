@@ -248,6 +248,12 @@ def _audit_semantic_fingerprints(
         if not before_fingerprint:
             continue
         after_fingerprint = after.semantic_fingerprints.get(feature, {})
+        if feature == "extensions":
+            after_fingerprint = {
+                part: after_fingerprint.get(part)
+                for part in before_fingerprint
+                if part in after.parts
+            }
         if after_fingerprint != before_fingerprint:
             issues.append(
                 {
@@ -388,6 +394,7 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "connections": _connection_fingerprint(archive, parts),
         "data_model": _data_model_fingerprint(archive, parts),
         "data_validations": _data_validation_fingerprint(archive, parts),
+        "extensions": _extension_payload_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
         "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
@@ -641,6 +648,22 @@ def _external_link_fingerprint(
     workbook_formulas = _worksheet_formulas(archive, parts, external_only=True)
     if workbook_formulas:
         out["worksheet_formulas"] = workbook_formulas
+    return out
+
+
+def _extension_payload_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(p for p in parts if p.endswith(".xml")):
+        if part == "xl/workbook.xml":
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        extensions = _xml_extensions(root)
+        if extensions:
+            out[part] = extensions
     return out
 
 

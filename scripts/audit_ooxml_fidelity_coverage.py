@@ -90,6 +90,16 @@ SURFACES = {
             "move_formula_range",
         ),
     },
+    "ooxml_extension_payload_preservation": {
+        "label": "OOXML extension payload preservation",
+        "feature_keys": (),
+        "semantic_keys": ("extensions",),
+        "structural_mutations": (
+            "marker_cell",
+            "copy_first_sheet",
+            "move_formula_range",
+        ),
+    },
     "table_structured_refs_validations": {
         "label": "Tables / structured refs / validations",
         "feature_keys": ("table",),
@@ -331,6 +341,7 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "connections": "connection",
         "data_model": "data_model",
         "external_links": "external_link",
+        "extensions": "extension_payload",
         "page_setup": "page_setup",
         "pivots": "pivot",
         "slicers": "slicer",
