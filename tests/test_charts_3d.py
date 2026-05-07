@@ -391,11 +391,8 @@ def _zip_read(path: Path, member: str) -> bytes:
 
 
 def _try_construct(chart_cls, *args, **kwargs):
-    """Construct ``chart_cls`` or skip if Pod-β′ hasn't landed."""
-    try:
-        return chart_cls(*args, **kwargs)
-    except NotImplementedError as exc:
-        pytest.skip(f"{chart_cls.__name__} not yet implemented: {exc}")
+    """Construct ``chart_cls``."""
+    return chart_cls(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
