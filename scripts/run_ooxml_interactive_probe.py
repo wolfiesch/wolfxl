@@ -26,11 +26,13 @@ SUPPORTED_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
     "external_link_update_prompt",
+    "pivot_refresh_state",
 )
 PROBE_FEATURE_KEYS = {
     "macro_project_presence": "vba",
     "embedded_control_openability": "embedded_object",
     "external_link_update_prompt": "external_link",
+    "pivot_refresh_state": "pivot",
 }
 
 
@@ -204,6 +206,11 @@ def _probe_part_present(path: Path, probe: str) -> bool:
         )
     if probe == "external_link_update_prompt":
         return any(name.startswith("xl/externalLinks/") for name in names)
+    if probe == "pivot_refresh_state":
+        return any(
+            name.startswith(("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"))
+            for name in names
+        )
     return False
 
 
@@ -214,6 +221,8 @@ def _probe_part_label(probe: str) -> str:
         return "embedded/control OOXML parts"
     if probe == "external_link_update_prompt":
         return "external-link OOXML parts"
+    if probe == "pivot_refresh_state":
+        return "pivot cache/table OOXML parts"
     return "required OOXML parts"
 
 

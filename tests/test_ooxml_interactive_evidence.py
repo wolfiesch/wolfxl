@@ -337,6 +337,79 @@ def test_external_link_probe_runner_fails_when_link_part_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
+def test_pivot_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_workbook(fixture_dir / "pivot.xlsx")
+    _write_manifest(fixture_dir, "pivot.xlsx")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("pivot_refresh_state",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "pivot.xlsx"
+    assert report["results"][0]["probe"] == "pivot_refresh_state"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["pivot_refresh_state"]["status"] == "clear"
+
+
+def test_pivot_probe_runner_fails_when_pivot_part_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_workbook(fixture_dir / "pivot.xlsx")
+    _write_manifest(fixture_dir, "pivot.xlsx")
+
+    def remove_pivot_during_smoke(src: Path, _output_dir: Path, _timeout: int):
+        _rewrite_without_prefixes(src, ("xl/pivotCache/", "xl/pivotTables/"))
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_pivot_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("pivot_refresh_state",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
 def _write_manifest(fixture_dir: Path, filename: str) -> None:
     fixture_dir.joinpath("manifest.json").write_text(
         json.dumps(
@@ -388,6 +461,25 @@ def _write_external_link_workbook(path: Path) -> None:
 <externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <externalBook><sheetNames><sheetName val="Sheet1"/></sheetNames></externalBook>
 </externalLink>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_pivot_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/pivotCache/pivotCacheDefinition1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      refreshOnLoad="1">
+  <cacheSource type="worksheet"><worksheetSource ref="A1:B4" sheet="Sheet1"/></cacheSource>
+  <cacheFields count="2"><cacheField name="Account"/><cacheField name="Amount"/></cacheFields>
+</pivotCacheDefinition>"""
+    entries["xl/pivotTables/pivotTable1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      name="PivotTable1" cacheId="1">
+  <location ref="A3:B6" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>
+  <rowFields count="1"><field x="0"/></rowFields>
+</pivotTableDefinition>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
