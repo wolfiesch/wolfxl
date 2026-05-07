@@ -224,6 +224,7 @@ def audit_coverage(
     recursive: bool = False,
     require_render: bool = False,
     require_intentional_render: bool = False,
+    require_render_engine: str | None = None,
     require_app: bool = False,
     require_intentional_app: bool = False,
 ) -> dict:
@@ -233,7 +234,8 @@ def audit_coverage(
     app_report_paths = list(app_reports)
     passed_mutations = _passed_mutations_by_fixture(report_paths)
     render_passes, intentional_render_passes = _render_passes_by_fixture(
-        render_report_paths
+        render_report_paths,
+        required_engine=require_render_engine,
     )
     app_passes, intentional_app_passes = _app_passes_by_fixture(app_report_paths)
     fixtures = []
@@ -275,6 +277,7 @@ def audit_coverage(
             fixture_dicts,
             require_render=require_render,
             require_intentional_render=require_intentional_render,
+            require_render_engine=require_render_engine,
             require_app=require_app,
             require_intentional_app=require_intentional_app,
         )
@@ -289,6 +292,8 @@ def audit_coverage(
         required_evidence.append("render_no_op_pass")
     if require_intentional_render:
         required_evidence.append("intentional_render_pass")
+    if require_render_engine:
+        required_evidence.append(f"render_engine:{require_render_engine}")
     if require_app:
         required_evidence.append("app_open_pass")
     if require_intentional_app:
@@ -302,6 +307,7 @@ def audit_coverage(
         "recursive": recursive,
         "render_required": require_render,
         "intentional_render_required": require_intentional_render,
+        "render_engine_required": require_render_engine,
         "app_required": require_app,
         "intentional_app_required": require_intentional_app,
         "fixture_count": len(fixtures),
@@ -327,27 +333,41 @@ def _passed_mutations_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]
 
 def _render_passes_by_fixture(
     reports: Iterable[Path],
+    required_engine: str | None = None,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     no_op: dict[str, set[str]] = {}
     intentional: dict[str, set[str]] = {}
+    normalized_required_engine = _normalize_engine(required_engine)
     for report_path in reports:
         payload = json.loads(Path(report_path).read_text())
+        report_engine = _normalize_engine(payload.get("render_engine"))
         for result in payload.get("results", []):
             fixture = result.get("fixture")
             mutation = result.get("mutation", "no_op")
             status = result.get("status")
             if not fixture or not status:
                 continue
+            result_engine = _normalize_engine(result.get("render_engine")) or report_engine
+            if normalized_required_engine and result_engine != normalized_required_engine:
+                continue
+            engine_label = result_engine or "unknown"
             if mutation == "no_op" and status in PASSING_NO_OP_RENDER_STATUSES:
-                no_op.setdefault(str(fixture), set()).add(str(status))
+                no_op.setdefault(str(fixture), set()).add(f"{engine_label}:{status}")
             elif (
                 mutation != "no_op"
                 and status in PASSING_INTENTIONAL_RENDER_STATUSES
             ):
                 intentional.setdefault(str(fixture), set()).add(
-                    f"{mutation}:{status}"
+                    f"{engine_label}:{mutation}:{status}"
                 )
     return no_op, intentional
+
+
+def _normalize_engine(engine: object) -> str | None:
+    if not isinstance(engine, str):
+        return None
+    normalized = engine.strip().lower().replace("_", "-")
+    return normalized or None
 
 
 def _app_passes_by_fixture(
@@ -455,6 +475,7 @@ def _surface_result(
     fixtures: list[dict],
     require_render: bool,
     require_intentional_render: bool,
+    require_render_engine: str | None,
     require_app: bool,
     require_intentional_app: bool,
 ) -> dict:
@@ -530,10 +551,16 @@ def _surface_result(
         missing.append("real_excel_fixture")
     if not structural:
         missing.append("structural_mutation_pass")
+    render_missing_label = _render_missing_label(
+        "render_no_op_pass", require_render_engine
+    )
+    intentional_render_missing_label = _render_missing_label(
+        "intentional_render_pass", require_render_engine
+    )
     if require_render and not rendered:
-        missing.append("render_no_op_pass")
+        missing.append(render_missing_label)
     if require_intentional_render and not intentional_rendered:
-        missing.append("intentional_render_pass")
+        missing.append(intentional_render_missing_label)
     if require_app and not app_opened:
         missing.append("app_open_pass")
     if require_intentional_app and not intentional_app_opened:
@@ -594,9 +621,9 @@ def _surface_result(
         if not group_structural:
             group_missing.append("structural_mutation_pass")
         if require_render and not group_rendered:
-            group_missing.append("render_no_op_pass")
+            group_missing.append(render_missing_label)
         if require_intentional_render and not group_intentional_rendered:
-            group_missing.append("intentional_render_pass")
+            group_missing.append(intentional_render_missing_label)
         if require_app and not group_app_opened:
             group_missing.append("app_open_pass")
         if require_intentional_app and not group_intentional_app_opened:
@@ -635,6 +662,12 @@ def _surface_result(
         "optional": not config.get("required", True),
         "status": "clear" if not missing else "missing",
     }
+
+
+def _render_missing_label(label: str, required_engine: str | None) -> str:
+    if not required_engine:
+        return label
+    return f"{label}:{required_engine}"
 
 
 def _application_name(path: Path) -> str | None:
@@ -717,6 +750,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--require-render-engine",
+        choices=("libreoffice", "excel"),
+        default=None,
+        help=(
+            "Only count render reports produced by this engine. Use with "
+            "--require-render and/or --require-intentional-render to make "
+            "LibreOffice-vs-Excel rendered evidence explicit."
+        ),
+    )
+    parser.add_argument(
         "--require-app",
         action="store_true",
         help=(
@@ -763,6 +806,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.require_render_engine and not args.render_report:
+        print(
+            "error: --require-render-engine requires at least one "
+            "--render-report from run_ooxml_render_compare.py so render "
+            "engine provenance can be evaluated.",
+            file=sys.stderr,
+        )
+        return 2
     if args.require_app and not args.app_report:
         print(
             "error: --require-app requires at least one --app-report from "
@@ -787,6 +838,7 @@ def main(argv: list[str] | None = None) -> int:
         recursive=args.recursive,
         require_render=args.require_render,
         require_intentional_render=args.require_intentional_render,
+        require_render_engine=args.require_render_engine,
         require_app=args.require_app,
         require_intentional_app=args.require_intentional_app,
     )

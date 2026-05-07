@@ -46,6 +46,7 @@ def test_render_compare_skips_when_renderer_tools_missing(
 
     report = render_module.run_render_compare(fixture_dir, output_dir, timeout=1)
 
+    assert report["render_engine"] == "libreoffice"
     assert report["result_count"] == 1
     assert report["failure_count"] == 0
     assert report["results"][0]["status"] == "skipped"

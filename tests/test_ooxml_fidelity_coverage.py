@@ -368,6 +368,7 @@ def test_coverage_audit_can_require_render_evidence(tmp_path: Path) -> None:
     chart = report["surfaces"]["chart_style_color_preservation"]
     assert report["render_report_count"] == 1
     assert report["render_required"] is True
+    assert report["render_engine_required"] is None
     assert "render_no_op_pass" in report["required_evidence"]
     assert chart["render_fixtures"] == ["external-chart.xlsx"]
     assert chart["missing"] == []
@@ -577,6 +578,77 @@ def test_coverage_audit_reports_missing_render_when_required(tmp_path: Path) -> 
     chart = report["surfaces"]["chart_style_color_preservation"]
     assert chart["render_fixtures"] == []
     assert "render_no_op_pass" in chart["missing"]
+    assert report["ready"] is False
+
+
+def test_coverage_audit_can_require_specific_render_engine(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-chart.xlsx"
+    excel = fixture_dir / "excel-chart.xlsx"
+    _write_chart_fixture(external)
+    _write_chart_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_chart",
+                        "tool": "excelize",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_chart",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "add_remove_chart",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+    render_report = tmp_path / "render-report.json"
+    render_report.write_text(
+        json.dumps(
+            {
+                "render_engine": "libreoffice",
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "no_op",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(
+        fixture_dir,
+        reports=[mutation_report],
+        render_reports=[render_report],
+        require_render=True,
+        require_render_engine="excel",
+    )
+
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert report["render_engine_required"] == "excel"
+    assert "render_engine:excel" in report["required_evidence"]
+    assert chart["render_fixtures"] == []
+    assert "render_no_op_pass:excel" in chart["missing"]
     assert report["ready"] is False
 
 

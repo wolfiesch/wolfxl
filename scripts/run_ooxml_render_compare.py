@@ -30,6 +30,7 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 import wolfxl  # noqa: E402
 
 DEFAULT_RENDER_MUTATIONS = ("no_op",)
+RENDER_ENGINE = "libreoffice"
 PASSING_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
@@ -86,6 +87,7 @@ def run_render_compare(
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
+        "render_engine": RENDER_ENGINE,
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
         "max_pages_per_fixture": max_pages_per_fixture,
