@@ -44,7 +44,7 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
 
     report = runner_module.run_sweep(fixture_dir, output_dir)
 
-    assert report["result_count"] == 3
+    assert report["result_count"] == 4
     assert report["failure_count"] == 0
     assert (output_dir / "report.json").is_file()
     statuses = {result["mutation"]: result["status"] for result in report["results"]}
@@ -52,6 +52,7 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
         "no_op": "passed",
         "marker_cell": "passed",
         "style_cell": "passed",
+        "insert_tail_row": "passed",
     }
 
 

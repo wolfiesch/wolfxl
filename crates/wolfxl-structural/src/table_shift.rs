@@ -1,6 +1,6 @@
 //! Table XML rewrites for worksheet structural shifts.
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -79,9 +79,7 @@ fn shift_table_xml_inner(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                 if local.as_slice() == b"calculatedColumnFormula" {
                     in_calc_formula = false;
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if in_calc_formula {

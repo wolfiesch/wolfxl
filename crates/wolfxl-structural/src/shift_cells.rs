@@ -22,7 +22,7 @@
 
 use std::io::Cursor;
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -191,9 +191,7 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     b"formula2" => in_formula2 = false,
                     _ => {}
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if skip_depth > 0 {

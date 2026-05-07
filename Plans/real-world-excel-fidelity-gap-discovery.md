@@ -18,7 +18,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, and style-cell modify-save mutations | Modify-save preserves important authored parts and still opens under three safe mutation modes | Structural edits and real Excel-authored long-tail workbooks still need broader coverage |
+| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, and tail-row-insert modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus a first row-structure mutation | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and first-pass semantic fingerprints for charts, CF, external links, pivots, and slicers | The external-oracle pack now catches broken dependency graphs and obvious feature-meaning drift | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix
@@ -71,11 +71,14 @@ Gap ledger:
 2. Extend the mutation runner beyond safe edits:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
-   - Current safe mutations: no-op modify-save, marker-cell modify-save, and
-     style-cell modify-save.
-   - Latest pinned-pack sweep: 21 results, 0 failures.
-   - Next mutations: row/column insert/delete, sheet rename/copy, and feature
-     add/remove where the expected semantic drift can be declared.
+   - Current safe/default mutations: no-op modify-save, marker-cell modify-save,
+     style-cell modify-save, and tail-row insert.
+   - Latest pinned-pack sweep: 28 results, 0 failures.
+   - Latest bug found: row insertion exposed a prefixed-XML end-tag corruption
+     path in structural rewrites, now covered by a regression test.
+   - Next mutations: column insert/delete, interior row delete, move range,
+     sheet rename/copy, and feature add/remove where the expected semantic drift
+     can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -334,10 +334,7 @@ pub fn shift_comments_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     buf.clear();
                     continue;
                 }
-                let local = e.local_name().as_ref().to_vec();
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if skip_depth > 0 {
@@ -419,9 +416,7 @@ pub fn shift_defined_names(
                     in_dn = false;
                     current_local_sheet_id = None;
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if in_dn {
