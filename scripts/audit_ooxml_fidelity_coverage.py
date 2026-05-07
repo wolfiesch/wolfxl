@@ -18,6 +18,7 @@ import audit_ooxml_fidelity  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
 
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
+PASSING_APP_STATUSES = {"passed"}
 PASSING_NO_OP_RENDER_STATUSES = {"passed", "sampled_passed"}
 PASSING_INTENTIONAL_RENDER_STATUSES = {"rendered", "sampled_rendered"}
 REAL_EXCEL_TOOLS = {"excel", "microsoft-excel", "excel-365", "excel-2021"}
@@ -140,22 +141,29 @@ class FixtureCoverage:
     passed_mutations: list[str]
     render_passes: list[str]
     intentional_render_passes: list[str]
+    app_passes: list[str]
+    intentional_app_passes: list[str]
 
 
 def audit_coverage(
     fixture_dir: Path,
     reports: Iterable[Path] = (),
     render_reports: Iterable[Path] = (),
+    app_reports: Iterable[Path] = (),
     require_render: bool = False,
     require_intentional_render: bool = False,
+    require_app: bool = False,
+    require_intentional_app: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     report_paths = list(reports)
     render_report_paths = list(render_reports)
+    app_report_paths = list(app_reports)
     passed_mutations = _passed_mutations_by_fixture(report_paths)
     render_passes, intentional_render_passes = _render_passes_by_fixture(
         render_report_paths
     )
+    app_passes, intentional_app_passes = _app_passes_by_fixture(app_report_paths)
     fixtures = []
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
         path = fixture_dir / entry.filename
@@ -177,6 +185,10 @@ def audit_coverage(
                 intentional_render_passes=sorted(
                     intentional_render_passes.get(entry.filename, set())
                 ),
+                app_passes=sorted(app_passes.get(entry.filename, set())),
+                intentional_app_passes=sorted(
+                    intentional_app_passes.get(entry.filename, set())
+                ),
             )
         )
 
@@ -187,6 +199,8 @@ def audit_coverage(
             fixture_dicts,
             require_render=require_render,
             require_intentional_render=require_intentional_render,
+            require_app=require_app,
+            require_intentional_app=require_intentional_app,
         )
         for name in SURFACES
     }
@@ -199,13 +213,20 @@ def audit_coverage(
         required_evidence.append("render_no_op_pass")
     if require_intentional_render:
         required_evidence.append("intentional_render_pass")
+    if require_app:
+        required_evidence.append("app_open_pass")
+    if require_intentional_app:
+        required_evidence.append("intentional_app_open_pass")
     return {
         "fixture_dir": str(fixture_dir),
         "required_evidence": required_evidence,
         "mutation_report_count": len(report_paths),
         "render_report_count": len(render_report_paths),
+        "app_report_count": len(app_report_paths),
         "render_required": require_render,
         "intentional_render_required": require_intentional_render,
+        "app_required": require_app,
+        "intentional_app_required": require_intentional_app,
         "fixture_count": len(fixtures),
         "fixtures": fixture_dicts,
         "surfaces": surface_results,
@@ -250,6 +271,28 @@ def _render_passes_by_fixture(
                     f"{mutation}:{status}"
                 )
     return no_op, intentional
+
+
+def _app_passes_by_fixture(
+    reports: Iterable[Path],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    source: dict[str, set[str]] = {}
+    intentional: dict[str, set[str]] = {}
+    for report_path in reports:
+        payload = json.loads(Path(report_path).read_text())
+        for result in payload.get("results", []):
+            fixture = result.get("fixture")
+            mutation = result.get("mutation", "source")
+            app = result.get("app", "app")
+            status = result.get("status")
+            if not fixture or status not in PASSING_APP_STATUSES:
+                continue
+            label = f"{app}:{mutation}"
+            if mutation == "source":
+                source.setdefault(str(fixture), set()).add(label)
+            else:
+                intentional.setdefault(str(fixture), set()).add(label)
+    return source, intentional
 
 
 def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
@@ -328,6 +371,8 @@ def _surface_result(
     fixtures: list[dict],
     require_render: bool,
     require_intentional_render: bool,
+    require_app: bool,
+    require_intentional_app: bool,
 ) -> dict:
     config = SURFACES[surface]
     matching = [fixture for fixture in fixtures if surface in fixture["surfaces"]]
@@ -359,6 +404,16 @@ def _surface_result(
         for fixture in matching
         if fixture["intentional_render_passes"]
     ]
+    app_opened = [
+        fixture["filename"]
+        for fixture in matching
+        if fixture["app_passes"]
+    ]
+    intentional_app_opened = [
+        fixture["filename"]
+        for fixture in matching
+        if fixture["intentional_app_passes"]
+    ]
     missing = []
     if not external:
         missing.append("external_tool_fixture")
@@ -370,6 +425,10 @@ def _surface_result(
         missing.append("render_no_op_pass")
     if require_intentional_render and not intentional_rendered:
         missing.append("intentional_render_pass")
+    if require_app and not app_opened:
+        missing.append("app_open_pass")
+    if require_intentional_app and not intentional_app_opened:
+        missing.append("intentional_app_open_pass")
     feature_groups = config.get("required_feature_groups", {})
     group_results = {}
     for group, keys in feature_groups.items():
@@ -406,6 +465,16 @@ def _surface_result(
             for fixture in group_matching
             if fixture["intentional_render_passes"]
         ]
+        group_app_opened = [
+            fixture["filename"]
+            for fixture in group_matching
+            if fixture["app_passes"]
+        ]
+        group_intentional_app_opened = [
+            fixture["filename"]
+            for fixture in group_matching
+            if fixture["intentional_app_passes"]
+        ]
         group_missing = []
         if not group_matching:
             group_missing.append("fixture")
@@ -419,6 +488,10 @@ def _surface_result(
             group_missing.append("render_no_op_pass")
         if require_intentional_render and not group_intentional_rendered:
             group_missing.append("intentional_render_pass")
+        if require_app and not group_app_opened:
+            group_missing.append("app_open_pass")
+        if require_intentional_app and not group_intentional_app_opened:
+            group_missing.append("intentional_app_open_pass")
         if group_missing:
             missing.extend(f"{group}_{item}" for item in group_missing)
         group_results[group] = {
@@ -429,6 +502,8 @@ def _surface_result(
             "structural_mutation_fixtures": group_structural,
             "render_fixtures": group_rendered,
             "intentional_render_fixtures": group_intentional_rendered,
+            "app_open_fixtures": group_app_opened,
+            "intentional_app_open_fixtures": group_intentional_app_opened,
             "missing": group_missing,
             "clear": not group_missing,
         }
@@ -441,6 +516,8 @@ def _surface_result(
         "structural_mutation_fixtures": structural,
         "render_fixtures": rendered,
         "intentional_render_fixtures": intentional_rendered,
+        "app_open_fixtures": app_opened,
+        "intentional_app_open_fixtures": intentional_app_opened,
         "accepted_structural_mutations": list(config["structural_mutations"]),
         "feature_groups": group_results,
         "missing": missing,
@@ -478,6 +555,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--app-report",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Spreadsheet app smoke app-smoke-report.json. May be passed "
+            "multiple times."
+        ),
+    )
+    parser.add_argument(
         "--require-render",
         action="store_true",
         help=(
@@ -491,6 +578,22 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Require at least one passing non-no-op mutation render smoke for "
             "each fidelity surface."
+        ),
+    )
+    parser.add_argument(
+        "--require-app",
+        action="store_true",
+        help=(
+            "Require at least one passing source fixture app-open smoke for "
+            "each fidelity surface."
+        ),
+    )
+    parser.add_argument(
+        "--require-intentional-app",
+        action="store_true",
+        help=(
+            "Require at least one passing non-source mutation app-open smoke "
+            "for each fidelity surface."
         ),
     )
     parser.add_argument(
@@ -524,13 +627,31 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.require_app and not args.app_report:
+        print(
+            "error: --require-app requires at least one --app-report from "
+            "run_ooxml_app_smoke.py so app-open evidence can be evaluated.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.require_intentional_app and not args.app_report:
+        print(
+            "error: --require-intentional-app requires at least one "
+            "--app-report from run_ooxml_app_smoke.py so intentional mutation "
+            "app-open evidence can be evaluated.",
+            file=sys.stderr,
+        )
+        return 2
 
     report = audit_coverage(
         args.fixture_dir,
         reports=args.report,
         render_reports=args.render_report,
+        app_reports=args.app_report,
         require_render=args.require_render,
         require_intentional_render=args.require_intentional_render,
+        require_app=args.require_app,
+        require_intentional_app=args.require_intentional_app,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if args.strict and not report["ready"] else 0

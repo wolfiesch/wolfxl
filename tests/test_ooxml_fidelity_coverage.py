@@ -55,8 +55,11 @@ def test_coverage_audit_reports_missing_real_excel_and_structural_evidence(
     assert report["ready"] is False
     assert report["mutation_report_count"] == 0
     assert report["render_report_count"] == 0
+    assert report["app_report_count"] == 0
     assert report["render_required"] is False
     assert report["intentional_render_required"] is False
+    assert report["app_required"] is False
+    assert report["intentional_app_required"] is False
 
 
 def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:
@@ -94,6 +97,32 @@ def test_require_intentional_render_cli_requires_render_report(
     captured = capsys.readouterr()
     assert code == 2
     assert "--require-intentional-render requires at least one" in captured.err
+    assert captured.out == ""
+
+
+def test_require_app_cli_requires_app_report(tmp_path: Path, capsys) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+
+    code = coverage_module.main([str(fixture_dir), "--require-app"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--require-app requires at least one --app-report" in captured.err
+    assert captured.out == ""
+
+
+def test_require_intentional_app_cli_requires_app_report(
+    tmp_path: Path, capsys
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+
+    code = coverage_module.main([str(fixture_dir), "--require-intentional-app"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--require-intentional-app requires at least one" in captured.err
     assert captured.out == ""
 
 
@@ -284,6 +313,86 @@ def test_coverage_audit_can_require_intentional_render_evidence(
     assert report["intentional_render_required"] is True
     assert "intentional_render_pass" in report["required_evidence"]
     assert chart["intentional_render_fixtures"] == ["external-chart.xlsx"]
+    assert chart["missing"] == []
+
+
+def test_coverage_audit_can_require_app_open_evidence(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-chart.xlsx"
+    excel = fixture_dir / "excel-chart.xlsx"
+    _write_chart_fixture(external)
+    _write_chart_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_chart",
+                        "tool": "excelize",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_chart",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "add_remove_chart",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+    app_report = tmp_path / "app-report.json"
+    app_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "source",
+                        "app": "excel",
+                        "status": "passed",
+                    },
+                    {
+                        "fixture": external.name,
+                        "mutation": "copy_first_sheet",
+                        "app": "excel",
+                        "status": "passed",
+                    },
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(
+        fixture_dir,
+        reports=[mutation_report],
+        app_reports=[app_report],
+        require_app=True,
+        require_intentional_app=True,
+    )
+
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert report["app_report_count"] == 1
+    assert report["app_required"] is True
+    assert report["intentional_app_required"] is True
+    assert "app_open_pass" in report["required_evidence"]
+    assert "intentional_app_open_pass" in report["required_evidence"]
+    assert chart["app_open_fixtures"] == ["external-chart.xlsx"]
+    assert chart["intentional_app_open_fixtures"] == ["external-chart.xlsx"]
     assert chart["missing"] == []
 
 
