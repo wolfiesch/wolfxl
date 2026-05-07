@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import wolfxl
-from wolfxl._zip_safety import _validate_info, validate_zipfile
+from wolfxl._zip_safety import _validate_info, _validate_part_name, validate_zipfile
 
 
 def _write_zip(path: Path, entries: dict[str, bytes]) -> None:
@@ -65,13 +65,10 @@ def test_rejects_unsafe_part_path(tmp_path: Path) -> None:
     ],
 )
 def test_rejects_absolute_windows_or_backslash_part_paths(
-    tmp_path: Path, part_name: str
+    part_name: str,
 ) -> None:
-    path = tmp_path / "unsafe-paths.xlsx"
-    _write_zip(path, {part_name: b"<workbook/>"})
-
-    with pytest.raises(Exception, match="unsafe OOXML package part path"):
-        wolfxl.load_workbook(path)
+    with pytest.raises(ValueError, match="unsafe OOXML package part path"):
+        _validate_part_name(part_name)
 
 
 def test_rejects_duplicate_zip_entry_names(tmp_path: Path) -> None:
