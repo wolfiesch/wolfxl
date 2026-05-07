@@ -180,6 +180,12 @@ def test_runner_separates_expected_interior_delete_drift(
                     "severity": "error",
                     "part": "conditional_formatting",
                     "message": "expected range change after row delete",
+                },
+                {
+                    "kind": "data_validations_semantic_drift",
+                    "severity": "error",
+                    "part": "data_validations",
+                    "message": "expected validation range change after row delete",
                 }
             ]
         }
@@ -196,10 +202,11 @@ def test_runner_separates_expected_interior_delete_drift(
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 1
-    assert result["expected_issues"][0]["kind"] == (
-        "conditional_formatting_semantic_drift"
-    )
+    assert result["expected_issue_count"] == 2
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "conditional_formatting_semantic_drift",
+        "data_validations_semantic_drift",
+    }
 
 
 def test_runner_separates_expected_sheet_copy_drift(
@@ -226,6 +233,12 @@ def test_runner_separates_expected_sheet_copy_drift(
                     "part": "slicers",
                     "message": "expected copied slicer part",
                 },
+                {
+                    "kind": "data_validations_semantic_drift",
+                    "severity": "error",
+                    "part": "data_validations",
+                    "message": "expected copied data validation part",
+                },
             ]
         }
 
@@ -241,9 +254,10 @@ def test_runner_separates_expected_sheet_copy_drift(
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 2
+    assert result["expected_issue_count"] == 3
     assert {issue["kind"] for issue in result["expected_issues"]} == {
         "charts_semantic_drift",
+        "data_validations_semantic_drift",
         "slicers_semantic_drift",
     }
 

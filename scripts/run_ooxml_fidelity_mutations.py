@@ -65,6 +65,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "delete_first_row": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
+        "data_validations_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -72,6 +73,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "delete_first_col": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
+        "data_validations_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",
@@ -79,6 +81,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "copy_first_sheet": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
+        "data_validations_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
         "worksheet_formulas_semantic_drift",

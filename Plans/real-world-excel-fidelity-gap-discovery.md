@@ -20,6 +20,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
 | External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, tail-row-delete, tail-column-delete, copy-remove-sheet, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure, row/column delete, sheet copy/remove, and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, worksheet formulas, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
+| Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass | The gap-discovery plan now has a strict, machine-readable "not clear yet" gate instead of relying on prose status | It only audits evidence presence; it does not invent missing real Excel or external-link fixtures |
 
 ## Risk matrix
 
@@ -123,6 +124,21 @@ Gap ledger:
      part and sheet drawing rel. Chart removal now preserves an empty source
      drawing shell when the chart was appended into that shell, while ordinary
      chart-only source removals still delete the drawing.
+   - Latest oracle-hardening bug found: first-row/first-column delete and
+     first-sheet copy correctly moved or duplicated data-validation ranges in
+     Apache POI and ExcelJS fixtures, but the mutation runner treated
+     `data_validations_semantic_drift` as unexpected. The runner now declares
+     data-validation range movement as expected only for structural mutations,
+     while feature-add mutations still require the new range marker.
+   - Latest strict P0 structural sweep: 28 results, 0 failures across the 7
+     external-oracle fixtures for first-row delete, first-column delete,
+     first-sheet copy, and first-sheet rename.
+   - Latest coverage audit result: `ready=false`. Pivot/slicer, chart/style,
+     and conditional-formatting P0 surfaces have external-tool fixture evidence
+     plus structural mutation passes but still lack real Excel-authored
+     fixtures. External-link relationship edges currently lack external-tool
+     fixture evidence, real Excel fixture evidence, and structural mutation
+     passes in the external-oracle pack.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
