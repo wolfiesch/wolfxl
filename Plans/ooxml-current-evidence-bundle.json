@@ -61,6 +61,34 @@
       ]
     },
     {
+      "name": "excel_render_intentional_marker_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-marker-full-pack.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-marker-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation marker_cell > /tmp/wolfxl-render-excel-intentional-marker-full-pack.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["marker_cell"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_full_pack_with_intentional_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-intentional.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-intentional.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "render_report_count", "equals": 2},
+        {"path": "render_engine_required", "equals": "excel"},
+        {"path": "intentional_render_required", "equals": true},
+        {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
+        {"path": "surfaces.chart_style_color_preservation.clear", "equals": true},
+        {"path": "surfaces.conditional_formatting_extension_preservation.clear", "equals": true},
+        {"path": "surfaces.external_link_relationship_edges.clear", "equals": true},
+        {"path": "surfaces.powerpivot_data_model_preservation.clear", "equals": true}
+      ]
+    },
+    {
       "name": "external_oracle_corpus_diversity",
       "path": "/tmp/wolfxl-corpus-buckets-external-oracle-final.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py tests/fixtures/external_oracle --json --strict > /tmp/wolfxl-corpus-buckets-external-oracle-final.json",
