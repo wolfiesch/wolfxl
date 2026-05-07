@@ -262,6 +262,81 @@ def test_embedded_control_probe_runner_fails_when_control_part_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
+def test_external_link_probe_runner_emits_passing_interactive_report(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def fake_smoke_excel(src: Path, _output_dir: Path, _timeout: int):
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        fake_smoke_excel,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["fixture"] == "external-link.xlsx"
+    assert report["results"][0]["probe"] == "external_link_update_prompt"
+    assert report["results"][0]["status"] == "passed"
+    audit = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[output_dir / "interactive-probe-report.json"],
+    )
+    assert audit["probes"]["external_link_update_prompt"]["status"] == "clear"
+
+
+def test_external_link_probe_runner_fails_when_link_part_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def remove_external_link_during_smoke(
+        src: Path, _output_dir: Path, _timeout: int
+    ):
+        _rewrite_without_prefixes(src, ("xl/externalLinks/",))
+        return SimpleNamespace(
+            status="passed",
+            output=str(src),
+            message="opened",
+        )
+
+    monkeypatch.setattr(
+        probe_runner.run_ooxml_app_smoke,
+        "_smoke_excel",
+        remove_external_link_during_smoke,
+    )
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"
+    assert "missing after Excel open" in report["results"][0]["message"]
+
+
 def _write_manifest(fixture_dir: Path, filename: str) -> None:
     fixture_dir.joinpath("manifest.json").write_text(
         json.dumps(
@@ -297,6 +372,22 @@ def _write_embedded_control_workbook(path: Path) -> None:
     entries = _base_entries()
     entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Button"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_external_link_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/_rels/workbook.xml.rels"] = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/>
+</Relationships>"""
+    entries["xl/externalLinks/externalLink1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <externalBook><sheetNames><sheetName val="Sheet1"/></sheetNames></externalBook>
+</externalLink>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

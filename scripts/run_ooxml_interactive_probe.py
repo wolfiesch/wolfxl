@@ -22,10 +22,15 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 SOURCE_MUTATION = run_ooxml_app_smoke.SOURCE_MUTATION
 PASSING_STATUSES = {"passed"}
-SUPPORTED_PROBES = ("macro_project_presence", "embedded_control_openability")
+SUPPORTED_PROBES = (
+    "macro_project_presence",
+    "embedded_control_openability",
+    "external_link_update_prompt",
+)
 PROBE_FEATURE_KEYS = {
     "macro_project_presence": "vba",
     "embedded_control_openability": "embedded_object",
+    "external_link_update_prompt": "external_link",
 }
 
 
@@ -197,6 +202,8 @@ def _probe_part_present(path: Path, probe: str) -> bool:
             name.startswith(("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"))
             for name in names
         )
+    if probe == "external_link_update_prompt":
+        return any(name.startswith("xl/externalLinks/") for name in names)
     return False
 
 
@@ -205,6 +212,8 @@ def _probe_part_label(probe: str) -> str:
         return "xl/vbaProject.bin"
     if probe == "embedded_control_openability":
         return "embedded/control OOXML parts"
+    if probe == "external_link_update_prompt":
+        return "external-link OOXML parts"
     return "required OOXML parts"
 
 
