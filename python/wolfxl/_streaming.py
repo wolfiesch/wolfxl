@@ -146,6 +146,35 @@ def _max_row_from_dimension_ref(ref: str) -> int | None:
         return None
 
 
+def _bounds_from_dimension_ref(ref: str) -> tuple[int, int, int, int] | None:
+    parts = ref.replace("$", "").split(":", 1)
+    if len(parts) == 1:
+        parts = [parts[0], parts[0]]
+    try:
+        min_row, min_col = a1_to_rowcol(parts[0])
+        max_row, max_col = a1_to_rowcol(parts[1])
+    except ValueError:
+        return None
+    return (
+        min(min_row, max_row),
+        min(min_col, max_col),
+        max(min_row, max_row),
+        max(min_col, max_col),
+    )
+
+
+def _source_dimension_bounds(path: str, sheet_title: str) -> tuple[int, int, int, int] | None:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            sheet_path = _sheet_path_from_workbook(zf, sheet_title)
+            if sheet_path is None:
+                return None
+            ref = _dimension_ref_from_sheet_head(zf, sheet_path)
+            return _bounds_from_dimension_ref(ref) if ref is not None else None
+    except (OSError, zipfile.BadZipFile):
+        return None
+
+
 def _source_dimension_max_row(path: str, sheet_title: str) -> int | None:
     try:
         with zipfile.ZipFile(path) as zf:
@@ -153,7 +182,8 @@ def _source_dimension_max_row(path: str, sheet_title: str) -> int | None:
             if sheet_path is None:
                 return None
             ref = _dimension_ref_from_sheet_head(zf, sheet_path)
-            max_row = _max_row_from_dimension_ref(ref) if ref is not None else None
+            bounds = _bounds_from_dimension_ref(ref) if ref is not None else None
+            max_row = bounds[2] if bounds is not None else None
             if max_row is not None:
                 return max_row
             if _row_count_exceeds_threshold(zf, sheet_path):
@@ -445,6 +475,7 @@ def stream_iter_rows(
             "(use load_workbook to obtain one)"
         )
     mn_r, mx_r, mn_c, mx_c = _resolve_bounds(ws, min_row, max_row, min_col, max_col)
+    source_bounds = _source_dimension_bounds(path, ws.title)
     reader = _rust.StreamingSheetReader.open(
         path, ws.title, mn_r, mx_r, mn_c, mx_c
     )
@@ -479,6 +510,13 @@ def stream_iter_rows(
         style_date_cache[style_id] = (num_fmt, is_date)
         return is_date
 
+    def _resolved_cmax(cells: list[tuple[Any, ...]]) -> int:
+        if mx_c is not None:
+            return mx_c
+        if source_bounds is not None:
+            return source_bounds[3]
+        return max((int(cell[0]) for cell in cells), default=(mn_c or 1) - 1)
+
     try:
         if values_only:
             counter = mn_r if mn_r is not None else 1
@@ -492,7 +530,7 @@ def stream_iter_rows(
                     break
                 row_idx, cells = row
                 cmin = mn_c if mn_c is not None else 1
-                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                cmax = _resolved_cmax(cells)
                 empty_row = (None,) * max(0, cmax + 1 - cmin)
                 while counter < row_idx:
                     yield empty_row
@@ -523,7 +561,9 @@ def stream_iter_rows(
                 counter = row_idx + 1
             if mx_r is not None:
                 cmin = mn_c if mn_c is not None else 1
-                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                cmax = mx_c if mx_c is not None else (
+                    source_bounds[3] if source_bounds is not None else cmin - 1
+                )
                 empty_row = (None,) * max(0, cmax + 1 - cmin)
                 while counter <= mx_r:
                     yield empty_row
@@ -538,7 +578,7 @@ def stream_iter_rows(
                 # Determine emitted column bounds: explicit min/max wins,
                 # else span observed cells.
                 cmin = mn_c if mn_c is not None else 1
-                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                cmax = _resolved_cmax(cells)
                 while counter < row_idx:
                     empty_row = tuple(
                         StreamingCell(ws, counter, col, None, None, "blank")
@@ -567,7 +607,9 @@ def stream_iter_rows(
                 counter = row_idx + 1
             if mx_r is not None:
                 cmin = mn_c if mn_c is not None else 1
-                cmax = mx_c if mx_c is not None else ws._max_col()  # noqa: SLF001
+                cmax = mx_c if mx_c is not None else (
+                    source_bounds[3] if source_bounds is not None else cmin - 1
+                )
                 while counter <= mx_r:
                     yield tuple(
                         StreamingCell(ws, counter, col, None, None, "blank")

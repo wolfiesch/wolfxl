@@ -26,6 +26,7 @@ from wolfxl.formatting.rule import (
     ColorScaleRule,
     DataBarRule,
     FormulaRule,
+    IconSetRule,
 )
 
 from wolfxl import Workbook
