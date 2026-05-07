@@ -71,6 +71,34 @@ def _build_workbook_with_two_openpyxl_charts(path: Path) -> Path:
     return path
 
 
+def _inject_shared_chart_dependencies(path: Path) -> None:
+    rels_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" '
+        b'Type="http://schemas.microsoft.com/office/2011/relationships/chartStyle" '
+        b'Target="style1.xml"/>'
+        b'<Relationship Id="rId2" '
+        b'Type="http://schemas.microsoft.com/office/2011/relationships/chartColorStyle" '
+        b'Target="colors1.xml"/>'
+        b"</Relationships>"
+    )
+    shared_parts = {
+        "xl/charts/_rels/chart1.xml.rels": rels_xml,
+        "xl/charts/_rels/chart2.xml.rels": rels_xml,
+        "xl/charts/style1.xml": b"<c:styleSheet/>",
+        "xl/charts/colors1.xml": b"<c:colorStyle/>",
+    }
+    parts: dict[str, bytes] = {}
+    with zipfile.ZipFile(path, "r") as zf:
+        for name in zf.namelist():
+            parts[name] = zf.read(name)
+    parts.update(shared_parts)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in parts.items():
+            zf.writestr(name, data)
+
+
 def _build_workbook_with_image_and_chart(path: Path) -> Path:
     openpyxl = pytest.importorskip("openpyxl")
     from openpyxl.chart import BarChart, Reference
@@ -373,6 +401,35 @@ def test_modify_remove_one_loaded_chart_keeps_second(tmp_path: Path) -> None:
         drawing_xml = zf.read("xl/drawings/drawing1.xml").decode()
     assert len(chart_xmls) == 1
     assert drawing_xml.count("<c:chart") == 1
+
+
+def test_modify_remove_one_loaded_chart_preserves_shared_chart_dependencies(
+    tmp_path: Path,
+) -> None:
+    import wolfxl
+
+    base = _build_workbook_with_two_openpyxl_charts(tmp_path / "shared_chart_deps.xlsx")
+    _inject_shared_chart_dependencies(base)
+
+    wb = wolfxl.load_workbook(base, modify=True)
+    ws = wb.active
+    assert len(ws._charts) == 2
+    ws.remove_chart(ws._charts[0])
+    out = tmp_path / "shared_chart_deps_removed.xlsx"
+    wb.save(out)
+
+    with zipfile.ZipFile(out) as zf:
+        names = set(zf.namelist())
+        chart2_rels = zf.read("xl/charts/_rels/chart2.xml.rels").decode("utf-8")
+
+    assert "xl/charts/chart1.xml" not in names
+    assert "xl/charts/_rels/chart1.xml.rels" not in names
+    assert "xl/charts/chart2.xml" in names
+    assert "xl/charts/_rels/chart2.xml.rels" in names
+    assert "xl/charts/style1.xml" in names
+    assert "xl/charts/colors1.xml" in names
+    assert "chartStyle" in chart2_rels
+    assert "chartColorStyle" in chart2_rels
 
 
 def test_modify_remove_loaded_chart_from_mixed_drawing_keeps_image(tmp_path: Path) -> None:
