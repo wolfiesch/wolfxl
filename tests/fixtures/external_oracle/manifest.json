@@ -79,6 +79,31 @@
       "notes": "Excelize-authored source normalized through LibreOffice because Microsoft Excel rejected the original source fixture before WolfXL mutation. The normalized active fixture preserves pivot, chart, style, color, table, and drawing parts, but LibreOffice removed the original slicer parts; slicer coverage remains a known follow-up for native Excel-authored fixtures."
     },
     {
+      "filename": "excelize-2.10-pivot-slicers.xlsx",
+      "tool": "excelize",
+      "fixture_id": "excelize_2_10_pivot_slicers",
+      "sha256": "a0d609aa852942ac5269b6fcaa312de4862b689114db0c2c441b7088d1f82b53",
+      "size_bytes": 12554,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/sheet2.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/worksheets/_rels/sheet2.xml.rels",
+        "xl/slicerCaches/slicerCache1.xml",
+        "xl/slicers/slicer1.xml",
+        "xl/tables/table1.xml",
+        "xl/drawings/drawing1.xml",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/pivotTables/_rels/pivotTable1.xml.rels",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ],
+      "notes": "Generated locally with github.com/xuri/excelize/v2 v2.10.1 using deterministic sample data and AddPivotTable/AddSlicer. Workbook metadata reports Application=Go Excelize. Covers Excel-compatible external-tool pivot slicer and slicer-cache preservation."
+    },
+    {
       "filename": "npoi-formula-comment-merge-protection.xlsx",
       "tool": "npoi",
       "fixture_id": "npoi_formula_comment_merge_protection",
