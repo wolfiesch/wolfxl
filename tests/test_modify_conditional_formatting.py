@@ -16,6 +16,7 @@ Mirror of ``tests/test_modify_data_validations.py``. The headline gates:
 from __future__ import annotations
 
 import re
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -203,6 +204,42 @@ def test_add_cf_preserves_existing(tmp_path: Path) -> None:
     assert out_dxf_count == src_dxf_count + 1, (
         f"expected {src_dxf_count + 1} dxfs after add, got {out_dxf_count}"
     )
+
+
+def test_add_cf_preserves_prefixed_x14_extension_fixture(tmp_path: Path) -> None:
+    """Adding a normal CF rule must not corrupt prefixed x14 CF extensions."""
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "external_oracle"
+        / "closedxml-pivot-cf-table.xlsx"
+    )
+    src = tmp_path / fixture.name
+    shutil.copy2(fixture, src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Data"]
+    ws.conditional_formatting.add(
+        "AC2:AC10",
+        CellIsRule(
+            operator="greaterThan",
+            formula=["0"],
+            extra={"font_bold": True},
+        ),
+    )
+    wb.save(src)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(src)
+    assert "</x:sheetData>ta>" not in sheet_xml
+    assert "</x:conditionalFormatting>" in sheet_xml
+    assert "<x14:conditionalFormatting" in sheet_xml
+    assert "AC2:AC10" in sheet_xml
+
+    # The file must remain XML-parseable enough for openpyxl to open it.
+    reopened = openpyxl.load_workbook(src)
+    assert "Data" in reopened.sheetnames
+    reopened.close()
 
 
 def test_dxf_id_monotonic_across_rules(tmp_path: Path) -> None:

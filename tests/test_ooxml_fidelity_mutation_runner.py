@@ -207,3 +207,78 @@ def test_runner_separates_expected_sheet_copy_drift(
         "charts_semantic_drift",
         "slicers_semantic_drift",
     }
+
+
+def test_runner_separates_expected_feature_add_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, after: Path) -> dict:
+        if "add_data_validation" in str(after):
+            issue = {
+                "kind": "data_validations_semantic_drift",
+                "severity": "error",
+                "part": "data_validations",
+                "message": "expected added data validation at AB2:AB10",
+            }
+        else:
+            issue = {
+                "kind": "conditional_formatting_semantic_drift",
+                "severity": "error",
+                "part": "conditional_formatting",
+                "message": "expected added conditional format at AC2:AC10",
+            }
+        return {"issues": [issue]}
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("add_data_validation", "add_conditional_formatting"),
+    )
+
+    assert report["failure_count"] == 0
+    statuses = {result["mutation"]: result["status"] for result in report["results"]}
+    assert statuses == {
+        "add_data_validation": "passed_with_expected_drift",
+        "add_conditional_formatting": "passed_with_expected_drift",
+    }
+
+
+def test_runner_does_not_hide_feature_add_loss_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "conditional_formatting_semantic_drift",
+                    "severity": "error",
+                    "part": "conditional_formatting",
+                    "message": "before had conditional formatting after={}",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("add_conditional_formatting",),
+    )
+
+    assert report["failure_count"] == 1
+    assert report["results"][0]["status"] == "failed"

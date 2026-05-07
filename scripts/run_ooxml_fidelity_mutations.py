@@ -37,6 +37,8 @@ SUPPORTED_MUTATIONS = (
     "delete_first_col",
     "copy_first_sheet",
     "rename_first_sheet",
+    "add_data_validation",
+    "add_conditional_formatting",
 )
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
@@ -73,6 +75,23 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+    },
+    "add_data_validation": {
+        "data_validations_semantic_drift",
+    },
+    "add_conditional_formatting": {
+        "conditional_formatting_semantic_drift",
+    },
+}
+EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
+    # Feature-add mutations should only accept semantic drift that contains
+    # the newly authored range. A wholesale loss of the pre-existing feature
+    # fingerprint must remain unexpected.
+    "add_data_validation": {
+        "data_validations_semantic_drift": "AB2:AB10",
+    },
+    "add_conditional_formatting": {
+        "conditional_formatting_semantic_drift": "AC2:AC10",
     },
 }
 
@@ -311,6 +330,32 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             worksheet.move_range("Z1:AA1", rows=1, cols=0)
         elif mutation == "rename_first_sheet":
             workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
+        elif mutation == "add_data_validation":
+            from wolfxl.worksheet.datavalidation import DataValidation
+
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet.data_validations.append(
+                DataValidation(
+                    type="whole",
+                    operator="between",
+                    formula1="1",
+                    formula2="100",
+                    sqref="AB2:AB10",
+                    showErrorMessage=True,
+                )
+            )
+        elif mutation == "add_conditional_formatting":
+            from wolfxl.formatting.rule import CellIsRule
+
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet.conditional_formatting.add(
+                "AC2:AC10",
+                CellIsRule(
+                    operator="greaterThan",
+                    formula=["0"],
+                    extra={"font_bold": True},
+                ),
+            )
         else:
             raise ValueError(f"unknown mutation: {mutation}")
         workbook.save(path)
@@ -327,11 +372,22 @@ def _split_expected_issues(
     unexpected: list[dict] = []
     expected: list[dict] = []
     for issue in issues:
-        if issue.get("kind") in expected_kinds:
+        if _is_expected_issue(issue, mutation, expected_kinds):
             expected.append(issue)
         else:
             unexpected.append(issue)
     return unexpected, expected
+
+
+def _is_expected_issue(issue: dict, mutation: str, expected_kinds: set[str]) -> bool:
+    kind = issue.get("kind")
+    if kind not in expected_kinds:
+        return False
+    expected_markers = EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
+    marker = expected_markers.get(kind)
+    if marker is None:
+        return True
+    return marker in issue.get("message", "")
 
 
 def _assert_zip_integrity(path: Path) -> None:

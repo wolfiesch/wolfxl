@@ -158,6 +158,24 @@ def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_chart_style_color_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/style1.xml"] = _chart_style_xml("accent1")
+    before_entries["xl/charts/colors1.xml"] = _chart_colors_xml("accent1")
+    after_entries = dict(before_entries)
+    after_entries["xl/charts/style1.xml"] = _chart_style_xml("accent2")
+    after_entries["xl/charts/colors1.xml"] = _chart_colors_xml("accent2")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "chart_styles_semantic_drift" for issue in report["issues"])
+
+
 def test_detects_conditional_formatting_sqref_semantic_drift(
     tmp_path: Path,
 ) -> None:
@@ -179,6 +197,46 @@ def test_detects_conditional_formatting_sqref_semantic_drift(
     )
 
 
+def test_detects_conditional_formatting_extension_semantic_drift(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = _cf_extension_xml("A1:A5")
+    after_entries = dict(before_entries)
+    after_entries["xl/worksheets/sheet1.xml"] = _cf_extension_xml("A1:A4")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "conditional_formatting_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
+def test_detects_data_validation_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = _data_validation_xml("A1:A5")
+    after_entries = dict(before_entries)
+    after_entries["xl/worksheets/sheet1.xml"] = _data_validation_xml("A1:A4")
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "data_validations_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
 def test_detects_external_link_target_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -186,6 +244,45 @@ def test_detects_external_link_target_semantic_drift(tmp_path: Path) -> None:
     before_entries.update(_external_link_entries("../inputs/source-a.xlsx"))
     after_entries = dict(before_entries)
     after_entries.update(_external_link_entries("../inputs/source-b.xlsx"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "external_links_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
+def test_detects_external_link_cached_data_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_external_link_cache_entries("100"))
+    after_entries = dict(before_entries)
+    after_entries.update(_external_link_cache_entries("200"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "external_links_semantic_drift"
+        for issue in report["issues"]
+    )
+
+
+def test_detects_external_formula_reference_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_external_link_entries("../inputs/source-a.xlsx"))
+    before_entries["xl/worksheets/sheet1.xml"] = _formula_xml("'[source-a.xlsx]Data'!A1")
+    after_entries = dict(before_entries)
+    after_entries["xl/worksheets/sheet1.xml"] = _formula_xml("'[source-b.xlsx]Data'!A1")
 
     _write_package(before, before_entries)
     _write_package(after, after_entries)
@@ -216,6 +313,44 @@ def test_detects_pivot_and_slicer_semantic_drift(tmp_path: Path) -> None:
     assert "slicers_semantic_drift" in kinds
 
 
+def test_detects_pivot_calculated_field_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries.update(_pivot_calculated_entries("revenue*0.1"))
+    after_entries = dict(before_entries)
+    after_entries.update(_pivot_calculated_entries("revenue*0.2"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "pivots_semantic_drift" for issue in report["issues"])
+
+
+def test_detects_slicer_and_timeline_extension_semantic_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/workbook.xml"] = _workbook_extension_xml(
+        slicer_cache_id="1", timeline_cache_id="1"
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = _workbook_extension_xml(
+        slicer_cache_id="2", timeline_cache_id="2"
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+    kinds = {issue["kind"] for issue in report["issues"]}
+
+    assert "slicers_semantic_drift" in kinds
+    assert "timelines_semantic_drift" in kinds
+
+
 def _chart_xml(formula: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
@@ -225,12 +360,51 @@ def _chart_xml(formula: str) -> str:
 </c:chartSpace>"""
 
 
+def _chart_style_xml(color: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<cs:chartStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle">
+  <cs:styleEntry><cs:fillRef idx="1"><cs:schemeClr val="{color}"/></cs:fillRef></cs:styleEntry>
+</cs:chartStyle>"""
+
+
+def _chart_colors_xml(color: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle">
+  <cs:schemeClr val="{color}"/>
+</cs:colorStyle>"""
+
+
 def _cf_xml(sqref: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <conditionalFormatting sqref="{sqref}">
     <cfRule type="expression" priority="1"><formula>A1&gt;0</formula></cfRule>
   </conditionalFormatting>
+</worksheet>"""
+
+
+def _cf_extension_xml(sqref: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+  <extLst><ext uri="{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}">
+    <x14:conditionalFormattings>
+      <x14:conditionalFormatting sqref="{sqref}">
+        <x14:cfRule type="dataBar" priority="1"><x14:dataBar minLength="0" maxLength="100"/></x14:cfRule>
+      </x14:conditionalFormatting>
+    </x14:conditionalFormattings>
+  </ext></extLst>
+</worksheet>"""
+
+
+def _data_validation_xml(sqref: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dataValidations count="1">
+    <dataValidation type="whole" operator="between" sqref="{sqref}">
+      <formula1>1</formula1><formula2>100</formula2>
+    </dataValidation>
+  </dataValidations>
 </worksheet>"""
 
 
@@ -248,6 +422,26 @@ def _external_link_entries(target: str) -> dict[str, str]:
     Target="{target}" TargetMode="External"/>
 </Relationships>""",
     }
+
+
+def _external_link_cache_entries(value: str) -> dict[str, str]:
+    entries = _external_link_entries("../inputs/source.xlsx")
+    entries["xl/externalLinks/externalLink1.xml"] = f"""<?xml version="1.0" encoding="UTF-8"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1">
+    <sheetNames><sheetName val="Sheet1"/></sheetNames>
+    <sheetDataSet><sheetData sheetId="0"><row r="1"><cell r="A1" t="n"><v>{value}</v></cell></row></sheetData></sheetDataSet>
+  </externalBook>
+</externalLink>"""
+    return entries
+
+
+def _formula_xml(formula: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1"><f>{formula}</f></c></row></sheetData>
+</worksheet>"""
 
 
 def _pivot_slicer_entries(cache_ref: str, slicer_cache_id: str) -> dict[str, str]:
@@ -274,3 +468,32 @@ def _pivot_slicer_entries(cache_ref: str, slicer_cache_id: str) -> dict[str, str
   <slicer name="Slicer_region1" cache="Slicer_region" caption="Region"/>
 </slicerList>""",
     }
+
+
+def _pivot_calculated_entries(formula: str) -> dict[str, str]:
+    return {
+        "xl/pivotCache/pivotCacheDefinition1.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="2"><cacheField name="revenue"/><cacheField name="tax" formula="{formula}"/></cacheFields>
+  <calculatedFields count="1"><calculatedField name="tax" formula="{formula}"/></calculatedFields>
+</pivotCacheDefinition>""",
+        "xl/pivotTables/pivotTable1.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  name="PivotTable1" cacheId="1">
+  <calculatedItems count="1"><calculatedItem field="1" formula="{formula}"/></calculatedItems>
+</pivotTableDefinition>""",
+    }
+
+
+def _workbook_extension_xml(slicer_cache_id: str, timeline_cache_id: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+  xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+  <extLst>
+    <ext uri="{{A8765BA9-456A-4DAB-B4F3-ACF838C121DE}}"><x14:slicerCaches><x14:slicerCache r:id="rId{slicer_cache_id}"/></x14:slicerCaches></ext>
+    <ext uri="{{7E03D99C-DC04-49d9-9315-930204A7B6E9}}"><x15:timelineCacheRefs><x15:timelineCacheRef r:id="rId{timeline_cache_id}"/></x15:timelineCacheRefs></ext>
+  </extLst>
+</workbook>"""

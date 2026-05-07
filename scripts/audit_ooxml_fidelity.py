@@ -32,8 +32,24 @@ FEATURE_PART_PREFIXES = {
     "pivot": ("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"),
     "slicer": ("xl/slicers/", "xl/slicerCaches/"),
     "table": ("xl/tables/",),
+    "timeline": ("xl/timelines/", "xl/timelineCaches/"),
     "vba": ("xl/vbaProject.bin",),
 }
+
+CF_EXTENSION_NAMES = frozenset(
+    {
+        "conditionalFormatting",
+        "conditionalFormattings",
+        "cfRule",
+        "colorScale",
+        "dataBar",
+        "iconSet",
+        "pivotAreas",
+    }
+)
+
+SLICER_EXTENSION_NAMES = frozenset({"slicerCaches", "slicerList"})
+TIMELINE_EXTENSION_NAMES = frozenset({"timelineCacheRefs", "timelineRefs", "timelineList"})
 
 
 @dataclass(frozen=True)
@@ -312,10 +328,13 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
     parts = set(archive.namelist())
     return {
         "charts": _chart_fingerprint(archive, parts),
+        "chart_styles": _chart_style_fingerprint(archive, parts),
         "conditional_formatting": _conditional_formatting_fingerprint(archive, parts),
+        "data_validations": _data_validation_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "slicers": _slicer_fingerprint(archive, parts),
+        "timelines": _timeline_fingerprint(archive, parts),
     }
 
 
@@ -323,6 +342,7 @@ def _chart_fingerprint(
     archive: zipfile.ZipFile, parts: set[str]
 ) -> dict[str, list[object]]:
     out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
     for part in sorted(_feature_xml_parts(parts, "xl/charts/", ".xml")):
         if _is_chart_style_part(part):
             continue
@@ -334,7 +354,21 @@ def _chart_fingerprint(
             ("pivot_sources", _pivot_source_names(root)),
             ("dPt_count", len(_nodes_by_local(root, "dPt"))),
             ("style_vals", _vals_by_path(root, ("style",))),
+            ("rels", rels_by_owner.get(part, [])),
         ]
+    return out
+
+
+def _chart_style_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for part in sorted(_feature_xml_parts(parts, "xl/charts/", ".xml")):
+        if not _is_chart_style_part(part):
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is not None:
+            out[part] = _xml_tree_fingerprint(root)
     return out
 
 
@@ -356,9 +390,48 @@ def _conditional_formatting_fingerprint(
                         _texts_by_local(rule, "formula"),
                     )
                 )
-            blocks.append((_attr(block, "sqref"), rules))
-        if blocks:
-            out[part] = blocks
+            blocks.append(
+                (
+                    _attr(block, "sqref"),
+                    rules,
+                    _extension_fingerprints(block, CF_EXTENSION_NAMES),
+                )
+            )
+        extensions = _extension_fingerprints(root, CF_EXTENSION_NAMES)
+        if blocks or extensions:
+            out[part] = [("blocks", blocks), ("extensions", extensions)]
+    return out
+
+
+def _data_validation_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        validations: list[object] = []
+        for validation in _nodes_by_local(root, "dataValidation"):
+            validations.append(
+                (
+                    _stable_attrs(
+                        validation,
+                        (
+                            "type",
+                            "operator",
+                            "allowBlank",
+                            "showErrorMessage",
+                            "showInputMessage",
+                            "sqref",
+                        ),
+                    ),
+                    _texts_by_local(validation, "formula1"),
+                    _texts_by_local(validation, "formula2"),
+                )
+            )
+        if validations:
+            out[part] = validations
     return out
 
 
@@ -378,11 +451,15 @@ def _external_link_fingerprint(
                 (
                     rid,
                     rel_targets.get((part, rid)),
-                    _texts_by_local(book, "sheetName"),
+                    _external_sheet_names(book),
                     _defined_name_refs(book),
+                    _external_sheet_data(book),
                 )
             )
         out[part] = external_books
+    workbook_formulas = _worksheet_formulas(archive, parts, external_only=True)
+    if workbook_formulas:
+        out["worksheet_formulas"] = workbook_formulas
     return out
 
 
@@ -390,16 +467,21 @@ def _pivot_fingerprint(
     archive: zipfile.ZipFile, parts: set[str]
 ) -> dict[str, list[object]]:
     out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
     for part in sorted(_feature_xml_parts(parts, "xl/pivotTables/", ".xml")):
         root = _read_xml_or_none(archive, part)
         if root is None:
             continue
         out[part] = [
             ("attrs", _stable_attrs(root, ("name", "cacheId", "dataOnRows"))),
+            ("rels", rels_by_owner.get(part, [])),
             ("data_fields", _pivot_data_fields(root)),
             ("row_fields", _pivot_field_indices(root, "rowFields", "field")),
             ("col_fields", _pivot_field_indices(root, "colFields", "field")),
             ("page_fields", _pivot_field_indices(root, "pageFields", "pageField")),
+            ("calculated_items", _pivot_calculated_items(root)),
+            ("formats", _pivot_formats(root)),
+            ("conditional_formats", _pivot_conditional_formats(root)),
         ]
     for part in sorted(_feature_xml_parts(parts, "xl/pivotCache/", ".xml")):
         root = _read_xml_or_none(archive, part)
@@ -409,7 +491,10 @@ def _pivot_fingerprint(
         out[part] = [
             ("cacheSource", _stable_attrs(source, ("ref", "sheet", "name"))),
             ("refreshOnLoad", _attr(root, "refreshOnLoad")),
+            ("rels", rels_by_owner.get(part, [])),
             ("fields", _pivot_cache_fields(root)),
+            ("calculated_fields", _pivot_calculated_fields(root)),
+            ("field_groups", _pivot_field_groups(root)),
         ]
     return out
 
@@ -418,12 +503,26 @@ def _slicer_fingerprint(
     archive: zipfile.ZipFile, parts: set[str]
 ) -> dict[str, list[object]]:
     out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    workbook_root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if workbook_root is not None:
+        extensions = _extension_fingerprints(workbook_root, SLICER_EXTENSION_NAMES)
+        if extensions:
+            out["xl/workbook.xml"] = [("extensions", extensions)]
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        extensions = _extension_fingerprints(root, SLICER_EXTENSION_NAMES)
+        if extensions:
+            out[part] = [("extensions", extensions)]
     for part in sorted(_feature_xml_parts(parts, "xl/slicerCaches/", ".xml")):
         root = _read_xml_or_none(archive, part)
         if root is None:
             continue
         out[part] = [
             ("attrs", _stable_attrs(root, ("name", "pivotCacheId"))),
+            ("rels", rels_by_owner.get(part, [])),
             ("data", _stable_attrs(_first_node_by_local(root, "data"), ("pivotCacheId",))),
             ("items", _slicer_items(root)),
         ]
@@ -433,6 +532,7 @@ def _slicer_fingerprint(
             continue
         out[part] = [
             ("attrs", _stable_attrs(root, ("name", "cache", "caption", "style"))),
+            ("rels", rels_by_owner.get(part, [])),
             (
                 "slicers",
                 [
@@ -441,6 +541,35 @@ def _slicer_fingerprint(
                 ],
             ),
         ]
+    return out
+
+
+def _timeline_fingerprint(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> dict[str, list[object]]:
+    out: dict[str, list[object]] = {}
+    rels_by_owner = _relationships_by_owner(archive)
+    workbook_root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if workbook_root is not None:
+        extensions = _extension_fingerprints(workbook_root, TIMELINE_EXTENSION_NAMES)
+        if extensions:
+            out["xl/workbook.xml"] = [("extensions", extensions)]
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        extensions = _extension_fingerprints(root, TIMELINE_EXTENSION_NAMES)
+        if extensions:
+            out[part] = [("extensions", extensions)]
+    for prefix in ("xl/timelineCaches/", "xl/timelines/"):
+        for part in sorted(_feature_xml_parts(parts, prefix, ".xml")):
+            root = _read_xml_or_none(archive, part)
+            if root is not None:
+                out[part] = [
+                    ("attrs", _stable_attrs(root, ("name", "pivotCacheId", "cache"))),
+                    ("rels", rels_by_owner.get(part, [])),
+                    ("xml", _xml_tree_fingerprint(root)),
+                ]
     return out
 
 
@@ -501,6 +630,45 @@ def _defined_name_refs(root: ElementTree.Element) -> list[tuple[str | None, str 
     ]
 
 
+def _external_sheet_names(root: ElementTree.Element) -> list[str | None]:
+    return [_attr(node, "val") for node in _nodes_by_local(root, "sheetName")]
+
+
+def _external_sheet_data(root: ElementTree.Element) -> list[object]:
+    sheets: list[object] = []
+    for sheet_data in _nodes_by_local(root, "sheetData"):
+        rows: list[object] = []
+        for row in _children_by_local(sheet_data, "row"):
+            cells = [
+                (_stable_attrs(cell, ("r", "t", "vm")), _texts_by_local(cell, "v"))
+                for cell in _children_by_local(row, "cell")
+            ]
+            rows.append((_stable_attrs(row, ("r",)), cells))
+        sheets.append(
+            (
+                _stable_attrs(sheet_data, ("sheetId", "refreshError")),
+                rows,
+            )
+        )
+    return sheets
+
+
+def _worksheet_formulas(
+    archive: zipfile.ZipFile, parts: set[str], *, external_only: bool = False
+) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        formulas = _texts_by_local(root, "f")
+        if external_only:
+            formulas = [formula for formula in formulas if "[" in formula and "]" in formula]
+        if formulas:
+            out[part] = formulas
+    return out
+
+
 def _pivot_data_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
     return [
         _stable_attrs(node, ("name", "fld", "subtotal", "baseField", "baseItem"))
@@ -522,9 +690,62 @@ def _pivot_field_indices(
 
 def _pivot_cache_fields(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
     return [
-        _stable_attrs(node, ("name", "numFmtId"))
+        _stable_attrs(node, ("name", "numFmtId", "databaseField", "formula"))
         for node in _nodes_by_local(root, "cacheField")
     ]
+
+
+def _pivot_calculated_fields(
+    root: ElementTree.Element,
+) -> list[tuple[tuple[str, str | None], ...]]:
+    return [
+        _stable_attrs(node, ("name", "formula", "hierarchy", "memberName", "mdx", "solveOrder"))
+        for node in _nodes_by_local(root, "calculatedField")
+    ]
+
+
+def _pivot_calculated_items(root: ElementTree.Element) -> list[object]:
+    return [
+        (
+            _stable_attrs(node, ("field", "formula")),
+            _extension_fingerprints(node, CF_EXTENSION_NAMES),
+        )
+        for node in _nodes_by_local(root, "calculatedItem")
+    ]
+
+
+def _pivot_formats(root: ElementTree.Element) -> list[object]:
+    return [
+        (
+            _stable_attrs(node, ("action", "dxfId")),
+            [
+                _stable_attrs(area, ("type", "field", "fieldPosition"))
+                for area in _nodes_by_local(node, "pivotArea")
+            ],
+        )
+        for node in _nodes_by_local(root, "format")
+    ]
+
+
+def _pivot_conditional_formats(root: ElementTree.Element) -> list[object]:
+    return [
+        (
+            _stable_attrs(node, ("scope", "type", "priority")),
+            [
+                _stable_attrs(area, ("type", "field", "fieldPosition"))
+                for area in _nodes_by_local(node, "pivotArea")
+            ],
+            _extension_fingerprints(node, CF_EXTENSION_NAMES),
+        )
+        for node in _nodes_by_local(root, "conditionalFormat")
+    ]
+
+
+def _pivot_field_groups(root: ElementTree.Element) -> list[object]:
+    groups: list[object] = []
+    for node in _nodes_by_local(root, "fieldGroup"):
+        groups.append(_xml_tree_fingerprint(node))
+    return groups
 
 
 def _slicer_items(root: ElementTree.Element) -> list[tuple[tuple[str, str | None], ...]]:
@@ -532,6 +753,42 @@ def _slicer_items(root: ElementTree.Element) -> list[tuple[tuple[str, str | None
         _stable_attrs(node, ("n", "c", "x", "s"))
         for node in _nodes_by_local(root, "i")
     ]
+
+
+def _extension_fingerprints(
+    root: ElementTree.Element, interesting_names: frozenset[str]
+) -> list[object]:
+    out: list[object] = []
+    for ext in _nodes_by_local(root, "ext"):
+        if any(_local_name(node.tag) in interesting_names for node in ext.iter()):
+            out.append(_xml_tree_fingerprint(ext))
+    return out
+
+
+def _xml_tree_fingerprint(node: ElementTree.Element) -> object:
+    return (
+        _local_name(node.tag),
+        _all_stable_attrs(node),
+        _text(node),
+        [_xml_tree_fingerprint(child) for child in list(node)],
+    )
+
+
+def _all_stable_attrs(node: ElementTree.Element) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((_local_name(key), value) for key, value in node.attrib.items()))
+
+
+def _relationships_by_owner(
+    archive: zipfile.ZipFile,
+) -> dict[str, list[tuple[str, str, str, str | None]]]:
+    lookup: dict[str, list[tuple[str, str, str, str | None]]] = {}
+    for rel in _read_relationships(archive):
+        owner = _source_part_for_rels(rel.rels_part)
+        if owner:
+            lookup.setdefault(owner, []).append(
+                (rel.rel_id, rel.rel_type, rel.target, rel.target_mode)
+            )
+    return lookup
 
 
 def _rels_target_lookup(archive: zipfile.ZipFile) -> dict[tuple[str, str], str]:

@@ -19,7 +19,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
 | External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op, marker-cell, style-cell, tail-row-insert, tail-column-insert, tail-row-delete, tail-column-delete, copy-remove-sheet, and marker-range-move modify-save mutations | Modify-save preserves important authored parts and still opens under safe value/style edits plus first row/column structure, row/column delete, sheet copy/remove, and range-move mutations | Broader structural edits and real Excel-authored long-tail workbooks still need coverage |
-| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and first-pass semantic fingerprints for charts, CF, external links, pivots, and slicers | The external-oracle pack now catches broken dependency graphs and obvious feature-meaning drift | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
+| New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and deeper semantic fingerprints for charts, chart style/color parts, CF/x14 extensions, data validations, external links/cached data/formulas, pivots, slicers, and timelines | The external-oracle pack now catches broken dependency graphs and feature-meaning drift across the named P0 surfaces when those parts are present in the fixture | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix
 
@@ -63,11 +63,18 @@ Gap ledger:
 
 1. Extend `scripts/audit_ooxml_fidelity.py` from first-pass semantic fingerprints
    to deeper feature-level summaries:
-   - pivot tables: cache records, table rel targets, calculated fields/items.
-   - slicers: workbook `extLst` entries, table slicers, timelines.
-   - charts: chart style/color parts, axis IDs, chart sheets, rendered output.
-   - conditional formatting: x14 extensions, pivot-scoped CF, formula translation.
-   - external links: cached sheet data, formula references to linked workbooks.
+   - Done: pivot table rel targets, calculated fields/items, formats, conditional
+     formats, pivot-cache rel targets, and field groups.
+   - Done: slicer workbook/sheet `extLst` anchors, slicer/slicer-cache rels,
+     slicer cache data, and timeline workbook/sheet anchors plus timeline parts.
+   - Done: chart rel targets and chart style/color XML part fingerprints.
+   - Done: conditional-formatting `sqref`/rule fingerprints, x14 extension
+     subtrees, data-validation ranges/formulas, and CF `dxfId` bounds.
+   - Done: external-link targets, cached sheet data, sheet names, defined names,
+     and worksheet formulas that reference linked workbooks.
+   - Still needed: axis-ID/plot-layout summaries, chart sheets, rendered
+     output comparison, and formula translation semantics after structural
+     edits.
 2. Extend the mutation runner beyond safe edits:
    - Current command:
      `uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-sweep`
@@ -76,11 +83,20 @@ Gap ledger:
      row/column delete, copy-remove-sheet, and marker-range move.
    - Latest pinned-pack sweep: 63 results, 0 failures across 7 fixtures and 9
      default mutations.
+   - Latest deeper-fingerprint sweep: 63 results, 0 failures across the same
+     pinned pack and default mutation set.
+   - Latest feature-add opt-in sweep: add-data-validation and
+     add-conditional-formatting pass 14 results across 7 fixtures with only
+     declared additive semantic drift.
    - Latest opt-in semantic sweeps: sheet rename passes 7 results with no
      drift; first-row/first-column delete passes 14 results with expected
      conditional-formatting range drift and no unexpected package-fidelity
      failure; first-sheet copy initially exposed a prefixed workbook-root
      splice bug and now passes 7 results as an opt-in expected-drift gate.
+   - Latest feature-add bugs found: add-conditional-formatting initially hid a
+     ClosedXML x14 CF corruption under broad expected-drift handling; the
+     runner now requires the added range marker for feature-add expected drift,
+     and CF extraction snaps prefixed raw slices to real tag boundaries.
    - Latest sheet-remove bug found: copy-then-remove originally deleted shared
      image media and left cloned sheet parts behind; the delete cleanup now
      honors in-progress relationship graphs and skips parts still referenced by

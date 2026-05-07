@@ -152,37 +152,56 @@ pub fn extract_existing_cf_blocks(sheet_xml: &str) -> Vec<Vec<u8>> {
 
     let mut blocks: Vec<Vec<u8>> = Vec::new();
     let mut start_pos: Option<usize> = None;
-    let mut depth: u32 = 0;
+    let mut depth: usize = 0;
+    let mut cf_depth: u32 = 0;
+    let mut search_from: usize = 0;
 
     loop {
-        let pre = reader.buffer_position() as usize;
-
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                if e.local_name().as_ref() == b"conditionalFormatting" {
+                let current_depth = depth;
+                if current_depth == 1 && e.local_name().as_ref() == b"conditionalFormatting" {
                     if start_pos.is_none() {
-                        start_pos = Some(pre);
-                        depth = 1;
+                        start_pos = find_local_start(bytes, search_from, b"conditionalFormatting");
+                        cf_depth = 1;
                     } else {
-                        depth += 1;
+                        cf_depth += 1;
                     }
+                } else if start_pos.is_some() && e.local_name().as_ref() == b"conditionalFormatting"
+                {
+                    cf_depth += 1;
                 }
+                depth += 1;
             }
             Ok(Event::Empty(ref e)) => {
-                if e.local_name().as_ref() == b"conditionalFormatting" && start_pos.is_none() {
-                    let end = reader.buffer_position() as usize;
-                    blocks.push(bytes[pre..end].to_vec());
+                if depth == 1
+                    && e.local_name().as_ref() == b"conditionalFormatting"
+                    && start_pos.is_none()
+                {
+                    if let Some(start) =
+                        find_local_start(bytes, search_from, b"conditionalFormatting")
+                    {
+                        if let Some(end) = find_tag_end(bytes, start) {
+                            blocks.push(bytes[start..end].to_vec());
+                            search_from = end;
+                        }
+                    }
                 }
             }
             Ok(Event::End(ref e)) => {
                 if e.local_name().as_ref() == b"conditionalFormatting" && start_pos.is_some() {
-                    depth -= 1;
-                    if depth == 0 {
+                    cf_depth -= 1;
+                    if cf_depth == 0 {
                         let start = start_pos.take().expect("end without start");
-                        let end = reader.buffer_position() as usize;
-                        blocks.push(bytes[start..end].to_vec());
+                        if let Some(end) =
+                            find_local_end_tag_end(bytes, start, b"conditionalFormatting")
+                        {
+                            blocks.push(bytes[start..end].to_vec());
+                            search_from = end;
+                        }
                     }
                 }
+                depth = depth.saturating_sub(1);
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -192,6 +211,78 @@ pub fn extract_existing_cf_blocks(sheet_xml: &str) -> Vec<Vec<u8>> {
     }
 
     blocks
+}
+
+fn find_local_start(bytes: &[u8], from: usize, local: &[u8]) -> Option<usize> {
+    let mut i = from;
+    while i < bytes.len() {
+        let rel = bytes[i..].iter().position(|b| *b == b'<')?;
+        i += rel;
+        let name_start = i + 1;
+        if name_start >= bytes.len() {
+            return None;
+        }
+        let first = bytes[name_start];
+        if first == b'/' || first == b'!' || first == b'?' {
+            i = name_start + 1;
+            continue;
+        }
+        let mut local_start = name_start;
+        let mut j = name_start;
+        while j < bytes.len() {
+            match bytes[j] {
+                b':' => {
+                    local_start = j + 1;
+                    j += 1;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>' => break,
+                _ => j += 1,
+            }
+        }
+        if bytes.get(local_start..j) == Some(local) {
+            return Some(i);
+        }
+        i = j.saturating_add(1);
+    }
+    None
+}
+
+fn find_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
+    bytes[start..]
+        .iter()
+        .position(|b| *b == b'>')
+        .map(|pos| start + pos + 1)
+}
+
+fn find_local_end_tag_end(bytes: &[u8], from: usize, local: &[u8]) -> Option<usize> {
+    let mut i = from;
+    while i < bytes.len() {
+        let rel = bytes[i..].iter().position(|b| *b == b'<')?;
+        i += rel;
+        let slash = i + 1;
+        if bytes.get(slash) != Some(&b'/') {
+            i = slash.saturating_add(1);
+            continue;
+        }
+        let name_start = slash + 1;
+        let mut local_start = name_start;
+        let mut j = name_start;
+        while j < bytes.len() {
+            match bytes[j] {
+                b':' => {
+                    local_start = j + 1;
+                    j += 1;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' | b'>' => break,
+                _ => j += 1,
+            }
+        }
+        if bytes.get(local_start..j) == Some(local) {
+            return find_tag_end(bytes, i);
+        }
+        i = j.saturating_add(1);
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -673,6 +764,10 @@ pub fn ensure_dxfs_section(styles_xml: &str, new_dxfs_xml: &str) -> String {
     let new_count = count_dxf_substrings(new_dxfs_xml);
 
     if styles_xml.contains("<dxfs") {
+        if !styles_xml.contains("</dxfs>") {
+            return expand_self_closing_dxfs_section(styles_xml, new_dxfs_xml, new_count);
+        }
+
         // Existing section — use the established inject_into_section, but
         // call it once per child since it bumps count by 1 per call.
         let mut s = styles_xml.to_string();
@@ -695,6 +790,56 @@ pub fn ensure_dxfs_section(styles_xml: &str, new_dxfs_xml: &str) -> String {
     result.push_str("</dxfs>");
     result.push_str(&styles_xml[close_pos..]);
     result
+}
+
+fn expand_self_closing_dxfs_section(
+    styles_xml: &str,
+    new_dxfs_xml: &str,
+    new_count: u32,
+) -> String {
+    let Some(open_pos) = styles_xml.find("<dxfs") else {
+        return styles_xml.to_string();
+    };
+    let Some(open_end_rel) = styles_xml[open_pos..].find('>') else {
+        return styles_xml.to_string();
+    };
+    let open_end = open_pos + open_end_rel;
+    let open_tag = &styles_xml[open_pos..=open_end];
+    if !open_tag.trim_end().ends_with("/>") {
+        return styles_xml.to_string();
+    }
+
+    let mut opening = open_tag
+        .trim_end_matches('>')
+        .trim_end_matches('/')
+        .to_string();
+    opening = update_or_insert_count_attr(&opening, new_count);
+
+    let mut result = String::with_capacity(styles_xml.len() + new_dxfs_xml.len() + 16);
+    result.push_str(&styles_xml[..open_pos]);
+    result.push_str(&opening);
+    result.push('>');
+    result.push_str(new_dxfs_xml);
+    result.push_str("</dxfs>");
+    result.push_str(&styles_xml[open_end + 1..]);
+    result
+}
+
+fn update_or_insert_count_attr(tag: &str, count: u32) -> String {
+    let needle = "count=\"";
+    if let Some(start) = tag.find(needle) {
+        let val_start = start + needle.len();
+        if let Some(end_offset) = tag[val_start..].find('"') {
+            let end = val_start + end_offset;
+            let mut result = String::with_capacity(tag.len() + 8);
+            result.push_str(&tag[..val_start]);
+            result.push_str(&count.to_string());
+            result.push_str(&tag[end..]);
+            return result;
+        }
+    }
+
+    format!("{tag} count=\"{count}\"")
 }
 
 fn count_dxf_substrings(s: &str) -> u32 {
@@ -860,6 +1005,27 @@ mod tests {
         let second = std::str::from_utf8(&got[1]).unwrap();
         assert!(first.contains("sqref=\"A1\""));
         assert!(second.contains("sqref=\"B1\""));
+    }
+
+    #[test]
+    fn extract_ignores_nested_x14_conditional_formatting_extensions() {
+        let xml = r#"<worksheet xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><sheetData/><conditionalFormatting sqref="A1"><cfRule type="cellIs"/></conditionalFormatting><extLst><ext><x14:conditionalFormattings><x14:conditionalFormatting><x14:cfRule type="dataBar"/></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst></worksheet>"#;
+        let got = extract_existing_cf_blocks(xml);
+        assert_eq!(got.len(), 1);
+        let s = std::str::from_utf8(&got[0]).unwrap();
+        assert!(s.contains("sqref=\"A1\""));
+        assert!(!s.contains("x14:conditionalFormatting"));
+    }
+
+    #[test]
+    fn extract_prefixed_block_starts_at_open_tag() {
+        let xml = r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData></x:sheetData><x:conditionalFormatting sqref="A1"><x:cfRule type="cellIs"/></x:conditionalFormatting></x:worksheet>"#;
+        let got = extract_existing_cf_blocks(xml);
+        assert_eq!(got.len(), 1);
+        let s = std::str::from_utf8(&got[0]).unwrap();
+        assert!(s.starts_with("<x:conditionalFormatting"), "got: {s}");
+        assert!(s.ends_with("</x:conditionalFormatting>"), "got: {s}");
+        assert!(!s.starts_with("ta>"), "got: {s}");
     }
 
     #[test]
@@ -1141,6 +1307,15 @@ mod tests {
         assert!(out.contains("<dxfs count=\"2\">"), "got: {out}");
         assert!(out.contains("<font><i/></font>"));
         assert!(out.contains("<font><b/></font>"));
+    }
+
+    #[test]
+    fn ensure_dxfs_expands_self_closing_section() {
+        let xml = r#"<?xml version="1.0"?><styleSheet><dxfs count="0"/><tableStyles count="0"/></styleSheet>"#;
+        let new_xml = "<dxf><font><b/></font></dxf>";
+        let out = ensure_dxfs_section(xml, new_xml);
+        assert!(out.contains("<dxfs count=\"1\"><dxf><font><b/></font></dxf></dxfs>"));
+        assert!(out.contains("<tableStyles count=\"0\"/>"));
     }
 
     #[test]
