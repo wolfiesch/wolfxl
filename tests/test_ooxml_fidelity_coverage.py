@@ -114,6 +114,10 @@ def test_coverage_audit_uses_application_for_recursive_source_class(
     assert report["fixtures"][0]["source_class"] == "real_excel"
     chart = report["surfaces"]["chart_style_color_preservation"]
     assert chart["real_excel_fixtures"] == ["nested/chart.xlsx"]
+    python = report["surfaces"]["python_in_excel_metadata"]
+    assert python["optional"] is True
+    assert python["status"] == "not_applicable"
+    assert python["fixtures"] == []
 
 
 def test_coverage_audit_manifest_tool_overrides_application_source_class(
@@ -176,11 +180,13 @@ def test_coverage_audit_tracks_present_python_and_sheet_metadata(
     assert python["real_excel_fixtures"] == ["python-metadata.xlsx"]
     assert python["structural_mutation_fixtures"] == ["python-metadata.xlsx"]
     assert python["missing"] == []
+    assert python["status"] == "clear"
     metadata = report["surfaces"]["sheet_metadata_preservation"]
     assert metadata["optional"] is True
     assert metadata["real_excel_fixtures"] == ["python-metadata.xlsx"]
     assert metadata["structural_mutation_fixtures"] == ["python-metadata.xlsx"]
     assert metadata["missing"] == []
+    assert metadata["status"] == "clear"
 
 
 def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:

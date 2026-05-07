@@ -480,6 +480,7 @@ def _surface_result(
             "missing": [],
             "clear": True,
             "optional": True,
+            "status": "not_applicable",
         }
     required_source_classes = config.get(
         "required_source_classes", ("external_tool", "real_excel")
@@ -632,6 +633,7 @@ def _surface_result(
         "missing": missing,
         "clear": not missing,
         "optional": not config.get("required", True),
+        "status": "clear" if not missing else "missing",
     }
 
 
