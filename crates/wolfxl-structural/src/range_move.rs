@@ -885,12 +885,32 @@ fn rewrite_anchor_attr<'a>(
         };
         if key == attr_name {
             let new_val = shift_anchor_pieces(&val, plan);
-            new_e.push_attribute((key, new_val.as_bytes()));
+            push_attr_escaped(&mut new_e, key, &new_val);
         } else {
-            new_e.push_attribute((key, val.as_bytes()));
+            push_attr_escaped(&mut new_e, key, &val);
         }
     }
     new_e
+}
+
+fn push_attr_escaped(e: &mut BytesStart<'_>, key: &[u8], val: &str) {
+    let escaped = xml_attr_escape(val);
+    e.push_attribute((key, escaped.as_bytes()));
+}
+
+fn xml_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Split a `ref` or `sqref` value on whitespace, apply the
@@ -1109,6 +1129,23 @@ mod tests {
         let out = apply_range_move(xml, &p);
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains(r#"ref="B8""#), "got: {s}");
+    }
+
+    #[test]
+    fn hyperlink_attrs_remain_xml_escaped_after_anchor_rewrite() {
+        let xml = br#"<worksheet><sheetData/><hyperlinks><hyperlink ref="B3" location="'Sec. 1 &amp; 2 Notes'!A1" display="A &amp; B"/></hyperlinks></worksheet>"#;
+        let p = plan((3, 2), (3, 2), 5, 0);
+        let out = apply_range_move(xml, &p);
+        let s = String::from_utf8(out).unwrap();
+
+        assert!(s.contains(r#"ref="B8""#), "got: {s}");
+        assert!(
+            s.contains(r#"location="&apos;Sec. 1 &amp; 2 Notes&apos;!A1""#),
+            "got: {s}"
+        );
+        assert!(s.contains(r#"display="A &amp; B""#), "got: {s}");
+        assert!(!s.contains(" 1 & 2 "), "got: {s}");
+        assert!(!s.contains("A & B"), "got: {s}");
     }
 
     #[test]

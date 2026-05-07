@@ -107,6 +107,44 @@ def test_detects_dangling_chart_relationship_after_modify_save(tmp_path: Path) -
     assert "feature_part_loss" in kinds
 
 
+def test_internal_fragment_hyperlinks_are_not_dangling_parts(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/drawings/_rels/drawing1.xml.rels"] = (
+        """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    Target="#'Sheet1'!A1"/>
+</Relationships>"""
+    )
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert report["issues"] == []
+
+
+def test_detects_malformed_xml_part_after_save(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    after_entries = dict(entries)
+    after_entries["xl/worksheets/sheet1.xml"] = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<hyperlinks><hyperlink ref="A1" location="Sec. 1 & 2 Notes!A1"/></hyperlinks>'
+        "</worksheet>"
+    )
+    _write_package(before, entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(issue["kind"] == "malformed_xml_part" for issue in report["issues"])
+
+
 def test_detects_conditional_formatting_dxf_reference_out_of_range(
     tmp_path: Path,
 ) -> None:

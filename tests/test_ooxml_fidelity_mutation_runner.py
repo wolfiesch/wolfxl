@@ -61,6 +61,33 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
     }
 
 
+def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    nested_dir = fixture_dir / "nested" / "deep"
+    nested_dir.mkdir(parents=True)
+    _make_fixture(nested_dir / "simple.xlsx")
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+        recursive=True,
+    )
+
+    assert report["recursive"] is True
+    assert report["result_count"] == 1
+    result = report["results"][0]
+    assert result["fixture"] == "nested/deep/simple.xlsx"
+    assert result["status"] == "passed"
+    assert (
+        output_dir
+        / "nested_deep_simple"
+        / "no_op"
+        / "after-simple.xlsx"
+    ).is_file()
+
+
 def test_runner_supports_add_remove_chart_mutation(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

@@ -162,7 +162,7 @@ class MutationResult:
     error: str | None = None
 
 
-def discover_fixtures(fixture_dir: Path) -> list[FixtureEntry]:
+def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[FixtureEntry]:
     manifest = fixture_dir / MANIFEST_NAME
     if manifest.is_file():
         payload = json.loads(manifest.read_text())
@@ -176,9 +176,10 @@ def discover_fixtures(fixture_dir: Path) -> list[FixtureEntry]:
             for entry in payload.get("fixtures", [])
         ]
 
+    pattern = "**/*.xlsx" if recursive else "*.xlsx"
     return [
-        FixtureEntry(filename=path.name)
-        for path in sorted(fixture_dir.glob("*.xlsx"))
+        FixtureEntry(filename=path.relative_to(fixture_dir).as_posix())
+        for path in sorted(fixture_dir.glob(pattern))
         if path.is_file() and not path.name.startswith("~$")
     ]
 
@@ -188,12 +189,13 @@ def run_sweep(
     output_dir: Path,
     mutations: Iterable[str] = DEFAULT_MUTATIONS,
     verify_hashes: bool = True,
+    recursive: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[MutationResult] = []
 
-    for entry in discover_fixtures(fixture_dir):
+    for entry in discover_fixtures(fixture_dir, recursive=recursive):
         fixture_path = fixture_dir / entry.filename
         if not fixture_path.is_file():
             results.append(
@@ -217,6 +219,7 @@ def run_sweep(
             results.append(
                 _run_single_mutation(
                     fixture_path=fixture_path,
+                    fixture_label=entry.filename,
                     output_dir=output_dir,
                     mutation=mutation,
                     hash_error=hash_error,
@@ -227,6 +230,7 @@ def run_sweep(
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "mutations": list(mutations),
+        "recursive": recursive,
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -247,9 +251,17 @@ def _hash_error(path: Path, expected_hash: str | None, verify_hashes: bool) -> s
 
 
 def _run_single_mutation(
-    fixture_path: Path, output_dir: Path, mutation: str, hash_error: str | None
+    fixture_path: Path,
+    fixture_label: str,
+    output_dir: Path,
+    mutation: str,
+    hash_error: str | None,
 ) -> MutationResult:
-    mutation_dir = output_dir / _safe_stem(fixture_path.stem) / mutation
+    mutation_dir = (
+        output_dir
+        / _safe_stem(Path(fixture_label).with_suffix("").as_posix())
+        / mutation
+    )
     mutation_dir.mkdir(parents=True, exist_ok=True)
     before_path = mutation_dir / f"before-{fixture_path.name}"
     after_path = mutation_dir / f"after-{fixture_path.name}"
@@ -258,7 +270,7 @@ def _run_single_mutation(
 
     if hash_error:
         return MutationResult(
-            fixture=fixture_path.name,
+            fixture=fixture_label,
             mutation=mutation,
             status="hash_mismatch",
             issue_count=0,
@@ -277,7 +289,7 @@ def _run_single_mutation(
         _assert_zip_integrity(after_path)
     except Exception as exc:
         return MutationResult(
-            fixture=fixture_path.name,
+            fixture=fixture_label,
             mutation=mutation,
             status="error",
             issue_count=0,
@@ -302,7 +314,7 @@ def _run_single_mutation(
     elif expected_issues:
         status = "passed_with_expected_drift"
     return MutationResult(
-        fixture=fixture_path.name,
+        fixture=fixture_label,
         mutation=mutation,
         status=status,
         issue_count=len(issues),
@@ -528,6 +540,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Mutation to run. May be passed multiple times.",
     )
     parser.add_argument("--no-verify-hashes", action="store_true")
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Discover .xlsx fixtures recursively when no manifest.json is present.",
+    )
     args = parser.parse_args(argv)
 
     report = run_sweep(
@@ -535,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         mutations=args.mutations or DEFAULT_MUTATIONS,
         verify_hashes=not args.no_verify_hashes,
+        recursive=args.recursive,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

@@ -67,6 +67,7 @@ class Relationship:
 class Snapshot:
     path: str
     parts: set[str]
+    xml_parse_errors: list[tuple[str, str]]
     content_overrides: dict[str, str]
     relationships: list[Relationship]
     dxfs_count: int
@@ -81,6 +82,7 @@ def snapshot(path: Path) -> Snapshot:
         return Snapshot(
             path=str(path),
             parts=parts,
+            xml_parse_errors=_read_xml_parse_errors(archive),
             content_overrides=_read_content_overrides(archive),
             relationships=_read_relationships(archive),
             dxfs_count=_read_dxfs_count(archive),
@@ -107,6 +109,7 @@ def audit(before: Path, after: Path) -> dict:
         )
 
     _audit_relationship_preservation(before_snapshot, after_snapshot, issues)
+    _audit_xml_well_formed(after_snapshot, issues)
     _audit_dangling_relationships(after_snapshot, issues)
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
@@ -139,6 +142,18 @@ def _audit_relationship_preservation(
                     ),
                 }
             )
+
+
+def _audit_xml_well_formed(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
+    for part, error in snapshot_.xml_parse_errors:
+        issues.append(
+            {
+                "severity": "error",
+                "kind": "malformed_xml_part",
+                "part": part,
+                "message": f"{part} is not well-formed XML after save: {error}",
+            }
+        )
 
 
 def _audit_dangling_relationships(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
@@ -253,6 +268,20 @@ def _read_content_overrides(archive: zipfile.ZipFile) -> dict[str, str]:
     return overrides
 
 
+def _read_xml_parse_errors(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+    errors: list[tuple[str, str]] = []
+    for part in sorted(
+        name for name in archive.namelist() if name.endswith((".xml", ".rels"))
+    ):
+        try:
+            ElementTree.fromstring(archive.read(part))
+        except ElementTree.ParseError as exc:
+            errors.append((part, str(exc)))
+        except KeyError:
+            continue
+    return errors
+
+
 def _read_relationships(archive: zipfile.ZipFile) -> list[Relationship]:
     out: list[Relationship] = []
     for rels_part in sorted(p for p in archive.namelist() if p.endswith(".rels")):
@@ -283,7 +312,7 @@ def _read_relationships(archive: zipfile.ZipFile) -> list[Relationship]:
 def _resolve_relationship_target(
     rels_part: str, target: str, target_mode: str | None
 ) -> str | None:
-    if not target or target_mode == "External":
+    if not target or target_mode == "External" or target.startswith("#"):
         return None
     if target.startswith("/"):
         return posixpath.normpath(target.lstrip("/"))
@@ -999,6 +1028,7 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
     return {
         "path": snapshot_.path,
         "part_count": len(snapshot_.parts),
+        "xml_parse_error_count": len(snapshot_.xml_parse_errors),
         "relationship_count": len(snapshot_.relationships),
         "content_override_count": len(snapshot_.content_overrides),
         "dxfs_count": snapshot_.dxfs_count,

@@ -23,6 +23,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Coverage evidence audit | `scripts/audit_ooxml_fidelity_coverage.py` maps fixtures plus mutation reports to the P0 evidence standard: external-tool fixture, real Excel fixture, and structural mutation pass. It records concrete feature keys and requires slicer/timeline evidence separately from pivot-table evidence | The current strict P0 evidence gate is green: pivot/slicer, chart/style/color, conditional-formatting, and external-link rows all have external-tool evidence, real Excel evidence, and structural mutation passes. The slicer/timeline group now includes direct timeline evidence from `real-excel-timeline-slicer.xlsx` | It only audits evidence presence; it does not prove rendered visual fidelity or broader corpus coverage |
 | App open/save smoke | `scripts/run_ooxml_app_smoke.py` opens and re-saves fixture packs through LibreOffice headless or Microsoft Excel, then validates the saved file as an OOXML ZIP | Microsoft Excel and LibreOffice now open/re-save all 14 active external-oracle fixtures cleanly | The active app-smoke pack is not a rendered comparison and does not prove every real-world workbook class |
 | Render comparison smoke | `scripts/run_ooxml_render_compare.py` no-op modify-saves each active fixture with WolfXL, exports the original and saved workbook to PDF through LibreOffice, rasterizes each page with `pdftoppm`, and compares page images with ImageMagick RMSE | The current active pack has no LibreOffice-rendered pixel drift after no-op WolfXL modify-save: 14 fixtures, 0 failures, max normalized RMSE 0.0 at 96 DPI | It is a no-op render gate only; it does not yet compare Excel-rendered pixels, intentional structural edit renders, interactive slicer/timeline state, or a broad real-file corpus |
+| Broader real-file corpus sweep | `scripts/run_ooxml_fidelity_mutations.py --recursive` can now walk nested workbook trees without flattening them first. Latest live SynthGL sweep covered `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` recursively | 32 live SynthGL workbooks pass no-op, marker-cell, and style-cell modify-save audits: 96 results, 0 failures. The same 32 workbooks also pass rename-first-sheet and move-formula-range structural audits: 64 results, 0 failures | This is broader than the pinned oracle pack, but still not a full real-world Excel corpus; rendered comparison over this corpus and richer feature-aware mutations remain open |
 
 ## Risk matrix
 
@@ -224,6 +225,25 @@ Gap ledger:
      with `pdftoppm`, and compares page images with ImageMagick RMSE. The
      active 14-fixture pack passes with 14 results, 0 failures, and max
      normalized RMSE 0.0 at 96 DPI.
+   - Latest broader-corpus evidence slice: `scripts/run_ooxml_fidelity_mutations.py`
+     now supports `--recursive` discovery for nested fixture trees. The live
+     SynthGL fixture tree at
+     `/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures` has
+     32 `.xlsx` workbooks and passes no-op, marker-cell, and style-cell
+     modify-save audits with 96 results and 0 failures. The same corpus passes
+     rename-first-sheet and move-formula-range structural audits with 64
+     results and 0 failures.
+   - Latest broader-corpus oracle-hardening bug found: a SynthGL workbook with
+     drawing hyperlink targets like `#'Sheet1'!A1` exposed a false positive in
+     the dangling-relationship audit. Fragment targets are in-workbook
+     hyperlinks, not package parts; the audit now ignores relationship targets
+     beginning with `#`, with a regression test.
+   - Latest broader-corpus production bug found: `move_range` anchor rewrites
+     parsed hyperlink attributes such as `location="'Sec. 1 &amp; 2 Notes'!A1"`
+     and re-emitted unescaped ampersands, producing malformed worksheet XML.
+     The range-move rewriter now XML-escapes rewritten anchor attributes, and
+     the audit now reports malformed XML parts explicitly instead of masking
+     them as secondary semantic drift.
    - Latest external-link oracle-hardening bug found: table structured
      references such as `Table1[REGION]` were being misclassified as external
      workbook formulas because the external-link fingerprint only looked for
@@ -236,7 +256,8 @@ Gap ledger:
    - Next mutations/evidence: add richer chart/pivot/slicer/timeline
      structural edits where the expected semantic drift can be declared, add
      rendered comparison for selected intentional structural edits, and broaden
-     the real-file corpus sweep beyond the pinned active pack.
+     corpus size/source diversity beyond the current pinned pack plus SynthGL
+     fixture tree.
 3. Expand fixture sources:
    - richer native Excel-authored workbooks with slicers, timelines, pivot
      charts, chart style/color parts, and conditional-formatting extensions;
