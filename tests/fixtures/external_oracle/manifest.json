@@ -118,6 +118,44 @@
       ]
     },
     {
+      "filename": "real-excel-chart-cf-basic.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_chart_cf_basic",
+      "sha256": "2924be3ec8d930f537388333942daadc61007c5f1181d5b51d4e588d339278c7",
+      "size_bytes": 11286,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/charts/chart1.xml",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ]
+    },
+    {
+      "filename": "real-excel-normalized-pivot-cf-table.xlsx",
+      "tool": "excel",
+      "fixture_id": "real_excel_normalized_pivot_cf_table",
+      "sha256": "4ee3f6436a75853e4121f1cf02dd1eaae99bb414e852c76e95a2a84443a49fab",
+      "size_bytes": 13468,
+      "expected_parts": [
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/pivotCache/pivotCacheDefinition1.xml",
+        "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+        "xl/pivotCache/pivotCacheRecords1.xml",
+        "xl/pivotTables/pivotTable1.xml",
+        "xl/pivotTables/_rels/pivotTable1.xml.rels",
+        "xl/styles.xml",
+        "xl/theme/theme1.xml"
+      ]
+    },
+    {
       "filename": "real-excel-external-link-basic.xlsx",
       "tool": "excel",
       "fixture_id": "real_excel_external_link_basic",
