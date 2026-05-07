@@ -238,7 +238,27 @@ def test_fingerprints_workbook_global_state(tmp_path: Path) -> None:
     workbook_globals = snapshot.semantic_fingerprints["workbook_globals"]
     assert "xl/workbook.xml" in workbook_globals
     assert "xl/printerSettings/printerSettings1.bin" in workbook_globals["package_parts"]
+    assert "xl/printerSettings/printerSettings1.bin" in workbook_globals["package_payloads"]
     assert "calc_chain" in snapshot.feature_parts
+
+
+def test_detects_workbook_global_package_payload_drift(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsm"
+    after = tmp_path / "after.xlsm"
+    before_entries = _base_entries()
+    before_entries.update(_workbook_global_package_entries(b"vba-a", "custom-a"))
+    after_entries = _base_entries()
+    after_entries.update(_workbook_global_package_entries(b"vba-b", "custom-b"))
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    assert any(
+        issue["kind"] == "workbook_globals_semantic_drift"
+        for issue in report["issues"]
+    )
 
 
 def test_detects_workbook_connection_semantic_drift(tmp_path: Path) -> None:
@@ -965,6 +985,25 @@ def _drawing_anchor_xml(anchor_row: str) -> str:
     <xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Picture 1"/></xdr:nvPicPr></xdr:pic>
   </xdr:twoCellAnchor>
 </xdr:wsDr>"""
+
+
+def _workbook_global_package_entries(vba_payload: bytes, custom_value: str) -> dict[str, str | bytes]:
+    entries = {
+        "xl/vbaProject.bin": vba_payload,
+        "customXml/item1.xml": f"""<?xml version="1.0" encoding="UTF-8"?>
+<root><value>{custom_value}</value></root>""",
+        "customXml/_rels/item1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""",
+        "xl/printerSettings/printerSettings1.bin": b"printer-settings",
+    }
+    entries["[Content_Types].xml"] = _base_entries()["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>\n'
+        '  <Override PartName="/customXml/item1.xml" ContentType="application/xml"/>\n'
+        '  <Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>\n'
+        "</Types>",
+    )
+    return entries
 
 
 def _data_model_entries(payload: bytes) -> dict[str, str | bytes]:

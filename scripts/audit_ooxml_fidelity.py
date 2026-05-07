@@ -949,7 +949,21 @@ def _workbook_global_fingerprint(
     )
     if global_parts:
         out["package_parts"] = global_parts
+        out["package_payloads"] = {
+            part: _global_package_part_fingerprint(archive, part)
+            for part in global_parts
+            if not part.endswith(".rels")
+        }
     return out
+
+
+def _global_package_part_fingerprint(archive: zipfile.ZipFile, part: str) -> object:
+    if part.endswith(".xml"):
+        root = _read_xml_or_none(archive, part)
+        if root is not None:
+            return ("xml", _xml_tree_fingerprint(root))
+    payload = archive.read(part)
+    return ("bytes", len(payload), hashlib.sha256(payload).hexdigest())
 
 
 def _read_xml_or_none(archive: zipfile.ZipFile, part: str) -> ElementTree.Element | None:
