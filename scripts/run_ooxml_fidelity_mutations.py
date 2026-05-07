@@ -20,7 +20,13 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_fidelity  # noqa: E402
 import wolfxl  # noqa: E402
 
-DEFAULT_MUTATIONS = ("no_op", "marker_cell", "style_cell", "insert_tail_row")
+DEFAULT_MUTATIONS = (
+    "no_op",
+    "marker_cell",
+    "style_cell",
+    "insert_tail_row",
+    "move_marker_range",
+)
 SUPPORTED_MUTATIONS = (*DEFAULT_MUTATIONS, "rename_first_sheet")
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
@@ -231,6 +237,11 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
             worksheet.insert_rows(row_idx, amount=1)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
+        elif mutation == "move_marker_range":
+            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet["Z1"] = MARKER_VALUE
+            worksheet["AA1"] = f"{MARKER_VALUE}_right"
+            worksheet.move_range("Z1:AA1", rows=1, cols=0)
         elif mutation == "rename_first_sheet":
             workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
         else:

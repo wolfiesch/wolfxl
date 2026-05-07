@@ -44,7 +44,13 @@ _MANIFEST_NAME = "manifest.json"
 _MARKER_CELL = "Z1"
 _MARKER_VALUE = "wolfxl_external_fixture_smoke"
 _STYLE_CELL = "AA1"
-_MUTATIONS = ("no_op", "marker_cell", "style_cell", "insert_tail_row")
+_MUTATIONS = (
+    "no_op",
+    "marker_cell",
+    "style_cell",
+    "insert_tail_row",
+    "move_marker_range",
+)
 
 
 def _load_ooxml_audit_module() -> ModuleType:
@@ -157,6 +163,11 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
         worksheet.insert_rows(row_idx, amount=1)
         worksheet.cell(row=row_idx, column=1).value = _MARKER_VALUE
+    elif mutation == "move_marker_range":
+        worksheet = workbook[sheet_name]
+        worksheet["Z1"] = _MARKER_VALUE
+        worksheet["AA1"] = f"{_MARKER_VALUE}_right"
+        worksheet.move_range("Z1:AA1", rows=1, cols=0)
     workbook.save(work_path)
     workbook.close()
 

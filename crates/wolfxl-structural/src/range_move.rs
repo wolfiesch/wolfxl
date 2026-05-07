@@ -124,21 +124,22 @@ pub fn apply_range_move(sheet_xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
     // Parse and relocate <sheetData>. The result is a fresh
     // <sheetData> byte block plus the rest of the worksheet XML
     // surrounding it (unchanged at this stage).
-    let (head, sheet_data_old, tail) = match split_sheet_data(xml_str) {
+    let sheet_data = match split_sheet_data(xml_str) {
         Some(parts) => parts,
         // No <sheetData> means we're being handed something we can't
         // process; return unchanged. (Belt-and-braces: every real
         // worksheet has <sheetData>.)
         None => return sheet_xml.to_vec(),
     };
-    let sheet_data_new = rewrite_sheet_data(sheet_data_old, plan);
+    let sheet_data_new = rewrite_sheet_data(sheet_data.inner, plan, &sheet_data.element_prefix);
 
     // Streaming-splice the surrounding parts (mergeCells, hyperlinks,
     // DV, CF, dimension) so anchor refs reflect the move.
-    let mut combined = String::with_capacity(head.len() + sheet_data_new.len() + tail.len());
-    combined.push_str(head);
+    let mut combined =
+        String::with_capacity(sheet_data.head.len() + sheet_data_new.len() + sheet_data.tail.len());
+    combined.push_str(&sheet_data.head);
     combined.push_str(&sheet_data_new);
-    combined.push_str(tail);
+    combined.push_str(&sheet_data.tail);
     rewrite_anchors_and_dimension(combined.as_bytes(), plan)
 }
 
@@ -146,47 +147,80 @@ pub fn apply_range_move(sheet_xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
 // sheetData parse / relocate / re-emit
 // ---------------------------------------------------------------------------
 
-/// Split the worksheet XML into `(head, sheet_data_inner, tail)`
-/// where `head` ends with `<sheetData>` (or `<sheetData …>`) and
-/// `tail` starts with `</sheetData>`. If the source uses the empty
-/// form `<sheetData/>`, we expand it to `<sheetData></sheetData>`
-/// for uniform downstream handling.
-fn split_sheet_data(xml: &str) -> Option<(&str, &str, &str)> {
-    // Try the empty form first.
-    if let Some(start) = xml.find("<sheetData/>") {
-        let end = start + "<sheetData/>".len();
-        // Re-render: pretend it was <sheetData></sheetData>.
-        // We can't return owned strings inside a &str-only API, so we
-        // route through a sentinel: head = up to "<sheetData>", inner
-        // empty, tail = "</sheetData>" + rest. That requires a small
-        // owned wrapper — handled via a separate path below.
-        // Trick: return slices into the original string, but mark inner
-        // as the empty slice between two synthetic tags. We can't
-        // actually do that directly; fall through to the full-form
-        // handler if the original is empty.
-        let _ = (start, end);
+struct SheetDataSplit<'a> {
+    head: String,
+    inner: &'a str,
+    tail: String,
+    element_prefix: String,
+}
+
+/// Split the worksheet XML into the surrounding `<sheetData>` slices.
+///
+/// The source may use a namespace prefix such as `<x:sheetData>`. Preserve that
+/// prefix when re-emitting rows and cells so a move does not corrupt prefixed
+/// worksheet XML.
+fn split_sheet_data(xml: &str) -> Option<SheetDataSplit<'_>> {
+    let (open_start, open_end, element_name, self_closing) =
+        find_open_element_by_local_name(xml, "sheetData")?;
+    let element_prefix = element_name
+        .strip_suffix("sheetData")
+        .unwrap_or_default()
+        .to_string();
+
+    if self_closing {
+        let open_tag = &xml[open_start..open_end];
+        let expanded_open = open_tag
+            .trim_end_matches('>')
+            .trim_end()
+            .trim_end_matches('/')
+            .trim_end();
+        return Some(SheetDataSplit {
+            head: format!("{}{expanded_open}>", &xml[..open_start]),
+            inner: "",
+            tail: format!("</{element_name}>{}", &xml[open_end..]),
+            element_prefix,
+        });
     }
 
-    let open = xml.find("<sheetData")?;
-    // Find the end of the open tag (`>` that terminates either
-    // `<sheetData>` or `<sheetData attr="...">` or the self-closing
-    // `<sheetData/>`).
-    let after_name = open + "<sheetData".len();
-    let close_tag = xml[after_name..].find('>')?;
-    let open_end = after_name + close_tag + 1; // points past the '>'.
-                                               // Self-closing case: treat inner as empty.
-    if xml[open..open_end].ends_with("/>") {
-        return Some((&xml[..open_end], "", &xml[open_end..]));
+    let close_tag = format!("</{element_name}>");
+    let close_rel = xml[open_end..].find(&close_tag)?;
+    let close_start = open_end + close_rel;
+    Some(SheetDataSplit {
+        head: xml[..open_end].to_string(),
+        inner: &xml[open_end..close_start],
+        tail: xml[close_start..].to_string(),
+        element_prefix,
+    })
+}
+
+fn find_open_element_by_local_name(
+    xml: &str,
+    local_name: &str,
+) -> Option<(usize, usize, String, bool)> {
+    let mut search_from = 0;
+    while let Some(rel_start) = xml[search_from..].find('<') {
+        let start = search_from + rel_start;
+        let name_start = start + 1;
+        let first = xml.as_bytes().get(name_start).copied()?;
+        if matches!(first, b'/' | b'!' | b'?') {
+            search_from = name_start + 1;
+            continue;
+        }
+        let name_end = xml[name_start..]
+            .find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/')
+            .map(|rel| name_start + rel)?;
+        let element_name = &xml[name_start..name_end];
+        if element_name.rsplit(':').next() == Some(local_name) {
+            let tag_end = xml[name_end..].find('>').map(|rel| name_end + rel + 1)?;
+            let self_closing = xml[name_end..tag_end]
+                .trim_end_matches('>')
+                .trim_end()
+                .ends_with('/');
+            return Some((start, tag_end, element_name.to_string(), self_closing));
+        }
+        search_from = name_end;
     }
-    let close = xml[open_end..].find("</sheetData>")?;
-    let inner_start = open_end;
-    let inner_end = open_end + close;
-    let tail_start = inner_end;
-    Some((
-        &xml[..inner_start],
-        &xml[inner_start..inner_end],
-        &xml[tail_start..],
-    ))
+    None
 }
 
 /// One captured cell from the source `<sheetData>`.
@@ -224,7 +258,7 @@ struct CapturedRow {
 /// re-emit. Cells outside `src` pass through; cells inside `src`
 /// are translated to `(row + d_row, col + d_col)`. Existing cells
 /// at the destination are overwritten.
-fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
+fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan, element_prefix: &str) -> String {
     let mut reader = XmlReader::from_str(inner);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -371,9 +405,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
                             cell_depth -= 1;
                         }
                         if let Some(w) = cell_child_writer.as_mut() {
-                            let _ = w.write_event(Event::End(BytesEnd::new(
-                                String::from_utf8_lossy(local.as_slice()).into_owned(),
-                            )));
+                            let _ = w.write_event(Event::End(e.to_owned()));
                         }
                     }
                     buf.clear();
@@ -461,18 +493,20 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
     let mut current_emit_row: Option<u32> = None;
     let mut row_open = false;
     let cells_iter = relocated.into_iter();
+    let row_name = format!("{element_prefix}row");
+    let cell_name = format!("{element_prefix}c");
 
     for cell in cells_iter {
         if Some(cell.row) != current_emit_row {
             if row_open {
-                let _ = writer.write_event(Event::End(BytesEnd::new("row")));
+                let _ = writer.write_event(Event::End(BytesEnd::new(row_name.as_str())));
             }
             // Open a new <row r="N"> (recover original metadata if
             // we had it for this row index in the SOURCE; we map the
             // pre-move row index lookup via inverse_row).
             let lookup_row = inverse_row_index(cell.row, plan);
             let extra = row_meta.get(&lookup_row).cloned().unwrap_or_default();
-            let mut start = BytesStart::new("row");
+            let mut start = BytesStart::new(row_name.as_str());
             start.push_attribute(("r", cell.row.to_string().as_str()));
             for (key, val) in &extra.extra_attrs {
                 // Skip any `spans` attribute — Excel re-derives, and
@@ -487,7 +521,7 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
             row_open = true;
         }
         // Emit <c r="...">...</c>
-        let mut c_start = BytesStart::new("c");
+        let mut c_start = BytesStart::new(cell_name.as_str());
         for (key, val) in &cell.raw_attrs {
             c_start.push_attribute((key.as_slice(), val.as_slice()));
         }
@@ -503,11 +537,11 @@ fn rewrite_sheet_data(inner: &str, plan: &RangeMovePlan) -> String {
             // into the underlying buffer directly.
             let inner = writer.get_mut();
             let _ = std::io::Write::write_all(inner, &cell.children);
-            let _ = writer.write_event(Event::End(BytesEnd::new("c")));
+            let _ = writer.write_event(Event::End(BytesEnd::new(cell_name.as_str())));
         }
     }
     if row_open {
-        let _ = writer.write_event(Event::End(BytesEnd::new("row")));
+        let _ = writer.write_event(Event::End(BytesEnd::new(row_name.as_str())));
     }
 
     String::from_utf8(writer.into_inner().into_inner()).unwrap_or_default()
@@ -672,9 +706,7 @@ impl FormulaTranslator {
                     if local.as_slice() == b"f" {
                         in_f = false;
                     }
-                    let _ = writer.write_event(Event::End(BytesEnd::new(
-                        String::from_utf8_lossy(local.as_slice()).into_owned(),
-                    )));
+                    let _ = writer.write_event(Event::End(e.to_owned()));
                 }
                 Ok(Event::Text(ref t)) => {
                     if in_f {
@@ -806,9 +838,7 @@ fn rewrite_anchors_and_dimension(xml: &[u8], plan: &RangeMovePlan) -> Vec<u8> {
                     }
                     _ => {}
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if plan.translate && (in_dv_formula > 0 || in_cf_formula > 0) {
