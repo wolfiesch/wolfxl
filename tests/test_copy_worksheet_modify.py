@@ -38,6 +38,7 @@ smoke file should be removed (handled in the same commit).
 from __future__ import annotations
 
 import re
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -658,6 +659,32 @@ def test_p_self_closing_sheets_block(tmp_path: Path) -> None:
     )
     assert "<sheets>" in new_wb_xml and "</sheets>" in new_wb_xml
     assert "<sheet " in new_wb_xml or "<sheet>" in new_wb_xml
+
+
+def test_copy_worksheet_handles_prefixed_workbook_root(tmp_path: Path) -> None:
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "external_oracle"
+        / "closedxml-rich-comment-protection.xlsx"
+    )
+    src = tmp_path / fixture.name
+    shutil.copy2(fixture, src)
+
+    wb = load_workbook(src, modify=True)
+    wb.copy_worksheet(wb[wb.sheetnames[0]])
+    wb.save(src)
+    wb.close()
+
+    roundtrip = openpyxl.load_workbook(src)
+    assert roundtrip.sheetnames == ["Review", "Review Copy"]
+    roundtrip.close()
+
+    with zipfile.ZipFile(src) as archive:
+        workbook_xml = archive.read("xl/workbook.xml").decode()
+    assert "<x:workbook" in workbook_xml
+    assert '<x:sheet name="Review Copy"' in workbook_xml
+    assert '<sheet name="Review Copy"' not in workbook_xml
 
 
 # ---------------------------------------------------------------------------

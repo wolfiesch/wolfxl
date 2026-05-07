@@ -131,6 +131,7 @@ pub(crate) fn splice_into_sheets_block(
     let mut splice_pos: Option<usize> = None;
     let mut sheets_open_depth: Option<i32> = None;
     let mut self_closing_range: Option<(usize, usize)> = None;
+    let mut sheets_element_name: Option<String> = None;
     let mut buf: Vec<u8> = Vec::new();
 
     loop {
@@ -141,6 +142,8 @@ pub(crate) fn splice_into_sheets_block(
             Ok(XmlEvent::Start(ref e)) => {
                 if e.local_name().as_ref() == b"sheets" && sheets_open_depth.is_none() {
                     sheets_open_depth = Some(depth);
+                    sheets_element_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 depth += 1;
             }
@@ -157,6 +160,8 @@ pub(crate) fn splice_into_sheets_block(
             Ok(XmlEvent::Empty(ref e)) => {
                 if e.local_name().as_ref() == b"sheets" && self_closing_range.is_none() {
                     self_closing_range = Some((pre, post));
+                    sheets_element_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                     break;
                 }
             }
@@ -167,25 +172,43 @@ pub(crate) fn splice_into_sheets_block(
         buf.clear();
     }
 
+    let sheets_name = sheets_element_name.as_deref().unwrap_or("sheets");
+    let sheet_element = qualify_sheet_element_for_sheets(new_sheet_element, sheets_name);
     if let Some(pos) = splice_pos {
-        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len());
+        let mut out = Vec::with_capacity(workbook_xml.len() + sheet_element.len());
         out.extend_from_slice(&workbook_xml[..pos]);
-        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(&sheet_element);
         out.extend_from_slice(&workbook_xml[pos..]);
         return Ok(out);
     }
     if let Some((start, end)) = self_closing_range {
-        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        let mut out = Vec::with_capacity(
+            workbook_xml.len() + sheet_element.len() + (2 * sheets_name.len()) + 5,
+        );
         out.extend_from_slice(&workbook_xml[..start]);
-        out.extend_from_slice(b"<sheets>");
-        out.extend_from_slice(new_sheet_element);
-        out.extend_from_slice(b"</sheets>");
+        out.extend_from_slice(format!("<{sheets_name}>").as_bytes());
+        out.extend_from_slice(&sheet_element);
+        out.extend_from_slice(format!("</{sheets_name}>").as_bytes());
         out.extend_from_slice(&workbook_xml[end..]);
         return Ok(out);
     }
     Err(PyIOError::new_err(
         "Phase 2.7: workbook.xml has no <sheets> block",
     ))
+}
+
+fn qualify_sheet_element_for_sheets(new_sheet_element: &[u8], sheets_name: &str) -> Vec<u8> {
+    let prefix = sheets_name.strip_suffix("sheets").unwrap_or_default();
+    if prefix.is_empty() {
+        return new_sheet_element.to_vec();
+    }
+    let Ok(text) = std::str::from_utf8(new_sheet_element) else {
+        return new_sheet_element.to_vec();
+    };
+    let Some(rest) = text.strip_prefix("<sheet") else {
+        return new_sheet_element.to_vec();
+    };
+    format!("<{prefix}sheet{rest}").into_bytes()
 }
 
 pub(super) fn apply_sheet_deletes_phase(
@@ -416,23 +439,15 @@ fn max_sheet_id_and_count(workbook_xml: &[u8]) -> (u32, usize) {
 }
 
 fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
-    let open = s
-        .find("<workbook")
+    let (open, rel_end) = find_open_tag_by_local_name(s, "workbook")
         .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
-    let rel_end = s[open..].find('>').ok_or_else(|| {
-        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
-    })?;
-    Ok(s[open..open + rel_end].contains("xmlns:r="))
+    Ok(s[open..rel_end].contains("xmlns:r="))
 }
 
 fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
-    let open = s
-        .find("<workbook")
+    let (_open, rel_end) = find_open_tag_by_local_name(s, "workbook")
         .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
-    let rel_end = s[open..].find('>').ok_or_else(|| {
-        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
-    })?;
-    let insert_at = open + rel_end;
+    let insert_at = rel_end;
     let mut out = String::with_capacity(
         s.len()
             + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
@@ -444,6 +459,29 @@ fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
     );
     out.push_str(&s[insert_at..]);
     Ok(out)
+}
+
+fn find_open_tag_by_local_name(s: &str, local_name: &str) -> Option<(usize, usize)> {
+    let mut search_from = 0;
+    while let Some(rel_start) = s[search_from..].find('<') {
+        let start = search_from + rel_start;
+        let name_start = start + 1;
+        let first = s.as_bytes().get(name_start).copied()?;
+        if matches!(first, b'/' | b'!' | b'?') {
+            search_from = name_start + 1;
+            continue;
+        }
+        let name_end = s[name_start..]
+            .find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/')
+            .map(|rel| name_start + rel)?;
+        let element_name = &s[name_start..name_end];
+        if element_name.rsplit(':').next() == Some(local_name) {
+            let tag_end = s[name_end..].find('>').map(|rel| name_end + rel)?;
+            return Some((start, tag_end));
+        }
+        search_from = name_end;
+    }
+    None
 }
 
 /// Naive byte-substring search for tiny workbook XML payloads.
@@ -1180,6 +1218,27 @@ mod tests {
             "new sheet r:id must be bound by the workbook root namespace"
         );
         assert!(s.contains("r:id=\"rId99\""));
+    }
+
+    #[test]
+    fn splice_handles_prefixed_workbook_and_sheets() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<x:sheets><x:sheet name="Sheet1" sheetId="1" r:id="rId1"/></x:sheets>
+</x:workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_start = s.find("<x:workbook").unwrap();
+        let root_end = root_start + s[root_start..].find('>').unwrap();
+        assert!(
+            s[root_start..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "prefixed workbook root must get the relationship namespace"
+        );
+        assert!(s.contains("<x:sheet name=\"Copy\""));
+        assert!(!s.contains("<sheet name=\"Copy\""));
+        assert!(s.contains("</x:sheets>"));
     }
 
     #[test]

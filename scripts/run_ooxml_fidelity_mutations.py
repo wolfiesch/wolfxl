@@ -34,6 +34,7 @@ SUPPORTED_MUTATIONS = (
     *DEFAULT_MUTATIONS,
     "delete_first_row",
     "delete_first_col",
+    "copy_first_sheet",
     "rename_first_sheet",
 )
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
@@ -61,6 +62,12 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "slicers_semantic_drift",
     },
     "delete_first_col": {
+        "charts_semantic_drift",
+        "conditional_formatting_semantic_drift",
+        "pivots_semantic_drift",
+        "slicers_semantic_drift",
+    },
+    "copy_first_sheet": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
@@ -287,6 +294,8 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             workbook[workbook.sheetnames[0]].delete_rows(1, amount=1)
         elif mutation == "delete_first_col":
             workbook[workbook.sheetnames[0]].delete_cols(1, amount=1)
+        elif mutation == "copy_first_sheet":
+            workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
         elif mutation == "move_marker_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE

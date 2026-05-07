@@ -79,12 +79,13 @@ Gap ledger:
    - Latest opt-in semantic sweeps: sheet rename passes 7 results with no
      drift; first-row/first-column delete passes 14 results with expected
      conditional-formatting range drift and no unexpected package-fidelity
-     failure.
+     failure; first-sheet copy initially exposed a prefixed workbook-root
+     splice bug and now passes 7 results as an opt-in expected-drift gate.
    - Latest bugs found: row insertion exposed a prefixed-XML end-tag corruption
      path in structural rewrites; range move exposed a prefixed `sheetData`
      discovery/re-emission gap. Both are now covered by regression tests.
-   - Next mutations: sheet copy/remove and feature add/remove where the
-     expected semantic drift can be declared.
+   - Next mutations: sheet remove and feature add/remove where the expected
+     semantic drift can be declared.
 3. Expand fixture sources:
    - real Excel-authored workbooks with slicers, timelines, pivot charts, chart
      style/color parts, and external links;
