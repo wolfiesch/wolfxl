@@ -18,7 +18,7 @@ renumbered, orphaned, or left pointing at the wrong part.
 | Signal | Current state | What it proves | What it does not prove |
 |---|---|---|---|
 | Openpyxl parity ledger | No active tracked openpyxl-supported gaps | WolfXL covers the current openpyxl-shaped surface | Excel-only or external-tool surfaces are exhausted |
-| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI | Modify-save preserves important authored parts and still opens | Every relationship, style reference, or feature extension has identical meaning |
+| External-oracle fixture pack | 7 pinned workbooks from Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, now checked under no-op and marker-cell modify-save mutations | Modify-save preserves important authored parts and still opens under two safe mutation modes | Structural edits and real Excel-authored long-tail workbooks still need broader coverage |
 | New OOXML audit gate | `scripts/audit_ooxml_fidelity.py` now checks part loss, rel loss, dangling rels, content-type drift, feature part loss, CF dxf bounds, and first-pass semantic fingerprints for charts, CF, external links, pivots, and slicers | The external-oracle pack now catches broken dependency graphs and obvious feature-meaning drift | It is not yet a full Excel-rendered semantic validator or real-Excel corpus proof |
 
 ## Risk matrix

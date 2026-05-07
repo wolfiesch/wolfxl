@@ -8,13 +8,12 @@ fixture, the test:
 
 1. Verifies the on-disk SHA256 matches the pinned manifest entry — guards
    against accidental modification of the in-tree pack.
-2. Asserts every entry in the fixture's `expected_parts` list survives a
-   wolfxl modify-save cycle (load_workbook(modify=True), write a marker
-   cell, save, re-open). This is stronger than "no parts lost" because
-   it catches drift on the parts that openpyxl normalizes away or that
-   would silently get dropped.
-3. Confirms the marker round-trips through openpyxl, the ZIP CRC checks
-   pass, and the fixture continues to open cleanly.
+2. Asserts every entry in the fixture's `expected_parts` list survives
+   representative wolfxl modify-save cycles. This is stronger than "no
+   parts lost" because it catches drift on the parts that openpyxl normalizes
+   away or that would silently get dropped.
+3. Confirms the marker mutation round-trips through openpyxl, the ZIP CRC
+   checks pass, and each fixture continues to open cleanly.
 
 The `WOLFXL_EXTERNAL_FIXTURES_DIR` env var still overrides the in-tree
 path so a freshly-regenerated ExcelBench pack can be tested before being
@@ -44,6 +43,7 @@ _PINNED_DIR = Path(__file__).resolve().parent / "fixtures" / "external_oracle"
 _MANIFEST_NAME = "manifest.json"
 _MARKER_CELL = "Z1"
 _MARKER_VALUE = "wolfxl_external_fixture_smoke"
+_MUTATIONS = ("no_op", "marker_cell")
 
 
 def _load_ooxml_audit_module() -> ModuleType:
@@ -114,8 +114,9 @@ def _entry_id(entry: dict) -> str:
     ),
 )
 @pytest.mark.parametrize("entry", _FIXTURE_ENTRIES, ids=_entry_id)
+@pytest.mark.parametrize("mutation", _MUTATIONS)
 def test_external_oracle_fixture_modify_save_preserves_expected_parts(
-    entry: dict, tmp_path: Path
+    entry: dict, mutation: str, tmp_path: Path
 ) -> None:
     """Each pinned fixture's expected_parts must survive wolfxl modify-save."""
     fixture_path = _FIXTURE_DIR / entry["filename"]
@@ -141,7 +142,8 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
 
     workbook = wolfxl.load_workbook(work_path, modify=True)
     sheet_name = workbook.sheetnames[0]
-    workbook[sheet_name][_MARKER_CELL] = _MARKER_VALUE
+    if mutation == "marker_cell":
+        workbook[sheet_name][_MARKER_CELL] = _MARKER_VALUE
     workbook.save(work_path)
     workbook.close()
 
@@ -149,7 +151,7 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
 
     audit_report = _OOXML_AUDIT.audit(before_audit_path, work_path)
     assert not audit_report["issues"], (
-        f"{fixture_path.name} failed OOXML fidelity audit after modify-save: "
+        f"{fixture_path.name} failed OOXML fidelity audit after {mutation}: "
         f"{json.dumps(audit_report['issues'], indent=2, sort_keys=True)}"
     )
 
@@ -171,14 +173,15 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         f"{sorted(missing_any)}"
     )
 
-    # Marker round-trips through openpyxl (validates the wolfxl save is
-    # readable by the canonical OOXML reader, not just by wolfxl itself).
+    # Openpyxl load validates the wolfxl save is readable by the canonical
+    # OOXML reader, not just by wolfxl itself.
     roundtrip = openpyxl.load_workbook(work_path, data_only=False)
     try:
-        assert roundtrip[sheet_name][_MARKER_CELL].value == _MARKER_VALUE, (
-            f"marker write to {fixture_path.name}!{_MARKER_CELL} did not "
-            "round-trip through openpyxl"
-        )
+        if mutation == "marker_cell":
+            assert roundtrip[sheet_name][_MARKER_CELL].value == _MARKER_VALUE, (
+                f"marker write to {fixture_path.name}!{_MARKER_CELL} did not "
+                "round-trip through openpyxl"
+            )
     finally:
         roundtrip.close()
 
