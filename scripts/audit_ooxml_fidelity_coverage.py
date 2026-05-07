@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -22,6 +24,7 @@ PASSING_APP_STATUSES = {"passed"}
 PASSING_NO_OP_RENDER_STATUSES = {"passed", "sampled_passed"}
 PASSING_INTENTIONAL_RENDER_STATUSES = {"rendered", "sampled_rendered"}
 REAL_EXCEL_TOOLS = {"excel", "microsoft-excel", "excel-365", "excel-2021"}
+APP_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}"
 
 SURFACES = {
     "pivot_slicer_preservation": {
@@ -87,6 +90,32 @@ SURFACES = {
         "structural_mutations": (
             "marker_cell",
             "copy_first_sheet",
+            "move_formula_range",
+        ),
+    },
+    "python_in_excel_metadata": {
+        "label": "Python-in-Excel metadata preservation",
+        "feature_keys": ("python",),
+        "semantic_keys": ("python",),
+        "required": False,
+        "required_source_classes": ("real_excel",),
+        "structural_mutations": (
+            "marker_cell",
+            "style_cell",
+            "rename_first_sheet",
+            "move_formula_range",
+        ),
+    },
+    "sheet_metadata_preservation": {
+        "label": "Sheet metadata preservation",
+        "feature_keys": ("sheet_metadata",),
+        "semantic_keys": ("sheet_metadata",),
+        "required": False,
+        "required_source_classes": ("real_excel",),
+        "structural_mutations": (
+            "marker_cell",
+            "style_cell",
+            "rename_first_sheet",
             "move_formula_range",
         ),
     },
@@ -176,6 +205,7 @@ class FixtureCoverage:
     filename: str
     fixture_id: str | None
     tool: str | None
+    application: str | None
     source_class: str
     feature_keys: list[str]
     surfaces: list[str]
@@ -214,6 +244,7 @@ def audit_coverage(
         if not path.is_file():
             continue
         snapshot = audit_ooxml_fidelity.snapshot(path)
+        application = _application_name(path)
         feature_keys = _feature_keys_for_snapshot(snapshot)
         surfaces = _surfaces_for_snapshot(snapshot)
         fixtures.append(
@@ -221,7 +252,8 @@ def audit_coverage(
                 filename=entry.filename,
                 fixture_id=entry.fixture_id,
                 tool=entry.tool,
-                source_class=_source_class(entry.tool),
+                application=application,
+                source_class=_source_class(entry.tool, application),
                 feature_keys=feature_keys,
                 surfaces=surfaces,
                 passed_mutations=sorted(passed_mutations.get(entry.filename, set())),
@@ -359,6 +391,8 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
         "extensions": "extension_payload",
         "page_setup": "page_setup",
         "pivots": "pivot",
+        "python": "python",
+        "sheet_metadata": "sheet_metadata",
         "slicers": "slicer",
         "style_theme": "style_theme",
         "structured_references": "structured_reference",
@@ -426,6 +460,27 @@ def _surface_result(
 ) -> dict:
     config = SURFACES[surface]
     matching = [fixture for fixture in fixtures if surface in fixture["surfaces"]]
+    if not matching and not config.get("required", True):
+        return {
+            "label": config["label"],
+            "fixture_count": 0,
+            "fixtures": [],
+            "external_tool_fixtures": [],
+            "real_excel_fixtures": [],
+            "structural_mutation_fixtures": [],
+            "render_fixtures": [],
+            "intentional_render_fixtures": [],
+            "app_open_fixtures": [],
+            "intentional_app_open_fixtures": [],
+            "accepted_structural_mutations": list(config["structural_mutations"]),
+            "required_source_classes": list(
+                config.get("required_source_classes", ("external_tool", "real_excel"))
+            ),
+            "feature_groups": {},
+            "missing": [],
+            "clear": True,
+            "optional": True,
+        }
     required_source_classes = config.get(
         "required_source_classes", ("external_tool", "real_excel")
     )
@@ -576,14 +631,29 @@ def _surface_result(
         "feature_groups": group_results,
         "missing": missing,
         "clear": not missing,
+        "optional": not config.get("required", True),
     }
 
 
-def _source_class(tool: str | None) -> str:
-    if not tool:
+def _application_name(path: Path) -> str | None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            root = ElementTree.fromstring(archive.read("docProps/app.xml"))
+    except (KeyError, ElementTree.ParseError, zipfile.BadZipFile):
+        return None
+    node = root.find(f"{APP_NS}Application")
+    if node is None or node.text is None:
+        return None
+    return node.text.strip() or None
+
+
+def _source_class(tool: str | None, application: str | None = None) -> str:
+    values = [value.strip().lower() for value in (tool, application) if value]
+    if not values:
         return "unknown"
-    normalized = tool.strip().lower()
-    if normalized in REAL_EXCEL_TOOLS:
+    if any(value in REAL_EXCEL_TOOLS for value in values):
+        return "real_excel"
+    if any("excel" in value and "excelize" not in value for value in values):
         return "real_excel"
     return "external_tool"
 

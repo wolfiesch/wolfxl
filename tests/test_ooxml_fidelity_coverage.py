@@ -98,6 +98,61 @@ def test_coverage_audit_can_discover_recursive_fixture_trees(
     assert chart["structural_mutation_fixtures"] == ["nested/chart.xlsx"]
 
 
+def test_coverage_audit_uses_application_for_recursive_source_class(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    nested_dir = fixture_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    fixture = nested_dir / "chart.xlsx"
+    _write_chart_fixture(fixture)
+    _add_application_name(fixture, "Microsoft Excel")
+
+    report = coverage_module.audit_coverage(fixture_dir, recursive=True)
+
+    assert report["fixtures"][0]["application"] == "Microsoft Excel"
+    assert report["fixtures"][0]["source_class"] == "real_excel"
+    chart = report["surfaces"]["chart_style_color_preservation"]
+    assert chart["real_excel_fixtures"] == ["nested/chart.xlsx"]
+
+
+def test_coverage_audit_tracks_present_python_and_sheet_metadata(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "python-metadata.xlsx"
+    _write_python_metadata_fixture(fixture)
+    _add_application_name(fixture, "Microsoft Excel")
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": fixture.name,
+                        "mutation": "marker_cell",
+                        "status": "passed",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir, reports=[mutation_report])
+
+    python = report["surfaces"]["python_in_excel_metadata"]
+    assert python["optional"] is True
+    assert python["real_excel_fixtures"] == ["python-metadata.xlsx"]
+    assert python["structural_mutation_fixtures"] == ["python-metadata.xlsx"]
+    assert python["missing"] == []
+    metadata = report["surfaces"]["sheet_metadata_preservation"]
+    assert metadata["optional"] is True
+    assert metadata["real_excel_fixtures"] == ["python-metadata.xlsx"]
+    assert metadata["structural_mutation_fixtures"] == ["python-metadata.xlsx"]
+    assert metadata["missing"] == []
+
+
 def test_strict_cli_requires_mutation_report(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
@@ -885,6 +940,32 @@ def _write_pivot_fixture(path: Path) -> None:
         )
 
 
+def _write_python_metadata_fixture(path: Path) -> None:
+    _write_plain_fixture(path)
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "xl/python.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<python xmlns="http://schemas.microsoft.com/office/spreadsheetml/2023/python">
+  <environmentDefinition id="{11111111-2222-3333-4444-555555555555}">
+    <initialization><code>import pandas as pd</code></initialization>
+  </environmentDefinition>
+</python>""",
+        )
+        archive.writestr(
+            "xl/metadata.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">
+  <futureMetadata name="XLDAPR" count="1">
+    <bk><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}">
+      <xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/>
+    </ext></extLst></bk>
+  </futureMetadata>
+</metadata>""",
+        )
+
+
 def _write_data_model_fixture(path: Path) -> None:
     entries = {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -1008,3 +1089,14 @@ def _write_style_theme_fixture(path: Path) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
+
+
+def _add_application_name(path: Path, application: str) -> None:
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "docProps/app.xml",
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
+  <Application>{application}</Application>
+</Properties>""",
+        )
