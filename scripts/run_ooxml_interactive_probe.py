@@ -50,6 +50,7 @@ PROBE_FEATURE_KEYS = {
 }
 SUPPORTED_UI_INTERACTION_PROBES = (
     "macro_project_presence",
+    "embedded_control_openability",
     "external_link_update_prompt",
     "pivot_refresh_state",
     "slicer_selection_state",
@@ -57,6 +58,7 @@ SUPPORTED_UI_INTERACTION_PROBES = (
 )
 REQUIRED_UI_ACTIONS = {
     "macro_project_presence": "clicked button: Disable Macros",
+    "embedded_control_openability": "clicked Excel embedded/control object",
     "external_link_update_prompt": "clicked button: Don't Update",
     "pivot_refresh_state": "executed Excel command: refresh all",
     "slicer_selection_state": "clicked Excel slicer item",
@@ -358,6 +360,11 @@ def _run_ui_interaction_probe(
         if probe == "slicer_selection_state"
         else None
     )
+    control_state_before = (
+        _control_property_state(probe_path)
+        if probe == "embedded_control_openability"
+        else None
+    )
     try:
         active_name, ui_actions = _open_excel_with_ui_interaction(probe_path, probe, timeout)
     except Exception as exc:
@@ -429,6 +436,23 @@ def _run_ui_interaction_probe(
                 message=(
                     "Excel slicer UI click did not change persisted "
                     f"table filter state: {slicer_filter_before}"
+                ),
+                ui_actions=ui_actions,
+            )
+    if probe == "embedded_control_openability":
+        control_state_after = _control_property_state(probe_path)
+        if not control_state_after or control_state_after == control_state_before:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=str(probe_path),
+                message=(
+                    "Excel embedded/control UI click did not change persisted "
+                    f"control-property state: {control_state_before}"
                 ),
                 ui_actions=ui_actions,
             )
@@ -506,6 +530,9 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
             raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
         name = run_ooxml_app_smoke._excel_active_workbook_name()
         if name:
+            if probe == "embedded_control_openability":
+                ui_actions.extend(_click_embedded_control(src))
+                ui_actions.extend(_save_active_workbook())
             if probe == "pivot_refresh_state":
                 ui_actions.extend(_refresh_all_active_workbook())
             if probe in {"slicer_selection_state", "timeline_selection_state"}:
@@ -704,6 +731,76 @@ end tell
     return actions
 
 
+def _click_embedded_control(src: Path) -> list[str]:
+    """Click a visible worksheet form control and rely on persisted state."""
+    names = _control_shape_names(src)
+    if not names:
+        return ["failed Excel embedded/control click: no control shape names in package"]
+    quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
+    script = f"""
+tell application "Microsoft Excel"
+  activate
+  try
+    set bounds of active window to {{0, 40, 1200, 850}}
+  end try
+  try
+    set zoom of active window to 175
+  end try
+  try
+    set scroll row of active window to 1
+    set scroll column of active window to 1
+  end try
+  try
+    set expectedNames to {{{quoted_names}}}
+    repeat with i from 1 to (count of shapes of active sheet)
+      set candidate to shape i of active sheet
+      set candidateName to name of candidate as text
+      if expectedNames contains candidateName then
+        return candidateName & "||" & ¬
+          (left position of candidate as text) & "||" & ¬
+          (top of candidate as text) & "||" & ¬
+          (width of candidate as text) & "||" & ¬
+          (height of candidate as text)
+      end if
+    end repeat
+    return ""
+  on error errText
+    return "ERROR: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["failed Excel embedded/control click: layout timeout"]
+    geometry = proc.stdout.strip()
+    if not geometry or geometry.startswith("ERROR:"):
+        return [f"failed Excel embedded/control click: {geometry or 'no matching shape'}"]
+    parts = geometry.split("||")
+    if len(parts) != 5:
+        return [f"failed Excel embedded/control click: invalid shape geometry {geometry!r}"]
+    name = parts[0]
+    try:
+        left, top, width, height = [float(part) for part in parts[1:]]
+    except ValueError:
+        return [f"failed Excel embedded/control click: invalid shape geometry {geometry!r}"]
+
+    zoom = 1.75
+    sheet_origin_x = 39.0
+    sheet_origin_y = 276.0
+    click_x = sheet_origin_x + (left * zoom) + (width * zoom * 0.2)
+    click_y = sheet_origin_y + (top * zoom) + min(height * zoom * 0.45, 49.0)
+    try:
+        _post_mouse_click(click_x, click_y)
+    except Exception as exc:
+        return [f"failed Excel embedded/control click: {str(exc)[:250]}"]
+    time.sleep(0.5)
+    return [
+        "clicked Excel embedded/control object",
+        f"clicked Excel embedded/control object: {name}",
+    ]
+
+
 def _click_timeline_month(src: Path) -> list[str]:
     """Click a visible month in the first authored timeline on local Mac Excel."""
     selection = _timeline_selection_range(src)
@@ -876,6 +973,25 @@ def _probe_shape_names(path: Path, probe: str) -> list[str]:
     return names
 
 
+def _control_shape_names(path: Path) -> list[str]:
+    names: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for part_name in archive.namelist():
+                if not part_name.startswith("xl/worksheets/") or not part_name.endswith(".xml"):
+                    continue
+                root = ET.fromstring(archive.read(part_name))
+                for element in root.iter():
+                    if _local_name(element.tag) != "control":
+                        continue
+                    name = element.attrib.get("name")
+                    if name and name not in names:
+                        names.append(name)
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return []
+    return names
+
+
 def _timeline_selection_range(path: Path) -> tuple[str, str] | None:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -921,6 +1037,23 @@ def _slicer_table_filter_state(path: Path) -> tuple[tuple[str, str, tuple[str, .
                     )
                     if values:
                         state.append((part_name, col_id, values))
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return ()
+    return tuple(state)
+
+
+def _control_property_state(path: Path) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...]:
+    state: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            control_parts = [
+                name
+                for name in archive.namelist()
+                if name.startswith("xl/ctrlProps/") and name.endswith(".xml")
+            ]
+            for part_name in sorted(control_parts):
+                root = ET.fromstring(archive.read(part_name))
+                state.append((part_name, tuple(sorted(root.attrib.items()))))
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return ()
     return tuple(state)

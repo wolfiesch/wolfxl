@@ -560,6 +560,71 @@ def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, mon
     assert result["ui_actions"] == []
 
 
+def test_ui_interaction_probe_records_embedded_control_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        _rewrite_control_selection(src, value="2")
+        return "control.xlsx", [
+            "clicked Excel embedded/control object",
+            "clicked Excel embedded/control object: List Box 1",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "clicked Excel embedded/control object",
+        "clicked Excel embedded/control object: List Box 1",
+        "saved active workbook",
+    ]
+
+
+def test_embedded_control_ui_interaction_requires_persisted_state_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        return "control.xlsx", [
+            "clicked Excel embedded/control object",
+            "clicked Excel embedded/control object: List Box 1",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted control-property state" in report["results"][0]["message"]
+
+
 def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -674,6 +739,13 @@ def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path
     assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
         "Timeline_Date"
     ]
+
+
+def test_control_shape_names_come_from_authored_worksheet_controls(tmp_path: Path) -> None:
+    control = tmp_path / "control.xlsx"
+    _write_embedded_control_workbook(control)
+
+    assert probe_runner._control_shape_names(control) == ["List Box 1"]
 
 
 def test_slicer_ui_interaction_requires_persisted_filter_change(
@@ -1081,8 +1153,13 @@ def _write_vba_workbook(path: Path) -> None:
 
 def _write_embedded_control_workbook(path: Path) -> None:
     entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <controls><control name="List Box 1"/></controls>
+</worksheet>"""
     entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
-<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Button"/>"""
+<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" sel="0" val="0"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
@@ -1246,6 +1323,17 @@ def _rewrite_slicer_filter(path: Path, *, value: str) -> None:
         ),
     )
     entries["xl/tables/table1.xml"] = table.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_control_selection(path: Path, *, value: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    control = entries["xl/ctrlProps/ctrlProp1.xml"].decode()
+    control = control.replace('sel="0"', f'sel="{value}"')
+    entries["xl/ctrlProps/ctrlProp1.xml"] = control.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
