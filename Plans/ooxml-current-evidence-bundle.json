@@ -45,6 +45,36 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_macro_disable_button",
+      "path": "/tmp/wolfxl-ui-interaction-macro-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-macro-20260508 --probe-kind excel_ui_interaction --probe macro_project_presence --fixture real-excel-macro-basic.xlsm --timeout 120 > /tmp/wolfxl-ui-interaction-macro-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-macro-basic.xlsm"},
+        {"path": "results.0.probe", "equals": "macro_project_presence"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Disable Macros"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_pivot_refresh_command",
+      "path": "/tmp/wolfxl-ui-interaction-pivot-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-pivot-20260508 --probe-kind excel_ui_interaction --probe pivot_refresh_state --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-pivot-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "pivot_refresh_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["executed Excel command: refresh all"]}
+      ]
+    },
+    {
       "name": "excel_render_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-full-pack.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 > /tmp/wolfxl-render-excel-full-pack.json",

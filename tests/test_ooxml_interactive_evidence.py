@@ -239,6 +239,7 @@ def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> 
         probe: str,
         mutation: str,
         timeout: int,
+        probe_kind: str,
     ) -> object:
         report_path = output_dir / "interactive-probe-report.json"
         if calls:
@@ -250,7 +251,7 @@ def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> 
         return probe_runner.InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=probe_runner.PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status="passed",
@@ -300,12 +301,13 @@ def test_probe_runner_filters_fixtures(tmp_path: Path, monkeypatch) -> None:
         probe: str,
         mutation: str,
         timeout: int,
+        probe_kind: str,
     ) -> object:
         calls.append(fixture_label)
         return probe_runner.InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=probe_runner.PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status="passed",
@@ -499,6 +501,89 @@ def test_external_link_probe_runner_fails_when_link_part_missing(
     assert report["failure_count"] == 1
     assert report["results"][0]["status"] == "failed"
     assert "missing after Excel open" in report["results"][0]["message"]
+
+
+def test_ui_interaction_probe_records_macro_button_click(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+
+    def fake_open_with_ui(src: Path, probe: str, timeout: int):
+        assert src.name == "macro.xlsm"
+        assert probe == "macro_project_presence"
+        assert timeout == 90
+        return "macro.xlsm", ["clicked button: Disable Macros"]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("macro_project_presence",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["probe_kind"] == "excel_ui_interaction"
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["probe"] == "macro_project_presence"
+    assert result["probe_kind"] == "excel_ui_interaction"
+    assert result["status"] == "passed"
+    assert result["ui_actions"] == ["clicked button: Disable Macros"]
+
+
+def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def fake_open_with_ui(_src: Path, _probe: str, _timeout: int):
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert "required UI action was not observed" in result["message"]
+    assert result["ui_actions"] == []
+
+
+def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_workbook(fixture_dir / "pivot.xlsx")
+    _write_manifest(fixture_dir, "pivot.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "pivot_refresh_state"
+        return "pivot.xlsx", ["executed Excel command: refresh all"]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("pivot_refresh_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["probe"] == "pivot_refresh_state"
+    assert result["ui_actions"] == ["executed Excel command: refresh all"]
 
 
 def test_pivot_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:

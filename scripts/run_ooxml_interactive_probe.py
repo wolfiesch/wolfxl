@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import subprocess
 import shutil
 import sys
+import time
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -23,7 +25,10 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 SOURCE_MUTATION = run_ooxml_app_smoke.SOURCE_MUTATION
 PASSING_STATUSES = {"passed"}
-PROBE_KIND = "ooxml_state_presence"
+PRESENCE_PROBE_KIND = "ooxml_state_presence"
+UI_INTERACTION_PROBE_KIND = "excel_ui_interaction"
+PROBE_KIND = PRESENCE_PROBE_KIND
+SUPPORTED_PROBE_KINDS = (PRESENCE_PROBE_KIND, UI_INTERACTION_PROBE_KIND)
 SUPPORTED_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
@@ -40,6 +45,16 @@ PROBE_FEATURE_KEYS = {
     "slicer_selection_state": "slicer",
     "timeline_selection_state": "timeline",
 }
+SUPPORTED_UI_INTERACTION_PROBES = (
+    "macro_project_presence",
+    "external_link_update_prompt",
+    "pivot_refresh_state",
+)
+REQUIRED_UI_ACTIONS = {
+    "macro_project_presence": "clicked button: Disable Macros",
+    "external_link_update_prompt": "clicked button: Don't Update",
+    "pivot_refresh_state": "executed Excel command: refresh all",
+}
 
 
 @dataclass
@@ -52,6 +67,7 @@ class InteractiveProbeResult:
     status: str
     output: str | None
     message: str
+    ui_actions: list[str] | None = None
 
 
 def run_interactive_probes(
@@ -61,10 +77,15 @@ def run_interactive_probes(
     mutation: str = SOURCE_MUTATION,
     timeout: int = 90,
     include_fixture_patterns: tuple[str, ...] = (),
+    probe_kind: str = PROBE_KIND,
 ) -> dict:
+    if probe_kind not in SUPPORTED_PROBE_KINDS:
+        raise ValueError(f"unsupported probe kind: {probe_kind}")
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[InteractiveProbeResult] = []
+    if probe_kind == UI_INTERACTION_PROBE_KIND:
+        probes = tuple(probe for probe in probes if probe in SUPPORTED_UI_INTERACTION_PROBES)
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
         if include_fixture_patterns and not _fixture_matches(
             entry.filename, include_fixture_patterns
@@ -86,6 +107,7 @@ def run_interactive_probes(
                     probe=probe,
                     mutation=mutation,
                     timeout=timeout,
+                    probe_kind=probe_kind,
                 )
             )
             _write_report(
@@ -95,6 +117,7 @@ def run_interactive_probes(
                 mutation,
                 results,
                 include_fixture_patterns,
+                probe_kind,
                 completed=False,
             )
 
@@ -105,6 +128,7 @@ def run_interactive_probes(
         mutation,
         results,
         include_fixture_patterns,
+        probe_kind,
         completed=True,
     )
 
@@ -120,6 +144,7 @@ def _write_report(
     mutation: str,
     results: list[InteractiveProbeResult],
     include_fixture_patterns: tuple[str, ...],
+    probe_kind: str,
     completed: bool,
 ) -> dict:
     report = {
@@ -128,7 +153,7 @@ def _write_report(
         "output_dir": str(output_dir.resolve()),
         "probes": list(probes),
         "include_fixture_patterns": list(include_fixture_patterns),
-        "probe_kind": PROBE_KIND,
+        "probe_kind": probe_kind,
         "mutation": mutation,
         "result_count": len(results),
         "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
@@ -153,17 +178,27 @@ def _run_probe(
     probe: str,
     mutation: str,
     timeout: int,
+    probe_kind: str,
 ) -> InteractiveProbeResult:
     if probe not in SUPPORTED_PROBES:
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status="failed",
             output=None,
             message=f"unsupported probe: {probe}",
+        )
+    if probe_kind == UI_INTERACTION_PROBE_KIND:
+        return _run_ui_interaction_probe(
+            fixture_path,
+            fixture_label,
+            output_dir,
+            probe=probe,
+            mutation=mutation,
+            timeout=timeout,
         )
 
     work = (
@@ -185,7 +220,7 @@ def _run_probe(
             return InteractiveProbeResult(
                 fixture=fixture_label,
                 probe=probe,
-                probe_kind=PROBE_KIND,
+                probe_kind=probe_kind,
                 mutation=mutation,
                 app="excel",
                 status="failed",
@@ -198,7 +233,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status="failed",
@@ -210,7 +245,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status=smoke.status,
@@ -221,7 +256,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
-            probe_kind=PROBE_KIND,
+            probe_kind=probe_kind,
             mutation=mutation,
             app="excel",
             status="failed",
@@ -232,13 +267,266 @@ def _run_probe(
     return InteractiveProbeResult(
         fixture=fixture_label,
         probe=probe,
-        probe_kind=PROBE_KIND,
+        probe_kind=probe_kind,
         mutation=mutation,
         app="excel",
         status="passed",
         output=str(probe_path),
         message=f"Microsoft Excel opened workbook and {part_label} is present",
     )
+
+
+def _run_ui_interaction_probe(
+    fixture_path: Path,
+    fixture_label: str,
+    output_dir: Path,
+    *,
+    probe: str,
+    mutation: str,
+    timeout: int,
+) -> InteractiveProbeResult:
+    if probe not in SUPPORTED_UI_INTERACTION_PROBES:
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=None,
+            message=f"probe {probe!r} does not have a click-level UI implementation",
+            ui_actions=[],
+        )
+
+    work = (
+        output_dir
+        / run_ooxml_fidelity_mutations._safe_stem(Path(fixture_label).with_suffix("").as_posix())
+        / mutation
+        / UI_INTERACTION_PROBE_KIND
+    )
+    work.mkdir(parents=True, exist_ok=True)
+    probe_path = work / fixture_path.name
+    shutil.copy2(fixture_path, probe_path)
+    if mutation != SOURCE_MUTATION:
+        prepared, mutation_error = run_ooxml_app_smoke._fixture_for_mutation(
+            probe_path,
+            fixture_label,
+            work,
+            mutation,
+        )
+        if mutation_error is not None:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=None,
+                message=mutation_error,
+                ui_actions=[],
+            )
+        probe_path = prepared
+
+    if not _probe_part_present(probe_path, probe):
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=str(probe_path),
+            message=f"{_probe_part_label(probe)} missing before Excel UI interaction",
+            ui_actions=[],
+        )
+
+    try:
+        active_name, ui_actions = _open_excel_with_ui_interaction(probe_path, probe, timeout)
+    except Exception as exc:
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=str(probe_path),
+            message=f"Excel UI interaction failed: {str(exc)[:500]}",
+            ui_actions=[],
+        )
+
+    required_action = REQUIRED_UI_ACTIONS[probe]
+    if required_action not in ui_actions:
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=str(probe_path),
+            message=f"required UI action was not observed: {required_action}",
+            ui_actions=ui_actions,
+        )
+    if not _probe_part_present(probe_path, probe):
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=str(probe_path),
+            message=f"{_probe_part_label(probe)} missing after Excel UI interaction",
+            ui_actions=ui_actions,
+        )
+
+    return InteractiveProbeResult(
+        fixture=fixture_label,
+        probe=probe,
+        probe_kind=UI_INTERACTION_PROBE_KIND,
+        mutation=mutation,
+        app="excel",
+        status="passed",
+        output=str(probe_path),
+        message=(
+            "Microsoft Excel opened "
+            f"{active_name}, completed required UI action, and "
+            f"{_probe_part_label(probe)} is present"
+        ),
+        ui_actions=ui_actions,
+    )
+
+
+def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tuple[str, list[str]]:
+    launched = subprocess.Popen(
+        ["open", "-a", "Microsoft Excel", str(src.resolve())],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout
+    ui_actions: list[str] = []
+    last_error = ""
+    while launched.poll() is None and time.monotonic() < deadline:
+        ui_actions.extend(_perform_probe_ui_actions(probe))
+        dialog = run_ooxml_app_smoke._excel_dialog_text()
+        if run_ooxml_app_smoke._is_excel_unsupported_content_dialog(dialog):
+            run_ooxml_app_smoke._dismiss_excel_unsupported_content_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            run_ooxml_app_smoke._quit_excel_best_effort()
+            run_ooxml_app_smoke._kill_process_group_best_effort(launched)
+            raise RuntimeError(f"Excel unsupported-content dialog: {dialog[:500]}")
+        if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
+            run_ooxml_app_smoke._dismiss_excel_repair_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            run_ooxml_app_smoke._quit_excel_best_effort()
+            run_ooxml_app_smoke._kill_process_group_best_effort(launched)
+            raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
+        last_error = dialog
+        time.sleep(0.25)
+    if launched.poll() is None:
+        run_ooxml_app_smoke._close_excel_best_effort()
+        run_ooxml_app_smoke._quit_excel_best_effort()
+        run_ooxml_app_smoke._kill_process_group_best_effort(launched)
+        raise subprocess.TimeoutExpired(
+            ["open", "-a", "Microsoft Excel", str(src.resolve())],
+            timeout,
+            output=last_error,
+        )
+    stdout, stderr = launched.communicate()
+    if launched.returncode != 0:
+        raise RuntimeError(f"open -a Microsoft Excel failed: {stderr[:500]}")
+
+    while time.monotonic() < deadline:
+        ui_actions.extend(_perform_probe_ui_actions(probe))
+        dialog = run_ooxml_app_smoke._excel_dialog_text()
+        if run_ooxml_app_smoke._is_excel_unsupported_content_dialog(dialog):
+            run_ooxml_app_smoke._dismiss_excel_unsupported_content_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            run_ooxml_app_smoke._quit_excel_best_effort()
+            raise RuntimeError(f"Excel unsupported-content dialog: {dialog[:500]}")
+        if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
+            run_ooxml_app_smoke._dismiss_excel_repair_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            run_ooxml_app_smoke._quit_excel_best_effort()
+            raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
+        name = run_ooxml_app_smoke._excel_active_workbook_name()
+        if name:
+            if probe == "pivot_refresh_state":
+                ui_actions.extend(_refresh_all_active_workbook())
+            run_ooxml_app_smoke._close_excel_best_effort()
+            run_ooxml_app_smoke._quit_excel_best_effort()
+            return name, _dedupe_actions(ui_actions)
+        last_error = dialog
+        time.sleep(0.5)
+    run_ooxml_app_smoke._close_excel_best_effort()
+    run_ooxml_app_smoke._quit_excel_best_effort()
+    raise subprocess.TimeoutExpired(
+        ["open", "-a", "Microsoft Excel", str(src.resolve())],
+        timeout,
+        output=last_error,
+    )
+
+
+def _perform_probe_ui_actions(probe: str) -> list[str]:
+    if probe == "macro_project_presence":
+        return _click_excel_button("Disable Macros")
+    if probe == "external_link_update_prompt":
+        return _click_excel_button("Don't Update")
+    return []
+
+
+def _click_excel_button(button: str) -> list[str]:
+    script = f'''
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return ""
+  tell process "Microsoft Excel"
+    try
+      if exists button "{button}" of window 1 then
+        click button "{button}" of window 1
+        return "clicked button: {button}"
+      end if
+    end try
+  end tell
+end tell
+return ""
+'''
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=1)
+    except subprocess.TimeoutExpired:
+        return []
+    action = proc.stdout.strip()
+    return [action] if action else []
+
+
+def _refresh_all_active_workbook() -> list[str]:
+    script = """
+tell application "Microsoft Excel"
+  try
+    refresh all active workbook
+    return "executed Excel command: refresh all"
+  on error errText
+    return "failed Excel command: refresh all: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["failed Excel command: refresh all: timeout"]
+    action = proc.stdout.strip()
+    return [action] if action else []
+
+
+def _dedupe_actions(actions: list[str]) -> list[str]:
+    out: list[str] = []
+    for action in actions:
+        if action and action not in out:
+            out.append(action)
+    return out
 
 
 def _probe_part_present(path: Path, probe: str) -> bool:
@@ -298,6 +586,15 @@ def main(argv: list[str] | None = None) -> int:
         choices=(SOURCE_MUTATION, *run_ooxml_fidelity_mutations.SUPPORTED_MUTATIONS),
         default=SOURCE_MUTATION,
     )
+    parser.add_argument(
+        "--probe-kind",
+        choices=SUPPORTED_PROBE_KINDS,
+        default=PROBE_KIND,
+        help=(
+            "Probe implementation to run. ooxml_state_presence opens/saves and checks "
+            "OOXML parts; excel_ui_interaction records targeted Excel UI actions."
+        ),
+    )
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument(
         "--fixture",
@@ -307,7 +604,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Fixture filename or shell-style pattern to include. May be passed multiple times.",
     )
     args = parser.parse_args(argv)
-    probes = tuple(args.probes) if args.probes else SUPPORTED_PROBES
+    if args.probes:
+        probes = tuple(args.probes)
+    elif args.probe_kind == UI_INTERACTION_PROBE_KIND:
+        probes = SUPPORTED_UI_INTERACTION_PROBES
+    else:
+        probes = SUPPORTED_PROBES
 
     report = run_interactive_probes(
         args.fixture_dir,
@@ -316,6 +618,7 @@ def main(argv: list[str] | None = None) -> int:
         mutation=args.mutation,
         timeout=args.timeout,
         include_fixture_patterns=tuple(args.fixtures),
+        probe_kind=args.probe_kind,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
