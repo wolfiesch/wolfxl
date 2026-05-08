@@ -240,6 +240,7 @@ def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> 
         mutation: str,
         timeout: int,
         probe_kind: str,
+        external_link_prompt_mode: str,
     ) -> object:
         report_path = output_dir / "interactive-probe-report.json"
         if calls:
@@ -302,6 +303,7 @@ def test_probe_runner_filters_fixtures(tmp_path: Path, monkeypatch) -> None:
         mutation: str,
         timeout: int,
         probe_kind: str,
+        external_link_prompt_mode: str,
     ) -> object:
         calls.append(fixture_label)
         return probe_runner.InteractiveProbeResult(
@@ -623,6 +625,36 @@ def test_external_link_ui_probe_does_not_force_unknown_update_prompt(
     assert opened is False
 
 
+def test_external_link_ui_probe_current_prompt_mode_does_not_force_setting(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(
+        probe_runner,
+        "_open_excel_with_ui_interaction_impl",
+        lambda src, probe, timeout: (
+            src.name,
+            [f"{probe}:{timeout}", "clicked button: Don't Update"],
+        ),
+    )
+
+    active_name, actions = probe_runner._open_excel_with_ui_interaction(
+        fixture,
+        "external_link_update_prompt",
+        45,
+        external_link_prompt_mode=probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT,
+    )
+
+    assert active_name == "external-link.xlsx"
+    assert actions == ["external_link_update_prompt:45", "clicked button: Don't Update"]
+    assert settings == []
+
+
 def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -630,7 +662,14 @@ def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, mon
     _write_external_link_workbook(fixture_dir / "external-link.xlsx")
     _write_manifest(fixture_dir, "external-link.xlsx")
 
-    def fake_open_with_ui(_src: Path, _probe: str, _timeout: int):
+    def fake_open_with_ui(
+        _src: Path,
+        _probe: str,
+        _timeout: int,
+        *,
+        external_link_prompt_mode: str,
+    ):
+        assert external_link_prompt_mode == probe_runner.EXTERNAL_LINK_PROMPT_MODE_FORCE
         return "external-link.xlsx", []
 
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
