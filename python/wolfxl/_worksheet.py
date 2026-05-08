@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -124,8 +125,34 @@ def _retarget_sheet_formula(refers_to: str, old: str, new: str) -> str:
     quoted_new = f"{quote_sheetname(new)}!"
     updated = body.replace(quoted_old, quoted_new)
     if updated == body:
-        updated = body.replace(f"{old}!", quoted_new)
+        old_token = re.escape(f"{old}!")
+        updated = re.sub(rf"(?<![A-Za-z0-9_]){old_token}", quoted_new, body)
     return f"{prefix}{updated}"
+
+
+def _pending_defined_name_for_sheet(
+    wb: Workbook, name: str, sheet_idx: int
+) -> object | None:
+    for pending in wb._pending_defined_names.values():  # noqa: SLF001
+        if (
+            getattr(pending, "name", None) == name
+            and getattr(pending, "localSheetId", None) == sheet_idx
+        ):
+            return pending
+    return None
+
+
+def _drop_pending_defined_name_aliases(
+    wb: Workbook, name: str, sheet_idx: int, keep_key: object
+) -> None:
+    for key, pending in list(wb._pending_defined_names.items()):  # noqa: SLF001
+        if key == keep_key:
+            continue
+        if (
+            getattr(pending, "name", None) == name
+            and getattr(pending, "localSheetId", None) == sheet_idx
+        ):
+            del wb._pending_defined_names[key]  # noqa: SLF001
 
 
 def _queue_defined_name_sheet_rename(
@@ -140,32 +167,102 @@ def _queue_defined_name_sheet_rename(
         return
     from wolfxl.workbook.defined_name import DefinedName
 
+    queued_names: set[str] = set()
     for entry in entries:
         if entry.get("scope") != "sheet":
             continue
-        refers_to = entry.get("refers_to") or ""
+        name = entry["name"]
+        pending = _pending_defined_name_for_sheet(wb, entry["name"], sheet_idx)
+        refers_to = (
+            getattr(pending, "value", None)
+            if pending is not None
+            else entry.get("refers_to")
+        ) or ""
         retargeted = _retarget_sheet_formula(refers_to, old, new)
         if retargeted == refers_to:
             continue
         defined_name = DefinedName(
-            name=entry["name"],
+            name=name,
             value=retargeted[1:] if retargeted.startswith("=") else retargeted,
             localSheetId=sheet_idx,
-            comment=entry.get("comment"),
-            hidden=bool(entry.get("hidden", False)),
-            customMenu=entry.get("custom_menu"),
-            description=entry.get("description"),
-            help=entry.get("help"),
-            statusBar=entry.get("status_bar"),
-            shortcutKey=entry.get("shortcut_key"),
-            function=entry.get("function"),
-            functionGroupId=entry.get("function_group_id"),
-            vbProcedure=entry.get("vb_procedure"),
-            xlm=entry.get("xlm"),
-            publishToServer=entry.get("publish_to_server"),
-            workbookParameter=entry.get("workbook_parameter"),
+            comment=(
+                getattr(pending, "comment", None)
+                if pending is not None
+                else entry.get("comment")
+            ),
+            hidden=(
+                bool(getattr(pending, "hidden", False))
+                if pending is not None
+                else bool(entry.get("hidden", False))
+            ),
+            customMenu=(
+                getattr(pending, "custom_menu", None)
+                if pending is not None
+                else entry.get("custom_menu")
+            ),
+            description=(
+                getattr(pending, "description", None)
+                if pending is not None
+                else entry.get("description")
+            ),
+            help=getattr(pending, "help", None) if pending is not None else entry.get("help"),
+            statusBar=(
+                getattr(pending, "status_bar", None)
+                if pending is not None
+                else entry.get("status_bar")
+            ),
+            shortcutKey=(
+                getattr(pending, "shortcut_key", None)
+                if pending is not None
+                else entry.get("shortcut_key")
+            ),
+            function=(
+                getattr(pending, "function", None)
+                if pending is not None
+                else entry.get("function")
+            ),
+            functionGroupId=(
+                getattr(pending, "function_group_id", None)
+                if pending is not None
+                else entry.get("function_group_id")
+            ),
+            vbProcedure=(
+                getattr(pending, "vb_procedure", None)
+                if pending is not None
+                else entry.get("vb_procedure")
+            ),
+            xlm=getattr(pending, "xlm", None) if pending is not None else entry.get("xlm"),
+            publishToServer=(
+                getattr(pending, "publish_to_server", None)
+                if pending is not None
+                else entry.get("publish_to_server")
+            ),
+            workbookParameter=(
+                getattr(pending, "workbook_parameter", None)
+                if pending is not None
+                else entry.get("workbook_parameter")
+            ),
         )
-        wb._pending_defined_names[(defined_name.name, sheet_idx)] = defined_name  # noqa: SLF001
+        keep_key = (defined_name.name, sheet_idx)
+        wb._pending_defined_names[keep_key] = defined_name  # noqa: SLF001
+        _drop_pending_defined_name_aliases(wb, defined_name.name, sheet_idx, keep_key)
+        queued_names.add(name)
+
+    for key, pending in list(wb._pending_defined_names.items()):  # noqa: SLF001
+        name = getattr(pending, "name", None)
+        if not name or name in queued_names:
+            continue
+        if getattr(pending, "localSheetId", None) != sheet_idx:
+            continue
+        refers_to = getattr(pending, "value", "") or ""
+        retargeted = _retarget_sheet_formula(refers_to, old, new)
+        if retargeted == refers_to:
+            continue
+        pending.value = retargeted[1:] if retargeted.startswith("=") else retargeted
+        keep_key = (name, sheet_idx)
+        wb._pending_defined_names[keep_key] = pending  # noqa: SLF001
+        if key != keep_key:
+            del wb._pending_defined_names[key]  # noqa: SLF001
 
 
 class Worksheet:

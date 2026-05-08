@@ -489,6 +489,11 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
     ask_to_update_links = None
     if probe == "external_link_update_prompt":
         ask_to_update_links = _excel_ask_to_update_links()
+        if ask_to_update_links is None:
+            raise RuntimeError(
+                "could not read Excel ask to update links setting before forcing "
+                "external-link prompt"
+            )
         _set_excel_ask_to_update_links(True)
     try:
         return _open_excel_with_ui_interaction_impl(src, probe, timeout)

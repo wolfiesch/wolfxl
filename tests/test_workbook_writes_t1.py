@@ -182,3 +182,86 @@ def test_sheet_rename_retargets_sheet_scoped_defined_name(tmp_path: Path) -> Non
     assert 'name="ExternalData_1"' in workbook_xml
     assert 'localSheetId="0"' in workbook_xml
     assert 'hidden="1"' in workbook_xml
+
+
+def test_sheet_rename_retargets_pending_sheet_scoped_defined_name(
+    tmp_path: Path,
+) -> None:
+    """Rename should preserve a caller's queued local-name edit."""
+    from openpyxl.workbook.defined_name import DefinedName as XDefinedName
+
+    src = tmp_path / "pending_name.xlsx"
+    dst = tmp_path / "renamed_pending.xlsx"
+
+    op = openpyxl.Workbook()
+    ws = op.active
+    ws.title = "Data"
+    defined_name = XDefinedName(
+        "LocalName",
+        attr_text="Data!$A$1",
+        localSheetId=0,
+        hidden=True,
+    )
+    if hasattr(op.defined_names, "add"):
+        op.defined_names.add(defined_name)
+    else:
+        op.defined_names["LocalName"] = defined_name
+    op.save(src)
+
+    wb = load_workbook(src, modify=True)
+    wb.defined_names["LocalName"] = DefinedName(
+        name="LocalName",
+        value="Data!$B$2",
+        localSheetId=0,
+        hidden=False,
+        description="caller edit",
+    )
+    wb["Data"].title = "Renamed"
+    wb.save(dst)
+    wb.close()
+
+    with ZipFile(dst) as zf:
+        workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+    assert "'Renamed'!$B$2" in workbook_xml
+    assert "Data!$B$2" not in workbook_xml
+    assert 'description="caller edit"' in workbook_xml
+    assert 'hidden="1"' not in workbook_xml
+
+
+def test_sheet_rename_retargets_whole_sheet_tokens_only(tmp_path: Path) -> None:
+    """Renaming Data must not rewrite SummaryData references."""
+    from openpyxl.workbook.defined_name import DefinedName as XDefinedName
+
+    src = tmp_path / "token_boundary.xlsx"
+    dst = tmp_path / "renamed_token_boundary.xlsx"
+
+    op = openpyxl.Workbook()
+    data = op.active
+    data.title = "Data"
+    op.create_sheet("SummaryData")
+    defined_name = XDefinedName(
+        "LocalName",
+        attr_text="SummaryData!$A$1,Data!$B$2",
+        localSheetId=0,
+    )
+    if hasattr(op.defined_names, "add"):
+        op.defined_names.add(defined_name)
+    else:
+        op.defined_names["LocalName"] = defined_name
+    op.save(src)
+
+    wb = load_workbook(src, modify=True)
+    wb.defined_names["LocalName"] = DefinedName(
+        name="LocalName",
+        value="SummaryData!$A$1,Data!$B$2",
+        localSheetId=0,
+    )
+    wb["Data"].title = "Renamed"
+    wb.save(dst)
+    wb.close()
+
+    with ZipFile(dst) as zf:
+        workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+    assert "SummaryData!$A$1" in workbook_xml
+    assert "'Renamed'!$B$2" in workbook_xml
+    assert "Summary'Renamed'!" not in workbook_xml

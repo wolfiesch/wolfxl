@@ -855,8 +855,8 @@
     },
     {
       "name": "excel_ui_interaction_external_link_prompt_click",
-      "path": "/tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508/interactive-probe-report.json",
-      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508.stdout.json",
+      "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",
       "expect": [
         {"path": "completed", "equals": true},
         {"path": "failure_count", "equals": 0},

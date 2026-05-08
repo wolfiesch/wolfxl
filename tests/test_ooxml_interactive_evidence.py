@@ -591,6 +591,38 @@ def test_external_link_ui_probe_restores_update_prompt_after_failure(
     assert settings == [True, False]
 
 
+def test_external_link_ui_probe_does_not_force_unknown_update_prompt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+    opened = False
+
+    def open_with_ui(_src: Path, _probe: str, _timeout: int) -> tuple[str, list[str]]:
+        nonlocal opened
+        opened = True
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: None)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", open_with_ui)
+
+    try:
+        probe_runner._open_excel_with_ui_interaction(
+            fixture,
+            "external_link_update_prompt",
+            45,
+        )
+    except RuntimeError as exc:
+        assert "could not read Excel ask to update links setting" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert settings == []
+    assert opened is False
+
+
 def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
