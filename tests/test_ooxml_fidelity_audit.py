@@ -329,7 +329,33 @@ def test_chart_formula_sheet_reference_audit_accepts_quoted_and_external_refs(
 
     snapshot = audit_module.snapshot(workbook)
 
-    assert snapshot.chart_formula_sheet_ref_issues == []
+    assert snapshot.chart_sheet_ref_issues == []
+
+
+def test_detects_chart_pivot_source_reference_to_missing_sheet(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_pivot_source_xml(
+        "[Book.xlsx]Sheet1!PivotTable1"
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "chart_pivot_source_missing_sheet"
+    )
+    assert issue["part"] == "xl/charts/chart1.xml"
+    assert "Sheet1" in issue["message"]
 
 
 def test_fingerprints_structured_references_without_external_links(
@@ -881,6 +907,14 @@ def _chart_xml(formula: str) -> str:
   <c:chart><c:plotArea><c:barChart><c:ser>
     <c:val><c:numRef><c:f>{formula}</c:f></c:numRef></c:val>
   </c:ser></c:barChart></c:plotArea></c:chart>
+</c:chartSpace>"""
+
+
+def _chart_pivot_source_xml(name: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:pivotSource><c:name>{name}</c:name><c:fmtId val="0"/></c:pivotSource>
+  <c:chart><c:plotArea/></c:chart>
 </c:chartSpace>"""
 
 

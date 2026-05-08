@@ -1154,18 +1154,34 @@ fn rewrite_chart_formula_sheet_renames(
     let mut writer = XmlWriter::new(Vec::with_capacity(chart_xml.len()));
     let mut buf = Vec::new();
     let mut in_formula = false;
+    let mut in_pivot_source = false;
+    let mut in_pivot_source_name = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
-                in_formula = e.local_name().as_ref() == b"f";
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                if local == b"pivotSource" {
+                    in_pivot_source = true;
+                }
+                in_formula = local == b"f";
+                in_pivot_source_name = in_pivot_source && local == b"name";
                 writer
                     .write_event(Event::Start(e.into_owned()))
                     .map_err(|e| format!("chart XML write error: {e}"))?;
             }
             Ok(Event::End(e)) => {
-                if e.local_name().as_ref() == b"f" {
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                if local == b"f" {
                     in_formula = false;
+                }
+                if local == b"name" {
+                    in_pivot_source_name = false;
+                }
+                if local == b"pivotSource" {
+                    in_pivot_source = false;
                 }
                 writer
                     .write_event(Event::End(e.into_owned()))
@@ -1182,6 +1198,16 @@ fn rewrite_chart_formula_sheet_renames(
                     .map_err(|e| format!("chart formula decode error: {e}"))?
                     .into_owned();
                 let translated = rename_formula_sheet_refs(&formula_text, renames);
+                writer
+                    .write_event(Event::Text(BytesText::new(&translated)))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) if in_pivot_source_name => {
+                let pivot_source_name = t
+                    .unescape()
+                    .map_err(|e| format!("chart pivot source decode error: {e}"))?
+                    .into_owned();
+                let translated = rename_chart_pivot_source_sheet_refs(&pivot_source_name, renames);
                 writer
                     .write_event(Event::Text(BytesText::new(&translated)))
                     .map_err(|e| format!("chart XML write error: {e}"))?;
@@ -1213,6 +1239,29 @@ fn rewrite_chart_formula_sheet_renames(
     }
 
     Ok(writer.into_inner())
+}
+
+fn rename_chart_pivot_source_sheet_refs(name: &str, renames: &[(String, String)]) -> String {
+    let mut current = name.to_string();
+    for (old_name, new_name) in renames {
+        let Some(bang_idx) = current.find('!') else {
+            continue;
+        };
+        let sheet_start = current[..bang_idx]
+            .rfind(']')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        if current[sheet_start..bang_idx] != *old_name {
+            continue;
+        }
+        current = format!(
+            "{}{}{}",
+            &current[..sheet_start],
+            new_name,
+            &current[bang_idx..]
+        );
+    }
+    current
 }
 
 fn rename_formula_sheet_refs(formula: &str, renames: &[(String, String)]) -> String {
