@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 import subprocess
+import zipfile
 
 import openpyxl
 
@@ -45,6 +46,23 @@ def test_validate_xlsx_accepts_basic_workbook(tmp_path: Path) -> None:
 
     assert ok
     assert message == "ok"
+
+
+def test_contains_powerview_content_detects_package_text(tmp_path: Path) -> None:
+    fixture = tmp_path / "powerview.xlsx"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        archive.writestr("xl/sharedStrings.xml", "<sst>PowerView report</sst>")
+
+    assert smoke_module._contains_powerview_content(fixture)
+
+
+def test_contains_powerview_content_ignores_plain_workbook(tmp_path: Path) -> None:
+    fixture = tmp_path / "simple.xlsx"
+    _make_fixture(fixture)
+
+    assert not smoke_module._contains_powerview_content(fixture)
 
 
 def test_smoke_skips_libreoffice_when_missing(tmp_path: Path, monkeypatch) -> None:
@@ -94,6 +112,31 @@ def test_smoke_excel_accepts_expected_active_workbook(tmp_path: Path, monkeypatc
     assert result.message == "opened and closed in Microsoft Excel: simple.xlsx"
 
 
+def test_smoke_excel_rejects_powerview_before_launching_excel(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = tmp_path / "powerview.xlsx"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        archive.writestr("xl/sharedStrings.xml", "<sst>Power View report</sst>")
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+
+    def fail_open(_src, _timeout):
+        raise AssertionError("Excel should not launch for PowerView preflight failures")
+
+    monkeypatch.setattr(smoke_module, "_open_excel_with_finder_and_close", fail_open)
+
+    result = smoke_module._smoke_excel(fixture, tmp_path / "out", timeout=1)
+
+    assert result.status == "failed"
+    assert smoke_module.EXCEL_UNSUPPORTED_CONTENT_MARKER in result.message
+    assert "PowerView" in result.message
+
+
 def test_excel_active_workbook_name_treats_missing_value_as_none(monkeypatch) -> None:
     class FakeProc:
         stdout = "missing value\n"
@@ -119,6 +162,18 @@ def test_excel_repair_dialog_detection() -> None:
     assert not smoke_module._is_excel_repair_dialog("windows=fixture.xlsx")
 
 
+def test_excel_unsupported_content_dialog_detection() -> None:
+    dialog = (
+        "windows=real-excel-powerpivot-contoso-pnl.xlsx\n"
+        "buttons=Open as Read-OnlyCancel\n"
+        "text=This workbook contains content that isn't supported in this "
+        "version of Excel. PowerView"
+    )
+
+    assert smoke_module._is_excel_unsupported_content_dialog(dialog)
+    assert not smoke_module._is_excel_unsupported_content_dialog("windows=fixture.xlsx")
+
+
 def test_dismiss_excel_repair_dialog_does_not_click_repair(monkeypatch) -> None:
     scripts: list[str] = []
 
@@ -140,6 +195,29 @@ def test_dismiss_excel_repair_dialog_does_not_click_repair(monkeypatch) -> None:
     assert 'button "Delete"' in script
     assert 'button "Yes"' not in script
     assert 'button "Recover"' not in script
+
+
+def test_dismiss_excel_unsupported_content_dialog_does_not_open_read_only(
+    monkeypatch,
+) -> None:
+    scripts: list[str] = []
+
+    class FakeProc:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_run(script: str, **_kwargs):
+        scripts.append(script)
+        return FakeProc()
+
+    monkeypatch.setattr(smoke_module, "_run_osascript", fake_run)
+
+    smoke_module._dismiss_excel_unsupported_content_dialogs()
+
+    script = scripts[0]
+    assert 'button "Cancel"' in script
+    assert 'button "Open as Read-Only"' not in script
 
 
 def test_run_osascript_timeout_tolerates_process_group_permission_error(
@@ -328,6 +406,49 @@ def test_run_smoke_aborts_after_first_excel_repair_dialog(tmp_path: Path, monkey
 
     assert report["aborted"] is True
     assert "stopped after first Microsoft Excel repair dialog" in report["abort_reason"]
+    assert report["result_count"] == 1
+    assert report["failure_count"] == 1
+    assert len(seen_sources) == 1
+    assert (output_dir / "app-smoke-report.json").is_file()
+
+
+def test_run_smoke_aborts_after_first_excel_unsupported_content_dialog(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "a.xlsx")
+    _make_fixture(fixture_dir / "b.xlsx")
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+
+    seen_sources: list[str] = []
+
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+        seen_sources.append(src.name)
+        return smoke_module.AppSmokeResult(
+            fixture=src.name,
+            mutation="source",
+            app="excel",
+            status="failed",
+            output=None,
+            message=f"{smoke_module.EXCEL_UNSUPPORTED_CONTENT_MARKER} simulated",
+        )
+
+    monkeypatch.setattr(smoke_module, "_smoke_excel", fake_smoke)
+
+    report = smoke_module.run_smoke(
+        fixture_dir,
+        output_dir,
+        apps=("excel",),
+        timeout=1,
+    )
+
+    assert report["aborted"] is True
+    assert "unsupported-content dialog" in report["abort_reason"]
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
     assert len(seen_sources) == 1
