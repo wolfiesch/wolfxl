@@ -1,5 +1,6 @@
 //! Ancillary part registry — per-sheet inventory of comments, VML drawings,
-//! tables, hyperlinks, and legacy drawings, lazily populated from the source
+//! tables, DrawingML drawings, controls, hyperlinks, and legacy drawings,
+//! lazily populated from the source
 //! ZIP's `_rels/sheetN.xml.rels` files.
 //!
 //! Scaffolding for RFC-022 (Hyperlinks), RFC-023 (Comments), RFC-024 (Tables),
@@ -45,6 +46,10 @@ pub struct SheetAncillary {
     /// Absolute ZIP paths of all table parts on this sheet, in source order.
     /// One sheet can own many tables.
     pub table_parts: Vec<String>,
+    /// Absolute ZIP path of the DrawingML drawing part, if the sheet has one.
+    pub drawing_part: Option<String>,
+    /// Absolute ZIP paths of all form-control property parts on this sheet.
+    pub ctrl_prop_parts: Vec<String>,
     /// `rId`s of hyperlink relationships on this sheet, in source order.
     /// Sheets typically have <50 hyperlinks; keeping the rIds (rather than
     /// targets) lets RFC-022 dedupe by id when adding new hyperlinks.
@@ -180,6 +185,14 @@ fn classify(rels_xml: &[u8], sheet_path: &str) -> Result<SheetAncillary, String>
             }
             rt::TABLE => {
                 out.table_parts.push(abs);
+            }
+            rt::DRAWING => {
+                if out.drawing_part.is_none() {
+                    out.drawing_part = Some(abs);
+                }
+            }
+            rt::CTRL_PROP => {
+                out.ctrl_prop_parts.push(abs);
             }
             rt::HYPERLINK => {
                 // Hyperlink targets are external URIs (TargetMode="External");

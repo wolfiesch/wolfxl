@@ -31,7 +31,7 @@ FEATURE_PART_PREFIXES = {
     "chart_style": ("xl/charts/style", "xl/charts/colors"),
     "comment": ("xl/comments", "xl/threadedComments/", "xl/persons/"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
-    "connection": ("xl/connections.xml",),
+    "connection": ("xl/connections.xml", "xl/queryTables/"),
     "custom_property": ("xl/customProperty",),
     "custom_xml": ("customXml/", "xl/customXml/"),
     "data_model": ("xl/model/",),
@@ -86,6 +86,7 @@ class Snapshot:
     relationships: list[Relationship]
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
+    table_integrity_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
     semantic_fingerprints: dict[str, dict[str, object]]
 
@@ -101,6 +102,7 @@ def snapshot(path: Path) -> Snapshot:
             relationships=_read_relationships(archive),
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
+            table_integrity_issues=_read_table_integrity_issues(archive),
             feature_parts=_classify_feature_parts(parts),
             semantic_fingerprints=_read_semantic_fingerprints(archive),
         )
@@ -127,6 +129,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_dangling_relationships(after_snapshot, issues)
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
+    _audit_table_integrity(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
@@ -225,6 +228,10 @@ def _audit_conditional_formatting_refs(
                     ),
                 }
             )
+
+
+def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
+    issues.extend(snapshot_.table_integrity_issues)
 
 
 def _audit_feature_hotspots(
@@ -387,6 +394,68 @@ def _read_cf_dxf_refs(archive: zipfile.ZipFile) -> list[tuple[str, int]]:
             if raw is not None and raw.isdigit():
                 refs.append((part, int(raw)))
     return refs
+
+
+def _read_table_integrity_issues(archive: zipfile.ZipFile) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for part in sorted(_feature_xml_parts(set(archive.namelist()), "xl/tables/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        ref = _attr(root, "ref")
+        ref_width = _range_width(ref) if ref else None
+        columns = _first_child_by_local(root, "tableColumns")
+        child_count = (
+            len(_children_by_local(columns, "tableColumn"))
+            if columns is not None
+            else 0
+        )
+        declared_count_raw = _attr(columns, "count") if columns is not None else None
+        declared_count = (
+            int(declared_count_raw)
+            if declared_count_raw is not None and declared_count_raw.isdigit()
+            else None
+        )
+        mismatches: list[str] = []
+        if ref_width is not None and child_count != ref_width:
+            mismatches.append(f"ref width={ref_width}, tableColumn children={child_count}")
+        if declared_count is not None and declared_count != child_count:
+            mismatches.append(f"count={declared_count}, tableColumn children={child_count}")
+        if declared_count is not None and ref_width is not None and declared_count != ref_width:
+            mismatches.append(f"count={declared_count}, ref width={ref_width}")
+        if mismatches:
+            mismatch_text = "; ".join(mismatches)
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": "table_column_count_mismatch",
+                    "part": part,
+                    "message": (
+                        f"{part} table metadata is internally inconsistent: {mismatch_text}"
+                    ),
+                }
+            )
+    return issues
+
+
+def _range_width(ref: str) -> int | None:
+    first, _, last = ref.partition(":")
+    last = last or first
+    first_col = _cell_col_index(first)
+    last_col = _cell_col_index(last)
+    if first_col is None or last_col is None:
+        return None
+    return abs(last_col - first_col) + 1
+
+
+def _cell_col_index(cell: str) -> int | None:
+    match = re.match(r"^\$?([A-Za-z]+)\$?\d+$", cell)
+    if match is None:
+        return None
+    value = 0
+    for char in match.group(1).upper():
+        value = value * 26 + (ord(char) - ord("A") + 1)
+    return value
 
 
 def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str, object]]:
@@ -1373,6 +1442,7 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "content_override_count": len(snapshot_.content_overrides),
         "dxfs_count": snapshot_.dxfs_count,
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
+        "table_integrity_issue_count": len(snapshot_.table_integrity_issues),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()
         },

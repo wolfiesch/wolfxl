@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -111,9 +112,157 @@ from wolfxl._worksheet_write_buffers import (
     write_rows as _write_rows,
 )
 from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl.utils import quote_sheetname
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
+
+
+def _retarget_sheet_formula(refers_to: str, old: str, new: str) -> str:
+    prefix = "=" if refers_to.startswith("=") else ""
+    body = refers_to[1:] if prefix else refers_to
+    quoted_old = f"{quote_sheetname(old)}!"
+    quoted_new = f"{quote_sheetname(new)}!"
+    updated = body.replace(quoted_old, quoted_new)
+    if updated == body:
+        old_token = re.escape(f"{old}!")
+        updated = re.sub(rf"(?<![A-Za-z0-9_]){old_token}", quoted_new, body)
+    return f"{prefix}{updated}"
+
+
+def _pending_defined_name_for_sheet(
+    wb: Workbook, name: str, sheet_idx: int
+) -> object | None:
+    for pending in wb._pending_defined_names.values():  # noqa: SLF001
+        if (
+            getattr(pending, "name", None) == name
+            and getattr(pending, "localSheetId", None) == sheet_idx
+        ):
+            return pending
+    return None
+
+
+def _drop_pending_defined_name_aliases(
+    wb: Workbook, name: str, sheet_idx: int, keep_key: object
+) -> None:
+    for key, pending in list(wb._pending_defined_names.items()):  # noqa: SLF001
+        if key == keep_key:
+            continue
+        if (
+            getattr(pending, "name", None) == name
+            and getattr(pending, "localSheetId", None) == sheet_idx
+        ):
+            del wb._pending_defined_names[key]  # noqa: SLF001
+
+
+def _queue_defined_name_sheet_rename(
+    wb: Workbook, old: str, new: str, sheet_idx: int
+) -> None:
+    reader = getattr(wb, "_rust_reader", None)
+    if reader is None or not hasattr(reader, "read_named_ranges"):
+        return
+    try:
+        entries = reader.read_named_ranges(old)
+    except Exception:
+        return
+    from wolfxl.workbook.defined_name import DefinedName
+
+    queued_names: set[str] = set()
+    for entry in entries:
+        if entry.get("scope") != "sheet":
+            continue
+        name = entry["name"]
+        pending = _pending_defined_name_for_sheet(wb, entry["name"], sheet_idx)
+        refers_to = (
+            getattr(pending, "value", None)
+            if pending is not None
+            else entry.get("refers_to")
+        ) or ""
+        retargeted = _retarget_sheet_formula(refers_to, old, new)
+        if retargeted == refers_to:
+            continue
+        defined_name = DefinedName(
+            name=name,
+            value=retargeted[1:] if retargeted.startswith("=") else retargeted,
+            localSheetId=sheet_idx,
+            comment=(
+                getattr(pending, "comment", None)
+                if pending is not None
+                else entry.get("comment")
+            ),
+            hidden=(
+                bool(getattr(pending, "hidden", False))
+                if pending is not None
+                else bool(entry.get("hidden", False))
+            ),
+            customMenu=(
+                getattr(pending, "custom_menu", None)
+                if pending is not None
+                else entry.get("custom_menu")
+            ),
+            description=(
+                getattr(pending, "description", None)
+                if pending is not None
+                else entry.get("description")
+            ),
+            help=getattr(pending, "help", None) if pending is not None else entry.get("help"),
+            statusBar=(
+                getattr(pending, "status_bar", None)
+                if pending is not None
+                else entry.get("status_bar")
+            ),
+            shortcutKey=(
+                getattr(pending, "shortcut_key", None)
+                if pending is not None
+                else entry.get("shortcut_key")
+            ),
+            function=(
+                getattr(pending, "function", None)
+                if pending is not None
+                else entry.get("function")
+            ),
+            functionGroupId=(
+                getattr(pending, "function_group_id", None)
+                if pending is not None
+                else entry.get("function_group_id")
+            ),
+            vbProcedure=(
+                getattr(pending, "vb_procedure", None)
+                if pending is not None
+                else entry.get("vb_procedure")
+            ),
+            xlm=getattr(pending, "xlm", None) if pending is not None else entry.get("xlm"),
+            publishToServer=(
+                getattr(pending, "publish_to_server", None)
+                if pending is not None
+                else entry.get("publish_to_server")
+            ),
+            workbookParameter=(
+                getattr(pending, "workbook_parameter", None)
+                if pending is not None
+                else entry.get("workbook_parameter")
+            ),
+        )
+        keep_key = (defined_name.name, sheet_idx)
+        wb._pending_defined_names[keep_key] = defined_name  # noqa: SLF001
+        _drop_pending_defined_name_aliases(wb, defined_name.name, sheet_idx, keep_key)
+        queued_names.add(name)
+
+    for key, pending in list(wb._pending_defined_names.items()):  # noqa: SLF001
+        name = getattr(pending, "name", None)
+        if not name or name in queued_names:
+            continue
+        if getattr(pending, "localSheetId", None) != sheet_idx:
+            continue
+        refers_to = getattr(pending, "value", "") or ""
+        retargeted = _retarget_sheet_formula(refers_to, old, new)
+        if retargeted == refers_to:
+            continue
+        pending.value = retargeted[1:] if retargeted.startswith("=") else retargeted
+        keep_key = (name, sheet_idx)
+        wb._pending_defined_names[keep_key] = pending  # noqa: SLF001
+        if key != keep_key:
+            del wb._pending_defined_names[key]  # noqa: SLF001
 
 
 class Worksheet:
@@ -204,15 +353,17 @@ class Worksheet:
             return
         if value in wb._sheets or value in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
             raise ValueError(f"Sheet '{value}' already exists")
+        idx = wb._sheet_names.index(old)  # noqa: SLF001
+        _queue_defined_name_sheet_rename(wb, old, value, idx)
         if wb._rust_patcher is not None:  # noqa: SLF001
             queue_rename = getattr(wb._rust_patcher, "queue_sheet_rename", None)  # noqa: SLF001
             if queue_rename is not None:
                 queue_rename(old, value)
         # Update workbook bookkeeping.
-        idx = wb._sheet_names.index(old)  # noqa: SLF001
         wb._sheet_names[idx] = value  # noqa: SLF001
         wb._sheets[value] = wb._sheets.pop(old)  # noqa: SLF001
         self._title = value
+        self._defined_names_cache = None
         # Sync the Rust writer so ensure_sheet_exists() sees the new name.
         if wb._rust_writer is not None:  # noqa: SLF001
             wb._rust_writer.rename_sheet(old, value)  # noqa: SLF001

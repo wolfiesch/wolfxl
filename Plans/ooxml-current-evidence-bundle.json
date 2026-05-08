@@ -22,13 +22,14 @@
     },
     {
       "name": "interactive_evidence_gate",
-      "path": "/tmp/wolfxl-interactive-evidence-external-oracle-all.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --report /tmp/wolfxl-interactive-probe-macro-excel.json --report /tmp/wolfxl-interactive-probe-embedded-control-excel.json --report /tmp/wolfxl-interactive-probe-external-link-excel.json --report /tmp/wolfxl-interactive-probe-pivot-excel.json --report /tmp/wolfxl-interactive-probe-slicer-excel.json --report /tmp/wolfxl-interactive-probe-timeline-excel.json --strict > /tmp/wolfxl-interactive-evidence-external-oracle-all.json",
+      "path": "/tmp/wolfxl-interactive-evidence-external-oracle-all-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --recursive --strict --report /tmp/wolfxl-interactive-probes-pivot-one-clean-20260508/interactive-probe-report.json --report /tmp/wolfxl-interactive-probes-slicer-one-clean-20260508/interactive-probe-report.json --report /tmp/wolfxl-interactive-probes-timeline-one-clean-20260508/interactive-probe-report.json --report /tmp/wolfxl-interactive-probes-external-link-one-clean-20260508/interactive-probe-report.json --report /tmp/wolfxl-interactive-probes-embedded-one-clean-20260508/interactive-probe-report.json --report /tmp/wolfxl-interactive-probes-macro-clean-rerun-20260508/interactive-probe-report.json > /tmp/wolfxl-interactive-evidence-external-oracle-all-20260508.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "probe_kind", "equals": "ooxml_state_presence"},
         {"path": "fixture_count", "equals": 22},
         {"path": "report_count", "equals": 6},
+        {"path": "incomplete_report_count", "equals": 0},
         {"path": "probes.slicer_selection_state.clear", "equals": true},
         {"path": "probes.slicer_selection_state.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.timeline_selection_state.clear", "equals": true},
@@ -41,6 +42,81 @@
         {"path": "probes.macro_project_presence.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.embedded_control_openability.clear", "equals": true},
         {"path": "probes.embedded_control_openability.probe_kind", "equals": "ooxml_state_presence"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_macro_disable_button",
+      "path": "/tmp/wolfxl-ui-interaction-macro-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-macro-20260508 --probe-kind excel_ui_interaction --probe macro_project_presence --fixture real-excel-macro-basic.xlsm --timeout 120 > /tmp/wolfxl-ui-interaction-macro-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-macro-basic.xlsm"},
+        {"path": "results.0.probe", "equals": "macro_project_presence"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Disable Macros"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_pivot_refresh_command",
+      "path": "/tmp/wolfxl-ui-interaction-pivot-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-pivot-20260508 --probe-kind excel_ui_interaction --probe pivot_refresh_state --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-pivot-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "pivot_refresh_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["executed Excel command: refresh all"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_embedded_control_click",
+      "path": "/tmp/wolfxl-ui-interaction-control-click-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-control-click-20260508 --probe-kind excel_ui_interaction --probe embedded_control_openability --fixture real-excel-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-control-click-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-control-props-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked Excel embedded/control object", "clicked Excel embedded/control object: List Box 1", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_slicer_all_items_click",
+      "path": "/tmp/wolfxl-ui-interaction-slicer-all-items-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-slicer-all-items-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-slicer-all-items-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-table-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION", "clicked Excel slicer item", "clicked Excel slicer item: REGION", "clicked Excel slicer item: YEAR", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_timeline_month_click",
+      "path": "/tmp/wolfxl-ui-interaction-timeline-click-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-timeline-click-20260508 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-timeline-click-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel timeline shape", "selected Excel timeline shape: ORDER DATE", "clicked Excel timeline month", "clicked Excel timeline month: May", "saved active workbook"]}
       ]
     },
     {
@@ -405,14 +481,18 @@
       ]
     },
     {
-      "name": "powerpivot_contoso_sidecar_excel_app_open",
+      "name": "powerpivot_contoso_sidecar_excel_expected_unsupported",
       "path": "/tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker --app excel --timeout 120 --mutation source --mutation marker_cell > /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
       "expect": [
         {"path": "result_count", "equals": 2},
         {"path": "failure_count", "equals": 0},
         {"path": "apps", "equals": ["excel"]},
-        {"path": "mutations", "equals": ["source", "marker_cell"]}
+        {"path": "mutations", "equals": ["source", "marker_cell"]},
+        {"path": "results.0.status", "equals": "expected_app_unsupported"},
+        {"path": "results.0.message", "contains": "PowerView"},
+        {"path": "results.1.status", "equals": "expected_app_unsupported"},
+        {"path": "results.1.message", "contains": "PowerView"}
       ]
     },
     {
@@ -429,13 +509,15 @@
     {
       "name": "powerpivot_contoso_sidecar_coverage",
       "path": "/tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/powerpivot_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json --app-report /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json --render-report /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json > /tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/powerpivot_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json --render-report /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json > /tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "fixture_count", "equals": 1},
+        {"path": "app_report_count", "equals": 0},
         {"path": "surfaces.powerpivot_data_model_preservation.status", "equals": "clear"},
         {"path": "surfaces.powerpivot_data_model_preservation.structural_mutation_fixtures", "length_at_least": 1},
-        {"path": "surfaces.powerpivot_data_model_preservation.intentional_app_open_fixtures", "length_at_least": 1},
+        {"path": "surfaces.powerpivot_data_model_preservation.app_open_fixtures", "equals": []},
+        {"path": "surfaces.powerpivot_data_model_preservation.intentional_app_open_fixtures", "equals": []},
         {"path": "surfaces.powerpivot_data_model_preservation.intentional_render_fixtures", "length_at_least": 1}
       ]
     },
@@ -449,7 +531,13 @@
         {"path": "unknown_part_family_count", "equals": 0},
         {"path": "unknown_relationship_type_count", "equals": 0},
         {"path": "unknown_content_type_count", "equals": 0},
-        {"path": "unknown_extension_uri_count", "equals": 0}
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_features", "equals": {"power_view": ["real-excel-powerpivot-contoso-pnl.xlsx"]}},
+        {"path": "app_unsupported_feature_count", "equals": 1},
+        {"path": "expected_app_unsupported_features", "equals": {"power_view": ["real-excel-powerpivot-contoso-pnl.xlsx"]}},
+        {"path": "expected_app_unsupported_feature_count", "equals": 1},
+        {"path": "unexpected_app_unsupported_feature_count", "equals": 0},
+        {"path": "missing_expected_app_unsupported_feature_count", "equals": 0}
       ]
     },
     {
@@ -635,16 +723,152 @@
       ]
     },
     {
+      "name": "public_powerbi_expanded_gap_radar",
+      "path": "/tmp/wolfxl-public-powerbi-expanded-gap-radar-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /tmp/wolfxl-public-powerbi-expanded-20260508 --json --strict > /tmp/wolfxl-public-powerbi-expanded-gap-radar-20260508.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 8},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_feature_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_mutations",
+      "path": "/tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-public-powerbi-expanded-mutations-20260508 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 144},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_excel_source_app_open",
+      "path": "/tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 8},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_excel_mutation_app_open",
+      "path": "/tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508 --app excel --timeout 180 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 144},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_gap_radar",
+      "path": "/tmp/wolfxl-public-microsoft-extra-gap-radar-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --json --strict > /tmp/wolfxl-public-microsoft-extra-gap-radar-20260508.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 2},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_feature_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_excel_source_app_open",
+      "path": "/tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_mutations",
+      "path": "/tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 36},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_adventureworks_rename_retarget_mutation",
+      "path": "/tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-adventureworks-rename-retarget-check-20260508 --fixture adventureworks-sales.xlsx --mutation rename_first_sheet > /tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 1},
+        {"path": "results.0.fixture", "equals": "adventureworks-sales.xlsx"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed_with_expected_drift"}
+      ]
+    },
+    {
+      "name": "public_adventureworks_renamed_excel_app_open",
+      "path": "/tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-single-mutated-open-probe-retarget-20260508 --output-dir /tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
-      "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
+      "path": "/tmp/wolfxl-coverage-synthgl-recursive-richer-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json > /tmp/wolfxl-coverage-synthgl-recursive-richer-20260508.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "recursive", "equals": true},
         {"path": "fixture_count", "equals": 32},
-        {"path": "mutation_report_count", "equals": 1},
+        {"path": "mutation_report_count", "equals": 2},
         {"path": "surfaces.python_in_excel_metadata.status", "equals": "clear"},
         {"path": "surfaces.sheet_metadata_preservation.status", "equals": "clear"}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_richer_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508 --mutation add_data_validation --mutation add_conditional_formatting --mutation copy_first_sheet --mutation delete_first_row --mutation delete_first_col --mutation add_remove_chart > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "copy_first_sheet", "delete_first_row", "delete_first_col", "add_remove_chart"]},
+        {"path": "result_count", "equals": 192},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_excel_render_noop_byte_identical",
+      "path": "/tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508/render-compare-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --render-engine excel --output-dir /tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508 --max-pages-per-fixture 3 --pass-byte-identical-xlsx > /tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508.stdout.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "pass_byte_identical_xlsx", "equals": true},
+        {"path": "mutations", "equals": ["no_op"]},
+        {"path": "result_count", "equals": 32},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.30.fixture", "equals": "number_memory/sigman_revenue_support.xlsx"},
+        {"path": "results.30.status", "equals": "passed"},
+        {"path": "results.30.message", "contains": "byte-identical xlsx after no-op save"}
       ]
     },
     {
@@ -656,6 +880,34 @@
         {"path": "workbook_count", "equals": 32},
         {"path": "bucket_fixtures.python_in_excel", "length_at_least": 1},
         {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 2}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_external_link_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_shared_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 60 > /tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
       ]
     }
   ]

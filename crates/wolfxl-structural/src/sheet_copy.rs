@@ -1202,52 +1202,31 @@ fn clone_table_start(
     for (key, value) in attrs {
         match key.as_slice() {
             b"name" => {
-                new_e.push_attribute(Attribute {
-                    key: QName(b"name"),
-                    value: new_name.clone().into_bytes().into(),
-                });
+                push_attr_escaped(&mut new_e, b"name", &new_name);
                 wrote_name = true;
             }
             b"displayName" => {
-                new_e.push_attribute(Attribute {
-                    key: QName(b"displayName"),
-                    value: new_name.clone().into_bytes().into(),
-                });
+                push_attr_escaped(&mut new_e, b"displayName", &new_name);
                 wrote_display_name = true;
             }
             b"id" => {
-                new_e.push_attribute(Attribute {
-                    key: QName(b"id"),
-                    value: new_n.to_string().into_bytes().into(),
-                });
+                push_attr_escaped(&mut new_e, b"id", &new_n.to_string());
                 wrote_id = true;
             }
             _ => {
-                new_e.push_attribute(Attribute {
-                    key: QName(&key),
-                    value: value.into_bytes().into(),
-                });
+                push_attr_escaped(&mut new_e, &key, &value);
             }
         }
     }
 
     if !wrote_id {
-        new_e.push_attribute(Attribute {
-            key: QName(b"id"),
-            value: new_n.to_string().into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, b"id", &new_n.to_string());
     }
     if !wrote_name {
-        new_e.push_attribute(Attribute {
-            key: QName(b"name"),
-            value: new_name.clone().into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, b"name", &new_name);
     }
     if !wrote_display_name {
-        new_e.push_attribute(Attribute {
-            key: QName(b"displayName"),
-            value: new_name.clone().into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, b"displayName", &new_name);
     }
 
     Ok((new_e, new_name, original_name))
@@ -1777,10 +1756,7 @@ fn rewrite_element_attrs_by_local_name(
             .and_then(|m| m.get(&value))
             .cloned()
             .unwrap_or(value);
-        new_e.push_attribute(Attribute {
-            key: QName(&key),
-            value: new_value.into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, &key, &new_value);
     }
     Ok(new_e)
 }
@@ -1855,10 +1831,7 @@ fn remap_element_attributes<'a>(
         } else {
             value
         };
-        new_e.push_attribute(Attribute {
-            key: QName(&key),
-            value: new_value.into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, &key, &new_value);
     }
     Ok(new_e)
 }
@@ -2097,10 +2070,7 @@ fn rewrite_f_attributes(
         } else {
             value
         };
-        new_e.push_attribute(Attribute {
-            key: QName(&key),
-            value: new_value.into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, &key, &new_value);
     }
     new_e
 }
@@ -2324,12 +2294,23 @@ fn remap_chart_attrs<'a>(
         } else {
             value
         };
-        new_e.push_attribute(Attribute {
-            key: QName(&key),
-            value: new_value.into_bytes().into(),
-        });
+        push_attr_escaped(&mut new_e, &key, &new_value);
     }
     new_e
+}
+
+fn push_attr_escaped(e: &mut BytesStart<'_>, key: &[u8], value: &str) {
+    let escaped = xml_attr_escape(value);
+    e.push_attribute(Attribute {
+        key: QName(key),
+        value: escaped.into_bytes().into(),
+    });
+}
+
+fn xml_attr_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    push_xml_attr_escape(&mut out, value);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -2639,6 +2620,62 @@ mod tests {
         let rels_body = std::str::from_utf8(&rels_part.1).unwrap();
         assert!(rels_body.contains("https://example.com/x"), "{rels_body}");
         assert!(rels_body.contains("mailto:a@b.com"), "{rels_body}");
+    }
+
+    #[test]
+    fn clone_escapes_internal_hyperlink_location_after_rid_rewrite() {
+        let mut alloc =
+            PartIdAllocator::from_zip_parts(["xl/worksheets/sheet1.xml"].iter().copied());
+        let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
+        zip_parts.insert(
+            "xl/worksheets/sheet1.xml".into(),
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData><row r="1"><c r="A1"><f>Template!A1</f></c></row></sheetData>
+  <hyperlinks><hyperlink ref="B2" r:id="rId1" location="'Sec. 1 &amp; 2 Notes'!A1" display="A &amp; B"/></hyperlinks>
+</worksheet>"#
+                .to_vec(),
+        );
+        let workbook_bytes = one_sheet_workbook(&[], &[]);
+        let existing_table_names: HashSet<String> = HashSet::new();
+        let source_rels =
+            rels_with(&[(rt::HYPERLINK, "https://example.com/x", TargetMode::External)]);
+
+        let mutations = plan_sheet_copy(SheetCopyInputs {
+            src_title: "Template".into(),
+            dst_title: "Template Copy".into(),
+            src_sheet_path: "xl/worksheets/sheet1.xml".into(),
+            source_zip_parts: &zip_parts,
+            source_rels: &source_rels,
+            workbook_xml: &workbook_bytes,
+            allocator: &mut alloc,
+            existing_table_names: &existing_table_names,
+            deep_copy_images: false,
+        })
+        .expect("plan ok");
+
+        let new_sheet = std::str::from_utf8(&mutations.new_sheet_xml).unwrap();
+        assert!(
+            new_sheet.contains(r#"location="&apos;Sec. 1 &amp; 2 Notes&apos;!A1""#),
+            "{new_sheet}"
+        );
+        assert!(new_sheet.contains(r#"display="A &amp; B""#), "{new_sheet}");
+        assert!(
+            new_sheet.contains("<f>&apos;Template Copy&apos;!A1</f>"),
+            "{new_sheet}"
+        );
+
+        let mut reader = XmlReader::from_reader(mutations.new_sheet_xml.as_slice());
+        reader.config_mut().trim_text(false);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(err) => panic!("cloned sheet XML is malformed: {err}; {new_sheet}"),
+            }
+            buf.clear();
+        }
     }
 
     #[test]

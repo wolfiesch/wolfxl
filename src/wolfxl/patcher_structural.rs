@@ -49,7 +49,7 @@ pub(super) fn apply_axis_shifts_phase(
             .ancillary
             .populate_for_sheet(zip, &op.sheet, &sheet_path);
 
-        let (comments_part, vml_part, table_paths) = {
+        let (comments_part, vml_part, table_paths, drawing_part, ctrl_prop_paths) = {
             let anc = patcher
                 .ancillary
                 .get(&op.sheet)
@@ -59,6 +59,8 @@ pub(super) fn apply_axis_shifts_phase(
                 anc.comments_part,
                 anc.vml_drawing_part,
                 anc.table_parts.clone(),
+                anc.drawing_part,
+                anc.ctrl_prop_parts.clone(),
             )
         };
 
@@ -68,10 +70,19 @@ pub(super) fn apply_axis_shifts_phase(
         let vml_bytes: Option<(String, Vec<u8>)> = vml_part.as_ref().and_then(|p| {
             patched_or_source_part_bytes(file_patches, zip, p).map(|b| (p.clone(), b))
         });
+        let drawing_bytes: Option<(String, Vec<u8>)> = drawing_part.as_ref().and_then(|p| {
+            patched_or_source_part_bytes(file_patches, zip, p).map(|b| (p.clone(), b))
+        });
         let mut table_bytes: Vec<(String, Vec<u8>)> = Vec::new();
         for tp in &table_paths {
             if let Some(b) = patched_or_source_part_bytes(file_patches, zip, tp) {
                 table_bytes.push((tp.clone(), b));
+            }
+        }
+        let mut ctrl_prop_bytes: Vec<(String, Vec<u8>)> = Vec::new();
+        for cp in &ctrl_prop_paths {
+            if let Some(b) = patched_or_source_part_bytes(file_patches, zip, cp) {
+                ctrl_prop_bytes.push((cp.clone(), b));
             }
         }
 
@@ -102,6 +113,18 @@ pub(super) fn apply_axis_shifts_phase(
             inputs
                 .vml
                 .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+        }
+        if let Some((ref p, ref b)) = drawing_bytes {
+            inputs
+                .drawings
+                .insert(op.sheet.clone(), (p.clone(), b.as_slice()));
+        }
+        if !ctrl_prop_bytes.is_empty() {
+            let parts: Vec<(String, &[u8])> = ctrl_prop_bytes
+                .iter()
+                .map(|(p, b)| (p.clone(), b.as_slice()))
+                .collect();
+            inputs.control_props.insert(op.sheet.clone(), parts);
         }
         inputs.sheet_positions = sheet_positions.clone();
 

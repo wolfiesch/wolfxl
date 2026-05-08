@@ -39,9 +39,17 @@ REPAIR_DISMISS_BUTTONS = (
     "OK",
     "Close",
 )
-PASSING_STATUSES = {"passed", "skipped"}
+PASSING_STATUSES = {"passed", "skipped", "expected_app_unsupported"}
 SOURCE_MUTATION = "source"
 EXCEL_REPAIR_MARKER = "Excel repair/error dialog while opening:"
+EXCEL_UNSUPPORTED_CONTENT_MARKER = "Excel unsupported-content dialog while opening:"
+UNSUPPORTED_CONTENT_KEYWORDS = (
+    "isn't supported in this version of excel",
+    "is not supported in this version of excel",
+    "unsupported content",
+    "powerview",
+)
+UNSUPPORTED_CONTENT_DISMISS_BUTTONS = ("Cancel", "OK", "Close")
 
 
 @dataclass
@@ -104,7 +112,12 @@ def run_smoke(
                 if app == "libreoffice":
                     result = _smoke_libreoffice(smoke_path, app_output_dir, timeout)
                 elif app == "excel":
-                    result = _smoke_excel(smoke_path, app_output_dir, timeout)
+                    result = _smoke_excel(
+                        smoke_path,
+                        app_output_dir,
+                        timeout,
+                        expected_app_unsupported_features=entry.app_unsupported_features,
+                    )
                 else:
                     raise ValueError(f"unknown app: {app}")
                 result.fixture = entry.filename
@@ -114,8 +127,16 @@ def run_smoke(
                     stop_on_excel_repair
                     and app == "excel"
                     and result.status not in PASSING_STATUSES
-                    and EXCEL_REPAIR_MARKER in result.message
+                    and (
+                        EXCEL_REPAIR_MARKER in result.message
+                        or EXCEL_UNSUPPORTED_CONTENT_MARKER in result.message
+                    )
                 ):
+                    reason = (
+                        "Microsoft Excel repair dialog"
+                        if EXCEL_REPAIR_MARKER in result.message
+                        else "Microsoft Excel unsupported-content dialog"
+                    )
                     return _write_report(
                         fixture_dir,
                         output_dir,
@@ -124,9 +145,9 @@ def run_smoke(
                         results,
                         aborted=True,
                         abort_reason=(
-                            "stopped after first Microsoft Excel repair dialog; "
+                            f"stopped after first {reason}; "
                             "rerun with --continue-after-excel-repair to collect "
-                            "additional failures"
+                            "additional repair or unsupported-content failures"
                         ),
                     )
 
@@ -236,7 +257,12 @@ def _libreoffice_converted_path(work: Path, src: Path) -> Path:
     return matches[0] if matches else expected
 
 
-def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
+def _smoke_excel(
+    src: Path,
+    output_dir: Path,
+    timeout: int,
+    expected_app_unsupported_features: Iterable[str] | None = None,
+) -> AppSmokeResult:
     if not Path(EXCEL_APP).is_dir():
         return AppSmokeResult(
             src.name,
@@ -245,6 +271,21 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
             "skipped",
             None,
             "Microsoft Excel not found",
+        )
+    expected_features = set(expected_app_unsupported_features or [])
+    if _contains_powerview_content(src):
+        status = "expected_app_unsupported" if "power_view" in expected_features else "failed"
+        return AppSmokeResult(
+            src.name,
+            SOURCE_MUTATION,
+            "excel",
+            status,
+            str(src),
+            (
+                f"{EXCEL_UNSUPPORTED_CONTENT_MARKER} workbook contains PowerView "
+                "content, which this Excel build can block behind a read-only "
+                "unsupported-content prompt"
+            ),
         )
     try:
         opened = _open_excel_with_finder_and_close(
@@ -315,6 +356,26 @@ def _validate_xlsx(path: Path) -> tuple[bool, str]:
     return True, "ok"
 
 
+def _contains_powerview_content(path: Path) -> bool:
+    if not path.exists() or not zipfile.is_zipfile(path):
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                name_lc = name.lower()
+                if not name_lc.endswith((".xml", ".vml", ".rels")):
+                    continue
+                try:
+                    payload = archive.read(name).lower()
+                except (KeyError, RuntimeError, zipfile.BadZipFile):
+                    continue
+                if b"powerview" in payload or b"power view" in payload:
+                    return True
+    except zipfile.BadZipFile:
+        return False
+    return False
+
+
 def _fixture_for_mutation(
     fixture_path: Path,
     fixture_label: str,
@@ -374,6 +435,14 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
     while launched.poll() is None and time.monotonic() < deadline:
         _dismiss_excel_safe_dialogs()
         dialog = _excel_dialog_text()
+        if _is_excel_unsupported_content_dialog(dialog):
+            _dismiss_excel_unsupported_content_dialogs()
+            _close_excel_best_effort()
+            _quit_excel_best_effort()
+            _kill_process_group_best_effort(launched)
+            raise RuntimeError(
+                f"{EXCEL_UNSUPPORTED_CONTENT_MARKER} {dialog[:500]}"
+            )
         if _is_excel_repair_dialog(dialog):
             _dismiss_excel_repair_dialogs()
             _close_excel_best_effort()
@@ -399,6 +468,13 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
     while time.monotonic() < deadline:
         _dismiss_excel_safe_dialogs()
         dialog = _excel_dialog_text()
+        if _is_excel_unsupported_content_dialog(dialog):
+            _dismiss_excel_unsupported_content_dialogs()
+            _close_excel_best_effort()
+            _quit_excel_best_effort()
+            raise RuntimeError(
+                f"{EXCEL_UNSUPPORTED_CONTENT_MARKER} {dialog[:500]}"
+            )
         if _is_excel_repair_dialog(dialog):
             _dismiss_excel_repair_dialogs()
             _close_excel_best_effort()
@@ -424,6 +500,11 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
 def _is_excel_repair_dialog(dialog: str) -> bool:
     dialog_lc = dialog.lower()
     return any(keyword in dialog_lc for keyword in SMOKE_KEYWORDS)
+
+
+def _is_excel_unsupported_content_dialog(dialog: str) -> bool:
+    dialog_lc = dialog.lower()
+    return any(keyword in dialog_lc for keyword in UNSUPPORTED_CONTENT_KEYWORDS)
 
 
 def _kill_process_group_best_effort(proc: subprocess.Popen[str]) -> None:
@@ -532,6 +613,33 @@ end tell
         pass
 
 
+def _dismiss_excel_unsupported_content_dialogs() -> None:
+    # Unsupported-content prompts such as PowerView are not repair dialogs, but
+    # they still block app-smoke validation. Choose the non-opening path so the
+    # run records a failure instead of silently accepting a read-only workbook.
+    buttons = "\n".join(
+        f'        if exists button "{button}" of w then click button "{button}" of w'
+        for button in UNSUPPORTED_CONTENT_DISMISS_BUTTONS
+    )
+    script = f"""
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return
+  tell process "Microsoft Excel"
+    set frontmost to true
+    try
+      repeat with w in windows
+{buttons}
+      end repeat
+    end try
+  end tell
+end tell
+"""
+    try:
+        _run_osascript(script, timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _close_excel_best_effort() -> None:
     try:
         _run_osascript(
@@ -616,8 +724,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "For Microsoft Excel GUI smoke only, keep running after a repair "
-            "dialog failure. By default the run aborts on the first repair "
-            "dialog to avoid repeated desktop popups."
+            "or unsupported-content dialog failure. By default the run aborts "
+            "on the first blocking dialog to avoid repeated desktop popups."
         ),
     )
     args = parser.parse_args(argv)

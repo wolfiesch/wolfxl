@@ -12,6 +12,23 @@ This page tracks meaningful differences versus openpyxl/Excel behavior.
 - Modify mode uses a surgical patcher for targeted changes.
 - Preserve-value behavior for style-only edits is regression-tested.
 
+## App-level evidence limits
+
+- PowerView-bearing workbooks are treated as app-unsupported evidence in the
+  local Microsoft Excel smoke harness. Excel can block those files behind a
+  read-only unsupported-content prompt, so they are useful for package-fidelity
+  radar coverage but not for proving clean editable Excel open/close behavior.
+  A Microsoft Error Reporting `SIG_FORCE_QUIT` / `merp` log after this kind of
+  blocked prompt is not, by itself, treated as an OOXML repair/corruption
+  signal; the repair signal remains an explicit Excel repair/error dialog.
+- The interactive Excel evidence gate is intentionally stricter than package
+  preservation. On 2026-05-08, targeted source-workbook probes passed for:
+  pivot state, slicer state, timeline state, external-link state, macro project
+  presence, and embedded-control state. The combined strict audit over all six
+  source-workbook probe reports now reports `ready=true` with no incomplete
+  reports:
+  `/tmp/wolfxl-interactive-evidence-external-oracle-all-20260508.json`.
+
 ## Contributing a difference report
 
 When reporting a difference, include:

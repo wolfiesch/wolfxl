@@ -17,6 +17,8 @@ use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
 use crate::axis::{Axis, ShiftPlan};
+use crate::control_props_shift::shift_control_props_xml;
+use crate::drawing_shift::shift_drawing_xml;
 use crate::shift_anchors::shift_anchor;
 use crate::shift_cells::shift_sheet_cells;
 use crate::shift_formulas::shift_formula_on_sheet;
@@ -69,6 +71,10 @@ pub struct SheetXmlInputs<'a> {
     pub comments: BTreeMap<String, (String, &'a [u8])>,
     /// Per-sheet vmlDrawing part: sheet name → (path, bytes).
     pub vml: BTreeMap<String, (String, &'a [u8])>,
+    /// Per-sheet DrawingML part: sheet name → (path, bytes).
+    pub drawings: BTreeMap<String, (String, &'a [u8])>,
+    /// Per-sheet form-control property parts: sheet name → vec of (path, bytes).
+    pub control_props: BTreeMap<String, Vec<(String, &'a [u8])>>,
     /// Sheet name → 0-based position (for definedName localSheetId).
     pub sheet_positions: BTreeMap<String, u32>,
 }
@@ -85,6 +91,8 @@ impl<'a> SheetXmlInputs<'a> {
             tables: BTreeMap::new(),
             comments: BTreeMap::new(),
             vml: BTreeMap::new(),
+            drawings: BTreeMap::new(),
+            control_props: BTreeMap::new(),
             sheet_positions: BTreeMap::new(),
         }
     }
@@ -139,6 +147,21 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
         .iter()
         .map(|(sheet, (path, b))| (sheet.clone(), (path.clone(), b.to_vec())))
         .collect();
+    let mut drawing_bytes: BTreeMap<String, (String, Vec<u8>)> = inputs
+        .drawings
+        .iter()
+        .map(|(sheet, (path, b))| (sheet.clone(), (path.clone(), b.to_vec())))
+        .collect();
+    let mut control_prop_bytes: BTreeMap<String, BTreeMap<String, Vec<u8>>> = inputs
+        .control_props
+        .iter()
+        .map(|(sheet, parts)| {
+            (
+                sheet.clone(),
+                parts.iter().map(|(p, b)| (p.clone(), b.to_vec())).collect(),
+            )
+        })
+        .collect();
 
     for op in ops {
         let plan = op.plan();
@@ -164,9 +187,10 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
             *parts = updated;
         }
 
-        // 2b. If a row delete removed a structured-table header row, Excel
-        // expects the promoted row's cells to be string headers and expects
-        // `<tableColumn name>` metadata to match those visible headers.
+        // 2b. If a row delete removed a structured-table header row, keep the
+        // table metadata stable and mark the table headerless. Promoting the
+        // first data row into header metadata leaves Excel's PDF export path
+        // rejecting the workbook.
         if plan.axis == Axis::Row && plan.is_delete() {
             if let (Some(sheet), Some(parts)) = (
                 sheet_bytes.get_mut(&op.sheet),
@@ -197,7 +221,23 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
             vml_bytes.insert(op.sheet.clone(), (path.clone(), new_bytes));
         }
 
-        // 5. Workbook defined names.
+        // 5. DrawingML anchors on this sheet.
+        if let Some((path, bytes)) = drawing_bytes.get(&op.sheet) {
+            let new_bytes = shift_drawing_xml(bytes, &plan);
+            drawing_bytes.insert(op.sheet.clone(), (path.clone(), new_bytes));
+        }
+
+        // 6. Form-control properties on this sheet.
+        if let Some(parts) = control_prop_bytes.get_mut(&op.sheet) {
+            let mut updated: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+            for (path, bytes) in parts.iter() {
+                let new_bytes = shift_control_props_xml(bytes, &plan);
+                updated.insert(path.clone(), new_bytes);
+            }
+            *parts = updated;
+        }
+
+        // 7. Workbook defined names.
         if let Some(ref wb) = workbook_bytes {
             let new_bytes = shift_defined_names(
                 wb,
@@ -258,6 +298,32 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
         if let Some((_, orig)) = inputs.vml.get(sheet) {
             if bytes.as_slice() != *orig {
                 out.file_patches.insert(path.clone(), bytes.clone());
+            }
+        }
+    }
+    for (sheet, (path, bytes)) in &drawing_bytes {
+        if let Some((_, orig)) = inputs.drawings.get(sheet) {
+            if bytes.as_slice() != *orig {
+                out.file_patches.insert(path.clone(), bytes.clone());
+            }
+        }
+    }
+    for (_sheet, parts) in &control_prop_bytes {
+        for (path, bytes) in parts {
+            let mut matched_orig = false;
+            for (_s, parts_orig) in &inputs.control_props {
+                for (p_o, b_o) in parts_orig {
+                    if p_o == path {
+                        if bytes.as_slice() != *b_o {
+                            out.file_patches.insert(path.clone(), bytes.clone());
+                        }
+                        matched_orig = true;
+                        break;
+                    }
+                }
+                if matched_orig {
+                    break;
+                }
             }
         }
     }
@@ -586,6 +652,34 @@ mod tests {
         assert!(s.contains("<shapetype id=\"_x0000_t202\"/>"));
         assert!(s.contains("<shape>"));
         assert!(s.contains("<Anchor>0, 0, 5, 0, 2, 0, 7, 0</Anchor>"));
+    }
+
+    #[test]
+    fn shifts_arbitrary_prefixed_vml_shape_anchor() {
+        let vml = r#"<xml><ns1:shapetype id="_x0000_t202"/><ns1:shape><ns2:ClientData><ns2:Anchor>0, 0, 4, 0, 2, 0, 6, 0</ns2:Anchor></ns2:ClientData></ns1:shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<ns1:shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<ns1:shape>"));
+        assert!(s.contains("<ns2:Anchor>0, 0, 5, 0, 2, 0, 7, 0</ns2:Anchor>"));
+    }
+
+    #[test]
+    fn shifts_prefixed_vml_comment_row_column_markers() {
+        let vml = r#"<xml><ns1:shape><ns2:ClientData ObjectType="Note"><ns2:Row>1</ns2:Row><ns2:Column>2</ns2:Column></ns2:ClientData></ns1:shape></xml>"#;
+
+        let row_plan = ShiftPlan::delete(Axis::Row, 1, 1);
+        let row_out = shift_vml_xml(vml.as_bytes(), &row_plan);
+        let row_s = String::from_utf8_lossy(&row_out);
+        assert!(row_s.contains("<ns2:Row>0</ns2:Row>"), "{row_s}");
+        assert!(row_s.contains("<ns2:Column>2</ns2:Column>"), "{row_s}");
+
+        let col_plan = ShiftPlan::delete(Axis::Col, 1, 1);
+        let col_out = shift_vml_xml(vml.as_bytes(), &col_plan);
+        let col_s = String::from_utf8_lossy(&col_out);
+        assert!(col_s.contains("<ns2:Row>1</ns2:Row>"), "{col_s}");
+        assert!(col_s.contains("<ns2:Column>1</ns2:Column>"), "{col_s}");
     }
 
     #[test]

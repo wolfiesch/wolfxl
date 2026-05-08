@@ -254,7 +254,67 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
         buf.clear();
     }
 
-    writer.into_inner().into_inner()
+    cleanup_empty_sheet_containers(writer.into_inner().into_inner())
+}
+
+fn cleanup_empty_sheet_containers(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(s) = String::from_utf8(bytes) else {
+        unreachable!("quick-xml writer emitted non-UTF-8 worksheet XML");
+    };
+    remove_empty_elements_by_local_name(&s, "mergeCells").into_bytes()
+}
+
+fn remove_empty_elements_by_local_name(s: &str, local_name: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut pos = 0;
+    while let Some(rel_start) = s[pos..].find('<') {
+        let start = pos + rel_start;
+        out.push_str(&s[pos..start]);
+
+        let Some(rel_end) = s[start..].find('>') else {
+            out.push_str(&s[start..]);
+            return out;
+        };
+        let open_end = start + rel_end;
+        let tag_body = s[start + 1..open_end].trim_start();
+        if tag_body.starts_with(['/', '?', '!']) {
+            out.push_str(&s[start..=open_end]);
+            pos = open_end + 1;
+            continue;
+        }
+
+        let tag_name_end = tag_body
+            .find(|c: char| c.is_whitespace() || c == '/')
+            .unwrap_or(tag_body.len());
+        let tag_name = &tag_body[..tag_name_end];
+        let tag_local = tag_name.rsplit(':').next().unwrap_or(tag_name);
+        if tag_local != local_name {
+            out.push_str(&s[start..=open_end]);
+            pos = open_end + 1;
+            continue;
+        }
+
+        if tag_body.trim_end().ends_with('/') {
+            pos = open_end + 1;
+            continue;
+        }
+
+        let close_tag = format!("</{tag_name}>");
+        let Some(close_rel) = s[open_end + 1..].find(&close_tag) else {
+            out.push_str(&s[start..=open_end]);
+            pos = open_end + 1;
+            continue;
+        };
+        let close_start = open_end + 1 + close_rel;
+        if s[open_end + 1..close_start].trim().is_empty() {
+            pos = close_start + close_tag.len();
+        } else {
+            out.push_str(&s[start..=open_end]);
+            pos = open_end + 1;
+        }
+    }
+    out.push_str(&s[pos..]);
+    out
 }
 
 enum RowAction<'a> {
@@ -450,6 +510,16 @@ mod tests {
         let p = ShiftPlan::delete(crate::Axis::Row, 5, 3);
         let out = apply(xml, &p);
         assert!(!out.contains("mergeCell ref"));
+        assert!(!out.contains("mergeCells"));
+    }
+
+    #[test]
+    fn drops_empty_prefixed_merge_cells_container_with_stale_count() {
+        let xml = r#"<x:mergeCells count="1" xmlns:x="urn:test"><x:mergeCell ref="A1:B1"/></x:mergeCells>"#;
+        let p = ShiftPlan::delete(crate::Axis::Row, 1, 1);
+        let out = apply(xml, &p);
+        assert!(!out.contains("mergeCell ref"), "{out}");
+        assert!(!out.contains("mergeCells"), "{out}");
     }
 
     #[test]

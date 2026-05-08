@@ -1,6 +1,7 @@
 //! VML drawing anchor shifts for comment shapes.
 
 use crate::axis::{Axis, ShiftPlan};
+use crate::shift_anchors::shift_anchor;
 
 /// Rewrite a VML drawing part. Looks for `<x:Anchor>` elements (or
 /// `<Anchor>` without prefix) and shifts the row component (axis 1
@@ -40,20 +41,15 @@ pub fn shift_vml_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     let mut cursor = 0;
     while cursor < s.len() {
         let rest = &s[cursor..];
-        if let Some(shape_start_rel) = find_shape_start(rest) {
+        if let Some((shape_start_rel, shape_open_end_rel)) = find_start_tag_by_local(rest, "shape")
+        {
             out.push_str(&rest[..shape_start_rel]);
             let shape_start = cursor + shape_start_rel;
-            let after_start = &s[shape_start..];
-            let close_tag = if after_start.starts_with("<v:shape") {
-                "</v:shape>"
-            } else {
-                "</shape>"
-            };
-            let shape_end_rel = after_start.find(close_tag);
-            let shape_end = match shape_end_rel {
-                Some(e) => shape_start + e + close_tag.len(),
+            let shape_open_end = cursor + shape_open_end_rel;
+            let shape_end = match element_end_for_start_tag(s, shape_start, shape_open_end) {
+                Some(e) => e,
                 None => {
-                    out.push_str(after_start);
+                    out.push_str(&s[shape_start..]);
                     break;
                 }
             };
@@ -75,54 +71,148 @@ pub fn shift_vml_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     out.into_bytes()
 }
 
-fn find_shape_start(s: &str) -> Option<usize> {
-    let mut cursor = 0;
-    while cursor < s.len() {
-        let rest = &s[cursor..];
-        let prefixed = rest.find("<v:shape");
-        let unprefixed = rest.find("<shape");
-        let next = match (prefixed, unprefixed) {
-            (Some(a), Some(b)) => a.min(b),
-            (Some(a), None) | (None, Some(a)) => a,
-            (None, None) => return None,
-        };
-        let absolute = cursor + next;
-        let candidate = &s[absolute..];
-        let tag_len = if candidate.starts_with("<v:shape") {
-            "<v:shape".len()
-        } else {
-            "<shape".len()
-        };
-        let next_char = candidate[tag_len..].chars().next();
-        if matches!(next_char, Some(' ' | '\t' | '\r' | '\n' | '>' | '/')) {
-            return Some(absolute);
+fn find_start_tag_by_local(s: &str, local: &str) -> Option<(usize, usize)> {
+    let mut search_from = 0usize;
+    while let Some(rel) = s[search_from..].find('<') {
+        let start = search_from + rel;
+        if s[start + 1..].starts_with('/') {
+            search_from = start + 1;
+            continue;
         }
-        cursor = absolute + tag_len;
+        let end = s[start..].find('>')? + start + 1;
+        let name_end = s[start + 1..end]
+            .find(|c: char| c == ' ' || c == '>' || c == '/')
+            .map(|i| start + 1 + i)
+            .unwrap_or(end - 1);
+        let name = &s[start + 1..name_end];
+        let name_local = name.rsplit(':').next().unwrap_or(name);
+        if name_local == local {
+            return Some((start, end));
+        }
+        search_from = end;
     }
     None
 }
 
+fn start_tag_name(s: &str, start: usize, open_end: usize) -> Option<&str> {
+    let name_start = start.checked_add(1)?;
+    if s[name_start..open_end].starts_with('/') {
+        return None;
+    }
+    let name_end = s[name_start..open_end]
+        .find(|c: char| c == ' ' || c == '>' || c == '/')
+        .map(|i| name_start + i)
+        .unwrap_or(open_end - 1);
+    Some(&s[name_start..name_end])
+}
+
+fn element_end_for_start_tag(s: &str, start: usize, open_end: usize) -> Option<usize> {
+    let open_tag = &s[start..open_end];
+    if open_tag.trim_end().ends_with("/>") {
+        return Some(open_end);
+    }
+    let tag_name = start_tag_name(s, start, open_end)?;
+    let close_tag = format!("</{tag_name}>");
+    Some(open_end + s[open_end..].find(&close_tag)? + close_tag.len())
+}
+
 fn shift_vml_anchor_in_shape(shape: &str, plan: &ShiftPlan) -> Option<String> {
-    let (open_tag, close_tag) = if shape.contains("<x:Anchor>") {
-        ("<x:Anchor>", "</x:Anchor>")
-    } else if shape.contains("<Anchor>") {
-        ("<Anchor>", "</Anchor>")
-    } else {
+    let out = shift_vml_anchor_tag(shape, plan)?;
+    let out = match plan.axis {
+        Axis::Row => shift_vml_numeric_marker(&out, "Row", plan),
+        Axis::Col => shift_vml_numeric_marker(&out, "Column", plan),
+    }?;
+    Some(shift_vml_formula_range(&out, plan))
+}
+
+fn shift_vml_formula_range(shape: &str, plan: &ShiftPlan) -> String {
+    let Some((open, open_end)) = find_start_tag_by_local(shape, "FmlaRange") else {
+        return shape.to_string();
+    };
+    let Some(tag_name) = start_tag_name(shape, open, open_end) else {
+        return shape.to_string();
+    };
+    let close_tag = format!("</{tag_name}>");
+    let Some(close_rel) = shape[open_end..].find(&close_tag) else {
+        return shape.to_string();
+    };
+    let close = open_end + close_rel;
+    let payload = shape[open_end..close].trim();
+    let shifted = shift_anchor(payload, plan);
+    if shifted == "#REF!" {
+        return shape.to_string();
+    }
+    let mut out = String::with_capacity(shape.len());
+    out.push_str(&shape[..open_end]);
+    out.push_str(&shifted);
+    out.push_str(&shape[close..]);
+    out
+}
+
+fn shift_vml_anchor_tag(shape: &str, plan: &ShiftPlan) -> Option<String> {
+    let Some((open, open_end)) = find_start_tag_by_local(shape, "Anchor") else {
         return Some(shape.to_string());
     };
-    let open = shape.find(open_tag)?;
-    let close = shape.find(close_tag)?;
+    let tag_name = start_tag_name(shape, open, open_end)?;
+    let close_tag = format!("</{tag_name}>");
+    let close = shape[open_end..].find(&close_tag)? + open_end;
     if close <= open {
         return Some(shape.to_string());
     }
-    let payload = &shape[open + open_tag.len()..close];
+    let payload = &shape[open_end..close];
     let new_payload = shift_vml_anchor_payload(payload, plan)?;
     let mut out = String::with_capacity(shape.len());
-    out.push_str(&shape[..open]);
-    out.push_str(open_tag);
+    out.push_str(&shape[..open_end]);
     out.push_str(&new_payload);
     out.push_str(&shape[close..]);
     Some(out)
+}
+
+fn shift_vml_numeric_marker(shape: &str, local: &str, plan: &ShiftPlan) -> Option<String> {
+    let Some((open, open_end)) = find_start_tag_by_local(shape, local) else {
+        return Some(shape.to_string());
+    };
+    let tag_name = start_tag_name(shape, open, open_end)?;
+    let close_tag = format!("</{tag_name}>");
+    let close = shape[open_end..].find(&close_tag)? + open_end;
+    if close <= open {
+        return Some(shape.to_string());
+    }
+    let payload = shape[open_end..close].trim();
+    let value = payload.parse::<i64>().ok()?;
+    let new_value = shift_vml_point(value, plan)?;
+    let max = match plan.axis {
+        Axis::Row => crate::MAX_ROW as i64,
+        Axis::Col => crate::MAX_COL as i64,
+    };
+    if new_value < 0 || new_value >= max {
+        return None;
+    }
+    let mut out = String::with_capacity(shape.len());
+    out.push_str(&shape[..open_end]);
+    out.push_str(&new_value.to_string());
+    out.push_str(&shape[close..]);
+    Some(out)
+}
+
+fn shift_vml_point(zero_based: i64, plan: &ShiftPlan) -> Option<i64> {
+    if plan.is_insert() {
+        if zero_based + 1 >= plan.idx as i64 {
+            Some(zero_based + plan.n as i64)
+        } else {
+            Some(zero_based)
+        }
+    } else {
+        let delete_start = plan.idx as i64 - 1;
+        let delete_end = delete_start + plan.abs_n() as i64;
+        if zero_based >= delete_start && zero_based < delete_end {
+            None
+        } else if zero_based >= delete_end {
+            Some(zero_based + plan.n as i64)
+        } else {
+            Some(zero_based)
+        }
+    }
 }
 
 fn shift_vml_anchor_payload(payload: &str, plan: &ShiftPlan) -> Option<String> {

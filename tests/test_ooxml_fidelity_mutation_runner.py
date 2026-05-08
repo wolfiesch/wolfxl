@@ -124,6 +124,21 @@ def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     assert (output_dir / "nested_deep_simple" / "no_op" / "after-simple.xlsx").is_file()
 
 
+def test_discover_fixtures_includes_macro_enabled_ooxml_without_manifest(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "plain.xlsx")
+    _make_fixture(fixture_dir / "macro.xlsm")
+    _make_fixture(fixture_dir / "~$lock.xlsx")
+    fixture_dir.joinpath("notes.txt").write_text("ignore me")
+
+    entries = runner_module.discover_fixtures(fixture_dir)
+
+    assert [entry.filename for entry in entries] == ["macro.xlsm", "plain.xlsx"]
+
+
 def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -364,6 +379,12 @@ def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> 
                     "severity": "error",
                     "part": "charts",
                     "message": "expected formula change after sheet rename",
+                },
+                {
+                    "kind": "workbook_globals_semantic_drift",
+                    "severity": "error",
+                    "part": "workbook_globals",
+                    "message": "expected defined-name formula change after sheet rename",
                 }
             ]
         }
@@ -380,8 +401,11 @@ def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> 
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 1
-    assert result["expected_issues"][0]["kind"] == "charts_semantic_drift"
+    assert result["expected_issue_count"] == 2
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "charts_semantic_drift",
+        "workbook_globals_semantic_drift",
+    }
 
 
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
@@ -684,6 +708,88 @@ def test_runner_accepts_structural_delete_semantic_drifts(tmp_path: Path, monkey
         "structured_references_semantic_drift",
         "workbook_globals_semantic_drift",
     }
+
+
+def test_runner_accepts_tail_mutation_structural_drawing_anchor_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "drawing_objects_semantic_drift",
+                    "severity": "error",
+                    "part": "drawing_objects",
+                    "message": "drawing anchor row/col shifted after tail mutation",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+    monkeypatch.setattr(
+        runner_module,
+        "_drawing_objects_match_except_structural_anchor_text",
+        lambda _before, _after: True,
+    )
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("insert_tail_col",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issues"][0]["kind"] == "drawing_objects_semantic_drift"
+
+
+def test_runner_does_not_hide_tail_mutation_non_anchor_drawing_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "drawing_objects_semantic_drift",
+                    "severity": "error",
+                    "part": "drawing_objects",
+                    "message": "drawing relationship disappeared after tail mutation",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+    monkeypatch.setattr(
+        runner_module,
+        "_drawing_objects_match_except_structural_anchor_text",
+        lambda _before, _after: False,
+    )
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("insert_tail_col",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["issue_count"] == 1
+    assert result["issues"][0]["kind"] == "drawing_objects_semantic_drift"
 
 
 def test_runner_does_not_hide_structural_delete_total_feature_loss(

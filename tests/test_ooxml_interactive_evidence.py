@@ -101,6 +101,37 @@ def test_interactive_audit_accepts_passing_probe_report(tmp_path: Path) -> None:
     assert report["probe_kind"] == "ooxml_state_presence"
 
 
+def test_interactive_audit_does_not_go_ready_on_incomplete_report(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+    probe_report = tmp_path / "interactive-report.json"
+    probe_report.write_text(
+        json.dumps(
+            {
+                "completed": False,
+                "results": [
+                    {
+                        "fixture": "macro.xlsm",
+                        "probe": "macro_project_presence",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    report = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[probe_report],
+    )
+
+    assert report["ready"] is False
+    assert report["incomplete_report_count"] == 1
+    assert report["probes"]["macro_project_presence"]["status"] == "clear"
+
+
 def test_interactive_audit_rejects_mismatched_probe_kind(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
@@ -180,6 +211,122 @@ def test_macro_probe_runner_emits_passing_interactive_report(tmp_path: Path, mon
         reports=[output_dir / "interactive-probe-report.json"],
     )
     assert audit["probes"]["macro_project_presence"]["status"] == "clear"
+
+
+def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_external_link_workbook(fixture_dir / "external.xlsx")
+    fixture_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {"filename": "macro.xlsm", "fixture_id": "macro", "tool": "excel"},
+                    {"filename": "external.xlsx", "fixture_id": "external", "tool": "excel"},
+                ]
+            }
+        )
+    )
+    calls: list[tuple[str, str]] = []
+
+    def fake_run_probe(
+        fixture_path: Path,
+        fixture_label: str,
+        _output_dir: Path,
+        *,
+        probe: str,
+        mutation: str,
+        timeout: int,
+        probe_kind: str,
+    ) -> object:
+        report_path = output_dir / "interactive-probe-report.json"
+        if calls:
+            partial = json.loads(report_path.read_text())
+            assert partial["completed"] is False
+            assert partial["result_count"] == len(calls)
+            assert partial["results"][-1]["fixture"] == calls[-1][0]
+        calls.append((fixture_label, probe))
+        return probe_runner.InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=probe_kind,
+            mutation=mutation,
+            app="excel",
+            status="passed",
+            output=str(fixture_path),
+            message=f"timeout={timeout}",
+        )
+
+    monkeypatch.setattr(probe_runner, "_run_probe", fake_run_probe)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("macro_project_presence", "external_link_update_prompt"),
+    )
+
+    assert calls == [
+        ("macro.xlsm", "macro_project_presence"),
+        ("external.xlsx", "external_link_update_prompt"),
+    ]
+    assert report["completed"] is True
+    assert report["result_count"] == 2
+
+
+def test_probe_runner_filters_fixtures(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_external_link_workbook(fixture_dir / "external.xlsx")
+    fixture_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {"filename": "macro.xlsm", "fixture_id": "macro", "tool": "excel"},
+                    {"filename": "external.xlsx", "fixture_id": "external", "tool": "excel"},
+                ]
+            }
+        )
+    )
+    calls: list[str] = []
+
+    def fake_run_probe(
+        fixture_path: Path,
+        fixture_label: str,
+        _output_dir: Path,
+        *,
+        probe: str,
+        mutation: str,
+        timeout: int,
+        probe_kind: str,
+    ) -> object:
+        calls.append(fixture_label)
+        return probe_runner.InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=probe_kind,
+            mutation=mutation,
+            app="excel",
+            status="passed",
+            output=str(fixture_path),
+            message=f"timeout={timeout}",
+        )
+
+    monkeypatch.setattr(probe_runner, "_run_probe", fake_run_probe)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("macro_project_presence", "external_link_update_prompt"),
+        include_fixture_patterns=("external.*",),
+    )
+
+    assert calls == ["external.xlsx"]
+    assert report["include_fixture_patterns"] == ["external.*"]
+    assert report["result_count"] == 1
 
 
 def test_macro_probe_runner_fails_when_vba_project_missing(tmp_path: Path, monkeypatch) -> None:
@@ -354,6 +501,524 @@ def test_external_link_probe_runner_fails_when_link_part_missing(
     assert report["failure_count"] == 1
     assert report["results"][0]["status"] == "failed"
     assert "missing after Excel open" in report["results"][0]["message"]
+
+
+def test_ui_interaction_probe_records_macro_button_click(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+
+    def fake_open_with_ui(src: Path, probe: str, timeout: int):
+        assert src.name == "macro.xlsm"
+        assert probe == "macro_project_presence"
+        assert timeout == 90
+        return "macro.xlsm", ["clicked button: Disable Macros"]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("macro_project_presence",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["probe_kind"] == "excel_ui_interaction"
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["probe"] == "macro_project_presence"
+    assert result["probe_kind"] == "excel_ui_interaction"
+    assert result["status"] == "passed"
+    assert result["ui_actions"] == ["clicked button: Disable Macros"]
+
+
+def test_external_link_ui_probe_forces_and_restores_update_prompt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(
+        probe_runner,
+        "_open_excel_with_ui_interaction_impl",
+        lambda src, probe, timeout: (
+            src.name,
+            [f"{probe}:{timeout}", "clicked button: Don't Update"],
+        ),
+    )
+
+    active_name, actions = probe_runner._open_excel_with_ui_interaction(
+        fixture,
+        "external_link_update_prompt",
+        45,
+    )
+
+    assert active_name == "external-link.xlsx"
+    assert actions == ["external_link_update_prompt:45", "clicked button: Don't Update"]
+    assert settings == [True, False]
+
+
+def test_external_link_ui_probe_restores_update_prompt_after_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    def fail_open(_src: Path, _probe: str, _timeout: int) -> tuple[str, list[str]]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", fail_open)
+
+    try:
+        probe_runner._open_excel_with_ui_interaction(
+            fixture,
+            "external_link_update_prompt",
+            45,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert settings == [True, False]
+
+
+def test_external_link_ui_probe_does_not_force_unknown_update_prompt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+    opened = False
+
+    def open_with_ui(_src: Path, _probe: str, _timeout: int) -> tuple[str, list[str]]:
+        nonlocal opened
+        opened = True
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: None)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", open_with_ui)
+
+    try:
+        probe_runner._open_excel_with_ui_interaction(
+            fixture,
+            "external_link_update_prompt",
+            45,
+        )
+    except RuntimeError as exc:
+        assert "could not read Excel ask to update links setting" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert settings == []
+    assert opened is False
+
+
+def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def fake_open_with_ui(_src: Path, _probe: str, _timeout: int):
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert "required UI action was not observed" in result["message"]
+    assert result["ui_actions"] == []
+
+
+def test_ui_interaction_probe_records_embedded_control_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        _rewrite_control_selection(src, value="2")
+        return "control.xlsx", [
+            "clicked Excel embedded/control object",
+            "clicked Excel embedded/control object: List Box 1",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "clicked Excel embedded/control object",
+        "clicked Excel embedded/control object: List Box 1",
+        "saved active workbook",
+    ]
+
+
+def test_embedded_control_ui_interaction_requires_persisted_state_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        return "control.xlsx", [
+            "clicked Excel embedded/control object",
+            "clicked Excel embedded/control object: List Box 1",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted control-property state" in report["results"][0]["message"]
+
+
+def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_workbook(fixture_dir / "pivot.xlsx")
+    _write_manifest(fixture_dir, "pivot.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "pivot_refresh_state"
+        return "pivot.xlsx", ["executed Excel command: refresh all"]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("pivot_refresh_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["probe"] == "pivot_refresh_state"
+    assert result["ui_actions"] == ["executed Excel command: refresh all"]
+
+
+def test_ui_interaction_probe_records_slicer_item_click(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        _rewrite_slicer_filter(src, value="EAST")
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel slicer shape",
+        "selected Excel slicer shape: Slicer_Region",
+        "clicked Excel slicer item",
+        "clicked Excel slicer item: Slicer_Region",
+        "clicked Excel slicer item: Slicer_Year",
+        "saved active workbook",
+    ]
+
+
+def test_ui_interaction_probe_records_timeline_shape_selection(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel timeline shape",
+        "selected Excel timeline shape: Timeline_Date",
+        "clicked Excel timeline month",
+        "clicked Excel timeline month: May",
+        "saved active workbook",
+    ]
+
+
+def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path: Path) -> None:
+    slicer = tmp_path / "slicer.xlsx"
+    timeline = tmp_path / "timeline.xlsx"
+    _write_slicer_workbook(slicer)
+    _write_timeline_workbook(timeline)
+
+    assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == [
+        "Slicer_Region",
+        "Slicer_Year",
+    ]
+    assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
+        "Timeline_Date"
+    ]
+
+
+def test_control_shape_names_come_from_authored_worksheet_controls(tmp_path: Path) -> None:
+    control = tmp_path / "control.xlsx"
+    _write_embedded_control_workbook(control)
+
+    assert probe_runner._control_shape_names(control) == ["List Box 1"]
+
+
+def test_slicer_ui_interaction_requires_persisted_filter_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted table filter or slicer-cache item state" in (
+        report["results"][0]["message"]
+    )
+
+
+def test_slicer_ui_interaction_accepts_persisted_filter_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        _rewrite_slicer_filter(src, value="EAST")
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel slicer shape",
+        "selected Excel slicer shape: Slicer_Region",
+        "clicked Excel slicer item",
+        "clicked Excel slicer item: Slicer_Region",
+        "clicked Excel slicer item: Slicer_Year",
+        "saved active workbook",
+    ]
+
+
+def test_slicer_ui_interaction_accepts_persisted_slicer_cache_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_slicer_workbook(fixture_dir / "pivot-slicer.xlsx")
+    _write_manifest(fixture_dir, "pivot-slicer.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        _rewrite_slicer_cache_selection(src)
+        return "pivot-slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Month",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: Slicer_Month",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "passed"
+
+
+def test_timeline_ui_interaction_requires_persisted_selection_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook_with_selection(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted timeline selection" in report["results"][0]["message"]
+
+
+def test_timeline_ui_interaction_accepts_persisted_selection_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook_with_selection(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        _rewrite_timeline_selection(
+            src,
+            start="2012-05-01T00:00:00",
+            end="2012-05-31T00:00:00",
+        )
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel timeline shape",
+        "selected Excel timeline shape: Timeline_Date",
+        "clicked Excel timeline month",
+        "clicked Excel timeline month: May",
+        "saved active workbook",
+    ]
 
 
 def test_pivot_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
@@ -612,8 +1277,13 @@ def _write_vba_workbook(path: Path) -> None:
 
 def _write_embedded_control_workbook(path: Path) -> None:
     entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <controls><control name="List Box 1"/></controls>
+</worksheet>"""
     entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
-<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Button"/>"""
+<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" sel="0" val="0"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
@@ -656,10 +1326,46 @@ def _write_pivot_workbook(path: Path) -> None:
 
 def _write_slicer_workbook(path: Path) -> None:
     entries = _base_entries()
+    entries["xl/tables/table1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Table1" displayName="Table1" ref="A1:C4">
+  <autoFilter ref="A1:C4"/>
+  <tableColumns count="3">
+    <tableColumn id="1" name="Customer"/>
+    <tableColumn id="2" name="Region"/>
+    <tableColumn id="3" name="Year"/>
+  </tableColumns>
+</table>"""
     entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region"/>"""
+    entries["xl/slicerCaches/slicerCache2.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Year"/>"""
     entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region" cache="Slicer_Region"/>"""
+    entries["xl/slicers/slicer2.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Year" cache="Slicer_Year"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_pivot_slicer_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+                       name="Slicer_Month" sourceName="Month">
+  <data>
+    <tabular pivotCacheId="1">
+      <items count="3">
+        <i x="0" s="1"/>
+        <i x="1" s="1"/>
+        <i x="2" s="1"/>
+      </items>
+    </tabular>
+  </data>
+</slicerCacheDefinition>"""
+    entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Month" cache="Slicer_Month"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
@@ -669,6 +1375,21 @@ def _write_timeline_workbook(path: Path) -> None:
     entries = _base_entries()
     entries["xl/timelineCaches/timelineCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date"/>"""
+    entries["xl/timelines/timeline1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date" cache="Timeline_Date"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_timeline_workbook_with_selection(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/timelineCaches/timelineCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date">
+  <state filterType="dateBetween">
+    <selection startDate="2012-01-01T00:00:00" endDate="2012-03-31T00:00:00"/>
+  </state>
+</timelineCacheDefinition>"""
     entries["xl/timelines/timeline1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date" cache="Timeline_Date"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -715,6 +1436,62 @@ def _rewrite_without_prefixes(path: Path, prefixes: tuple[str, ...]) -> None:
             for name in archive.namelist()
             if not any(name.startswith(prefix) for prefix in prefixes)
         }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_timeline_selection(path: Path, *, start: str, end: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    timeline = entries["xl/timelineCaches/timelineCache1.xml"].decode()
+    timeline = timeline.replace(
+        'startDate="2012-01-01T00:00:00" endDate="2012-03-31T00:00:00"',
+        f'startDate="{start}" endDate="{end}"',
+    )
+    entries["xl/timelineCaches/timelineCache1.xml"] = timeline.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_slicer_filter(path: Path, *, value: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    table = entries["xl/tables/table1.xml"].decode()
+    table = table.replace(
+        '<autoFilter ref="A1:C4"/>',
+        (
+            '<autoFilter ref="A1:C4">'
+            f'<filterColumn colId="1"><filters><filter val="{value}"/></filters></filterColumn>'
+            '<filterColumn colId="2"><filters><filter val="2014"/></filters></filterColumn>'
+            "</autoFilter>"
+        ),
+    )
+    entries["xl/tables/table1.xml"] = table.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_slicer_cache_selection(path: Path) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    cache = entries["xl/slicerCaches/slicerCache1.xml"].decode()
+    cache = cache.replace('<i x="1" s="1"/>', '<i x="1"/>')
+    cache = cache.replace('<i x="2" s="1"/>', '<i x="2"/>')
+    entries["xl/slicerCaches/slicerCache1.xml"] = cache.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_control_selection(path: Path, *, value: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    control = entries["xl/ctrlProps/ctrlProp1.xml"].decode()
+    control = control.replace('sel="0"', f'sel="{value}"')
+    entries["xl/ctrlProps/ctrlProp1.xml"] = control.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
