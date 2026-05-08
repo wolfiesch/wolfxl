@@ -187,9 +187,10 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
             *parts = updated;
         }
 
-        // 2b. If a row delete removed a structured-table header row, Excel
-        // expects the promoted row's cells to be string headers and expects
-        // `<tableColumn name>` metadata to match those visible headers.
+        // 2b. If a row delete removed a structured-table header row, keep the
+        // table metadata stable and mark the table headerless. Promoting the
+        // first data row into header metadata leaves Excel's PDF export path
+        // rejecting the workbook.
         if plan.axis == Axis::Row && plan.is_delete() {
             if let (Some(sheet), Some(parts)) = (
                 sheet_bytes.get_mut(&op.sheet),
