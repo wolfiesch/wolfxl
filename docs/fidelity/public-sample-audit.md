@@ -50,3 +50,39 @@ clean Excel process and running the workbook alone both opened it under the
 expected filename with no repair prompt. The clean rerun above is the retained
 evidence artifact. The later eight-file source smoke also opened all files under
 their expected filenames.
+
+## 2026-05-08 Microsoft Power BI Desktop Repository Remainder
+
+Repository tree: [microsoft/powerbi-desktop-samples](https://github.com/microsoft/powerbi-desktop-samples/tree/main)
+
+After the eight Learn-linked service samples passed, the repository tree was
+enumerated for every remaining `.xlsx` workbook. Two additional public
+workbooks were downloaded to `/tmp` and audited without committing binaries.
+
+| Workbook | Source URL | Bytes | SHA-256 |
+|---|---|---:|---|
+| `adventureworks-sales.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/AdventureWorks%20Sales%20Sample/AdventureWorks%20Sales.xlsx` | 14,322,931 | `76fe718fb7806bc06f96b07f8e6835af22c1667f59157225cae6163827856df8` |
+| `customerfeedback.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/Monthly%20Desktop%20Blog%20Samples/2019/customerfeedback.xlsx` | 7,848,484 | `76ab40c7b772976117f963d79034096c8ff96429f244c1bc6162a590b306b319` |
+
+`adventureworks-sales.xlsx` introduced external-data query table package
+surfaces: `xl/queryTables/queryTable*.xml`, query-table content types, and
+query-table relationships. The gap radar now classifies those as workbook
+connection/query-table evidence rather than unknown OOXML.
+
+This pass also exposed a real app-level fidelity gap that the package oracle
+had not caught: renaming the first AdventureWorks sheet left a sheet-scoped,
+hidden `ExternalData_6` defined name pointing at the old sheet title, and Excel
+timed out while opening the mutated file. The rename path now retargets
+sheet-scoped defined-name formulas for the renamed sheet while preserving the
+existing defined-name attributes. The mutation runner classifies the resulting
+workbook-global fingerprint change as expected rename drift.
+
+Evidence artifacts:
+
+| Check | Artifact | Result |
+|---|---|---|
+| Gap radar | `/tmp/wolfxl-public-microsoft-extra-samples-20260508` | clear, `fixture_count=2` |
+| Excel source app smoke | `/tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json` | `2` results, `0` failures |
+| Package mutation sweep | `/tmp/wolfxl-public-microsoft-extra-mutations-20260508/report.json` | `36` results, `0` failures, `24` passed, `12` expected drift |
+| AdventureWorks rename retarget check | `/tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json` | `1` result, `0` failures, `1` expected workbook-global drift |
+| AdventureWorks renamed Excel app smoke | `/tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json` | `1` result, `0` failures |

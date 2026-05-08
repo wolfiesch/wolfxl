@@ -296,7 +296,7 @@ def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
         ("externalLink", "externalLinkPath", "xlPathMissing"),
         ("Python", "sheetMetadata"),
         ("jsaProject",),
-        ("table",),
+        ("table", "queryTable"),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
         ("powerPivotData", "model"),
         ("slicer", "slicerCache", "timeline", "timelineCache"),

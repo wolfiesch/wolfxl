@@ -88,6 +88,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "pivots_semantic_drift",
+        "workbook_globals_semantic_drift",
         "worksheet_formulas_semantic_drift",
     },
     # Deleting the first row/column intentionally moves feature ranges. The

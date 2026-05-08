@@ -31,7 +31,7 @@ FEATURE_PART_PREFIXES = {
     "chart_style": ("xl/charts/style", "xl/charts/colors"),
     "comment": ("xl/comments", "xl/threadedComments/", "xl/persons/"),
     "conditional_formatting": ("xl/worksheets/", "xl/styles.xml"),
-    "connection": ("xl/connections.xml",),
+    "connection": ("xl/connections.xml", "xl/queryTables/"),
     "custom_property": ("xl/customProperty",),
     "custom_xml": ("customXml/", "xl/customXml/"),
     "data_model": ("xl/model/",),

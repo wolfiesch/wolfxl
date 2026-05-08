@@ -111,9 +111,61 @@ from wolfxl._worksheet_write_buffers import (
     write_rows as _write_rows,
 )
 from wolfxl._utils import a1_to_rowcol, rowcol_to_a1
+from wolfxl.utils import quote_sheetname
 
 if TYPE_CHECKING:
     from wolfxl._workbook import Workbook
+
+
+def _retarget_sheet_formula(refers_to: str, old: str, new: str) -> str:
+    prefix = "=" if refers_to.startswith("=") else ""
+    body = refers_to[1:] if prefix else refers_to
+    quoted_old = f"{quote_sheetname(old)}!"
+    quoted_new = f"{quote_sheetname(new)}!"
+    updated = body.replace(quoted_old, quoted_new)
+    if updated == body:
+        updated = body.replace(f"{old}!", quoted_new)
+    return f"{prefix}{updated}"
+
+
+def _queue_defined_name_sheet_rename(
+    wb: Workbook, old: str, new: str, sheet_idx: int
+) -> None:
+    reader = getattr(wb, "_rust_reader", None)
+    if reader is None or not hasattr(reader, "read_named_ranges"):
+        return
+    try:
+        entries = reader.read_named_ranges(old)
+    except Exception:
+        return
+    from wolfxl.workbook.defined_name import DefinedName
+
+    for entry in entries:
+        if entry.get("scope") != "sheet":
+            continue
+        refers_to = entry.get("refers_to") or ""
+        retargeted = _retarget_sheet_formula(refers_to, old, new)
+        if retargeted == refers_to:
+            continue
+        defined_name = DefinedName(
+            name=entry["name"],
+            value=retargeted[1:] if retargeted.startswith("=") else retargeted,
+            localSheetId=sheet_idx,
+            comment=entry.get("comment"),
+            hidden=bool(entry.get("hidden", False)),
+            customMenu=entry.get("custom_menu"),
+            description=entry.get("description"),
+            help=entry.get("help"),
+            statusBar=entry.get("status_bar"),
+            shortcutKey=entry.get("shortcut_key"),
+            function=entry.get("function"),
+            functionGroupId=entry.get("function_group_id"),
+            vbProcedure=entry.get("vb_procedure"),
+            xlm=entry.get("xlm"),
+            publishToServer=entry.get("publish_to_server"),
+            workbookParameter=entry.get("workbook_parameter"),
+        )
+        wb._pending_defined_names[(defined_name.name, sheet_idx)] = defined_name  # noqa: SLF001
 
 
 class Worksheet:
@@ -204,15 +256,17 @@ class Worksheet:
             return
         if value in wb._sheets or value in getattr(wb, "_chartsheets", {}):  # noqa: SLF001
             raise ValueError(f"Sheet '{value}' already exists")
+        idx = wb._sheet_names.index(old)  # noqa: SLF001
+        _queue_defined_name_sheet_rename(wb, old, value, idx)
         if wb._rust_patcher is not None:  # noqa: SLF001
             queue_rename = getattr(wb._rust_patcher, "queue_sheet_rename", None)  # noqa: SLF001
             if queue_rename is not None:
                 queue_rename(old, value)
         # Update workbook bookkeeping.
-        idx = wb._sheet_names.index(old)  # noqa: SLF001
         wb._sheet_names[idx] = value  # noqa: SLF001
         wb._sheets[value] = wb._sheets.pop(old)  # noqa: SLF001
         self._title = value
+        self._defined_names_cache = None
         # Sync the Rust writer so ensure_sheet_exists() sees the new name.
         if wb._rust_writer is not None:  # noqa: SLF001
             wb._rust_writer.rename_sheet(old, value)  # noqa: SLF001

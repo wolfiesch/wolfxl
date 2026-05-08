@@ -8,12 +8,13 @@ still T1.5 (RFC-021) so its raise-contract test stays.
 from __future__ import annotations
 
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from wolfxl.packaging.core import DocumentProperties
 from wolfxl.workbook.defined_name import DefinedName
 
-from wolfxl import Workbook
+from wolfxl import Workbook, load_workbook
 
 openpyxl = pytest.importorskip("openpyxl")
 
@@ -142,3 +143,42 @@ def test_defined_names_modify_mode_round_trip(tmp_path: Path) -> None:
     rt = openpyxl.load_workbook(dst)
     assert "New" in rt.defined_names
     assert rt.defined_names["New"].attr_text == "Sheet!$A$1"
+
+
+def test_sheet_rename_retargets_sheet_scoped_defined_name(tmp_path: Path) -> None:
+    """Modify-mode sheet rename keeps hidden external-data names coherent."""
+    from openpyxl.workbook.defined_name import DefinedName as XDefinedName
+
+    src = tmp_path / "external_data_name.xlsx"
+    dst = tmp_path / "renamed.xlsx"
+
+    op = openpyxl.Workbook()
+    ws = op.active
+    ws.title = "Sales Order_data"
+    for row in range(1, 5):
+        for col in range(1, 5):
+            ws.cell(row=row, column=col, value=row * col)
+    defined_name = XDefinedName(
+        "ExternalData_1",
+        attr_text="'Sales Order_data'!$A$1:$D$4",
+        localSheetId=0,
+        hidden=True,
+    )
+    if hasattr(op.defined_names, "add"):
+        op.defined_names.add(defined_name)
+    else:
+        op.defined_names["ExternalData_1"] = defined_name
+    op.save(src)
+
+    wb = load_workbook(src, modify=True)
+    wb["Sales Order_data"].title = "WolfXL Fidelity Rename"
+    wb.save(dst)
+    wb.close()
+
+    with ZipFile(dst) as zf:
+        workbook_xml = zf.read("xl/workbook.xml").decode("utf-8")
+    assert "'WolfXL Fidelity Rename'!$A$1:$D$4" in workbook_xml
+    assert "'Sales Order_data'!$A$1:$D$4" not in workbook_xml
+    assert 'name="ExternalData_1"' in workbook_xml
+    assert 'localSheetId="0"' in workbook_xml
+    assert 'hidden="1"' in workbook_xml

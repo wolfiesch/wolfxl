@@ -364,6 +364,12 @@ def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> 
                     "severity": "error",
                     "part": "charts",
                     "message": "expected formula change after sheet rename",
+                },
+                {
+                    "kind": "workbook_globals_semantic_drift",
+                    "severity": "error",
+                    "part": "workbook_globals",
+                    "message": "expected defined-name formula change after sheet rename",
                 }
             ]
         }
@@ -380,8 +386,11 @@ def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> 
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 1
-    assert result["expected_issues"][0]["kind"] == "charts_semantic_drift"
+    assert result["expected_issue_count"] == 2
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "charts_semantic_drift",
+        "workbook_globals_semantic_drift",
+    }
 
 
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
