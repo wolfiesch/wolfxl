@@ -835,7 +835,9 @@ def test_slicer_ui_interaction_requires_persisted_filter_change(
     )
 
     assert report["failure_count"] == 1
-    assert "did not change persisted table filter state" in report["results"][0]["message"]
+    assert "did not change persisted table filter or slicer-cache item state" in (
+        report["results"][0]["message"]
+    )
 
 
 def test_slicer_ui_interaction_accepts_persisted_filter_change(
@@ -877,6 +879,39 @@ def test_slicer_ui_interaction_accepts_persisted_filter_change(
         "clicked Excel slicer item: Slicer_Year",
         "saved active workbook",
     ]
+
+
+def test_slicer_ui_interaction_accepts_persisted_slicer_cache_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_pivot_slicer_workbook(fixture_dir / "pivot-slicer.xlsx")
+    _write_manifest(fixture_dir, "pivot-slicer.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        _rewrite_slicer_cache_selection(src)
+        return "pivot-slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Month",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: Slicer_Month",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "passed"
 
 
 def test_timeline_ui_interaction_requires_persisted_selection_change(
@@ -1282,6 +1317,28 @@ def _write_slicer_workbook(path: Path) -> None:
             archive.writestr(name, content)
 
 
+def _write_pivot_slicer_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+                       name="Slicer_Month" sourceName="Month">
+  <data>
+    <tabular pivotCacheId="1">
+      <items count="3">
+        <i x="0" s="1"/>
+        <i x="1" s="1"/>
+        <i x="2" s="1"/>
+      </items>
+    </tabular>
+  </data>
+</slicerCacheDefinition>"""
+    entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Month" cache="Slicer_Month"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
 def _write_timeline_workbook(path: Path) -> None:
     entries = _base_entries()
     entries["xl/timelineCaches/timelineCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1380,6 +1437,18 @@ def _rewrite_slicer_filter(path: Path, *, value: str) -> None:
         ),
     )
     entries["xl/tables/table1.xml"] = table.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_slicer_cache_selection(path: Path) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    cache = entries["xl/slicerCaches/slicerCache1.xml"].decode()
+    cache = cache.replace('<i x="1" s="1"/>', '<i x="1"/>')
+    cache = cache.replace('<i x="2" s="1"/>', '<i x="2"/>')
+    entries["xl/slicerCaches/slicerCache1.xml"] = cache.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

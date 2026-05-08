@@ -866,6 +866,20 @@
         {"path": "results.0.probe", "equals": "external_link_update_prompt"},
         {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
       ]
+    },
+    {
+      "name": "excel_ui_interaction_shared_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 60 > /tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
+      ]
     }
   ]
 }

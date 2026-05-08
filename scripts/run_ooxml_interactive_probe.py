@@ -360,6 +360,11 @@ def _run_ui_interaction_probe(
         if probe == "slicer_selection_state"
         else None
     )
+    slicer_cache_before = (
+        _slicer_cache_item_state(probe_path)
+        if probe == "slicer_selection_state"
+        else None
+    )
     control_state_before = (
         _control_property_state(probe_path)
         if probe == "embedded_control_openability"
@@ -424,7 +429,12 @@ def _run_ui_interaction_probe(
             )
     if probe == "slicer_selection_state":
         slicer_filter_after = _slicer_table_filter_state(probe_path)
-        if not slicer_filter_after or slicer_filter_after == slicer_filter_before:
+        slicer_cache_after = _slicer_cache_item_state(probe_path)
+        table_filter_changed = (
+            bool(slicer_filter_after) and slicer_filter_after != slicer_filter_before
+        )
+        cache_item_changed = bool(slicer_cache_after) and slicer_cache_after != slicer_cache_before
+        if not table_filter_changed and not cache_item_changed:
             return InteractiveProbeResult(
                 fixture=fixture_label,
                 probe=probe,
@@ -435,7 +445,8 @@ def _run_ui_interaction_probe(
                 output=str(probe_path),
                 message=(
                     "Excel slicer UI click did not change persisted "
-                    f"table filter state: {slicer_filter_before}"
+                    "table filter or slicer-cache item state: "
+                    f"table={slicer_filter_before}, cache={slicer_cache_before}"
                 ),
                 ui_actions=ui_actions,
             )
@@ -1074,6 +1085,32 @@ def _slicer_table_filter_state(path: Path) -> tuple[tuple[str, str, tuple[str, .
                     )
                     if values:
                         state.append((part_name, col_id, values))
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return ()
+    return tuple(state)
+
+
+def _slicer_cache_item_state(
+    path: Path,
+) -> tuple[tuple[str, tuple[tuple[int, tuple[tuple[str, str], ...]], ...]], ...]:
+    state: list[tuple[str, tuple[tuple[int, tuple[tuple[str, str], ...]], ...]]] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            cache_parts = [
+                name
+                for name in archive.namelist()
+                if name.startswith("xl/slicerCaches/") and name.endswith(".xml")
+            ]
+            for part_name in sorted(cache_parts):
+                items: list[tuple[int, tuple[tuple[str, str], ...]]] = []
+                root = ET.fromstring(archive.read(part_name))
+                for index, element in enumerate(root.iter()):
+                    if _local_name(element.tag) not in {"i", "item", "slicerCacheItem"}:
+                        continue
+                    if element.attrib:
+                        items.append((index, tuple(sorted(element.attrib.items()))))
+                if items:
+                    state.append((part_name, tuple(items)))
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return ()
     return tuple(state)
