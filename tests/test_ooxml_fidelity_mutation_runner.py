@@ -401,6 +401,12 @@ def test_runner_accepts_structural_delete_calc_chain_volatility_only(
                     ),
                 },
                 {
+                    "kind": "feature_part_loss",
+                    "severity": "error",
+                    "part": "calc_chain",
+                    "message": "calc_chain parts disappeared after save: ['xl/calcChain.xml']",
+                },
+                {
                     "kind": "missing_part",
                     "severity": "error",
                     "part": "xl/charts/chart1.xml",
@@ -427,10 +433,186 @@ def test_runner_accepts_structural_delete_calc_chain_volatility_only(
             "http://schemas.openxmlformats.org/officeDocument/2006/"
             "relationships/calcChain -> calcChain.xml"
         ),
+        "calc_chain parts disappeared after save: ['xl/calcChain.xml']",
     ]
     assert [issue["message"] for issue in result["issues"]] == [
         "missing part after save: xl/charts/chart1.xml",
     ]
+
+
+def test_runner_accepts_structural_delete_semantic_drifts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "extensions_semantic_drift",
+                    "severity": "error",
+                    "part": "extensions",
+                    "message": "extensions semantic fingerprint changed: before={'sqref':'C2:C4'} after={'sqref':'C1:C3'}",
+                },
+                {
+                    "kind": "drawing_objects_semantic_drift",
+                    "severity": "error",
+                    "part": "drawing_objects",
+                    "message": "comment anchor changed: before={'ref':'C2'} after={'ref':'C1'}",
+                },
+                {
+                    "kind": "structured_references_semantic_drift",
+                    "severity": "error",
+                    "part": "structured_references",
+                    "message": "formula moved: before={'r':'F2'} after={'r':'E1'}",
+                },
+                {
+                    "kind": "workbook_globals_semantic_drift",
+                    "severity": "error",
+                    "part": "workbook_globals",
+                    "message": "defined name shifted: before={'A1:D4'} after={'A1:C3'}",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "drawing_objects_semantic_drift",
+        "extensions_semantic_drift",
+        "structured_references_semantic_drift",
+        "workbook_globals_semantic_drift",
+    }
+
+
+def test_runner_does_not_hide_structural_delete_total_feature_loss(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "extensions_semantic_drift",
+                    "severity": "error",
+                    "part": "extensions",
+                    "message": "extensions semantic fingerprint changed: before={'ext':'present'} after={}",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["expected_issue_count"] == 0
+    assert result["issues"][0]["kind"] == "extensions_semantic_drift"
+
+
+def test_runner_accepts_deleted_first_axis_formula_loss(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "worksheet_formulas_semantic_drift",
+                    "severity": "error",
+                    "part": "worksheet_formulas",
+                    "message": (
+                        "worksheet_formulas semantic fingerprint changed after save: "
+                        "before={'xl/worksheets/sheet1.xml': [((('r', 'B1'),), "
+                        "(('t', None),), '[1]Sheet1!$A$1')]} after={}"
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issues"][0]["kind"] == "worksheet_formulas_semantic_drift"
+
+
+def test_runner_does_not_hide_non_deleted_axis_formula_loss(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "worksheet_formulas_semantic_drift",
+                    "severity": "error",
+                    "part": "worksheet_formulas",
+                    "message": (
+                        "worksheet_formulas semantic fingerprint changed after save: "
+                        "before={'xl/worksheets/sheet1.xml': [((('r', 'B2'),), "
+                        "(('t', None),), 'SUM(A2:A3)')]} after={}"
+                    ),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("delete_first_row",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["expected_issue_count"] == 0
+    assert result["issues"][0]["kind"] == "worksheet_formulas_semantic_drift"
 
 
 def test_runner_separates_expected_feature_add_drift(

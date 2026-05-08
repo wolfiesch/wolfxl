@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 from copy import deepcopy
@@ -68,22 +69,32 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
+        "drawing_objects_semantic_drift",
         "external_links_semantic_drift",
+        "extensions_semantic_drift",
+        "feature_part_loss",
         "missing_part",
         "missing_relationship",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "structured_references_semantic_drift",
+        "workbook_globals_semantic_drift",
         "worksheet_formulas_semantic_drift",
     },
     "delete_first_col": {
         "charts_semantic_drift",
         "conditional_formatting_semantic_drift",
         "data_validations_semantic_drift",
+        "drawing_objects_semantic_drift",
         "external_links_semantic_drift",
+        "extensions_semantic_drift",
+        "feature_part_loss",
         "missing_part",
         "missing_relationship",
         "pivots_semantic_drift",
         "slicers_semantic_drift",
+        "structured_references_semantic_drift",
+        "workbook_globals_semantic_drift",
         "worksheet_formulas_semantic_drift",
     },
     "copy_first_sheet": {
@@ -132,11 +143,13 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "delete_first_row": {
         "external_links_semantic_drift": "worksheet_formulas",
+        "feature_part_loss": "calc_chain",
         "missing_part": "xl/calcChain.xml",
         "missing_relationship": "relationships/calcChain",
     },
     "delete_first_col": {
         "external_links_semantic_drift": "worksheet_formulas",
+        "feature_part_loss": "calc_chain",
         "missing_part": "xl/calcChain.xml",
         "missing_relationship": "relationships/calcChain",
     },
@@ -516,6 +529,10 @@ def _is_expected_issue(
     kind = issue.get("kind")
     if kind not in expected_kinds:
         return False
+    if _is_expected_deleted_first_axis_formula_loss(issue, mutation):
+        return True
+    if _looks_like_total_semantic_loss(issue):
+        return False
     if (
         mutation == "add_conditional_formatting"
         and kind == "style_theme_semantic_drift"
@@ -528,6 +545,27 @@ def _is_expected_issue(
     if marker is None:
         return True
     return marker in issue.get("message", "")
+
+
+def _looks_like_total_semantic_loss(issue: dict) -> bool:
+    message = issue.get("message", "")
+    return "before={" in message and " after={}" in message
+
+
+def _is_expected_deleted_first_axis_formula_loss(issue: dict, mutation: str) -> bool:
+    if issue.get("kind") != "worksheet_formulas_semantic_drift":
+        return False
+    if mutation not in {"delete_first_row", "delete_first_col"}:
+        return False
+    message = issue.get("message", "")
+    if " after={}" not in message:
+        return False
+    refs = re.findall(r"\('r', '([A-Z]+)([0-9]+)'\)", message)
+    if not refs:
+        return False
+    if mutation == "delete_first_row":
+        return all(row == "1" for _col, row in refs)
+    return all(col == "A" for col, _row in refs)
 
 
 def _is_expected_conditional_formatting_dxf_addition(
