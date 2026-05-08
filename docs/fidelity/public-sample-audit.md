@@ -39,7 +39,7 @@ Evidence artifacts:
 
 | Check | Artifact | Result |
 |---|---|---|
-| Gap radar | `/tmp/wolfxl-public-powerbi-expanded-20260508` | clear, `fixture_count=8` |
+| Gap radar | `/tmp/wolfxl-public-powerbi-expanded-gap-radar-20260508.json` | clear, `fixture_count=8` |
 | Package mutation sweep | `/tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json` | `144` results, `0` failures, `96` passed, `48` expected drift |
 | Excel source app smoke | `/tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json` | `8` results, `0` failures |
 | Excel mutation app smoke | `/tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json` | `144` results, `0` failures |
@@ -81,8 +81,12 @@ Evidence artifacts:
 
 | Check | Artifact | Result |
 |---|---|---|
-| Gap radar | `/tmp/wolfxl-public-microsoft-extra-samples-20260508` | clear, `fixture_count=2` |
+| Gap radar | `/tmp/wolfxl-public-microsoft-extra-gap-radar-20260508.json` | clear, `fixture_count=2` |
 | Excel source app smoke | `/tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json` | `2` results, `0` failures |
 | Package mutation sweep | `/tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json` | `36` results, `0` failures, `23` passed, `13` expected drift |
 | AdventureWorks rename retarget check | `/tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json` | `1` result, `0` failures, `1` expected workbook-global drift |
 | AdventureWorks renamed Excel app smoke | `/tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json` | `1` result, `0` failures |
+
+These public-sample reports are also pinned in
+`Plans/ooxml-current-evidence-bundle.json`; the latest bundle verification is
+`/tmp/wolfxl-current-evidence-bundle-audit-20260508-public-samples.json`.

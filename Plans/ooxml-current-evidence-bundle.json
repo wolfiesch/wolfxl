@@ -636,6 +636,113 @@
       ]
     },
     {
+      "name": "public_powerbi_expanded_gap_radar",
+      "path": "/tmp/wolfxl-public-powerbi-expanded-gap-radar-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /tmp/wolfxl-public-powerbi-expanded-20260508 --json --strict > /tmp/wolfxl-public-powerbi-expanded-gap-radar-20260508.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 8},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_feature_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_mutations",
+      "path": "/tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-public-powerbi-expanded-mutations-20260508 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 144},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_excel_source_app_open",
+      "path": "/tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 8},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_powerbi_expanded_excel_mutation_app_open",
+      "path": "/tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-powerbi-expanded-20260508 --output-dir /tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508 --app excel --timeout 180 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 144},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_gap_radar",
+      "path": "/tmp/wolfxl-public-microsoft-extra-gap-radar-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --json --strict > /tmp/wolfxl-public-microsoft-extra-gap-radar-20260508.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 2},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_feature_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_excel_source_app_open",
+      "path": "/tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
+      "name": "public_microsoft_extra_mutations",
+      "path": "/tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508 --mutation no_op --mutation marker_cell --mutation style_cell --mutation insert_tail_row --mutation insert_tail_col --mutation delete_marker_tail_row --mutation delete_marker_tail_col --mutation copy_remove_sheet --mutation move_marker_range --mutation delete_first_row --mutation delete_first_col --mutation copy_first_sheet --mutation rename_first_sheet --mutation add_remove_chart --mutation add_data_validation --mutation add_conditional_formatting --mutation move_formula_range --mutation retarget_external_links > /tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 36},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "public_adventureworks_rename_retarget_mutation",
+      "path": "/tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-public-microsoft-extra-samples-20260508 --output-dir /tmp/wolfxl-adventureworks-rename-retarget-check-20260508 --fixture adventureworks-sales.xlsx --mutation rename_first_sheet > /tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 1},
+        {"path": "results.0.fixture", "equals": "adventureworks-sales.xlsx"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed_with_expected_drift"}
+      ]
+    },
+    {
+      "name": "public_adventureworks_renamed_excel_app_open",
+      "path": "/tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-single-mutated-open-probe-retarget-20260508 --output-dir /tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508 --app excel --timeout 180 --mutation source > /tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source"]},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
       "name": "synthgl_recursive_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
