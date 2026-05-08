@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import zipfile
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 
 def _load_gap_radar_module() -> ModuleType:
@@ -211,6 +214,15 @@ def test_gap_radar_reports_unreadable_workbooks_without_crashing(
     ]
 
 
+def test_validate_package_part_names_rejects_backslashes() -> None:
+    with pytest.raises(ValueError, match="unsafe OOXML package part path"):
+        gap_radar._validate_package_part_names({r"xl\_rels\workbook.xml.rels"})
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="zipfile normalizes member names on Windows before the gap radar sees them",
+)
 def test_gap_radar_reports_backslash_package_paths_as_skipped_invalid_inputs(
     tmp_path: Path,
 ) -> None:
