@@ -272,13 +272,24 @@
       ]
     },
     {
-      "name": "excel_render_full_pack_with_chart_remove_intentional_coverage_gate",
-      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-chart-remove-20260508.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --render-report /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-chart-remove-20260508.json",
+      "name": "excel_render_intentional_retarget_external_links_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation retarget_external_links > /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["retarget_external_links"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_full_pack_with_chart_remove_external_retarget_intentional_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-chart-remove-external-retarget-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --render-report /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-chart-remove-external-retarget-20260508.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
-        {"path": "render_report_count", "equals": 7},
+        {"path": "render_report_count", "equals": 8},
         {"path": "render_engine_required", "equals": "excel"},
         {"path": "intentional_render_required", "equals": true},
         {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
