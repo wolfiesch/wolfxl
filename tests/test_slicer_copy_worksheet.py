@@ -89,6 +89,22 @@ def _copy_save_reopen_remove_copy(src: Path, dst: Path, name: str = "Copied Shee
     wb.save(dst)
 
 
+def _inject_shared_slicer_relationship(src: Path, dst: Path) -> None:
+    rels_path = "xl/worksheets/_rels/sheet2.xml.rels"
+    rel = (
+        '<Relationship Id="rId99" '
+        'Type="http://schemas.microsoft.com/office/2007/relationships/slicer" '
+        'Target="../slicers/slicer1.xml"/>'
+    )
+    with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == rels_path:
+                text = data.decode()
+                data = text.replace("</Relationships>", f"{rel}</Relationships>").encode()
+            zout.writestr(info, data)
+
+
 # ---------------------------------------------------------------------------
 # Case 1 — copy_worksheet allocates a FRESH slicer{N}.xml.
 # ---------------------------------------------------------------------------
@@ -286,6 +302,35 @@ def test_real_excel_pivot_slicer_remove_copy_prunes_orphaned_cache_parts(
     assert "slicerCache4.xml" not in workbook_rels
     assert "/xl/slicerCaches/slicerCache3.xml" not in content_types
     assert "/xl/slicerCaches/slicerCache4.xml" not in content_types
+
+
+def test_remove_sheet_keeps_slicer_cache_used_by_retained_sheet(
+    tmp_path: Path,
+) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-pivot-chart-slicers.xlsx")
+    shared_src = tmp_path / "pivot-slicer-shared.xlsx"
+    dst = tmp_path / "pivot-slicer-shared-sheet-removed.xlsx"
+    _inject_shared_slicer_relationship(src, shared_src)
+
+    wb = load_workbook(shared_src, modify=True)
+    wb.remove(wb["Pivot Table"])
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    assert "xl/slicers/slicer1.xml" in entries
+    assert "xl/slicerCaches/slicerCache1.xml" in entries
+    assert "xl/slicerCaches/slicerCache2.xml" in entries
+
+    kept_sheet_rels = _zip_read(dst, "xl/worksheets/_rels/sheet2.xml.rels").decode()
+    assert "Target=\"../slicers/slicer1.xml\"" in kept_sheet_rels
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    workbook_rels = _zip_read(dst, "xl/_rels/workbook.xml.rels").decode()
+    assert workbook_xml.count("<x14:slicerCache ") == 2
+    assert 'name="Slicer_REGION">#N/A</definedName>' in workbook_xml
+    assert 'name="Slicer_YEAR">#N/A</definedName>' in workbook_xml
+    assert "slicerCaches/slicerCache1.xml" in workbook_rels
+    assert "slicerCaches/slicerCache2.xml" in workbook_rels
 
 
 def test_real_excel_timeline_copy_clones_timeline_cache_parts(tmp_path: Path) -> None:

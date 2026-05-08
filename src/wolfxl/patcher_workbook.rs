@@ -600,6 +600,29 @@ fn retained_deleted_subgraph_parts(
         }
     }
 
+    let retained_presentations: Vec<String> = retained
+        .iter()
+        .filter(|part| {
+            (part.starts_with("xl/slicers/slicer") && part.ends_with(".xml"))
+                || (part.starts_with("xl/timelines/timeline") && part.ends_with(".xml"))
+        })
+        .cloned()
+        .collect();
+    let mut retained_cache_names: HashSet<String> = HashSet::new();
+    for part in retained_presentations {
+        let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &part) else {
+            continue;
+        };
+        retained_cache_names.extend(xml_attr_values_by_local_name(&bytes, b"cache"));
+    }
+    for part in
+        workbook_cache_parts_for_names(&retained_cache_names, file_patches, &patcher.file_adds, zip)
+    {
+        if deleted_parts.contains(&part) {
+            retained.insert(part);
+        }
+    }
+
     Ok(retained)
 }
 
