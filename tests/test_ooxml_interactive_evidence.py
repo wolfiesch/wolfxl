@@ -586,6 +586,78 @@ def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monk
     assert result["ui_actions"] == ["executed Excel command: refresh all"]
 
 
+def test_ui_interaction_probe_records_slicer_shape_selection(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel slicer shape",
+        "selected Excel slicer shape: Slicer_Region",
+    ]
+
+
+def test_ui_interaction_probe_records_timeline_shape_selection(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel timeline shape",
+        "selected Excel timeline shape: Timeline_Date",
+    ]
+
+
+def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path: Path) -> None:
+    slicer = tmp_path / "slicer.xlsx"
+    timeline = tmp_path / "timeline.xlsx"
+    _write_slicer_workbook(slicer)
+    _write_timeline_workbook(timeline)
+
+    assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == ["Slicer_Region"]
+    assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
+        "Timeline_Date"
+    ]
+
+
 def test_pivot_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

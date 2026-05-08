@@ -75,6 +75,36 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_slicer_shape_selection",
+      "path": "/tmp/wolfxl-ui-interaction-slicer-shape-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-slicer-shape-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-slicer-shape-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-table-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_timeline_shape_selection",
+      "path": "/tmp/wolfxl-ui-interaction-timeline-shape-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-timeline-shape-20260508 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-timeline-shape-20260508/report.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel timeline shape", "selected Excel timeline shape: ORDER DATE"]}
+      ]
+    },
+    {
       "name": "excel_render_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-full-pack.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 > /tmp/wolfxl-render-excel-full-pack.json",

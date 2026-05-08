@@ -10,6 +10,7 @@ import subprocess
 import shutil
 import sys
 import time
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -49,11 +50,15 @@ SUPPORTED_UI_INTERACTION_PROBES = (
     "macro_project_presence",
     "external_link_update_prompt",
     "pivot_refresh_state",
+    "slicer_selection_state",
+    "timeline_selection_state",
 )
 REQUIRED_UI_ACTIONS = {
     "macro_project_presence": "clicked button: Disable Macros",
     "external_link_update_prompt": "clicked button: Don't Update",
     "pivot_refresh_state": "executed Excel command: refresh all",
+    "slicer_selection_state": "selected Excel slicer shape",
+    "timeline_selection_state": "selected Excel timeline shape",
 }
 
 
@@ -457,6 +462,8 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
         if name:
             if probe == "pivot_refresh_state":
                 ui_actions.extend(_refresh_all_active_workbook())
+            if probe in {"slicer_selection_state", "timeline_selection_state"}:
+                ui_actions.extend(_select_first_probe_shape(src, probe))
             run_ooxml_app_smoke._close_excel_best_effort()
             run_ooxml_app_smoke._quit_excel_best_effort()
             return name, _dedupe_actions(ui_actions)
@@ -519,6 +526,71 @@ end tell
         return ["failed Excel command: refresh all: timeout"]
     action = proc.stdout.strip()
     return [action] if action else []
+
+
+def _select_first_probe_shape(src: Path, probe: str) -> list[str]:
+    names = _probe_shape_names(src, probe)
+    if not names:
+        return [f"failed Excel shape selection: no {probe} shape names in package"]
+    quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
+    label = "slicer" if probe == "slicer_selection_state" else "timeline"
+    script = f"""
+tell application "Microsoft Excel"
+  try
+    set expectedNames to {{{quoted_names}}}
+    repeat with i from 1 to (count of shapes of active sheet)
+      set candidate to shape i of active sheet
+      set candidateName to name of candidate as text
+      if expectedNames contains candidateName then
+        select candidate
+        return "selected Excel {label} shape" & linefeed & "selected Excel {label} shape: " & candidateName
+      end if
+    end repeat
+    return "failed Excel {label} shape selection: no matching shape"
+  on error errText
+    return "failed Excel {label} shape selection: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return [f"failed Excel {label} shape selection: timeout"]
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _probe_shape_names(path: Path, probe: str) -> list[str]:
+    if probe == "slicer_selection_state":
+        prefix = "xl/slicers/"
+        tag = "slicer"
+    elif probe == "timeline_selection_state":
+        prefix = "xl/timelines/"
+        tag = "timeline"
+    else:
+        return []
+    names: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for part_name in archive.namelist():
+                if not part_name.startswith(prefix) or not part_name.endswith(".xml"):
+                    continue
+                root = ET.fromstring(archive.read(part_name))
+                for element in root.iter():
+                    if _local_name(element.tag) == tag:
+                        name = element.attrib.get("name")
+                        if name and name not in names:
+                            names.append(name)
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return []
+    return names
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _escape_applescript_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _dedupe_actions(actions: list[str]) -> list[str]:
