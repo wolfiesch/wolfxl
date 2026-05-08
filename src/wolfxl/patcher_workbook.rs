@@ -1110,6 +1110,7 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
     }
 
     let mut chart_paths: HashSet<String> = HashSet::new();
+    let mut worksheet_paths: HashSet<String> = HashSet::new();
     let mut pivot_cache_paths: HashSet<String> = HashSet::new();
     for idx in 0..zip.len() {
         let Ok(entry) = zip.by_index(idx) else {
@@ -1119,6 +1120,9 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
         if is_chart_part_path(name) {
             chart_paths.insert(name.to_string());
         }
+        if is_worksheet_part_path(name) {
+            worksheet_paths.insert(name.to_string());
+        }
         if is_pivot_cache_definition_path(name) {
             pivot_cache_paths.insert(name.to_string());
         }
@@ -1126,6 +1130,9 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
     for path in patcher.file_adds.keys() {
         if is_chart_part_path(path) {
             chart_paths.insert(path.clone());
+        }
+        if is_worksheet_part_path(path) {
+            worksheet_paths.insert(path.clone());
         }
         if is_pivot_cache_definition_path(path) {
             pivot_cache_paths.insert(path.clone());
@@ -1135,8 +1142,22 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
         if is_chart_part_path(path) {
             chart_paths.insert(path.clone());
         }
+        if is_worksheet_part_path(path) {
+            worksheet_paths.insert(path.clone());
+        }
         if is_pivot_cache_definition_path(path) {
             pivot_cache_paths.insert(path.clone());
+        }
+    }
+
+    for path in worksheet_paths {
+        let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &path) else {
+            continue;
+        };
+        let updated = rewrite_worksheet_formula_sheet_renames(&bytes, &patcher.queued_sheet_renames)
+            .map_err(|e| PyIOError::new_err(format!("worksheet formula sheet-rename merge: {e}")))?;
+        if updated != bytes {
+            file_patches.insert(path, updated);
         }
     }
 
@@ -1167,6 +1188,10 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
 
 fn is_chart_part_path(path: &str) -> bool {
     path.starts_with("xl/charts/") && path.ends_with(".xml")
+}
+
+fn is_worksheet_part_path(path: &str) -> bool {
+    path.starts_with("xl/worksheets/sheet") && path.ends_with(".xml")
 }
 
 fn is_pivot_cache_definition_path(path: &str) -> bool {
@@ -1243,6 +1268,89 @@ fn rewrite_workbook_defined_name_sheet_renames(
     }
 
     Ok(writer.into_inner())
+}
+
+fn rewrite_worksheet_formula_sheet_renames(
+    worksheet_xml: &[u8],
+    renames: &[(String, String)],
+) -> Result<Vec<u8>, String> {
+    let mut reader = XmlReader::from_reader(worksheet_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(worksheet_xml.len()));
+    let mut buf = Vec::new();
+    let mut formula_depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                if is_formula_text_element(e.local_name().as_ref()) {
+                    formula_depth += 1;
+                }
+                writer
+                    .write_event(Event::Start(e.into_owned()))
+                    .map_err(|e| format!("worksheet XML write error: {e}"))?;
+            }
+            Ok(Event::End(e)) => {
+                let closes_formula = is_formula_text_element(e.local_name().as_ref());
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .map_err(|e| format!("worksheet XML write error: {e}"))?;
+                if closes_formula {
+                    formula_depth = formula_depth.saturating_sub(1);
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                writer
+                    .write_event(Event::Empty(e.into_owned()))
+                    .map_err(|e| format!("worksheet XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) if formula_depth > 0 => {
+                let formula_text = t
+                    .unescape()
+                    .map_err(|e| format!("worksheet formula decode error: {e}"))?
+                    .into_owned();
+                if formula_text.trim().is_empty() {
+                    writer
+                        .write_event(Event::Text(t.into_owned()))
+                        .map_err(|e| format!("worksheet XML write error: {e}"))?;
+                } else {
+                    let translated = rename_formula_sheet_refs(&formula_text, renames);
+                    writer
+                        .write_event(Event::Text(BytesText::new(&translated)))
+                        .map_err(|e| format!("worksheet XML write error: {e}"))?;
+                }
+            }
+            Ok(Event::Text(t)) => {
+                writer
+                    .write_event(Event::Text(t.into_owned()))
+                    .map_err(|e| format!("worksheet XML write error: {e}"))?;
+            }
+            Ok(Event::CData(c)) => writer
+                .write_event(Event::CData(c.into_owned()))
+                .map_err(|e| format!("worksheet XML write error: {e}"))?,
+            Ok(Event::Decl(d)) => writer
+                .write_event(Event::Decl(d.into_owned()))
+                .map_err(|e| format!("worksheet XML write error: {e}"))?,
+            Ok(Event::PI(p)) => writer
+                .write_event(Event::PI(p.into_owned()))
+                .map_err(|e| format!("worksheet XML write error: {e}"))?,
+            Ok(Event::Comment(c)) => writer
+                .write_event(Event::Comment(c.into_owned()))
+                .map_err(|e| format!("worksheet XML write error: {e}"))?,
+            Ok(Event::DocType(d)) => writer
+                .write_event(Event::DocType(d.into_owned()))
+                .map_err(|e| format!("worksheet XML write error: {e}"))?,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("worksheet XML parse error: {e}")),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn is_formula_text_element(local_name: &[u8]) -> bool {
+    matches!(local_name, b"f" | b"formula" | b"formula1" | b"formula2")
 }
 
 fn rewrite_pivot_cache_sheet_renames(
@@ -1527,8 +1635,14 @@ fn rename_quoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &str)
 fn rename_unquoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &str) -> String {
     let mut out = String::with_capacity(formula.len());
     let mut cursor = 0;
+    let double_quoted_ranges = double_quoted_ranges(formula);
     while let Some(rel_bang) = formula[cursor..].find('!') {
         let bang = cursor + rel_bang;
+        if byte_index_in_ranges(bang, &double_quoted_ranges) {
+            out.push_str(&formula[cursor..=bang]);
+            cursor = bang + 1;
+            continue;
+        }
         let mut start = bang;
         while start > cursor {
             let Some((prev_idx, ch)) = formula[..start].char_indices().next_back() else {
@@ -1542,7 +1656,16 @@ fn rename_unquoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &st
         }
 
         let token = formula[start..bang].trim();
-        if token.is_empty() || token.contains('[') || token.contains(']') {
+        let preceded_by_external_book = start > cursor
+            && formula[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch == ']');
+        if token.is_empty()
+            || token.contains('[')
+            || token.contains(']')
+            || preceded_by_external_book
+        {
             out.push_str(&formula[cursor..=bang]);
             cursor = bang + 1;
             continue;
@@ -1559,6 +1682,37 @@ fn rename_unquoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &st
     }
     out.push_str(&formula[cursor..]);
     out
+}
+
+fn double_quoted_ranges(formula: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel_start) = formula[cursor..].find('"') {
+        let start = cursor + rel_start;
+        let mut idx = start + 1;
+        while idx < formula.len() {
+            let rest = &formula[idx..];
+            if rest.starts_with("\"\"") {
+                idx += 2;
+                continue;
+            }
+            if rest.starts_with('"') {
+                ranges.push((start, idx + 1));
+                idx += 1;
+                break;
+            }
+            let Some(ch) = rest.chars().next() else {
+                break;
+            };
+            idx += ch.len_utf8();
+        }
+        cursor = idx;
+    }
+    ranges
+}
+
+fn byte_index_in_ranges(index: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges.iter().any(|(start, end)| *start <= index && index < *end)
 }
 
 fn rename_sheet_token(token: &str, old_name: &str, new_name: &str) -> Option<String> {

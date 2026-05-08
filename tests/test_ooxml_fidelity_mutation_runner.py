@@ -552,6 +552,46 @@ def test_rename_first_sheet_rewrites_pivot_cache_worksheet_source_sheet_refs(
     assert 'sheet="WolfXL Fidelity Rename"' in cache_xml
 
 
+def test_rename_first_sheet_rewrites_existing_worksheet_formula_sheet_refs(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "worksheet-formulas.xlsx"
+    workbook = openpyxl.Workbook()
+    overview = workbook.active
+    overview.title = "Overview"
+    overview["A1"] = 42
+    calc = workbook.create_sheet("Calc")
+    calc["A1"] = "=Overview!$A$1"
+    calc["A2"] = '="Overview!"'
+    calc["A3"] = "=VLOOKUP(B2,[1]Overview!A:D,2,0)"
+    workbook.save(fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("rename_first_sheet",),
+    )
+
+    assert report["failure_count"] == 0
+    after = (
+        output_dir
+        / "worksheet-formulas"
+        / "rename_first_sheet"
+        / "after-worksheet-formulas.xlsx"
+    )
+    with zipfile.ZipFile(after) as archive:
+        sheet_xml = archive.read("xl/worksheets/sheet2.xml").decode()
+
+    assert "Overview!$A$1" not in sheet_xml
+    assert "&apos;WolfXL Fidelity Rename&apos;!$A$1" in sheet_xml
+    assert "Overview!" in sheet_xml
+    assert "[1]Overview!A:D" in sheet_xml
+    assert "[1]&apos;WolfXL Fidelity Rename&apos;!A:D" not in sheet_xml
+
+
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
