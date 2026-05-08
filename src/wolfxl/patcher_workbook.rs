@@ -20,6 +20,7 @@ use super::{
 
 const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const FAST_SAVE_DEFLATE_LEVEL: i64 = 2;
 
 /// Maps a sheet XML path to its relationship sidecar path.
 pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
@@ -1282,6 +1283,9 @@ pub(super) fn rewrite_zip_phase(
             }
 
             let mut opts = SimpleFileOptions::default().compression_method(file.compression());
+            if file.compression() == zip::CompressionMethod::Deflated {
+                opts = opts.compression_level(Some(FAST_SAVE_DEFLATE_LEVEL));
+            }
             if let Some(dt) = file.last_modified() {
                 opts = opts.last_modified_time(dt);
             }
@@ -1325,6 +1329,7 @@ pub(super) fn rewrite_zip_phase(
                 let bytes = &patcher.file_adds[new_path];
                 let opts = SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated)
+                    .compression_level(Some(FAST_SAVE_DEFLATE_LEVEL))
                     .last_modified_time(dt);
                 out.start_file(new_path, opts)
                     .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;

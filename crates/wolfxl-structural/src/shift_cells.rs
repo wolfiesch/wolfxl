@@ -35,7 +35,23 @@ use crate::shift_formulas::shift_formula;
 /// Wraps the `(key.as_bytes(), val.as_bytes())` form supported by
 /// quick-xml 0.37.
 fn push_attr<'a>(e: &mut BytesStart<'a>, key: &[u8], val: &str) {
-    e.push_attribute((key, val.as_bytes()));
+    let escaped = xml_attr_escape(val);
+    e.push_attribute((key, escaped.as_bytes()));
+}
+
+fn xml_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Streaming rewrite of a sheet XML. Returns the new bytes.
@@ -478,6 +494,19 @@ mod tests {
         let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
         let out = apply(xml, &p);
         assert!(out.contains(r#"ref="B8""#));
+    }
+
+    #[test]
+    fn hyperlink_attrs_remain_xml_escaped_after_axis_shift() {
+        let xml = r#"<hyperlinks><hyperlink ref="B5" location="'Sec. 1 &amp; 2 Notes'!A1" display="A &amp; B"/></hyperlinks>"#;
+        let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
+        let out = apply(xml, &p);
+        assert!(out.contains(r#"ref="B8""#));
+        assert!(
+            out.contains(r#"location="&apos;Sec. 1 &amp; 2 Notes&apos;!A1""#),
+            "got: {out}"
+        );
+        assert!(out.contains(r#"display="A &amp; B""#), "got: {out}");
     }
 
     #[test]
