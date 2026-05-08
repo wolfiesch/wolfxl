@@ -319,6 +319,7 @@ impl WorkbookLayout {
 fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
     let s =
         std::str::from_utf8(xml).map_err(|e| format!("workbook.xml is not valid UTF-8: {e}"))?;
+    let offset = utf8_bom_offset(xml);
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -338,10 +339,10 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         match evt {
             Ok(Event::Start(ref e)) => {
                 if e.local_name().as_ref() == b"sheets" && sheets_inner_start.is_none() {
-                    sheets_inner_start = Some(post);
+                    sheets_inner_start = Some(post + offset);
                     in_sheets = true;
                 } else if in_sheets && e.local_name().as_ref() == b"sheet" {
-                    current_sheet_start = Some(pre);
+                    current_sheet_start = Some(pre + offset);
                     current_sheet_name = Some(parse_sheet_name(e));
                 }
             }
@@ -351,7 +352,7 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
                     entries.push(SheetEntry {
                         name,
                         original_pos: entries.len() as u32,
-                        raw: xml[pre..post].to_vec(),
+                        raw: xml[pre + offset..post + offset].to_vec(),
                     });
                 }
             }
@@ -363,11 +364,11 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
                         entries.push(SheetEntry {
                             name,
                             original_pos: entries.len() as u32,
-                            raw: xml[start..post].to_vec(),
+                            raw: xml[start..post + offset].to_vec(),
                         });
                     }
                 } else if e.local_name().as_ref() == b"sheets" && in_sheets {
-                    sheets_inner_end = Some(pre);
+                    sheets_inner_end = Some(pre + offset);
                     in_sheets = false;
                 }
             }
@@ -429,6 +430,10 @@ fn splice_sheets_inner(
 fn rewrite_local_sheet_ids(src: &[u8], remap: &BTreeMap<u32, u32>) -> Result<Vec<u8>, String> {
     let s = std::str::from_utf8(src)
         .map_err(|e| format!("workbook.xml is not valid UTF-8 after sheets splice: {e}"))?;
+    if !s.contains("definedName") {
+        return Ok(src.to_vec());
+    }
+    let offset = utf8_bom_offset(src);
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -446,7 +451,7 @@ fn rewrite_local_sheet_ids(src: &[u8], remap: &BTreeMap<u32, u32>) -> Result<Vec
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                 if e.local_name().as_ref() == b"definedName" {
                     if let Some((val_start, val_end, old)) =
-                        find_local_sheet_id_value(s.as_bytes(), pre)
+                        find_local_sheet_id_value(src, pre + offset)
                     {
                         if let Ok(parsed) = old.parse::<u32>() {
                             if let Some(&new_idx) = remap.get(&parsed) {
@@ -489,6 +494,10 @@ fn remove_defined_names_for_deleted_sheets(
     }
     let s = std::str::from_utf8(src)
         .map_err(|e| format!("workbook.xml is not valid UTF-8 after sheet delete: {e}"))?;
+    if !s.contains("definedName") {
+        return Ok(src.to_vec());
+    }
+    let offset = utf8_bom_offset(src);
     let mut reader = XmlReader::from_str(s);
     reader.config_mut().trim_text(false);
     let mut buf: Vec<u8> = Vec::new();
@@ -501,26 +510,26 @@ fn remove_defined_names_for_deleted_sheets(
         let post = reader.buffer_position() as usize;
         match evt {
             Ok(Event::Empty(ref e)) if e.local_name().as_ref() == b"definedName" => {
-                if let Some((_, _, old)) = find_local_sheet_id_value(s.as_bytes(), pre) {
+                if let Some((_, _, old)) = find_local_sheet_id_value(src, pre + offset) {
                     if let Ok(parsed) = old.parse::<u32>() {
                         if deleted_positions.contains(&parsed) {
-                            removals.push((pre, post));
+                            removals.push((pre + offset, post + offset));
                         }
                     }
                 }
             }
             Ok(Event::Start(ref e)) if e.local_name().as_ref() == b"definedName" => {
-                if let Some((_, _, old)) = find_local_sheet_id_value(s.as_bytes(), pre) {
+                if let Some((_, _, old)) = find_local_sheet_id_value(src, pre + offset) {
                     if let Ok(parsed) = old.parse::<u32>() {
                         if deleted_positions.contains(&parsed) {
-                            active_defined_name = Some((pre, parsed));
+                            active_defined_name = Some((pre + offset, parsed));
                         }
                     }
                 }
             }
             Ok(Event::End(ref e)) if e.local_name().as_ref() == b"definedName" => {
                 if let Some((start, _)) = active_defined_name.take() {
-                    removals.push((start, post));
+                    removals.push((start, post + offset));
                 }
             }
             Ok(Event::Eof) => break,
@@ -543,6 +552,14 @@ fn remove_defined_names_for_deleted_sheets(
     }
     out.extend_from_slice(&src[cursor..]);
     Ok(out)
+}
+
+fn utf8_bom_offset(src: &[u8]) -> usize {
+    if src.starts_with(b"\xEF\xBB\xBF") {
+        3
+    } else {
+        0
+    }
 }
 
 /// Given the byte offset of a `<definedName` start tag, locate the
@@ -842,6 +859,37 @@ mod tests {
         let pos_hidden = text.find(r#"name="Hidden""#).unwrap();
         let pos_visible = text.find(r#"name="Visible""#).unwrap();
         assert!(pos_hidden < pos_visible);
+    }
+
+    #[test]
+    fn sheet_delete_without_defined_names_handles_utf8_bom_workbook() {
+        let xml = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"utf-8\"?>
+<workbook xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"
+          xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">
+    <sheets>
+        <sheet name=\"Some Sheet\" sheetId=\"1\" r:id=\"rId1\"/>
+        <sheet name=\"Some Sheet Copy\" sheetId=\"2\" r:id=\"rId5\"/>
+    </sheets>
+</workbook>";
+        let res = merge_sheet_deletes(xml, &["Some Sheet Copy".to_string()]).expect("merge");
+        let text = std::str::from_utf8(&res.workbook_xml).unwrap();
+
+        assert!(text.contains("Some Sheet"));
+        assert!(!text.contains("Some Sheet Copy"));
+        assert!(text.contains("<sheets>"));
+        assert!(text.contains(r#"<sheet name="Some Sheet" sheetId="1" r:id="rId1"/>"#));
+        assert_eq!(res.new_order, vec!["Some Sheet"]);
+
+        let mut reader = XmlReader::from_str(text);
+        let mut buf = Vec::new();
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(e) => panic!("workbook.xml should remain well-formed: {e}"),
+            }
+            buf.clear();
+        }
     }
 
     #[test]

@@ -134,6 +134,7 @@ pub enum CellValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellDataType {
     Number,
+    DateIso,
     SharedString,
     InlineString,
     FormulaString,
@@ -5734,6 +5735,7 @@ impl CellBuilder {
             Some("str") => CellDataType::FormulaString,
             Some("b") => CellDataType::Bool,
             Some("e") => CellDataType::Error,
+            Some("d") => CellDataType::DateIso,
             _ => CellDataType::Number,
         };
         let style_id = attr_value(e, b"s").and_then(|v| v.parse::<u32>().ok());
@@ -5860,6 +5862,7 @@ impl CellBuilder {
             }
             CellDataType::Bool => CellValue::Bool(matches!(self.value_text.trim(), "1" | "true")),
             CellDataType::Error => CellValue::Error(self.value_text),
+            CellDataType::DateIso => CellValue::String(self.value_text),
             CellDataType::FormulaString => CellValue::String(self.value_text),
             CellDataType::Number => {
                 let raw = self.value_text.trim();
@@ -6647,6 +6650,32 @@ mod tests {
         assert_eq!(
             inline_rich[0].font.as_ref().and_then(|font| font.italic),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn parses_iso_date_cells_as_string_values() {
+        let xml = r#"<worksheet><sheetData>
+            <row r="1">
+                <c r="A1" t="d"><v>2021-01-01</v></c>
+                <c r="A2" t="d"><v>2021-01-01T10:10:10</v></c>
+                <c r="A3" t="d"><v>10:10:10</v></c>
+            </row>
+        </sheetData></worksheet>"#;
+        let sheet = parse_worksheet(xml, &SharedStrings::default(), None, Vec::new(), Vec::new())
+            .expect("parse worksheet");
+
+        assert_eq!(
+            sheet
+                .cells
+                .iter()
+                .map(|cell| cell.value.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                CellValue::String("2021-01-01".to_string()),
+                CellValue::String("2021-01-01T10:10:10".to_string()),
+                CellValue::String("10:10:10".to_string()),
+            ]
         );
     }
 
