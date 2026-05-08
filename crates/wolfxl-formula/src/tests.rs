@@ -226,6 +226,20 @@ fn t11c_full_rectangular_sheet_range_is_stable_on_tail_row_insert() {
 }
 
 #[test]
+fn t11d_unnecessary_source_quotes_are_preserved_without_rename() {
+    let out = shift(
+        "='Cover'!$A$1:$L$28",
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: crate::MAX_ROW,
+            n: 1,
+            respect_dollar: false,
+        },
+    );
+    assert_eq!(out, "='Cover'!$A$1:$L$28");
+}
+
+#[test]
 fn t12_3d_unquoted_sheet_passes_through_on_no_rename() {
     let out = shift(
         "=Sheet2!A1",

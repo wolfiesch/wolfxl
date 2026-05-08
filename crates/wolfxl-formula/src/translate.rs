@@ -16,7 +16,8 @@
 use std::collections::HashMap;
 
 use crate::reference::{
-    col_letter, parse_ref, render_cell, A1Cell, A1Col, A1Row, RefKind, SheetPrefix,
+    col_letter, parse_ref, render_cell, sheet_name_needs_quoting, A1Cell, A1Col, A1Row, RefKind,
+    SheetPrefix,
 };
 use crate::tokenizer::{render, tokenize, Token, TokenKind, TokenSubKind, TokenizeError};
 use crate::{MAX_COL, MAX_ROW};
@@ -274,10 +275,7 @@ fn translate_cell(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
+            renamed_sheet_prefix(new_name)
         } else {
             s
         }
@@ -428,10 +426,7 @@ fn translate_cell_skip_tombstone(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
+            renamed_sheet_prefix(new_name)
         } else {
             s
         }
@@ -705,18 +700,19 @@ fn translate_sheet_prefix(
     match sheet {
         Some(s) => {
             if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-                (
-                    Some(SheetPrefix {
-                        name: new_name.clone(),
-                        quoted: s.quoted,
-                    }),
-                    true,
-                )
+                (Some(renamed_sheet_prefix(new_name)), true)
             } else {
                 (Some(s), false)
             }
         }
         None => (None, false),
+    }
+}
+
+fn renamed_sheet_prefix(new_name: &str) -> SheetPrefix {
+    SheetPrefix {
+        name: new_name.to_string(),
+        quoted: sheet_name_needs_quoting(new_name),
     }
 }
 
