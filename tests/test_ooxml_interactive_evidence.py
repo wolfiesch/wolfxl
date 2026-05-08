@@ -688,6 +688,42 @@ def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, mon
     assert result["ui_actions"] == []
 
 
+def test_current_external_link_ui_probe_allows_absent_prompt_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def fake_open_with_ui(
+        _src: Path,
+        _probe: str,
+        _timeout: int,
+        *,
+        external_link_prompt_mode: str,
+    ):
+        assert external_link_prompt_mode == probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+        external_link_prompt_mode=probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed"
+    assert "preserved the current Excel external-link prompt setting" in result["message"]
+    assert result["ui_actions"] == []
+
+
 def test_ui_interaction_probe_records_embedded_control_click(
     tmp_path: Path, monkeypatch
 ) -> None:

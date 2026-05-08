@@ -415,7 +415,12 @@ def _run_ui_interaction_probe(
         )
 
     required_action = REQUIRED_UI_ACTIONS[probe]
-    if required_action not in ui_actions:
+    required_action_observed = required_action in ui_actions
+    required_action_optional = (
+        probe == "external_link_update_prompt"
+        and external_link_prompt_mode == EXTERNAL_LINK_PROMPT_MODE_CURRENT
+    )
+    if not required_action_observed and not required_action_optional:
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
@@ -514,6 +519,11 @@ def _run_ui_interaction_probe(
                 ui_actions=ui_actions,
             )
 
+    action_message = (
+        "completed required UI action"
+        if required_action_observed
+        else "preserved the current Excel external-link prompt setting"
+    )
     return InteractiveProbeResult(
         fixture=fixture_label,
         probe=probe,
@@ -524,7 +534,7 @@ def _run_ui_interaction_probe(
         output=str(probe_path),
         message=(
             "Microsoft Excel opened "
-            f"{active_name}, completed required UI action, and "
+            f"{active_name}, {action_message}, and "
             f"{_probe_part_label(probe)} is present"
         ),
         ui_actions=ui_actions,
