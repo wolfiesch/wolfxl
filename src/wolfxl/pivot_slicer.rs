@@ -72,6 +72,13 @@ pub struct WorkbookSlicerCacheRef {
     pub rid: String,
 }
 
+/// One workbook-rel pair for the `<x15:timelineCacheRefs>` block.
+#[derive(Debug, Clone)]
+pub struct WorkbookTimelineCacheRef {
+    pub name: String,
+    pub rid: String,
+}
+
 /// Splice the `<x14:slicerCaches>` extension into `xl/workbook.xml`.
 ///
 /// Logic mirrors `pivot::splice_pivot_caches`: tolerant placement with
@@ -93,8 +100,24 @@ pub fn splice_workbook_slicer_caches(
     let inner = workbook_slicer_caches_inner_xml(&pairs);
     let inner_str =
         std::str::from_utf8(&inner).map_err(|e| format!("slicer_caches inner not utf8: {e}"))?;
+    let entry_fragment = slicer_cache_entry_fragment(inner_str);
 
     let s = std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+
+    if let Some(close_pos) = s.find("</x15:slicerCaches>") {
+        let mut out = String::with_capacity(s.len() + entry_fragment.len());
+        out.push_str(&s[..close_pos]);
+        out.push_str(&entry_fragment);
+        out.push_str(&s[close_pos..]);
+        return Ok(out.into_bytes());
+    }
+    if let Some(close_pos) = s.find("</x14:slicerCaches>") {
+        let mut out = String::with_capacity(s.len() + entry_fragment.len());
+        out.push_str(&s[..close_pos]);
+        out.push_str(&entry_fragment);
+        out.push_str(&s[close_pos..]);
+        return Ok(out.into_bytes());
+    }
 
     // Build the wrapped <ext> fragment — the <ext> wrapper carries
     // the URI and x14 namespace declaration so splicing into either
@@ -131,6 +154,69 @@ pub fn splice_workbook_slicer_caches(
         out.push_str(&s[..close_wb]);
         out.push_str(&block);
         out.push_str(&s[close_wb..]);
+        return Ok(out.into_bytes());
+    }
+    Err("workbook.xml has no </workbook> closing tag".into())
+}
+
+fn slicer_cache_entry_fragment(inner_str: &str) -> String {
+    let Some(open_end) = inner_str.find('>') else {
+        return inner_str.to_string();
+    };
+    let Some(close_start) = inner_str.rfind("</") else {
+        return inner_str.to_string();
+    };
+    inner_str[open_end + 1..close_start].to_string()
+}
+
+/// Splice the `<x15:timelineCacheRefs>` extension into `xl/workbook.xml`.
+pub fn splice_workbook_timeline_caches(
+    workbook_xml: &[u8],
+    entries: &[WorkbookTimelineCacheRef],
+) -> Result<Vec<u8>, String> {
+    if entries.is_empty() {
+        return Ok(workbook_xml.to_vec());
+    }
+    let entry_fragment: String = entries
+        .iter()
+        .map(|e| format!(r#"<x15:timelineCacheRef r:id="{}"/>"#, e.rid))
+        .collect();
+    let s = std::str::from_utf8(workbook_xml).map_err(|e| format!("workbook.xml not utf8: {e}"))?;
+
+    if let Some(close_pos) = s.find("</x15:timelineCacheRefs>") {
+        let mut out = String::with_capacity(s.len() + entry_fragment.len());
+        out.push_str(&s[..close_pos]);
+        out.push_str(&entry_fragment);
+        out.push_str(&s[close_pos..]);
+        return Ok(out.into_bytes());
+    }
+
+    let ext_fragment = format!(
+        r#"<ext uri="{{7E03D99C-DC04-49d9-9315-930204A7B6E9}}" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"><x15:timelineCacheRefs>{entry_fragment}</x15:timelineCacheRefs></ext>"#
+    );
+    if let Some(close_pos) = s.find("</extLst>") {
+        let mut out = String::with_capacity(s.len() + ext_fragment.len());
+        out.push_str(&s[..close_pos]);
+        out.push_str(&ext_fragment);
+        out.push_str(&s[close_pos..]);
+        return Ok(out.into_bytes());
+    }
+    if let Some(empty_pos) = s.find("<extLst/>") {
+        let mut out = String::with_capacity(s.len() + ext_fragment.len() + 32);
+        out.push_str(&s[..empty_pos]);
+        out.push_str("<extLst>");
+        out.push_str(&ext_fragment);
+        out.push_str("</extLst>");
+        out.push_str(&s[empty_pos + "<extLst/>".len()..]);
+        return Ok(out.into_bytes());
+    }
+    if let Some(close_pos) = s.rfind("</workbook>") {
+        let mut out = String::with_capacity(s.len() + ext_fragment.len() + 18);
+        out.push_str(&s[..close_pos]);
+        out.push_str("<extLst>");
+        out.push_str(&ext_fragment);
+        out.push_str("</extLst>");
+        out.push_str(&s[close_pos..]);
         return Ok(out.into_bytes());
     }
     Err("workbook.xml has no </workbook> closing tag".into())
@@ -354,6 +440,34 @@ mod tests {
         // New x14:slicerCaches inside the same extLst.
         assert_eq!(s.matches("<extLst>").count(), 1);
         assert!(s.contains("<x14:slicerCaches"));
+    }
+
+    #[test]
+    fn splice_workbook_extends_existing_slicer_cache_block() {
+        let xml = br#"<workbook><extLst><ext uri="x"><x15:slicerCaches><x14:slicerCache r:id="rId2"/></x15:slicerCaches></ext></extLst></workbook>"#;
+        let entries = vec![WorkbookSlicerCacheRef {
+            name: "Slicer_region".into(),
+            rid: "rId7".into(),
+        }];
+        let out = splice_workbook_slicer_caches(xml, &entries).unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        assert_eq!(s.matches("slicerCaches").count(), 2, "{s}");
+        assert!(s.contains(r#"<x14:slicerCache r:id="rId2"/><x14:slicerCache r:id="rId7"/>"#));
+    }
+
+    #[test]
+    fn splice_workbook_extends_existing_timeline_cache_block() {
+        let xml = br#"<workbook><extLst><ext uri="x"><x15:timelineCacheRefs><x15:timelineCacheRef r:id="rId5"/></x15:timelineCacheRefs></ext></extLst></workbook>"#;
+        let entries = vec![WorkbookTimelineCacheRef {
+            name: "NativeTimeline_DATE1".into(),
+            rid: "rId7".into(),
+        }];
+        let out = splice_workbook_timeline_caches(xml, &entries).unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        assert_eq!(s.matches("timelineCacheRefs").count(), 2, "{s}");
+        assert!(
+            s.contains(r#"<x15:timelineCacheRef r:id="rId5"/><x15:timelineCacheRef r:id="rId7"/>"#)
+        );
     }
 
     #[test]

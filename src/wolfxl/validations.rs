@@ -68,12 +68,15 @@ pub struct DataValidationPatch {
 // extract_existing_dv_block
 // ---------------------------------------------------------------------------
 
-/// Locate the `<dataValidations>` element in a sheet XML and return its
+/// Locate the main worksheet `<dataValidations>` element in a sheet XML and return its
 /// raw byte range (everything from `<dataValidations` through
 /// `</dataValidations>` inclusive, or the self-closing form if applicable).
 ///
 /// Returns `None` if no such block exists. This is what the merger needs
 /// to decide whether to preserve an existing block or only emit new rules.
+/// Extension payloads such as `<x14:dataValidations>` are deliberately ignored:
+/// they are not valid children for the main `<dataValidations>` wrapper and
+/// may carry namespace declarations from an enclosing `<ext>` element.
 pub fn extract_existing_dv_block(sheet_xml: &str) -> Option<Vec<u8>> {
     let bytes = sheet_xml.as_bytes();
     let mut reader = XmlReader::from_str(sheet_xml);
@@ -91,23 +94,23 @@ pub fn extract_existing_dv_block(sheet_xml: &str) -> Option<Vec<u8>> {
 
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
-                if e.local_name().as_ref() == b"dataValidations" && start_pos.is_none() {
+                if is_main_data_validations_name(e.name().as_ref()) && start_pos.is_none() {
                     start_pos = Some(pre);
                     depth = 1;
-                } else if start_pos.is_some() && e.local_name().as_ref() == b"dataValidations" {
+                } else if start_pos.is_some() && is_main_data_validations_name(e.name().as_ref()) {
                     // Pathological nested case — shouldn't happen, but be defensive.
                     depth += 1;
                 }
             }
             Ok(Event::Empty(ref e)) => {
-                if e.local_name().as_ref() == b"dataValidations" && start_pos.is_none() {
+                if is_main_data_validations_name(e.name().as_ref()) && start_pos.is_none() {
                     // Self-closing `<dataValidations/>` — capture the single tag.
                     let end = reader.buffer_position() as usize;
                     return Some(bytes[pre..end].to_vec());
                 }
             }
             Ok(Event::End(ref e)) => {
-                if e.local_name().as_ref() == b"dataValidations" {
+                if is_main_data_validations_name(e.name().as_ref()) {
                     if depth > 0 {
                         depth -= 1;
                     }
@@ -124,6 +127,10 @@ pub fn extract_existing_dv_block(sheet_xml: &str) -> Option<Vec<u8>> {
         }
         buf.clear();
     }
+}
+
+fn is_main_data_validations_name(name: &[u8]) -> bool {
+    name == b"dataValidations"
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +409,24 @@ mod tests {
         assert!(s.contains("type=\"list\""));
         assert!(s.contains("type=\"whole\""));
         assert!(s.ends_with("</dataValidations>"));
+    }
+
+    #[test]
+    fn extract_ignores_x14_extension_data_validations() {
+        let xml = r#"<worksheet><sheetData/><extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:dataValidations count="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><x14:dataValidation type="list"><x14:formula1><xm:f>LOV!$A$2:$A$15</xm:f></x14:formula1><xm:sqref>A2</xm:sqref></x14:dataValidation></x14:dataValidations></ext></extLst></worksheet>"#;
+        assert!(extract_existing_dv_block(xml).is_none());
+    }
+
+    #[test]
+    fn extract_prefers_main_block_before_x14_extension_payload() {
+        let xml = r#"<worksheet><sheetData/><dataValidations count="1"><dataValidation type="whole" sqref="A1"><formula1>1</formula1></dataValidation></dataValidations><extLst><ext xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:dataValidations count="1"/></ext></extLst></worksheet>"#;
+        let got = extract_existing_dv_block(xml).expect("should find main block");
+        let s = std::str::from_utf8(&got).unwrap();
+        assert!(s.starts_with("<dataValidations count=\"1\">"));
+        assert!(
+            !s.contains("x14:dataValidation"),
+            "got extension payload: {s}"
+        );
     }
 
     // --- build_data_validations_block --------------------------------------

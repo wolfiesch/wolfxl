@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -20,7 +20,7 @@ use crate::axis::{Axis, ShiftPlan};
 use crate::shift_anchors::shift_anchor;
 use crate::shift_cells::shift_sheet_cells;
 use crate::shift_formulas::shift_formula_on_sheet;
-use crate::table_shift::shift_table_xml;
+use crate::table_shift::{repair_deleted_table_header_row, shift_table_xml};
 use crate::vml_shift::shift_vml_xml;
 
 fn push_attr<'a>(e: &mut BytesStart<'a>, key: &[u8], val: &str) {
@@ -60,6 +60,9 @@ pub struct SheetXmlInputs<'a> {
     pub sheet_paths: BTreeMap<String, String>,
     /// Optional `xl/workbook.xml` bytes (for defined-name shift).
     pub workbook_xml: Option<&'a [u8]>,
+    /// Parsed `xl/sharedStrings.xml` values, used when row deletes promote a
+    /// table data row into the header row.
+    pub shared_strings: Option<&'a [String]>,
     /// Per-sheet table parts: sheet name → vec of (path, bytes).
     pub tables: BTreeMap<String, Vec<(String, &'a [u8])>>,
     /// Per-sheet comments part: sheet name → (path, bytes).
@@ -78,6 +81,7 @@ impl<'a> SheetXmlInputs<'a> {
             sheets: BTreeMap::new(),
             sheet_paths: BTreeMap::new(),
             workbook_xml: None,
+            shared_strings: None,
             tables: BTreeMap::new(),
             comments: BTreeMap::new(),
             vml: BTreeMap::new(),
@@ -158,6 +162,27 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
                 updated.insert(path.clone(), new_bytes);
             }
             *parts = updated;
+        }
+
+        // 2b. If a row delete removed a structured-table header row, Excel
+        // expects the promoted row's cells to be string headers and expects
+        // `<tableColumn name>` metadata to match those visible headers.
+        if plan.axis == Axis::Row && plan.is_delete() {
+            if let (Some(sheet), Some(parts)) = (
+                sheet_bytes.get_mut(&op.sheet),
+                table_bytes.get_mut(&op.sheet),
+            ) {
+                for (_path, table) in parts.iter_mut() {
+                    if let Some(new_sheet) = repair_deleted_table_header_row(
+                        sheet,
+                        table,
+                        inputs.shared_strings.unwrap_or(&[]),
+                        &plan,
+                    ) {
+                        *sheet = new_sheet;
+                    }
+                }
+            }
         }
 
         // 3. Comments on this sheet.
@@ -334,10 +359,7 @@ pub fn shift_comments_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     buf.clear();
                     continue;
                 }
-                let local = e.local_name().as_ref().to_vec();
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if skip_depth > 0 {
@@ -419,9 +441,7 @@ pub fn shift_defined_names(
                     in_dn = false;
                     current_local_sheet_id = None;
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if in_dn {
@@ -547,12 +567,74 @@ mod tests {
     }
 
     #[test]
+    fn vml_shift_does_not_match_shapetype_as_shape() {
+        let vml = r#"<xml><v:shapetype id="_x0000_t202"/><v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 5, 0, 2, 0, 7, 0"));
+    }
+
+    #[test]
+    fn shifts_unprefixed_vml_shape_anchor() {
+        let vml = r#"<xml><shapetype id="_x0000_t202"/><shape><ClientData><Anchor>0, 0, 4, 0, 2, 0, 6, 0</Anchor></ClientData></shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<shape>"));
+        assert!(s.contains("<Anchor>0, 0, 5, 0, 2, 0, 7, 0</Anchor>"));
+    }
+
+    #[test]
     fn drops_vml_shape_when_anchor_tombstoned() {
         let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 4, 0</x:Anchor></x:ClientData></v:shape>"#;
         let p = ShiftPlan::delete(Axis::Row, 5, 1);
         let out = shift_vml_xml(vml.as_bytes(), &p);
         let s = String::from_utf8_lossy(&out);
         assert!(!s.contains("v:shape"));
+    }
+
+    #[test]
+    fn shrinks_vml_row_anchor_when_bottom_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 3, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Row, 7, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 3, 0, 2, 0, 5, 0"));
+    }
+
+    #[test]
+    fn shrinks_vml_row_anchor_when_top_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 4, 0, 2, 0, 5, 0"));
+    }
+
+    #[test]
+    fn shrinks_vml_col_anchor_when_right_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>1, 0, 3, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Col, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("1, 0, 3, 0, 3, 0, 6, 0"));
+    }
+
+    #[test]
+    fn shrinks_vml_col_anchor_when_left_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>1, 0, 3, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Col, 2, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("1, 0, 3, 0, 3, 0, 6, 0"));
     }
 
     #[test]

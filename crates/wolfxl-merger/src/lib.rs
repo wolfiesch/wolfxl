@@ -350,6 +350,7 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
     // Tracks whether we've already emitted the worksheet open tag (so we
     // know whether xmlns:r needs injection).
     let mut emitted_root = false;
+    let mut depth: usize = 0;
 
     loop {
         let event = reader
@@ -359,16 +360,18 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
         match event {
             Event::Start(e) => {
                 let local = e.local_name().as_ref().to_vec();
+                let current_depth = depth;
 
                 // (a) Worksheet root: the only place we ever rewrite a
                 // non-block element. We may need to inject xmlns:r.
-                if local == b"worksheet" && !emitted_root {
+                if current_depth == 0 && local == b"worksheet" && !emitted_root {
                     let to_emit =
                         ensure_rel_namespace(&e, needs_rel_ns).unwrap_or_else(|| e.borrow());
                     writer
                         .write_event(Event::Start(to_emit))
                         .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
                     emitted_root = true;
+                    depth += 1;
                     buf.clear();
                     continue;
                 }
@@ -376,7 +379,7 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
                 // (b) cf_replace: skip every <conditionalFormatting>
                 // element wholesale; the caller's CF blocks land at the
                 // ECMA-17 slot below.
-                if cf_replace && local == b"conditionalFormatting" {
+                if current_depth == 1 && cf_replace && local == b"conditionalFormatting" {
                     consume_until_matching_end(&mut reader, &local)?;
                     buf.clear();
                     continue;
@@ -385,24 +388,27 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
                 // (c) ECMA-known element: flush any pending blocks that
                 // come strictly before this slot, then either emit
                 // verbatim or skip-to-replace.
-                if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
-                    flush_pending_before(&mut writer, &mut pending, ord)?;
+                if current_depth == 1 {
+                    if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
+                        flush_pending_before(&mut writer, &mut pending, ord)?;
 
-                    if replace_names.contains(&local.as_slice()) {
-                        // Drop the source block; its replacement will be
-                        // emitted when we drain `pending` at slot `ord`
-                        // (next call to `flush_pending_at` below).
-                        consume_until_matching_end(&mut reader, &local)?;
-                        flush_pending_at(&mut writer, &mut pending, ord)?;
+                        if replace_names.contains(&local.as_slice()) {
+                            // Drop the source block; its replacement will be
+                            // emitted when we drain `pending` at slot `ord`
+                            // (next call to `flush_pending_at` below).
+                            consume_until_matching_end(&mut reader, &local)?;
+                            flush_pending_at(&mut writer, &mut pending, ord)?;
+                            buf.clear();
+                            continue;
+                        }
+
+                        writer
+                            .write_event(Event::Start(e.borrow()))
+                            .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                        depth += 1;
                         buf.clear();
                         continue;
                     }
-
-                    writer
-                        .write_event(Event::Start(e.borrow()))
-                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
-                    buf.clear();
-                    continue;
                 }
 
                 // (d) Unknown element (extLst, x14ac:something, third-party
@@ -410,15 +416,17 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
                 writer
                     .write_event(Event::Start(e.borrow()))
                     .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                depth += 1;
             }
 
             Event::Empty(e) => {
                 let local = e.local_name().as_ref().to_vec();
+                let current_depth = depth;
 
                 // Self-closing <worksheet/> — RFC-011 §8 risk #3. Expand
                 // to explicit <worksheet>...</worksheet> and flush every
                 // pending block in between.
-                if local == b"worksheet" && !emitted_root {
+                if current_depth == 0 && local == b"worksheet" && !emitted_root {
                     let opened =
                         ensure_rel_namespace(&e, needs_rel_ns).unwrap_or_else(|| e.borrow());
                     writer
@@ -433,29 +441,31 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
                     continue;
                 }
 
-                if cf_replace && local == b"conditionalFormatting" {
+                if current_depth == 1 && cf_replace && local == b"conditionalFormatting" {
                     // Empty-element <conditionalFormatting/> — drop without
                     // recursing; emission of replacements happens at slot 17.
                     buf.clear();
                     continue;
                 }
 
-                if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
-                    flush_pending_before(&mut writer, &mut pending, ord)?;
+                if current_depth == 1 {
+                    if let Some(ord) = ct_worksheet_order::ordinal_of(&local) {
+                        flush_pending_before(&mut writer, &mut pending, ord)?;
 
-                    if replace_names.contains(&local.as_slice()) {
-                        // Empty source block — nothing to consume; the
-                        // replacement still lands at the slot.
-                        flush_pending_at(&mut writer, &mut pending, ord)?;
+                        if replace_names.contains(&local.as_slice()) {
+                            // Empty source block — nothing to consume; the
+                            // replacement still lands at the slot.
+                            flush_pending_at(&mut writer, &mut pending, ord)?;
+                            buf.clear();
+                            continue;
+                        }
+
+                        writer
+                            .write_event(Event::Empty(e.borrow()))
+                            .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
                         buf.clear();
                         continue;
                     }
-
-                    writer
-                        .write_event(Event::Empty(e.borrow()))
-                        .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
-                    buf.clear();
-                    continue;
                 }
 
                 // Unknown empty element — verbatim.
@@ -465,12 +475,13 @@ pub fn merge_blocks(sheet_xml: &[u8], blocks: Vec<SheetBlock>) -> Result<Vec<u8>
             }
 
             Event::End(e) => {
-                if e.local_name().as_ref() == b"worksheet" {
+                if depth == 1 && e.local_name().as_ref() == b"worksheet" {
                     flush_all_pending(&mut writer, &mut pending)?;
                 }
                 writer
                     .write_event(Event::End(e))
                     .map_err(|e| format!("wolfxl-merger: XML write error: {e}"))?;
+                depth = depth.saturating_sub(1);
             }
 
             Event::Eof => break,
@@ -1041,6 +1052,24 @@ mod tests {
         assert!(!s.contains("OLD_A"));
         assert!(!s.contains("OLD_B"));
         assert_eq!(s.matches("<conditionalFormatting").count(), 1);
+    }
+
+    #[test]
+    fn conditionalformatting_does_not_replace_nested_extension_elements() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><sheetData/><conditionalFormatting sqref="A1"><cfRule type="OLD_A"/></conditionalFormatting><extLst><ext><x14:conditionalFormattings><x14:conditionalFormatting><x14:cfRule type="dataBar"/></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst></worksheet>"#;
+        let block = SheetBlock::ConditionalFormatting(
+            br#"<conditionalFormatting sqref="B1"><cfRule type="NEW_B"/></conditionalFormatting>"#
+                .to_vec(),
+        );
+        let out = merge_blocks(xml, vec![block]).expect("merge");
+        let s = std::str::from_utf8(&out).expect("utf8");
+
+        assert!(s.contains("NEW_B"));
+        assert!(!s.contains("OLD_A"));
+        assert!(s.contains("x14:conditionalFormattings"));
+        assert!(s.contains("x14:conditionalFormatting"));
+        assert!(s.contains("x14:cfRule type=\"dataBar\""));
     }
 
     #[test]

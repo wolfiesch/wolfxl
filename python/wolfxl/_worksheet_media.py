@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from wolfxl._worksheet import Worksheet
 
 _PENDING_IMAGE_DELETIONS: dict[int, list[int]] = {}
-_PENDING_CHART_DELETIONS: dict[int, list[dict[str, str]]] = {}
 
 
 def add_chart(ws: Worksheet, chart: Any, anchor: Any = None) -> None:
@@ -176,7 +175,8 @@ def replace_chart(ws: Worksheet, old: Any, new: Any) -> None:
 
 def pop_pending_chart_deletions(ws: Worksheet) -> list[dict[str, str]]:
     """Drain queued source-chart deletions for *ws* in append order."""
-    pending = _PENDING_CHART_DELETIONS.pop(id(ws), [])
+    pending = list(ws._pending_chart_deletions)  # noqa: SLF001
+    ws._pending_chart_deletions.clear()  # noqa: SLF001
     return list(pending)
 
 
@@ -556,7 +556,7 @@ def _pending_image_deletions(ws: Worksheet) -> list[int]:
 
 
 def _pending_chart_deletions(ws: Worksheet) -> list[dict[str, str]]:
-    return _PENDING_CHART_DELETIONS.setdefault(id(ws), [])
+    return ws._pending_chart_deletions  # noqa: SLF001
 
 
 def _source_chart_meta(chart: Any) -> dict[str, str] | None:

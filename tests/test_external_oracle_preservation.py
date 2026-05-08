@@ -1,20 +1,20 @@
 """Pre-release modify-save preservation test over the pinned external-oracle fixture pack.
 
 The pack lives in `tests/fixtures/external_oracle/` and contains workbooks
-authored by Excelize, ClosedXML, NPOI, ExcelJS, and Apache POI — features
-that openpyxl rarely *constructs* deeply (pivots, slicers, charts, complex
-conditional formatting, drawings, comments, tables, validations). For each
-fixture, the test:
+authored by Excelize, ClosedXML, NPOI, ExcelJS, Apache POI, plus targeted
+synthetic OOXML fixtures for surfaces missing from those external tools.
+These cover features that openpyxl rarely *constructs* deeply (pivots,
+slicers, charts, complex conditional formatting, drawings, comments, tables,
+validations, external links). For each fixture, the test:
 
 1. Verifies the on-disk SHA256 matches the pinned manifest entry — guards
    against accidental modification of the in-tree pack.
-2. Asserts every entry in the fixture's `expected_parts` list survives a
-   wolfxl modify-save cycle (load_workbook(modify=True), write a marker
-   cell, save, re-open). This is stronger than "no parts lost" because
-   it catches drift on the parts that openpyxl normalizes away or that
-   would silently get dropped.
-3. Confirms the marker round-trips through openpyxl, the ZIP CRC checks
-   pass, and the fixture continues to open cleanly.
+2. Asserts every entry in the fixture's `expected_parts` list survives
+   representative wolfxl modify-save cycles. This is stronger than "no
+   parts lost" because it catches drift on the parts that openpyxl normalizes
+   away or that would silently get dropped.
+3. Confirms the marker mutation round-trips through openpyxl, the ZIP CRC
+   checks pass, and each fixture continues to open cleanly.
 
 The `WOLFXL_EXTERNAL_FIXTURES_DIR` env var still overrides the in-tree
 path so a freshly-regenerated ExcelBench pack can be tested before being
@@ -25,11 +25,14 @@ hashes there are not pinned.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
+import sys
 import zipfile
 from pathlib import Path
+from types import ModuleType
 
 import openpyxl
 import pytest
@@ -41,6 +44,41 @@ _PINNED_DIR = Path(__file__).resolve().parent / "fixtures" / "external_oracle"
 _MANIFEST_NAME = "manifest.json"
 _MARKER_CELL = "Z1"
 _MARKER_VALUE = "wolfxl_external_fixture_smoke"
+_STYLE_CELL = "AA1"
+_MUTATIONS = (
+    "no_op",
+    "marker_cell",
+    "style_cell",
+    "insert_tail_row",
+    "insert_tail_col",
+    "delete_marker_tail_row",
+    "delete_marker_tail_col",
+    "copy_remove_sheet",
+    "move_marker_range",
+)
+_EXPECTED_AUDIT_KINDS_BY_MUTATION = {
+    "style_cell": {"style_theme_semantic_drift"},
+    "insert_tail_row": {"data_validations_semantic_drift"},
+    "delete_marker_tail_row": {"data_validations_semantic_drift"},
+}
+_EXPECTED_DRAWING_ANCHOR_DRIFT_MUTATIONS = {
+    "insert_tail_row",
+    "delete_marker_tail_row",
+}
+
+
+def _load_ooxml_audit_module() -> ModuleType:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_fidelity.py"
+    spec = importlib.util.spec_from_file_location("audit_ooxml_fidelity", script)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_OOXML_AUDIT = _load_ooxml_audit_module()
 
 
 def _fixture_dir() -> Path:
@@ -97,8 +135,9 @@ def _entry_id(entry: dict) -> str:
     ),
 )
 @pytest.mark.parametrize("entry", _FIXTURE_ENTRIES, ids=_entry_id)
+@pytest.mark.parametrize("mutation", _MUTATIONS)
 def test_external_oracle_fixture_modify_save_preserves_expected_parts(
-    entry: dict, tmp_path: Path
+    entry: dict, mutation: str, tmp_path: Path
 ) -> None:
     """Each pinned fixture's expected_parts must survive wolfxl modify-save."""
     fixture_path = _FIXTURE_DIR / entry["filename"]
@@ -115,18 +154,86 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
             "otherwise restore from git."
         )
 
+    before_audit_path = tmp_path / f"before-{fixture_path.name}"
     work_path = tmp_path / fixture_path.name
+    shutil.copy2(fixture_path, before_audit_path)
     shutil.copy2(fixture_path, work_path)
 
     before_parts = _zip_parts(work_path)
 
     workbook = wolfxl.load_workbook(work_path, modify=True)
     sheet_name = workbook.sheetnames[0]
-    workbook[sheet_name][_MARKER_CELL] = _MARKER_VALUE
+    if mutation == "marker_cell":
+        workbook[sheet_name][_MARKER_CELL] = _MARKER_VALUE
+    elif mutation == "style_cell":
+        from wolfxl.styles import Font, PatternFill
+
+        cell = workbook[sheet_name][_STYLE_CELL]
+        cell.value = _MARKER_VALUE
+        cell.font = Font(bold=True, color="FF1F4E79")
+        cell.fill = PatternFill(fill_type="solid", fgColor="FFEAF2F8")
+    elif mutation == "insert_tail_row":
+        worksheet = workbook[sheet_name]
+        row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+        worksheet.insert_rows(row_idx, amount=1)
+        worksheet.cell(row=row_idx, column=1).value = _MARKER_VALUE
+    elif mutation == "insert_tail_col":
+        worksheet = workbook[sheet_name]
+        col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+        worksheet.insert_cols(col_idx, amount=1)
+        worksheet.cell(row=1, column=col_idx).value = _MARKER_VALUE
+    elif mutation == "delete_marker_tail_row":
+        worksheet = workbook[sheet_name]
+        row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+        worksheet.cell(row=row_idx, column=1).value = _MARKER_VALUE
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        sheet_name = workbook.sheetnames[0]
+        worksheet = workbook[sheet_name]
+        worksheet.delete_rows(row_idx, amount=1)
+    elif mutation == "delete_marker_tail_col":
+        worksheet = workbook[sheet_name]
+        col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+        worksheet.cell(row=1, column=col_idx).value = _MARKER_VALUE
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        sheet_name = workbook.sheetnames[0]
+        worksheet = workbook[sheet_name]
+        worksheet.delete_cols(col_idx, amount=1)
+    elif mutation == "copy_remove_sheet":
+        clone = workbook.copy_worksheet(workbook[sheet_name])
+        clone_title = clone.title
+        workbook.save(work_path)
+        workbook.close()
+        workbook = wolfxl.load_workbook(work_path, modify=True)
+        workbook.remove(workbook[clone_title])
+    elif mutation == "move_marker_range":
+        worksheet = workbook[sheet_name]
+        worksheet["Z1"] = _MARKER_VALUE
+        worksheet["AA1"] = f"{_MARKER_VALUE}_right"
+        worksheet.move_range("Z1:AA1", rows=1, cols=0)
     workbook.save(work_path)
     workbook.close()
 
     after_parts = _zip_parts(work_path)
+
+    audit_report = _OOXML_AUDIT.audit(before_audit_path, work_path)
+    unexpected_issues = [
+        issue
+        for issue in audit_report["issues"]
+        if not _is_expected_audit_issue(
+            issue,
+            mutation=mutation,
+            before_path=before_audit_path,
+            after_path=work_path,
+        )
+    ]
+    assert not unexpected_issues, (
+        f"{fixture_path.name} failed OOXML fidelity audit after {mutation}: "
+        f"{json.dumps(unexpected_issues, indent=2, sort_keys=True)}"
+    )
 
     # Stronger gate than "no parts lost": every entry the fixture's
     # originating tool authored must still be present.
@@ -146,14 +253,15 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
         f"{sorted(missing_any)}"
     )
 
-    # Marker round-trips through openpyxl (validates the wolfxl save is
-    # readable by the canonical OOXML reader, not just by wolfxl itself).
+    # Openpyxl load validates the wolfxl save is readable by the canonical
+    # OOXML reader, not just by wolfxl itself.
     roundtrip = openpyxl.load_workbook(work_path, data_only=False)
     try:
-        assert roundtrip[sheet_name][_MARKER_CELL].value == _MARKER_VALUE, (
-            f"marker write to {fixture_path.name}!{_MARKER_CELL} did not "
-            "round-trip through openpyxl"
-        )
+        if mutation == "marker_cell":
+            assert roundtrip[sheet_name][_MARKER_CELL].value == _MARKER_VALUE, (
+                f"marker write to {fixture_path.name}!{_MARKER_CELL} did not "
+                "round-trip through openpyxl"
+            )
     finally:
         roundtrip.close()
 
@@ -166,3 +274,46 @@ def test_external_oracle_fixture_modify_save_preserves_expected_parts(
 def _zip_parts(path: Path) -> set[str]:
     with zipfile.ZipFile(path) as archive:
         return set(archive.namelist())
+
+
+def _is_expected_audit_issue(
+    issue: dict, *, mutation: str, before_path: Path, after_path: Path
+) -> bool:
+    if issue.get("kind") in _EXPECTED_AUDIT_KINDS_BY_MUTATION.get(mutation, set()):
+        return True
+    if issue.get("kind") != "drawing_objects_semantic_drift":
+        return False
+    if mutation not in _EXPECTED_DRAWING_ANCHOR_DRIFT_MUTATIONS:
+        return False
+    return _drawing_objects_match_except_vml_anchor_text(before_path, after_path)
+
+
+def _drawing_objects_match_except_vml_anchor_text(before_path: Path, after_path: Path) -> bool:
+    with zipfile.ZipFile(before_path) as before_archive:
+        before_fingerprint = _OOXML_AUDIT._drawing_object_fingerprint(
+            before_archive, set(before_archive.namelist())
+        )
+    with zipfile.ZipFile(after_path) as after_archive:
+        after_fingerprint = _OOXML_AUDIT._drawing_object_fingerprint(
+            after_archive, set(after_archive.namelist())
+        )
+    return _normalize_vml_anchor_text(before_fingerprint) == _normalize_vml_anchor_text(
+        after_fingerprint
+    )
+
+
+def _normalize_vml_anchor_text(value):
+    if (
+        isinstance(value, tuple)
+        and len(value) == 4
+        and value[0] == "Anchor"
+        and isinstance(value[2], str)
+    ):
+        return (value[0], value[1], "<vml-anchor>", value[3])
+    if isinstance(value, dict):
+        return {key: _normalize_vml_anchor_text(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_vml_anchor_text(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_normalize_vml_anchor_text(item) for item in value)
+    return value

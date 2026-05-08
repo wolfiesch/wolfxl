@@ -279,38 +279,41 @@ def test_foreign_authored_pivot_round_trips(tmp_path: Path) -> None:
         Path("tests/data/pivot_fixtures"),
         Path("tests/fixtures/pivot"),
     ]
-    candidate: Path | None = None
+    candidate: tuple[Path, str] | None = None
     for d in fixture_dirs:
         if d.exists():
-            for f in d.glob("*.xlsx"):
+            for f in sorted(d.glob("*.xlsx")):
                 with zipfile.ZipFile(f) as zf:
-                    if any("pivotTable" in n for n in zf.namelist()):
-                        candidate = f
+                    if not any("pivotTable" in n for n in zf.namelist()):
+                        continue
+                probe = tmp_path / f"probe-{f.name}"
+                probe.write_bytes(f.read_bytes())
+                wb = wolfxl.load_workbook(probe, modify=True)
+                for ws in wb.worksheets:
+                    if ws.pivot_tables:
+                        candidate = (f, ws.title)
                         break
+                if candidate:
+                    break
         if candidate:
             break
     assert candidate is not None, "expected a foreign-authored pivot fixture"
 
-    dest = tmp_path / candidate.name
-    dest.write_bytes(candidate.read_bytes())
+    candidate_path, candidate_sheet = candidate
+    dest = tmp_path / candidate_path.name
+    dest.write_bytes(candidate_path.read_bytes())
 
     wb = wolfxl.load_workbook(dest, modify=True)
-    found_pivot = False
-    for ws in wb.worksheets:
-        handles = ws.pivot_tables
-        if not handles:
-            continue
-        found_pivot = True
-        h = handles[0]
-        # Mutate to the same shape so refreshOnLoad stays off.
-        cur = h.source
-        h.source = Reference(
-            cur.worksheet,
-            min_col=cur.min_col,
-            min_row=cur.min_row,
-            max_col=cur.max_col,
-            max_row=cur.max_row,
-        )
-        break
-    assert found_pivot, "fixture had no parseable pivot handle"
+    handles = wb[candidate_sheet].pivot_tables
+    assert handles, "selected fixture had no parseable pivot handle"
+    h = handles[0]
+    # Mutate to the same shape so refreshOnLoad stays off.
+    cur = h.source
+    h.source = Reference(
+        cur.worksheet,
+        min_col=cur.min_col,
+        min_row=cur.min_row,
+        max_col=cur.max_col,
+        max_row=cur.max_row,
+    )
     wb.save(dest)

@@ -87,6 +87,23 @@ fn rels_external_link_path_with_relative_target() {
 }
 
 #[test]
+fn rels_accepts_excel_xl_path_missing_external_link_path() {
+    // Current Microsoft Excel can emit this relationship type when the linked
+    // workbook path is unavailable at save time. It still carries the workbook
+    // target and should surface as a normal external file link to callers.
+    let xml =
+        br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.microsoft.com/office/2006/relationships/xlExternalLinkPath/xlPathMissing"
+    Target="wolfxl_excel_link_source.xlsx" TargetMode="External"/>
+</Relationships>"#;
+    let r = parse_rels(xml).unwrap();
+    assert_eq!(r.target.as_deref(), Some("wolfxl_excel_link_source.xlsx"));
+    assert_eq!(r.target_mode, Some(TargetMode::External));
+    assert_eq!(r.rid.as_deref(), Some("rId1"));
+}
+
+#[test]
 fn rels_only_first_external_link_path_wins() {
     let xml =
         br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">

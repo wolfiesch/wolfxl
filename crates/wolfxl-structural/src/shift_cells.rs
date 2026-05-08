@@ -18,11 +18,12 @@
 //!   - `<conditionalFormatting sqref>` — rewrite via `shift_sqref`.
 //!     Empty-sqref CF blocks are dropped.
 //!   - `<cfRule>/<formula>` text — via `shift_formula`.
+//!   - `<xm:sqref>` extension text — rewrite via `shift_sqref`.
 //!   - `<hyperlink ref>` — via `shift_anchor`.
 
 use std::io::Cursor;
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -34,7 +35,23 @@ use crate::shift_formulas::shift_formula;
 /// Wraps the `(key.as_bytes(), val.as_bytes())` form supported by
 /// quick-xml 0.37.
 fn push_attr<'a>(e: &mut BytesStart<'a>, key: &[u8], val: &str) {
-    e.push_attribute((key, val.as_bytes()));
+    let escaped = xml_attr_escape(val);
+    e.push_attribute((key, escaped.as_bytes()));
+}
+
+fn xml_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Streaming rewrite of a sheet XML. Returns the new bytes.
@@ -58,6 +75,7 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     let mut in_f: bool = false;
     let mut in_formula1: bool = false;
     let mut in_formula2: bool = false;
+    let mut in_sqref_text: bool = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -96,6 +114,10 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     }
                     b"formula2" => {
                         in_formula2 = true;
+                        let _ = writer.write_event(Event::Start(e.to_owned()));
+                    }
+                    b"sqref" => {
+                        in_sqref_text = true;
                         let _ = writer.write_event(Event::Start(e.to_owned()));
                     }
                     b"dimension" | b"mergeCell" | b"hyperlink" => {
@@ -189,11 +211,10 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     b"f" => in_f = false,
                     b"formula1" => in_formula1 = false,
                     b"formula2" => in_formula2 = false,
+                    b"sqref" => in_sqref_text = false,
                     _ => {}
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if skip_depth > 0 {
@@ -206,6 +227,14 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
                     let new_s = shift_formula(&s, plan);
+                    let new_t = BytesText::new(&new_s);
+                    let _ = writer.write_event(Event::Text(new_t));
+                } else if in_sqref_text {
+                    let s = match t.unescape() {
+                        Ok(c) => c.into_owned(),
+                        Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
+                    };
+                    let new_s = shift_sqref(&s, plan);
                     let new_t = BytesText::new(&new_s);
                     let _ = writer.write_event(Event::Text(new_t));
                 } else {
@@ -468,6 +497,19 @@ mod tests {
     }
 
     #[test]
+    fn hyperlink_attrs_remain_xml_escaped_after_axis_shift() {
+        let xml = r#"<hyperlinks><hyperlink ref="B5" location="'Sec. 1 &amp; 2 Notes'!A1" display="A &amp; B"/></hyperlinks>"#;
+        let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
+        let out = apply(xml, &p);
+        assert!(out.contains(r#"ref="B8""#));
+        assert!(
+            out.contains(r#"location="&apos;Sec. 1 &amp; 2 Notes&apos;!A1""#),
+            "got: {out}"
+        );
+        assert!(out.contains(r#"display="A &amp; B""#), "got: {out}");
+    }
+
+    #[test]
     fn shifts_dv_sqref_and_formula() {
         let xml = r#"<dataValidations><dataValidation type="list" sqref="A5:A10"><formula1>$Z$5:$Z$10</formula1></dataValidation></dataValidations>"#;
         let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
@@ -482,6 +524,14 @@ mod tests {
         let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
         let out = apply(xml, &p);
         assert!(out.contains(r#"sqref="A8:A13""#));
+    }
+
+    #[test]
+    fn shifts_extension_sqref_text() {
+        let xml = r#"<worksheet><extLst><ext><x14:conditionalFormattings xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:conditionalFormatting xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><xm:sqref>C2:C4</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst></worksheet>"#;
+        let p = ShiftPlan::delete(crate::Axis::Row, 1, 1);
+        let out = apply(xml, &p);
+        assert!(out.contains("<xm:sqref>C1:C3</xm:sqref>"), "{out}");
     }
 
     #[test]

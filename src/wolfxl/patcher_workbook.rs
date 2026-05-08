@@ -6,6 +6,8 @@ use std::io::{Read, Seek, Write};
 
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
+use quick_xml::events::Event;
+use quick_xml::Reader as XmlReader;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -18,6 +20,7 @@ use super::{
 
 const CT_WORKSHEET: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const FAST_SAVE_DEFLATE_LEVEL: i64 = 2;
 
 /// Maps a sheet XML path to its relationship sidecar path.
 pub(crate) fn sheet_rels_path_for(sheet_path: &str) -> String {
@@ -131,6 +134,7 @@ pub(crate) fn splice_into_sheets_block(
     let mut splice_pos: Option<usize> = None;
     let mut sheets_open_depth: Option<i32> = None;
     let mut self_closing_range: Option<(usize, usize)> = None;
+    let mut sheets_element_name: Option<String> = None;
     let mut buf: Vec<u8> = Vec::new();
 
     loop {
@@ -141,6 +145,8 @@ pub(crate) fn splice_into_sheets_block(
             Ok(XmlEvent::Start(ref e)) => {
                 if e.local_name().as_ref() == b"sheets" && sheets_open_depth.is_none() {
                     sheets_open_depth = Some(depth);
+                    sheets_element_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                 }
                 depth += 1;
             }
@@ -157,6 +163,8 @@ pub(crate) fn splice_into_sheets_block(
             Ok(XmlEvent::Empty(ref e)) => {
                 if e.local_name().as_ref() == b"sheets" && self_closing_range.is_none() {
                     self_closing_range = Some((pre, post));
+                    sheets_element_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
                     break;
                 }
             }
@@ -167,25 +175,43 @@ pub(crate) fn splice_into_sheets_block(
         buf.clear();
     }
 
+    let sheets_name = sheets_element_name.as_deref().unwrap_or("sheets");
+    let sheet_element = qualify_sheet_element_for_sheets(new_sheet_element, sheets_name);
     if let Some(pos) = splice_pos {
-        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len());
+        let mut out = Vec::with_capacity(workbook_xml.len() + sheet_element.len());
         out.extend_from_slice(&workbook_xml[..pos]);
-        out.extend_from_slice(new_sheet_element);
+        out.extend_from_slice(&sheet_element);
         out.extend_from_slice(&workbook_xml[pos..]);
         return Ok(out);
     }
     if let Some((start, end)) = self_closing_range {
-        let mut out = Vec::with_capacity(workbook_xml.len() + new_sheet_element.len() + 16);
+        let mut out = Vec::with_capacity(
+            workbook_xml.len() + sheet_element.len() + (2 * sheets_name.len()) + 5,
+        );
         out.extend_from_slice(&workbook_xml[..start]);
-        out.extend_from_slice(b"<sheets>");
-        out.extend_from_slice(new_sheet_element);
-        out.extend_from_slice(b"</sheets>");
+        out.extend_from_slice(format!("<{sheets_name}>").as_bytes());
+        out.extend_from_slice(&sheet_element);
+        out.extend_from_slice(format!("</{sheets_name}>").as_bytes());
         out.extend_from_slice(&workbook_xml[end..]);
         return Ok(out);
     }
     Err(PyIOError::new_err(
         "Phase 2.7: workbook.xml has no <sheets> block",
     ))
+}
+
+fn qualify_sheet_element_for_sheets(new_sheet_element: &[u8], sheets_name: &str) -> Vec<u8> {
+    let prefix = sheets_name.strip_suffix("sheets").unwrap_or_default();
+    if prefix.is_empty() {
+        return new_sheet_element.to_vec();
+    }
+    let Ok(text) = std::str::from_utf8(new_sheet_element) else {
+        return new_sheet_element.to_vec();
+    };
+    let Some(rest) = text.strip_prefix("<sheet") else {
+        return new_sheet_element.to_vec();
+    };
+    format!("<{prefix}sheet{rest}").into_bytes()
 }
 
 pub(super) fn apply_sheet_deletes_phase(
@@ -218,6 +244,7 @@ pub(super) fn apply_sheet_deletes_phase(
         .map_err(|e| PyIOError::new_err(format!("sheet-delete workbook.xml parse: {e}")))?;
 
     let deletes = patcher.queued_sheet_deletes.clone();
+    let mut deleted_workbook_cache_names: HashSet<String> = HashSet::new();
     for title in &deletes {
         if let Some((_, rid)) = sheet_rids.iter().find(|(name, _)| name == title) {
             if let Some(graph) = patcher.rels_patches.get_mut(&workbook_rels_path) {
@@ -242,7 +269,22 @@ pub(super) fn apply_sheet_deletes_phase(
                 RelsGraph::parse(&bytes).ok()
             },
         );
+        let deleted_parts: HashSet<String> = subgraph.reachable_parts.iter().cloned().collect();
+        let retained_parts =
+            retained_deleted_subgraph_parts(&deleted_parts, patcher, file_patches, zip)?;
+        let pruned_deleted_parts: HashSet<String> =
+            deleted_parts.difference(&retained_parts).cloned().collect();
+        collect_deleted_workbook_cache_names(
+            &pruned_deleted_parts,
+            file_patches,
+            &patcher.file_adds,
+            zip,
+            &mut deleted_workbook_cache_names,
+        );
         for part in subgraph.reachable_parts {
+            if retained_parts.contains(&part) {
+                continue;
+            }
             patcher.file_deletes.insert(part.clone());
             if let Some(rels_path) = wolfxl_rels::rels_path_for(&part) {
                 patcher.file_deletes.insert(rels_path);
@@ -260,11 +302,341 @@ pub(super) fn apply_sheet_deletes_phase(
 
     let result = sheet_order::merge_sheet_deletes(&workbook_xml, &deletes)
         .map_err(|e| PyIOError::new_err(format!("sheet-delete merge: {e}")))?;
-    file_patches.insert("xl/workbook.xml".to_string(), result.workbook_xml);
+    let workbook_xml = prune_deleted_workbook_cache_refs(
+        result.workbook_xml,
+        &deleted_workbook_cache_names,
+        patcher,
+        file_patches,
+        zip,
+    )?;
+    file_patches.insert("xl/workbook.xml".to_string(), workbook_xml);
     patcher.sheet_order = result.new_order;
     patcher.queued_sheet_deletes.clear();
     patcher.deleted_sheet_paths.clear();
     Ok(())
+}
+
+fn collect_deleted_workbook_cache_names(
+    deleted_parts: &HashSet<String>,
+    file_patches: &HashMap<String, Vec<u8>>,
+    file_adds: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+    out: &mut HashSet<String>,
+) {
+    for part in deleted_parts {
+        let is_slicer = part.starts_with("xl/slicers/slicer") && part.ends_with(".xml");
+        let is_timeline = part.starts_with("xl/timelines/timeline") && part.ends_with(".xml");
+        if !is_slicer && !is_timeline {
+            continue;
+        }
+        let Some(bytes) = current_part_bytes(file_patches, file_adds, zip, part) else {
+            continue;
+        };
+        for cache_name in xml_attr_values_by_local_name(&bytes, b"cache") {
+            out.insert(cache_name);
+        }
+    }
+}
+
+fn prune_deleted_workbook_cache_refs(
+    workbook_xml: Vec<u8>,
+    cache_names: &HashSet<String>,
+    patcher: &mut XlsxPatcher,
+    file_patches: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<Vec<u8>> {
+    if cache_names.is_empty() {
+        return Ok(workbook_xml);
+    }
+    let cache_parts =
+        workbook_cache_parts_for_names(cache_names, file_patches, &patcher.file_adds, zip);
+    if cache_parts.is_empty() {
+        return Ok(workbook_xml);
+    }
+    let workbook_rels_path = "xl/_rels/workbook.xml.rels".to_string();
+    if !patcher.rels_patches.contains_key(&workbook_rels_path) {
+        let g = load_or_empty_rels(zip, &workbook_rels_path)?;
+        patcher.rels_patches.insert(workbook_rels_path.clone(), g);
+    }
+    let mut removed_rids = HashSet::new();
+    if let Some(graph) = patcher.rels_patches.get_mut(&workbook_rels_path) {
+        let mut to_remove = Vec::new();
+        for rel in graph.iter() {
+            if rel.mode == wolfxl_rels::TargetMode::External {
+                continue;
+            }
+            let target = wolfxl_rels::resolve_target("xl", &rel.target);
+            if cache_parts.contains(&target) {
+                to_remove.push(rel.id.clone());
+            }
+        }
+        for rid in to_remove {
+            removed_rids.insert(rid.0.clone());
+            graph.remove(&rid);
+        }
+    }
+    for part in &cache_parts {
+        patcher.file_deletes.insert(part.clone());
+        if let Some(rels_path) = wolfxl_rels::rels_path_for(part) {
+            patcher.file_deletes.insert(rels_path);
+        }
+        patcher
+            .queued_content_type_ops
+            .entry("__sheet_delete__".to_string())
+            .or_default()
+            .push(content_types::ContentTypeOp::RemoveOverride(format!(
+                "/{part}"
+            )));
+    }
+    let mut xml = String::from_utf8(workbook_xml)
+        .map_err(|e| PyIOError::new_err(format!("sheet-delete workbook.xml utf8: {e}")))?;
+    for rid in &removed_rids {
+        xml = remove_self_closing_element_with_attr(&xml, "slicerCache", "id", rid);
+        xml = remove_self_closing_element_with_attr(&xml, "timelineCacheRef", "id", rid);
+    }
+    for name in cache_names {
+        xml = remove_defined_name_by_name(&xml, name);
+    }
+    Ok(xml.into_bytes())
+}
+
+fn workbook_cache_parts_for_names(
+    cache_names: &HashSet<String>,
+    file_patches: &HashMap<String, Vec<u8>>,
+    file_adds: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> HashSet<String> {
+    let mut candidates: HashSet<String> = HashSet::new();
+    for i in 0..zip.len() {
+        let Ok(entry) = zip.by_index(i) else {
+            continue;
+        };
+        let name = entry.name().to_string();
+        if is_workbook_cache_part(&name) {
+            candidates.insert(name);
+        }
+    }
+    candidates.extend(
+        file_patches
+            .keys()
+            .filter(|p| is_workbook_cache_part(p))
+            .cloned(),
+    );
+    candidates.extend(
+        file_adds
+            .keys()
+            .filter(|p| is_workbook_cache_part(p))
+            .cloned(),
+    );
+
+    let mut out = HashSet::new();
+    for part in candidates {
+        let Some(bytes) = current_part_bytes(file_patches, file_adds, zip, &part) else {
+            continue;
+        };
+        if xml_attr_values_by_local_name(&bytes, b"name")
+            .into_iter()
+            .any(|name| cache_names.contains(&name))
+        {
+            out.insert(part);
+        }
+    }
+    out
+}
+
+fn is_workbook_cache_part(path: &str) -> bool {
+    (path.starts_with("xl/slicerCaches/slicerCache") && path.ends_with(".xml"))
+        || (path.starts_with("xl/timelineCaches/timelineCache") && path.ends_with(".xml"))
+}
+
+fn xml_attr_values_by_local_name(xml: &[u8], attr_name: &[u8]) -> Vec<String> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                for attr in e.attributes().with_checks(false).flatten() {
+                    if attr.key.local_name().as_ref() == attr_name {
+                        if let Ok(value) = attr.decode_and_unescape_value(reader.decoder()) {
+                            out.push(value.into_owned());
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn remove_self_closing_element_with_attr(
+    xml: &str,
+    local: &str,
+    attr: &str,
+    value: &str,
+) -> String {
+    let mut out = xml.to_string();
+    loop {
+        let Some(pos) = find_local_tag_with_attr(&out, local, attr, value) else {
+            break;
+        };
+        let Some(end_rel) = out[pos..].find("/>") else {
+            break;
+        };
+        let end = pos + end_rel + 2;
+        out.replace_range(pos..end, "");
+    }
+    out
+}
+
+fn remove_defined_name_by_name(xml: &str, name: &str) -> String {
+    let mut out = xml.to_string();
+    loop {
+        let Some(pos) = find_local_tag_with_attr(&out, "definedName", "name", name) else {
+            break;
+        };
+        let Some(end_rel) = out[pos..].find("</definedName>") else {
+            break;
+        };
+        let end = pos + end_rel + "</definedName>".len();
+        out.replace_range(pos..end, "");
+    }
+    out
+}
+
+fn find_local_tag_with_attr(xml: &str, local: &str, attr: &str, value: &str) -> Option<usize> {
+    let needle = format!("{attr}=\"{value}\"");
+    let mut offset = 0;
+    while let Some(rel) = xml[offset..].find(&needle) {
+        let hit = offset + rel;
+        let tag_start = xml[..hit].rfind('<')?;
+        let tag_end = xml[hit..].find('>').map(|e| hit + e)?;
+        let tag = &xml[tag_start + 1..tag_end];
+        let tag_name = tag.split_whitespace().next().unwrap_or("");
+        let tag_local = tag_name.rsplit(':').next().unwrap_or(tag_name);
+        if tag_local == local {
+            return Some(tag_start);
+        }
+        offset = hit + needle.len();
+    }
+    None
+}
+
+fn retained_deleted_subgraph_parts(
+    deleted_parts: &HashSet<String>,
+    patcher: &XlsxPatcher,
+    file_patches: &HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<HashSet<String>> {
+    let mut rels_paths: HashSet<String> = HashSet::new();
+    for i in 0..zip.len() {
+        let Ok(entry) = zip.by_index(i) else {
+            continue;
+        };
+        let name = entry.name().to_string();
+        if name.ends_with(".rels") {
+            rels_paths.insert(name);
+        }
+    }
+    rels_paths.extend(patcher.rels_patches.keys().cloned());
+    rels_paths.extend(
+        file_patches
+            .keys()
+            .filter(|p| p.ends_with(".rels"))
+            .cloned(),
+    );
+    rels_paths.extend(
+        patcher
+            .file_adds
+            .keys()
+            .filter(|p| p.ends_with(".rels"))
+            .cloned(),
+    );
+
+    let mut retained: HashSet<String> = HashSet::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rels_path in &rels_paths {
+            let Some(owner_part) = owner_part_for_rels_path(rels_path) else {
+                continue;
+            };
+            let owner_is_kept =
+                !deleted_parts.contains(&owner_part) || retained.contains(&owner_part);
+            if !owner_is_kept {
+                continue;
+            }
+            let graph = if let Some(graph) = patcher.rels_patches.get(rels_path) {
+                graph.clone()
+            } else {
+                let Some(bytes) =
+                    current_part_bytes(file_patches, &patcher.file_adds, zip, rels_path)
+                else {
+                    continue;
+                };
+                let Ok(graph) = RelsGraph::parse(&bytes) else {
+                    continue;
+                };
+                graph
+            };
+            let owner_dir = owner_part
+                .rsplit_once('/')
+                .map(|(dir, _)| dir)
+                .unwrap_or("");
+            for rel in graph.iter() {
+                if rel.mode == wolfxl_rels::TargetMode::External {
+                    continue;
+                }
+                let target = wolfxl_rels::resolve_target(owner_dir, &rel.target);
+                if deleted_parts.contains(&target) && retained.insert(target) {
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    let retained_presentations: Vec<String> = retained
+        .iter()
+        .filter(|part| {
+            (part.starts_with("xl/slicers/slicer") && part.ends_with(".xml"))
+                || (part.starts_with("xl/timelines/timeline") && part.ends_with(".xml"))
+        })
+        .cloned()
+        .collect();
+    let mut retained_cache_names: HashSet<String> = HashSet::new();
+    for part in retained_presentations {
+        let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &part) else {
+            continue;
+        };
+        retained_cache_names.extend(xml_attr_values_by_local_name(&bytes, b"cache"));
+    }
+    for part in
+        workbook_cache_parts_for_names(&retained_cache_names, file_patches, &patcher.file_adds, zip)
+    {
+        if deleted_parts.contains(&part) {
+            retained.insert(part);
+        }
+    }
+
+    Ok(retained)
+}
+
+fn owner_part_for_rels_path(rels_path: &str) -> Option<String> {
+    if rels_path == "_rels/.rels" {
+        return Some(String::new());
+    }
+    let (dir, file) = rels_path.rsplit_once("/_rels/")?;
+    let part_file = file.strip_suffix(".rels")?;
+    if dir.is_empty() {
+        Some(part_file.to_string())
+    } else {
+        Some(format!("{dir}/{part_file}"))
+    }
 }
 
 pub(super) fn apply_sheet_creates_phase(
@@ -415,24 +787,54 @@ fn max_sheet_id_and_count(workbook_xml: &[u8]) -> (u32, usize) {
     (max_id, count)
 }
 
+fn sheet_ids_by_name(workbook_xml: &[u8]) -> HashMap<String, u32> {
+    let mut reader = quick_xml::Reader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut ids = HashMap::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Start(e)) | Ok(quick_xml::events::Event::Empty(e))
+                if e.local_name().as_ref() == b"sheet" =>
+            {
+                let mut name = None;
+                let mut sheet_id = None;
+                for attr in e.attributes().with_checks(false).flatten() {
+                    let value = attr
+                        .unescape_value()
+                        .map(|v| v.into_owned())
+                        .unwrap_or_else(|_| {
+                            String::from_utf8_lossy(attr.value.as_ref()).into_owned()
+                        });
+                    match attr.key.as_ref() {
+                        b"name" => name = Some(value),
+                        b"sheetId" => sheet_id = value.parse::<u32>().ok(),
+                        _ => {}
+                    }
+                }
+                if let (Some(name), Some(sheet_id)) = (name, sheet_id) {
+                    ids.insert(name, sheet_id);
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    ids
+}
+
 fn workbook_root_has_relationship_namespace(s: &str) -> PyResult<bool> {
-    let open = s
-        .find("<workbook")
+    let (open, rel_end) = find_open_tag_by_local_name(s, "workbook")
         .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
-    let rel_end = s[open..].find('>').ok_or_else(|| {
-        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
-    })?;
-    Ok(s[open..open + rel_end].contains("xmlns:r="))
+    Ok(s[open..rel_end].contains("xmlns:r="))
 }
 
 fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
-    let open = s
-        .find("<workbook")
+    let (_open, rel_end) = find_open_tag_by_local_name(s, "workbook")
         .ok_or_else(|| PyIOError::new_err("Phase 2.7: workbook.xml has no <workbook> root"))?;
-    let rel_end = s[open..].find('>').ok_or_else(|| {
-        PyIOError::new_err("Phase 2.7: workbook.xml has unclosed <workbook> root")
-    })?;
-    let insert_at = open + rel_end;
+    let insert_at = rel_end;
     let mut out = String::with_capacity(
         s.len()
             + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""
@@ -444,6 +846,29 @@ fn add_workbook_relationship_namespace(s: &str) -> PyResult<String> {
     );
     out.push_str(&s[insert_at..]);
     Ok(out)
+}
+
+fn find_open_tag_by_local_name(s: &str, local_name: &str) -> Option<(usize, usize)> {
+    let mut search_from = 0;
+    while let Some(rel_start) = s[search_from..].find('<') {
+        let start = search_from + rel_start;
+        let name_start = start + 1;
+        let first = s.as_bytes().get(name_start).copied()?;
+        if matches!(first, b'/' | b'!' | b'?') {
+            search_from = name_start + 1;
+            continue;
+        }
+        let name_end = s[name_start..]
+            .find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/')
+            .map(|rel| name_start + rel)?;
+        let element_name = &s[name_start..name_end];
+        if element_name.rsplit(':').next() == Some(local_name) {
+            let tag_end = s[name_end..].find('>').map(|rel| name_end + rel)?;
+            return Some((start, tag_end));
+        }
+        search_from = name_end;
+    }
+    None
 }
 
 /// Naive byte-substring search for tiny workbook XML payloads.
@@ -799,8 +1224,14 @@ pub(super) fn rebuild_calc_chain_phase(
     let source_calc_chain_ext_lst = source_calc_chain
         .as_deref()
         .and_then(calcchain::extract_ext_lst);
+    let workbook_xml = get_bytes(file_patches, &patcher.file_adds, zip, "xl/workbook.xml");
+    let sheet_ids = workbook_xml
+        .as_deref()
+        .map(sheet_ids_by_name)
+        .unwrap_or_default();
 
-    // Walk sheets in tab order, scanning each.
+    // Walk sheets in tab order, scanning each while emitting calcChain's
+    // workbook sheetId value.
     let mut all_entries: Vec<calcchain::CalcChainEntry> = Vec::new();
     let order = patcher.sheet_order.clone();
     for (i, sheet_name) in order.iter().enumerate() {
@@ -812,8 +1243,11 @@ pub(super) fn rebuild_calc_chain_phase(
             Some(b) => b,
             None => continue,
         };
-        let sheet_index_1based = (i as u32) + 1;
-        let entries = calcchain::scan_sheet_for_formulas(&sheet_xml, sheet_index_1based);
+        let sheet_id = sheet_ids
+            .get(sheet_name)
+            .copied()
+            .unwrap_or_else(|| (i as u32) + 1);
+        let entries = calcchain::scan_sheet_for_formulas(&sheet_xml, sheet_id);
         all_entries.extend(entries);
     }
 
@@ -840,11 +1274,8 @@ pub(super) fn rebuild_calc_chain_phase(
             if source_has_calc_chain {
                 patcher.file_deletes.insert(CALC_CHAIN_PATH.to_string());
                 file_patches.remove(CALC_CHAIN_PATH);
+                remove_calc_chain_metadata(patcher, file_patches, zip)?;
             }
-            // No-op for content-types / workbook rels: leaving stale
-            // metadata is benign because the part is gone, and many
-            // Excel-generated files keep both ends in sync naturally
-            // (we only remove our own rebuild output).
         }
     }
     Ok(())
@@ -877,6 +1308,9 @@ pub(super) fn rewrite_zip_phase(
             }
 
             let mut opts = SimpleFileOptions::default().compression_method(file.compression());
+            if file.compression() == zip::CompressionMethod::Deflated {
+                opts = opts.compression_level(Some(FAST_SAVE_DEFLATE_LEVEL));
+            }
             if let Some(dt) = file.last_modified() {
                 opts = opts.last_modified_time(dt);
             }
@@ -920,6 +1354,7 @@ pub(super) fn rewrite_zip_phase(
                 let bytes = &patcher.file_adds[new_path];
                 let opts = SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated)
+                    .compression_level(Some(FAST_SAVE_DEFLATE_LEVEL))
                     .last_modified_time(dt);
                 out.start_file(new_path, opts)
                     .map_err(|e| PyIOError::new_err(format!("ZIP write error: {e}")))?;
@@ -986,6 +1421,60 @@ pub(super) fn ensure_calc_chain_metadata(
             );
             file_patches.insert(wb_rels_path.to_string(), graph.serialize());
         }
+    }
+
+    Ok(())
+}
+
+fn remove_calc_chain_metadata(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    // Content types.
+    let ct_xml: Vec<u8> = if let Some(b) = file_patches.get("[Content_Types].xml") {
+        b.clone()
+    } else {
+        ooxml_util::zip_read_to_string(zip, "[Content_Types].xml")?
+            .as_bytes()
+            .to_vec()
+    };
+    let mut content_types = content_types::ContentTypesGraph::parse(&ct_xml)
+        .map_err(|e| PyErr::new::<PyIOError, _>(format!("[Content_Types].xml parse: {e}")))?;
+    content_types.remove_override("/xl/calcChain.xml");
+    file_patches.insert("[Content_Types].xml".to_string(), content_types.serialize());
+
+    // Workbook rels.
+    let wb_rels_path = "xl/_rels/workbook.xml.rels";
+    let wb_rels_bytes_opt: Option<Vec<u8>> = if let Some(b) = file_patches.get(wb_rels_path) {
+        Some(b.clone())
+    } else if let Some(g) = patcher.rels_patches.get(wb_rels_path) {
+        Some(g.serialize())
+    } else if let Ok(mut entry) = zip.by_name(wb_rels_path) {
+        let mut buf: Vec<u8> = Vec::with_capacity(entry.size() as usize);
+        if std::io::copy(&mut entry, &mut buf).is_ok() {
+            Some(buf)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(bytes) = wb_rels_bytes_opt {
+        let mut graph =
+            wolfxl_rels::RelsGraph::parse(&bytes).unwrap_or_else(|_| wolfxl_rels::RelsGraph::new());
+        let calc_chain_ids: Vec<wolfxl_rels::RelId> = graph
+            .iter()
+            .filter(|r| {
+                r.rel_type == calcchain::REL_CALC_CHAIN
+                    && (r.target == "calcChain.xml" || r.target == "/xl/calcChain.xml")
+            })
+            .map(|r| r.id.clone())
+            .collect();
+        for id in calc_chain_ids {
+            graph.remove(&id);
+        }
+        file_patches.insert(wb_rels_path.to_string(), graph.serialize());
     }
 
     Ok(())
@@ -1180,6 +1669,27 @@ mod tests {
             "new sheet r:id must be bound by the workbook root namespace"
         );
         assert!(s.contains("r:id=\"rId99\""));
+    }
+
+    #[test]
+    fn splice_handles_prefixed_workbook_and_sheets() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<x:sheets><x:sheet name="Sheet1" sheetId="1" r:id="rId1"/></x:sheets>
+</x:workbook>"#;
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        let root_start = s.find("<x:workbook").unwrap();
+        let root_end = root_start + s[root_start..].find('>').unwrap();
+        assert!(
+            s[root_start..root_end].contains(
+                r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
+            "prefixed workbook root must get the relationship namespace"
+        );
+        assert!(s.contains("<x:sheet name=\"Copy\""));
+        assert!(!s.contains("<sheet name=\"Copy\""));
+        assert!(s.contains("</x:sheets>"));
     }
 
     #[test]

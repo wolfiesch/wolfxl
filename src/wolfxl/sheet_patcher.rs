@@ -98,6 +98,7 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
     for p in patches {
         row_patches.entry(p.row).or_default().insert(p.col, p);
     }
+    let patch_bounds = bounds_for_patches(patches);
 
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -118,7 +119,10 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                 let tag = e.local_name().as_ref().to_vec();
                 capture_prefix(&mut worksheet_prefix, e.name().as_ref(), &tag);
 
-                if tag == b"sheetData" {
+                if tag == b"dimension" {
+                    let dim = rewrite_dimension(e, patch_bounds, worksheet_prefix.as_deref())?;
+                    write_event(&mut writer, Event::Start(dim))?;
+                } else if tag == b"sheetData" {
                     in_sheet_data = true;
                     write_event(&mut writer, Event::Start(e.to_owned()))?;
                 } else if tag == b"row" && in_sheet_data {
@@ -142,7 +146,12 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                     current_row = Some(row_num);
                     current_row_cols_seen.clear();
                     rows_seen.insert(row_num);
-                    write_event(&mut writer, Event::Start(e.to_owned()))?;
+                    let row_start = rewrite_row_spans(
+                        e,
+                        row_patches.get(&row_num),
+                        worksheet_prefix.as_deref(),
+                    )?;
+                    write_event(&mut writer, Event::Start(row_start))?;
                 } else if tag == b"c" && in_sheet_data {
                     let cell_ref = attr_value(e, b"r").unwrap_or_default();
                     let (_, col) = parse_cell_ref(&cell_ref);
@@ -191,7 +200,10 @@ pub fn patch_worksheet(xml: &str, patches: &[CellPatch]) -> Result<String, Strin
                 let tag = e.local_name().as_ref().to_vec();
                 capture_prefix(&mut worksheet_prefix, e.name().as_ref(), &tag);
 
-                if tag == b"row" && in_sheet_data {
+                if tag == b"dimension" {
+                    let dim = rewrite_dimension(e, patch_bounds, worksheet_prefix.as_deref())?;
+                    write_event(&mut writer, Event::Empty(dim))?;
+                } else if tag == b"row" && in_sheet_data {
                     // Self-closing empty row — handle insertions
                     let row_num = attr_value(e, b"r")
                         .and_then(|s| s.parse::<u32>().ok())
@@ -328,6 +340,152 @@ fn write_event<W: Write>(writer: &mut XmlWriter<W>, event: Event<'_>) -> Result<
     writer
         .write_event(event)
         .map_err(|e| format!("XML write error: {e}"))
+}
+
+fn bounds_for_patches(patches: &[CellPatch]) -> Option<(u32, u32, u32, u32)> {
+    let mut min_row = u32::MAX;
+    let mut min_col = u32::MAX;
+    let mut max_row = 0;
+    let mut max_col = 0;
+    for patch in patches {
+        min_row = min_row.min(patch.row);
+        min_col = min_col.min(patch.col);
+        max_row = max_row.max(patch.row);
+        max_col = max_col.max(patch.col);
+    }
+    if max_row == 0 || max_col == 0 {
+        None
+    } else {
+        Some((min_row, min_col, max_row, max_col))
+    }
+}
+
+fn rewrite_dimension(
+    original: &BytesStart<'_>,
+    patch_bounds: Option<(u32, u32, u32, u32)>,
+    prefix: Option<&str>,
+) -> Result<BytesStart<'static>, String> {
+    let dimension_name = qname_for_original(original.name().as_ref(), "dimension", prefix);
+    let mut elem = BytesStart::new(dimension_name);
+    let original_ref = attr_value(original, b"ref");
+    let merged_ref = original_ref
+        .as_deref()
+        .and_then(parse_dimension_ref)
+        .map(|existing| merge_bounds(existing, patch_bounds))
+        .or(patch_bounds)
+        .map(format_dimension_ref);
+
+    for a in original.attributes() {
+        let a = a.map_err(|e| format!("XML attr error: {e}"))?;
+        if a.key.as_ref() == b"ref" {
+            continue;
+        }
+        elem.push_attribute((a.key.as_ref(), a.value.as_ref()));
+    }
+    if let Some(ref_value) = merged_ref {
+        elem.push_attribute(("ref", ref_value.as_str()));
+    }
+    Ok(elem)
+}
+
+fn merge_bounds(
+    existing: (u32, u32, u32, u32),
+    patch_bounds: Option<(u32, u32, u32, u32)>,
+) -> (u32, u32, u32, u32) {
+    if let Some((patch_min_row, patch_min_col, patch_max_row, patch_max_col)) = patch_bounds {
+        (
+            existing.0.min(patch_min_row),
+            existing.1.min(patch_min_col),
+            existing.2.max(patch_max_row),
+            existing.3.max(patch_max_col),
+        )
+    } else {
+        existing
+    }
+}
+
+fn parse_dimension_ref(value: &str) -> Option<(u32, u32, u32, u32)> {
+    let (start, end) = value.split_once(':').unwrap_or((value, value));
+    let (start_row, start_col) = parse_cell_ref(start);
+    let (end_row, end_col) = parse_cell_ref(end);
+    if start_row == 0 || start_col == 0 || end_row == 0 || end_col == 0 {
+        None
+    } else {
+        Some((
+            start_row.min(end_row),
+            start_col.min(end_col),
+            start_row.max(end_row),
+            start_col.max(end_col),
+        ))
+    }
+}
+
+fn format_dimension_ref((min_row, min_col, max_row, max_col): (u32, u32, u32, u32)) -> String {
+    let start = col_row_to_a1(min_col, min_row);
+    let end = col_row_to_a1(max_col, max_row);
+    if start == end {
+        start
+    } else {
+        format!("{start}:{end}")
+    }
+}
+
+fn rewrite_row_spans(
+    original: &BytesStart<'_>,
+    row_patches: Option<&BTreeMap<u32, &CellPatch>>,
+    prefix: Option<&str>,
+) -> Result<BytesStart<'static>, String> {
+    let row_name = qname_for_original(original.name().as_ref(), "row", prefix);
+    let mut elem = BytesStart::new(row_name);
+    let patch_bounds = row_patches.map(|patches| {
+        let min_col = patches.keys().copied().min().unwrap_or(1);
+        let max_col = patches.keys().copied().max().unwrap_or(1);
+        (min_col, max_col)
+    });
+    let original_spans = attr_value(original, b"spans");
+    let merged_spans = original_spans
+        .as_deref()
+        .and_then(parse_spans)
+        .map(|existing| merge_spans(existing, patch_bounds))
+        .or(patch_bounds)
+        .map(|(min_col, max_col)| format!("{min_col}:{max_col}"));
+
+    for a in original.attributes() {
+        let a = a.map_err(|e| format!("XML attr error: {e}"))?;
+        if a.key.as_ref() == b"spans" {
+            continue;
+        }
+        elem.push_attribute((a.key.as_ref(), a.value.as_ref()));
+    }
+    if let Some(spans) = merged_spans {
+        elem.push_attribute(("spans", spans.as_str()));
+    }
+    Ok(elem)
+}
+
+fn parse_spans(value: &str) -> Option<(u32, u32)> {
+    let (start, end) = value.split_once(':')?;
+    let start_col = start.parse::<u32>().ok()?;
+    let end_col = end.parse::<u32>().ok()?;
+    if start_col == 0 || end_col == 0 {
+        None
+    } else {
+        Some((start_col.min(end_col), start_col.max(end_col)))
+    }
+}
+
+fn merge_spans(
+    existing: (u32, u32),
+    patch_bounds: Option<(u32, u32)>,
+) -> (u32, u32) {
+    if let Some((patch_min_col, patch_max_col)) = patch_bounds {
+        (
+            existing.0.min(patch_min_col),
+            existing.1.max(patch_max_col),
+        )
+    } else {
+        existing
+    }
 }
 
 /// Write a patched `<c ...>` start tag for a style-only patch, preserving original children.
@@ -768,6 +926,39 @@ mod tests {
         assert!(result.contains("r=\"C1\""));
         assert!(result.contains("t=\"str\""));
         assert!(result.contains("<v>new</v>"));
+    }
+
+    #[test]
+    fn test_patch_insert_new_cell_expands_dimension() {
+        let xml = r#"<worksheet><dimension ref="A1:K22"/><sheetData><row r="1" spans="1:11"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#;
+
+        let patches = vec![CellPatch {
+            row: 1,
+            col: 26, // Z1 — outside the original A1:K22 dimension.
+            value: Some(CellValue::String("new".to_string())),
+            style_index: None,
+        }];
+
+        let result = patch_worksheet(xml, &patches).unwrap();
+        assert!(result.contains(r#"<dimension ref="A1:Z22"/>"#), "{result}");
+        assert!(result.contains(r#"<row r="1" spans="1:26">"#), "{result}");
+        assert!(result.contains(r#"r="Z1""#), "{result}");
+    }
+
+    #[test]
+    fn test_patch_insert_new_cell_expands_prefixed_dimension() {
+        let xml = r#"<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:dimension ref="B2:C3"/><x:sheetData><x:row r="2"><x:c r="B2"><x:v>1</x:v></x:c></x:row></x:sheetData></x:worksheet>"#;
+
+        let patches = vec![CellPatch {
+            row: 10,
+            col: 1,
+            value: Some(CellValue::String("new".to_string())),
+            style_index: None,
+        }];
+
+        let result = patch_worksheet(xml, &patches).unwrap();
+        assert!(result.contains(r#"<x:dimension ref="A2:C10"/>"#), "{result}");
+        assert!(result.contains(r#"<x:c r="A10" t="str"><x:v>new</x:v></x:c>"#));
     }
 
     #[test]

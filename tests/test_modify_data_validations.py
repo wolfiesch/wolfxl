@@ -17,6 +17,7 @@ import os
 import re
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 import openpyxl
 import pytest
@@ -54,6 +55,37 @@ def _make_fixture_with_one_dv(path: Path) -> None:
     dv.add("A2:A100")
     ws.add_data_validation(dv)
     wb.save(path)
+
+
+def _make_fixture_with_x14_extension_dv(path: Path) -> None:
+    """Workbook with only an x14 extension data-validation payload."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws["A1"] = "header"
+    wb.save(path)
+
+    with zipfile.ZipFile(path) as source_archive:
+        sheet_xml = source_archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        ext_xml = (
+            '<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}" '
+            'xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">'
+            '<x14:dataValidations count="1" '
+            'xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">'
+            '<x14:dataValidation type="list" allowBlank="1" showInputMessage="1" '
+            'showErrorMessage="1"><x14:formula1><xm:f>LOV!$A$2:$A$15</xm:f>'
+            '</x14:formula1><xm:sqref>A2</xm:sqref></x14:dataValidation>'
+            '</x14:dataValidations></ext></extLst>'
+        )
+        sheet_xml = sheet_xml.replace("</worksheet>", f"{ext_xml}</worksheet>")
+        tmp_path = path.with_suffix(".rewritten.xlsx")
+        with zipfile.ZipFile(tmp_path, "w") as target_archive:
+            for entry in source_archive.infolist():
+                if entry.filename == "xl/worksheets/sheet1.xml":
+                    target_archive.writestr(entry, sheet_xml.encode("utf-8"))
+                else:
+                    target_archive.writestr(entry, source_archive.read(entry.filename))
+    tmp_path.replace(path)
 
 
 def _read_sheet_xml(path: Path, sheet_path: str = "xl/worksheets/sheet1.xml") -> str:
@@ -140,6 +172,39 @@ def test_add_dv_preserves_existing(tmp_path: Path) -> None:
     assert 'type="whole"' in out_block
     assert 'operator="between"' in out_block
     assert "<formula2>100</formula2>" in out_block
+
+
+def test_add_dv_preserves_x14_extension_payload_without_reparenting(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "src.xlsx"
+    _make_fixture_with_x14_extension_dv(src)
+
+    wb = Workbook._from_patcher(str(src))
+    ws = wb["Sheet1"]
+    ws.data_validations.append(
+        DataValidation(
+            type="whole",
+            operator="between",
+            formula1="1",
+            formula2="100",
+            sqref="AB2:AB10",
+            showErrorMessage=True,
+        )
+    )
+    out = tmp_path / "out.xlsx"
+    wb.save(out)
+    wb.close()
+
+    sheet_xml = _read_sheet_xml(out)
+    block = _read_dv_block(out)
+    assert block is not None
+    assert '<dataValidations count="1">' in block
+    assert 'sqref="AB2:AB10"' in block
+    assert "x14:dataValidation" not in block
+    assert '<x14:dataValidations count="1"' in sheet_xml
+    assert "<xm:sqref>A2</xm:sqref>" in sheet_xml
+    ElementTree.fromstring(sheet_xml)
 
 
 def test_dv_list_inline_values(tmp_path: Path) -> None:

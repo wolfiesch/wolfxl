@@ -32,6 +32,8 @@
 //! | `xl/drawings/drawing<N>.xml`         | `next_drawing`  |
 //! | `xl/worksheets/sheet<N>.xml`         | `next_sheet`    |
 //! | `xl/charts/chart<N>.xml`             | `next_chart`    |
+//! | `xl/charts/style<N>.xml`             | `next_chart_style` |
+//! | `xl/charts/colors<N>.xml`            | `next_chart_color` |
 //!
 //! Any path with a non-numeric or missing suffix (e.g. `xl/tables/foo.xml`)
 //! is skipped — it does not contribute to any counter and does not panic.
@@ -58,6 +60,8 @@ pub struct PartIdAllocator {
     next_drawing: u32,
     next_sheet: u32,
     next_chart: u32,
+    next_chart_style: u32,
+    next_chart_color: u32,
     next_image: u32,
     // Sprint Ν Pod-γ (RFC-035 §10) — pivot deep-clone counters.
     next_pivot_table: u32,
@@ -65,6 +69,10 @@ pub struct PartIdAllocator {
     // Sprint Ο Pod 3.5 (RFC-061 §3.1) — slicer deep-clone counters.
     next_slicer: u32,
     next_slicer_cache: u32,
+    // Real Excel fidelity — timeline presentations/caches are separate
+    // workbook-scoped part families from slicers.
+    next_timeline: u32,
+    next_timeline_cache: u32,
     // Sprint Σ G08 (RFC-068 §5) — threaded-comment counter.
     next_threaded_comments: u32,
 }
@@ -85,11 +93,15 @@ impl PartIdAllocator {
             next_drawing: 1,
             next_sheet: 1,
             next_chart: 1,
+            next_chart_style: 1,
+            next_chart_color: 1,
             next_image: 1,
             next_pivot_table: 1,
             next_pivot_cache: 1,
             next_slicer: 1,
             next_slicer_cache: 1,
+            next_timeline: 1,
+            next_timeline_cache: 1,
             next_threaded_comments: 1,
         }
     }
@@ -128,6 +140,10 @@ impl PartIdAllocator {
             self.bump(Counter::Sheet, n);
         } else if let Some(n) = parse_n(path, "xl/charts/chart", ".xml") {
             self.bump(Counter::Chart, n);
+        } else if let Some(n) = parse_n(path, "xl/charts/style", ".xml") {
+            self.bump(Counter::ChartStyle, n);
+        } else if let Some(n) = parse_n(path, "xl/charts/colors", ".xml") {
+            self.bump(Counter::ChartColor, n);
         } else if let Some(n) = parse_n(path, "xl/pivotTables/pivotTable", ".xml") {
             self.bump(Counter::PivotTable, n);
         } else if let Some(n) = parse_n(path, "xl/pivotCache/pivotCacheDefinition", ".xml") {
@@ -139,6 +155,10 @@ impl PartIdAllocator {
             self.bump(Counter::Slicer, n);
         } else if let Some(n) = parse_n(path, "xl/slicerCaches/slicerCache", ".xml") {
             self.bump(Counter::SlicerCache, n);
+        } else if let Some(n) = parse_n(path, "xl/timelines/timeline", ".xml") {
+            self.bump(Counter::Timeline, n);
+        } else if let Some(n) = parse_n(path, "xl/timelineCaches/timelineCache", ".xml") {
+            self.bump(Counter::TimelineCache, n);
         } else if let Some(n) = parse_n(path, "xl/threadedComments/threadedComments", ".xml") {
             self.bump(Counter::ThreadedComments, n);
         } else if path.starts_with("xl/media/image") {
@@ -161,11 +181,15 @@ impl PartIdAllocator {
             Counter::Drawing => &mut self.next_drawing,
             Counter::Sheet => &mut self.next_sheet,
             Counter::Chart => &mut self.next_chart,
+            Counter::ChartStyle => &mut self.next_chart_style,
+            Counter::ChartColor => &mut self.next_chart_color,
             Counter::Image => &mut self.next_image,
             Counter::PivotTable => &mut self.next_pivot_table,
             Counter::PivotCache => &mut self.next_pivot_cache,
             Counter::Slicer => &mut self.next_slicer,
             Counter::SlicerCache => &mut self.next_slicer_cache,
+            Counter::Timeline => &mut self.next_timeline,
+            Counter::TimelineCache => &mut self.next_timeline_cache,
             Counter::ThreadedComments => &mut self.next_threaded_comments,
         };
         if n + 1 > *slot {
@@ -215,6 +239,22 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `styleN` suffix for `xl/charts/styleN.xml`;
+    /// returns `N` (>=1).
+    pub fn alloc_chart_style(&mut self) -> u32 {
+        let n = self.next_chart_style;
+        self.next_chart_style += 1;
+        n
+    }
+
+    /// Allocate a fresh `colorsN` suffix for `xl/charts/colorsN.xml`;
+    /// returns `N` (>=1).
+    pub fn alloc_chart_color(&mut self) -> u32 {
+        let n = self.next_chart_color;
+        self.next_chart_color += 1;
+        n
+    }
+
     /// Allocate a fresh `imageN` suffix for `xl/media/imageN.<ext>`;
     /// returns `N` (≥1). Used by RFC-035 §5.3 deep-copy mode (Sprint Θ
     /// Pod-C2). Extensions vary (png/jpeg/gif/…) so callers append the
@@ -261,6 +301,20 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `timeline{N}` suffix; returns `N` (≥1).
+    pub fn alloc_timeline(&mut self) -> u32 {
+        let n = self.next_timeline;
+        self.next_timeline += 1;
+        n
+    }
+
+    /// Allocate a fresh `timelineCache{N}` suffix; returns `N` (≥1).
+    pub fn alloc_timeline_cache(&mut self) -> u32 {
+        let n = self.next_timeline_cache;
+        self.next_timeline_cache += 1;
+        n
+    }
+
     /// Allocate a fresh `threadedComments{N}` suffix; returns `N` (≥1).
     /// Used by RFC-068 G08 step 5 in modify mode for sheets that gain
     /// their first threaded-comment part.
@@ -291,9 +345,13 @@ enum Counter {
     VmlDrawing,
     Slicer,
     SlicerCache,
+    Timeline,
+    TimelineCache,
     Drawing,
     Sheet,
     Chart,
+    ChartStyle,
+    ChartColor,
     Image,
     PivotTable,
     PivotCache,
@@ -438,10 +496,14 @@ mod tests {
             "xl/worksheets/sheet11.xml",
             "xl/charts/chart1.xml",
             "xl/charts/chart3.xml",
+            "xl/charts/style1.xml",
+            "xl/charts/colors4.xml",
         ];
         let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
         assert_eq!(a.alloc_sheet(), 12);
         assert_eq!(a.alloc_chart(), 4);
+        assert_eq!(a.alloc_chart_style(), 2);
+        assert_eq!(a.alloc_chart_color(), 5);
     }
 
     #[test]

@@ -332,6 +332,31 @@ def test_copy_worksheet_with_image_and_chart_both_clone_correctly(
     )
 
 
+def test_copy_worksheet_deep_clones_chart_style_color_sidecars(
+    tmp_path: Path,
+) -> None:
+    src = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "external_oracle"
+        / "excelize-sales-pivot-slicer-chart.xlsx"
+    )
+    dst = tmp_path / "dst.xlsx"
+
+    wb = load_workbook(src, modify=True)
+    wb.copy_worksheet(wb[wb.sheetnames[0]])
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    assert "xl/charts/style2.xml" in entries
+    assert "xl/charts/colors2.xml" in entries
+    chart_rels = _zip_read(dst, "xl/charts/_rels/chart2.xml.rels").decode()
+    assert 'Target="style2.xml"' in chart_rels
+    assert 'Target="colors2.xml"' in chart_rels
+    assert 'Target="style1.xml"' not in chart_rels
+    assert 'Target="colors1.xml"' not in chart_rels
+
+
 # ---------------------------------------------------------------------------
 # F — Round-trip: emitted workbook structure is well-formed (ZIP-level
 #     plus xml.etree parse). Full openpyxl load is gated by a separate,

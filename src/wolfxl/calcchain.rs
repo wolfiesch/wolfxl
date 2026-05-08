@@ -10,9 +10,9 @@
 //!
 //! This module exposes the pure scanning + emission helpers; the
 //! patcher's flush phase calls them after every sheet mutation has
-//! settled. The output is byte-deterministic for a given (sheet
-//! tab-order, formula cells per sheet) tuple — important for the
-//! diff-test infrastructure.
+//! settled. The output is byte-deterministic for a given (workbook sheetId,
+//! formula cells per sheet) tuple — important for the diff-test
+//! infrastructure.
 //!
 //! # Format
 //!
@@ -25,9 +25,8 @@
 //! </calcChain>
 //! ```
 //!
-//! Where `r` is the cell A1 reference and `i` is the 1-based sheet
-//! index (matches `<sheet sheetId="N">` declaration order in
-//! `xl/workbook.xml`).
+//! Where `r` is the cell A1 reference and `i` matches the workbook
+//! `<sheet sheetId="N">` value from `xl/workbook.xml`.
 
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
@@ -41,13 +40,13 @@ pub const CT_CALC_CHAIN: &str =
 pub const REL_CALC_CHAIN: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain";
 
-/// One calcChain entry: cell reference + 1-based sheet index.
+/// One calcChain entry: cell reference + workbook sheetId.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalcChainEntry {
     /// A1 reference, e.g. `"A1"`, `"BC42"`. Verbatim copy of the
     /// `<c r="…">` attribute on the formula cell.
     pub cell_ref: String,
-    /// 1-based sheet index — position in the workbook's tab list.
+    /// Workbook `<sheet sheetId="N">` value.
     pub sheet_index: u32,
 }
 

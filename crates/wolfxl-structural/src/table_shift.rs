@@ -1,6 +1,6 @@
 //! Table XML rewrites for worksheet structural shifts.
 
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 
@@ -30,6 +30,58 @@ pub(crate) fn shift_table_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
         rewrite_table_columns_block(&shifted, plan, t_lo, t_hi)
     } else {
         shifted
+    }
+}
+
+pub(crate) fn repair_deleted_table_header_row(
+    sheet_xml: &[u8],
+    table_xml: &mut Vec<u8>,
+    shared_strings: &[String],
+    plan: &ShiftPlan,
+) -> Option<Vec<u8>> {
+    if plan.axis != Axis::Row || !plan.is_delete() {
+        return None;
+    }
+    let table_s = std::str::from_utf8(table_xml).ok()?;
+    let (first, last) = extract_table_ref(table_s)?;
+    let first_row = parse_row_number(&first)?;
+    let first_col = parse_col_letters(&first)?;
+    let last_col = parse_col_letters(&last)?;
+    let deleted_lo = plan.idx;
+    let deleted_hi = plan.idx + plan.abs_n() - 1;
+    if !(deleted_lo <= first_row && first_row <= deleted_hi) {
+        return None;
+    }
+
+    let sheet_s = std::str::from_utf8(sheet_xml).ok()?;
+    let mut headers = Vec::new();
+    let mut new_sheet = sheet_s.to_string();
+    let mut changed_sheet = false;
+    for col in first_col..=last_col {
+        let cell_ref = format!("{}{}", col_to_letters(col), first_row);
+        let Some(cell) = extract_cell_element(&new_sheet, &cell_ref) else {
+            headers.push(format!("Column{}", headers.len() + 1));
+            continue;
+        };
+        let header = resolve_cell_text(cell.element, shared_strings)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("Column{}", headers.len() + 1));
+        if !is_string_cell(cell.element) {
+            let replacement = inline_string_cell(cell.element, &cell_ref, &header);
+            new_sheet.replace_range(cell.start..cell.end, &replacement);
+            changed_sheet = true;
+        }
+        headers.push(header);
+    }
+
+    let repaired_table = rewrite_table_column_names(table_s, &headers)?;
+    if repaired_table.as_bytes() != table_xml.as_slice() {
+        *table_xml = repaired_table.into_bytes();
+    }
+    if changed_sheet {
+        Some(new_sheet.into_bytes())
+    } else {
+        None
     }
 }
 
@@ -79,9 +131,7 @@ fn shift_table_xml_inner(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                 if local.as_slice() == b"calculatedColumnFormula" {
                     in_calc_formula = false;
                 }
-                let _ = writer.write_event(Event::End(BytesEnd::new(
-                    String::from_utf8_lossy(local.as_slice()).into_owned(),
-                )));
+                let _ = writer.write_event(Event::End(e.to_owned()));
             }
             Ok(Event::Text(ref t)) => {
                 if in_calc_formula {
@@ -106,6 +156,210 @@ fn shift_table_xml_inner(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     }
 
     writer.into_inner().into_inner()
+}
+
+fn extract_table_ref(s: &str) -> Option<(String, String)> {
+    let (i, close) = find_start_tag_by_local(s, "table")?;
+    let elt = &s[i..close];
+    let r = extract_attr(elt, "ref")?;
+    let (first, last) = match r.find(':') {
+        Some(c) => (&r[..c], &r[c + 1..]),
+        None => (r.as_str(), r.as_str()),
+    };
+    Some((first.to_string(), last.to_string()))
+}
+
+fn find_start_tag_by_local(s: &str, local: &str) -> Option<(usize, usize)> {
+    let mut search_from = 0usize;
+    while let Some(rel) = s[search_from..].find('<') {
+        let start = search_from + rel;
+        if s[start + 1..].starts_with('/') {
+            search_from = start + 1;
+            continue;
+        }
+        let end = s[start..].find('>')? + start + 1;
+        let name_end = s[start + 1..end]
+            .find(|c: char| c == ' ' || c == '>' || c == '/')
+            .map(|i| start + 1 + i)
+            .unwrap_or(end - 1);
+        let name = &s[start + 1..name_end];
+        let name_local = name.rsplit(':').next().unwrap_or(name);
+        if name_local == local {
+            return Some((start, end));
+        }
+        search_from = end;
+    }
+    None
+}
+
+fn parse_row_number(cell: &str) -> Option<u32> {
+    let mut i = 0usize;
+    let bytes = cell.as_bytes();
+    if bytes.get(i) == Some(&b'$') {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+    if bytes.get(i) == Some(&b'$') {
+        i += 1;
+    }
+    cell[i..].parse().ok()
+}
+
+fn col_to_letters(mut col: u32) -> String {
+    let mut out = Vec::new();
+    while col > 0 {
+        col -= 1;
+        out.push((b'A' + (col % 26) as u8) as char);
+        col /= 26;
+    }
+    out.iter().rev().collect()
+}
+
+struct CellSlice<'a> {
+    start: usize,
+    end: usize,
+    element: &'a str,
+}
+
+fn extract_cell_element<'a>(sheet: &'a str, cell_ref: &str) -> Option<CellSlice<'a>> {
+    let marker = format!(r#" r="{cell_ref}""#);
+    let marker_pos = sheet.find(&marker)?;
+    let start = sheet[..marker_pos].rfind('<')?;
+    let tag_end = sheet[start..].find('>')? + start + 1;
+    if sheet[start..tag_end].ends_with("/>") {
+        return Some(CellSlice {
+            start,
+            end: tag_end,
+            element: &sheet[start..tag_end],
+        });
+    }
+    let tag_name_end = sheet[start + 1..]
+        .find(|c: char| c == ' ' || c == '>')
+        .map(|i| start + 1 + i)?;
+    let tag_name = &sheet[start + 1..tag_name_end];
+    let close = format!("</{tag_name}>");
+    let end = sheet[tag_end..].find(&close)? + tag_end + close.len();
+    Some(CellSlice {
+        start,
+        end,
+        element: &sheet[start..end],
+    })
+}
+
+fn is_string_cell(cell: &str) -> bool {
+    cell.contains(r#" t="s""#) || cell.contains(r#" t="str""#) || cell.contains(r#" t="inlineStr""#)
+}
+
+fn resolve_cell_text(cell: &str, shared_strings: &[String]) -> Option<String> {
+    if cell.contains(r#" t="s""#) {
+        let idx: usize = tag_text(cell, "v")?.parse().ok()?;
+        shared_strings.get(idx).cloned()
+    } else if cell.contains(r#" t="inlineStr""#) {
+        tag_text(cell, "t")
+    } else {
+        tag_text(cell, "v")
+    }
+}
+
+fn tag_text(s: &str, local: &str) -> Option<String> {
+    let start_pat = format!(":{local}>");
+    let start = match s.find(&start_pat) {
+        Some(i) => i + start_pat.len(),
+        None => {
+            let pat = format!("<{local}>");
+            s.find(&pat)? + pat.len()
+        }
+    };
+    let end = match s[start..].find("</") {
+        Some(i) => start + i,
+        None => return None,
+    };
+    let raw = &s[start..end];
+    Some(unescape_xml(raw))
+}
+
+fn inline_string_cell(cell: &str, cell_ref: &str, text: &str) -> String {
+    let tag_name = cell
+        .strip_prefix('<')
+        .and_then(|rest| rest.split(|c: char| c == ' ' || c == '>').next())
+        .unwrap_or("c");
+    let style = extract_attr(cell, "s")
+        .map(|s| format!(r#" s="{s}""#))
+        .unwrap_or_default();
+    let child_prefix = tag_name
+        .find(':')
+        .map(|i| tag_name[..=i].to_string())
+        .unwrap_or_default();
+    format!(
+        r#"<{tag_name} r="{cell_ref}"{style} t="inlineStr"><{child_prefix}is><{child_prefix}t>{}</{child_prefix}t></{child_prefix}is></{tag_name}>"#,
+        escape_xml(text)
+    )
+}
+
+fn rewrite_table_column_names(s: &str, headers: &[String]) -> Option<String> {
+    let (block_start, block_open_end) = find_start_tag_by_local(s, "tableColumns")?;
+    let block_tag = &s[block_start + 1
+        ..s[block_start + 1..block_open_end]
+            .find(|c: char| c == ' ' || c == '>')
+            .map(|i| block_start + 1 + i)
+            .unwrap_or(block_open_end - 1)];
+    let close_tag = format!("</{block_tag}>");
+    let block_end = s[block_open_end..].find(&close_tag)? + block_open_end + close_tag.len();
+    let block = &s[block_start..block_end];
+    let mut out_block = String::with_capacity(block.len());
+    let mut i = 0usize;
+    let mut col_idx = 0usize;
+    while let Some((rel_start, open_end)) = find_start_tag_by_local(&block[i..], "tableColumn") {
+        let abs_start = i + rel_start;
+        out_block.push_str(&block[i..abs_start]);
+        let abs_open_end = i + open_end;
+        let open_tag = &block[abs_start..abs_open_end];
+        let end = if open_tag.trim_end().ends_with("/>") {
+            abs_open_end
+        } else {
+            let tag_name_end = block[abs_start + 1..abs_open_end]
+                .find(|c: char| c == ' ' || c == '>' || c == '/')
+                .map(|j| abs_start + 1 + j)
+                .unwrap_or(abs_open_end - 1);
+            let tag_name = &block[abs_start + 1..tag_name_end];
+            let close_tag = format!("</{tag_name}>");
+            match block[abs_open_end..].find(&close_tag) {
+                Some(e) => abs_open_end + e + close_tag.len(),
+                None => return None,
+            }
+        };
+        let entry = &block[abs_start..end];
+        let header = headers
+            .get(col_idx)
+            .cloned()
+            .unwrap_or_else(|| format!("Column{}", col_idx + 1));
+        out_block.push_str(&replace_attr_value(entry, "name", &escape_xml(&header)));
+        col_idx += 1;
+        i = end;
+    }
+    out_block.push_str(&block[i..]);
+    let mut out = String::with_capacity(s.len());
+    out.push_str(&s[..block_start]);
+    out.push_str(&out_block);
+    out.push_str(&s[block_end..]);
+    Some(out)
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn unescape_xml(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Parse the `<table ref="A1:E5">` attribute and return the 1-based
@@ -384,6 +638,56 @@ mod tests {
         assert!(s.contains(r#"<tableColumns count="5">"#), "got: {s}");
         assert!(s.contains(r#"<tableColumn id="3" name="H3"/>"#), "got: {s}");
         assert!(s.contains(r#"ref="A1:E7""#), "got: {s}");
+    }
+
+    #[test]
+    fn deleted_header_row_promotes_visible_headers() {
+        let sheet = br#"<worksheet><sheetData><row r="1"><x:c r="A1" t="s"><x:v>0</x:v></x:c><x:c r="B1"><x:v>120</x:v></x:c></row></sheetData></worksheet>"#;
+        let mut table = br#"<x:table id="1" ref="A1:B3"><x:autoFilter ref="A1:B3"/><x:tableColumns count="2"><x:tableColumn id="1" name="Old1"/><x:tableColumn id="2" name="Old2"/></x:tableColumns></x:table>"#.to_vec();
+        let shared = vec!["West".to_string()];
+        let plan = ShiftPlan::delete(Axis::Row, 1, 1);
+
+        let new_sheet = repair_deleted_table_header_row(sheet, &mut table, &shared, &plan).unwrap();
+        let sheet_s = String::from_utf8(new_sheet).unwrap();
+        let table_s = String::from_utf8(table).unwrap();
+
+        assert!(
+            table_s.contains(r#"<x:tableColumn id="1" name="West"/>"#),
+            "{table_s}"
+        );
+        assert!(
+            table_s.contains(r#"<x:tableColumn id="2" name="120"/>"#),
+            "{table_s}"
+        );
+        assert!(
+            sheet_s.contains(r#"<x:c r="B1" t="inlineStr"><x:is><x:t>120</x:t></x:is></x:c>"#),
+            "{sheet_s}"
+        );
+    }
+
+    #[test]
+    fn deleted_header_row_repairs_non_empty_table_column_names() {
+        let sheet = br#"<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>120</v></c></row></sheetData></worksheet>"#;
+        let mut table = br#"<table id="1" ref="A1:B3"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="Old1"><calculatedColumnFormula>=[@Old1]</calculatedColumnFormula></tableColumn><tableColumn id="2" name="Old2"><totalsRowFormula>SUM([Old2])</totalsRowFormula></tableColumn></tableColumns></table>"#.to_vec();
+        let shared = vec!["West".to_string()];
+        let plan = ShiftPlan::delete(Axis::Row, 1, 1);
+
+        let new_sheet = repair_deleted_table_header_row(sheet, &mut table, &shared, &plan).unwrap();
+        let sheet_s = String::from_utf8(new_sheet).unwrap();
+        let table_s = String::from_utf8(table).unwrap();
+
+        assert!(
+            table_s.contains(r#"<tableColumn id="1" name="West"><calculatedColumnFormula>"#),
+            "{table_s}"
+        );
+        assert!(
+            table_s.contains(r#"<tableColumn id="2" name="120"><totalsRowFormula>"#),
+            "{table_s}"
+        );
+        assert!(
+            sheet_s.contains(r#"<c r="B1" t="inlineStr"><is><t>120</t></is></c>"#),
+            "{sheet_s}"
+        );
     }
 
     #[test]
