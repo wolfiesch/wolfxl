@@ -270,15 +270,17 @@ pub(super) fn apply_sheet_deletes_phase(
             },
         );
         let deleted_parts: HashSet<String> = subgraph.reachable_parts.iter().cloned().collect();
+        let retained_parts =
+            retained_deleted_subgraph_parts(&deleted_parts, patcher, file_patches, zip)?;
+        let pruned_deleted_parts: HashSet<String> =
+            deleted_parts.difference(&retained_parts).cloned().collect();
         collect_deleted_workbook_cache_names(
-            &deleted_parts,
+            &pruned_deleted_parts,
             file_patches,
             &patcher.file_adds,
             zip,
             &mut deleted_workbook_cache_names,
         );
-        let retained_parts =
-            retained_deleted_subgraph_parts(&deleted_parts, patcher, file_patches, zip)?;
         for part in subgraph.reachable_parts {
             if retained_parts.contains(&part) {
                 continue;

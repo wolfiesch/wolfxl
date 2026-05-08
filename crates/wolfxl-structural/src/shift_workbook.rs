@@ -168,9 +168,10 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
         // expects the promoted row's cells to be string headers and expects
         // `<tableColumn name>` metadata to match those visible headers.
         if plan.axis == Axis::Row && plan.is_delete() {
-            if let (Some(sheet), Some(parts)) =
-                (sheet_bytes.get_mut(&op.sheet), table_bytes.get_mut(&op.sheet))
-            {
+            if let (Some(sheet), Some(parts)) = (
+                sheet_bytes.get_mut(&op.sheet),
+                table_bytes.get_mut(&op.sheet),
+            ) {
                 for (_path, table) in parts.iter_mut() {
                     if let Some(new_sheet) = repair_deleted_table_header_row(
                         sheet,
@@ -607,9 +608,29 @@ mod tests {
     }
 
     #[test]
+    fn shrinks_vml_row_anchor_when_top_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("0, 0, 4, 0, 2, 0, 5, 0"));
+    }
+
+    #[test]
     fn shrinks_vml_col_anchor_when_right_edge_deleted() {
         let vml = r#"<v:shape><x:ClientData><x:Anchor>1, 0, 3, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
         let p = ShiftPlan::delete(Axis::Col, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<v:shape>"));
+        assert!(s.contains("1, 0, 3, 0, 3, 0, 6, 0"));
+    }
+
+    #[test]
+    fn shrinks_vml_col_anchor_when_left_edge_deleted() {
+        let vml = r#"<v:shape><x:ClientData><x:Anchor>1, 0, 3, 0, 4, 0, 6, 0</x:Anchor></x:ClientData></v:shape>"#;
+        let p = ShiftPlan::delete(Axis::Col, 2, 1);
         let out = shift_vml_xml(vml.as_bytes(), &p);
         let s = String::from_utf8_lossy(&out);
         assert!(s.contains("<v:shape>"));

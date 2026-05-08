@@ -311,12 +311,24 @@ fn rewrite_table_column_names(s: &str, headers: &[String]) -> Option<String> {
     let mut out_block = String::with_capacity(block.len());
     let mut i = 0usize;
     let mut col_idx = 0usize;
-    while let Some((rel_start, _open_end)) = find_start_tag_by_local(&block[i..], "tableColumn") {
+    while let Some((rel_start, open_end)) = find_start_tag_by_local(&block[i..], "tableColumn") {
         let abs_start = i + rel_start;
         out_block.push_str(&block[i..abs_start]);
-        let end = match block[abs_start..].find("/>") {
-            Some(e) => abs_start + e + 2,
-            None => return None,
+        let abs_open_end = i + open_end;
+        let open_tag = &block[abs_start..abs_open_end];
+        let end = if open_tag.trim_end().ends_with("/>") {
+            abs_open_end
+        } else {
+            let tag_name_end = block[abs_start + 1..abs_open_end]
+                .find(|c: char| c == ' ' || c == '>' || c == '/')
+                .map(|j| abs_start + 1 + j)
+                .unwrap_or(abs_open_end - 1);
+            let tag_name = &block[abs_start + 1..tag_name_end];
+            let close_tag = format!("</{tag_name}>");
+            match block[abs_open_end..].find(&close_tag) {
+                Some(e) => abs_open_end + e + close_tag.len(),
+                None => return None,
+            }
         };
         let entry = &block[abs_start..end];
         let header = headers
@@ -635,17 +647,45 @@ mod tests {
         let shared = vec!["West".to_string()];
         let plan = ShiftPlan::delete(Axis::Row, 1, 1);
 
-        let new_sheet =
-            repair_deleted_table_header_row(sheet, &mut table, &shared, &plan).unwrap();
+        let new_sheet = repair_deleted_table_header_row(sheet, &mut table, &shared, &plan).unwrap();
         let sheet_s = String::from_utf8(new_sheet).unwrap();
         let table_s = String::from_utf8(table).unwrap();
 
-        assert!(table_s.contains(r#"<x:tableColumn id="1" name="West"/>"#), "{table_s}");
-        assert!(table_s.contains(r#"<x:tableColumn id="2" name="120"/>"#), "{table_s}");
         assert!(
-            sheet_s.contains(
-                r#"<x:c r="B1" t="inlineStr"><x:is><x:t>120</x:t></x:is></x:c>"#
-            ),
+            table_s.contains(r#"<x:tableColumn id="1" name="West"/>"#),
+            "{table_s}"
+        );
+        assert!(
+            table_s.contains(r#"<x:tableColumn id="2" name="120"/>"#),
+            "{table_s}"
+        );
+        assert!(
+            sheet_s.contains(r#"<x:c r="B1" t="inlineStr"><x:is><x:t>120</x:t></x:is></x:c>"#),
+            "{sheet_s}"
+        );
+    }
+
+    #[test]
+    fn deleted_header_row_repairs_non_empty_table_column_names() {
+        let sheet = br#"<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>120</v></c></row></sheetData></worksheet>"#;
+        let mut table = br#"<table id="1" ref="A1:B3"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="Old1"><calculatedColumnFormula>=[@Old1]</calculatedColumnFormula></tableColumn><tableColumn id="2" name="Old2"><totalsRowFormula>SUM([Old2])</totalsRowFormula></tableColumn></tableColumns></table>"#.to_vec();
+        let shared = vec!["West".to_string()];
+        let plan = ShiftPlan::delete(Axis::Row, 1, 1);
+
+        let new_sheet = repair_deleted_table_header_row(sheet, &mut table, &shared, &plan).unwrap();
+        let sheet_s = String::from_utf8(new_sheet).unwrap();
+        let table_s = String::from_utf8(table).unwrap();
+
+        assert!(
+            table_s.contains(r#"<tableColumn id="1" name="West"><calculatedColumnFormula>"#),
+            "{table_s}"
+        );
+        assert!(
+            table_s.contains(r#"<tableColumn id="2" name="120"><totalsRowFormula>"#),
+            "{table_s}"
+        );
+        assert!(
+            sheet_s.contains(r#"<c r="B1" t="inlineStr"><is><t>120</t></is></c>"#),
             "{sheet_s}"
         );
     }

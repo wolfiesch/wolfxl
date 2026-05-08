@@ -120,7 +120,7 @@ def _evaluate_check(payload: object, check: dict[str, object]) -> dict:
         )
     elif "length_at_least" in check:
         expected = check["length_at_least"]
-        actual_len = len(actual) if isinstance(actual, list | dict | str) else None
+        actual_len = len(actual) if isinstance(actual, (list, dict, str)) else None
         passed = actual_len is not None and actual_len >= expected
         message = (
             "ok"

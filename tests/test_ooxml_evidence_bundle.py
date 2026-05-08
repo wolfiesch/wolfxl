@@ -71,6 +71,33 @@ def test_bundle_audit_accepts_expected_report_values(tmp_path: Path) -> None:
     assert audit["reports"][0]["producer"] == "uv run --no-sync python scripts/example.py"
 
 
+def test_bundle_audit_accepts_length_expectation(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(json.dumps({"fixtures": ["a.xlsx", "b.xlsx"]}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
+                        "expect": [
+                            {"path": "fixtures", "length_at_least": 2},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is True
+    assert audit["issue_count"] == 0
+
+
 def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None:
     report_path = tmp_path / "coverage.json"
     report_path.write_text(json.dumps({"ready": False}))

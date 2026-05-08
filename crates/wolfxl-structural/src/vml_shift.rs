@@ -198,12 +198,15 @@ fn shift_deleted_anchor_span(
         return false;
     }
 
-    for &i in &[start_idx, end_idx] {
-        if nums[i] >= delete_start && nums[i] < delete_end {
-            nums[i] = delete_start.saturating_sub(1);
-        } else if nums[i] >= delete_end {
-            nums[i] += plan.n as i64;
-        }
+    if start_deleted {
+        nums[start_idx] = delete_start;
+    } else if nums[start_idx] >= delete_end {
+        nums[start_idx] += plan.n as i64;
+    }
+    if end_deleted {
+        nums[end_idx] = delete_start.saturating_sub(1);
+    } else if nums[end_idx] >= delete_end {
+        nums[end_idx] += plan.n as i64;
     }
     true
 }
