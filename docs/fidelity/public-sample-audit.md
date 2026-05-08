@@ -83,6 +83,6 @@ Evidence artifacts:
 |---|---|---|
 | Gap radar | `/tmp/wolfxl-public-microsoft-extra-samples-20260508` | clear, `fixture_count=2` |
 | Excel source app smoke | `/tmp/wolfxl-excel-public-microsoft-extra-source-smoke-20260508/app-smoke-report.json` | `2` results, `0` failures |
-| Package mutation sweep | `/tmp/wolfxl-public-microsoft-extra-mutations-20260508/report.json` | `36` results, `0` failures, `24` passed, `12` expected drift |
+| Package mutation sweep | `/tmp/wolfxl-public-microsoft-extra-mutations-retarget-all-20260508/report.json` | `36` results, `0` failures, `23` passed, `13` expected drift |
 | AdventureWorks rename retarget check | `/tmp/wolfxl-adventureworks-rename-retarget-check-20260508/report.json` | `1` result, `0` failures, `1` expected workbook-global drift |
 | AdventureWorks renamed Excel app smoke | `/tmp/wolfxl-excel-single-mutated-open-probe-retarget-20260508/app-smoke-report.json` | `1` result, `0` failures |
