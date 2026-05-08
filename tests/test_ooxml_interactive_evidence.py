@@ -628,6 +628,9 @@ def test_ui_interaction_probe_records_timeline_shape_selection(tmp_path: Path, m
         return "timeline.xlsx", [
             "selected Excel timeline shape",
             "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
         ]
 
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
@@ -643,6 +646,9 @@ def test_ui_interaction_probe_records_timeline_shape_selection(tmp_path: Path, m
     assert report["results"][0]["ui_actions"] == [
         "selected Excel timeline shape",
         "selected Excel timeline shape: Timeline_Date",
+        "clicked Excel timeline month",
+        "clicked Excel timeline month: May",
+        "saved active workbook",
     ]
 
 
@@ -655,6 +661,81 @@ def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path
     assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == ["Slicer_Region"]
     assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
         "Timeline_Date"
+    ]
+
+
+def test_timeline_ui_interaction_requires_persisted_selection_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook_with_selection(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted timeline selection" in report["results"][0]["message"]
+
+
+def test_timeline_ui_interaction_accepts_persisted_selection_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_timeline_workbook_with_selection(fixture_dir / "timeline.xlsx")
+    _write_manifest(fixture_dir, "timeline.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "timeline_selection_state"
+        _rewrite_timeline_selection(
+            src,
+            start="2012-05-01T00:00:00",
+            end="2012-05-31T00:00:00",
+        )
+        return "timeline.xlsx", [
+            "selected Excel timeline shape",
+            "selected Excel timeline shape: Timeline_Date",
+            "clicked Excel timeline month",
+            "clicked Excel timeline month: May",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("timeline_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel timeline shape",
+        "selected Excel timeline shape: Timeline_Date",
+        "clicked Excel timeline month",
+        "clicked Excel timeline month: May",
+        "saved active workbook",
     ]
 
 
@@ -978,6 +1059,21 @@ def _write_timeline_workbook(path: Path) -> None:
             archive.writestr(name, content)
 
 
+def _write_timeline_workbook_with_selection(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/timelineCaches/timelineCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date">
+  <state filterType="dateBetween">
+    <selection startDate="2012-01-01T00:00:00" endDate="2012-03-31T00:00:00"/>
+  </state>
+</timelineCacheDefinition>"""
+    entries["xl/timelines/timeline1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main" name="Timeline_Date" cache="Timeline_Date"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
 def _base_entries() -> dict[str, str | bytes]:
     return {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -1017,6 +1113,20 @@ def _rewrite_without_prefixes(path: Path, prefixes: tuple[str, ...]) -> None:
             for name in archive.namelist()
             if not any(name.startswith(prefix) for prefix in prefixes)
         }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_timeline_selection(path: Path, *, start: str, end: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    timeline = entries["xl/timelineCaches/timelineCache1.xml"].decode()
+    timeline = timeline.replace(
+        'startDate="2012-01-01T00:00:00" endDate="2012-03-31T00:00:00"',
+        f'startDate="{start}" endDate="{end}"',
+    )
+    entries["xl/timelineCaches/timelineCache1.xml"] = timeline.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

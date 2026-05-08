@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import fnmatch
 import json
+import os
 import subprocess
 import shutil
 import sys
@@ -58,7 +60,7 @@ REQUIRED_UI_ACTIONS = {
     "external_link_update_prompt": "clicked button: Don't Update",
     "pivot_refresh_state": "executed Excel command: refresh all",
     "slicer_selection_state": "selected Excel slicer shape",
-    "timeline_selection_state": "selected Excel timeline shape",
+    "timeline_selection_state": "clicked Excel timeline month",
 }
 
 
@@ -346,6 +348,11 @@ def _run_ui_interaction_probe(
             ui_actions=[],
         )
 
+    timeline_before = (
+        _timeline_selection_range(probe_path)
+        if probe == "timeline_selection_state"
+        else None
+    )
     try:
         active_name, ui_actions = _open_excel_with_ui_interaction(probe_path, probe, timeout)
     except Exception as exc:
@@ -386,6 +393,23 @@ def _run_ui_interaction_probe(
             message=f"{_probe_part_label(probe)} missing after Excel UI interaction",
             ui_actions=ui_actions,
         )
+    if probe == "timeline_selection_state" and timeline_before is not None:
+        timeline_after = _timeline_selection_range(probe_path)
+        if timeline_after == timeline_before:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=str(probe_path),
+                message=(
+                    "Excel timeline UI click did not change persisted "
+                    f"timeline selection: {timeline_before}"
+                ),
+                ui_actions=ui_actions,
+            )
 
     return InteractiveProbeResult(
         fixture=fixture_label,
@@ -464,6 +488,9 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
                 ui_actions.extend(_refresh_all_active_workbook())
             if probe in {"slicer_selection_state", "timeline_selection_state"}:
                 ui_actions.extend(_select_first_probe_shape(src, probe))
+            if probe == "timeline_selection_state":
+                ui_actions.extend(_click_timeline_month(src))
+                ui_actions.extend(_save_active_workbook())
             run_ooxml_app_smoke._close_excel_best_effort()
             run_ooxml_app_smoke._quit_excel_best_effort()
             return name, _dedupe_actions(ui_actions)
@@ -528,6 +555,25 @@ end tell
     return [action] if action else []
 
 
+def _save_active_workbook() -> list[str]:
+    script = """
+tell application "Microsoft Excel"
+  try
+    save active workbook
+    return "saved active workbook"
+  on error errText
+    return "failed Excel command: save active workbook: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["failed Excel command: save active workbook: timeout"]
+    action = proc.stdout.strip()
+    return [action] if action else []
+
+
 def _select_first_probe_shape(src: Path, probe: str) -> list[str]:
     names = _probe_shape_names(src, probe)
     if not names:
@@ -559,6 +605,152 @@ end tell
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
+def _click_timeline_month(src: Path) -> list[str]:
+    """Click a visible month in the first authored timeline on local Mac Excel."""
+    selection = _timeline_selection_range(src)
+    if selection is None:
+        return ["failed Excel timeline month click: no persisted selection in package"]
+    _, end_date = selection
+    target_month_index = _timeline_target_month_index(end_date)
+    names = _probe_shape_names(src, "timeline_selection_state")
+    if not names:
+        return ["failed Excel timeline month click: no timeline shape names in package"]
+    quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
+    script = f"""
+tell application "Microsoft Excel"
+  activate
+  try
+    set bounds of active window to {{0, 40, 1600, 1050}}
+  end try
+  try
+    set zoom of active window to 80
+  end try
+  try
+    set scroll row of active window to 1
+    set scroll column of active window to 1
+  end try
+  try
+    set expectedNames to {{{quoted_names}}}
+    repeat with i from 1 to (count of shapes of active sheet)
+      set candidate to shape i of active sheet
+      set candidateName to name of candidate as text
+      if expectedNames contains candidateName then
+        return (left position of candidate as text) & "," & ¬
+          (top of candidate as text) & "," & ¬
+          (width of candidate as text) & "," & ¬
+          (height of candidate as text)
+      end if
+    end repeat
+    return ""
+  on error errText
+    return "ERROR: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["failed Excel timeline month click: layout timeout"]
+    geometry = proc.stdout.strip()
+    if not geometry or geometry.startswith("ERROR:"):
+        return [f"failed Excel timeline month click: {geometry or 'no matching shape'}"]
+    try:
+        left, top, width, _height = [float(part) for part in geometry.split(",")]
+    except ValueError:
+        return [f"failed Excel timeline month click: invalid shape geometry {geometry!r}"]
+
+    # The probe normalizes Excel to a known top-left window, 80% worksheet zoom,
+    # and scroll origin. These offsets target the month band inside the authored
+    # MyExcelOnline timeline fixture and are verified by the persisted XML change.
+    zoom = 0.8
+    sheet_origin_x = 24.0
+    sheet_origin_y = 253.0
+    month_width = (width * zoom) / 12.0
+    click_x = sheet_origin_x + (left * zoom) + ((target_month_index + 0.5) * month_width)
+    click_y = sheet_origin_y + (top * zoom) + 62.0
+    try:
+        _post_mouse_click(click_x, click_y)
+    except Exception as exc:
+        return [f"failed Excel timeline month click: {str(exc)[:250]}"]
+    target_label = _month_label(target_month_index)
+    return ["clicked Excel timeline month", f"clicked Excel timeline month: {target_label}"]
+
+
+def _timeline_target_month_index(end_date: str) -> int:
+    parsed = dt.datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+    # Skip the immediately adjacent month to avoid timeline resize handles.
+    return max(0, min(11, parsed.month + 1))
+
+
+def _month_label(month_index: int) -> str:
+    return dt.date(2000, month_index + 1, 1).strftime("%b")
+
+
+def _post_mouse_click(x: float, y: float) -> None:
+    try:
+        import Quartz  # type: ignore[import-not-found]
+    except ImportError:
+        _post_mouse_click_with_external_python(x, y)
+        return
+
+    for event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+        event = Quartz.CGEventCreateMouseEvent(
+            None,
+            event_type,
+            (x, y),
+            Quartz.kCGMouseButtonLeft,
+        )
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+        time.sleep(0.08)
+
+
+def _post_mouse_click_with_external_python(x: float, y: float) -> None:
+    script = f"""
+import time
+import Quartz
+for event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+    event = Quartz.CGEventCreateMouseEvent(
+        None,
+        event_type,
+        ({x!r}, {y!r}),
+        Quartz.kCGMouseButtonLeft,
+    )
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+    time.sleep(0.08)
+"""
+    candidates = [
+        Path("/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"),
+        Path("/opt/homebrew/bin/python3"),
+        Path("/usr/local/bin/python3"),
+        Path("/usr/bin/python3"),
+    ]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        candidate = Path(entry) / "python3"
+        if candidate not in candidates:
+            candidates.append(candidate)
+    errors: list[str] = []
+    for candidate in candidates:
+        if not candidate.exists() or str(candidate) == sys.executable:
+            continue
+        proc = subprocess.run(
+            [str(candidate), "-c", script],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return
+        errors.append(f"{candidate}: {proc.stderr.strip()[:120]}")
+    raise RuntimeError(
+        "PyObjC Quartz is not available for mouse events"
+        + (f" ({'; '.join(errors[:3])})" if errors else "")
+    )
+
+
 def _probe_shape_names(path: Path, probe: str) -> list[str]:
     if probe == "slicer_selection_state":
         prefix = "xl/slicers/"
@@ -583,6 +775,28 @@ def _probe_shape_names(path: Path, probe: str) -> list[str]:
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return []
     return names
+
+
+def _timeline_selection_range(path: Path) -> tuple[str, str] | None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            timeline_cache_parts = [
+                name
+                for name in archive.namelist()
+                if name.startswith("xl/timelineCaches/") and name.endswith(".xml")
+            ]
+            for part_name in sorted(timeline_cache_parts):
+                root = ET.fromstring(archive.read(part_name))
+                for element in root.iter():
+                    if _local_name(element.tag) != "selection":
+                        continue
+                    start = element.attrib.get("startDate")
+                    end = element.attrib.get("endDate")
+                    if start and end:
+                        return (start, end)
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return None
+    return None
 
 
 def _local_name(tag: str) -> str:
