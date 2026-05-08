@@ -82,8 +82,35 @@ def run_interactive_probes(
                     timeout=timeout,
                 )
             )
+            _write_report(
+                fixture_dir,
+                output_dir,
+                probes,
+                mutation,
+                results,
+                completed=False,
+            )
 
+    return _write_report(
+        fixture_dir,
+        output_dir,
+        probes,
+        mutation,
+        results,
+        completed=True,
+    )
+
+
+def _write_report(
+    fixture_dir: Path,
+    output_dir: Path,
+    probes: tuple[str, ...],
+    mutation: str,
+    results: list[InteractiveProbeResult],
+    completed: bool,
+) -> dict:
     report = {
+        "completed": completed,
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "probes": list(probes),

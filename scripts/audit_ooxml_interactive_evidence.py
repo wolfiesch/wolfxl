@@ -73,6 +73,7 @@ def audit_interactive_evidence(
     report_paths = list(reports)
     fixtures = _discover_interactive_fixtures(fixture_dir, recursive=recursive)
     passed = _passed_probes_by_fixture(report_paths)
+    incomplete_report_count = _incomplete_report_count(report_paths)
     fixture_dicts = [asdict(fixture) for fixture in fixtures]
     probe_results = {
         name: _probe_result(name, fixture_dicts, passed) for name in INTERACTIVE_PROBES
@@ -82,10 +83,12 @@ def audit_interactive_evidence(
         "recursive": recursive,
         "probe_kind": PROBE_KIND,
         "report_count": len(report_paths),
+        "incomplete_report_count": incomplete_report_count,
         "fixture_count": len(fixtures),
         "fixtures": fixture_dicts,
         "probes": probe_results,
-        "ready": all(result["clear"] for result in probe_results.values()),
+        "ready": incomplete_report_count == 0
+        and all(result["clear"] for result in probe_results.values()),
     }
 
 
@@ -124,6 +127,15 @@ def _passed_probes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
             if fixture and probe:
                 out.setdefault(str(fixture), set()).add(str(probe))
     return out
+
+
+def _incomplete_report_count(reports: Iterable[Path]) -> int:
+    count = 0
+    for report_path in reports:
+        payload = json.loads(Path(report_path).read_text())
+        if payload.get("completed", True) is False:
+            count += 1
+    return count
 
 
 def _probe_result(
