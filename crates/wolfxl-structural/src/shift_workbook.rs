@@ -20,7 +20,7 @@ use crate::axis::{Axis, ShiftPlan};
 use crate::shift_anchors::shift_anchor;
 use crate::shift_cells::shift_sheet_cells;
 use crate::shift_formulas::shift_formula_on_sheet;
-use crate::table_shift::shift_table_xml;
+use crate::table_shift::{repair_deleted_table_header_row, shift_table_xml};
 use crate::vml_shift::shift_vml_xml;
 
 fn push_attr<'a>(e: &mut BytesStart<'a>, key: &[u8], val: &str) {
@@ -60,6 +60,9 @@ pub struct SheetXmlInputs<'a> {
     pub sheet_paths: BTreeMap<String, String>,
     /// Optional `xl/workbook.xml` bytes (for defined-name shift).
     pub workbook_xml: Option<&'a [u8]>,
+    /// Parsed `xl/sharedStrings.xml` values, used when row deletes promote a
+    /// table data row into the header row.
+    pub shared_strings: Option<&'a [String]>,
     /// Per-sheet table parts: sheet name → vec of (path, bytes).
     pub tables: BTreeMap<String, Vec<(String, &'a [u8])>>,
     /// Per-sheet comments part: sheet name → (path, bytes).
@@ -78,6 +81,7 @@ impl<'a> SheetXmlInputs<'a> {
             sheets: BTreeMap::new(),
             sheet_paths: BTreeMap::new(),
             workbook_xml: None,
+            shared_strings: None,
             tables: BTreeMap::new(),
             comments: BTreeMap::new(),
             vml: BTreeMap::new(),
@@ -158,6 +162,26 @@ pub fn apply_workbook_shift(inputs: SheetXmlInputs<'_>, ops: &[AxisShiftOp]) -> 
                 updated.insert(path.clone(), new_bytes);
             }
             *parts = updated;
+        }
+
+        // 2b. If a row delete removed a structured-table header row, Excel
+        // expects the promoted row's cells to be string headers and expects
+        // `<tableColumn name>` metadata to match those visible headers.
+        if plan.axis == Axis::Row && plan.is_delete() {
+            if let (Some(sheet), Some(parts)) =
+                (sheet_bytes.get_mut(&op.sheet), table_bytes.get_mut(&op.sheet))
+            {
+                for (_path, table) in parts.iter_mut() {
+                    if let Some(new_sheet) = repair_deleted_table_header_row(
+                        sheet,
+                        table,
+                        inputs.shared_strings.unwrap_or(&[]),
+                        &plan,
+                    ) {
+                        *sheet = new_sheet;
+                    }
+                }
+            }
         }
 
         // 3. Comments on this sheet.

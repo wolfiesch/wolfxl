@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 use zip::ZipArchive;
 
 use super::patcher_workbook::patched_or_source_part_bytes;
+use super::shared_strings;
 use super::XlsxPatcher;
 
 pub(super) fn apply_axis_shifts_phase(
@@ -38,6 +39,11 @@ pub(super) fn apply_axis_shifts_phase(
             None => continue,
         };
         let wb_xml = patched_or_source_part_bytes(file_patches, zip, "xl/workbook.xml");
+        let shared_strings_xml =
+            patched_or_source_part_bytes(file_patches, zip, "xl/sharedStrings.xml");
+        let parsed_shared_strings = shared_strings_xml
+            .as_ref()
+            .map(|bytes| shared_strings::parse_shared_strings(&String::from_utf8_lossy(bytes)));
 
         let _ = patcher
             .ancillary
@@ -76,6 +82,9 @@ pub(super) fn apply_axis_shifts_phase(
             .insert(op.sheet.clone(), sheet_path.clone());
         if let Some(ref wb) = wb_xml {
             inputs.workbook_xml = Some(wb.as_slice());
+        }
+        if let Some(ref strings) = parsed_shared_strings {
+            inputs.shared_strings = Some(strings.as_slice());
         }
         if !table_bytes.is_empty() {
             let parts: Vec<(String, &[u8])> = table_bytes

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,14 @@ LIBREOFFICE_CANDIDATES = (
 EXCEL_APP = "/Applications/Microsoft Excel.app"
 MANIFEST_NAME = "manifest.json"
 SMOKE_KEYWORDS = ("corrupt", "repaired", "repair", "error")
+REPAIR_DISMISS_BUTTONS = (
+    "No",
+    "Cancel",
+    "Don't Recover",
+    "Delete",
+    "OK",
+    "Close",
+)
 PASSING_STATUSES = {"passed", "skipped"}
 SOURCE_MUTATION = "source"
 
@@ -311,35 +320,76 @@ def _safe_stem(stem: str) -> str:
 def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
     # Finder-style open avoids Office's AppleScript sandbox prompt for generated
     # files; AppleScript is still used for the observable close/no-save step.
-    launched = subprocess.run(
+    launched = subprocess.Popen(
         ["open", "-a", "Microsoft Excel", str(src.resolve())],
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=10,
+        start_new_session=True,
     )
-    if launched.returncode != 0:
-        raise RuntimeError(f"open -a Microsoft Excel failed: {launched.stderr[:500]}")
 
-    elapsed = 0.0
+    deadline = time.monotonic() + timeout
     last_error = ""
-    while elapsed < timeout:
+    while launched.poll() is None and time.monotonic() < deadline:
         _dismiss_excel_safe_dialogs()
         dialog = _excel_dialog_text()
-        if any(keyword in dialog.lower() for keyword in SMOKE_KEYWORDS):
+        if _is_excel_repair_dialog(dialog):
+            _dismiss_excel_repair_dialogs()
             _close_excel_best_effort()
+            _quit_excel_best_effort()
+            _kill_process_group_best_effort(launched)
+            raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
+        last_error = dialog
+        time.sleep(0.25)
+    if launched.poll() is None:
+        _dismiss_excel_repair_dialogs()
+        _close_excel_best_effort()
+        _quit_excel_best_effort()
+        _kill_process_group_best_effort(launched)
+        raise subprocess.TimeoutExpired(
+            ["open", "-a", "Microsoft Excel", str(src.resolve())],
+            timeout,
+            output=last_error,
+        )
+    stdout, stderr = launched.communicate()
+    if launched.returncode != 0:
+        raise RuntimeError(f"open -a Microsoft Excel failed: {stderr[:500]}")
+
+    while time.monotonic() < deadline:
+        _dismiss_excel_safe_dialogs()
+        dialog = _excel_dialog_text()
+        if _is_excel_repair_dialog(dialog):
+            _dismiss_excel_repair_dialogs()
+            _close_excel_best_effort()
+            _quit_excel_best_effort()
             raise RuntimeError(f"Excel repair/error dialog while opening: {dialog[:500]}")
         name = _excel_active_workbook_name()
         if name:
             _close_excel_best_effort()
+            _quit_excel_best_effort()
             return name
         last_error = dialog
         time.sleep(0.5)
-        elapsed += 0.5
+    _dismiss_excel_repair_dialogs()
+    _close_excel_best_effort()
+    _quit_excel_best_effort()
     raise subprocess.TimeoutExpired(
         ["open", "-a", "Microsoft Excel", str(src.resolve())],
         timeout,
         output=last_error,
     )
+
+
+def _is_excel_repair_dialog(dialog: str) -> bool:
+    dialog_lc = dialog.lower()
+    return any(keyword in dialog_lc for keyword in SMOKE_KEYWORDS)
+
+
+def _kill_process_group_best_effort(proc: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (PermissionError, ProcessLookupError):
+        pass
 
 
 def _excel_active_workbook_name() -> str | None:
@@ -352,12 +402,7 @@ tell application "Microsoft Excel"
   end try
 end tell
 """
-    proc = subprocess.run(
-        ["osascript", "-e", script],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
+    proc = _run_osascript(script, timeout=2)
     name = proc.stdout.strip()
     if name == "missing value":
         return None
@@ -381,12 +426,7 @@ tell application "System Events"
 end tell
 """
     try:
-        proc = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
+        proc = _run_osascript(script, timeout=1)
     except subprocess.TimeoutExpired:
         return ""
     return proc.stdout.strip()
@@ -410,23 +450,43 @@ tell application "System Events"
 end tell
 """
     try:
-        subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
+        _run_osascript(script, timeout=1)
     except subprocess.TimeoutExpired:
         # Excel can briefly stop responding to UI automation while opening large
         # pivot/slicer workbooks. Keep the primary open/close attempt alive.
         pass
 
 
+def _dismiss_excel_repair_dialogs() -> None:
+    # Treat repair/recovery prompts as a failure signal and choose the
+    # non-repairing/default-dismiss path. Do not click "Yes" or "Recover":
+    # accepting repair can mutate the workbook and hide the OOXML defect.
+    buttons = "\n".join(
+        f'        if exists button "{button}" of w then click button "{button}" of w'
+        for button in REPAIR_DISMISS_BUTTONS
+    )
+    script = f"""
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return
+  tell process "Microsoft Excel"
+    set frontmost to true
+    try
+      repeat with w in windows
+{buttons}
+      end repeat
+    end try
+  end tell
+end tell
+"""
+    try:
+        _run_osascript(script, timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _close_excel_best_effort() -> None:
-    subprocess.run(
-        [
-            "osascript",
-            "-e",
+    try:
+        _run_osascript(
             (
                 'tell application "Microsoft Excel"\n'
                 "  try\n"
@@ -434,11 +494,56 @@ def _close_excel_best_effort() -> None:
                 "  end try\n"
                 "end tell"
             ),
-        ],
-        capture_output=True,
+            timeout=3,
+        )
+    except subprocess.TimeoutExpired:
+        _quit_excel_best_effort()
+
+
+def _quit_excel_best_effort() -> None:
+    try:
+        _run_osascript(
+            (
+                'tell application "Microsoft Excel"\n'
+                "  try\n"
+                "    quit saving no\n"
+                "  end try\n"
+                "end tell"
+            ),
+            timeout=3,
+        )
+    except subprocess.TimeoutExpired:
+        subprocess.run(
+            ["pkill", "-x", "Microsoft Excel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+
+def _run_osascript(script: str, timeout: int) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(
+        ["osascript", "-e", script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=10,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(
+            proc.args,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from exc
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
 
 
 def main(argv: list[str] | None = None) -> int:

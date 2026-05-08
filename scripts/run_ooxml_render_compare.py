@@ -457,6 +457,8 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
     )
     proc = _run_excel_script_with_dialog_handling(script, timeout)
     dialog = run_ooxml_app_smoke._excel_dialog_text()
+    if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
+        run_ooxml_app_smoke._dismiss_excel_repair_dialogs()
     run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
     run_ooxml_app_smoke._close_excel_best_effort()
     _restore_excel_automation_security_best_effort()
@@ -496,6 +498,8 @@ def _run_excel_script_with_dialog_handling(
             dialog = run_ooxml_app_smoke._excel_dialog_text()
             proc.kill()
             stdout, stderr = proc.communicate()
+            if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
+                run_ooxml_app_smoke._dismiss_excel_repair_dialogs()
             run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
             run_ooxml_app_smoke._close_excel_best_effort()
             _restore_excel_automation_security_best_effort()

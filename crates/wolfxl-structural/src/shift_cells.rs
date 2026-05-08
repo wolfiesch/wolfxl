@@ -18,6 +18,7 @@
 //!   - `<conditionalFormatting sqref>` — rewrite via `shift_sqref`.
 //!     Empty-sqref CF blocks are dropped.
 //!   - `<cfRule>/<formula>` text — via `shift_formula`.
+//!   - `<xm:sqref>` extension text — rewrite via `shift_sqref`.
 //!   - `<hyperlink ref>` — via `shift_anchor`.
 
 use std::io::Cursor;
@@ -58,6 +59,7 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     let mut in_f: bool = false;
     let mut in_formula1: bool = false;
     let mut in_formula2: bool = false;
+    let mut in_sqref_text: bool = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -96,6 +98,10 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     }
                     b"formula2" => {
                         in_formula2 = true;
+                        let _ = writer.write_event(Event::Start(e.to_owned()));
+                    }
+                    b"sqref" => {
+                        in_sqref_text = true;
                         let _ = writer.write_event(Event::Start(e.to_owned()));
                     }
                     b"dimension" | b"mergeCell" | b"hyperlink" => {
@@ -189,6 +195,7 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                     b"f" => in_f = false,
                     b"formula1" => in_formula1 = false,
                     b"formula2" => in_formula2 = false,
+                    b"sqref" => in_sqref_text = false,
                     _ => {}
                 }
                 let _ = writer.write_event(Event::End(e.to_owned()));
@@ -204,6 +211,14 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
                     let new_s = shift_formula(&s, plan);
+                    let new_t = BytesText::new(&new_s);
+                    let _ = writer.write_event(Event::Text(new_t));
+                } else if in_sqref_text {
+                    let s = match t.unescape() {
+                        Ok(c) => c.into_owned(),
+                        Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
+                    };
+                    let new_s = shift_sqref(&s, plan);
                     let new_t = BytesText::new(&new_s);
                     let _ = writer.write_event(Event::Text(new_t));
                 } else {
@@ -480,6 +495,14 @@ mod tests {
         let p = ShiftPlan::insert(crate::Axis::Row, 5, 3);
         let out = apply(xml, &p);
         assert!(out.contains(r#"sqref="A8:A13""#));
+    }
+
+    #[test]
+    fn shifts_extension_sqref_text() {
+        let xml = r#"<worksheet><extLst><ext><x14:conditionalFormattings xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:conditionalFormatting xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"><xm:sqref>C2:C4</xm:sqref></x14:conditionalFormatting></x14:conditionalFormattings></ext></extLst></worksheet>"#;
+        let p = ShiftPlan::delete(crate::Axis::Row, 1, 1);
+        let out = apply(xml, &p);
+        assert!(out.contains("<xm:sqref>C1:C3</xm:sqref>"), "{out}");
     }
 
     #[test]

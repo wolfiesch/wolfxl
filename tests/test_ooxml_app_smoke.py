@@ -102,12 +102,47 @@ def test_excel_active_workbook_name_treats_missing_value_as_none(monkeypatch) ->
         stdout = "missing value\n"
 
     monkeypatch.setattr(
-        smoke_module.subprocess,
-        "run",
+        smoke_module,
+        "_run_osascript",
         lambda *_args, **_kwargs: FakeProc(),
     )
 
     assert smoke_module._excel_active_workbook_name() is None
+
+
+def test_excel_repair_dialog_detection() -> None:
+    dialog = (
+        "windows=after-fixture.xlsx  -  Repaired\n"
+        "buttons=ViewDelete\n"
+        "text=Excel was able to open the file by repairing or removing "
+        "the unreadable content."
+    )
+
+    assert smoke_module._is_excel_repair_dialog(dialog)
+    assert not smoke_module._is_excel_repair_dialog("windows=fixture.xlsx")
+
+
+def test_dismiss_excel_repair_dialog_does_not_click_repair(monkeypatch) -> None:
+    scripts: list[str] = []
+
+    class FakeProc:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_run(script: str, **_kwargs):
+        scripts.append(script)
+        return FakeProc()
+
+    monkeypatch.setattr(smoke_module, "_run_osascript", fake_run)
+
+    smoke_module._dismiss_excel_repair_dialogs()
+
+    script = scripts[0]
+    assert 'button "No"' in script
+    assert 'button "Delete"' in script
+    assert 'button "Yes"' not in script
+    assert 'button "Recover"' not in script
 
 
 def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
