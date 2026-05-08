@@ -406,7 +406,7 @@ def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
         ("powerPivotData", "model"),
         ("slicer", "slicerCache", "timeline", "timelineCache"),
-        ("vbaProject", "control", "ctrlProp", "activeXControl", "oleObject"),
+        ("vbaProject", "control", "ctrlProp", "activeXControl", "oleObject", "package"),
         ("customXml", "customXmlProps"),
     )
 
