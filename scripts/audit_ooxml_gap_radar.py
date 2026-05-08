@@ -118,6 +118,7 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
     unknown_rel_fixtures: dict[str, set[str]] = {}
     unknown_content_type_fixtures: dict[str, set[str]] = {}
     unknown_extension_uri_fixtures: dict[str, set[str]] = {}
+    app_unsupported_feature_fixtures: dict[str, set[str]] = {}
 
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(
         fixture_dir, recursive=recursive
@@ -142,6 +143,8 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
             unknown_content_type_fixtures.setdefault(content_type, set()).add(entry.filename)
         for uri in fixture_report["unknown_extension_uris"]:
             unknown_extension_uri_fixtures.setdefault(uri, set()).add(entry.filename)
+        for feature in fixture_report["app_unsupported_features"]:
+            app_unsupported_feature_fixtures.setdefault(feature, set()).add(entry.filename)
 
     return {
         "fixture_dir": str(fixture_dir),
@@ -152,14 +155,17 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         "unknown_relationship_types": _sorted_mapping(unknown_rel_fixtures),
         "unknown_content_types": _sorted_mapping(unknown_content_type_fixtures),
         "unknown_extension_uris": _sorted_mapping(unknown_extension_uri_fixtures),
+        "app_unsupported_features": _sorted_mapping(app_unsupported_feature_fixtures),
         "unknown_part_family_count": len(unknown_part_fixtures),
         "unknown_relationship_type_count": len(unknown_rel_fixtures),
         "unknown_content_type_count": len(unknown_content_type_fixtures),
         "unknown_extension_uri_count": len(unknown_extension_uri_fixtures),
+        "app_unsupported_feature_count": len(app_unsupported_feature_fixtures),
         "clear": not unknown_part_fixtures
         and not unknown_rel_fixtures
         and not unknown_content_type_fixtures
-        and not unknown_extension_uri_fixtures,
+        and not unknown_extension_uri_fixtures
+        and not app_unsupported_feature_fixtures,
     }
 
 
@@ -195,13 +201,30 @@ def _fixture_unknowns(path: Path) -> dict:
             for uri in _extension_uris(archive)
             if uri.upper() not in KNOWN_EXTENSION_URIS_NORMALIZED
         )
+        app_unsupported_features = _app_unsupported_features(archive)
     return {
         "unknown_parts": unknown_parts,
         "unknown_part_families": unknown_families,
         "unknown_relationship_types": unknown_relationship_types,
         "unknown_content_types": unknown_content_types,
         "unknown_extension_uris": unknown_extension_uris,
+        "app_unsupported_features": app_unsupported_features,
     }
+
+
+def _app_unsupported_features(archive: zipfile.ZipFile) -> list[str]:
+    features = set()
+    for name in archive.namelist():
+        name_lc = name.lower()
+        if not name_lc.endswith((".xml", ".vml", ".rels")):
+            continue
+        try:
+            payload = archive.read(name).lower()
+        except (KeyError, RuntimeError, zipfile.BadZipFile):
+            continue
+        if b"powerview" in payload or b"power view" in payload:
+            features.add("power_view")
+    return sorted(features)
 
 
 def _is_core_part(part: str) -> bool:

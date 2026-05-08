@@ -12,6 +12,13 @@ This page tracks meaningful differences versus openpyxl/Excel behavior.
 - Modify mode uses a surgical patcher for targeted changes.
 - Preserve-value behavior for style-only edits is regression-tested.
 
+## App-level evidence limits
+
+- PowerView-bearing workbooks are treated as app-unsupported evidence in the
+  local Microsoft Excel smoke harness. Excel can block those files behind a
+  read-only unsupported-content prompt, so they are useful for package-fidelity
+  radar coverage but not for proving clean editable Excel open/close behavior.
+
 ## Contributing a difference report
 
 When reporting a difference, include:
