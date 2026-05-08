@@ -382,7 +382,8 @@ Gap ledger:
      `scripts/audit_ooxml_interactive_evidence.py` now turns the remaining
      interactive blind spot into a strict, machine-readable gate. Current
      external-oracle output with all six probe reports at
-     `/tmp/wolfxl-interactive-evidence-external-oracle-all.json` is ready.
+     `/tmp/wolfxl-interactive-evidence-external-oracle-all-20260508.json` is
+     ready.
      `scripts/run_ooxml_interactive_probe.py` clears
      macro project presence for `real-excel-macro-basic.xlsm` by opening it in
      Microsoft Excel and verifying `xl/vbaProject.bin` remains present. It also

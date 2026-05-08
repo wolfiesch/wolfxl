@@ -20,11 +20,11 @@ This page tracks meaningful differences versus openpyxl/Excel behavior.
   radar coverage but not for proving clean editable Excel open/close behavior.
 - The interactive Excel evidence gate is intentionally stricter than package
   preservation. On 2026-05-08, targeted source-workbook probes passed for:
-  pivot state, slicer state, timeline state, external-link state, and embedded
-  control state. The combined audit still reports `ready=false` because
-  `macro_project_presence` times out while opening
-  `real-excel-macro-basic.xlsm` in Microsoft Excel:
-  `/tmp/wolfxl-interactive-probes-macro-one-clean-20260508/interactive-probe-report.json`.
+  pivot state, slicer state, timeline state, external-link state, macro project
+  presence, and embedded-control state. The combined strict audit over all six
+  source-workbook probe reports now reports `ready=true` with no incomplete
+  reports:
+  `/tmp/wolfxl-interactive-evidence-external-oracle-all-20260508.json`.
 
 ## Contributing a difference report
 
