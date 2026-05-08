@@ -1043,6 +1043,17 @@
         {"path": "results.0.probe", "equals": "slicer_selection_state"},
         {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
       ]
+    },
+    {
+      "name": "rename_sheet_chart_formula_ref_audit_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-chart-ref-audit-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-chart-ref-audit-20260508 --mutation rename_first_sheet > /tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-chart-ref-audit-20260508/report.json",
+      "expect": [
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
+      ]
     }
   ]
 }

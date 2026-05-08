@@ -288,6 +288,50 @@ def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
 
 
+def test_detects_chart_formula_reference_to_missing_sheet(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_xml("Metrics!$A$1:$A$5")
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "chart_formula_missing_sheet"
+    )
+    assert issue["part"] == "xl/charts/chart1.xml"
+    assert "Metrics" in issue["message"]
+
+
+def test_chart_formula_sheet_reference_audit_accepts_quoted_and_external_refs(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "chart-formulas.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    entries["xl/charts/chart1.xml"] = _chart_xml(
+        "'WolfXL Fidelity Rename'!$A$1:$A$5"
+    )
+    entries["xl/charts/chart2.xml"] = _chart_xml("'[Book.xlsx]Sheet1'!$A$1:$A$5")
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.chart_formula_sheet_ref_issues == []
+
+
 def test_fingerprints_structured_references_without_external_links(
     tmp_path: Path,
 ) -> None:

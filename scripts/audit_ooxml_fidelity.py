@@ -87,6 +87,7 @@ class Snapshot:
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
     table_integrity_issues: list[dict[str, str]]
+    chart_formula_sheet_ref_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
     semantic_fingerprints: dict[str, dict[str, object]]
 
@@ -103,6 +104,7 @@ def snapshot(path: Path) -> Snapshot:
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
             table_integrity_issues=_read_table_integrity_issues(archive),
+            chart_formula_sheet_ref_issues=_read_chart_formula_sheet_ref_issues(archive),
             feature_parts=_classify_feature_parts(parts),
             semantic_fingerprints=_read_semantic_fingerprints(archive),
         )
@@ -130,6 +132,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
     _audit_table_integrity(after_snapshot, issues)
+    _audit_chart_formula_sheet_refs(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
@@ -237,6 +240,12 @@ def _audit_conditional_formatting_refs(
 
 def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
     issues.extend(snapshot_.table_integrity_issues)
+
+
+def _audit_chart_formula_sheet_refs(
+    snapshot_: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    issues.extend(snapshot_.chart_formula_sheet_ref_issues)
 
 
 def _audit_feature_hotspots(
@@ -443,6 +452,72 @@ def _read_table_integrity_issues(archive: zipfile.ZipFile) -> list[dict[str, str
                 }
             )
     return issues
+
+
+def _read_chart_formula_sheet_ref_issues(
+    archive: zipfile.ZipFile,
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    parts = set(archive.namelist())
+    issues: list[dict[str, str]] = []
+    for part in sorted(_feature_xml_parts(parts, "xl/charts/", ".xml")):
+        if _is_chart_style_part(part):
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for formula in _texts_by_local(root, "f"):
+            refs = _formula_sheet_reference_names(formula)
+            missing = sorted(ref for ref in refs if ref not in sheet_names)
+            if missing:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "kind": "chart_formula_missing_sheet",
+                        "part": part,
+                        "message": (
+                            f"{part} chart formula {formula!r} references missing "
+                            f"sheet(s): {missing}"
+                        ),
+                    }
+                )
+    return issues
+
+
+def _workbook_sheet_names(archive: zipfile.ZipFile) -> set[str]:
+    root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if root is None:
+        return set()
+    return {
+        name
+        for sheet in _nodes_by_local(root, "sheet")
+        if (name := _attr(sheet, "name"))
+    }
+
+
+def _formula_sheet_reference_names(formula: str) -> set[str]:
+    refs: set[str] = set()
+    consumed_ranges: list[tuple[int, int]] = []
+
+    for match in re.finditer(r"'((?:[^']|'')+)'!", formula):
+        consumed_ranges.append(match.span())
+        refs.update(_local_sheet_names_from_token(match.group(1).replace("''", "'")))
+
+    for match in re.finditer(r"(?<![\]\w'])((?:[A-Za-z0-9_][A-Za-z0-9_ .:]*)!)", formula):
+        if any(start <= match.start() < end for start, end in consumed_ranges):
+            continue
+        refs.update(_local_sheet_names_from_token(match.group(1)[:-1].strip()))
+
+    return refs
+
+
+def _local_sheet_names_from_token(token: str) -> set[str]:
+    if "[" in token or "]" in token:
+        return set()
+    return {name for name in token.split(":") if name}
 
 
 def _range_width(ref: str) -> int | None:
@@ -1450,6 +1525,9 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "dxfs_count": snapshot_.dxfs_count,
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
         "table_integrity_issue_count": len(snapshot_.table_integrity_issues),
+        "chart_formula_sheet_ref_issue_count": len(
+            snapshot_.chart_formula_sheet_ref_issues
+        ),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()
         },
