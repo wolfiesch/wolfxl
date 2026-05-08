@@ -100,6 +100,37 @@ def test_relationship_source_rejects_backslash_package_paths() -> None:
         audit_module._source_part_for_rels(r"xl\_rels\workbook.xml.rels")
 
 
+def test_dangling_relationship_audit_treats_part_names_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["[Content_Types].xml"] = entries["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Override PartName="/xl/sharedStrings.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>\n'
+        "</Types>",
+    )
+    entries["xl/_rels/workbook.xml.rels"] = entries["xl/_rels/workbook.xml.rels"].replace(
+        "</Relationships>",
+        '  <Relationship Id="rId2" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" '
+        'Target="sharedStrings.xml"/>\n'
+        "</Relationships>",
+    )
+    entries["xl/SharedStrings.xml"] = (
+        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<si><t>Hello</t></si></sst>"
+    )
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert report["issues"] == []
+
+
 def test_detects_dangling_chart_relationship_after_modify_save(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"

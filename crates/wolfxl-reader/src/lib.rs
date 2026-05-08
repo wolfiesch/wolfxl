@@ -1660,7 +1660,7 @@ fn parse_workbook(
                 }
                 b"sheet" => {
                     let name = attr_value(&e, b"name");
-                    let rid = attr_value(&e, b"r:id");
+                    let rid = relationship_id_attr(&e);
                     if let (Some(name), Some(rid)) = (name, rid) {
                         sheets.push(SheetRef {
                             name,
@@ -6035,14 +6035,16 @@ fn read_part_optional<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<String>> {
-    match zip.by_name(name) {
+    let Some(actual_name) = resolve_zip_part_name(zip, name) else {
+        return Ok(None);
+    };
+    match zip.by_name(&actual_name) {
         Ok(mut file) => {
-            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
+            validate_zip_entry_metadata(&actual_name, file.size(), file.compressed_size())?;
             let mut out = String::new();
             file.read_to_string(&mut out)?;
             Ok(Some(out))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(ReaderError::Zip(e)),
     }
 }
@@ -6051,21 +6053,48 @@ fn read_part_optional_bytes<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>> {
-    match zip.by_name(name) {
+    let Some(actual_name) = resolve_zip_part_name(zip, name) else {
+        return Ok(None);
+    };
+    match zip.by_name(&actual_name) {
         Ok(mut file) => {
-            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
+            validate_zip_entry_metadata(&actual_name, file.size(), file.compressed_size())?;
             let mut out = Vec::new();
             file.read_to_end(&mut out)?;
             Ok(Some(out))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(ReaderError::Zip(e)),
     }
+}
+
+fn resolve_zip_part_name<R: Read + std::io::Seek>(
+    zip: &ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
+    zip.file_names()
+        .find(|candidate| candidate.eq_ignore_ascii_case(name))
+        .map(str::to_string)
 }
 
 fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
     for a in e.attributes().with_checks(false).flatten() {
         if a.key.as_ref() == key {
+            if let Ok(v) = a.unescape_value() {
+                return Some(v.to_string());
+            }
+            return Some(String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        }
+    }
+    None
+}
+
+fn relationship_id_attr(e: &BytesStart<'_>) -> Option<String> {
+    attr_value(e, b"r:id").or_else(|| attr_value_by_suffix(e, b":id"))
+}
+
+fn attr_value_by_suffix(e: &BytesStart<'_>, suffix: &[u8]) -> Option<String> {
+    for a in e.attributes().with_checks(false).flatten() {
+        if a.key.as_ref().ends_with(suffix) {
             if let Ok(v) = a.unescape_value() {
                 return Some(v.to_string());
             }

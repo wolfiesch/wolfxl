@@ -177,7 +177,7 @@ def _audit_dangling_relationships(snapshot_: Snapshot, issues: list[dict[str, st
     for rel in snapshot_.relationships:
         if rel.resolved_target is None:
             continue
-        if rel.resolved_target not in snapshot_.parts:
+        if not _has_part_case_insensitive(snapshot_.parts, rel.resolved_target):
             issues.append(
                 {
                     "severity": "error",
@@ -189,6 +189,11 @@ def _audit_dangling_relationships(snapshot_: Snapshot, issues: list[dict[str, st
                     ),
                 }
             )
+
+
+def _has_part_case_insensitive(parts: set[str], target: str) -> bool:
+    target_lc = target.lower()
+    return any(part.lower() == target_lc for part in parts)
 
 
 def _audit_content_type_preservation(

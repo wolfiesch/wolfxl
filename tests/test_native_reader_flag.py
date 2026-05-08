@@ -100,6 +100,48 @@ def _make_basic_xlsx(path: Path) -> None:
     _inject_merged_subordinate_style(path)
 
 
+def _make_case_variant_shared_strings_xlsx(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:relationships="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" relationships:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData>
+</worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+        "xl/SharedStrings.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <si><t>Hello</t></si>
+</sst>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in entries.items():
+            zout.writestr(name, data)
+
+
 def _inject_workbook_security(path: Path) -> None:
     with zipfile.ZipFile(path, "r") as zin:
         entries = {name: zin.read(name) for name in zin.namelist()}
@@ -710,6 +752,25 @@ def test_native_reader_flag_loads_path_values(tmp_path: Path, monkeypatch: pytes
         assert records["A3"]["data_type"] == "datetime"
     finally:
         wb.close()
+
+
+def test_native_reader_resolves_case_variant_shared_strings_part(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "case-variant-shared-strings.xlsx"
+    _make_case_variant_shared_strings_xlsx(path)
+
+    wb = wolfxl.load_workbook(path)
+    try:
+        assert wb.sheetnames == ["Sheet1"]
+        assert wb.active["A1"].value == "Hello"
+    finally:
+        wb.close()
+    read_only_wb = wolfxl.load_workbook(path, read_only=True)
+    try:
+        assert next(read_only_wb.active.iter_rows(values_only=True)) == ("Hello",)
+    finally:
+        read_only_wb.close()
 
 
 def test_native_reader_loads_workbook_sheet_states(
