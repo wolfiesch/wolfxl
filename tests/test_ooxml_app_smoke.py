@@ -174,7 +174,88 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
     assert report["mutations"] == ["source"]
+    assert report["aborted"] is False
+    assert report["abort_reason"] is None
     assert (output_dir / "app-smoke-report.json").is_file()
+
+
+def test_run_smoke_aborts_after_first_excel_repair_dialog(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "a.xlsx")
+    _make_fixture(fixture_dir / "b.xlsx")
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+
+    seen_sources: list[str] = []
+
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+        seen_sources.append(src.name)
+        return smoke_module.AppSmokeResult(
+            fixture=src.name,
+            mutation="source",
+            app="excel",
+            status="failed",
+            output=None,
+            message=f"{smoke_module.EXCEL_REPAIR_MARKER} simulated",
+        )
+
+    monkeypatch.setattr(smoke_module, "_smoke_excel", fake_smoke)
+
+    report = smoke_module.run_smoke(
+        fixture_dir,
+        output_dir,
+        apps=("excel",),
+        timeout=1,
+    )
+
+    assert report["aborted"] is True
+    assert "stopped after first Microsoft Excel repair dialog" in report["abort_reason"]
+    assert report["result_count"] == 1
+    assert report["failure_count"] == 1
+    assert len(seen_sources) == 1
+    assert (output_dir / "app-smoke-report.json").is_file()
+
+
+def test_run_smoke_can_continue_after_excel_repair_dialog(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "a.xlsx")
+    _make_fixture(fixture_dir / "b.xlsx")
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+        return smoke_module.AppSmokeResult(
+            fixture=src.name,
+            mutation="source",
+            app="excel",
+            status="failed",
+            output=None,
+            message=f"{smoke_module.EXCEL_REPAIR_MARKER} simulated",
+        )
+
+    monkeypatch.setattr(smoke_module, "_smoke_excel", fake_smoke)
+
+    report = smoke_module.run_smoke(
+        fixture_dir,
+        output_dir,
+        apps=("excel",),
+        timeout=1,
+        stop_on_excel_repair=False,
+    )
+
+    assert report["aborted"] is False
+    assert report["result_count"] == 2
+    assert report["failure_count"] == 2
 
 
 def test_run_smoke_can_apply_mutation_before_app_smoke(

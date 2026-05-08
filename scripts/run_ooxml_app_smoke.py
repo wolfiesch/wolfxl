@@ -41,6 +41,7 @@ REPAIR_DISMISS_BUTTONS = (
 )
 PASSING_STATUSES = {"passed", "skipped"}
 SOURCE_MUTATION = "source"
+EXCEL_REPAIR_MARKER = "Excel repair/error dialog while opening:"
 
 
 @dataclass
@@ -59,6 +60,7 @@ def run_smoke(
     apps: Iterable[str],
     timeout: int = 90,
     mutations: Iterable[str] = (SOURCE_MUTATION,),
+    stop_on_excel_repair: bool = True,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -108,12 +110,54 @@ def run_smoke(
                 result.fixture = entry.filename
                 result.mutation = mutation
                 results.append(result)
+                if (
+                    stop_on_excel_repair
+                    and app == "excel"
+                    and result.status not in PASSING_STATUSES
+                    and EXCEL_REPAIR_MARKER in result.message
+                ):
+                    return _write_report(
+                        fixture_dir,
+                        output_dir,
+                        apps,
+                        mutations,
+                        results,
+                        aborted=True,
+                        abort_reason=(
+                            "stopped after first Microsoft Excel repair dialog; "
+                            "rerun with --continue-after-excel-repair to collect "
+                            "additional failures"
+                        ),
+                    )
 
+    return _write_report(
+        fixture_dir,
+        output_dir,
+        apps,
+        mutations,
+        results,
+        aborted=False,
+        abort_reason=None,
+    )
+
+
+def _write_report(
+    fixture_dir: Path,
+    output_dir: Path,
+    apps: Iterable[str],
+    mutations: Iterable[str],
+    results: list[AppSmokeResult],
+    *,
+    aborted: bool,
+    abort_reason: str | None,
+) -> dict:
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "apps": list(apps),
         "mutations": list(mutations),
+        "aborted": aborted,
+        "abort_reason": abort_reason,
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -222,6 +266,9 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
             f"timeout after {timeout}s: {str(exc)[:500]}",
         )
     except RuntimeError as exc:
+        _dismiss_excel_repair_dialogs()
+        _close_excel_best_effort()
+        _quit_excel_best_effort()
         return AppSmokeResult(
             src.name,
             SOURCE_MUTATION,
@@ -568,6 +615,15 @@ def main(argv: list[str] | None = None) -> int:
             "Defaults to source fixtures without mutation."
         ),
     )
+    parser.add_argument(
+        "--continue-after-excel-repair",
+        action="store_true",
+        help=(
+            "For Microsoft Excel GUI smoke only, keep running after a repair "
+            "dialog failure. By default the run aborts on the first repair "
+            "dialog to avoid repeated desktop popups."
+        ),
+    )
     args = parser.parse_args(argv)
 
     apps = tuple(args.apps or ("libreoffice",))
@@ -578,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
         apps,
         timeout=args.timeout,
         mutations=mutations,
+        stop_on_excel_repair=not args.continue_after_excel_repair,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
