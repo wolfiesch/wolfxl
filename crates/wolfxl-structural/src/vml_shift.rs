@@ -1,6 +1,7 @@
 //! VML drawing anchor shifts for comment shapes.
 
 use crate::axis::{Axis, ShiftPlan};
+use crate::shift_anchors::shift_anchor;
 
 /// Rewrite a VML drawing part. Looks for `<x:Anchor>` elements (or
 /// `<Anchor>` without prefix) and shifts the row component (axis 1
@@ -117,10 +118,35 @@ fn element_end_for_start_tag(s: &str, start: usize, open_end: usize) -> Option<u
 
 fn shift_vml_anchor_in_shape(shape: &str, plan: &ShiftPlan) -> Option<String> {
     let out = shift_vml_anchor_tag(shape, plan)?;
-    match plan.axis {
+    let out = match plan.axis {
         Axis::Row => shift_vml_numeric_marker(&out, "Row", plan),
         Axis::Col => shift_vml_numeric_marker(&out, "Column", plan),
+    }?;
+    Some(shift_vml_formula_range(&out, plan))
+}
+
+fn shift_vml_formula_range(shape: &str, plan: &ShiftPlan) -> String {
+    let Some((open, open_end)) = find_start_tag_by_local(shape, "FmlaRange") else {
+        return shape.to_string();
+    };
+    let Some(tag_name) = start_tag_name(shape, open, open_end) else {
+        return shape.to_string();
+    };
+    let close_tag = format!("</{tag_name}>");
+    let Some(close_rel) = shape[open_end..].find(&close_tag) else {
+        return shape.to_string();
+    };
+    let close = open_end + close_rel;
+    let payload = shape[open_end..close].trim();
+    let shifted = shift_anchor(payload, plan);
+    if shifted == "#REF!" {
+        return shape.to_string();
     }
+    let mut out = String::with_capacity(shape.len());
+    out.push_str(&shape[..open_end]);
+    out.push_str(&shifted);
+    out.push_str(&shape[close..]);
+    out
 }
 
 fn shift_vml_anchor_tag(shape: &str, plan: &ShiftPlan) -> Option<String> {

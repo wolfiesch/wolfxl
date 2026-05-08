@@ -254,7 +254,16 @@ pub fn shift_sheet_cells(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
         buf.clear();
     }
 
-    writer.into_inner().into_inner()
+    cleanup_empty_sheet_containers(writer.into_inner().into_inner())
+}
+
+fn cleanup_empty_sheet_containers(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(mut s) = String::from_utf8(bytes) else {
+        unreachable!("quick-xml writer emitted non-UTF-8 worksheet XML");
+    };
+    s = s.replace("<mergeCells></mergeCells>", "");
+    s = s.replace("<mergeCells />", "");
+    s.into_bytes()
 }
 
 enum RowAction<'a> {

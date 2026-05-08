@@ -33,6 +33,8 @@
 
 pub mod axis;
 pub mod cols;
+pub(crate) mod control_props_shift;
+pub(crate) mod drawing_shift;
 pub mod range_move;
 pub mod sheet_copy;
 pub mod shift_anchors;

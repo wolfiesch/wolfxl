@@ -80,6 +80,8 @@ pub mod rt {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing";
     pub const DRAWING: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+    pub const CTRL_PROP: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/ctrlProp";
     pub const IMAGE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
     pub const CHART: &str =
