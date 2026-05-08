@@ -120,6 +120,21 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_external_tool_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture excelize-2.10-pivot-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "excelize-2.10-pivot-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: Month", "clicked Excel slicer item", "clicked Excel slicer item: Month", "clicked Excel slicer item: Region", "saved active workbook"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_timeline_month_click",
       "path": "/tmp/wolfxl-ui-interaction-timeline-click-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-timeline-click-20260508 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-timeline-click-20260508.stdout.json",
