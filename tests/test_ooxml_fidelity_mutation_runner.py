@@ -36,6 +36,50 @@ def _make_fixture(path: Path) -> None:
     workbook.save(path)
 
 
+def test_safe_tail_row_uses_package_level_feature_refs(tmp_path: Path) -> None:
+    fixture = tmp_path / "data-validation-tail.xlsx"
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet["A1"] = "status"
+    validation = openpyxl.worksheet.datavalidation.DataValidation(
+        type="list",
+        formula1='"Open,Closed"',
+        showErrorMessage=True,
+    )
+    validation.add("C2:C20")
+    worksheet.add_data_validation(validation)
+    workbook.save(fixture)
+
+    loaded = runner_module.wolfxl.load_workbook(fixture, modify=True)
+    try:
+        assert loaded.active.max_row == 1
+        assert runner_module._safe_tail_row_index(fixture, loaded.active) == 21
+    finally:
+        loaded.close()
+
+
+def test_safe_tail_col_uses_package_level_feature_refs(tmp_path: Path) -> None:
+    fixture = tmp_path / "data-validation-tail-col.xlsx"
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet["A1"] = "status"
+    validation = openpyxl.worksheet.datavalidation.DataValidation(
+        type="list",
+        formula1='"Open,Closed"',
+        showErrorMessage=True,
+    )
+    validation.add("AA1:AA2")
+    worksheet.add_data_validation(validation)
+    workbook.save(fixture)
+
+    loaded = runner_module.wolfxl.load_workbook(fixture, modify=True)
+    try:
+        assert loaded.active.max_column == 1
+        assert runner_module._safe_tail_col_index(fixture, loaded.active) == 28
+    finally:
+        loaded.close()
+
+
 def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

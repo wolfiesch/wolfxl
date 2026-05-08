@@ -23,6 +23,23 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_fidelity  # noqa: E402
 import wolfxl  # noqa: E402
 
+CELL_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})(?![A-Za-z0-9_])"
+)
+REF_SCAN_PART_PREFIXES = (
+    "xl/workbook.xml",
+    "xl/worksheets/",
+    "xl/comments",
+    "xl/drawings/",
+    "xl/tables/",
+    "xl/ctrlProps/",
+    "xl/charts/",
+    "xl/pivotTables/",
+    "xl/pivotCache/",
+    "xl/slicers/",
+    "xl/timelines/",
+)
+
 DEFAULT_MUTATIONS = (
     "no_op",
     "marker_cell",
@@ -374,17 +391,17 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             )
         elif mutation == "insert_tail_row":
             worksheet = workbook[workbook.sheetnames[0]]
-            row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+            row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.insert_rows(row_idx, amount=1)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
         elif mutation == "insert_tail_col":
             worksheet = workbook[workbook.sheetnames[0]]
-            col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+            col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.insert_cols(col_idx, amount=1)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
         elif mutation == "delete_marker_tail_row":
             worksheet = workbook[workbook.sheetnames[0]]
-            row_idx = int(getattr(worksheet, "max_row", 1) or 1) + 1
+            row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
@@ -393,7 +410,7 @@ def _apply_mutation(path: Path, mutation: str) -> None:
             worksheet.delete_rows(row_idx, amount=1)
         elif mutation == "delete_marker_tail_col":
             worksheet = workbook[workbook.sheetnames[0]]
-            col_idx = int(getattr(worksheet, "max_column", 1) or 1) + 1
+            col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
@@ -478,6 +495,51 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         close = getattr(workbook, "close", None)
         if close is not None:
             close()
+
+
+def _safe_tail_row_index(path: Path, worksheet) -> int:
+    max_row = int(getattr(worksheet, "max_row", 1) or 1)
+    for _col_idx, row_idx in _package_cell_refs(path):
+        max_row = max(max_row, row_idx)
+    return min(max_row + 1, 1_048_576)
+
+
+def _safe_tail_col_index(path: Path, worksheet) -> int:
+    max_col = int(getattr(worksheet, "max_column", 1) or 1)
+    for col_idx, _row_idx in _package_cell_refs(path):
+        max_col = max(max_col, col_idx)
+    return min(max_col + 1, 16_384)
+
+
+def _package_cell_refs(path: Path) -> Iterable[tuple[int, int]]:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for name in archive.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                if not name.startswith(REF_SCAN_PART_PREFIXES):
+                    continue
+                try:
+                    text = archive.read(name).decode("utf-8", errors="ignore")
+                except KeyError:
+                    continue
+                for col_letters, row_text in CELL_REF_RE.findall(text):
+                    row_idx = int(row_text)
+                    if row_idx > 1_048_576:
+                        continue
+                    col_idx = _column_index(col_letters)
+                    if col_idx > 16_384:
+                        continue
+                    yield col_idx, row_idx
+    except zipfile.BadZipFile:
+        return
+
+
+def _column_index(col_letters: str) -> int:
+    idx = 0
+    for char in col_letters:
+        idx = idx * 26 + (ord(char) - ord("A") + 1)
+    return idx
 
 
 def _prepare_mutation_baseline(before_path: Path, after_path: Path, mutation: str) -> None:
