@@ -10,31 +10,43 @@ Source page: [Microsoft Learn: Power BI samples as Excel workbooks](https://lear
 The Microsoft Learn page links public sample `.xlsx` workbooks hosted in the
 `microsoft/powerbi-desktop-samples` GitHub repository. The page's sample-use
 notice limits use to internal reference purposes, so the workbooks were
-downloaded to `/tmp` for audit evidence only and were not committed.
+downloaded to `/tmp` for audit evidence only and were not committed. The full
+no-PowerView `.xlsx` set was tested, not just a hand-picked subset.
 
 | Workbook | Source URL | Bytes | SHA-256 |
 |---|---|---:|---|
 | `customer-profitability-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Customer%20Profitability%20Sample-no-PV.xlsx` | 2,906,427 | `76f21c59d631e95bbad5489350695a46d903061aedb179e88b72f038772666d4` |
+| `human-resources-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Human%20Resources%20Sample-no-PV.xlsx` | 10,377,251 | `d837a4af057b450510ca3d1b00ce1ecc6ced32a18255c99e4b10b5aea4f1f1aa` |
 | `it-spend-analysis-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/IT%20Spend%20Analysis%20Sample-no-PV.xlsx` | 1,408,921 | `2adaf60667b42610d0a7d4d8ef141ea815d649acf60ba6e4f9f27376845ad4d5` |
+| `opportunity-tracking-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Opportunity%20Tracking%20Sample%20no%20PV.xlsx` | 700,910 | `16e924bc6ca72b89e4b1dbb09516778cca6c8cce8652d3e79ed166313b62ec7c` |
+| `procurement-analysis-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Procurement%20Analysis%20Sample-no-PV.xlsx` | 15,220,519 | `6192e15c4b75942bc663c49fa2c971edf2b868eb8f194b54fb113e47a9e32aa5` |
+| `retail-analysis-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Retail%20Analysis%20Sample-no-PV.xlsx` | 13,509,178 | `82f07475d5980321a1ce20b495cbd2ac2d26fe1ec13bf02ff405d7c4f704217c` |
+| `sales-and-marketing-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Sales%20and%20Marketing%20Sample-no-PV.xlsx` | 8,525,431 | `ce2ca572d76d2725cf65da3edb08486a268b3548ef7ebaf5348b00e415f4ebcc` |
+| `supplier-quality-analysis-no-pv.xlsx` | `https://raw.githubusercontent.com/microsoft/powerbi-desktop-samples/main/powerbi-service-samples/Supplier%20Quality%20Analysis%20Sample-no-PV.xlsx` | 794,651 | `0bf6079ea5345f31ba186bf7cfdf8db79cd2f8b673a9065919615583803ec43a` |
 
-Feature radar classified both workbooks as Excel-authored PowerPivot/Data Model
-files with custom XML, workbook connections, extension payloads, drawing/media
-parts, printer settings, workbook calc/global state, and style/theme content.
-`audit_ooxml_gap_radar.py` reported no unknown content types, unknown
-relationships, unknown extension URIs, unknown part families, or app-unsupported
-features for this mini corpus.
+Feature radar classified the set as Excel-authored PowerPivot/Data Model files
+with custom XML, workbook connections, extension payloads, drawing/media parts,
+printer settings, workbook calc/global state, and style/theme content. The
+larger set also covers pivot caches, chart/chart-style parts, and sheet metadata.
+
+This pass discovered `{4F2E5C28-24EA-4eb8-9CBF-B6C8F9C3D259}` in
+`xl/pivotCache/pivotCacheDefinition*.xml` as an `x15:cachedUniqueNames`
+pivot-cache extension. The gap radar now classifies that extension explicitly,
+and the expanded corpus reports no unknown content types, unknown relationships,
+unknown extension URIs, unknown part families, or app-unsupported features.
 
 Evidence artifacts:
 
 | Check | Artifact | Result |
 |---|---|---|
-| Gap radar | `/tmp/wolfxl-public-powerbi-samples-20260508` | clear, `fixture_count=2` |
-| Package mutation sweep | `/tmp/wolfxl-public-powerbi-mutations-20260508/report.json` | `36` results, `0` failures, `24` passed, `12` expected drift |
-| Excel source app smoke | `/tmp/wolfxl-excel-public-powerbi-source-smoke-20260508-clean/app-smoke-report.json` | `2` results, `0` failures |
-| Excel mutation app smoke | `/tmp/wolfxl-excel-public-powerbi-all-mutations-smoke-20260508/app-smoke-report.json` | `36` results, `0` failures |
+| Gap radar | `/tmp/wolfxl-public-powerbi-expanded-20260508` | clear, `fixture_count=8` |
+| Package mutation sweep | `/tmp/wolfxl-public-powerbi-expanded-mutations-20260508/report.json` | `144` results, `0` failures, `96` passed, `48` expected drift |
+| Excel source app smoke | `/tmp/wolfxl-excel-public-powerbi-expanded-source-smoke-20260508/app-smoke-report.json` | `8` results, `0` failures |
+| Excel mutation app smoke | `/tmp/wolfxl-excel-public-powerbi-expanded-all-mutations-smoke-20260508/app-smoke-report.json` | `144` results, `0` failures |
 
 The first two-file source app-smoke attempt produced one transient `Book1`
 active-workbook mismatch for `it-spend-analysis-no-pv.xlsx`; rerunning from a
 clean Excel process and running the workbook alone both opened it under the
 expected filename with no repair prompt. The clean rerun above is the retained
-evidence artifact.
+evidence artifact. The later eight-file source smoke also opened all files under
+their expected filenames.
