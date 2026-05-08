@@ -741,6 +741,22 @@ mod tests {
     }
 
     #[test]
+    fn preserves_full_sheet_row_defined_name_at_tail_boundary() {
+        let xml = r#"<workbook><definedNames><definedName name="_bdm.hidden" hidden="1">'HB ROI'!$1:$1048576</definedName></definedNames></workbook>"#;
+        let insert_tail = ShiftPlan::insert(Axis::Row, crate::MAX_ROW, 1);
+        let inserted = shift_defined_names(xml.as_bytes(), &insert_tail, "HB ROI", Some(0));
+        let inserted_text = String::from_utf8_lossy(&inserted);
+        assert!(inserted_text.contains("$1:$1048576"));
+        assert!(!inserted_text.contains("#REF!"));
+
+        let delete_tail = ShiftPlan::delete(Axis::Row, crate::MAX_ROW, 1);
+        let deleted = shift_defined_names(xml.as_bytes(), &delete_tail, "HB ROI", Some(0));
+        let deleted_text = String::from_utf8_lossy(&deleted);
+        assert!(deleted_text.contains("$1:$1048576"));
+        assert!(!deleted_text.contains("$1:$1048575"));
+    }
+
+    #[test]
     fn skips_per_sheet_dn_for_other_sheet() {
         let xml = r#"<workbook><definedNames><definedName name="Total" localSheetId="1">A5</definedName></definedNames></workbook>"#;
         let p = ShiftPlan::insert(Axis::Row, 5, 3);

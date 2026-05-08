@@ -480,6 +480,8 @@ def _is_skippable_source_error(exc: BaseException) -> bool:
             "could not determine file format",
             "File is not a zip file",
             "BadZipFile",
+            "invalid Zip archive",
+            "Could not find EOCD",
         )
     )
 

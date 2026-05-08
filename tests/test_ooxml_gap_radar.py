@@ -89,6 +89,34 @@ def test_gap_radar_reports_unknown_extension_uri_in_known_part(tmp_path: Path) -
     }
 
 
+def test_gap_radar_allows_mac_excel_view_extension_uris(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "mac-view-ext.xlsx"
+    _write_macos_view_extension_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "mac_view_ext",
+                        "tool": "excel-mac",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uri_count"] == 0
+
+
 def test_gap_radar_is_clear_for_plain_core_workbook(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
@@ -1029,6 +1057,46 @@ def _write_future_extension_fixture(path: Path) -> None:
            xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
   <sheetData/>
   <extLst><ext uri="{11111111-2222-3333-4444-555555555555}"><x14:futureThing/></ext></extLst>
+</worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_macos_view_extension_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          xmlns:mx="http://schemas.microsoft.com/office/mac/excel/2008/main">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+  <extLst><ext uri="{7523E5D3-25F3-A5E0-1632-64F254C22452}"><mx:ArchID Flags="2"/></ext></extLst>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:mx="http://schemas.microsoft.com/office/mac/excel/2008/main">
+  <sheetData/>
+  <extLst><ext uri="{64002731-A6B0-56B0-2670-7721B7C09600}"><mx:PLV Mode="0" OnePage="0" WScale="0"/></ext></extLst>
 </worksheet>""",
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",

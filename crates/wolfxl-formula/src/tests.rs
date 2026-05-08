@@ -141,6 +141,35 @@ fn t09_whole_row_range_unchanged_on_col_delta() {
 }
 
 #[test]
+fn t09b_full_sheet_row_range_is_stable_on_tail_row_insert() {
+    let out = shift(
+        "='HB ROI'!$1:$1048576",
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: crate::MAX_ROW,
+            n: 1,
+            respect_dollar: false,
+        },
+    );
+    assert_eq!(out, "='HB ROI'!$1:$1048576");
+}
+
+#[test]
+fn t09c_full_sheet_row_range_is_stable_on_tail_row_delete() {
+    let mut delta = RefDelta::empty();
+    delta.rows = -1;
+    delta.anchor_row = crate::MAX_ROW + 1;
+    delta.deleted_range = Some(DeletedRange {
+        min_row: crate::MAX_ROW,
+        max_row: crate::MAX_ROW,
+        min_col: 1,
+        max_col: crate::MAX_COL,
+    });
+    let out = translate("='HB ROI'!$1:$1048576", &delta).unwrap();
+    assert_eq!(out, "='HB ROI'!$1:$1048576");
+}
+
+#[test]
 fn t10_whole_col_range_shifts_on_col_delta() {
     let out = shift(
         "=SUM(A:C)",
@@ -166,6 +195,34 @@ fn t11_whole_col_range_unchanged_on_row_delta() {
         },
     );
     assert_eq!(out, "=SUM(A:C)");
+}
+
+#[test]
+fn t11b_full_sheet_col_range_is_stable_on_tail_col_insert() {
+    let out = shift(
+        "=Sheet1!$A:$XFD",
+        &ShiftPlan {
+            axis: Axis::Col,
+            at: crate::MAX_COL,
+            n: 1,
+            respect_dollar: false,
+        },
+    );
+    assert_eq!(out, "=Sheet1!$A:$XFD");
+}
+
+#[test]
+fn t11c_full_rectangular_sheet_range_is_stable_on_tail_row_insert() {
+    let out = shift(
+        "=Sheet1!$A$1:$XFD$1048576",
+        &ShiftPlan {
+            axis: Axis::Row,
+            at: crate::MAX_ROW,
+            n: 1,
+            respect_dollar: false,
+        },
+    );
+    assert_eq!(out, "=Sheet1!$A$1:$XFD$1048576");
 }
 
 #[test]

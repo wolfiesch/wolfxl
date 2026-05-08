@@ -250,6 +250,12 @@ def test_runner_can_skip_invalid_source_workbooks_for_exploratory_corpora(
     assert "could not determine file format" in result["error"]
 
 
+def test_runner_treats_native_invalid_zip_as_skippable_source_error() -> None:
+    error = RuntimeError("native xlsx open failed: invalid Zip archive: Could not find EOCD")
+
+    assert runner_module._is_skippable_source_error(error) is True
+
+
 def test_runner_can_skip_missing_manifest_fixtures_for_exploratory_corpora(
     tmp_path: Path,
 ) -> None:
