@@ -586,18 +586,22 @@ def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monk
     assert result["ui_actions"] == ["executed Excel command: refresh all"]
 
 
-def test_ui_interaction_probe_records_slicer_shape_selection(tmp_path: Path, monkeypatch) -> None:
+def test_ui_interaction_probe_records_slicer_item_click(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
     _write_slicer_workbook(fixture_dir / "slicer.xlsx")
     _write_manifest(fixture_dir, "slicer.xlsx")
 
-    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
         assert probe == "slicer_selection_state"
+        _rewrite_slicer_filter(src, value="EAST")
         return "slicer.xlsx", [
             "selected Excel slicer shape",
             "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: first visible item",
+            "saved active workbook",
         ]
 
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
@@ -613,6 +617,9 @@ def test_ui_interaction_probe_records_slicer_shape_selection(tmp_path: Path, mon
     assert report["results"][0]["ui_actions"] == [
         "selected Excel slicer shape",
         "selected Excel slicer shape: Slicer_Region",
+        "clicked Excel slicer item",
+        "clicked Excel slicer item: first visible item",
+        "saved active workbook",
     ]
 
 
@@ -661,6 +668,77 @@ def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path
     assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == ["Slicer_Region"]
     assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
         "Timeline_Date"
+    ]
+
+
+def test_slicer_ui_interaction_requires_persisted_filter_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: first visible item",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "did not change persisted table filter state" in report["results"][0]["message"]
+
+
+def test_slicer_ui_interaction_accepts_persisted_filter_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, _timeout: int):
+        assert probe == "slicer_selection_state"
+        _rewrite_slicer_filter(src, value="EAST")
+        return "slicer.xlsx", [
+            "selected Excel slicer shape",
+            "selected Excel slicer shape: Slicer_Region",
+            "clicked Excel slicer item",
+            "clicked Excel slicer item: first visible item",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("slicer_selection_state",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["ui_actions"] == [
+        "selected Excel slicer shape",
+        "selected Excel slicer shape: Slicer_Region",
+        "clicked Excel slicer item",
+        "clicked Excel slicer item: first visible item",
+        "saved active workbook",
     ]
 
 
@@ -1039,6 +1117,15 @@ def _write_pivot_workbook(path: Path) -> None:
 
 def _write_slicer_workbook(path: Path) -> None:
     entries = _base_entries()
+    entries["xl/tables/table1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+       id="1" name="Table1" displayName="Table1" ref="A1:B4">
+  <autoFilter ref="A1:B4"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="Customer"/>
+    <tableColumn id="2" name="Region"/>
+  </tableColumns>
+</table>"""
     entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region"/>"""
     entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1127,6 +1214,24 @@ def _rewrite_timeline_selection(path: Path, *, start: str, end: str) -> None:
         f'startDate="{start}" endDate="{end}"',
     )
     entries["xl/timelineCaches/timelineCache1.xml"] = timeline.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _rewrite_slicer_filter(path: Path, *, value: str) -> None:
+    with zipfile.ZipFile(path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    table = entries["xl/tables/table1.xml"].decode()
+    table = table.replace(
+        '<autoFilter ref="A1:B4"/>',
+        (
+            '<autoFilter ref="A1:B4">'
+            f'<filterColumn colId="1"><filters><filter val="{value}"/></filters></filterColumn>'
+            "</autoFilter>"
+        ),
+    )
+    entries["xl/tables/table1.xml"] = table.encode()
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

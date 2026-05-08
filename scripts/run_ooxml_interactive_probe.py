@@ -59,7 +59,7 @@ REQUIRED_UI_ACTIONS = {
     "macro_project_presence": "clicked button: Disable Macros",
     "external_link_update_prompt": "clicked button: Don't Update",
     "pivot_refresh_state": "executed Excel command: refresh all",
-    "slicer_selection_state": "selected Excel slicer shape",
+    "slicer_selection_state": "clicked Excel slicer item",
     "timeline_selection_state": "clicked Excel timeline month",
 }
 
@@ -353,6 +353,11 @@ def _run_ui_interaction_probe(
         if probe == "timeline_selection_state"
         else None
     )
+    slicer_filter_before = (
+        _slicer_table_filter_state(probe_path)
+        if probe == "slicer_selection_state"
+        else None
+    )
     try:
         active_name, ui_actions = _open_excel_with_ui_interaction(probe_path, probe, timeout)
     except Exception as exc:
@@ -407,6 +412,23 @@ def _run_ui_interaction_probe(
                 message=(
                     "Excel timeline UI click did not change persisted "
                     f"timeline selection: {timeline_before}"
+                ),
+                ui_actions=ui_actions,
+            )
+    if probe == "slicer_selection_state":
+        slicer_filter_after = _slicer_table_filter_state(probe_path)
+        if not slicer_filter_after or slicer_filter_after == slicer_filter_before:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=str(probe_path),
+                message=(
+                    "Excel slicer UI click did not change persisted "
+                    f"table filter state: {slicer_filter_before}"
                 ),
                 ui_actions=ui_actions,
             )
@@ -488,6 +510,9 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
                 ui_actions.extend(_refresh_all_active_workbook())
             if probe in {"slicer_selection_state", "timeline_selection_state"}:
                 ui_actions.extend(_select_first_probe_shape(src, probe))
+            if probe == "slicer_selection_state":
+                ui_actions.extend(_click_slicer_item(src))
+                ui_actions.extend(_save_active_workbook())
             if probe == "timeline_selection_state":
                 ui_actions.extend(_click_timeline_month(src))
                 ui_actions.extend(_save_active_workbook())
@@ -603,6 +628,69 @@ end tell
     except subprocess.TimeoutExpired:
         return [f"failed Excel {label} shape selection: timeout"]
     return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _click_slicer_item(src: Path) -> list[str]:
+    """Click the first visible item in the first authored table slicer."""
+    names = _probe_shape_names(src, "slicer_selection_state")
+    if not names:
+        return ["failed Excel slicer item click: no slicer shape names in package"]
+    quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
+    script = f"""
+tell application "Microsoft Excel"
+  activate
+  try
+    set bounds of active window to {{0, 40, 1600, 1050}}
+  end try
+  try
+    set zoom of active window to 100
+  end try
+  try
+    set scroll row of active window to 1
+    set scroll column of active window to 1
+  end try
+  try
+    set expectedNames to {{{quoted_names}}}
+    repeat with i from 1 to (count of shapes of active sheet)
+      set candidate to shape i of active sheet
+      set candidateName to name of candidate as text
+      if expectedNames contains candidateName then
+        return (left position of candidate as text) & "," & ¬
+          (top of candidate as text) & "," & ¬
+          (width of candidate as text) & "," & ¬
+          (height of candidate as text)
+      end if
+    end repeat
+    return ""
+  on error errText
+    return "ERROR: " & errText
+  end try
+end tell
+"""
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=10)
+    except subprocess.TimeoutExpired:
+        return ["failed Excel slicer item click: layout timeout"]
+    geometry = proc.stdout.strip()
+    if not geometry or geometry.startswith("ERROR:"):
+        return [f"failed Excel slicer item click: {geometry or 'no matching shape'}"]
+    try:
+        left, top, width, _height = [float(part) for part in geometry.split(",")]
+    except ValueError:
+        return [f"failed Excel slicer item click: invalid shape geometry {geometry!r}"]
+
+    # The probe normalizes the Excel window, zoom, and scroll origin above.
+    # These offsets target the first visible button in the MyExcelOnline slicer
+    # fixture; the persisted table filter change is the actual pass condition.
+    sheet_origin_x = 24.0
+    sheet_origin_y = 259.0
+    click_x = sheet_origin_x + left + (width / 2.0)
+    click_y = sheet_origin_y + top + 33.0
+    try:
+        _post_mouse_click(click_x, click_y)
+    except Exception as exc:
+        return [f"failed Excel slicer item click: {str(exc)[:250]}"]
+    return ["clicked Excel slicer item", "clicked Excel slicer item: first visible item"]
 
 
 def _click_timeline_month(src: Path) -> list[str]:
@@ -797,6 +885,34 @@ def _timeline_selection_range(path: Path) -> tuple[str, str] | None:
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return None
     return None
+
+
+def _slicer_table_filter_state(path: Path) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    state: list[tuple[str, str, tuple[str, ...]]] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            table_parts = [
+                name
+                for name in archive.namelist()
+                if name.startswith("xl/tables/") and name.endswith(".xml")
+            ]
+            for part_name in sorted(table_parts):
+                root = ET.fromstring(archive.read(part_name))
+                for filter_column in root.iter():
+                    if _local_name(filter_column.tag) != "filterColumn":
+                        continue
+                    col_id = filter_column.attrib.get("colId", "")
+                    values = tuple(
+                        filter_element.attrib.get("val", "")
+                        for filter_element in filter_column.iter()
+                        if _local_name(filter_element.tag) == "filter"
+                        and filter_element.attrib.get("val")
+                    )
+                    if values:
+                        state.append((part_name, col_id, values))
+    except (zipfile.BadZipFile, ET.ParseError, OSError):
+        return ()
+    return tuple(state)
 
 
 def _local_name(tag: str) -> str:
