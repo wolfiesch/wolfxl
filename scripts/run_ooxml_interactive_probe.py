@@ -475,6 +475,20 @@ def _run_ui_interaction_probe(
 
 
 def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tuple[str, list[str]]:
+    ask_to_update_links = None
+    if probe == "external_link_update_prompt":
+        ask_to_update_links = _excel_ask_to_update_links()
+        _set_excel_ask_to_update_links(True)
+    try:
+        return _open_excel_with_ui_interaction_impl(src, probe, timeout)
+    finally:
+        if ask_to_update_links is not None:
+            _set_excel_ask_to_update_links(ask_to_update_links)
+
+
+def _open_excel_with_ui_interaction_impl(
+    src: Path, probe: str, timeout: int
+) -> tuple[str, list[str]]:
     launched = subprocess.Popen(
         ["open", "-a", "Microsoft Excel", str(src.resolve())],
         stdout=subprocess.PIPE,
@@ -555,6 +569,29 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
         timeout,
         output=last_error,
     )
+
+
+def _excel_ask_to_update_links() -> bool | None:
+    script = 'tell application "Microsoft Excel" to get ask to update links'
+    try:
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=3)
+    except subprocess.TimeoutExpired:
+        return None
+    value = proc.stdout.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
+def _set_excel_ask_to_update_links(enabled: bool) -> None:
+    value = "true" if enabled else "false"
+    script = f'tell application "Microsoft Excel" to set ask to update links to {value}'
+    try:
+        run_ooxml_app_smoke._run_osascript(script, timeout=3)
+    except subprocess.TimeoutExpired:
+        return
 
 
 def _perform_probe_ui_actions(probe: str) -> list[str]:

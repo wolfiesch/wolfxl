@@ -852,6 +852,20 @@
         {"path": "bucket_fixtures.python_in_excel", "length_at_least": 1},
         {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 2}
       ]
+    },
+    {
+      "name": "excel_ui_interaction_external_link_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-forced-codepath-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
+      ]
     }
   ]
 }

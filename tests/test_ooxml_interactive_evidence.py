@@ -534,6 +534,63 @@ def test_ui_interaction_probe_records_macro_button_click(tmp_path: Path, monkeyp
     assert result["ui_actions"] == ["clicked button: Disable Macros"]
 
 
+def test_external_link_ui_probe_forces_and_restores_update_prompt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(
+        probe_runner,
+        "_open_excel_with_ui_interaction_impl",
+        lambda src, probe, timeout: (
+            src.name,
+            [f"{probe}:{timeout}", "clicked button: Don't Update"],
+        ),
+    )
+
+    active_name, actions = probe_runner._open_excel_with_ui_interaction(
+        fixture,
+        "external_link_update_prompt",
+        45,
+    )
+
+    assert active_name == "external-link.xlsx"
+    assert actions == ["external_link_update_prompt:45", "clicked button: Don't Update"]
+    assert settings == [True, False]
+
+
+def test_external_link_ui_probe_restores_update_prompt_after_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    def fail_open(_src: Path, _probe: str, _timeout: int) -> tuple[str, list[str]]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", fail_open)
+
+    try:
+        probe_runner._open_excel_with_ui_interaction(
+            fixture,
+            "external_link_update_prompt",
+            45,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert settings == [True, False]
+
+
 def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
