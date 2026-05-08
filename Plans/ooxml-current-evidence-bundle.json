@@ -466,14 +466,18 @@
       ]
     },
     {
-      "name": "powerpivot_contoso_sidecar_excel_app_open",
+      "name": "powerpivot_contoso_sidecar_excel_expected_unsupported",
       "path": "/tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker --app excel --timeout 120 --mutation source --mutation marker_cell > /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json",
       "expect": [
         {"path": "result_count", "equals": 2},
         {"path": "failure_count", "equals": 0},
         {"path": "apps", "equals": ["excel"]},
-        {"path": "mutations", "equals": ["source", "marker_cell"]}
+        {"path": "mutations", "equals": ["source", "marker_cell"]},
+        {"path": "results.0.status", "equals": "expected_app_unsupported"},
+        {"path": "results.0.message", "contains": "PowerView"},
+        {"path": "results.1.status", "equals": "expected_app_unsupported"},
+        {"path": "results.1.message", "contains": "PowerView"}
       ]
     },
     {
@@ -490,13 +494,15 @@
     {
       "name": "powerpivot_contoso_sidecar_coverage",
       "path": "/tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/powerpivot_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json --app-report /tmp/wolfxl-app-smoke-excel-powerpivot-contoso-source-marker.json --render-report /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json > /tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/powerpivot_variants --report /tmp/wolfxl-ooxml-fidelity-mutations-powerpivot-contoso.json --render-report /tmp/wolfxl-render-excel-powerpivot-contoso-marker.json > /tmp/wolfxl-coverage-powerpivot-contoso-sidecar.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "fixture_count", "equals": 1},
+        {"path": "app_report_count", "equals": 0},
         {"path": "surfaces.powerpivot_data_model_preservation.status", "equals": "clear"},
         {"path": "surfaces.powerpivot_data_model_preservation.structural_mutation_fixtures", "length_at_least": 1},
-        {"path": "surfaces.powerpivot_data_model_preservation.intentional_app_open_fixtures", "length_at_least": 1},
+        {"path": "surfaces.powerpivot_data_model_preservation.app_open_fixtures", "equals": []},
+        {"path": "surfaces.powerpivot_data_model_preservation.intentional_app_open_fixtures", "equals": []},
         {"path": "surfaces.powerpivot_data_model_preservation.intentional_render_fixtures", "length_at_least": 1}
       ]
     },
@@ -510,7 +516,13 @@
         {"path": "unknown_part_family_count", "equals": 0},
         {"path": "unknown_relationship_type_count", "equals": 0},
         {"path": "unknown_content_type_count", "equals": 0},
-        {"path": "unknown_extension_uri_count", "equals": 0}
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "app_unsupported_features", "equals": {"power_view": ["real-excel-powerpivot-contoso-pnl.xlsx"]}},
+        {"path": "app_unsupported_feature_count", "equals": 1},
+        {"path": "expected_app_unsupported_features", "equals": {"power_view": ["real-excel-powerpivot-contoso-pnl.xlsx"]}},
+        {"path": "expected_app_unsupported_feature_count", "equals": 1},
+        {"path": "unexpected_app_unsupported_feature_count", "equals": 0},
+        {"path": "missing_expected_app_unsupported_feature_count", "equals": 0}
       ]
     },
     {

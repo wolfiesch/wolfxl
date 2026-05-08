@@ -137,6 +137,36 @@ def test_smoke_excel_rejects_powerview_before_launching_excel(
     assert "PowerView" in result.message
 
 
+def test_smoke_excel_accepts_manifest_expected_powerview_as_nonpassing_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture = tmp_path / "powerview.xlsx"
+    with zipfile.ZipFile(fixture, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        archive.writestr("xl/sharedStrings.xml", "<sst>Power View report</sst>")
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
+
+    def fail_open(_src, _timeout):
+        raise AssertionError("Excel should not launch for expected PowerView preflight")
+
+    monkeypatch.setattr(smoke_module, "_open_excel_with_finder_and_close", fail_open)
+
+    result = smoke_module._smoke_excel(
+        fixture,
+        tmp_path / "out",
+        timeout=1,
+        expected_app_unsupported_features=["power_view"],
+    )
+
+    assert result.status == "expected_app_unsupported"
+    assert result.status not in {"passed", "skipped"}
+    assert smoke_module.EXCEL_UNSUPPORTED_CONTENT_MARKER in result.message
+
+
 def test_excel_active_workbook_name_treats_missing_value_as_none(monkeypatch) -> None:
     class FakeProc:
         stdout = "missing value\n"
@@ -345,7 +375,7 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     fixture = fixture_dir / "simple.xlsx"
     _make_fixture(fixture)
 
-    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int, **_kwargs):
         return smoke_module.AppSmokeResult(
             fixture=src.name,
             mutation="source",
@@ -384,7 +414,7 @@ def test_run_smoke_aborts_after_first_excel_repair_dialog(tmp_path: Path, monkey
 
     seen_sources: list[str] = []
 
-    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int, **_kwargs):
         seen_sources.append(src.name)
         return smoke_module.AppSmokeResult(
             fixture=src.name,
@@ -427,7 +457,7 @@ def test_run_smoke_aborts_after_first_excel_unsupported_content_dialog(
 
     seen_sources: list[str] = []
 
-    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int, **_kwargs):
         seen_sources.append(src.name)
         return smoke_module.AppSmokeResult(
             fixture=src.name,
@@ -465,7 +495,7 @@ def test_run_smoke_can_continue_after_excel_repair_dialog(tmp_path: Path, monkey
     excel_app.mkdir()
     monkeypatch.setattr(smoke_module, "EXCEL_APP", str(excel_app))
 
-    def fake_smoke(src: Path, _output_dir: Path, _timeout: int):
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int, **_kwargs):
         return smoke_module.AppSmokeResult(
             fixture=src.name,
             mutation="source",

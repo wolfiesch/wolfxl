@@ -39,7 +39,7 @@ REPAIR_DISMISS_BUTTONS = (
     "OK",
     "Close",
 )
-PASSING_STATUSES = {"passed", "skipped"}
+PASSING_STATUSES = {"passed", "skipped", "expected_app_unsupported"}
 SOURCE_MUTATION = "source"
 EXCEL_REPAIR_MARKER = "Excel repair/error dialog while opening:"
 EXCEL_UNSUPPORTED_CONTENT_MARKER = "Excel unsupported-content dialog while opening:"
@@ -112,7 +112,12 @@ def run_smoke(
                 if app == "libreoffice":
                     result = _smoke_libreoffice(smoke_path, app_output_dir, timeout)
                 elif app == "excel":
-                    result = _smoke_excel(smoke_path, app_output_dir, timeout)
+                    result = _smoke_excel(
+                        smoke_path,
+                        app_output_dir,
+                        timeout,
+                        expected_app_unsupported_features=entry.app_unsupported_features,
+                    )
                 else:
                     raise ValueError(f"unknown app: {app}")
                 result.fixture = entry.filename
@@ -252,7 +257,12 @@ def _libreoffice_converted_path(work: Path, src: Path) -> Path:
     return matches[0] if matches else expected
 
 
-def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
+def _smoke_excel(
+    src: Path,
+    output_dir: Path,
+    timeout: int,
+    expected_app_unsupported_features: Iterable[str] | None = None,
+) -> AppSmokeResult:
     if not Path(EXCEL_APP).is_dir():
         return AppSmokeResult(
             src.name,
@@ -262,12 +272,14 @@ def _smoke_excel(src: Path, output_dir: Path, timeout: int) -> AppSmokeResult:
             None,
             "Microsoft Excel not found",
         )
+    expected_features = set(expected_app_unsupported_features or [])
     if _contains_powerview_content(src):
+        status = "expected_app_unsupported" if "power_view" in expected_features else "failed"
         return AppSmokeResult(
             src.name,
             SOURCE_MUTATION,
             "excel",
-            "failed",
+            status,
             str(src),
             (
                 f"{EXCEL_UNSUPPORTED_CONTENT_MARKER} workbook contains PowerView "

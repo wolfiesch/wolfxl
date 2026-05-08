@@ -120,6 +120,9 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
     unknown_content_type_fixtures: dict[str, set[str]] = {}
     unknown_extension_uri_fixtures: dict[str, set[str]] = {}
     app_unsupported_feature_fixtures: dict[str, set[str]] = {}
+    expected_app_unsupported_feature_fixtures: dict[str, set[str]] = {}
+    unexpected_app_unsupported_feature_fixtures: dict[str, set[str]] = {}
+    missing_expected_app_unsupported_feature_fixtures: dict[str, set[str]] = {}
 
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(
         fixture_dir, recursive=recursive
@@ -128,12 +131,26 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         if not path.is_file():
             continue
         fixture_report = _fixture_unknowns(path)
+        observed_app_unsupported_features = set(fixture_report["app_unsupported_features"])
+        expected_app_unsupported_features = set(entry.app_unsupported_features or [])
+        expected_observed = sorted(
+            observed_app_unsupported_features & expected_app_unsupported_features
+        )
+        unexpected = sorted(
+            observed_app_unsupported_features - expected_app_unsupported_features
+        )
+        missing_expected = sorted(
+            expected_app_unsupported_features - observed_app_unsupported_features
+        )
         fixtures.append(
             {
                 "filename": entry.filename,
                 "fixture_id": entry.fixture_id,
                 "tool": entry.tool,
                 **fixture_report,
+                "expected_app_unsupported_features": expected_observed,
+                "unexpected_app_unsupported_features": unexpected,
+                "missing_expected_app_unsupported_features": missing_expected,
             }
         )
         for family in fixture_report["unknown_part_families"]:
@@ -146,6 +163,18 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
             unknown_extension_uri_fixtures.setdefault(uri, set()).add(entry.filename)
         for feature in fixture_report["app_unsupported_features"]:
             app_unsupported_feature_fixtures.setdefault(feature, set()).add(entry.filename)
+        for feature in expected_observed:
+            expected_app_unsupported_feature_fixtures.setdefault(feature, set()).add(
+                entry.filename
+            )
+        for feature in unexpected:
+            unexpected_app_unsupported_feature_fixtures.setdefault(feature, set()).add(
+                entry.filename
+            )
+        for feature in missing_expected:
+            missing_expected_app_unsupported_feature_fixtures.setdefault(
+                feature, set()
+            ).add(entry.filename)
 
     return {
         "fixture_dir": str(fixture_dir),
@@ -157,16 +186,35 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         "unknown_content_types": _sorted_mapping(unknown_content_type_fixtures),
         "unknown_extension_uris": _sorted_mapping(unknown_extension_uri_fixtures),
         "app_unsupported_features": _sorted_mapping(app_unsupported_feature_fixtures),
+        "expected_app_unsupported_features": _sorted_mapping(
+            expected_app_unsupported_feature_fixtures
+        ),
+        "unexpected_app_unsupported_features": _sorted_mapping(
+            unexpected_app_unsupported_feature_fixtures
+        ),
+        "missing_expected_app_unsupported_features": _sorted_mapping(
+            missing_expected_app_unsupported_feature_fixtures
+        ),
         "unknown_part_family_count": len(unknown_part_fixtures),
         "unknown_relationship_type_count": len(unknown_rel_fixtures),
         "unknown_content_type_count": len(unknown_content_type_fixtures),
         "unknown_extension_uri_count": len(unknown_extension_uri_fixtures),
         "app_unsupported_feature_count": len(app_unsupported_feature_fixtures),
+        "expected_app_unsupported_feature_count": len(
+            expected_app_unsupported_feature_fixtures
+        ),
+        "unexpected_app_unsupported_feature_count": len(
+            unexpected_app_unsupported_feature_fixtures
+        ),
+        "missing_expected_app_unsupported_feature_count": len(
+            missing_expected_app_unsupported_feature_fixtures
+        ),
         "clear": not unknown_part_fixtures
         and not unknown_rel_fixtures
         and not unknown_content_type_fixtures
         and not unknown_extension_uri_fixtures
-        and not app_unsupported_feature_fixtures,
+        and not unexpected_app_unsupported_feature_fixtures
+        and not missing_expected_app_unsupported_feature_fixtures,
     }
 
 

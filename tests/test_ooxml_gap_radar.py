@@ -306,6 +306,44 @@ def test_gap_radar_reports_powerview_as_app_unsupported_feature(
     assert report["unknown_extension_uri_count"] == 0
     assert report["app_unsupported_features"] == {"power_view": ["powerview.xlsx"]}
     assert report["app_unsupported_feature_count"] == 1
+    assert report["unexpected_app_unsupported_features"] == {
+        "power_view": ["powerview.xlsx"]
+    }
+    assert report["unexpected_app_unsupported_feature_count"] == 1
+
+
+def test_gap_radar_allows_manifest_declared_powerview_feature(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "powerview.xlsx"
+    _write_powerview_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "powerview",
+                        "tool": "excel",
+                        "app_unsupported_features": ["power_view"],
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["app_unsupported_features"] == {"power_view": ["powerview.xlsx"]}
+    assert report["app_unsupported_feature_count"] == 1
+    assert report["expected_app_unsupported_features"] == {
+        "power_view": ["powerview.xlsx"]
+    }
+    assert report["unexpected_app_unsupported_feature_count"] == 0
+    assert report["missing_expected_app_unsupported_feature_count"] == 0
 
 
 def _write_plain_fixture(path: Path) -> None:

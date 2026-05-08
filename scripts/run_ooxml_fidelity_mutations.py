@@ -212,6 +212,7 @@ class FixtureEntry:
     sha256: str | None = None
     fixture_id: str | None = None
     tool: str | None = None
+    app_unsupported_features: list[str] | None = None
 
 
 @dataclass
@@ -238,6 +239,7 @@ def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[Fixtur
                 sha256=entry.get("sha256"),
                 fixture_id=entry.get("fixture_id"),
                 tool=entry.get("tool"),
+                app_unsupported_features=entry.get("app_unsupported_features"),
             )
             for entry in payload.get("fixtures", [])
         ]
