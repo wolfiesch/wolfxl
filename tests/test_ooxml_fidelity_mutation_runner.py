@@ -163,6 +163,31 @@ def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
     assert report["results"][0]["fixture"] == "keep.xlsx"
 
 
+def test_runner_can_skip_invalid_source_workbooks_for_exploratory_corpora(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    invalid = fixture_dir / "bad.xlsx"
+    invalid.write_text("not an OOXML zip")
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+        skip_invalid_source=True,
+    )
+
+    assert report["skip_invalid_source"] is True
+    assert report["failure_count"] == 0
+    assert report["result_count"] == 1
+    result = report["results"][0]
+    assert result["fixture"] == "bad.xlsx"
+    assert result["status"] == "skipped_source_invalid"
+    assert "could not determine file format" in result["error"]
+
+
 def test_runner_supports_add_remove_chart_mutation(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

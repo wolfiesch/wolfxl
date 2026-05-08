@@ -62,7 +62,7 @@ SUPPORTED_MUTATIONS = (
     "move_formula_range",
     "retarget_external_links",
 )
-PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
+PASSING_STATUSES = {"passed", "passed_with_expected_drift", "skipped_source_invalid"}
 MARKER_CELL = "Z1"
 MARKER_VALUE = "wolfxl_ooxml_fidelity_mutation"
 STYLE_CELL = "AA1"
@@ -261,6 +261,7 @@ def run_sweep(
     verify_hashes: bool = True,
     recursive: bool = False,
     exclude_fixture_patterns: Iterable[str] = (),
+    skip_invalid_source: bool = False,
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -299,6 +300,7 @@ def run_sweep(
                     output_dir=output_dir,
                     mutation=mutation,
                     hash_error=hash_error,
+                    skip_invalid_source=skip_invalid_source,
                 )
             )
 
@@ -308,6 +310,7 @@ def run_sweep(
         "mutations": list(mutations),
         "recursive": recursive,
         "exclude_fixture_patterns": list(exclude_fixture_patterns),
+        "skip_invalid_source": skip_invalid_source,
         "skipped_fixture_count": len(skipped_fixtures),
         "skipped_fixtures": skipped_fixtures,
         "result_count": len(results),
@@ -341,6 +344,7 @@ def _run_single_mutation(
     output_dir: Path,
     mutation: str,
     hash_error: str | None,
+    skip_invalid_source: bool = False,
 ) -> MutationResult:
     mutation_dir = (
         output_dir / _safe_stem(Path(fixture_label).with_suffix("").as_posix()) / mutation
@@ -371,6 +375,19 @@ def _run_single_mutation(
         audit_report = audit_ooxml_fidelity.audit(before_path, after_path)
         _assert_zip_integrity(after_path)
     except Exception as exc:
+        if skip_invalid_source and _is_skippable_source_error(exc):
+            return MutationResult(
+                fixture=fixture_label,
+                mutation=mutation,
+                status="skipped_source_invalid",
+                issue_count=0,
+                issues=[],
+                expected_issue_count=0,
+                expected_issues=[],
+                before=str(before_path),
+                after=str(after_path),
+                error=_source_error_reason(exc),
+            )
         return MutationResult(
             fixture=fixture_label,
             mutation=mutation,
@@ -410,6 +427,28 @@ def _run_single_mutation(
         before=str(before_path),
         after=str(after_path),
     )
+
+
+def _is_skippable_source_error(exc: BaseException) -> bool:
+    message = str(exc)
+    return any(
+        marker in message
+        for marker in (
+            "Invalid checksum",
+            "unsafe OOXML package part path",
+            "OOXML-encrypted",
+            "could not determine file format",
+            "File is not a zip file",
+            "BadZipFile",
+        )
+    )
+
+
+def _source_error_reason(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
 
 
 def _apply_mutation(path: Path, mutation: str) -> None:
@@ -924,6 +963,15 @@ def main(argv: list[str] | None = None) -> int:
             "May be passed multiple times."
         ),
     )
+    parser.add_argument(
+        "--skip-invalid-source",
+        action="store_true",
+        help=(
+            "Treat source workbooks that are corrupt, encrypted, or unsafe packages "
+            "as skipped_source_invalid instead of fidelity failures. Intended for "
+            "broad exploratory corpora, not curated evidence packs."
+        ),
+    )
     args = parser.parse_args(argv)
 
     report = run_sweep(
@@ -933,6 +981,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_hashes=not args.no_verify_hashes,
         recursive=args.recursive,
         exclude_fixture_patterns=args.exclude_fixture,
+        skip_invalid_source=args.skip_invalid_source,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
