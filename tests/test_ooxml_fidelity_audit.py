@@ -416,6 +416,100 @@ def test_workbook_defined_name_reference_audit_accepts_current_external_and_ref(
     assert snapshot.workbook_sheet_ref_issues == []
 
 
+def test_detects_worksheet_formula_references_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+  xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>Sheet1!A1</f></c>
+      <c r="B1"><f>"Sheet1!"</f></c>
+    </row>
+  </sheetData>
+  <conditionalFormatting sqref="A1:A5">
+    <cfRule type="expression" priority="1">
+      <formula>Sheet1!$A$1&gt;0</formula>
+    </cfRule>
+  </conditionalFormatting>
+  <dataValidations count="1">
+    <dataValidation type="list" sqref="C1">
+      <formula1>Sheet1!$A$1:$A$3</formula1>
+      <formula2>"Sheet1!"</formula2>
+    </dataValidation>
+  </dataValidations>
+  <extLst>
+    <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}">
+      <x14:dataValidations count="1">
+        <x14:dataValidation type="list">
+          <x14:formula1><xm:f>Sheet1!$A$1:$A$3</xm:f></x14:formula1>
+        </x14:dataValidation>
+      </x14:dataValidations>
+    </ext>
+  </extLst>
+</worksheet>"""
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issues = [
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "worksheet_formula_missing_sheet"
+    ]
+    assert len(issues) == 4
+    assert {issue["part"] for issue in issues} == {"xl/worksheets/sheet1.xml"}
+    assert all("Sheet1" in issue["message"] for issue in issues)
+    assert all('"Sheet1!"' not in issue["message"] for issue in issues)
+
+
+def test_worksheet_formula_reference_audit_accepts_current_external_and_literals(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "worksheet-formulas.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>'WolfXL Fidelity Rename'!A1</f></c>
+      <c r="B1"><f>'[Book.xlsx]Sheet1'!A1</f></c>
+      <c r="C1"><f>"Sheet1!"</f></c>
+    </row>
+  </sheetData>
+  <conditionalFormatting sqref="A1:A5">
+    <cfRule type="expression" priority="1">
+      <formula>'WolfXL Fidelity Rename'!$A$1&gt;0</formula>
+    </cfRule>
+  </conditionalFormatting>
+  <dataValidations count="1">
+    <dataValidation type="list" sqref="D1">
+      <formula1>'WolfXL Fidelity Rename'!$A$1:$A$3</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>"""
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.worksheet_sheet_ref_issues == []
+
+
 def test_fingerprints_structured_references_without_external_links(
     tmp_path: Path,
 ) -> None:

@@ -87,6 +87,7 @@ class Snapshot:
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
     table_integrity_issues: list[dict[str, str]]
+    worksheet_sheet_ref_issues: list[dict[str, str]]
     workbook_sheet_ref_issues: list[dict[str, str]]
     chart_sheet_ref_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
@@ -105,6 +106,7 @@ def snapshot(path: Path) -> Snapshot:
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
             table_integrity_issues=_read_table_integrity_issues(archive),
+            worksheet_sheet_ref_issues=_read_worksheet_sheet_ref_issues(archive, parts),
             workbook_sheet_ref_issues=_read_workbook_sheet_ref_issues(archive),
             chart_sheet_ref_issues=_read_chart_sheet_ref_issues(archive),
             feature_parts=_classify_feature_parts(parts),
@@ -134,6 +136,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
     _audit_table_integrity(after_snapshot, issues)
+    _audit_worksheet_sheet_refs(after_snapshot, issues)
     _audit_workbook_sheet_refs(after_snapshot, issues)
     _audit_chart_sheet_refs(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
@@ -243,6 +246,12 @@ def _audit_conditional_formatting_refs(
 
 def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
     issues.extend(snapshot_.table_integrity_issues)
+
+
+def _audit_worksheet_sheet_refs(
+    snapshot_: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    issues.extend(snapshot_.worksheet_sheet_ref_issues)
 
 
 def _audit_workbook_sheet_refs(
@@ -542,6 +551,55 @@ def _read_workbook_sheet_ref_issues(
     return issues
 
 
+def _read_worksheet_sheet_ref_issues(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for element_name, formula in _worksheet_formula_reference_texts(root):
+            refs = _formula_sheet_reference_names(formula)
+            missing = sorted(ref for ref in refs if ref not in sheet_names)
+            if missing:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "kind": "worksheet_formula_missing_sheet",
+                        "part": part,
+                        "message": (
+                            f"{part} {element_name} formula {formula!r} references "
+                            f"missing sheet(s): {missing}"
+                        ),
+                    }
+                )
+    return issues
+
+
+def _worksheet_formula_reference_texts(
+    root: ElementTree.Element,
+) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    formula_node_names = {"f", "formula", "formula1", "formula2"}
+    for node in root.iter():
+        element_name = _local_name(node.tag)
+        if element_name not in formula_node_names:
+            continue
+        if (
+            element_name in {"formula1", "formula2"}
+            and _first_child_by_local(node, "f") is not None
+        ):
+            continue
+        if formula := _text(node):
+            out.append((element_name, formula))
+    return out
+
+
 def _workbook_sheet_names(archive: zipfile.ZipFile) -> set[str]:
     root = _read_xml_or_none(archive, "xl/workbook.xml")
     if root is None:
@@ -556,6 +614,9 @@ def _workbook_sheet_names(archive: zipfile.ZipFile) -> set[str]:
 def _formula_sheet_reference_names(formula: str) -> set[str]:
     refs: set[str] = set()
     consumed_ranges: list[tuple[int, int]] = []
+
+    for match in re.finditer(r'"(?:[^"]|"")*"', formula):
+        consumed_ranges.append(match.span())
 
     for match in re.finditer(r"'((?:[^']|'')+)'!", formula):
         consumed_ranges.append(match.span())
@@ -1607,6 +1668,7 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "dxfs_count": snapshot_.dxfs_count,
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
         "table_integrity_issue_count": len(snapshot_.table_integrity_issues),
+        "worksheet_sheet_ref_issue_count": len(snapshot_.worksheet_sheet_ref_issues),
         "workbook_sheet_ref_issue_count": len(snapshot_.workbook_sheet_ref_issues),
         "chart_sheet_ref_issue_count": len(snapshot_.chart_sheet_ref_issues),
         "feature_part_counts": {
