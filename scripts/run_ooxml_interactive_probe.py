@@ -481,7 +481,24 @@ def _run_ui_interaction_probe(
             )
     if probe == "embedded_control_openability":
         control_state_after = _control_property_state(probe_path)
-        if not control_state_after or control_state_after == control_state_before:
+        if not control_state_after:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=str(probe_path),
+                message=(
+                    "Excel embedded/control UI click did not change persisted "
+                    f"control-property state: {control_state_before}"
+                ),
+                ui_actions=ui_actions,
+            )
+        if control_state_after == control_state_before and not _stateless_button_control_state(
+            control_state_after
+        ):
             return InteractiveProbeResult(
                 fixture=fixture_label,
                 probe=probe,
@@ -1174,6 +1191,21 @@ def _control_property_state(path: Path) -> tuple[tuple[str, tuple[tuple[str, str
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return ()
     return tuple(state)
+
+
+def _stateless_button_control_state(
+    state: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+) -> bool:
+    if not state:
+        return False
+    selection_attrs = {"checked", "sel", "val"}
+    for _part_name, attrs in state:
+        attr_dict = dict(attrs)
+        if attr_dict.get("objectType") != "Button":
+            return False
+        if selection_attrs & set(attr_dict):
+            return False
+    return True
 
 
 def _local_name(tag: str) -> str:
