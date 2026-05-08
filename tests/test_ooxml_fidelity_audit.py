@@ -204,6 +204,23 @@ def test_detects_malformed_xml_part_after_save(tmp_path: Path) -> None:
     assert any(issue["kind"] == "malformed_xml_part" for issue in report["issues"])
 
 
+def test_ignores_preexisting_malformed_xml_part(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<hyperlinks><hyperlink ref="A1" location="Sec. 1 & 2 Notes!A1"/></hyperlinks>'
+        "</worksheet>"
+    )
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(issue["kind"] == "malformed_xml_part" for issue in report["issues"])
+
+
 def test_detects_conditional_formatting_dxf_reference_out_of_range(
     tmp_path: Path,
 ) -> None:
@@ -292,7 +309,7 @@ def test_detects_chart_formula_reference_to_missing_sheet(tmp_path: Path) -> Non
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
     before_entries = _base_entries()
-    before_entries["xl/charts/chart1.xml"] = _chart_xml("Metrics!$A$1:$A$5")
+    before_entries["xl/charts/chart1.xml"] = _chart_xml("Sheet1!$A$1:$A$5")
     after_entries = dict(before_entries)
     after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
         'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
@@ -309,7 +326,7 @@ def test_detects_chart_formula_reference_to_missing_sheet(tmp_path: Path) -> Non
         if issue["kind"] == "chart_formula_missing_sheet"
     )
     assert issue["part"] == "xl/charts/chart1.xml"
-    assert "Metrics" in issue["message"]
+    assert "Sheet1" in issue["message"]
 
 
 def test_chart_formula_sheet_reference_audit_accepts_quoted_and_external_refs(
@@ -388,6 +405,30 @@ def test_detects_workbook_defined_name_reference_to_missing_sheet(
     assert issue["part"] == "xl/workbook.xml"
     assert "ReportRange" in issue["message"]
     assert "Sheet1" in issue["message"]
+
+
+def test_ignores_preexisting_workbook_defined_name_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        "<sheets>",
+        '<definedNames><definedName name="ReportRange">'
+        "'Deleted Sheet'!$A$1:$D$4"
+        "</definedName></definedNames><sheets>",
+    )
+
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(
+        issue["kind"] == "workbook_defined_name_missing_sheet"
+        for issue in report["issues"]
+    )
 
 
 def test_workbook_defined_name_reference_audit_accepts_current_external_and_ref(

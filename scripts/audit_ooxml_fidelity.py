@@ -41,6 +41,7 @@ FEATURE_PART_PREFIXES = {
     "external_link": ("xl/externalLinks/",),
     "image_media": ("xl/media/",),
     "javascript_project": ("xl/jsaProject.bin",),
+    "named_sheet_view": ("xl/namedSheetViews/",),
     "pivot": ("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"),
     "printer_settings": ("xl/printerSettings/",),
     "python": ("xl/python.xml",),
@@ -133,15 +134,15 @@ def audit(before: Path, after: Path) -> dict:
         )
 
     _audit_relationship_preservation(before_snapshot, after_snapshot, issues)
-    _audit_xml_well_formed(after_snapshot, issues)
+    _audit_xml_well_formed(before_snapshot, after_snapshot, issues)
     _audit_dangling_relationships(after_snapshot, issues)
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
-    _audit_table_integrity(after_snapshot, issues)
-    _audit_worksheet_sheet_refs(after_snapshot, issues)
-    _audit_workbook_sheet_refs(after_snapshot, issues)
-    _audit_chart_sheet_refs(after_snapshot, issues)
-    _audit_pivot_sheet_refs(after_snapshot, issues)
+    _audit_table_integrity(before_snapshot, after_snapshot, issues)
+    _audit_worksheet_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_workbook_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_chart_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_pivot_sheet_refs(before_snapshot, after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
@@ -173,8 +174,13 @@ def _audit_relationship_preservation(
             )
 
 
-def _audit_xml_well_formed(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
-    for part, error in snapshot_.xml_parse_errors:
+def _audit_xml_well_formed(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    before_errors = set(before.xml_parse_errors)
+    for part, error in after.xml_parse_errors:
+        if (part, error) in before_errors:
+            continue
         issues.append(
             {
                 "severity": "error",
@@ -247,32 +253,55 @@ def _audit_conditional_formatting_refs(
             )
 
 
-def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
-    issues.extend(snapshot_.table_integrity_issues)
+def _audit_table_integrity(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(before.table_integrity_issues, after.table_integrity_issues, issues)
 
 
 def _audit_worksheet_sheet_refs(
-    snapshot_: Snapshot, issues: list[dict[str, str]]
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
 ) -> None:
-    issues.extend(snapshot_.worksheet_sheet_ref_issues)
+    _extend_new_issues(
+        before.worksheet_sheet_ref_issues, after.worksheet_sheet_ref_issues, issues
+    )
 
 
 def _audit_workbook_sheet_refs(
-    snapshot_: Snapshot, issues: list[dict[str, str]]
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
 ) -> None:
-    issues.extend(snapshot_.workbook_sheet_ref_issues)
+    _extend_new_issues(
+        before.workbook_sheet_ref_issues, after.workbook_sheet_ref_issues, issues
+    )
 
 
 def _audit_chart_sheet_refs(
-    snapshot_: Snapshot, issues: list[dict[str, str]]
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
 ) -> None:
-    issues.extend(snapshot_.chart_sheet_ref_issues)
+    _extend_new_issues(before.chart_sheet_ref_issues, after.chart_sheet_ref_issues, issues)
 
 
 def _audit_pivot_sheet_refs(
-    snapshot_: Snapshot, issues: list[dict[str, str]]
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
 ) -> None:
-    issues.extend(snapshot_.pivot_sheet_ref_issues)
+    _extend_new_issues(before.pivot_sheet_ref_issues, after.pivot_sheet_ref_issues, issues)
+
+
+def _extend_new_issues(
+    before_issues: list[dict[str, str]],
+    after_issues: list[dict[str, str]],
+    issues: list[dict[str, str]],
+) -> None:
+    before_keys = {_issue_key(issue) for issue in before_issues}
+    issues.extend(issue for issue in after_issues if _issue_key(issue) not in before_keys)
+
+
+def _issue_key(issue: dict[str, str]) -> tuple[str, str, str]:
+    return (
+        issue.get("kind", ""),
+        issue.get("part", ""),
+        issue.get("message", ""),
+    )
 
 
 def _audit_feature_hotspots(
@@ -735,6 +764,11 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "drawing_objects": _drawing_object_fingerprint(archive, parts),
         "extensions": _extension_payload_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
+        "named_sheet_views": _xml_part_fingerprint(
+            archive,
+            parts,
+            tuple(sorted(part for part in parts if part.startswith("xl/namedSheetViews/"))),
+        ),
         "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "python": _xml_part_fingerprint(archive, parts, ("xl/python.xml",)),

@@ -62,8 +62,10 @@ KNOWN_EXTENSION_URIS = {
     "{02D57815-91ED-43cb-92C2-25804820EDAC}",
     "{03082B11-2C62-411c-B77F-237D8FCFBE4C}",
     "{05A4C25C-085E-4340-85A3-A5531E510DB2}",
+    "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}",
     "{0605FD5F-26C8-4aeb-8148-2DB25E43C511}",
     "{140A7094-0E35-4892-8432-C4D2E57EDEB5}",
+    "{2946ED86-A175-432a-8AC1-64E0C546D7DE}",
     "{28A0092B-C50C-407E-A947-70E740481C1C}",
     "{2F2917AC-EB37-4324-AD4E-5DD8C200BD13}",
     "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}",
@@ -76,6 +78,7 @@ KNOWN_EXTENSION_URIS = {
     "{723BEF56-08C2-4564-9609-F4CBC75E7E54}",
     "{747A6164-185A-40DC-8AA5-F01512510D54}",
     "{7626C862-2A13-11E5-B345-FEFF819CDC9F}",
+    "{77bfe23e-c014-4d31-8a63-9c772dbf06b6}",
     "{781A3756-C4B2-4CAC-9D66-4F8BD8637D16}",
     "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
     "{79F54976-1DA5-4618-B147-4CDE4B953A38}",
@@ -390,12 +393,12 @@ def _is_known_relationship_type(rel_type: str) -> bool:
 
 def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
     return (
-        ("chart", "chartsheet", "chartUserShapes", "chartStyle", "chartColorStyle"),
+        ("chart", "chartEx", "chartsheet", "chartUserShapes", "chartStyle", "chartColorStyle"),
         ("comments", "threadedComment", "person", "vmlDrawing"),
         ("drawing", "image", "printerSettings"),
         ("customProperty",),
         ("externalLink", "externalLinkPath", "xlPathMissing"),
-        ("Python", "sheetMetadata"),
+        ("Python", "sheetMetadata", "namedSheetView"),
         ("jsaProject",),
         ("table", "queryTable"),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
