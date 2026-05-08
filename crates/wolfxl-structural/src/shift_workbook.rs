@@ -589,6 +589,34 @@ mod tests {
     }
 
     #[test]
+    fn shifts_arbitrary_prefixed_vml_shape_anchor() {
+        let vml = r#"<xml><ns1:shapetype id="_x0000_t202"/><ns1:shape><ns2:ClientData><ns2:Anchor>0, 0, 4, 0, 2, 0, 6, 0</ns2:Anchor></ns2:ClientData></ns1:shape></xml>"#;
+        let p = ShiftPlan::insert(Axis::Row, 5, 1);
+        let out = shift_vml_xml(vml.as_bytes(), &p);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains("<ns1:shapetype id=\"_x0000_t202\"/>"));
+        assert!(s.contains("<ns1:shape>"));
+        assert!(s.contains("<ns2:Anchor>0, 0, 5, 0, 2, 0, 7, 0</ns2:Anchor>"));
+    }
+
+    #[test]
+    fn shifts_prefixed_vml_comment_row_column_markers() {
+        let vml = r#"<xml><ns1:shape><ns2:ClientData ObjectType="Note"><ns2:Row>1</ns2:Row><ns2:Column>2</ns2:Column></ns2:ClientData></ns1:shape></xml>"#;
+
+        let row_plan = ShiftPlan::delete(Axis::Row, 1, 1);
+        let row_out = shift_vml_xml(vml.as_bytes(), &row_plan);
+        let row_s = String::from_utf8_lossy(&row_out);
+        assert!(row_s.contains("<ns2:Row>0</ns2:Row>"), "{row_s}");
+        assert!(row_s.contains("<ns2:Column>2</ns2:Column>"), "{row_s}");
+
+        let col_plan = ShiftPlan::delete(Axis::Col, 1, 1);
+        let col_out = shift_vml_xml(vml.as_bytes(), &col_plan);
+        let col_s = String::from_utf8_lossy(&col_out);
+        assert!(col_s.contains("<ns2:Row>1</ns2:Row>"), "{col_s}");
+        assert!(col_s.contains("<ns2:Column>1</ns2:Column>"), "{col_s}");
+    }
+
+    #[test]
     fn drops_vml_shape_when_anchor_tombstoned() {
         let vml = r#"<v:shape><x:ClientData><x:Anchor>0, 0, 4, 0, 2, 0, 4, 0</x:Anchor></x:ClientData></v:shape>"#;
         let p = ShiftPlan::delete(Axis::Row, 5, 1);
