@@ -21,6 +21,17 @@ def _load_audit_module() -> ModuleType:
 audit_module = _load_audit_module()
 
 
+class _FakeArchive:
+    def __init__(self, entries: dict[str, str]) -> None:
+        self.entries = entries
+        self.read_counts: dict[str, int] = {}
+
+    def read(self, part: str) -> bytes:
+        self.read_counts[part] = self.read_counts.get(part, 0) + 1
+        payload = self.entries[part]
+        return payload.encode("utf-8")
+
+
 def _write_package(path: Path, entries: dict[str, str | bytes]) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, payload in entries.items():
@@ -58,6 +69,16 @@ def _base_entries() -> dict[str, str]:
         "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
     }
+
+
+def test_read_xml_or_none_caches_parsed_parts() -> None:
+    archive = _FakeArchive({"xl/worksheets/sheet1.xml": "<worksheet/>"})
+
+    first = audit_module._read_xml_or_none(archive, "xl/worksheets/sheet1.xml")
+    second = audit_module._read_xml_or_none(archive, "xl/worksheets/sheet1.xml")
+
+    assert first is second
+    assert archive.read_counts == {"xl/worksheets/sheet1.xml": 1}
 
 
 def test_clean_package_has_no_fidelity_issues(tmp_path: Path) -> None:

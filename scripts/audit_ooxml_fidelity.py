@@ -993,10 +993,19 @@ def _global_package_part_fingerprint(archive: zipfile.ZipFile, part: str) -> obj
 
 
 def _read_xml_or_none(archive: zipfile.ZipFile, part: str) -> ElementTree.Element | None:
+    cache = getattr(archive, "_wolfxl_ooxml_xml_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(archive, "_wolfxl_ooxml_xml_cache", cache)
+    if part in cache:
+        return cache[part]
     try:
-        return ElementTree.fromstring(archive.read(part))
+        root = ElementTree.fromstring(archive.read(part))
     except (KeyError, ElementTree.ParseError):
+        cache[part] = None
         return None
+    cache[part] = root
+    return root
 
 
 def _feature_xml_parts(parts: set[str], prefix: str, suffix: str) -> Iterable[str]:
