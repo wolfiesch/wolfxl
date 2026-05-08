@@ -516,6 +516,42 @@ def test_rename_first_sheet_rewrites_workbook_defined_name_sheet_refs(
     assert "&apos;WolfXL Fidelity Rename&apos;!$A$1:$D$4" in workbook_xml
 
 
+def test_rename_first_sheet_rewrites_pivot_cache_worksheet_source_sheet_refs(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "excelize-2.10-pivot-slicers.xlsx"
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "tests"
+        / "fixtures"
+        / "external_oracle"
+        / fixture.name
+    )
+    shutil.copy2(source, fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("rename_first_sheet",),
+    )
+
+    assert report["failure_count"] == 0
+    after = (
+        output_dir
+        / "excelize-2.10-pivot-slicers"
+        / "rename_first_sheet"
+        / "after-excelize-2.10-pivot-slicers.xlsx"
+    )
+    with zipfile.ZipFile(after) as archive:
+        cache_xml = archive.read("xl/pivotCache/pivotCacheDefinition1.xml").decode()
+
+    assert 'sheet="Data"' not in cache_xml
+    assert 'sheet="WolfXL Fidelity Rename"' in cache_xml
+
+
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

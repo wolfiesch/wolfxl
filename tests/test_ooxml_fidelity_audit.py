@@ -510,6 +510,34 @@ def test_worksheet_formula_reference_audit_accepts_current_external_and_literals
     assert snapshot.worksheet_sheet_ref_issues == []
 
 
+def test_detects_pivot_cache_source_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries() | _pivot_slicer_entries("A1:B4", "1")
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    after_entries["xl/pivotCache/pivotCacheDefinition1.xml"] = after_entries[
+        "xl/pivotCache/pivotCacheDefinition1.xml"
+    ].replace('sheet="Data"', 'sheet="Sheet1"')
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "pivot_cache_source_missing_sheet"
+    )
+    assert issue["part"] == "xl/pivotCache/pivotCacheDefinition1.xml"
+    assert "Sheet1" in issue["message"]
+
+
 def test_fingerprints_structured_references_without_external_links(
     tmp_path: Path,
 ) -> None:

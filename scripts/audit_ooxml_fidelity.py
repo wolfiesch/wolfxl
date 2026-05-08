@@ -90,6 +90,7 @@ class Snapshot:
     worksheet_sheet_ref_issues: list[dict[str, str]]
     workbook_sheet_ref_issues: list[dict[str, str]]
     chart_sheet_ref_issues: list[dict[str, str]]
+    pivot_sheet_ref_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
     semantic_fingerprints: dict[str, dict[str, object]]
 
@@ -109,6 +110,7 @@ def snapshot(path: Path) -> Snapshot:
             worksheet_sheet_ref_issues=_read_worksheet_sheet_ref_issues(archive, parts),
             workbook_sheet_ref_issues=_read_workbook_sheet_ref_issues(archive),
             chart_sheet_ref_issues=_read_chart_sheet_ref_issues(archive),
+            pivot_sheet_ref_issues=_read_pivot_sheet_ref_issues(archive, parts),
             feature_parts=_classify_feature_parts(parts),
             semantic_fingerprints=_read_semantic_fingerprints(archive),
         )
@@ -139,6 +141,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_worksheet_sheet_refs(after_snapshot, issues)
     _audit_workbook_sheet_refs(after_snapshot, issues)
     _audit_chart_sheet_refs(after_snapshot, issues)
+    _audit_pivot_sheet_refs(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
@@ -264,6 +267,12 @@ def _audit_chart_sheet_refs(
     snapshot_: Snapshot, issues: list[dict[str, str]]
 ) -> None:
     issues.extend(snapshot_.chart_sheet_ref_issues)
+
+
+def _audit_pivot_sheet_refs(
+    snapshot_: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    issues.extend(snapshot_.pivot_sheet_ref_issues)
 
 
 def _audit_feature_hotspots(
@@ -578,6 +587,36 @@ def _read_worksheet_sheet_ref_issues(
                         ),
                     }
                 )
+    return issues
+
+
+def _read_pivot_sheet_ref_issues(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for part in sorted(_feature_xml_parts(parts, "xl/pivotCache/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for source in _nodes_by_local(root, "worksheetSource"):
+            sheet_name = _attr(source, "sheet")
+            if not sheet_name or sheet_name in sheet_names:
+                continue
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": "pivot_cache_source_missing_sheet",
+                    "part": part,
+                    "message": (
+                        f"{part} worksheetSource sheet {sheet_name!r} references "
+                        "a missing sheet"
+                    ),
+                }
+            )
     return issues
 
 
@@ -1671,6 +1710,7 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "worksheet_sheet_ref_issue_count": len(snapshot_.worksheet_sheet_ref_issues),
         "workbook_sheet_ref_issue_count": len(snapshot_.workbook_sheet_ref_issues),
         "chart_sheet_ref_issue_count": len(snapshot_.chart_sheet_ref_issues),
+        "pivot_sheet_ref_issue_count": len(snapshot_.pivot_sheet_ref_issues),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()
         },

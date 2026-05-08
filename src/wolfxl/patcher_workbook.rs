@@ -6,7 +6,7 @@ use std::io::{Read, Seek, Write};
 
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
-use quick_xml::events::{BytesText, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 use zip::write::SimpleFileOptions;
@@ -1110,6 +1110,7 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
     }
 
     let mut chart_paths: HashSet<String> = HashSet::new();
+    let mut pivot_cache_paths: HashSet<String> = HashSet::new();
     for idx in 0..zip.len() {
         let Ok(entry) = zip.by_index(idx) else {
             continue;
@@ -1118,15 +1119,24 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
         if is_chart_part_path(name) {
             chart_paths.insert(name.to_string());
         }
+        if is_pivot_cache_definition_path(name) {
+            pivot_cache_paths.insert(name.to_string());
+        }
     }
     for path in patcher.file_adds.keys() {
         if is_chart_part_path(path) {
             chart_paths.insert(path.clone());
         }
+        if is_pivot_cache_definition_path(path) {
+            pivot_cache_paths.insert(path.clone());
+        }
     }
     for path in file_patches.keys() {
         if is_chart_part_path(path) {
             chart_paths.insert(path.clone());
+        }
+        if is_pivot_cache_definition_path(path) {
+            pivot_cache_paths.insert(path.clone());
         }
     }
 
@@ -1141,11 +1151,26 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
         }
     }
 
+    for path in pivot_cache_paths {
+        let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &path) else {
+            continue;
+        };
+        let updated = rewrite_pivot_cache_sheet_renames(&bytes, &patcher.queued_sheet_renames)
+            .map_err(|e| PyIOError::new_err(format!("pivot cache sheet-rename merge: {e}")))?;
+        if updated != bytes {
+            file_patches.insert(path, updated);
+        }
+    }
+
     Ok(())
 }
 
 fn is_chart_part_path(path: &str) -> bool {
     path.starts_with("xl/charts/") && path.ends_with(".xml")
+}
+
+fn is_pivot_cache_definition_path(path: &str) -> bool {
+    path.starts_with("xl/pivotCache/pivotCacheDefinition") && path.ends_with(".xml")
 }
 
 fn rewrite_workbook_defined_name_sheet_renames(
@@ -1218,6 +1243,91 @@ fn rewrite_workbook_defined_name_sheet_renames(
     }
 
     Ok(writer.into_inner())
+}
+
+fn rewrite_pivot_cache_sheet_renames(
+    pivot_cache_xml: &[u8],
+    renames: &[(String, String)],
+) -> Result<Vec<u8>, String> {
+    let mut reader = XmlReader::from_reader(pivot_cache_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(pivot_cache_xml.len()));
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"worksheetSource" => {
+                let updated = rename_worksheet_source_sheet_attr(&e, renames)?;
+                writer
+                    .write_event(Event::Start(updated))
+                    .map_err(|e| format!("pivot cache XML write error: {e}"))?;
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"worksheetSource" => {
+                let updated = rename_worksheet_source_sheet_attr(&e, renames)?;
+                writer
+                    .write_event(Event::Empty(updated))
+                    .map_err(|e| format!("pivot cache XML write error: {e}"))?;
+            }
+            Ok(Event::Start(e)) => writer
+                .write_event(Event::Start(e.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::End(e)) => writer
+                .write_event(Event::End(e.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::Empty(e)) => writer
+                .write_event(Event::Empty(e.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::Text(t)) => writer
+                .write_event(Event::Text(t.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::CData(c)) => writer
+                .write_event(Event::CData(c.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::Decl(d)) => writer
+                .write_event(Event::Decl(d.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::PI(p)) => writer
+                .write_event(Event::PI(p.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::Comment(c)) => writer
+                .write_event(Event::Comment(c.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::DocType(d)) => writer
+                .write_event(Event::DocType(d.into_owned()))
+                .map_err(|e| format!("pivot cache XML write error: {e}"))?,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("pivot cache XML parse error: {e}")),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn rename_worksheet_source_sheet_attr(
+    event: &BytesStart<'_>,
+    renames: &[(String, String)],
+) -> Result<BytesStart<'static>, String> {
+    let mut out = BytesStart::new(String::from_utf8_lossy(event.name().as_ref()).into_owned());
+    for attr in event.attributes().with_checks(false) {
+        let attr = attr.map_err(|e| format!("pivot cache worksheetSource attr error: {e}"))?;
+        if attr.key.as_ref() == b"sheet" {
+            let value = attr
+                .unescape_value()
+                .map_err(|e| format!("pivot cache worksheetSource sheet decode error: {e}"))?;
+            if let Some((_, new_name)) = renames
+                .iter()
+                .find(|(old_name, _)| value.as_ref() == old_name.as_str())
+            {
+                out.push_attribute(("sheet", new_name.as_str()));
+            } else {
+                out.push_attribute(("sheet", value.as_ref()));
+            }
+        } else {
+            out.push_attribute(attr);
+        }
+    }
+    Ok(out)
 }
 
 fn rewrite_chart_formula_sheet_renames(
