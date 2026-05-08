@@ -70,6 +70,12 @@ RENAMED_SHEET = "WolfXL Fidelity Rename"
 SCRATCH_CHART_SHEET = "WolfXL Chart Scratch"
 MANIFEST_NAME = "manifest.json"
 RETARGETED_EXTERNAL_LINK = "wolfxl-retargeted-external-link.xlsx"
+EXPECTED_DRAWING_ANCHOR_DRIFT_MUTATIONS = {
+    "insert_tail_row",
+    "insert_tail_col",
+    "delete_marker_tail_row",
+    "delete_marker_tail_col",
+}
 MISSING_RELATIONSHIP_RE = re.compile(
     r"^Relationship existed before save and is missing after save: "
     r"(?P<part>\S+) (?P<rid>\S+) (?P<rel_type>\S+) -> (?P<target>.*)$"
@@ -621,6 +627,10 @@ def _is_expected_issue(
     after_path: Path | None = None,
 ) -> bool:
     kind = issue.get("kind")
+    if _is_expected_structural_drawing_anchor_drift(
+        issue, mutation, before_path, after_path
+    ):
+        return True
     if kind not in expected_kinds:
         return False
     if _is_expected_deleted_first_axis_formula_loss(issue, mutation):
@@ -638,6 +648,71 @@ def _is_expected_issue(
     if marker is None:
         return True
     return marker in issue.get("message", "")
+
+
+def _is_expected_structural_drawing_anchor_drift(
+    issue: dict,
+    mutation: str,
+    before_path: Path | None,
+    after_path: Path | None,
+) -> bool:
+    if mutation not in EXPECTED_DRAWING_ANCHOR_DRIFT_MUTATIONS:
+        return False
+    if issue.get("kind") != "drawing_objects_semantic_drift":
+        return False
+    if before_path is None or after_path is None:
+        return False
+    return _drawing_objects_match_except_structural_anchor_text(before_path, after_path)
+
+
+def _drawing_objects_match_except_structural_anchor_text(
+    before_path: Path, after_path: Path
+) -> bool:
+    with zipfile.ZipFile(before_path) as before_archive:
+        before_fingerprint = audit_ooxml_fidelity._drawing_object_fingerprint(
+            before_archive, set(before_archive.namelist())
+        )
+    with zipfile.ZipFile(after_path) as after_archive:
+        after_fingerprint = audit_ooxml_fidelity._drawing_object_fingerprint(
+            after_archive, set(after_archive.namelist())
+        )
+    return _normalize_structural_anchor_text(
+        before_fingerprint
+    ) == _normalize_structural_anchor_text(after_fingerprint)
+
+
+def _normalize_structural_anchor_text(value, parent: str | None = None):
+    if (
+        isinstance(value, tuple)
+        and len(value) == 4
+        and value[0] == "Anchor"
+        and isinstance(value[2], str)
+    ):
+        return (value[0], value[1], "<vml-anchor>", value[3])
+    if (
+        isinstance(value, tuple)
+        and len(value) == 4
+        and parent in {"from", "to"}
+        and value[0] in {"row", "col"}
+        and isinstance(value[2], str)
+    ):
+        return (
+            value[0],
+            value[1],
+            "<drawingml-anchor>",
+            _normalize_structural_anchor_text(value[3], value[0]),
+        )
+    if isinstance(value, dict):
+        return {
+            key: _normalize_structural_anchor_text(item, parent)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_structural_anchor_text(item, parent) for item in value]
+    if isinstance(value, tuple):
+        next_parent = value[0] if len(value) == 4 and isinstance(value[0], str) else parent
+        return tuple(_normalize_structural_anchor_text(item, next_parent) for item in value)
+    return value
 
 
 def _looks_like_total_semantic_loss(issue: dict) -> bool:
