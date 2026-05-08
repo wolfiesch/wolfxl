@@ -843,6 +843,22 @@
       ]
     },
     {
+      "name": "synthgl_recursive_excel_render_noop_byte_identical",
+      "path": "/tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508/render-compare-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --render-engine excel --output-dir /tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508 --max-pages-per-fixture 3 --pass-byte-identical-xlsx > /tmp/wolfxl-render-excel-synthgl-recursive-byte-identical-20260508.stdout.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "pass_byte_identical_xlsx", "equals": true},
+        {"path": "mutations", "equals": ["no_op"]},
+        {"path": "result_count", "equals": 32},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.30.fixture", "equals": "number_memory/sigman_revenue_support.xlsx"},
+        {"path": "results.30.status", "equals": "passed"},
+        {"path": "results.30.message", "contains": "byte-identical xlsx after no-op save"}
+      ]
+    },
+    {
       "name": "synthgl_recursive_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --json > /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json",
