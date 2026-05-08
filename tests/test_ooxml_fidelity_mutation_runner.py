@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -406,6 +407,41 @@ def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> 
         "charts_semantic_drift",
         "workbook_globals_semantic_drift",
     }
+
+
+def test_rename_first_sheet_rewrites_existing_chart_formula_refs(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "excelize-chart-points-formula-cf.xlsx"
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "tests"
+        / "fixtures"
+        / "external_oracle"
+        / fixture.name
+    )
+    shutil.copy2(source, fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("rename_first_sheet",),
+    )
+
+    assert report["failure_count"] == 0
+    after = (
+        output_dir
+        / "excelize-chart-points-formula-cf"
+        / "rename_first_sheet"
+        / "after-excelize-chart-points-formula-cf.xlsx"
+    )
+    with zipfile.ZipFile(after) as archive:
+        chart_xml = archive.read("xl/charts/chart1.xml").decode()
+
+    assert "Metrics!" not in chart_xml
+    assert "&apos;WolfXL Fidelity Rename&apos;!$B$1" in chart_xml
+    assert "&apos;WolfXL Fidelity Rename&apos;!$A$2:$A$4" in chart_xml
 
 
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:

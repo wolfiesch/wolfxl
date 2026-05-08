@@ -31,6 +31,10 @@ LIBREOFFICE_CANDIDATES = (
 EXCEL_APP = "/Applications/Microsoft Excel.app"
 MANIFEST_NAME = "manifest.json"
 SMOKE_KEYWORDS = ("corrupt", "repaired", "repair", "error")
+RECOVERY_PROMPT_KEYWORDS = (
+    "open recovered workbooks",
+    "your recent changes were saved",
+)
 REPAIR_DISMISS_BUTTONS = (
     "No",
     "Cancel",
@@ -498,8 +502,15 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
 
 
 def _is_excel_repair_dialog(dialog: str) -> bool:
+    if _is_excel_recovery_prompt(dialog):
+        return False
     dialog_lc = dialog.lower()
     return any(keyword in dialog_lc for keyword in SMOKE_KEYWORDS)
+
+
+def _is_excel_recovery_prompt(dialog: str) -> bool:
+    dialog_lc = dialog.lower()
+    return any(keyword in dialog_lc for keyword in RECOVERY_PROMPT_KEYWORDS)
 
 
 def _is_excel_unsupported_content_dialog(dialog: str) -> bool:
@@ -565,6 +576,9 @@ def _dismiss_excel_safe_dialogs() -> None:
     # Macro-enabled fixtures can block AppleScript until the security prompt is
     # answered. Disable macros for smoke validation: we only need to prove Excel
     # can open the workbook without repair/corruption prompts.
+    dialog = _excel_dialog_text()
+    if _is_excel_recovery_prompt(dialog):
+        _dismiss_excel_recovery_prompts()
     script = """
 tell application "System Events"
   if not (exists process "Microsoft Excel") then return
@@ -586,8 +600,35 @@ end tell
         pass
 
 
+def _dismiss_excel_recovery_prompts() -> None:
+    # This is Excel's stale session recovery prompt, not a workbook repair
+    # prompt for the file under test. Dismiss it so GUI smoke/render runs can
+    # start from a clean Excel session without opening old recovered workbooks.
+    buttons = "\n".join(
+        f'        if exists button "{button}" of w then click button "{button}" of w'
+        for button in ("No", "Don't Recover", "Cancel", "Close", "OK")
+    )
+    script = f"""
+tell application "System Events"
+  if not (exists process "Microsoft Excel") then return
+  tell process "Microsoft Excel"
+    set frontmost to true
+    try
+      repeat with w in windows
+{buttons}
+      end repeat
+    end try
+  end tell
+end tell
+"""
+    try:
+        _run_osascript(script, timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _dismiss_excel_repair_dialogs() -> None:
-    # Treat repair/recovery prompts as a failure signal and choose the
+    # Treat repair prompts as a failure signal and choose the
     # non-repairing/default-dismiss path. Do not click "Yes" or "Recover":
     # accepting repair can mutate the workbook and hide the OOXML defect.
     buttons = "\n".join(

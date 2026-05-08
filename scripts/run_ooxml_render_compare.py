@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -28,7 +27,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import run_ooxml_app_smoke  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
-import wolfxl  # noqa: E402
 
 DEFAULT_RENDER_MUTATIONS = ("no_op",)
 DEFAULT_RENDER_ENGINE = "libreoffice"
@@ -490,6 +488,7 @@ def _run_excel_script_with_dialog_handling(
     script: str,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
+    run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
     proc = subprocess.Popen(
         ["osascript", "-e", script],
         stdout=subprocess.PIPE,

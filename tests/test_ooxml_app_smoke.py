@@ -192,6 +192,18 @@ def test_excel_repair_dialog_detection() -> None:
     assert not smoke_module._is_excel_repair_dialog("windows=fixture.xlsx")
 
 
+def test_excel_recovery_prompt_is_not_repair_dialog() -> None:
+    dialog = (
+        "windows=Book1\n"
+        "buttons=NoYes\n"
+        "text=Your recent changes were saved. Do you want to continue "
+        "working where you left off? Open recovered workbooks?"
+    )
+
+    assert smoke_module._is_excel_recovery_prompt(dialog)
+    assert not smoke_module._is_excel_repair_dialog(dialog)
+
+
 def test_excel_unsupported_content_dialog_detection() -> None:
     dialog = (
         "windows=real-excel-powerpivot-contoso-pnl.xlsx\n"

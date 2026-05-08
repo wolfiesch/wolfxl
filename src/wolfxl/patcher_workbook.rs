@@ -6,8 +6,9 @@ use std::io::{Read, Seek, Write};
 
 use pyo3::exceptions::PyIOError;
 use pyo3::prelude::*;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesText, Event};
 use quick_xml::Reader as XmlReader;
+use quick_xml::Writer as XmlWriter;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -1094,6 +1095,144 @@ pub(super) fn apply_workbook_xml_phases(
     }
 
     Ok(())
+}
+
+pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
+    patcher: &mut XlsxPatcher,
+    file_patches: &mut HashMap<String, Vec<u8>>,
+    zip: &mut ZipArchive<File>,
+) -> PyResult<()> {
+    if patcher.queued_sheet_renames.is_empty() {
+        return Ok(());
+    }
+
+    let mut chart_paths: HashSet<String> = HashSet::new();
+    for idx in 0..zip.len() {
+        let Ok(entry) = zip.by_index(idx) else {
+            continue;
+        };
+        let name = entry.name();
+        if is_chart_part_path(name) {
+            chart_paths.insert(name.to_string());
+        }
+    }
+    for path in patcher.file_adds.keys() {
+        if is_chart_part_path(path) {
+            chart_paths.insert(path.clone());
+        }
+    }
+    for path in file_patches.keys() {
+        if is_chart_part_path(path) {
+            chart_paths.insert(path.clone());
+        }
+    }
+
+    for path in chart_paths {
+        let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &path) else {
+            continue;
+        };
+        let updated = rewrite_chart_formula_sheet_renames(&bytes, &patcher.queued_sheet_renames)
+            .map_err(|e| PyIOError::new_err(format!("chart formula sheet-rename merge: {e}")))?;
+        if updated != bytes {
+            file_patches.insert(path, updated);
+        }
+    }
+
+    Ok(())
+}
+
+fn is_chart_part_path(path: &str) -> bool {
+    path.starts_with("xl/charts/") && path.ends_with(".xml")
+}
+
+fn rewrite_chart_formula_sheet_renames(
+    chart_xml: &[u8],
+    renames: &[(String, String)],
+) -> Result<Vec<u8>, String> {
+    let mut reader = XmlReader::from_reader(chart_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(chart_xml.len()));
+    let mut buf = Vec::new();
+    let mut in_formula = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                in_formula = e.local_name().as_ref() == b"f";
+                writer
+                    .write_event(Event::Start(e.into_owned()))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"f" {
+                    in_formula = false;
+                }
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::Empty(e)) => {
+                writer
+                    .write_event(Event::Empty(e.into_owned()))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) if in_formula => {
+                let formula_text = t
+                    .unescape()
+                    .map_err(|e| format!("chart formula decode error: {e}"))?
+                    .into_owned();
+                let translated = rename_formula_sheet_refs(&formula_text, renames);
+                writer
+                    .write_event(Event::Text(BytesText::new(&translated)))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) => {
+                writer
+                    .write_event(Event::Text(t.into_owned()))
+                    .map_err(|e| format!("chart XML write error: {e}"))?;
+            }
+            Ok(Event::CData(c)) => writer
+                .write_event(Event::CData(c.into_owned()))
+                .map_err(|e| format!("chart XML write error: {e}"))?,
+            Ok(Event::Decl(d)) => writer
+                .write_event(Event::Decl(d.into_owned()))
+                .map_err(|e| format!("chart XML write error: {e}"))?,
+            Ok(Event::PI(p)) => writer
+                .write_event(Event::PI(p.into_owned()))
+                .map_err(|e| format!("chart XML write error: {e}"))?,
+            Ok(Event::Comment(c)) => writer
+                .write_event(Event::Comment(c.into_owned()))
+                .map_err(|e| format!("chart XML write error: {e}"))?,
+            Ok(Event::DocType(d)) => writer
+                .write_event(Event::DocType(d.into_owned()))
+                .map_err(|e| format!("chart XML write error: {e}"))?,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("chart XML parse error: {e}")),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn rename_formula_sheet_refs(formula: &str, renames: &[(String, String)]) -> String {
+    let had_prefix = formula.starts_with('=');
+    let mut current = if had_prefix {
+        formula.to_string()
+    } else {
+        format!("={formula}")
+    };
+    for (old_name, new_name) in renames {
+        current = wolfxl_formula::rename_sheet(&current, old_name, new_name);
+    }
+    if had_prefix {
+        current
+    } else {
+        current
+            .strip_prefix('=')
+            .unwrap_or(current.as_str())
+            .to_string()
+    }
 }
 
 pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {

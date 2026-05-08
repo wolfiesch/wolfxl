@@ -2593,6 +2593,11 @@ impl XlsxPatcher {
             )?;
         }
         patcher_workbook::apply_workbook_xml_phases(self, &mut save.file_patches, &mut zip)?;
+        patcher_workbook::apply_sheet_rename_chart_formula_refs_phase(
+            self,
+            &mut save.file_patches,
+            &mut zip,
+        )?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
         // the path already exists in the source ZIP:
