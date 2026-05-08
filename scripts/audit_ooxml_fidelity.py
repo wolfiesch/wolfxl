@@ -367,6 +367,8 @@ def _resolve_relationship_target(
 def _source_part_for_rels(rels_part: str) -> str:
     if rels_part == "_rels/.rels":
         return ""
+    if "\\" in rels_part or rels_part.startswith("/") or "/_rels/" not in rels_part:
+        raise ValueError(f"unsafe OOXML package part path: {rels_part}")
     prefix, name = rels_part.rsplit("/_rels/", 1)
     return posixpath.join(prefix, name.removesuffix(".rels"))
 

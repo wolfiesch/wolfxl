@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_audit_module() -> ModuleType:
     script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_fidelity.py"
@@ -91,6 +93,11 @@ def test_clean_package_has_no_fidelity_issues(tmp_path: Path) -> None:
     report = audit_module.audit(before, after)
 
     assert report["issues"] == []
+
+
+def test_relationship_source_rejects_backslash_package_paths() -> None:
+    with pytest.raises(ValueError, match="unsafe OOXML package part path"):
+        audit_module._source_part_for_rels(r"xl\_rels\workbook.xml.rels")
 
 
 def test_detects_dangling_chart_relationship_after_modify_save(tmp_path: Path) -> None:

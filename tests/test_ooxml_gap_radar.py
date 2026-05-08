@@ -114,6 +114,137 @@ def test_gap_radar_is_clear_for_plain_core_workbook(tmp_path: Path) -> None:
     assert report["unknown_extension_uri_count"] == 0
 
 
+def test_gap_radar_allows_case_variant_shared_strings_and_macos_junk(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "packaging-noise.xlsx"
+    _write_packaging_noise_fixture(fixture)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "packaging_noise",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["ready"] is True
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+
+
+def test_gap_radar_reports_unreadable_workbooks_without_crashing(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "not-a-zip.xlsx"
+    fixture.write_bytes(b"not a zip file")
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "invalid",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["ready"] is False
+    assert report["fixture_count"] == 0
+    assert report["skipped_fixture_count"] == 1
+    assert report["skipped_fixtures"] == [
+        {
+            "filename": "not-a-zip.xlsx",
+            "fixture_id": "invalid",
+            "tool": "excel",
+            "reason": "BadZipFile: File is not a zip file",
+        }
+    ]
+
+
+def test_gap_radar_reports_backslash_package_paths_as_skipped_invalid_inputs(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "backslash-path.xlsx"
+    with zipfile.ZipFile(fixture, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""",
+        )
+        archive.writestr(
+            r"xl\_rels\workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""",
+        )
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "backslash_path",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["fixture_count"] == 0
+    assert report["skipped_fixture_count"] == 1
+    assert report["skipped_fixtures"][0]["reason"] == (
+        r"ValueError: unsafe OOXML package part path: xl\_rels\workbook.xml.rels"
+    )
+
+
+def test_gap_radar_strict_cli_fails_for_unreadable_workbook(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "not-a-zip.xlsx"
+    fixture.write_bytes(b"not a zip file")
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "invalid",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert gap_radar.main([str(fixture_dir), "--strict"]) == 1
+
+
 def test_gap_radar_can_discover_nested_workbooks_without_manifest(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     nested_dir = fixture_dir / "nested"
@@ -412,6 +543,45 @@ def _write_powerview_fixture(path: Path) -> None:
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
         "xl/sharedStrings.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>PowerView report</t></si></sst>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_packaging_noise_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/SharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="SharedStrings.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>""",
+        "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+        "xl/SharedStrings.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Text</t></si></sst>""",
+        "xl/.DS_Store": b"junk",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():

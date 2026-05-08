@@ -53,6 +53,49 @@ def test_corpus_bucket_audit_reports_missing_buckets(tmp_path: Path) -> None:
     assert "powerpivot_data_model" in report["missing_buckets"]
 
 
+def test_corpus_bucket_audit_reports_unreadable_workbooks_without_crashing(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    valid_workbook = fixture_dir / "plain.xlsx"
+    invalid_workbook = fixture_dir / "not-a-zip.xlsx"
+    _write_plain_workbook(valid_workbook, application="Microsoft Excel")
+    invalid_workbook.write_bytes(b"not a zip file")
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": valid_workbook.name,
+                        "fixture_id": "plain",
+                        "tool": "excel",
+                    },
+                    {
+                        "filename": invalid_workbook.name,
+                        "fixture_id": "invalid",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+
+    report = corpus.audit_corpus([fixture_dir])
+
+    assert report["ready"] is False
+    assert report["workbook_count"] == 1
+    assert report["skipped_workbook_count"] == 1
+    assert report["skipped_workbooks"] == [
+        {
+            "path": str(invalid_workbook),
+            "source_label": str(fixture_dir),
+            "tool": "excel",
+            "reason": "BadZipFile: File is not a zip file",
+        }
+    ]
+
+
 def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()

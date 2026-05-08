@@ -9,6 +9,7 @@ import posixpath
 import re
 import sys
 import zipfile
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -33,7 +34,8 @@ CORE_PART_PATTERNS = (
     re.compile(r"^xl/worksheets/sheet\d+\.xml$"),
     re.compile(r"^xl/worksheets/_rels/sheet\d+\.xml\.rels$"),
     re.compile(r"^xl/styles\.xml$"),
-    re.compile(r"^xl/sharedStrings\.xml$"),
+    re.compile(r"^xl/[Ss]haredStrings\.xml$"),
+    re.compile(r"^xl/\.DS_Store$"),
     re.compile(r"^xl/theme/theme(?:\d+)?\.xml$"),
     re.compile(r"^xl/theme/_rels/theme(?:\d+)?\.xml\.rels$"),
     re.compile(r"^xl/metadata\.xml$"),
@@ -112,9 +114,18 @@ KNOWN_EXTENSION_URIS = {
 KNOWN_EXTENSION_URIS_NORMALIZED = {uri.upper() for uri in KNOWN_EXTENSION_URIS}
 
 
+@dataclass(frozen=True)
+class SkippedFixture:
+    filename: str
+    fixture_id: str
+    tool: str | None
+    reason: str
+
+
 def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
     fixture_dir = fixture_dir.resolve()
     fixtures = []
+    skipped_fixtures: list[SkippedFixture] = []
     unknown_part_fixtures: dict[str, set[str]] = {}
     unknown_rel_fixtures: dict[str, set[str]] = {}
     unknown_content_type_fixtures: dict[str, set[str]] = {}
@@ -130,7 +141,18 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
-        fixture_report = _fixture_unknowns(path)
+        try:
+            fixture_report = _fixture_unknowns(path)
+        except _SKIPPABLE_FIXTURE_ERRORS as exc:
+            skipped_fixtures.append(
+                SkippedFixture(
+                    filename=entry.filename,
+                    fixture_id=entry.fixture_id,
+                    tool=entry.tool,
+                    reason=_error_reason(exc),
+                )
+            )
+            continue
         observed_app_unsupported_features = set(fixture_report["app_unsupported_features"])
         expected_app_unsupported_features = set(entry.app_unsupported_features or [])
         expected_observed = sorted(
@@ -176,11 +198,23 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
                 feature, set()
             ).add(entry.filename)
 
+    clear = (
+        not unknown_part_fixtures
+        and not unknown_rel_fixtures
+        and not unknown_content_type_fixtures
+        and not unknown_extension_uri_fixtures
+        and not unexpected_app_unsupported_feature_fixtures
+        and not missing_expected_app_unsupported_feature_fixtures
+    )
     return {
         "fixture_dir": str(fixture_dir),
         "fixture_count": len(fixtures),
+        "skipped_fixture_count": len(skipped_fixtures),
         "recursive": recursive,
         "fixtures": fixtures,
+        "skipped_fixtures": [
+            asdict(skipped_fixture) for skipped_fixture in skipped_fixtures
+        ],
         "unknown_part_families": _sorted_mapping(unknown_part_fixtures),
         "unknown_relationship_types": _sorted_mapping(unknown_rel_fixtures),
         "unknown_content_types": _sorted_mapping(unknown_content_type_fixtures),
@@ -209,18 +243,31 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         "missing_expected_app_unsupported_feature_count": len(
             missing_expected_app_unsupported_feature_fixtures
         ),
-        "clear": not unknown_part_fixtures
-        and not unknown_rel_fixtures
-        and not unknown_content_type_fixtures
-        and not unknown_extension_uri_fixtures
-        and not unexpected_app_unsupported_feature_fixtures
-        and not missing_expected_app_unsupported_feature_fixtures,
+        "clear": clear,
+        "ready": clear and not skipped_fixtures,
     }
+
+
+_SKIPPABLE_FIXTURE_ERRORS = (
+    ElementTree.ParseError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    zipfile.BadZipFile,
+)
+
+
+def _error_reason(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
 
 
 def _fixture_unknowns(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         parts = set(archive.namelist())
+        _validate_package_part_names(parts)
         feature_parts = audit_ooxml_fidelity._classify_feature_parts(parts)
         classified_parts = {part for values in feature_parts.values() for part in values}
         unknown_parts = sorted(
@@ -259,6 +306,12 @@ def _fixture_unknowns(path: Path) -> dict:
         "unknown_extension_uris": unknown_extension_uris,
         "app_unsupported_features": app_unsupported_features,
     }
+
+
+def _validate_package_part_names(parts: set[str]) -> None:
+    for part in sorted(parts):
+        if "\\" in part:
+            raise ValueError(f"unsafe OOXML package part path: {part}")
 
 
 def _app_unsupported_features(archive: zipfile.ZipFile) -> list[str]:
@@ -386,6 +439,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(f"Fixtures: {report['fixture_count']}")
+        print(f"Skipped fixtures: {report['skipped_fixture_count']}")
         print(f"Unknown part families: {report['unknown_part_family_count']}")
         print(f"Unknown relationship types: {report['unknown_relationship_type_count']}")
         print(f"Unknown content types: {report['unknown_content_type_count']}")
@@ -394,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {family}: {', '.join(fixtures)}")
         for uri, fixtures in report["unknown_extension_uris"].items():
             print(f"- {uri}: {', '.join(fixtures)}")
-    return 1 if args.strict and not report["clear"] else 0
+    return 1 if args.strict and not report["ready"] else 0
 
 
 if __name__ == "__main__":
