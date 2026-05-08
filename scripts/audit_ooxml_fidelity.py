@@ -87,6 +87,7 @@ class Snapshot:
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
     table_integrity_issues: list[dict[str, str]]
+    workbook_sheet_ref_issues: list[dict[str, str]]
     chart_sheet_ref_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
     semantic_fingerprints: dict[str, dict[str, object]]
@@ -104,6 +105,7 @@ def snapshot(path: Path) -> Snapshot:
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
             table_integrity_issues=_read_table_integrity_issues(archive),
+            workbook_sheet_ref_issues=_read_workbook_sheet_ref_issues(archive),
             chart_sheet_ref_issues=_read_chart_sheet_ref_issues(archive),
             feature_parts=_classify_feature_parts(parts),
             semantic_fingerprints=_read_semantic_fingerprints(archive),
@@ -132,6 +134,7 @@ def audit(before: Path, after: Path) -> dict:
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
     _audit_table_integrity(after_snapshot, issues)
+    _audit_workbook_sheet_refs(after_snapshot, issues)
     _audit_chart_sheet_refs(after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
@@ -240,6 +243,12 @@ def _audit_conditional_formatting_refs(
 
 def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
     issues.extend(snapshot_.table_integrity_issues)
+
+
+def _audit_workbook_sheet_refs(
+    snapshot_: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    issues.extend(snapshot_.workbook_sheet_ref_issues)
 
 
 def _audit_chart_sheet_refs(
@@ -501,6 +510,38 @@ def _read_chart_sheet_ref_issues(
     return issues
 
 
+def _read_workbook_sheet_ref_issues(
+    archive: zipfile.ZipFile,
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if root is None:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for node in _nodes_by_local(root, "definedName"):
+        formula = _text(node)
+        refs = _formula_sheet_reference_names(formula)
+        missing = sorted(ref for ref in refs if ref not in sheet_names)
+        if missing:
+            name = _attr(node, "name") or "<unnamed>"
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": "workbook_defined_name_missing_sheet",
+                    "part": "xl/workbook.xml",
+                    "message": (
+                        f"defined name {name!r} formula {formula!r} references "
+                        f"missing sheet(s): {missing}"
+                    ),
+                }
+            )
+    return issues
+
+
 def _workbook_sheet_names(archive: zipfile.ZipFile) -> set[str]:
     root = _read_xml_or_none(archive, "xl/workbook.xml")
     if root is None:
@@ -531,7 +572,24 @@ def _formula_sheet_reference_names(formula: str) -> set[str]:
 def _local_sheet_names_from_token(token: str) -> set[str]:
     if "[" in token or "]" in token:
         return set()
-    return {name for name in token.split(":") if name}
+    return {
+        name
+        for name in token.split(":")
+        if name and not _is_formula_error_reference_token(name)
+    }
+
+
+def _is_formula_error_reference_token(token: str) -> bool:
+    return token.lstrip("#").upper() in {
+        "REF",
+        "VALUE",
+        "DIV/0",
+        "NAME?",
+        "N/A",
+        "NULL",
+        "NUM",
+    }
+
 
 
 def _pivot_source_sheet_reference_name(name: str) -> str | None:
@@ -1549,6 +1607,7 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "dxfs_count": snapshot_.dxfs_count,
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
         "table_integrity_issue_count": len(snapshot_.table_integrity_issues),
+        "workbook_sheet_ref_issue_count": len(snapshot_.workbook_sheet_ref_issues),
         "chart_sheet_ref_issue_count": len(snapshot_.chart_sheet_ref_issues),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()

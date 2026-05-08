@@ -1061,6 +1061,9 @@ pub(super) fn apply_workbook_xml_phases(
         };
         let updated = sheet_order::merge_sheet_renames(&wb_bytes, &patcher.queued_sheet_renames)
             .map_err(|e| PyIOError::new_err(format!("sheet-rename merge: {e}")))?;
+        let updated =
+            rewrite_workbook_defined_name_sheet_renames(&updated, &patcher.queued_sheet_renames)
+                .map_err(|e| PyIOError::new_err(format!("defined-name sheet-rename merge: {e}")))?;
         workbook_xml_in_progress = Some(updated);
     }
 
@@ -1143,6 +1146,78 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
 
 fn is_chart_part_path(path: &str) -> bool {
     path.starts_with("xl/charts/") && path.ends_with(".xml")
+}
+
+fn rewrite_workbook_defined_name_sheet_renames(
+    workbook_xml: &[u8],
+    renames: &[(String, String)],
+) -> Result<Vec<u8>, String> {
+    let mut reader = XmlReader::from_reader(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(workbook_xml.len()));
+    let mut buf = Vec::new();
+    let mut in_defined_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                if e.local_name().as_ref() == b"definedName" {
+                    in_defined_name = true;
+                }
+                writer
+                    .write_event(Event::Start(e.into_owned()))
+                    .map_err(|e| format!("workbook XML write error: {e}"))?;
+            }
+            Ok(Event::End(e)) => {
+                if e.local_name().as_ref() == b"definedName" {
+                    in_defined_name = false;
+                }
+                writer
+                    .write_event(Event::End(e.into_owned()))
+                    .map_err(|e| format!("workbook XML write error: {e}"))?;
+            }
+            Ok(Event::Empty(e)) => {
+                writer
+                    .write_event(Event::Empty(e.into_owned()))
+                    .map_err(|e| format!("workbook XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) if in_defined_name => {
+                let formula_text = t
+                    .unescape()
+                    .map_err(|e| format!("defined name decode error: {e}"))?
+                    .into_owned();
+                let translated = rename_formula_sheet_refs(&formula_text, renames);
+                writer
+                    .write_event(Event::Text(BytesText::new(&translated)))
+                    .map_err(|e| format!("workbook XML write error: {e}"))?;
+            }
+            Ok(Event::Text(t)) => {
+                writer
+                    .write_event(Event::Text(t.into_owned()))
+                    .map_err(|e| format!("workbook XML write error: {e}"))?;
+            }
+            Ok(Event::CData(c)) => writer
+                .write_event(Event::CData(c.into_owned()))
+                .map_err(|e| format!("workbook XML write error: {e}"))?,
+            Ok(Event::Decl(d)) => writer
+                .write_event(Event::Decl(d.into_owned()))
+                .map_err(|e| format!("workbook XML write error: {e}"))?,
+            Ok(Event::PI(p)) => writer
+                .write_event(Event::PI(p.into_owned()))
+                .map_err(|e| format!("workbook XML write error: {e}"))?,
+            Ok(Event::Comment(c)) => writer
+                .write_event(Event::Comment(c.into_owned()))
+                .map_err(|e| format!("workbook XML write error: {e}"))?,
+            Ok(Event::DocType(d)) => writer
+                .write_event(Event::DocType(d.into_owned()))
+                .map_err(|e| format!("workbook XML write error: {e}"))?,
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(format!("workbook XML parse error: {e}")),
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
 }
 
 fn rewrite_chart_formula_sheet_renames(
@@ -1273,6 +1348,7 @@ fn rename_formula_sheet_refs(formula: &str, renames: &[(String, String)]) -> Str
     };
     for (old_name, new_name) in renames {
         current = wolfxl_formula::rename_sheet(&current, old_name, new_name);
+        current = rename_loose_local_sheet_refs(&current, old_name, new_name);
     }
     if had_prefix {
         current
@@ -1282,6 +1358,121 @@ fn rename_formula_sheet_refs(formula: &str, renames: &[(String, String)]) -> Str
             .unwrap_or(current.as_str())
             .to_string()
     }
+}
+
+fn rename_loose_local_sheet_refs(formula: &str, old_name: &str, new_name: &str) -> String {
+    let quoted = rename_quoted_local_sheet_refs(formula, old_name, new_name);
+    rename_unquoted_local_sheet_refs(&quoted, old_name, new_name)
+}
+
+fn rename_quoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &str) -> String {
+    let mut out = String::with_capacity(formula.len());
+    let mut cursor = 0;
+    while let Some(rel_start) = formula[cursor..].find('\'') {
+        let start = cursor + rel_start;
+        let mut idx = start + 1;
+        let mut token = String::new();
+        let mut close = None;
+        while idx < formula.len() {
+            let rest = &formula[idx..];
+            if rest.starts_with("''") {
+                token.push('\'');
+                idx += 2;
+                continue;
+            }
+            if rest.starts_with('\'') {
+                close = Some(idx);
+                break;
+            }
+            let Some(ch) = rest.chars().next() else {
+                break;
+            };
+            token.push(ch);
+            idx += ch.len_utf8();
+        }
+
+        let Some(close_idx) = close else {
+            break;
+        };
+        let after_quote = close_idx + 1;
+        if !formula[after_quote..].starts_with('!') {
+            out.push_str(&formula[cursor..after_quote]);
+            cursor = after_quote;
+            continue;
+        }
+
+        out.push_str(&formula[cursor..start]);
+        if let Some(renamed) = rename_sheet_token(&token, old_name, new_name) {
+            out.push_str(&quote_sheet_token(&renamed));
+        } else {
+            out.push_str(&formula[start..after_quote]);
+        }
+        out.push('!');
+        cursor = after_quote + 1;
+    }
+    out.push_str(&formula[cursor..]);
+    out
+}
+
+fn rename_unquoted_local_sheet_refs(formula: &str, old_name: &str, new_name: &str) -> String {
+    let mut out = String::with_capacity(formula.len());
+    let mut cursor = 0;
+    while let Some(rel_bang) = formula[cursor..].find('!') {
+        let bang = cursor + rel_bang;
+        let mut start = bang;
+        while start > cursor {
+            let Some((prev_idx, ch)) = formula[..start].char_indices().next_back() else {
+                break;
+            };
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == ':' {
+                start = prev_idx;
+            } else {
+                break;
+            }
+        }
+
+        let token = formula[start..bang].trim();
+        if token.is_empty() || token.contains('[') || token.contains(']') {
+            out.push_str(&formula[cursor..=bang]);
+            cursor = bang + 1;
+            continue;
+        }
+
+        if let Some(renamed) = rename_sheet_token(token, old_name, new_name) {
+            out.push_str(&formula[cursor..start]);
+            out.push_str(&quote_sheet_token(&renamed));
+            out.push('!');
+        } else {
+            out.push_str(&formula[cursor..=bang]);
+        }
+        cursor = bang + 1;
+    }
+    out.push_str(&formula[cursor..]);
+    out
+}
+
+fn rename_sheet_token(token: &str, old_name: &str, new_name: &str) -> Option<String> {
+    if token.contains('[') || token.contains(']') {
+        return None;
+    }
+    let mut changed = false;
+    let renamed = token
+        .split(':')
+        .map(|part| {
+            if part == old_name {
+                changed = true;
+                new_name
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(":");
+    changed.then_some(renamed)
+}
+
+fn quote_sheet_token(token: &str) -> String {
+    format!("'{}'", token.replace('\'', "''"))
 }
 
 pub(super) fn has_pending_save_work(patcher: &XlsxPatcher) -> bool {

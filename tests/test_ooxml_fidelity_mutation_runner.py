@@ -480,6 +480,42 @@ def test_rename_first_sheet_rewrites_chart_pivot_source_sheet_refs(
     assert "WolfXL Fidelity Rename!PivotTable9" in chart_xml
 
 
+def test_rename_first_sheet_rewrites_workbook_defined_name_sheet_refs(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "openpyxl-p1-structured-validation-protection-customxml.xlsx"
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "tests"
+        / "fixtures"
+        / "external_oracle"
+        / fixture.name
+    )
+    shutil.copy2(source, fixture)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("rename_first_sheet",),
+    )
+
+    assert report["failure_count"] == 0
+    after = (
+        output_dir
+        / "openpyxl-p1-structured-validation-protection-customxml"
+        / "rename_first_sheet"
+        / "after-openpyxl-p1-structured-validation-protection-customxml.xlsx"
+    )
+    with zipfile.ZipFile(after) as archive:
+        workbook_xml = archive.read("xl/workbook.xml").decode()
+
+    assert "'P1 Surface'!$A$1:$D$4" not in workbook_xml
+    assert "&apos;WolfXL Fidelity Rename&apos;!$A$1:$D$4" in workbook_xml
+
+
 def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

@@ -358,6 +358,64 @@ def test_detects_chart_pivot_source_reference_to_missing_sheet(tmp_path: Path) -
     assert "Sheet1" in issue["message"]
 
 
+def test_detects_workbook_defined_name_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/workbook.xml"] = before_entries["xl/workbook.xml"].replace(
+        "<sheets>",
+        '<definedNames><definedName name="ReportRange">'
+        "'Sheet1'!$A$1:$D$4"
+        "</definedName></definedNames><sheets>",
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "workbook_defined_name_missing_sheet"
+    )
+    assert issue["part"] == "xl/workbook.xml"
+    assert "ReportRange" in issue["message"]
+    assert "Sheet1" in issue["message"]
+
+
+def test_workbook_defined_name_reference_audit_accepts_current_external_and_ref(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "defined-names.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"',
+        'name="WolfXL Fidelity Rename"',
+    ).replace(
+        "<sheets>",
+        '<definedNames><definedName name="CurrentRange">'
+        "'WolfXL Fidelity Rename'!$A$1:$D$4"
+        '</definedName><definedName name="ExternalRange">'
+        "'[Book.xlsx]Sheet1'!$A$1"
+        '</definedName><definedName name="BrokenAllowed">'
+        "#REF!"
+        "</definedName></definedNames><sheets>",
+    )
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.workbook_sheet_ref_issues == []
+
+
 def test_fingerprints_structured_references_without_external_links(
     tmp_path: Path,
 ) -> None:
