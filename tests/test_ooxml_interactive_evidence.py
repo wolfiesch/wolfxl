@@ -274,6 +274,59 @@ def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> 
     assert report["result_count"] == 2
 
 
+def test_probe_runner_filters_fixtures(tmp_path: Path, monkeypatch) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_external_link_workbook(fixture_dir / "external.xlsx")
+    fixture_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {"filename": "macro.xlsm", "fixture_id": "macro", "tool": "excel"},
+                    {"filename": "external.xlsx", "fixture_id": "external", "tool": "excel"},
+                ]
+            }
+        )
+    )
+    calls: list[str] = []
+
+    def fake_run_probe(
+        fixture_path: Path,
+        fixture_label: str,
+        _output_dir: Path,
+        *,
+        probe: str,
+        mutation: str,
+        timeout: int,
+    ) -> object:
+        calls.append(fixture_label)
+        return probe_runner.InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=probe_runner.PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="passed",
+            output=str(fixture_path),
+            message=f"timeout={timeout}",
+        )
+
+    monkeypatch.setattr(probe_runner, "_run_probe", fake_run_probe)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("macro_project_presence", "external_link_update_prompt"),
+        include_fixture_patterns=("external.*",),
+    )
+
+    assert calls == ["external.xlsx"]
+    assert report["include_fixture_patterns"] == ["external.*"]
+    assert report["result_count"] == 1
+
+
 def test_macro_probe_runner_fails_when_vba_project_missing(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

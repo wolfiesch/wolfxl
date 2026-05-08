@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import shutil
 import sys
@@ -59,11 +60,16 @@ def run_interactive_probes(
     probes: tuple[str, ...] = SUPPORTED_PROBES,
     mutation: str = SOURCE_MUTATION,
     timeout: int = 90,
+    include_fixture_patterns: tuple[str, ...] = (),
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[InteractiveProbeResult] = []
     for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir):
+        if include_fixture_patterns and not _fixture_matches(
+            entry.filename, include_fixture_patterns
+        ):
+            continue
         fixture_path = fixture_dir / entry.filename
         if not fixture_path.is_file():
             continue
@@ -88,6 +94,7 @@ def run_interactive_probes(
                 probes,
                 mutation,
                 results,
+                include_fixture_patterns,
                 completed=False,
             )
 
@@ -97,8 +104,13 @@ def run_interactive_probes(
         probes,
         mutation,
         results,
+        include_fixture_patterns,
         completed=True,
     )
+
+
+def _fixture_matches(filename: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatch(filename, pattern) for pattern in patterns)
 
 
 def _write_report(
@@ -107,6 +119,7 @@ def _write_report(
     probes: tuple[str, ...],
     mutation: str,
     results: list[InteractiveProbeResult],
+    include_fixture_patterns: tuple[str, ...],
     completed: bool,
 ) -> dict:
     report = {
@@ -114,6 +127,7 @@ def _write_report(
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "probes": list(probes),
+        "include_fixture_patterns": list(include_fixture_patterns),
         "probe_kind": PROBE_KIND,
         "mutation": mutation,
         "result_count": len(results),
@@ -285,6 +299,13 @@ def main(argv: list[str] | None = None) -> int:
         default=SOURCE_MUTATION,
     )
     parser.add_argument("--timeout", type=int, default=90)
+    parser.add_argument(
+        "--fixture",
+        action="append",
+        default=[],
+        dest="fixtures",
+        help="Fixture filename or shell-style pattern to include. May be passed multiple times.",
+    )
     args = parser.parse_args(argv)
     probes = tuple(args.probes) if args.probes else SUPPORTED_PROBES
 
@@ -294,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         probes=probes,
         mutation=args.mutation,
         timeout=args.timeout,
+        include_fixture_patterns=tuple(args.fixtures),
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
