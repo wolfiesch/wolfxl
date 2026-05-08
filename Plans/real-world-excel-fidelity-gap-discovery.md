@@ -487,11 +487,12 @@ Next evidence slices before declaring a higher-confidence "no known gaps":
    workbooks.
 2. Extend structural intentional mutation Excel render-smoke beyond
    `copy_first_sheet` and `move_formula_range` into higher-risk
-   feature-specific edits such as drawing anchor mutations and external-link
-   relationship-preserving edits.
-3. Add interactive state probes where package/render evidence is weak:
-   slicer selections, timeline selections, pivot refresh state, external-link
-   update prompts, macro/project presence, and embedded-control openability.
+   feature-specific edits such as drawing anchor mutations, pivot/slicer
+   structural edits, and external-link relationship-preserving edits.
+3. Add click-level interactive UI automation beyond the current
+   `ooxml_state_presence` probes, especially for slicer selections, timeline
+   selections, pivot refresh/filter behavior, external-link update prompts,
+   macro/project presence, and embedded-control openability.
 4. Keep the gap radar strict: every newly seen part family, relationship type,
    content type, or extension URI must become either an allowlisted known
    surface with a semantic fingerprint or an explicit gap.
