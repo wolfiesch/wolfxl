@@ -5962,6 +5962,7 @@ fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
         )));
     }
     let mut names = HashSet::with_capacity(zip.len());
+    let mut casefolded_names = HashSet::with_capacity(zip.len());
     let mut total: u64 = 0;
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
@@ -5970,6 +5971,12 @@ fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
         if !names.insert(name.clone()) {
             return Err(ReaderError::Unsupported(format!(
                 "OOXML package contains duplicate ZIP entry: {name}"
+            )));
+        }
+        let casefolded_name = name.to_ascii_lowercase();
+        if !casefolded_names.insert(casefolded_name) {
+            return Err(ReaderError::Unsupported(format!(
+                "OOXML package contains case-insensitive duplicate ZIP entry: {name}"
             )));
         }
         validate_zip_entry_metadata(&name, file.size(), file.compressed_size())?;
@@ -6035,6 +6042,16 @@ fn read_part_optional<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<String>> {
+    match zip.by_name(name) {
+        Ok(mut file) => {
+            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
+            let mut out = String::new();
+            file.read_to_string(&mut out)?;
+            return Ok(Some(out));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => return Err(ReaderError::Zip(e)),
+    }
     let Some(actual_name) = resolve_zip_part_name(zip, name) else {
         return Ok(None);
     };
@@ -6053,6 +6070,16 @@ fn read_part_optional_bytes<R: Read + std::io::Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>> {
+    match zip.by_name(name) {
+        Ok(mut file) => {
+            validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
+            let mut out = Vec::new();
+            file.read_to_end(&mut out)?;
+            return Ok(Some(out));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => return Err(ReaderError::Zip(e)),
+    }
     let Some(actual_name) = resolve_zip_part_name(zip, name) else {
         return Ok(None);
     };
