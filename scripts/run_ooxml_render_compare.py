@@ -294,7 +294,12 @@ def _compare_fixture(
             timeout,
         )
         max_rmse = 0.0
-        for before_page, after_page in zip(before_pages, after_pages, strict=True):
+        if len(before_pages) != len(after_pages):
+            raise RuntimeError(
+                f"rasterized page-count mismatch: before={len(before_pages)} "
+                f"after={len(after_pages)}"
+            )
+        for before_page, after_page in zip(before_pages, after_pages):
             max_rmse = max(
                 max_rmse,
                 _normalized_rmse(compare_cmd, before_page, after_page, timeout),
