@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import re
@@ -233,12 +234,18 @@ def run_sweep(
     mutations: Iterable[str] = DEFAULT_MUTATIONS,
     verify_hashes: bool = True,
     recursive: bool = False,
+    exclude_fixture_patterns: Iterable[str] = (),
 ) -> dict:
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[MutationResult] = []
+    exclude_fixture_patterns = tuple(exclude_fixture_patterns)
+    skipped_fixtures: list[str] = []
 
     for entry in discover_fixtures(fixture_dir, recursive=recursive):
+        if _fixture_is_excluded(entry.filename, exclude_fixture_patterns):
+            skipped_fixtures.append(entry.filename)
+            continue
         fixture_path = fixture_dir / entry.filename
         if not fixture_path.is_file():
             results.append(
@@ -274,6 +281,9 @@ def run_sweep(
         "output_dir": str(output_dir.resolve()),
         "mutations": list(mutations),
         "recursive": recursive,
+        "exclude_fixture_patterns": list(exclude_fixture_patterns),
+        "skipped_fixture_count": len(skipped_fixtures),
+        "skipped_fixtures": skipped_fixtures,
         "result_count": len(results),
         "failure_count": sum(
             1 for result in results if result.status not in PASSING_STATUSES
@@ -282,6 +292,15 @@ def run_sweep(
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
     return report
+
+
+def _fixture_is_excluded(filename: str, patterns: Iterable[str]) -> bool:
+    path = filename.replace("\\", "/")
+    name = Path(path).name
+    return any(
+        fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(name, pattern)
+        for pattern in patterns
+    )
 
 
 def _hash_error(path: Path, expected_hash: str | None, verify_hashes: bool) -> str | None:
@@ -741,6 +760,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Discover .xlsx fixtures recursively when no manifest.json is present.",
     )
+    parser.add_argument(
+        "--exclude-fixture",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help=(
+            "Skip discovered fixtures whose relative path or basename matches GLOB. "
+            "May be passed multiple times."
+        ),
+    )
     args = parser.parse_args(argv)
 
     report = run_sweep(
@@ -749,6 +778,7 @@ def main(argv: list[str] | None = None) -> int:
         mutations=args.mutations or DEFAULT_MUTATIONS,
         verify_hashes=not args.no_verify_hashes,
         recursive=args.recursive,
+        exclude_fixture_patterns=args.exclude_fixture,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

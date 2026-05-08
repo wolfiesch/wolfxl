@@ -133,6 +133,29 @@ def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     ).is_file()
 
 
+def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    nested_dir = fixture_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    _make_fixture(fixture_dir / "keep.xlsx")
+    _make_fixture(nested_dir / "skip-heavy.xlsx")
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+        recursive=True,
+        exclude_fixture_patterns=("*skip-heavy.xlsx",),
+    )
+
+    assert report["exclude_fixture_patterns"] == ["*skip-heavy.xlsx"]
+    assert report["skipped_fixture_count"] == 1
+    assert report["skipped_fixtures"] == ["nested/skip-heavy.xlsx"]
+    assert report["result_count"] == 1
+    assert report["results"][0]["fixture"] == "keep.xlsx"
+
+
 def test_runner_supports_add_remove_chart_mutation(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
