@@ -223,8 +223,10 @@ def test_gap_radar_reports_backslash_package_paths_as_skipped_invalid_inputs(
             """<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""",
         )
+        backslash_part = zipfile.ZipInfo("placeholder")
+        backslash_part.filename = r"xl\_rels\workbook.xml.rels"
         archive.writestr(
-            r"xl\_rels\workbook.xml.rels",
+            backslash_part,
             """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""",
         )
