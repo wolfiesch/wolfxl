@@ -201,6 +201,39 @@ def test_detects_conditional_formatting_dxf_reference_out_of_range(
     )
 
 
+def test_detects_table_ref_column_count_mismatch(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/tables/table1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" ref="A1:C4">
+  <x:autoFilter ref="A1:C4"/>
+  <x:tableColumns count="3">
+    <x:tableColumn id="1" name="Region"/>
+    <x:tableColumn id="2" name="Product"/>
+    <x:tableColumn id="3" name="Sales"/>
+  </x:tableColumns>
+</x:table>"""
+    after_entries = dict(before_entries)
+    after_entries["xl/tables/table1.xml"] = before_entries["xl/tables/table1.xml"].replace(
+        'ref="A1:C4"', 'ref="A1:B4"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "table_column_count_mismatch"
+    )
+    assert issue["part"] == "xl/tables/table1.xml"
+    assert "ref width=2" in issue["message"]
+    assert "tableColumn children=3" in issue["message"]
+
+
 def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"

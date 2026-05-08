@@ -192,6 +192,28 @@ fn find_start_tag_by_local(s: &str, local: &str) -> Option<(usize, usize)> {
     None
 }
 
+fn start_tag_name(s: &str, start: usize, open_end: usize) -> Option<&str> {
+    let name_start = start.checked_add(1)?;
+    if s[name_start..open_end].starts_with('/') {
+        return None;
+    }
+    let name_end = s[name_start..open_end]
+        .find(|c: char| c == ' ' || c == '>' || c == '/')
+        .map(|i| name_start + i)
+        .unwrap_or(open_end - 1);
+    Some(&s[name_start..name_end])
+}
+
+fn element_end_for_start_tag(s: &str, start: usize, open_end: usize) -> Option<usize> {
+    let open_tag = &s[start..open_end];
+    if open_tag.trim_end().ends_with("/>") {
+        return Some(open_end);
+    }
+    let tag_name = start_tag_name(s, start, open_end)?;
+    let close_tag = format!("</{tag_name}>");
+    Some(open_end + s[open_end..].find(&close_tag)? + close_tag.len())
+}
+
 fn parse_row_number(cell: &str) -> Option<u32> {
     let mut i = 0usize;
     let bytes = cell.as_bytes();
@@ -366,14 +388,10 @@ fn unescape_xml(s: &str) -> String {
 /// `[col_lo, col_hi]` band.
 fn extract_table_col_band(xml: &[u8]) -> Option<(u32, u32)> {
     let s = std::str::from_utf8(xml).ok()?;
-    let i = s.find("<table ")?;
-    let close = s[i..].find('>')?;
-    let elt = &s[i..i + close];
-    let r_idx = elt.find(" ref=\"")?;
-    let v_start = r_idx + " ref=\"".len();
-    let v_end = elt[v_start..].find('"')?;
-    let r = &elt[v_start..v_start + v_end];
-    parse_ref_col_band(r)
+    let (i, close) = find_start_tag_by_local(s, "table")?;
+    let elt = &s[i..close];
+    let r = extract_attr(elt, "ref")?;
+    parse_ref_col_band(&r)
 }
 
 /// Parse "A1:E5" into `(1, 5)`. Single-cell refs return the same column twice.
@@ -412,27 +430,45 @@ fn rewrite_table_columns_block(shifted: &[u8], plan: &ShiftPlan, t_lo: u32, t_hi
         Ok(s) => s.to_owned(),
         Err(_) => return shifted.to_vec(),
     };
-    let block_start = match s.find("<tableColumns") {
-        Some(i) => i,
+    let (block_start, block_open_end) = match find_start_tag_by_local(&s, "tableColumns") {
+        Some(span) => span,
         None => return shifted.to_vec(),
     };
-    let block_end = match s[block_start..].find("</tableColumns>") {
-        Some(i) => block_start + i + "</tableColumns>".len(),
+    let block_tag = match start_tag_name(&s, block_start, block_open_end) {
+        Some(tag) => tag.to_string(),
+        None => return shifted.to_vec(),
+    };
+    let close_tag = format!("</{block_tag}>");
+    let block_end = match s[block_open_end..].find(&close_tag) {
+        Some(i) => block_open_end + i + close_tag.len(),
         None => return shifted.to_vec(),
     };
     let block = &s[block_start..block_end];
+    let block_open_tag = &s[block_start..block_open_end];
 
     let mut entries: Vec<String> = Vec::new();
     let mut i = 0usize;
-    while let Some(start_rel) = block[i..].find("<tableColumn ") {
+    while let Some((start_rel, open_end)) = find_start_tag_by_local(&block[i..], "tableColumn") {
         let abs_start = i + start_rel;
-        let end = match block[abs_start..].find("/>") {
-            Some(e) => abs_start + e + 2,
-            None => break,
+        let abs_open_end = i + open_end;
+        let Some(end) = element_end_for_start_tag(block, abs_start, abs_open_end) else {
+            break;
         };
         entries.push(block[abs_start..end].to_string());
         i = end;
     }
+    let column_tag = entries
+        .first()
+        .and_then(|entry| {
+            let (start, open_end) = find_start_tag_by_local(entry, "tableColumn")?;
+            start_tag_name(entry, start, open_end).map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            block_tag
+                .rsplit_once(':')
+                .map(|(prefix, _)| format!("{prefix}:tableColumn"))
+                .unwrap_or_else(|| "tableColumn".to_string())
+        });
 
     let new_entries: Vec<String> = if plan.is_insert() {
         let n = plan.n as u32;
@@ -456,7 +492,7 @@ fn rewrite_table_columns_block(shifted: &[u8], plan: &ShiftPlan, t_lo: u32, t_hi
             }
             for k in 0..n {
                 let new_name = format!("Column{}", max_n + 1 + k);
-                out.push(format!(r#"<tableColumn id="0" name="{new_name}"/>"#));
+                out.push(format!(r#"<{column_tag} id="0" name="{new_name}"/>"#));
             }
             out.extend_from_slice(&entries[insert_pos..]);
             renumber_ids(out)
@@ -483,11 +519,12 @@ fn rewrite_table_columns_block(shifted: &[u8], plan: &ShiftPlan, t_lo: u32, t_hi
     };
 
     let new_count = new_entries.len();
-    let mut new_block = format!(r#"<tableColumns count="{new_count}">"#);
+    let mut new_block =
+        replace_or_insert_attr_value(block_open_tag, "count", &new_count.to_string());
     for e in &new_entries {
         new_block.push_str(e);
     }
-    new_block.push_str("</tableColumns>");
+    new_block.push_str(&close_tag);
 
     let mut out = Vec::with_capacity(shifted.len());
     out.extend_from_slice(s[..block_start].as_bytes());
@@ -528,6 +565,25 @@ fn replace_attr_value(elt: &str, key: &str, new_val: &str) -> String {
         return out;
     }
     elt.to_string()
+}
+
+fn replace_or_insert_attr_value(elt: &str, key: &str, new_val: &str) -> String {
+    if extract_attr(elt, key).is_some() {
+        return replace_attr_value(elt, key, new_val);
+    }
+    let Some(close) = elt.rfind('>') else {
+        return elt.to_string();
+    };
+    let insert = if close > 0 && elt.as_bytes().get(close - 1) == Some(&b'/') {
+        close - 1
+    } else {
+        close
+    };
+    let mut out = String::with_capacity(elt.len() + key.len() + new_val.len() + 4);
+    out.push_str(&elt[..insert]);
+    out.push_str(&format!(" {key}=\"{new_val}\""));
+    out.push_str(&elt[insert..]);
+    out
 }
 
 fn extract_attr(elt: &str, key: &str) -> Option<String> {
@@ -610,6 +666,45 @@ mod tests {
         assert!(s.contains(r#"<tableColumn id="3" name="H5"/>"#), "got: {s}");
         assert!(!s.contains(r#"name="H3""#), "got: {s}");
         assert!(!s.contains(r#"name="H4""#), "got: {s}");
+    }
+
+    #[test]
+    fn prefixed_table_delete_inside_band_removes_columns_and_preserves_prefix() {
+        let table_xml = r#"<?xml version="1.0"?><x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="A1:C4"><x:autoFilter ref="A1:C4"/><x:tableColumns count="3"><x:tableColumn id="1" name="Region" /><x:tableColumn id="2" name="Product" /><x:tableColumn id="3" name="Sales" /></x:tableColumns></x:table>"#;
+        let plan = ShiftPlan::delete(Axis::Col, 1, 1);
+        let out = shift_table_xml(table_xml.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="A1:B4""#), "got: {s}");
+        assert!(s.contains(r#"<x:tableColumns count="2">"#), "got: {s}");
+        assert!(
+            s.contains(r#"<x:tableColumn id="1" name="Product" />"#),
+            "got: {s}"
+        );
+        assert!(
+            s.contains(r#"<x:tableColumn id="2" name="Sales" />"#),
+            "got: {s}"
+        );
+        assert!(!s.contains(r#"name="Region""#), "got: {s}");
+        assert_eq!(s.matches("<x:tableColumn ").count(), 2, "got: {s}");
+    }
+
+    #[test]
+    fn prefixed_table_insert_inside_band_adds_prefixed_columns() {
+        let table_xml = r#"<?xml version="1.0"?><x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="A1:C4"><x:autoFilter ref="A1:C4"/><x:tableColumns count="3"><x:tableColumn id="1" name="Region"/><x:tableColumn id="2" name="Product"/><x:tableColumn id="3" name="Sales"/></x:tableColumns></x:table>"#;
+        let plan = ShiftPlan::insert(Axis::Col, 2, 1);
+        let out = shift_table_xml(table_xml.as_bytes(), &plan);
+        let s = String::from_utf8_lossy(&out);
+        assert!(s.contains(r#"ref="A1:D4""#), "got: {s}");
+        assert!(s.contains(r#"<x:tableColumns count="4">"#), "got: {s}");
+        assert!(
+            s.contains(r#"<x:tableColumn id="2" name="Column"#),
+            "got: {s}"
+        );
+        assert!(
+            s.contains(r#"<x:tableColumn id="3" name="Product"/>"#),
+            "got: {s}"
+        );
+        assert_eq!(s.matches("<x:tableColumn ").count(), 4, "got: {s}");
     }
 
     #[test]
