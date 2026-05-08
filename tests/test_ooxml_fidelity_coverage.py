@@ -9,11 +9,7 @@ from types import ModuleType
 
 
 def _load_coverage_module() -> ModuleType:
-    script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "audit_ooxml_fidelity_coverage.py"
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_fidelity_coverage.py"
     spec = importlib.util.spec_from_file_location("audit_ooxml_fidelity_coverage", script)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -213,9 +209,7 @@ def test_require_render_cli_requires_render_report(tmp_path: Path, capsys) -> No
     assert captured.out == ""
 
 
-def test_require_intentional_render_cli_requires_render_report(
-    tmp_path: Path, capsys
-) -> None:
+def test_require_intentional_render_cli_requires_render_report(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
 
@@ -239,9 +233,7 @@ def test_require_app_cli_requires_app_report(tmp_path: Path, capsys) -> None:
     assert captured.out == ""
 
 
-def test_require_intentional_app_cli_requires_app_report(
-    tmp_path: Path, capsys
-) -> None:
+def test_require_intentional_app_cli_requires_app_report(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
 
@@ -745,12 +737,7 @@ def test_coverage_audit_does_not_count_plain_worksheet_as_cf_surface(
     report = coverage_module.audit_coverage(fixture_dir)
 
     assert report["fixtures"][0]["surfaces"] == ["style_theme_color_preservation"]
-    assert (
-        report["surfaces"]["conditional_formatting_extension_preservation"][
-            "fixtures"
-        ]
-        == []
-    )
+    assert report["surfaces"]["conditional_formatting_extension_preservation"]["fixtures"] == []
 
 
 def test_coverage_audit_does_not_count_pivot_as_slicer_evidence(
@@ -851,6 +838,58 @@ def test_powerpivot_data_model_surface_accepts_real_excel_source(
     assert data_model["external_tool_fixtures"] == []
     assert data_model["structural_mutation_fixtures"] == ["excel-data-model.xlsx"]
     assert data_model["missing"] == []
+
+
+def test_external_link_surface_accepts_retarget_mutation_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    external = fixture_dir / "external-link.xlsx"
+    excel = fixture_dir / "excel-link.xlsx"
+    _write_external_link_fixture(external)
+    _write_external_link_fixture(excel)
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": external.name,
+                        "fixture_id": "external_link",
+                        "tool": "synthetic-ooxml",
+                    },
+                    {
+                        "filename": excel.name,
+                        "fixture_id": "excel_link",
+                        "tool": "excel",
+                    },
+                ]
+            }
+        )
+    )
+    mutation_report = tmp_path / "mutation-report.json"
+    mutation_report.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "fixture": external.name,
+                        "mutation": "retarget_external_links",
+                        "status": "passed_with_expected_drift",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = coverage_module.audit_coverage(fixture_dir, reports=[mutation_report])
+
+    external_links = report["surfaces"]["external_link_relationship_edges"]
+    assert "retarget_external_links" in external_links["accepted_structural_mutations"]
+    assert external_links["external_tool_fixtures"] == ["external-link.xlsx"]
+    assert external_links["real_excel_fixtures"] == ["excel-link.xlsx"]
+    assert external_links["structural_mutation_fixtures"] == ["external-link.xlsx"]
+    assert external_links["missing"] == []
 
 
 def test_extension_payload_surface_requires_source_and_mutation_evidence(
@@ -1105,6 +1144,53 @@ def _write_data_model_fixture(path: Path) -> None:
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
         "xl/model/item.data": b"powerpivot-model",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_external_link_fixture(path: Path) -> None:
+    entries = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+  <externalReferences><externalReference r:id="rId2"/></externalReferences>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1"><f>'[source.xlsx]Sheet1'!A1</f></c></row></sheetData>
+</worksheet>""",
+        "xl/externalLinks/externalLink1.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1">
+    <sheetNames><sheetName val="Sheet1"/></sheetNames>
+    <sheetDataSet><sheetData sheetId="0"><row r="1"><cell r="A1" t="n"><v>1</v></cell></row></sheetData></sheetDataSet>
+  </externalBook>
+</externalLink>""",
+        "xl/externalLinks/_rels/externalLink1.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="source.xlsx" TargetMode="External"/>
+</Relationships>""",
     }
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():

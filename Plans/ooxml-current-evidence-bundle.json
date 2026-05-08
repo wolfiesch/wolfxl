@@ -4,17 +4,19 @@
     {
       "name": "combined_all_evidence_gate",
       "path": "/tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-app --require-intentional-app --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-noop-p1-all-final.json --render-report /tmp/wolfxl-render-intentional-p1-all-final.json --render-report /tmp/wolfxl-render-noop-connections.json --render-report /tmp/wolfxl-render-intentional-connections.json --render-report /tmp/wolfxl-render-noop-powerpivot.json --render-report /tmp/wolfxl-render-intentional-powerpivot.json --app-report /tmp/wolfxl-app-smoke-excel-source-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-connections.json --app-report /tmp/wolfxl-app-smoke-excel-intentional-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-intentional-p1-all-final2.json --app-report /tmp/wolfxl-app-smoke-powerpivot-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-intentional.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-intentional.json > /tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-app --require-intentional-app --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --report /tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget.json --render-report /tmp/wolfxl-render-noop-p1-all-final.json --render-report /tmp/wolfxl-render-intentional-p1-all-final.json --render-report /tmp/wolfxl-render-noop-connections.json --render-report /tmp/wolfxl-render-intentional-connections.json --render-report /tmp/wolfxl-render-noop-powerpivot.json --render-report /tmp/wolfxl-render-intentional-powerpivot.json --app-report /tmp/wolfxl-app-smoke-excel-source-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-connections.json --app-report /tmp/wolfxl-app-smoke-excel-intentional-connections.json --app-report /tmp/wolfxl-app-smoke-libreoffice-intentional-p1-all-final2.json --app-report /tmp/wolfxl-app-smoke-powerpivot-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-intentional.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-source.json --app-report /tmp/wolfxl-app-smoke-powerpivot-excel-intentional.json --app-report /tmp/wolfxl-app-smoke-excel-retarget-external-links.json > /tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
-        {"path": "mutation_report_count", "at_least": 4},
+        {"path": "mutation_report_count", "at_least": 5},
         {"path": "render_report_count", "at_least": 6},
-        {"path": "app_report_count", "at_least": 8},
+        {"path": "app_report_count", "at_least": 9},
         {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
         {"path": "surfaces.chart_style_color_preservation.clear", "equals": true},
         {"path": "surfaces.conditional_formatting_extension_preservation.clear", "equals": true},
         {"path": "surfaces.external_link_relationship_edges.clear", "equals": true},
+        {"path": "surfaces.external_link_relationship_edges.accepted_structural_mutations", "equals": ["rename_first_sheet", "move_formula_range", "retarget_external_links"]},
+        {"path": "surfaces.external_link_relationship_edges.structural_mutation_fixtures", "equals": ["synthetic-external-link-basic.xlsx", "real-excel-timeline-slicer.xlsx", "real-excel-external-link-basic.xlsx"]},
         {"path": "surfaces.powerpivot_data_model_preservation.clear", "equals": true}
       ]
     },
@@ -24,14 +26,21 @@
       "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --report /tmp/wolfxl-interactive-probe-macro-excel.json --report /tmp/wolfxl-interactive-probe-embedded-control-excel.json --report /tmp/wolfxl-interactive-probe-external-link-excel.json --report /tmp/wolfxl-interactive-probe-pivot-excel.json --report /tmp/wolfxl-interactive-probe-slicer-excel.json --report /tmp/wolfxl-interactive-probe-timeline-excel.json --strict > /tmp/wolfxl-interactive-evidence-external-oracle-all.json",
       "expect": [
         {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "ooxml_state_presence"},
         {"path": "fixture_count", "equals": 22},
         {"path": "report_count", "equals": 6},
         {"path": "probes.slicer_selection_state.clear", "equals": true},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.timeline_selection_state.clear", "equals": true},
+        {"path": "probes.timeline_selection_state.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.pivot_refresh_state.clear", "equals": true},
+        {"path": "probes.pivot_refresh_state.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.external_link_update_prompt.clear", "equals": true},
+        {"path": "probes.external_link_update_prompt.probe_kind", "equals": "ooxml_state_presence"},
         {"path": "probes.macro_project_presence.clear", "equals": true},
-        {"path": "probes.embedded_control_openability.clear", "equals": true}
+        {"path": "probes.macro_project_presence.probe_kind", "equals": "ooxml_state_presence"},
+        {"path": "probes.embedded_control_openability.clear", "equals": true},
+        {"path": "probes.embedded_control_openability.probe_kind", "equals": "ooxml_state_presence"}
       ]
     },
     {
@@ -576,10 +585,53 @@
       "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/slicer_timeline_variants --report /tmp/wolfxl-interactive-probe-slicer-shared-two-pivots-excel.json > /tmp/wolfxl-interactive-evidence-slicer-shared-two-pivots-sidecar.json",
       "expect": [
         {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "ooxml_state_presence"},
         {"path": "fixture_count", "equals": 1},
         {"path": "report_count", "equals": 1},
         {"path": "probes.slicer_selection_state.status", "equals": "clear"},
-        {"path": "probes.pivot_refresh_state.status", "equals": "clear"}
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "ooxml_state_presence"},
+        {"path": "probes.pivot_refresh_state.status", "equals": "clear"},
+        {"path": "probes.pivot_refresh_state.probe_kind", "equals": "ooxml_state_presence"}
+      ]
+    },
+    {
+      "name": "external_link_retarget_mutation",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget --mutation retarget_external_links > /tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget.json",
+      "expect": [
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "mutations", "equals": ["retarget_external_links"]},
+        {"path": "results.7.fixture", "equals": "synthetic-external-link-basic.xlsx"},
+        {"path": "results.7.status", "equals": "passed_with_expected_drift"},
+        {"path": "results.7.expected_issue_count", "equals": 2},
+        {"path": "results.7.expected_issues.0.kind", "equals": "missing_relationship"},
+        {"path": "results.7.expected_issues.1.kind", "equals": "external_links_semantic_drift"},
+        {"path": "results.7.expected_issues.1.message", "contains": "wolfxl-retargeted-external-link.xlsx"},
+        {"path": "results.10.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.10.status", "equals": "passed_with_expected_drift"},
+        {"path": "results.10.expected_issue_count", "equals": 2},
+        {"path": "results.10.expected_issues.0.kind", "equals": "missing_relationship"},
+        {"path": "results.10.expected_issues.1.kind", "equals": "external_links_semantic_drift"},
+        {"path": "results.10.expected_issues.1.message", "contains": "wolfxl-retargeted-external-link.xlsx"},
+        {"path": "results.13.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.13.status", "equals": "passed_with_expected_drift"},
+        {"path": "results.13.expected_issue_count", "equals": 2},
+        {"path": "results.13.expected_issues.0.kind", "equals": "missing_relationship"},
+        {"path": "results.13.expected_issues.1.kind", "equals": "external_links_semantic_drift"},
+        {"path": "results.13.expected_issues.1.message", "contains": "wolfxl-retargeted-external-link.xlsx"}
+      ]
+    },
+    {
+      "name": "external_link_retarget_excel_app_open",
+      "path": "/tmp/wolfxl-app-smoke-excel-retarget-external-links.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_app_smoke.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-app-smoke-excel-retarget-external-links --app excel --timeout 180 --mutation retarget_external_links > /tmp/wolfxl-app-smoke-excel-retarget-external-links.json",
+      "expect": [
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["retarget_external_links"]},
+        {"path": "aborted", "equals": false}
       ]
     },
     {

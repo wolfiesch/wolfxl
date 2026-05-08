@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+import subprocess
 
 import openpyxl
 
@@ -57,9 +58,7 @@ def test_smoke_skips_libreoffice_when_missing(tmp_path: Path, monkeypatch) -> No
     assert result.app == "libreoffice"
 
 
-def test_smoke_excel_rejects_unrelated_active_workbook(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_smoke_excel_rejects_unrelated_active_workbook(tmp_path: Path, monkeypatch) -> None:
     fixture = tmp_path / "simple.xlsx"
     _make_fixture(fixture)
     excel_app = tmp_path / "Microsoft Excel.app"
@@ -77,9 +76,7 @@ def test_smoke_excel_rejects_unrelated_active_workbook(
     assert "opened 'Book1', expected 'simple.xlsx'" in result.message
 
 
-def test_smoke_excel_accepts_expected_active_workbook(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_smoke_excel_accepts_expected_active_workbook(tmp_path: Path, monkeypatch) -> None:
     fixture = tmp_path / "simple.xlsx"
     _make_fixture(fixture)
     excel_app = tmp_path / "Microsoft Excel.app"
@@ -145,6 +142,124 @@ def test_dismiss_excel_repair_dialog_does_not_click_repair(monkeypatch) -> None:
     assert 'button "Recover"' not in script
 
 
+def test_run_osascript_timeout_tolerates_process_group_permission_error(
+    monkeypatch,
+) -> None:
+    class FakeProc:
+        args = ["osascript", "-e", "script"]
+        pid = 12345
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.killed = False
+
+        def communicate(self, timeout: int | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(self.args, timeout or 1)
+            return "stdout", "stderr"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    fake_proc = FakeProc()
+    monkeypatch.setattr(
+        smoke_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: fake_proc,
+    )
+
+    def fake_killpg(_pid: int, _signal: int) -> None:
+        raise PermissionError("operation not permitted")
+
+    monkeypatch.setattr(smoke_module.os, "killpg", fake_killpg, raising=False)
+
+    try:
+        smoke_module._run_osascript("script", timeout=1)
+    except subprocess.TimeoutExpired as exc:
+        assert exc.output == "stdout"
+        assert exc.stderr == "stderr"
+    else:
+        raise AssertionError("expected TimeoutExpired")
+    assert fake_proc.killed is True
+
+
+def test_run_osascript_timeout_falls_back_without_process_groups(
+    monkeypatch,
+) -> None:
+    class FakeProc:
+        args = ["osascript", "-e", "script"]
+        pid = 12345
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.killed = False
+
+        def communicate(self, timeout: int | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(self.args, timeout or 1)
+            return "stdout", "stderr"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    fake_proc = FakeProc()
+    monkeypatch.setattr(
+        smoke_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: fake_proc,
+    )
+    monkeypatch.delattr(smoke_module.os, "killpg", raising=False)
+
+    try:
+        smoke_module._run_osascript("script", timeout=1)
+    except subprocess.TimeoutExpired as exc:
+        assert exc.output == "stdout"
+        assert exc.stderr == "stderr"
+    else:
+        raise AssertionError("expected TimeoutExpired")
+    assert fake_proc.killed is True
+
+
+def test_run_osascript_timeout_falls_back_without_sigkill(
+    monkeypatch,
+) -> None:
+    class FakeProc:
+        args = ["osascript", "-e", "script"]
+        pid = 12345
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.killed = False
+
+        def communicate(self, timeout: int | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(self.args, timeout or 1)
+            return "stdout", "stderr"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    fake_proc = FakeProc()
+    monkeypatch.setattr(
+        smoke_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: fake_proc,
+    )
+    monkeypatch.delattr(smoke_module.signal, "SIGKILL", raising=False)
+
+    try:
+        smoke_module._run_osascript("script", timeout=1)
+    except subprocess.TimeoutExpired as exc:
+        assert exc.output == "stdout"
+        assert exc.stderr == "stderr"
+    else:
+        raise AssertionError("expected TimeoutExpired")
+    assert fake_proc.killed is True
+
+
 def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -179,9 +294,7 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
     assert (output_dir / "app-smoke-report.json").is_file()
 
 
-def test_run_smoke_aborts_after_first_excel_repair_dialog(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_smoke_aborts_after_first_excel_repair_dialog(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -221,9 +334,7 @@ def test_run_smoke_aborts_after_first_excel_repair_dialog(
     assert (output_dir / "app-smoke-report.json").is_file()
 
 
-def test_run_smoke_can_continue_after_excel_repair_dialog(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_smoke_can_continue_after_excel_repair_dialog(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -258,9 +369,7 @@ def test_run_smoke_can_continue_after_excel_repair_dialog(
     assert report["failure_count"] == 2
 
 
-def test_run_smoke_can_apply_mutation_before_app_smoke(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_run_smoke_can_apply_mutation_before_app_smoke(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()

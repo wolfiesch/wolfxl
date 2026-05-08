@@ -22,6 +22,7 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 SOURCE_MUTATION = run_ooxml_app_smoke.SOURCE_MUTATION
 PASSING_STATUSES = {"passed"}
+PROBE_KIND = "ooxml_state_presence"
 SUPPORTED_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
@@ -44,6 +45,7 @@ PROBE_FEATURE_KEYS = {
 class InteractiveProbeResult:
     fixture: str
     probe: str
+    probe_kind: str
     mutation: str
     app: str
     status: str
@@ -85,11 +87,10 @@ def run_interactive_probes(
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "probes": list(probes),
+        "probe_kind": PROBE_KIND,
         "mutation": mutation,
         "result_count": len(results),
-        "failure_count": sum(
-            1 for result in results if result.status not in PASSING_STATUSES
-        ),
+        "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
         "results": [asdict(result) for result in results],
     }
     (output_dir / "interactive-probe-report.json").write_text(
@@ -116,6 +117,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
+            probe_kind=PROBE_KIND,
             mutation=mutation,
             app="excel",
             status="failed",
@@ -125,9 +127,7 @@ def _run_probe(
 
     work = (
         output_dir
-        / run_ooxml_fidelity_mutations._safe_stem(
-            Path(fixture_label).with_suffix("").as_posix()
-        )
+        / run_ooxml_fidelity_mutations._safe_stem(Path(fixture_label).with_suffix("").as_posix())
         / mutation
     )
     work.mkdir(parents=True, exist_ok=True)
@@ -144,6 +144,7 @@ def _run_probe(
             return InteractiveProbeResult(
                 fixture=fixture_label,
                 probe=probe,
+                probe_kind=PROBE_KIND,
                 mutation=mutation,
                 app="excel",
                 status="failed",
@@ -156,6 +157,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
+            probe_kind=PROBE_KIND,
             mutation=mutation,
             app="excel",
             status="failed",
@@ -167,6 +169,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
+            probe_kind=PROBE_KIND,
             mutation=mutation,
             app="excel",
             status=smoke.status,
@@ -177,6 +180,7 @@ def _run_probe(
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
+            probe_kind=PROBE_KIND,
             mutation=mutation,
             app="excel",
             status="failed",
@@ -187,6 +191,7 @@ def _run_probe(
     return InteractiveProbeResult(
         fixture=fixture_label,
         probe=probe,
+        probe_kind=PROBE_KIND,
         mutation=mutation,
         app="excel",
         status="passed",
@@ -205,22 +210,18 @@ def _probe_part_present(path: Path, probe: str) -> bool:
         return "xl/vbaProject.bin" in names
     if probe == "embedded_control_openability":
         return any(
-            name.startswith(("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/"))
-            for name in names
+            name.startswith(("xl/embeddings/", "xl/ctrlProps/", "xl/activeX/")) for name in names
         )
     if probe == "external_link_update_prompt":
         return any(name.startswith("xl/externalLinks/") for name in names)
     if probe == "pivot_refresh_state":
         return any(
-            name.startswith(("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"))
-            for name in names
+            name.startswith(("xl/pivotCache/", "xl/pivotTables/", "pivotCache/")) for name in names
         )
     if probe == "slicer_selection_state":
         return any(name.startswith(("xl/slicers/", "xl/slicerCaches/")) for name in names)
     if probe == "timeline_selection_state":
-        return any(
-            name.startswith(("xl/timelines/", "xl/timelineCaches/")) for name in names
-        )
+        return any(name.startswith(("xl/timelines/", "xl/timelineCaches/")) for name in names)
     return False
 
 

@@ -21,31 +21,39 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 PASSING_STATUSES = {"passed"}
 SPREADSHEET_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
+PROBE_KIND = "ooxml_state_presence"
+PRESENCE_PROBE_PASS = "interactive_presence_probe_pass"
 
 INTERACTIVE_PROBES = {
     "slicer_selection_state": {
-        "label": "Slicer selection state survives open/save",
+        "label": "Slicer OOXML state remains present after Excel open/save",
         "feature_keys": ("slicer",),
+        "probe_kind": PROBE_KIND,
     },
     "timeline_selection_state": {
-        "label": "Timeline selection state survives open/save",
+        "label": "Timeline OOXML state remains present after Excel open/save",
         "feature_keys": ("timeline",),
+        "probe_kind": PROBE_KIND,
     },
     "pivot_refresh_state": {
-        "label": "Pivot refresh/filter state remains usable",
+        "label": "Pivot cache/table OOXML state remains present after Excel open/save",
         "feature_keys": ("pivot",),
+        "probe_kind": PROBE_KIND,
     },
     "external_link_update_prompt": {
-        "label": "External-link update prompt and cached values remain sane",
+        "label": "External-link OOXML state remains present after Excel prompt handling",
         "feature_keys": ("external_link",),
+        "probe_kind": PROBE_KIND,
     },
     "macro_project_presence": {
-        "label": "Macro project remains present and openable",
+        "label": "Macro project binary remains present after Excel open/save",
         "feature_keys": ("vba",),
+        "probe_kind": PROBE_KIND,
     },
     "embedded_control_openability": {
-        "label": "Embedded controls/objects remain openable",
+        "label": "Embedded control/object OOXML state remains present after Excel open/save",
         "feature_keys": ("embedded_object",),
+        "probe_kind": PROBE_KIND,
     },
 }
 
@@ -67,12 +75,12 @@ def audit_interactive_evidence(
     passed = _passed_probes_by_fixture(report_paths)
     fixture_dicts = [asdict(fixture) for fixture in fixtures]
     probe_results = {
-        name: _probe_result(name, fixture_dicts, passed)
-        for name in INTERACTIVE_PROBES
+        name: _probe_result(name, fixture_dicts, passed) for name in INTERACTIVE_PROBES
     }
     return {
         "fixture_dir": str(fixture_dir),
         "recursive": recursive,
+        "probe_kind": PROBE_KIND,
         "report_count": len(report_paths),
         "fixture_count": len(fixtures),
         "fixtures": fixture_dicts,
@@ -81,13 +89,9 @@ def audit_interactive_evidence(
     }
 
 
-def _discover_interactive_fixtures(
-    fixture_dir: Path, recursive: bool
-) -> list[InteractiveFixture]:
+def _discover_interactive_fixtures(fixture_dir: Path, recursive: bool) -> list[InteractiveFixture]:
     fixtures: list[InteractiveFixture] = []
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
-        fixture_dir, recursive=recursive
-    ):
+    for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir, recursive=recursive):
         path = fixture_dir / entry.filename
         if not path.is_file() or path.suffix.lower() not in SPREADSHEET_SUFFIXES:
             continue
@@ -95,9 +99,7 @@ def _discover_interactive_fixtures(
             snapshot = audit_ooxml_fidelity.snapshot(path)
         except zipfile.BadZipFile:
             continue
-        feature_keys = audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(
-            snapshot
-        )
+        feature_keys = audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(snapshot)
         fixtures.append(
             InteractiveFixture(
                 filename=entry.filename,
@@ -111,8 +113,11 @@ def _passed_probes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for report_path in reports:
         payload = json.loads(Path(report_path).read_text())
+        report_probe_kind = payload.get("probe_kind", PROBE_KIND)
         for result in payload.get("results", []):
             if result.get("status") not in PASSING_STATUSES:
+                continue
+            if result.get("probe_kind", report_probe_kind) != PROBE_KIND:
                 continue
             fixture = result.get("fixture")
             probe = result.get("probe")
@@ -132,9 +137,7 @@ def _probe_result(
         for fixture in fixtures
         if any(key in fixture["feature_keys"] for key in config["feature_keys"])
     ]
-    passed_fixtures = [
-        fixture for fixture in candidates if probe in passed.get(fixture, set())
-    ]
+    passed_fixtures = [fixture for fixture in candidates if probe in passed.get(fixture, set())]
     if not candidates:
         status = "not_applicable"
         missing: list[str] = []
@@ -143,9 +146,10 @@ def _probe_result(
         missing = []
     else:
         status = "missing"
-        missing = ["interactive_probe_pass"]
+        missing = [PRESENCE_PROBE_PASS]
     return {
         "label": config["label"],
+        "probe_kind": config["probe_kind"],
         "feature_keys": list(config["feature_keys"]),
         "candidate_fixtures": candidates,
         "passed_fixtures": passed_fixtures,

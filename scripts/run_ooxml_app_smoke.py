@@ -159,14 +159,10 @@ def _write_report(
         "aborted": aborted,
         "abort_reason": abort_reason,
         "result_count": len(results),
-        "failure_count": sum(
-            1 for result in results if result.status not in PASSING_STATUSES
-        ),
+        "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
         "results": [asdict(result) for result in results],
     }
-    (output_dir / "app-smoke-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True)
-    )
+    (output_dir / "app-smoke-report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
     return report
 
 
@@ -330,9 +326,7 @@ def _fixture_for_mutation(
     work = (
         output_dir
         / "_mutations"
-        / run_ooxml_fidelity_mutations._safe_stem(
-            Path(fixture_label).with_suffix("").as_posix()
-        )
+        / run_ooxml_fidelity_mutations._safe_stem(Path(fixture_label).with_suffix("").as_posix())
         / mutation
     )
     work.mkdir(parents=True, exist_ok=True)
@@ -433,10 +427,17 @@ def _is_excel_repair_dialog(dialog: str) -> bool:
 
 
 def _kill_process_group_best_effort(proc: subprocess.Popen[str]) -> None:
+    killpg = getattr(os, "killpg", None)
+    kill_signal = getattr(signal, "SIGKILL", None)
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
+        if killpg is None or kill_signal is None:
+            raise PermissionError("process groups are not available")
+        killpg(proc.pid, kill_signal)
     except (PermissionError, ProcessLookupError):
-        pass
+        try:
+            proc.kill()
+        except (PermissionError, ProcessLookupError):
+            pass
 
 
 def _excel_active_workbook_name() -> str | None:
@@ -550,13 +551,7 @@ def _close_excel_best_effort() -> None:
 def _quit_excel_best_effort() -> None:
     try:
         _run_osascript(
-            (
-                'tell application "Microsoft Excel"\n'
-                "  try\n"
-                "    quit saving no\n"
-                "  end try\n"
-                "end tell"
-            ),
+            ('tell application "Microsoft Excel"\n  try\n    quit saving no\n  end try\nend tell'),
             timeout=3,
         )
     except subprocess.TimeoutExpired:
@@ -579,11 +574,12 @@ def _run_osascript(script: str, timeout: int) -> subprocess.CompletedProcess[str
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        _kill_process_group_best_effort(proc)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        stdout, stderr = proc.communicate()
+            stdout, stderr = proc.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            stdout = exc.output or ""
+            stderr = exc.stderr or ""
         raise subprocess.TimeoutExpired(
             proc.args,
             timeout,

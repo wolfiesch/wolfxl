@@ -8,11 +8,7 @@ from types import ModuleType
 
 
 def _load_bundle_module() -> ModuleType:
-    script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "audit_ooxml_evidence_bundle.py"
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_evidence_bundle.py"
     spec = importlib.util.spec_from_file_location("audit_ooxml_evidence_bundle", script)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -96,6 +92,72 @@ def test_bundle_audit_accepts_length_expectation(tmp_path: Path) -> None:
 
     assert audit["ready"] is True
     assert audit["issue_count"] == 0
+
+
+def test_bundle_audit_accepts_contains_expectation(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "message": "external link target wolfxl-retargeted-external-link.xlsx",
+                "fixtures": ["external-link.xlsx", "plain.xlsx"],
+            }
+        )
+    )
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
+                        "expect": [
+                            {
+                                "path": "message",
+                                "contains": "wolfxl-retargeted-external-link.xlsx",
+                            },
+                            {"path": "fixtures", "contains": "external-link.xlsx"},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is True
+    assert audit["issue_count"] == 0
+
+
+def test_bundle_audit_reports_unhashable_contains_expectation(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(json.dumps({"fixtures": {"external-link.xlsx": {"ok": True}}}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
+                        "expect": [
+                            {"path": "fixtures", "contains": ["external-link.xlsx"]},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is False
+    assert audit["issue_count"] == 1
+    assert "to contain ['external-link.xlsx']" in audit["issues"][0]["message"]
 
 
 def test_bundle_audit_reports_missing_and_stale_evidence(tmp_path: Path) -> None:
