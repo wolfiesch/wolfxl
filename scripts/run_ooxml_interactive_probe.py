@@ -32,6 +32,12 @@ PRESENCE_PROBE_KIND = "ooxml_state_presence"
 UI_INTERACTION_PROBE_KIND = "excel_ui_interaction"
 PROBE_KIND = PRESENCE_PROBE_KIND
 SUPPORTED_PROBE_KINDS = (PRESENCE_PROBE_KIND, UI_INTERACTION_PROBE_KIND)
+EXTERNAL_LINK_PROMPT_MODE_FORCE = "force"
+EXTERNAL_LINK_PROMPT_MODE_CURRENT = "current"
+SUPPORTED_EXTERNAL_LINK_PROMPT_MODES = (
+    EXTERNAL_LINK_PROMPT_MODE_FORCE,
+    EXTERNAL_LINK_PROMPT_MODE_CURRENT,
+)
 SUPPORTED_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
@@ -87,9 +93,12 @@ def run_interactive_probes(
     timeout: int = 90,
     include_fixture_patterns: tuple[str, ...] = (),
     probe_kind: str = PROBE_KIND,
+    external_link_prompt_mode: str = EXTERNAL_LINK_PROMPT_MODE_FORCE,
 ) -> dict:
     if probe_kind not in SUPPORTED_PROBE_KINDS:
         raise ValueError(f"unsupported probe kind: {probe_kind}")
+    if external_link_prompt_mode not in SUPPORTED_EXTERNAL_LINK_PROMPT_MODES:
+        raise ValueError(f"unsupported external-link prompt mode: {external_link_prompt_mode}")
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[InteractiveProbeResult] = []
@@ -117,6 +126,7 @@ def run_interactive_probes(
                     mutation=mutation,
                     timeout=timeout,
                     probe_kind=probe_kind,
+                    external_link_prompt_mode=external_link_prompt_mode,
                 )
             )
             _write_report(
@@ -127,6 +137,7 @@ def run_interactive_probes(
                 results,
                 include_fixture_patterns,
                 probe_kind,
+                external_link_prompt_mode,
                 completed=False,
             )
 
@@ -138,6 +149,7 @@ def run_interactive_probes(
         results,
         include_fixture_patterns,
         probe_kind,
+        external_link_prompt_mode,
         completed=True,
     )
 
@@ -154,6 +166,7 @@ def _write_report(
     results: list[InteractiveProbeResult],
     include_fixture_patterns: tuple[str, ...],
     probe_kind: str,
+    external_link_prompt_mode: str,
     completed: bool,
 ) -> dict:
     report = {
@@ -163,6 +176,7 @@ def _write_report(
         "probes": list(probes),
         "include_fixture_patterns": list(include_fixture_patterns),
         "probe_kind": probe_kind,
+        "external_link_prompt_mode": external_link_prompt_mode,
         "mutation": mutation,
         "result_count": len(results),
         "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
@@ -188,6 +202,7 @@ def _run_probe(
     mutation: str,
     timeout: int,
     probe_kind: str,
+    external_link_prompt_mode: str,
 ) -> InteractiveProbeResult:
     if probe not in SUPPORTED_PROBES:
         return InteractiveProbeResult(
@@ -208,6 +223,7 @@ def _run_probe(
             probe=probe,
             mutation=mutation,
             timeout=timeout,
+            external_link_prompt_mode=external_link_prompt_mode,
         )
 
     work = (
@@ -293,6 +309,7 @@ def _run_ui_interaction_probe(
     probe: str,
     mutation: str,
     timeout: int,
+    external_link_prompt_mode: str,
 ) -> InteractiveProbeResult:
     if probe not in SUPPORTED_UI_INTERACTION_PROBES:
         return InteractiveProbeResult(
@@ -371,7 +388,19 @@ def _run_ui_interaction_probe(
         else None
     )
     try:
-        active_name, ui_actions = _open_excel_with_ui_interaction(probe_path, probe, timeout)
+        if probe == "external_link_update_prompt":
+            active_name, ui_actions = _open_excel_with_ui_interaction(
+                probe_path,
+                probe,
+                timeout,
+                external_link_prompt_mode=external_link_prompt_mode,
+            )
+        else:
+            active_name, ui_actions = _open_excel_with_ui_interaction(
+                probe_path,
+                probe,
+                timeout,
+            )
     except Exception as exc:
         return InteractiveProbeResult(
             fixture=fixture_label,
@@ -386,7 +415,12 @@ def _run_ui_interaction_probe(
         )
 
     required_action = REQUIRED_UI_ACTIONS[probe]
-    if required_action not in ui_actions:
+    required_action_observed = required_action in ui_actions
+    required_action_optional = (
+        probe == "external_link_update_prompt"
+        and external_link_prompt_mode == EXTERNAL_LINK_PROMPT_MODE_CURRENT
+    )
+    if not required_action_observed and not required_action_optional:
         return InteractiveProbeResult(
             fixture=fixture_label,
             probe=probe,
@@ -452,7 +486,24 @@ def _run_ui_interaction_probe(
             )
     if probe == "embedded_control_openability":
         control_state_after = _control_property_state(probe_path)
-        if not control_state_after or control_state_after == control_state_before:
+        if not control_state_after:
+            return InteractiveProbeResult(
+                fixture=fixture_label,
+                probe=probe,
+                probe_kind=UI_INTERACTION_PROBE_KIND,
+                mutation=mutation,
+                app="excel",
+                status="failed",
+                output=str(probe_path),
+                message=(
+                    "Excel embedded/control UI click did not change persisted "
+                    f"control-property state: {control_state_before}"
+                ),
+                ui_actions=ui_actions,
+            )
+        if control_state_after == control_state_before and not _stateless_button_control_state(
+            control_state_after
+        ):
             return InteractiveProbeResult(
                 fixture=fixture_label,
                 probe=probe,
@@ -468,6 +519,11 @@ def _run_ui_interaction_probe(
                 ui_actions=ui_actions,
             )
 
+    action_message = (
+        "completed required UI action"
+        if required_action_observed
+        else "preserved the current Excel external-link prompt setting"
+    )
     return InteractiveProbeResult(
         fixture=fixture_label,
         probe=probe,
@@ -478,16 +534,25 @@ def _run_ui_interaction_probe(
         output=str(probe_path),
         message=(
             "Microsoft Excel opened "
-            f"{active_name}, completed required UI action, and "
+            f"{active_name}, {action_message}, and "
             f"{_probe_part_label(probe)} is present"
         ),
         ui_actions=ui_actions,
     )
 
 
-def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tuple[str, list[str]]:
+def _open_excel_with_ui_interaction(
+    src: Path,
+    probe: str,
+    timeout: int,
+    *,
+    external_link_prompt_mode: str = EXTERNAL_LINK_PROMPT_MODE_FORCE,
+) -> tuple[str, list[str]]:
     ask_to_update_links = None
-    if probe == "external_link_update_prompt":
+    if (
+        probe == "external_link_update_prompt"
+        and external_link_prompt_mode == EXTERNAL_LINK_PROMPT_MODE_FORCE
+    ):
         ask_to_update_links = _excel_ask_to_update_links()
         if ask_to_update_links is None:
             raise RuntimeError(
@@ -1138,6 +1203,21 @@ def _control_property_state(path: Path) -> tuple[tuple[str, tuple[tuple[str, str
     return tuple(state)
 
 
+def _stateless_button_control_state(
+    state: tuple[tuple[str, tuple[tuple[str, str], ...]], ...],
+) -> bool:
+    if not state:
+        return False
+    selection_attrs = {"checked", "sel", "val"}
+    for _part_name, attrs in state:
+        attr_dict = dict(attrs)
+        if attr_dict.get("objectType") != "Button":
+            return False
+        if selection_attrs & set(attr_dict):
+            return False
+    return True
+
+
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
@@ -1222,6 +1302,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument(
+        "--external-link-prompt-mode",
+        choices=SUPPORTED_EXTERNAL_LINK_PROMPT_MODES,
+        default=EXTERNAL_LINK_PROMPT_MODE_FORCE,
+        help=(
+            "For external-link UI interaction probes, either force Excel's "
+            "ask-to-update-links setting temporarily or use the current "
+            "setting without changing it."
+        ),
+    )
+    parser.add_argument(
         "--fixture",
         action="append",
         default=[],
@@ -1244,6 +1334,7 @@ def main(argv: list[str] | None = None) -> int:
         timeout=args.timeout,
         include_fixture_patterns=tuple(args.fixtures),
         probe_kind=args.probe_kind,
+        external_link_prompt_mode=args.external_link_prompt_mode,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

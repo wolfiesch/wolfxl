@@ -240,6 +240,7 @@ def test_probe_runner_writes_incremental_report(tmp_path: Path, monkeypatch) -> 
         mutation: str,
         timeout: int,
         probe_kind: str,
+        external_link_prompt_mode: str,
     ) -> object:
         report_path = output_dir / "interactive-probe-report.json"
         if calls:
@@ -302,6 +303,7 @@ def test_probe_runner_filters_fixtures(tmp_path: Path, monkeypatch) -> None:
         mutation: str,
         timeout: int,
         probe_kind: str,
+        external_link_prompt_mode: str,
     ) -> object:
         calls.append(fixture_label)
         return probe_runner.InteractiveProbeResult(
@@ -623,6 +625,36 @@ def test_external_link_ui_probe_does_not_force_unknown_update_prompt(
     assert opened is False
 
 
+def test_external_link_ui_probe_current_prompt_mode_does_not_force_setting(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = tmp_path / "external-link.xlsx"
+    fixture.write_bytes(b"placeholder")
+    settings: list[bool] = []
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
+    monkeypatch.setattr(
+        probe_runner,
+        "_open_excel_with_ui_interaction_impl",
+        lambda src, probe, timeout: (
+            src.name,
+            [f"{probe}:{timeout}", "clicked button: Don't Update"],
+        ),
+    )
+
+    active_name, actions = probe_runner._open_excel_with_ui_interaction(
+        fixture,
+        "external_link_update_prompt",
+        45,
+        external_link_prompt_mode=probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT,
+    )
+
+    assert active_name == "external-link.xlsx"
+    assert actions == ["external_link_update_prompt:45", "clicked button: Don't Update"]
+    assert settings == []
+
+
 def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -630,7 +662,14 @@ def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, mon
     _write_external_link_workbook(fixture_dir / "external-link.xlsx")
     _write_manifest(fixture_dir, "external-link.xlsx")
 
-    def fake_open_with_ui(_src: Path, _probe: str, _timeout: int):
+    def fake_open_with_ui(
+        _src: Path,
+        _probe: str,
+        _timeout: int,
+        *,
+        external_link_prompt_mode: str,
+    ):
+        assert external_link_prompt_mode == probe_runner.EXTERNAL_LINK_PROMPT_MODE_FORCE
         return "external-link.xlsx", []
 
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
@@ -646,6 +685,42 @@ def test_ui_interaction_probe_requires_observed_button_click(tmp_path: Path, mon
     result = report["results"][0]
     assert result["status"] == "failed"
     assert "required UI action was not observed" in result["message"]
+    assert result["ui_actions"] == []
+
+
+def test_current_external_link_ui_probe_allows_absent_prompt_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_external_link_workbook(fixture_dir / "external-link.xlsx")
+    _write_manifest(fixture_dir, "external-link.xlsx")
+
+    def fake_open_with_ui(
+        _src: Path,
+        _probe: str,
+        _timeout: int,
+        *,
+        external_link_prompt_mode: str,
+    ):
+        assert external_link_prompt_mode == probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT
+        return "external-link.xlsx", []
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("external_link_update_prompt",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+        external_link_prompt_mode=probe_runner.EXTERNAL_LINK_PROMPT_MODE_CURRENT,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed"
+    assert "preserved the current Excel external-link prompt setting" in result["message"]
     assert result["ui_actions"] == []
 
 
@@ -712,6 +787,36 @@ def test_embedded_control_ui_interaction_requires_persisted_state_change(
 
     assert report["failure_count"] == 1
     assert "did not change persisted control-property state" in report["results"][0]["message"]
+
+
+def test_embedded_control_ui_interaction_accepts_stateless_button_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_button_control_workbook(fixture_dir / "button.xlsx")
+    _write_manifest(fixture_dir, "button.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        return "button.xlsx", [
+            "clicked Excel embedded/control object",
+            "clicked Excel embedded/control object: Button 1",
+            "saved active workbook",
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "passed"
 
 
 def test_ui_interaction_probe_records_pivot_refresh_command(tmp_path: Path, monkeypatch) -> None:
@@ -1284,6 +1389,20 @@ def _write_embedded_control_workbook(path: Path) -> None:
 </worksheet>"""
     entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="List" sel="0" val="0"/>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_button_control_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <controls><control name="Button 1"/></controls>
+</worksheet>"""
+    entries["xl/ctrlProps/ctrlProp1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<formControlPr xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" objectType="Button" lockText="1"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)

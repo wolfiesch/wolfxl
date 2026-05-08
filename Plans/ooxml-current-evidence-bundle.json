@@ -90,6 +90,36 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_umya_listbox_control_click",
+      "path": "/tmp/wolfxl-ui-interaction-umya-listbox-control-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ui-interaction-umya-listbox-control-20260508 --probe-kind excel_ui_interaction --probe embedded_control_openability --fixture issue_208.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-umya-listbox-control-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "issue_208.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked Excel embedded/control object", "clicked Excel embedded/control object: List Box 1", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_button_control_click",
+      "path": "/tmp/wolfxl-ui-interaction-button-control-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-button-control-20260508 --probe-kind excel_ui_interaction --probe embedded_control_openability --fixture umya-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-button-control-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "umya-control-props-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked Excel embedded/control object", "clicked Excel embedded/control object: Button 1", "saved active workbook"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_slicer_all_items_click",
       "path": "/tmp/wolfxl-ui-interaction-slicer-all-items-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-slicer-all-items-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-slicer-all-items-20260508.stdout.json",
@@ -102,6 +132,36 @@
         {"path": "results.0.probe", "equals": "slicer_selection_state"},
         {"path": "results.0.status", "equals": "passed"},
         {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION", "clicked Excel slicer item", "clicked Excel slicer item: REGION", "clicked Excel slicer item: YEAR", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_pivot_chart_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-pivot-chart-slicer-extra-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-pivot-chart-slicer-extra-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-pivot-chart-slicer-extra-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION", "clicked Excel slicer item", "clicked Excel slicer item: REGION", "clicked Excel slicer item: YEAR", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_external_tool_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture excelize-2.10-pivot-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "excelize-2.10-pivot-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: Month", "clicked Excel slicer item", "clicked Excel slicer item: Month", "clicked Excel slicer item: Region", "saved active workbook"]}
       ]
     },
     {
@@ -892,6 +952,36 @@
         {"path": "result_count", "equals": 1},
         {"path": "probe_kind", "equals": "excel_ui_interaction"},
         {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_external_link_current_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-external-link-current-prompt-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-current-prompt-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode current --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-current-prompt-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "external_link_prompt_mode", "equals": "current"},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_umya_external_link_current_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-umya-external-link-current-prompt-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ui-interaction-umya-external-link-current-prompt-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode current --fixture issue_297.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-umya-external-link-current-prompt-20260508.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "external_link_prompt_mode", "equals": "current"},
+        {"path": "results.0.fixture", "equals": "issue_297.xlsx"},
         {"path": "results.0.probe", "equals": "external_link_update_prompt"},
         {"path": "results.0.ui_actions", "contains": "clicked button: Don't Update"}
       ]
