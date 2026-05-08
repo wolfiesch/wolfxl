@@ -105,6 +105,22 @@ def _inject_shared_slicer_relationship(src: Path, dst: Path) -> None:
             zout.writestr(info, data)
 
 
+def _inject_shared_timeline_relationship(src: Path, dst: Path) -> None:
+    rels_path = "xl/worksheets/_rels/sheet2.xml.rels"
+    rel = (
+        '<Relationship Id="rId99" '
+        'Type="http://schemas.microsoft.com/office/2011/relationships/timeline" '
+        'Target="../timelines/timeline1.xml"/>'
+    )
+    with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename == rels_path:
+                text = data.decode()
+                data = text.replace("</Relationships>", f"{rel}</Relationships>").encode()
+            zout.writestr(info, data)
+
+
 # ---------------------------------------------------------------------------
 # Case 1 — copy_worksheet allocates a FRESH slicer{N}.xml.
 # ---------------------------------------------------------------------------
@@ -394,3 +410,29 @@ def test_real_excel_timeline_remove_copy_prunes_orphaned_cache_parts(
     assert "NativeTimeline_ORDER_DATE1" not in workbook_xml
     assert "timelineCache2.xml" not in workbook_rels
     assert "/xl/timelineCaches/timelineCache2.xml" not in content_types
+
+
+def test_remove_sheet_keeps_timeline_cache_used_by_retained_sheet(
+    tmp_path: Path,
+) -> None:
+    src = Path("tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx")
+    shared_src = tmp_path / "timeline-shared.xlsx"
+    dst = tmp_path / "timeline-shared-sheet-removed.xlsx"
+    _inject_shared_timeline_relationship(src, shared_src)
+
+    wb = load_workbook(shared_src, modify=True)
+    wb.remove(wb["Pivot Table"])
+    wb.save(dst)
+
+    entries = _zip_listing(dst)
+    assert "xl/timelines/timeline1.xml" in entries
+    assert "xl/timelineCaches/timelineCache1.xml" in entries
+
+    kept_sheet_rels = _zip_read(dst, "xl/worksheets/_rels/sheet2.xml.rels").decode()
+    assert "Target=\"../timelines/timeline1.xml\"" in kept_sheet_rels
+
+    workbook_xml = _zip_read(dst, "xl/workbook.xml").decode()
+    workbook_rels = _zip_read(dst, "xl/_rels/workbook.xml.rels").decode()
+    assert workbook_xml.count("<x15:timelineCacheRef ") == 1
+    assert 'name="NativeTimeline_ORDER_DATE">#N/A</definedName>' in workbook_xml
+    assert "timelineCaches/timelineCache1.xml" in workbook_rels
