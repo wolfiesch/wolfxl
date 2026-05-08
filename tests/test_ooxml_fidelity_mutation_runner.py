@@ -140,6 +140,68 @@ def test_discover_fixtures_includes_macro_enabled_ooxml_without_manifest(
     assert [entry.filename for entry in entries] == ["macro.xlsm", "plain.xlsx"]
 
 
+def test_discover_fixtures_supports_excelbench_files_manifest(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    tier_dir = fixture_dir / "tier1"
+    tier_dir.mkdir(parents=True)
+    _make_fixture(tier_dir / "plain.xlsx")
+    fixture_dir.joinpath("manifest.json").write_text(
+        """{
+  "excel_version": "16.105.3",
+  "files": [
+    {
+      "path": "tier1/plain.xlsx",
+      "feature": "cell_values",
+      "sha256": "abc123"
+    }
+  ]
+}"""
+    )
+
+    entries = runner_module.discover_fixtures(fixture_dir, recursive=True)
+
+    assert entries == [
+        runner_module.FixtureEntry(
+            filename="tier1/plain.xlsx",
+            sha256="abc123",
+            fixture_id="cell_values",
+            tool="excel",
+            app_unsupported_features=None,
+        )
+    ]
+
+
+def test_discover_fixtures_supports_curated_workbooks_manifest(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    workbook_dir = fixture_dir / "published"
+    workbook_dir.mkdir(parents=True)
+    _make_fixture(workbook_dir / "table.xlsx")
+    fixture_dir.joinpath("manifest.json").write_text(
+        """{
+  "workbooks": [
+    {
+      "workbook_id": "tables_filters",
+      "path": "published/table.xlsx",
+      "source_type": "synthetic_external",
+      "app_unsupported_features": ["powerview"]
+    }
+  ]
+}"""
+    )
+
+    entries = runner_module.discover_fixtures(fixture_dir)
+
+    assert entries == [
+        runner_module.FixtureEntry(
+            filename="published/table.xlsx",
+            sha256=None,
+            fixture_id="tables_filters",
+            tool="synthetic_external",
+            app_unsupported_features=["powerview"],
+        )
+    ]
+
+
 def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -186,6 +248,38 @@ def test_runner_can_skip_invalid_source_workbooks_for_exploratory_corpora(
     assert result["fixture"] == "bad.xlsx"
     assert result["status"] == "skipped_source_invalid"
     assert "could not determine file format" in result["error"]
+
+
+def test_runner_can_skip_missing_manifest_fixtures_for_exploratory_corpora(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture_dir.joinpath("manifest.json").write_text(
+        """{
+  "workbooks": [
+    {
+      "workbook_id": "missing_placeholder",
+      "path": "missing/placeholder.xlsx"
+    }
+  ]
+}"""
+    )
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+        skip_invalid_source=True,
+    )
+
+    assert report["failure_count"] == 0
+    assert report["result_count"] == 1
+    result = report["results"][0]
+    assert result["fixture"] == "missing/placeholder.xlsx"
+    assert result["status"] == "skipped_source_missing"
+    assert "fixture missing:" in result["error"]
 
 
 def test_runner_supports_add_remove_chart_mutation(tmp_path: Path) -> None:

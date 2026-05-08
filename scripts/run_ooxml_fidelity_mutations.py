@@ -62,7 +62,12 @@ SUPPORTED_MUTATIONS = (
     "move_formula_range",
     "retarget_external_links",
 )
-PASSING_STATUSES = {"passed", "passed_with_expected_drift", "skipped_source_invalid"}
+PASSING_STATUSES = {
+    "passed",
+    "passed_with_expected_drift",
+    "skipped_source_invalid",
+    "skipped_source_missing",
+}
 MARKER_CELL = "Z1"
 MARKER_VALUE = "wolfxl_ooxml_fidelity_mutation"
 STYLE_CELL = "AA1"
@@ -233,6 +238,20 @@ def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[Fixtur
     manifest = fixture_dir / MANIFEST_NAME
     if manifest.is_file():
         payload = json.loads(manifest.read_text())
+        return _manifest_fixture_entries(payload)
+
+    pattern = "**/*" if recursive else "*"
+    return [
+        FixtureEntry(filename=path.relative_to(fixture_dir).as_posix())
+        for path in sorted(fixture_dir.glob(pattern))
+        if path.is_file()
+        and path.suffix.lower() in SPREADSHEET_SUFFIXES
+        and not path.name.startswith("~$")
+    ]
+
+
+def _manifest_fixture_entries(payload: dict) -> list[FixtureEntry]:
+    if "fixtures" in payload:
         return [
             FixtureEntry(
                 filename=entry["filename"],
@@ -244,14 +263,34 @@ def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[Fixtur
             for entry in payload.get("fixtures", [])
         ]
 
-    pattern = "**/*" if recursive else "*"
-    return [
-        FixtureEntry(filename=path.relative_to(fixture_dir).as_posix())
-        for path in sorted(fixture_dir.glob(pattern))
-        if path.is_file()
-        and path.suffix.lower() in SPREADSHEET_SUFFIXES
-        and not path.name.startswith("~$")
-    ]
+    if "files" in payload:
+        payload_tool = payload.get("tool") or ("excel" if payload.get("excel_version") else None)
+        return [
+            FixtureEntry(
+                filename=entry["path"],
+                sha256=entry.get("sha256"),
+                fixture_id=entry.get("id") or entry.get("feature") or Path(entry["path"]).stem,
+                tool=entry.get("tool") or payload_tool,
+                app_unsupported_features=entry.get("app_unsupported_features"),
+            )
+            for entry in payload.get("files", [])
+            if entry.get("path")
+        ]
+
+    if "workbooks" in payload:
+        return [
+            FixtureEntry(
+                filename=entry["path"],
+                sha256=entry.get("sha256"),
+                fixture_id=entry.get("workbook_id") or Path(entry["path"]).stem,
+                tool=entry.get("tool") or entry.get("source_type"),
+                app_unsupported_features=entry.get("app_unsupported_features"),
+            )
+            for entry in payload.get("workbooks", [])
+            if entry.get("path")
+        ]
+
+    return []
 
 
 def run_sweep(
@@ -275,11 +314,12 @@ def run_sweep(
             continue
         fixture_path = fixture_dir / entry.filename
         if not fixture_path.is_file():
+            status = "skipped_source_missing" if skip_invalid_source else "missing_fixture"
             results.append(
                 MutationResult(
                     fixture=entry.filename,
                     mutation="discover",
-                    status="missing_fixture",
+                    status=status,
                     issue_count=0,
                     issues=[],
                     expected_issue_count=0,
