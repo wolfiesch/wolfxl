@@ -10,11 +10,7 @@ import openpyxl
 
 
 def _load_runner_module() -> ModuleType:
-    script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "run_ooxml_fidelity_mutations.py"
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_ooxml_fidelity_mutations.py"
     spec = importlib.util.spec_from_file_location("run_ooxml_fidelity_mutations", script)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -125,12 +121,7 @@ def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     result = report["results"][0]
     assert result["fixture"] == "nested/deep/simple.xlsx"
     assert result["status"] == "passed"
-    assert (
-        output_dir
-        / "nested_deep_simple"
-        / "no_op"
-        / "after-simple.xlsx"
-    ).is_file()
+    assert (output_dir / "nested_deep_simple" / "no_op" / "after-simple.xlsx").is_file()
 
 
 def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
@@ -195,6 +186,143 @@ def test_runner_requires_formula_move_translation_drift(tmp_path: Path) -> None:
     assert "Z2" in result["expected_issues"][0]["message"]
 
 
+def test_runner_retargets_external_links_with_required_drift(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "external_links_basic.xlsx"
+    fixture.write_bytes(
+        (Path(__file__).parent / "fixtures" / "external_links_basic.xlsx").read_bytes()
+    )
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("retarget_external_links",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_expected_drift"
+    assert result["issue_count"] == 0
+    assert result["expected_issue_count"] == 2
+    assert {issue["kind"] for issue in result["expected_issues"]} == {
+        "external_links_semantic_drift",
+        "missing_relationship",
+    }
+    semantic_drift = [
+        issue
+        for issue in result["expected_issues"]
+        if issue["kind"] == "external_links_semantic_drift"
+    ][0]
+    assert "wolfxl-retargeted-external-link.xlsx" in semantic_drift["message"]
+
+    with zipfile.ZipFile(result["after"]) as archive:
+        rels = archive.read("xl/externalLinks/_rels/externalLink1.xml.rels").decode("utf-8")
+    assert "wolfxl-retargeted-external-link.xlsx" in rels
+
+
+def test_runner_requires_external_link_retarget_drift_when_links_exist(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "external_links_basic.xlsx"
+    fixture.write_bytes(
+        (Path(__file__).parent / "fixtures" / "external_links_basic.xlsx").read_bytes()
+    )
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {"issues": []}
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("retarget_external_links",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["issues"][0]["kind"] == "missing_required_expected_drift"
+
+
+def test_runner_rejects_unrelated_external_link_relationship_loss_for_retarget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "external_links_basic.xlsx"
+    fixture.write_bytes(
+        (Path(__file__).parent / "fixtures" / "external_links_basic.xlsx").read_bytes()
+    )
+
+    def fake_audit(_before: Path, _after: Path) -> dict:
+        return {
+            "issues": [
+                {
+                    "kind": "external_links_semantic_drift",
+                    "severity": "error",
+                    "part": "external_links",
+                    "message": (
+                        "external_links semantic fingerprint changed after save: "
+                        "wolfxl-retargeted-external-link.xlsx"
+                    ),
+                },
+                {
+                    "kind": "missing_relationship",
+                    "severity": "error",
+                    "part": "xl/externalLinks/_rels/externalLink1.xml.rels",
+                    "message": (
+                        "Relationship existed before save and is missing after save: "
+                        "xl/externalLinks/_rels/externalLink1.xml.rels rId1 "
+                        "http://schemas.openxmlformats.org/officeDocument/2006/"
+                        "relationships/externalLinkPath -> ext.xlsx"
+                    ),
+                },
+                {
+                    "kind": "missing_relationship",
+                    "severity": "error",
+                    "part": "xl/externalLinks/_rels/externalLink1.xml.rels",
+                    "message": (
+                        "Relationship existed before save and is missing after save: "
+                        "xl/externalLinks/_rels/externalLink1.xml.rels rId2 "
+                        "http://schemas.openxmlformats.org/officeDocument/2006/"
+                        "relationships/externalLinkPath -> unrelated.xlsx"
+                    ),
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("retarget_external_links",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert [issue["kind"] for issue in result["expected_issues"]] == [
+        "external_links_semantic_drift",
+        "missing_relationship",
+    ]
+    assert [issue["message"] for issue in result["issues"]] == [
+        (
+            "Relationship existed before save and is missing after save: "
+            "xl/externalLinks/_rels/externalLink1.xml.rels rId2 "
+            "http://schemas.openxmlformats.org/officeDocument/2006/"
+            "relationships/externalLinkPath -> unrelated.xlsx"
+        )
+    ]
+
+
 def test_runner_reports_manifest_hash_mismatch(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -221,9 +349,7 @@ def test_runner_reports_manifest_hash_mismatch(tmp_path: Path) -> None:
     assert report["results"][0]["status"] == "hash_mismatch"
 
 
-def test_runner_separates_expected_rename_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -258,9 +384,7 @@ def test_runner_separates_expected_rename_drift(
     assert result["expected_issues"][0]["kind"] == "charts_semantic_drift"
 
 
-def test_runner_separates_expected_interior_delete_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_separates_expected_interior_delete_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -281,7 +405,7 @@ def test_runner_separates_expected_interior_delete_drift(
                     "severity": "error",
                     "part": "data_validations",
                     "message": "expected validation range change after row delete",
-                }
+                },
             ]
         }
 
@@ -304,9 +428,7 @@ def test_runner_separates_expected_interior_delete_drift(
     }
 
 
-def test_runner_separates_expected_sheet_copy_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_separates_expected_sheet_copy_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -507,9 +629,7 @@ def test_runner_accepts_structural_delete_calc_chain_volatility_only(
     ]
 
 
-def test_runner_accepts_structural_delete_semantic_drifts(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_accepts_structural_delete_semantic_drifts(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -602,9 +722,7 @@ def test_runner_does_not_hide_structural_delete_total_feature_loss(
     assert result["issues"][0]["kind"] == "extensions_semantic_drift"
 
 
-def test_runner_accepts_deleted_first_axis_formula_loss(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_accepts_deleted_first_axis_formula_loss(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -642,9 +760,7 @@ def test_runner_accepts_deleted_first_axis_formula_loss(
     assert result["expected_issues"][0]["kind"] == "worksheet_formulas_semantic_drift"
 
 
-def test_runner_does_not_hide_non_deleted_axis_formula_loss(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_does_not_hide_non_deleted_axis_formula_loss(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -682,9 +798,7 @@ def test_runner_does_not_hide_non_deleted_axis_formula_loss(
     assert result["issues"][0]["kind"] == "worksheet_formulas_semantic_drift"
 
 
-def test_runner_separates_expected_feature_add_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_separates_expected_feature_add_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -724,9 +838,7 @@ def test_runner_separates_expected_feature_add_drift(
     }
 
 
-def test_runner_separates_expected_style_cell_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_separates_expected_style_cell_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -761,9 +873,7 @@ def test_runner_separates_expected_style_cell_drift(
     assert result["expected_issues"][0]["kind"] == "style_theme_semantic_drift"
 
 
-def test_runner_does_not_hide_style_loss_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_does_not_hide_style_loss_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -797,9 +907,7 @@ def test_runner_does_not_hide_style_loss_drift(
     assert result["issues"][0]["kind"] == "style_theme_semantic_drift"
 
 
-def test_runner_does_not_hide_feature_add_loss_drift(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_runner_does_not_hide_feature_add_loss_drift(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -908,13 +1016,9 @@ def test_runner_does_not_hide_add_conditional_formatting_style_loss(
             with zipfile.ZipFile(tmp_path, "w") as target_archive:
                 for entry in source_archive.infolist():
                     if entry.filename == "xl/styles.xml":
-                        target_archive.writestr(
-                            entry, runner_module.ElementTree.tostring(root)
-                        )
+                        target_archive.writestr(entry, runner_module.ElementTree.tostring(root))
                     else:
-                        target_archive.writestr(
-                            entry, source_archive.read(entry.filename)
-                        )
+                        target_archive.writestr(entry, source_archive.read(entry.filename))
         tmp_path.replace(path)
 
     monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)

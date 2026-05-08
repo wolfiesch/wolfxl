@@ -10,14 +10,8 @@ from types import ModuleType
 
 
 def _load_interactive_module() -> ModuleType:
-    script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "audit_ooxml_interactive_evidence.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "audit_ooxml_interactive_evidence", script
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_interactive_evidence.py"
+    spec = importlib.util.spec_from_file_location("audit_ooxml_interactive_evidence", script)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -30,11 +24,7 @@ interactive = _load_interactive_module()
 
 
 def _load_probe_runner_module() -> ModuleType:
-    script = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "run_ooxml_interactive_probe.py"
-    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_ooxml_interactive_probe.py"
     spec = importlib.util.spec_from_file_location("run_ooxml_interactive_probe", script)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -74,7 +64,8 @@ def test_interactive_audit_requires_probe_for_applicable_feature(
     macro = report["probes"]["macro_project_presence"]
     assert macro["status"] == "missing"
     assert macro["candidate_fixtures"] == ["macro.xlsm"]
-    assert macro["missing"] == ["interactive_probe_pass"]
+    assert macro["missing"] == ["interactive_presence_probe_pass"]
+    assert macro["probe_kind"] == "ooxml_state_presence"
 
 
 def test_interactive_audit_accepts_passing_probe_report(tmp_path: Path) -> None:
@@ -106,11 +97,44 @@ def test_interactive_audit_accepts_passing_probe_report(tmp_path: Path) -> None:
     macro = report["probes"]["macro_project_presence"]
     assert macro["status"] == "clear"
     assert macro["passed_fixtures"] == ["macro.xlsm"]
+    assert macro["probe_kind"] == "ooxml_state_presence"
+    assert report["probe_kind"] == "ooxml_state_presence"
 
 
-def test_interactive_strict_cli_fails_when_probe_missing(
-    tmp_path: Path, capsys
-) -> None:
+def test_interactive_audit_rejects_mismatched_probe_kind(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_vba_workbook(fixture_dir / "macro.xlsm")
+    _write_manifest(fixture_dir, "macro.xlsm")
+    probe_report = tmp_path / "interactive-report.json"
+    probe_report.write_text(
+        json.dumps(
+            {
+                "probe_kind": "click_level_interaction",
+                "results": [
+                    {
+                        "fixture": "macro.xlsm",
+                        "probe": "macro_project_presence",
+                        "probe_kind": "click_level_interaction",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    report = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[probe_report],
+    )
+
+    macro = report["probes"]["macro_project_presence"]
+    assert report["ready"] is False
+    assert macro["status"] == "missing"
+    assert macro["missing"] == ["interactive_presence_probe_pass"]
+
+
+def test_interactive_strict_cli_fails_when_probe_missing(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
     _write_vba_workbook(fixture_dir / "macro.xlsm")
@@ -124,9 +148,7 @@ def test_interactive_strict_cli_fails_when_probe_missing(
     assert payload["ready"] is False
 
 
-def test_macro_probe_runner_emits_passing_interactive_report(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_macro_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -151,6 +173,7 @@ def test_macro_probe_runner_emits_passing_interactive_report(
     assert report["failure_count"] == 0
     assert report["results"][0]["fixture"] == "macro.xlsm"
     assert report["results"][0]["probe"] == "macro_project_presence"
+    assert report["results"][0]["probe_kind"] == "ooxml_state_presence"
     assert report["results"][0]["status"] == "passed"
     audit = interactive.audit_interactive_evidence(
         fixture_dir,
@@ -159,9 +182,7 @@ def test_macro_probe_runner_emits_passing_interactive_report(
     assert audit["probes"]["macro_project_presence"]["status"] == "clear"
 
 
-def test_macro_probe_runner_fails_when_vba_project_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_macro_probe_runner_fails_when_vba_project_missing(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -310,9 +331,7 @@ def test_external_link_probe_runner_fails_when_link_part_missing(
     _write_external_link_workbook(fixture_dir / "external-link.xlsx")
     _write_manifest(fixture_dir, "external-link.xlsx")
 
-    def remove_external_link_during_smoke(
-        src: Path, _output_dir: Path, _timeout: int
-    ):
+    def remove_external_link_during_smoke(src: Path, _output_dir: Path, _timeout: int):
         _rewrite_without_prefixes(src, ("xl/externalLinks/",))
         return SimpleNamespace(
             status="passed",
@@ -337,9 +356,7 @@ def test_external_link_probe_runner_fails_when_link_part_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
-def test_pivot_probe_runner_emits_passing_interactive_report(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_pivot_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -376,9 +393,7 @@ def test_pivot_probe_runner_emits_passing_interactive_report(
     assert audit["probes"]["pivot_refresh_state"]["status"] == "clear"
 
 
-def test_pivot_probe_runner_fails_when_pivot_part_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_pivot_probe_runner_fails_when_pivot_part_missing(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -410,9 +425,7 @@ def test_pivot_probe_runner_fails_when_pivot_part_missing(
     assert "missing after Excel open" in report["results"][0]["message"]
 
 
-def test_slicer_probe_runner_emits_passing_interactive_report(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_slicer_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -441,17 +454,21 @@ def test_slicer_probe_runner_emits_passing_interactive_report(
     assert report["failure_count"] == 0
     assert report["results"][0]["fixture"] == "slicer.xlsx"
     assert report["results"][0]["probe"] == "slicer_selection_state"
+    assert report["results"][0]["probe_kind"] == "ooxml_state_presence"
     assert report["results"][0]["status"] == "passed"
     audit = interactive.audit_interactive_evidence(
         fixture_dir,
         reports=[output_dir / "interactive-probe-report.json"],
     )
     assert audit["probes"]["slicer_selection_state"]["status"] == "clear"
+    assert (
+        audit["probes"]["slicer_selection_state"]["label"]
+        == "Slicer OOXML state remains present after Excel open/save"
+    )
+    assert audit["probes"]["slicer_selection_state"]["probe_kind"] == "ooxml_state_presence"
 
 
-def test_slicer_probe_runner_fails_when_slicer_part_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_slicer_probe_runner_fails_when_slicer_part_missing(tmp_path: Path, monkeypatch) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
     fixture_dir.mkdir()
@@ -514,12 +531,18 @@ def test_timeline_probe_runner_emits_passing_interactive_report(
     assert report["failure_count"] == 0
     assert report["results"][0]["fixture"] == "timeline.xlsx"
     assert report["results"][0]["probe"] == "timeline_selection_state"
+    assert report["results"][0]["probe_kind"] == "ooxml_state_presence"
     assert report["results"][0]["status"] == "passed"
     audit = interactive.audit_interactive_evidence(
         fixture_dir,
         reports=[output_dir / "interactive-probe-report.json"],
     )
     assert audit["probes"]["timeline_selection_state"]["status"] == "clear"
+    assert (
+        audit["probes"]["timeline_selection_state"]["label"]
+        == "Timeline OOXML state remains present after Excel open/save"
+    )
+    assert audit["probes"]["timeline_selection_state"]["probe_kind"] == "ooxml_state_presence"
 
 
 def test_timeline_probe_runner_fails_when_timeline_part_missing(

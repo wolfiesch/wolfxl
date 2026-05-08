@@ -81,6 +81,7 @@ SURFACES = {
         "structural_mutations": (
             "rename_first_sheet",
             "move_formula_range",
+            "retarget_external_links",
         ),
     },
     "workbook_connections_query_metadata": {
@@ -239,9 +240,7 @@ def audit_coverage(
     )
     app_passes, intentional_app_passes = _app_passes_by_fixture(app_report_paths)
     fixtures = []
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
-        fixture_dir, recursive=recursive
-    ):
+    for entry in run_ooxml_fidelity_mutations.discover_fixtures(fixture_dir, recursive=recursive):
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
@@ -264,9 +263,7 @@ def audit_coverage(
                     intentional_render_passes.get(entry.filename, set())
                 ),
                 app_passes=sorted(app_passes.get(entry.filename, set())),
-                intentional_app_passes=sorted(
-                    intentional_app_passes.get(entry.filename, set())
-                ),
+                intentional_app_passes=sorted(intentional_app_passes.get(entry.filename, set())),
             )
         )
 
@@ -353,10 +350,7 @@ def _render_passes_by_fixture(
             engine_label = result_engine or "unknown"
             if mutation == "no_op" and status in PASSING_NO_OP_RENDER_STATUSES:
                 no_op.setdefault(str(fixture), set()).add(f"{engine_label}:{status}")
-            elif (
-                mutation != "no_op"
-                and status in PASSING_INTENTIONAL_RENDER_STATUSES
-            ):
+            elif mutation != "no_op" and status in PASSING_INTENTIONAL_RENDER_STATUSES:
                 intentional.setdefault(str(fixture), set()).add(
                     f"{engine_label}:{mutation}:{status}"
                 )
@@ -393,11 +387,7 @@ def _app_passes_by_fixture(
 
 
 def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
-    keys = {
-        key
-        for key, values in snapshot.feature_parts.items()
-        if values
-    }
+    keys = {key for key, values in snapshot.feature_parts.items() if values}
     semantic_to_feature = {
         "data_validations": "data_validation",
         "charts": "chart",
@@ -432,13 +422,9 @@ def _feature_keys_for_snapshot(snapshot: object) -> list[str]:
 def _surfaces_for_snapshot(snapshot: object) -> list[str]:
     out: list[str] = []
     for surface, config in SURFACES.items():
-        has_feature_part = any(
-            snapshot.feature_parts.get(key)
-            for key in config["feature_keys"]
-        )
+        has_feature_part = any(snapshot.feature_parts.get(key) for key in config["feature_keys"])
         has_semantic_fingerprint = any(
-            snapshot.semantic_fingerprints.get(key)
-            for key in config["semantic_keys"]
+            snapshot.semantic_fingerprints.get(key) for key in config["semantic_keys"]
         )
         if has_feature_part or has_semantic_fingerprint:
             out.append(surface)
@@ -503,46 +489,27 @@ def _surface_result(
             "optional": True,
             "status": "not_applicable",
         }
-    required_source_classes = config.get(
-        "required_source_classes", ("external_tool", "real_excel")
-    )
+    required_source_classes = config.get("required_source_classes", ("external_tool", "real_excel"))
     external = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["source_class"] == "external_tool"
+        fixture["filename"] for fixture in matching if fixture["source_class"] == "external_tool"
     ]
     real_excel = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["source_class"] == "real_excel"
+        fixture["filename"] for fixture in matching if fixture["source_class"] == "real_excel"
     ]
     structural = [
         fixture["filename"]
         for fixture in matching
         if any(
-            mutation in fixture["passed_mutations"]
-            for mutation in config["structural_mutations"]
+            mutation in fixture["passed_mutations"] for mutation in config["structural_mutations"]
         )
     ]
-    rendered = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["render_passes"]
-    ]
+    rendered = [fixture["filename"] for fixture in matching if fixture["render_passes"]]
     intentional_rendered = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["intentional_render_passes"]
+        fixture["filename"] for fixture in matching if fixture["intentional_render_passes"]
     ]
-    app_opened = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["app_passes"]
-    ]
+    app_opened = [fixture["filename"] for fixture in matching if fixture["app_passes"]]
     intentional_app_opened = [
-        fixture["filename"]
-        for fixture in matching
-        if fixture["intentional_app_passes"]
+        fixture["filename"] for fixture in matching if fixture["intentional_app_passes"]
     ]
     missing = []
     if "external_tool" in required_source_classes and not external:
@@ -551,9 +518,7 @@ def _surface_result(
         missing.append("real_excel_fixture")
     if not structural:
         missing.append("structural_mutation_pass")
-    render_missing_label = _render_missing_label(
-        "render_no_op_pass", require_render_engine
-    )
+    render_missing_label = _render_missing_label("render_no_op_pass", require_render_engine)
     intentional_render_missing_label = _render_missing_label(
         "intentional_render_pass", require_render_engine
     )
@@ -569,9 +534,7 @@ def _surface_result(
     group_results = {}
     for group, keys in feature_groups.items():
         group_matching = [
-            fixture
-            for fixture in matching
-            if any(key in fixture["feature_keys"] for key in keys)
+            fixture for fixture in matching if any(key in fixture["feature_keys"] for key in keys)
         ]
         group_external = [
             fixture["filename"]
@@ -592,9 +555,7 @@ def _surface_result(
             )
         ]
         group_rendered = [
-            fixture["filename"]
-            for fixture in group_matching
-            if fixture["render_passes"]
+            fixture["filename"] for fixture in group_matching if fixture["render_passes"]
         ]
         group_intentional_rendered = [
             fixture["filename"]
@@ -602,14 +563,10 @@ def _surface_result(
             if fixture["intentional_render_passes"]
         ]
         group_app_opened = [
-            fixture["filename"]
-            for fixture in group_matching
-            if fixture["app_passes"]
+            fixture["filename"] for fixture in group_matching if fixture["app_passes"]
         ]
         group_intentional_app_opened = [
-            fixture["filename"]
-            for fixture in group_matching
-            if fixture["intentional_app_passes"]
+            fixture["filename"] for fixture in group_matching if fixture["intentional_app_passes"]
         ]
         group_missing = []
         if not group_matching:
@@ -713,20 +670,14 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         type=Path,
         default=[],
-        help=(
-            "Rendered comparison render-compare-report.json. May be passed "
-            "multiple times."
-        ),
+        help=("Rendered comparison render-compare-report.json. May be passed multiple times."),
     )
     parser.add_argument(
         "--app-report",
         action="append",
         type=Path,
         default=[],
-        help=(
-            "Spreadsheet app smoke app-smoke-report.json. May be passed "
-            "multiple times."
-        ),
+        help=("Spreadsheet app smoke app-smoke-report.json. May be passed multiple times."),
     )
     parser.add_argument(
         "--recursive",
@@ -736,10 +687,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-render",
         action="store_true",
-        help=(
-            "Require at least one passing no-op render comparison for each "
-            "fidelity surface."
-        ),
+        help=("Require at least one passing no-op render comparison for each fidelity surface."),
     )
     parser.add_argument(
         "--require-intentional-render",
@@ -763,8 +711,7 @@ def main(argv: list[str] | None = None) -> int:
         "--require-app",
         action="store_true",
         help=(
-            "Require at least one passing source fixture app-open smoke for "
-            "each fidelity surface."
+            "Require at least one passing source fixture app-open smoke for each fidelity surface."
         ),
     )
     parser.add_argument(

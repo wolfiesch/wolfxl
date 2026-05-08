@@ -24,9 +24,7 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_fidelity  # noqa: E402
 import wolfxl  # noqa: E402
 
-CELL_REF_RE = re.compile(
-    r"(?<![A-Za-z0-9_])\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})(?![A-Za-z0-9_])"
-)
+CELL_REF_RE = re.compile(r"(?<![A-Za-z0-9_])\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})(?![A-Za-z0-9_])")
 REF_SCAN_PART_PREFIXES = (
     "xl/workbook.xml",
     "xl/worksheets/",
@@ -62,6 +60,7 @@ SUPPORTED_MUTATIONS = (
     "add_data_validation",
     "add_conditional_formatting",
     "move_formula_range",
+    "retarget_external_links",
 )
 PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
 MARKER_CELL = "Z1"
@@ -70,6 +69,11 @@ STYLE_CELL = "AA1"
 RENAMED_SHEET = "WolfXL Fidelity Rename"
 SCRATCH_CHART_SHEET = "WolfXL Chart Scratch"
 MANIFEST_NAME = "manifest.json"
+RETARGETED_EXTERNAL_LINK = "wolfxl-retargeted-external-link.xlsx"
+MISSING_RELATIONSHIP_RE = re.compile(
+    r"^Relationship existed before save and is missing after save: "
+    r"(?P<part>\S+) (?P<rid>\S+) (?P<rel_type>\S+) -> (?P<target>.*)$"
+)
 EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     # Renaming a sheet is an intentional workbook semantic change. Feature
     # formulas and pivot cache worksheetSource sheet attrs may legitimately
@@ -139,6 +143,10 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "move_formula_range": {
         "worksheet_formulas_semantic_drift",
     },
+    "retarget_external_links": {
+        "external_links_semantic_drift",
+        "missing_relationship",
+    },
     "style_cell": {
         "style_theme_semantic_drift",
     },
@@ -155,6 +163,9 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "move_formula_range": {
         "worksheet_formulas_semantic_drift": "Z2",
+    },
+    "retarget_external_links": {
+        "external_links_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
     },
     "style_cell": {
         "style_theme_semantic_drift": "FF1F4E79",
@@ -180,6 +191,9 @@ REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     # audit to observe the formula move and the translated reference.
     "move_formula_range": {
         "worksheet_formulas_semantic_drift": "Z2",
+    },
+    "retarget_external_links": {
+        "external_links_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
     },
 }
 
@@ -285,9 +299,7 @@ def run_sweep(
         "skipped_fixture_count": len(skipped_fixtures),
         "skipped_fixtures": skipped_fixtures,
         "result_count": len(results),
-        "failure_count": sum(
-            1 for result in results if result.status not in PASSING_STATUSES
-        ),
+        "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
         "results": [asdict(result) for result in results],
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
@@ -298,8 +310,7 @@ def _fixture_is_excluded(filename: str, patterns: Iterable[str]) -> bool:
     path = filename.replace("\\", "/")
     name = Path(path).name
     return any(
-        fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(name, pattern)
-        for pattern in patterns
+        fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(name, pattern) for pattern in patterns
     )
 
 
@@ -320,9 +331,7 @@ def _run_single_mutation(
     hash_error: str | None,
 ) -> MutationResult:
     mutation_dir = (
-        output_dir
-        / _safe_stem(Path(fixture_label).with_suffix("").as_posix())
-        / mutation
+        output_dir / _safe_stem(Path(fixture_label).with_suffix("").as_posix()) / mutation
     )
     mutation_dir.mkdir(parents=True, exist_ok=True)
     before_path = mutation_dir / f"before-{fixture_path.name}"
@@ -370,7 +379,7 @@ def _run_single_mutation(
         after_path=after_path,
     )
     missing_expected_issues = _missing_required_expected_issues(
-        expected_issues, mutation
+        expected_issues, mutation, before_path=before_path
     )
     issues.extend(missing_expected_issues)
     status = "passed"
@@ -457,6 +466,10 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         elif mutation == "move_formula_range":
             worksheet = workbook[workbook.sheetnames[0]]
             worksheet.move_range("Z1:AA1", rows=1, cols=0, translate=True)
+        elif mutation == "retarget_external_links":
+            links = getattr(workbook, "_external_links", [])
+            if links:
+                links[0].update_target(RETARGETED_EXTERNAL_LINK)
         elif mutation == "rename_first_sheet":
             workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
         elif mutation == "add_remove_chart":
@@ -614,13 +627,12 @@ def _is_expected_issue(
         return True
     if _looks_like_total_semantic_loss(issue):
         return False
-    if (
-        mutation == "add_conditional_formatting"
-        and kind == "style_theme_semantic_drift"
-    ):
-        return _is_expected_conditional_formatting_dxf_addition(
-            before_path, after_path
-        )
+    if mutation == "add_conditional_formatting" and kind == "style_theme_semantic_drift":
+        return _is_expected_conditional_formatting_dxf_addition(before_path, after_path)
+    if _is_expected_external_link_retarget_relationship_drift(issue, mutation, after_path):
+        return True
+    if mutation == "retarget_external_links" and kind == "missing_relationship":
+        return False
     expected_markers = EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
     marker = expected_markers.get(kind)
     if marker is None:
@@ -672,6 +684,45 @@ def _is_expected_conditional_formatting_dxf_addition(
     return _strip_dxfs_fingerprint(before_root) == _strip_dxfs_fingerprint(after_root)
 
 
+def _is_expected_external_link_retarget_relationship_drift(
+    issue: dict,
+    mutation: str,
+    after_path: Path | None,
+) -> bool:
+    if mutation != "retarget_external_links":
+        return False
+    if issue.get("kind") != "missing_relationship":
+        return False
+    message = issue.get("message", "")
+    if "relationships/externalLinkPath" not in message and "xlExternalLinkPath" not in message:
+        return False
+    return _external_link_retarget_replaces_missing_relationship(issue, after_path)
+
+
+def _external_link_retarget_replaces_missing_relationship(issue: dict, path: Path | None) -> bool:
+    if path is None:
+        return False
+    match = MISSING_RELATIONSHIP_RE.match(issue.get("message", ""))
+    if not match:
+        return False
+    part = str(issue.get("part") or match.group("part"))
+    if part != match.group("part"):
+        return False
+    if not part.startswith("xl/externalLinks/_rels/") or not part.endswith(".rels"):
+        return False
+    missing_rid = match.group("rid")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            rels_root = ElementTree.fromstring(archive.read(part))
+    except (OSError, KeyError, ElementTree.ParseError, zipfile.BadZipFile):
+        return False
+    for relationship in rels_root:
+        if relationship.attrib.get("Id") != missing_rid:
+            continue
+        return relationship.attrib.get("Target") == RETARGETED_EXTERNAL_LINK
+    return False
+
+
 def _read_styles_root(archive: zipfile.ZipFile) -> ElementTree.Element | None:
     try:
         return ElementTree.fromstring(archive.read("xl/styles.xml"))
@@ -708,9 +759,11 @@ def _local_name(tag: str) -> str:
 
 
 def _missing_required_expected_issues(
-    expected_issues: list[dict], mutation: str
+    expected_issues: list[dict],
+    mutation: str,
+    before_path: Path | None = None,
 ) -> list[dict]:
-    required = REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
+    required = _required_expected_issue_markers(mutation, before_path)
     missing: list[dict] = []
     for kind, marker in required.items():
         if any(
@@ -730,6 +783,26 @@ def _missing_required_expected_issues(
             }
         )
     return missing
+
+
+def _required_expected_issue_markers(
+    mutation: str,
+    before_path: Path | None,
+) -> dict[str, str]:
+    required = REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION.get(mutation, {})
+    if mutation == "retarget_external_links" and not _has_external_link_parts(before_path):
+        return {}
+    return required
+
+
+def _has_external_link_parts(path: Path | None) -> bool:
+    if path is None:
+        return False
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return any(name.startswith("xl/externalLinks/") for name in archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return False
 
 
 def _assert_zip_integrity(path: Path) -> None:

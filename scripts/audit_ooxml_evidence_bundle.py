@@ -105,28 +105,20 @@ def _evaluate_check(payload: object, check: dict[str, object]) -> dict:
     if "equals" in check:
         expected = check["equals"]
         passed = actual == expected
-        message = (
-            "ok"
-            if passed
-            else f"expected {path} == {expected!r}, got {actual!r}"
-        )
+        message = "ok" if passed else f"expected {path} == {expected!r}, got {actual!r}"
     elif "at_least" in check:
         expected = check["at_least"]
         passed = isinstance(actual, (int, float)) and actual >= expected
-        message = (
-            "ok"
-            if passed
-            else f"expected {path} >= {expected!r}, got {actual!r}"
-        )
+        message = "ok" if passed else f"expected {path} >= {expected!r}, got {actual!r}"
     elif "length_at_least" in check:
         expected = check["length_at_least"]
         actual_len = len(actual) if isinstance(actual, (list, dict, str)) else None
         passed = actual_len is not None and actual_len >= expected
-        message = (
-            "ok"
-            if passed
-            else f"expected len({path}) >= {expected!r}, got {actual_len!r}"
-        )
+        message = "ok" if passed else f"expected len({path}) >= {expected!r}, got {actual_len!r}"
+    elif "contains" in check:
+        expected = check["contains"]
+        passed = _contains(actual, expected)
+        message = "ok" if passed else f"expected {path} to contain {expected!r}, got {actual!r}"
     else:
         raise ValueError(f"unsupported evidence check: {check}")
     return {
@@ -135,6 +127,19 @@ def _evaluate_check(payload: object, check: dict[str, object]) -> dict:
         "passed": passed,
         "message": message,
     }
+
+
+def _contains(actual: object, expected: object) -> bool:
+    if isinstance(actual, str):
+        return isinstance(expected, str) and expected in actual
+    if isinstance(actual, (list, tuple)):
+        return expected in actual
+    if isinstance(actual, (set, dict)):
+        try:
+            return expected in actual
+        except TypeError:
+            return False
+    return False
 
 
 def _get_path(payload: Any, path: str) -> Any:
