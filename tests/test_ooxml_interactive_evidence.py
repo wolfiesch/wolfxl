@@ -600,7 +600,8 @@ def test_ui_interaction_probe_records_slicer_item_click(tmp_path: Path, monkeypa
             "selected Excel slicer shape",
             "selected Excel slicer shape: Slicer_Region",
             "clicked Excel slicer item",
-            "clicked Excel slicer item: first visible item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
             "saved active workbook",
         ]
 
@@ -618,7 +619,8 @@ def test_ui_interaction_probe_records_slicer_item_click(tmp_path: Path, monkeypa
         "selected Excel slicer shape",
         "selected Excel slicer shape: Slicer_Region",
         "clicked Excel slicer item",
-        "clicked Excel slicer item: first visible item",
+        "clicked Excel slicer item: Slicer_Region",
+        "clicked Excel slicer item: Slicer_Year",
         "saved active workbook",
     ]
 
@@ -665,7 +667,10 @@ def test_probe_shape_names_come_from_authored_slicer_and_timeline_parts(tmp_path
     _write_slicer_workbook(slicer)
     _write_timeline_workbook(timeline)
 
-    assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == ["Slicer_Region"]
+    assert probe_runner._probe_shape_names(slicer, "slicer_selection_state") == [
+        "Slicer_Region",
+        "Slicer_Year",
+    ]
     assert probe_runner._probe_shape_names(timeline, "timeline_selection_state") == [
         "Timeline_Date"
     ]
@@ -686,7 +691,8 @@ def test_slicer_ui_interaction_requires_persisted_filter_change(
             "selected Excel slicer shape",
             "selected Excel slicer shape: Slicer_Region",
             "clicked Excel slicer item",
-            "clicked Excel slicer item: first visible item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
             "saved active workbook",
         ]
 
@@ -719,7 +725,8 @@ def test_slicer_ui_interaction_accepts_persisted_filter_change(
             "selected Excel slicer shape",
             "selected Excel slicer shape: Slicer_Region",
             "clicked Excel slicer item",
-            "clicked Excel slicer item: first visible item",
+            "clicked Excel slicer item: Slicer_Region",
+            "clicked Excel slicer item: Slicer_Year",
             "saved active workbook",
         ]
 
@@ -737,7 +744,8 @@ def test_slicer_ui_interaction_accepts_persisted_filter_change(
         "selected Excel slicer shape",
         "selected Excel slicer shape: Slicer_Region",
         "clicked Excel slicer item",
-        "clicked Excel slicer item: first visible item",
+        "clicked Excel slicer item: Slicer_Region",
+        "clicked Excel slicer item: Slicer_Year",
         "saved active workbook",
     ]
 
@@ -1119,17 +1127,22 @@ def _write_slicer_workbook(path: Path) -> None:
     entries = _base_entries()
     entries["xl/tables/table1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-       id="1" name="Table1" displayName="Table1" ref="A1:B4">
-  <autoFilter ref="A1:B4"/>
-  <tableColumns count="2">
+       id="1" name="Table1" displayName="Table1" ref="A1:C4">
+  <autoFilter ref="A1:C4"/>
+  <tableColumns count="3">
     <tableColumn id="1" name="Customer"/>
     <tableColumn id="2" name="Region"/>
+    <tableColumn id="3" name="Year"/>
   </tableColumns>
 </table>"""
     entries["xl/slicerCaches/slicerCache1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region"/>"""
+    entries["xl/slicerCaches/slicerCache2.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicerCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Year"/>"""
     entries["xl/slicers/slicer1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
 <slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Region" cache="Slicer_Region"/>"""
+    entries["xl/slicers/slicer2.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Slicer_Year" cache="Slicer_Year"/>"""
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
@@ -1224,10 +1237,11 @@ def _rewrite_slicer_filter(path: Path, *, value: str) -> None:
         entries = {name: archive.read(name) for name in archive.namelist()}
     table = entries["xl/tables/table1.xml"].decode()
     table = table.replace(
-        '<autoFilter ref="A1:B4"/>',
+        '<autoFilter ref="A1:C4"/>',
         (
-            '<autoFilter ref="A1:B4">'
+            '<autoFilter ref="A1:C4">'
             f'<filterColumn colId="1"><filters><filter val="{value}"/></filters></filterColumn>'
+            '<filterColumn colId="2"><filters><filter val="2014"/></filters></filterColumn>'
             "</autoFilter>"
         ),
     )

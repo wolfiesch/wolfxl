@@ -75,9 +75,9 @@
       ]
     },
     {
-      "name": "excel_ui_interaction_slicer_item_click",
-      "path": "/tmp/wolfxl-ui-interaction-slicer-item-click-20260508/interactive-probe-report.json",
-      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-slicer-item-click-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-slicer-item-click-20260508.stdout.json",
+      "name": "excel_ui_interaction_slicer_all_items_click",
+      "path": "/tmp/wolfxl-ui-interaction-slicer-all-items-20260508/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-slicer-all-items-20260508 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-slicer-all-items-20260508.stdout.json",
       "expect": [
         {"path": "completed", "equals": true},
         {"path": "probe_kind", "equals": "excel_ui_interaction"},
@@ -86,7 +86,7 @@
         {"path": "results.0.fixture", "equals": "real-excel-table-slicers.xlsx"},
         {"path": "results.0.probe", "equals": "slicer_selection_state"},
         {"path": "results.0.status", "equals": "passed"},
-        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION", "clicked Excel slicer item", "clicked Excel slicer item: first visible item", "saved active workbook"]}
+        {"path": "results.0.ui_actions", "equals": ["selected Excel slicer shape", "selected Excel slicer shape: REGION", "clicked Excel slicer item", "clicked Excel slicer item: REGION", "clicked Excel slicer item: YEAR", "saved active workbook"]}
       ]
     },
     {

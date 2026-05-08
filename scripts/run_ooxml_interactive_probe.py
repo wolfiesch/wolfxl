@@ -511,7 +511,7 @@ def _open_excel_with_ui_interaction(src: Path, probe: str, timeout: int) -> tupl
             if probe in {"slicer_selection_state", "timeline_selection_state"}:
                 ui_actions.extend(_select_first_probe_shape(src, probe))
             if probe == "slicer_selection_state":
-                ui_actions.extend(_click_slicer_item(src))
+                ui_actions.extend(_click_slicer_items(src))
                 ui_actions.extend(_save_active_workbook())
             if probe == "timeline_selection_state":
                 ui_actions.extend(_click_timeline_month(src))
@@ -630,8 +630,8 @@ end tell
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
-def _click_slicer_item(src: Path) -> list[str]:
-    """Click the first visible item in the first authored table slicer."""
+def _click_slicer_items(src: Path) -> list[str]:
+    """Click the first visible item in every authored table slicer."""
     names = _probe_shape_names(src, "slicer_selection_state")
     if not names:
         return ["failed Excel slicer item click: no slicer shape names in package"]
@@ -651,17 +651,20 @@ tell application "Microsoft Excel"
   end try
   try
     set expectedNames to {{{quoted_names}}}
+    set out to ""
     repeat with i from 1 to (count of shapes of active sheet)
       set candidate to shape i of active sheet
       set candidateName to name of candidate as text
       if expectedNames contains candidateName then
-        return (left position of candidate as text) & "," & ¬
-          (top of candidate as text) & "," & ¬
-          (width of candidate as text) & "," & ¬
+        if out is not "" then set out to out & linefeed
+        set out to out & candidateName & "||" & ¬
+          (left position of candidate as text) & "||" & ¬
+          (top of candidate as text) & "||" & ¬
+          (width of candidate as text) & "||" & ¬
           (height of candidate as text)
       end if
     end repeat
-    return ""
+    return out
   on error errText
     return "ERROR: " & errText
   end try
@@ -674,23 +677,31 @@ end tell
     geometry = proc.stdout.strip()
     if not geometry or geometry.startswith("ERROR:"):
         return [f"failed Excel slicer item click: {geometry or 'no matching shape'}"]
-    try:
-        left, top, width, _height = [float(part) for part in geometry.split(",")]
-    except ValueError:
-        return [f"failed Excel slicer item click: invalid shape geometry {geometry!r}"]
 
     # The probe normalizes the Excel window, zoom, and scroll origin above.
     # These offsets target the first visible button in the MyExcelOnline slicer
     # fixture; the persisted table filter change is the actual pass condition.
     sheet_origin_x = 24.0
     sheet_origin_y = 259.0
-    click_x = sheet_origin_x + left + (width / 2.0)
-    click_y = sheet_origin_y + top + 33.0
-    try:
-        _post_mouse_click(click_x, click_y)
-    except Exception as exc:
-        return [f"failed Excel slicer item click: {str(exc)[:250]}"]
-    return ["clicked Excel slicer item", "clicked Excel slicer item: first visible item"]
+    actions = ["clicked Excel slicer item"]
+    for line in geometry.splitlines():
+        parts = line.split("||")
+        if len(parts) != 5:
+            return [f"failed Excel slicer item click: invalid shape geometry {line!r}"]
+        name = parts[0]
+        try:
+            left, top, width, _height = [float(part) for part in parts[1:]]
+        except ValueError:
+            return [f"failed Excel slicer item click: invalid shape geometry {line!r}"]
+        click_x = sheet_origin_x + left + (width / 2.0)
+        click_y = sheet_origin_y + top + 33.0
+        try:
+            _post_mouse_click(click_x, click_y)
+        except Exception as exc:
+            return [f"failed Excel slicer item click: {str(exc)[:250]}"]
+        actions.append(f"clicked Excel slicer item: {name}")
+        time.sleep(0.2)
+    return actions
 
 
 def _click_timeline_month(src: Path) -> list[str]:
