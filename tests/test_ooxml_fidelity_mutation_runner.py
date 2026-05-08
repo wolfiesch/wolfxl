@@ -124,6 +124,21 @@ def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     assert (output_dir / "nested_deep_simple" / "no_op" / "after-simple.xlsx").is_file()
 
 
+def test_discover_fixtures_includes_macro_enabled_ooxml_without_manifest(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "plain.xlsx")
+    _make_fixture(fixture_dir / "macro.xlsm")
+    _make_fixture(fixture_dir / "~$lock.xlsx")
+    fixture_dir.joinpath("notes.txt").write_text("ignore me")
+
+    entries = runner_module.discover_fixtures(fixture_dir)
+
+    assert [entry.filename for entry in entries] == ["macro.xlsm", "plain.xlsx"]
+
+
 def test_runner_can_exclude_fixtures_by_glob(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"

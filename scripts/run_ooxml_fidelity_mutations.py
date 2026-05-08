@@ -70,6 +70,7 @@ RENAMED_SHEET = "WolfXL Fidelity Rename"
 SCRATCH_CHART_SHEET = "WolfXL Chart Scratch"
 MANIFEST_NAME = "manifest.json"
 RETARGETED_EXTERNAL_LINK = "wolfxl-retargeted-external-link.xlsx"
+SPREADSHEET_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 EXPECTED_DRAWING_ANCHOR_DRIFT_MUTATIONS = {
     "insert_tail_row",
     "insert_tail_col",
@@ -241,11 +242,13 @@ def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[Fixtur
             for entry in payload.get("fixtures", [])
         ]
 
-    pattern = "**/*.xlsx" if recursive else "*.xlsx"
+    pattern = "**/*" if recursive else "*"
     return [
         FixtureEntry(filename=path.relative_to(fixture_dir).as_posix())
         for path in sorted(fixture_dir.glob(pattern))
-        if path.is_file() and not path.name.startswith("~$")
+        if path.is_file()
+        and path.suffix.lower() in SPREADSHEET_SUFFIXES
+        and not path.name.startswith("~$")
     ]
 
 
@@ -894,7 +897,7 @@ def _safe_stem(stem: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("fixture_dir", type=Path, help="Directory of .xlsx fixtures")
+    parser.add_argument("fixture_dir", type=Path, help="Directory of OOXML spreadsheet fixtures")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--mutation",
@@ -907,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--recursive",
         action="store_true",
-        help="Discover .xlsx fixtures recursively when no manifest.json is present.",
+        help="Discover OOXML spreadsheet fixtures recursively when no manifest.json is present.",
     )
     parser.add_argument(
         "--exclude-fixture",
