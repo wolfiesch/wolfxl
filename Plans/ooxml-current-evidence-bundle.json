@@ -831,15 +831,28 @@
     },
     {
       "name": "synthgl_recursive_mutation_coverage",
-      "path": "/tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json > /tmp/wolfxl-coverage-synthgl-recursive-python-metadata.json",
+      "path": "/tmp/wolfxl-coverage-synthgl-recursive-richer-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-python-metadata-final/report.json --report /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json > /tmp/wolfxl-coverage-synthgl-recursive-richer-20260508.json",
       "expect": [
         {"path": "ready", "equals": false},
         {"path": "recursive", "equals": true},
         {"path": "fixture_count", "equals": 32},
-        {"path": "mutation_report_count", "equals": 1},
+        {"path": "mutation_report_count", "equals": 2},
         {"path": "surfaces.python_in_excel_metadata.status", "equals": "clear"},
         {"path": "surfaces.sheet_metadata_preservation.status", "equals": "clear"}
+      ]
+    },
+    {
+      "name": "synthgl_recursive_richer_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508 --mutation add_data_validation --mutation add_conditional_formatting --mutation copy_first_sheet --mutation delete_first_row --mutation delete_first_col --mutation add_remove_chart > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-richer-fixed-20260508.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "copy_first_sheet", "delete_first_row", "delete_first_col", "add_remove_chart"]},
+        {"path": "result_count", "equals": 192},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
       ]
     },
     {
