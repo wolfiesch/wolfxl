@@ -44,6 +44,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_delete_first_row_delta_full_pack_report",
     "excel_render_delete_first_col_delta_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
+    "excel_ui_interaction_marker_timeline_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -106,9 +107,10 @@ OPEN_REQUIREMENTS = (
         "id": "broader_click_level_interaction_variants",
         "status": "open",
         "reason": (
-            "Targeted UI-interaction evidence exists, including a marker-cell "
-            "mutated shared pivot-slicer cache click, but broader slicer, "
-            "timeline, embedded-control, and prompt variants remain unexhausted."
+            "Targeted UI-interaction evidence exists, including marker-cell "
+            "mutated shared pivot-slicer cache and timeline clicks, but broader "
+            "slicer, timeline, embedded-control, and prompt variants remain "
+            "unexhausted."
         ),
     },
     {
