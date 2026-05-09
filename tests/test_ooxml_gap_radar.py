@@ -145,6 +145,36 @@ def test_gap_radar_is_clear_for_plain_core_workbook(tmp_path: Path) -> None:
     assert report["unknown_extension_uri_count"] == 0
 
 
+def test_gap_radar_classifies_excel_trash_payloads(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "trash.xlsx"
+    _write_plain_fixture(fixture)
+    with zipfile.ZipFile(fixture, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[trash]/0000.dat", b"\xff\xff\xff\xff" + (b"\0" * 32))
+    (fixture_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": fixture.name,
+                        "fixture_id": "trash",
+                        "tool": "excel",
+                    }
+                ]
+            }
+        )
+    )
+
+    report = gap_radar.audit_gap_radar(fixture_dir)
+
+    assert report["clear"] is True
+    assert report["unknown_part_family_count"] == 0
+    assert report["unknown_relationship_type_count"] == 0
+    assert report["unknown_content_type_count"] == 0
+    assert report["unknown_extension_uri_count"] == 0
+
+
 def test_gap_radar_classifies_embedded_package_relationships(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
