@@ -55,6 +55,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
+    "slicer_shared_two_pivots_sidecar_rename_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_interactive_evidence",
     "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
     "external_link_retarget_excel_app_open",
@@ -85,8 +86,9 @@ OPEN_REQUIREMENTS = (
             "copy-sheet, rename-sheet, external-link retargeting, and the visually "
             "neutral add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet edits; shared pivot-slicer "
-            "sidecar evidence separately proves copy-remove-sheet equivalence on a "
-            "high-risk workbook; ILPA side evidence separately proves external-link "
+            "sidecar evidence separately proves copy-remove-sheet and rename-sheet "
+            "equivalence on a high-risk workbook; ILPA side evidence separately "
+            "proves external-link "
             "retarget render equivalence on public finance templates, plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
