@@ -24,6 +24,8 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_rename_sheet_render_equivalence as base  # noqa: E402
 
 MUTATION_LABELS = {
+    "delete_first_col": "delete-first-col",
+    "delete_first_row": "delete-first-row",
     "move_formula_range": "move-formula-range",
 }
 
@@ -73,6 +75,14 @@ def audit_intentional_render_delta(
                     f"{label} intentional render delta observed: "
                     f"max_normalized_rmse={audit_result.max_normalized_rmse:.8f}"
                 ),
+            )
+        elif audit_result.status == "failed" and audit_result.message.startswith(
+            "page-count mismatch:"
+        ):
+            audit_result = replace(
+                audit_result,
+                status="changed",
+                message=f"{label} intentional page-count delta observed: {audit_result.message}",
             )
         elif audit_result.status == "passed":
             audit_result = replace(
