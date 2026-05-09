@@ -430,8 +430,8 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
     if stage_dir.exists():
         shutil.rmtree(stage_dir)
     stage_dir.mkdir(parents=True, exist_ok=True)
-    staged_src = stage_dir / src.name
-    staged_pdf = stage_dir / f"{src.stem}.pdf"
+    staged_src = stage_dir / f"workbook{src.suffix}"
+    staged_pdf = stage_dir / "workbook.pdf"
     shutil.copy2(src, staged_src)
     open_cmd = (
         "    open workbook workbook file name workbookPath "
@@ -469,8 +469,18 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             "end tell",
         ]
     )
-    proc = _run_excel_script_with_dialog_handling(script, timeout)
-    dialog = run_ooxml_app_smoke._excel_dialog_text()
+    proc: subprocess.CompletedProcess[str] | None = None
+    dialog = ""
+    for attempt in range(2):
+        proc = _run_excel_script_with_dialog_handling(script, timeout)
+        dialog = run_ooxml_app_smoke._excel_dialog_text()
+        if run_ooxml_app_smoke._is_excel_recovery_prompt(dialog):
+            run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            if proc.returncode != 0 and attempt == 0:
+                continue
+        break
+    assert proc is not None
     if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
         run_ooxml_app_smoke._dismiss_excel_repair_dialogs()
     run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
@@ -555,7 +565,6 @@ end tell
 
 def _excel_render_stage_dir(src: Path) -> Path:
     digest = hashlib.sha256(str(src.resolve()).encode()).hexdigest()[:16]
-    stem = run_ooxml_fidelity_mutations._safe_stem(src.stem)
     return (
         Path.home()
         / "Library"
@@ -563,7 +572,7 @@ def _excel_render_stage_dir(src: Path) -> Path:
         / "com.microsoft.Excel"
         / "Data"
         / "wolfxl-render-compare"
-        / f"{stem}-{digest}"
+        / f"job-{digest}"
     )
 
 
