@@ -30,6 +30,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_style_cell_delta_full_pack_report",
     "excel_render_insert_tail_col_delta_full_pack_report",
     "excel_render_insert_tail_row_delta_full_pack_report",
+    "excel_render_delete_marker_tail_col_delta_full_pack_report",
     "excel_render_delete_marker_tail_row_delta_full_pack_report",
     "excel_render_copy_sheet_equivalence_full_pack_report",
     "excel_render_rename_sheet_equivalence_full_pack_report",
@@ -78,8 +79,8 @@ OPEN_REQUIREMENTS = (
             "neutral add-data-validation, add-conditional-formatting, and "
             "add-remove-chart edits, plus expected visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, "
-            "delete-marker-tail-row, move-formula-range, and first row/column "
-            "deletion; they still do "
+            "delete-marker-tail-row/column, move-formula-range, and first "
+            "row/column deletion; they still do "
             "not prove semantic visual equivalence for every high-risk feature "
             "edit."
         ),
