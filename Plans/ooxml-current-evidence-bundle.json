@@ -1441,6 +1441,48 @@
       ]
     },
     {
+      "name": "sec_edgar_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/sec_edgar --recursive --json > /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 6},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 6},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 6},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 6}
+      ]
+    },
+    {
+      "name": "sec_edgar_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-sec-edgar-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/sec_edgar --recursive --json > /tmp/wolfxl-gap-radar-sec-edgar-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 6},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "sec_edgar_default_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-sec-edgar-20260509/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/sec_edgar --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-sec-edgar-20260509 --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/sec_edgar"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "insert_tail_row", "insert_tail_col", "delete_marker_tail_row", "delete_marker_tail_col", "copy_remove_sheet", "move_marker_range"]},
+        {"path": "result_count", "equals": 54},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "iran_osint_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-iran-osint-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/iran/osint/data --recursive --json > /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json",
