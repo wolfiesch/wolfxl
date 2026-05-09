@@ -21,6 +21,28 @@ CURRENT_SUPPORTED_CLAIM = (
     "no known fidelity gap in the currently pinned and classified real-world OOXML surface"
 )
 
+REQUIRED_CURRENT_EVIDENCE_REPORTS = (
+    "combined_all_evidence_gate",
+    "interactive_evidence_gate",
+    "excel_ui_interaction_evidence_gate",
+    "excel_render_full_pack_with_rename_sheet_intentional_coverage_gate",
+    "excel_app_open_full_pack_with_cf_verified_coverage_gate",
+    "external_oracle_corpus_diversity",
+    "external_oracle_gap_radar",
+    "synthgl_recursive_gap_radar",
+    "umya_test_files_gap_radar",
+    "umya_test_files_quick_plus_structural_mutation_coverage",
+    "powerpivot_contoso_sidecar_coverage",
+    "powerpivot_contoso_sidecar_excel_expected_unsupported",
+    "slicer_shared_two_pivots_sidecar_coverage",
+    "slicer_shared_two_pivots_sidecar_interactive_evidence",
+    "external_link_retarget_excel_app_open",
+    "public_powerbi_expanded_mutations",
+    "synthgl_recursive_mutation_coverage",
+    "synthgl_recursive_excel_render_noop_byte_identical",
+    "rename_sheet_defined_name_ref_audit_report",
+)
+
 OPEN_REQUIREMENTS = (
     {
         "id": "broader_real_world_corpus_diversity",
@@ -60,6 +82,10 @@ OPEN_REQUIREMENTS = (
 def audit_completion_claim(bundle_path: Path) -> dict:
     bundle_audit = audit_ooxml_evidence_bundle.audit_bundle(bundle_path)
     bundle_ready = bool(bundle_audit["ready"])
+    report_names = {str(report["name"]) for report in bundle_audit["reports"]}
+    missing_report_names = sorted(set(REQUIRED_CURRENT_EVIDENCE_REPORTS) - report_names)
+    required_reports_present = not missing_report_names
+    current_supported_claim_ready = bundle_ready and required_reports_present
     criteria = [
         {
             "id": "current_evidence_bundle_ready",
@@ -70,6 +96,22 @@ def audit_completion_claim(bundle_path: Path) -> dict:
                 "report_count": bundle_audit["report_count"],
                 "producer_count": bundle_audit["producer_count"],
                 "issue_count": bundle_audit["issue_count"],
+            },
+        },
+        {
+            "id": "current_evidence_required_reports_present",
+            "status": "satisfied" if required_reports_present else "missing",
+            "reason": (
+                "The current supported claim requires the named coverage, render, "
+                "app-open, interactive, corpus, gap-radar, sidecar, and broader "
+                "corpus evidence reports pinned in the bundle."
+            ),
+            "evidence": {
+                "required_report_count": len(REQUIRED_CURRENT_EVIDENCE_REPORTS),
+                "present_report_count": len(
+                    set(REQUIRED_CURRENT_EVIDENCE_REPORTS) & report_names
+                ),
+                "missing_reports": missing_report_names,
             },
         },
         *OPEN_REQUIREMENTS,
@@ -84,7 +126,7 @@ def audit_completion_claim(bundle_path: Path) -> dict:
         "exhaustive_claim": EXHAUSTIVE_CLAIM,
         "exhaustive_claim_ready": False,
         "current_supported_claim": CURRENT_SUPPORTED_CLAIM,
-        "current_supported_claim_ready": bundle_ready,
+        "current_supported_claim_ready": current_supported_claim_ready,
         "criteria": criteria,
         "missing_requirement_count": len(missing),
         "missing_requirements": missing,
