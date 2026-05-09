@@ -1154,6 +1154,55 @@
       ]
     },
     {
+      "name": "calamine_reader_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/calamine/tests --recursive --json > /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 52},
+        {"path": "skipped_workbook_count", "equals": 3},
+        {"path": "missing_buckets", "equals": ["powerpivot_data_model", "slicer_or_timeline"]},
+        {"path": "bucket_fixtures.chart_or_chart_style", "length_at_least": 2},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 52},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 9},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 9},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 42},
+        {"path": "bucket_fixtures.external_link", "length_at_least": 1},
+        {"path": "bucket_fixtures.external_tool_authored", "length_at_least": 5},
+        {"path": "bucket_fixtures.macro_vba", "length_at_least": 2},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 5},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 49}
+      ]
+    },
+    {
+      "name": "calamine_reader_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-calamine-tests-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/calamine/tests --recursive --json > /tmp/wolfxl-gap-radar-calamine-tests-20260508.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "ready", "equals": false},
+        {"path": "fixture_count", "equals": 52},
+        {"path": "skipped_fixture_count", "equals": 3},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "calamine_reader_default_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-calamine-tests-fixed-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/calamine/tests --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-calamine-tests-fixed-20260508 --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/calamine/tests"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "insert_tail_row", "insert_tail_col", "delete_marker_tail_row", "delete_marker_tail_col", "copy_remove_sheet", "move_marker_range"]},
+        {"path": "result_count", "equals": 495},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_external_link_prompt_click",
       "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",
