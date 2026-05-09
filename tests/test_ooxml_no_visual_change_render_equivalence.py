@@ -261,12 +261,15 @@ def test_no_visual_change_render_equivalence_labels_conditional_formatting(
     ]
 
 
-def test_no_visual_change_render_equivalence_labels_add_remove_chart(
+def _assert_explicit_neutral_mutation_label(
     tmp_path: Path,
     monkeypatch,
+    *,
+    mutation: str,
+    label: str,
 ) -> None:
-    report = _write_fake_render_result(tmp_path, mutation="add_remove_chart")
-    work = tmp_path / "book" / "add_remove_chart"
+    report = _write_fake_render_result(tmp_path, mutation=mutation)
+    work = tmp_path / "book" / mutation
     (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
 
     def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
@@ -291,10 +294,34 @@ def test_no_visual_change_render_equivalence_labels_add_remove_chart(
 
     result = audit.audit_no_visual_change_render_equivalence(
         report,
-        mutations=("add_remove_chart",),
+        mutations=(mutation,),
     )
 
     assert result["ready"] is True
-    assert result["mutations"] == ["add_remove_chart"]
-    assert result["observed_mutations"] == ["add_remove_chart"]
-    assert "add-remove-chart render equivalent" in result["results"][0]["message"]
+    assert result["mutations"] == [mutation]
+    assert result["observed_mutations"] == [mutation]
+    assert f"{label} render equivalent" in result["results"][0]["message"]
+
+
+def test_no_visual_change_render_equivalence_labels_add_remove_chart(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _assert_explicit_neutral_mutation_label(
+        tmp_path,
+        monkeypatch,
+        mutation="add_remove_chart",
+        label="add-remove-chart",
+    )
+
+
+def test_no_visual_change_render_equivalence_labels_copy_remove_sheet(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _assert_explicit_neutral_mutation_label(
+        tmp_path,
+        monkeypatch,
+        mutation="copy_remove_sheet",
+        label="copy-remove-sheet",
+    )

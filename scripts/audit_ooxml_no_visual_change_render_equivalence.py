@@ -28,6 +28,7 @@ MUTATION_LABELS = {
     "add_conditional_formatting": "add-conditional-formatting",
     "add_data_validation": "add-data-validation",
     "add_remove_chart": "add-remove-chart",
+    "copy_remove_sheet": "copy-remove-sheet",
     "rename_first_sheet": "rename-sheet",
     "retarget_external_links": "external-link retarget",
 }
