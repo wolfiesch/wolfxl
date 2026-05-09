@@ -1203,6 +1203,110 @@
       ]
     },
     {
+      "name": "ilpa_reporting_template_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-ilpa-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa --json > /tmp/wolfxl-corpus-buckets-ilpa-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 4},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 4},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 4},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 4},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 4},
+        {"path": "bucket_fixtures.external_link", "length_at_least": 3},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 4}
+      ]
+    },
+    {
+      "name": "ilpa_reporting_template_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-ilpa-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa --json > /tmp/wolfxl-gap-radar-ilpa-20260508.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 4},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "ilpa_reporting_template_default_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-ilpa-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-ilpa-20260508 --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "insert_tail_row", "insert_tail_col", "delete_marker_tail_row", "delete_marker_tail_col", "copy_remove_sheet", "move_marker_range"]},
+        {"path": "result_count", "equals": 36},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "ilpa_reporting_template_structural_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-ilpa-structural-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-ilpa-structural-20260508 --mutation copy_first_sheet --mutation rename_first_sheet --mutation move_formula_range --mutation add_data_validation --mutation add_conditional_formatting --mutation retarget_external_links --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/domain-ground-truth/11-lending-labor-banking/ilpa"},
+        {"path": "mutations", "equals": ["copy_first_sheet", "rename_first_sheet", "move_formula_range", "add_data_validation", "add_conditional_formatting", "retarget_external_links"]},
+        {"path": "result_count", "equals": 24},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "wbd_wdesk_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence/real_files/archive/dev/public-company-ir-supplemental-workbook/warner-bros-discovery --json > /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 1},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "excel_authored", "external_link", "macro_vba", "powerpivot_data_model", "slicer_or_timeline"]},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 1},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 1},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 1},
+        {"path": "bucket_fixtures.external_tool_authored", "length_at_least": 1},
+        {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 1},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 1},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 1}
+      ]
+    },
+    {
+      "name": "wbd_wdesk_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-wdesk-wbd-directory-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence/real_files/archive/dev/public-company-ir-supplemental-workbook/warner-bros-discovery --json > /tmp/wolfxl-gap-radar-wdesk-wbd-directory-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "wbd_wdesk_default_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-wdesk-wbd-quoted-sheet-fixed-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence/real_files/archive/dev/public-company-ir-supplemental-workbook/warner-bros-discovery --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-wdesk-wbd-quoted-sheet-fixed-20260508 --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence/real_files/archive/dev/public-company-ir-supplemental-workbook/warner-bros-discovery"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "insert_tail_row", "insert_tail_col", "delete_marker_tail_row", "delete_marker_tail_col", "copy_remove_sheet", "move_marker_range"]},
+        {"path": "result_count", "equals": 9},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_external_link_prompt_click",
       "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",
