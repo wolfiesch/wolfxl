@@ -355,6 +355,21 @@
       ]
     },
     {
+      "name": "excel_render_add_remove_chart_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-add-remove-chart-render-equivalence-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json --mutation add_remove_chart --timeout 180 --strict > /tmp/wolfxl-add-remove-chart-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_remove_chart"]},
+        {"path": "observed_mutations", "equals": ["add_remove_chart"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_retarget_external_links_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation retarget_external_links > /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509.json",
