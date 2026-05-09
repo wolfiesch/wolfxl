@@ -451,6 +451,7 @@
         {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
         {"path": "results.0.mutation", "equals": "style_cell"},
         {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel slicer shape"},
         {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
         {"path": "results.0.ui_actions", "contains": "saved active workbook"}
       ]
