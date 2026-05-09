@@ -44,6 +44,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_delete_first_row_delta_full_pack_report",
     "excel_render_delete_first_col_delta_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
+    "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_control_evidence",
@@ -111,9 +112,10 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "Targeted UI-interaction evidence exists, including marker-cell "
-            "mutated shared pivot-slicer cache and timeline clicks plus a "
-            "marker-cell mutated current-setting external-link prompt path "
-            "and marker-cell mutated list-box and button-control click "
+            "mutated table-slicer item clicks, shared pivot-slicer cache "
+            "and timeline clicks plus a marker-cell mutated current-setting "
+            "external-link prompt path and marker-cell mutated list-box and "
+            "button-control click "
             "persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
