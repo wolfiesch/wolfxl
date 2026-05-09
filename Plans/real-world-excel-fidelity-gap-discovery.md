@@ -538,7 +538,7 @@ Next evidence slices before declaring a higher-confidence "no known gaps":
    pivot-slicer cache clicks,
    source and marker-cell-mutated external-tool-authored pivot-slicer item clicks, source and marker-cell-mutated
    timeline date-range clicks, PowerView read-only prompts, and external-link prompt handling under prompt-forcing,
-   current-setting, style-cell current-setting, and marker-cell-mutated adjacent issue-corpus prompt paths now have pinned UI-interaction
+   current-setting, style-cell-mutated current-setting, and marker-cell-mutated adjacent issue-corpus prompt paths now have pinned UI-interaction
    artifacts; broader embedded-control/slicer/timeline variants remain open.
 4. Keep the gap radar strict: every newly seen part family, relationship type,
    content type, or extension URI must become either an allowlisted known
