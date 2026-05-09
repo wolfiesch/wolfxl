@@ -149,6 +149,7 @@ def _read_mode_has_pending_changes(wb: Any) -> bool:
         "_pending_source_chart_ops",
         "_pending_pivot_caches",
         "_pending_slicer_caches",
+        "_strip_external_links_on_save",
     )
     if any(bool(getattr(wb, attr, None)) for attr in workbook_pending_attrs):
         return True
@@ -179,6 +180,8 @@ def _read_mode_has_pending_changes(wb: Any) -> bool:
 
     for ws in getattr(wb, "_sheets", {}).values():
         if any(bool(getattr(ws, attr, None)) for attr in worksheet_pending_attrs):
+            return True
+        if getattr(ws, "_header_footer", None) is not None:
             return True
         if has_pending_image_deletions(ws):
             return True
