@@ -359,10 +359,11 @@ Gap ledger:
      definitions, three pivot tables, and slicer caches. The sidecar passes
      marker/copy-sheet/move-formula mutation sweep, records expected
      PowerView app-unsupported status for Microsoft Excel source and marker
-     app-smoke, passes sampled Microsoft Excel render-smoke, and passes strict
-     package gap radar with `power_view` recorded as an expected app-unsupported
-     feature after classifying PowerPivot custom-property payloads, theme media
-     relationships, and x15 pivot/slicer extension URIs.
+     app-smoke with zero clean app-open passes, passes sampled Microsoft Excel
+     render-smoke, and passes strict package gap radar with `power_view`
+     recorded as an expected app-unsupported feature after classifying
+     PowerPivot custom-property payloads, theme media relationships, and x15
+     pivot/slicer extension URIs.
    - Latest broader-corpus coverage slice:
      `scripts/audit_ooxml_fidelity_coverage.py --recursive --report` now maps
      nested live-corpus workbooks to mutation evidence and falls back to
