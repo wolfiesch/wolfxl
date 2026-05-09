@@ -28,6 +28,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_full_pack_with_rename_sheet_intentional_coverage_gate",
     "excel_render_copy_sheet_equivalence_full_pack_report",
     "excel_render_rename_sheet_equivalence_full_pack_report",
+    "excel_render_retarget_external_links_equivalence_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "external_oracle_corpus_diversity",
     "external_oracle_gap_radar",

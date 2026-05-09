@@ -163,6 +163,7 @@ EXPECTED_ISSUE_KINDS_BY_MUTATION = {
     "retarget_external_links": {
         "external_links_semantic_drift",
         "missing_relationship",
+        "worksheet_formulas_semantic_drift",
     },
     "style_cell": {
         "style_theme_semantic_drift",
@@ -183,6 +184,7 @@ EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
     },
     "retarget_external_links": {
         "external_links_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
+        "worksheet_formulas_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
     },
     "style_cell": {
         "style_theme_semantic_drift": "FF1F4E79",
