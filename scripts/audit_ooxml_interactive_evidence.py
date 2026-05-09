@@ -197,7 +197,7 @@ def _report_contains_probe_kind(
         return True
     return any(
         result.get("probe_kind", report_probe_kind) == probe_kind
-        and result.get("probe") in required_probes
+        and str(result.get("probe")) in required_probes
         for result in payload.get("results", [])
     )
 
@@ -267,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=tuple(INTERACTIVE_PROBES),
         default=None,
         help=(
-            "Restrict the audit to one interactive probe. May be passed multiple "
+            "Restrict the audit to specific interactive probe(s). May be passed multiple "
             "times. Without this, every applicable probe class is required."
         ),
     )
