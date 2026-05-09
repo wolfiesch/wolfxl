@@ -2874,6 +2874,22 @@
       ]
     },
     {
+      "name": "sec_edgar_copy_remove_sheet_render_equivalence",
+      "path": "/tmp/wolfxl-sec-edgar-copy-remove-sheet-render-equivalence-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/sec_edgar --output-dir /tmp/wolfxl-render-excel-sec-edgar-copy-remove-sheet-20260509 --render-engine excel --mutation copy_remove_sheet --max-pages-per-fixture 2 --page-selection first-and-last-pages --timeout 180 && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-sec-edgar-copy-remove-sheet-20260509/render-compare-report.json --mutation copy_remove_sheet --timeout 180 --strict > /tmp/wolfxl-sec-edgar-copy-remove-sheet-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["copy_remove_sheet"]},
+        {"path": "result_count", "equals": 6},
+        {"path": "passed_count", "equals": 6},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "copy-remove-sheet render equivalent"}
+      ]
+    },
+    {
       "name": "iran_osint_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-iran-osint-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/iran/osint/data --recursive --json > /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json",
