@@ -66,7 +66,7 @@ OPEN_REQUIREMENTS = (
         "id": "broader_real_world_corpus_diversity",
         "status": "open",
         "reason": (
-            "The current corpus portfolio spans 262 readable workbooks across 17 "
+            "The current corpus portfolio spans 270 readable workbooks across 18 "
             "source reports and covers all required diversity buckets, but it is "
             "still not customer-scale or random real-world Excel evidence."
         ),

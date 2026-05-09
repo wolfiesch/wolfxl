@@ -1949,24 +1949,71 @@
       ]
     },
     {
-      "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-excelbench-20260509.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json --min-sources 17 --min-workbooks 250 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-excelbench-20260509.json",
+      "name": "excelbench_real_world_manifest_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/ExcelBench/fixtures/real_world --json > /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 8},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "external_link", "macro_vba", "powerpivot_data_model", "slicer_or_timeline"]},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 8},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 2},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 2},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 8},
+        {"path": "bucket_fixtures.external_tool_authored", "length_at_least": 8},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 2},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 8}
+      ]
+    },
+    {
+      "name": "excelbench_real_world_manifest_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-excelbench-real-world-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/ExcelBench/fixtures/real_world --json > /tmp/wolfxl-gap-radar-excelbench-real-world-20260509.json",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 17},
-        {"path": "workbook_count", "equals": 262},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 8},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excelbench_real_world_manifest_default_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-excelbench-real-world-20260509/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/ExcelBench/fixtures/real_world --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-excelbench-real-world-20260509 --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/ExcelBench/fixtures/real_world"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "insert_tail_row", "insert_tail_col", "delete_marker_tail_row", "delete_marker_tail_col", "copy_remove_sheet", "move_marker_range"]},
+        {"path": "result_count", "equals": 74},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "corpus_portfolio_diversity",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-excelbench-real-world-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json --min-sources 18 --min-workbooks 260 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-excelbench-real-world-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_count", "equals": 18},
+        {"path": "workbook_count", "equals": 270},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 229},
-        {"path": "bucket_counts.external_tool_authored", "equals": 33},
+        {"path": "bucket_counts.excel_authored", "equals": 237},
+        {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
         {"path": "bucket_counts.slicer_or_timeline", "equals": 7},
         {"path": "bucket_counts.external_link", "equals": 11},
         {"path": "bucket_counts.chart_or_chart_style", "equals": 18},
-        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 45}
+        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 47}
       ]
     },
     {
