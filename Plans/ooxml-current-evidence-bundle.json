@@ -45,6 +45,30 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_evidence_gate",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-external-oracle-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --report /tmp/wolfxl-ui-interaction-macro-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-pivot-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-control-click-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-button-control-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-slicer-all-items-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-pivot-chart-slicer-extra-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-excelize-pivot-slicer-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-timeline-click-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-external-link-current-prompt-20260508/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-external-oracle-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 10},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.clear", "equals": true},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.timeline_selection_state.clear", "equals": true},
+        {"path": "probes.timeline_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.pivot_refresh_state.clear", "equals": true},
+        {"path": "probes.pivot_refresh_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.external_link_update_prompt.clear", "equals": true},
+        {"path": "probes.external_link_update_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.macro_project_presence.clear", "equals": true},
+        {"path": "probes.macro_project_presence.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.embedded_control_openability.clear", "equals": true},
+        {"path": "probes.embedded_control_openability.probe_kind", "equals": "excel_ui_interaction"}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_macro_disable_button",
       "path": "/tmp/wolfxl-ui-interaction-macro-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-macro-20260508 --probe-kind excel_ui_interaction --probe macro_project_presence --fixture real-excel-macro-basic.xlsm --timeout 120 > /tmp/wolfxl-ui-interaction-macro-20260508/report.stdout.json",
