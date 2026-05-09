@@ -261,6 +261,42 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_marker_external_tool_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-marker-external-tool-pivot-slicer-20260509/interactive-probe-report.json",
+      "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-marker-external-tool-pivot-slicer-20260509 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation marker_cell --fixture excelize-2.10-pivot-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-marker-external-tool-pivot-slicer-20260509.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "marker_cell"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "excelize-2.10-pivot-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "marker_cell"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel slicer shape"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-marker-external-tool-pivot-slicer-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-marker-external-tool-pivot-slicer-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-marker-external-tool-pivot-slicer-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["excelize-2.10-pivot-slicers.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_timeline_month_click",
       "path": "/tmp/wolfxl-ui-interaction-timeline-click-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-timeline-click-20260508 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-timeline-click-20260508.stdout.json",

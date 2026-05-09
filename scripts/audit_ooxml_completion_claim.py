@@ -46,6 +46,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_marker_pivot_chart_slicer_evidence",
+    "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_control_evidence",
@@ -113,8 +114,9 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "Targeted UI-interaction evidence exists, including marker-cell "
-            "mutated table-slicer and pivot-chart slicer item clicks, shared "
-            "pivot-slicer cache and timeline clicks plus a marker-cell mutated "
+            "mutated table-slicer, pivot-chart slicer, and external-tool "
+            "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
+            "clicks plus a marker-cell mutated "
             "current-setting external-link prompt path and marker-cell mutated "
             "list-box and button-control click "
             "persistence, but "
