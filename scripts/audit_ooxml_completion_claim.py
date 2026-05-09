@@ -32,6 +32,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_add_data_validation_equivalence_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "external_oracle_corpus_diversity",
+    "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
     "synthgl_recursive_gap_radar",
     "umya_test_files_gap_radar",
@@ -53,8 +54,9 @@ OPEN_REQUIREMENTS = (
         "id": "broader_real_world_corpus_diversity",
         "status": "open",
         "reason": (
-            "The current evidence spans pinned and sidecar corpora, but not a broad "
-            "customer-scale or random real-world Excel corpus."
+            "The current corpus portfolio spans 236 readable workbooks across 15 "
+            "source reports and covers all required diversity buckets, but it is "
+            "still not customer-scale or random real-world Excel evidence."
         ),
     },
     {
