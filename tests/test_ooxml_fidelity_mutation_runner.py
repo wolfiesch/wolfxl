@@ -33,6 +33,31 @@ def _make_fixture(path: Path) -> None:
     workbook.save(path)
 
 
+def _make_empty_workbook_without_sheets(path: Path) -> None:
+    parts = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""",
+    }
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in parts.items():
+            archive.writestr(name, content)
+
+
 def test_safe_tail_row_uses_package_level_feature_refs(tmp_path: Path) -> None:
     fixture = tmp_path / "data-validation-tail.xlsx"
     workbook = openpyxl.Workbook()
@@ -101,6 +126,25 @@ def test_runner_writes_report_for_safe_mutations(tmp_path: Path) -> None:
         "copy_remove_sheet": "passed",
         "move_marker_range": "passed",
     }
+
+
+def test_runner_treats_existing_sheet_mutation_as_noop_when_no_sheets(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_empty_workbook_without_sheets(fixture_dir / "empty_worksheet.xlsx")
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("marker_cell", "style_cell"),
+        skip_invalid_source=True,
+    )
+
+    assert report["failure_count"] == 0
+    assert {result["status"] for result in report["results"]} == {"passed"}
 
 
 def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:

@@ -1901,6 +1901,11 @@ impl XlsxPatcher {
         self.do_save(&target)
     }
 
+    /// Return whether the Rust patcher already has queued mutations.
+    fn _has_pending_save_work(&self) -> bool {
+        self.has_pending_save_work()
+    }
+
     /// RFC-072 (G19): return the raw `xl/vbaProject.bin` bytes from the
     /// source workbook, or `None` when the workbook contains no VBA
     /// archive. Read-only inspection — no authoring side effects.

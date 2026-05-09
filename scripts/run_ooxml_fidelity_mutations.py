@@ -62,6 +62,10 @@ SUPPORTED_MUTATIONS = (
     "move_formula_range",
     "retarget_external_links",
 )
+EXISTING_SHEET_MUTATIONS = set(SUPPORTED_MUTATIONS) - {
+    "no_op",
+    "add_remove_chart",
+}
 PASSING_STATUSES = {
     "passed",
     "passed_with_expected_drift",
@@ -496,6 +500,10 @@ def _source_error_reason(exc: BaseException) -> str:
 def _apply_mutation(path: Path, mutation: str) -> None:
     workbook = wolfxl.load_workbook(path, modify=True)
     try:
+        if mutation in EXISTING_SHEET_MUTATIONS and not workbook.sheetnames:
+            workbook.save(path)
+            return
+
         if mutation == "no_op":
             pass
         elif mutation == "marker_cell":

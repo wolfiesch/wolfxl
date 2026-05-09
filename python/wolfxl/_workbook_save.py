@@ -17,9 +17,8 @@ def normalize_openpyxl_package_shape(wb: Any, filename: str) -> None:
     from wolfxl._openpyxl_package_shape import normalize_openpyxl_package_shape as _normalize
 
     keep_vba = bool(getattr(wb, "_keep_vba", False))
-    if not keep_vba and getattr(wb, "_rust_patcher", None) is not None:
-        keep_vba = getattr(wb, "vba_archive", None) is not None
-    _normalize(filename, keep_vba=keep_vba)
+    if keep_vba:
+        _normalize(filename, keep_vba=True)
 
 
 def save_workbook(
@@ -171,13 +170,21 @@ def _read_mode_has_pending_changes(wb: Any) -> bool:
         "_pending_array_formulas",
         "_pending_images",
         "_pending_charts",
+        "_pending_chart_deletions",
         "_pending_pivot_tables",
         "_pending_slicers",
         "_print_titles_dirty",
     )
+    from wolfxl._worksheet_media import has_pending_image_deletions
+
     for ws in getattr(wb, "_sheets", {}).values():
         if any(bool(getattr(ws, attr, None)) for attr in worksheet_pending_attrs):
             return True
+        if has_pending_image_deletions(ws):
+            return True
+        for handle in getattr(ws, "_pivot_handles_cache", None) or []:
+            if getattr(handle, "_dirty", False) or getattr(handle, "_layout_dirty", False):
+                return True
     return False
 
 
@@ -202,6 +209,13 @@ def save_write_only_mode(wb: Any, filename: str) -> None:
 
 def save_modify_mode(wb: Any, filename: str) -> None:
     """Flush pending modify-mode queues and write through ``XlsxPatcher``."""
+    if not _modify_mode_has_pending_changes(wb):
+        if same_existing_path(filename, wb._source_path):  # noqa: SLF001
+            wb._rust_patcher.save_in_place()  # noqa: SLF001
+        else:
+            wb._rust_patcher.save(filename)  # noqa: SLF001
+        return
+
     # Workbook-level metadata flushes before per-sheet drains so the patcher
     # composes workbook.xml once, with all pending workbook-scoped edits.
     if wb._properties_dirty:  # noqa: SLF001
@@ -269,6 +283,35 @@ def save_modify_mode(wb: Any, filename: str) -> None:
     flush_source_chart_authoring(wb, filename)
     flush_chartsheets_authoring(wb, filename)
     normalize_openpyxl_package_shape(wb, filename)
+
+
+def _modify_mode_has_pending_changes(wb: Any) -> bool:
+    if _read_mode_has_pending_changes(wb):
+        return True
+    patcher = getattr(wb, "_rust_patcher", None)
+    if patcher is not None:
+        has_pending = getattr(patcher, "_has_pending_save_work", None)
+        if has_pending is None:
+            return True
+        if bool(has_pending()):
+            return True
+    if _has_pending_source_chart_authoring(wb):
+        return True
+    return False
+
+
+def _has_pending_source_chart_authoring(wb: Any) -> bool:
+    if getattr(wb, "_pending_source_chart_ops", None):
+        return True
+    for ws in getattr(wb, "_sheets", {}).values():
+        for chart in getattr(ws, "_charts_cache", None) or []:
+            meta = getattr(chart, "_wolfxl_source_chart", None)
+            if not meta:
+                continue
+            original_title = getattr(chart, "_wolfxl_source_title", None)
+            if _source_chart_title_signature(chart) != original_title:
+                return True
+    return False
 
 
 def save_write_mode(wb: Any, filename: str) -> None:
