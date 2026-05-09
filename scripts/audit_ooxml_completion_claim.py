@@ -47,6 +47,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_control_evidence",
+    "excel_ui_interaction_marker_button_control_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -112,7 +113,8 @@ OPEN_REQUIREMENTS = (
             "Targeted UI-interaction evidence exists, including marker-cell "
             "mutated shared pivot-slicer cache and timeline clicks plus a "
             "marker-cell mutated current-setting external-link prompt path "
-            "and marker-cell mutated embedded-control click persistence, but "
+            "and marker-cell mutated list-box and button-control click "
+            "persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
         ),
