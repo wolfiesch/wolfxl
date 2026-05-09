@@ -47,12 +47,16 @@ PASSING_STATUSES = {"passed", "skipped", "expected_app_unsupported"}
 SOURCE_MUTATION = "source"
 EXCEL_REPAIR_MARKER = "Excel repair/error dialog while opening:"
 EXCEL_UNSUPPORTED_CONTENT_MARKER = "Excel unsupported-content dialog while opening:"
-UNSUPPORTED_CONTENT_KEYWORDS = (
+UNSUPPORTED_CONTENT_PROMPT_KEYWORDS = (
     "isn't supported in this version of excel",
     "is not supported in this version of excel",
     "unsupported content",
-    "powerview",
 )
+UNSUPPORTED_CONTENT_FEATURE_KEYWORDS = (
+    "powerview",
+    "power view",
+)
+UNSUPPORTED_CONTENT_ACTION_KEYWORDS = ("open as read-only",)
 UNSUPPORTED_CONTENT_DISMISS_BUTTONS = ("Cancel", "OK", "Close")
 
 
@@ -176,6 +180,18 @@ def _write_report(
     aborted: bool,
     abort_reason: str | None,
 ) -> dict:
+    clean_pass_count = sum(1 for result in results if result.status == "passed")
+    skipped_count = sum(1 for result in results if result.status == "skipped")
+    expected_app_unsupported_count = sum(
+        1 for result in results if result.status == "expected_app_unsupported"
+    )
+    unexpected_app_unsupported_count = sum(
+        1
+        for result in results
+        if result.status not in PASSING_STATUSES
+        and EXCEL_UNSUPPORTED_CONTENT_MARKER in result.message
+    )
+    non_clean_count = len(results) - clean_pass_count
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
@@ -185,6 +201,11 @@ def _write_report(
         "abort_reason": abort_reason,
         "result_count": len(results),
         "failure_count": sum(1 for result in results if result.status not in PASSING_STATUSES),
+        "clean_pass_count": clean_pass_count,
+        "skipped_count": skipped_count,
+        "expected_app_unsupported_count": expected_app_unsupported_count,
+        "unexpected_app_unsupported_count": unexpected_app_unsupported_count,
+        "non_clean_count": non_clean_count,
         "results": [asdict(result) for result in results],
     }
     (output_dir / "app-smoke-report.json").write_text(json.dumps(report, indent=2, sort_keys=True))
@@ -297,7 +318,9 @@ def _smoke_excel(
             timeout,
         )
     except subprocess.TimeoutExpired as exc:
+        _dismiss_excel_unsupported_content_dialogs()
         _close_excel_best_effort()
+        _quit_excel_best_effort()
         return AppSmokeResult(
             src.name,
             SOURCE_MUTATION,
@@ -307,6 +330,7 @@ def _smoke_excel(
             f"timeout after {timeout}s: {str(exc)[:500]}",
         )
     except RuntimeError as exc:
+        _dismiss_excel_unsupported_content_dialogs()
         _dismiss_excel_repair_dialogs()
         _close_excel_best_effort()
         _quit_excel_best_effort()
@@ -456,6 +480,7 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
         last_error = dialog
         time.sleep(0.25)
     if launched.poll() is None:
+        _dismiss_excel_unsupported_content_dialogs()
         _dismiss_excel_repair_dialogs()
         _close_excel_best_effort()
         _quit_excel_best_effort()
@@ -491,6 +516,7 @@ def _open_excel_with_finder_and_close(src: Path, timeout: int) -> str:
             return name
         last_error = dialog
         time.sleep(0.5)
+    _dismiss_excel_unsupported_content_dialogs()
     _dismiss_excel_repair_dialogs()
     _close_excel_best_effort()
     _quit_excel_best_effort()
@@ -515,7 +541,15 @@ def _is_excel_recovery_prompt(dialog: str) -> bool:
 
 def _is_excel_unsupported_content_dialog(dialog: str) -> bool:
     dialog_lc = dialog.lower()
-    return any(keyword in dialog_lc for keyword in UNSUPPORTED_CONTENT_KEYWORDS)
+    if any(keyword in dialog_lc for keyword in UNSUPPORTED_CONTENT_PROMPT_KEYWORDS):
+        return True
+    has_unsupported_feature = any(
+        keyword in dialog_lc for keyword in UNSUPPORTED_CONTENT_FEATURE_KEYWORDS
+    )
+    has_read_only_action = any(
+        keyword in dialog_lc for keyword in UNSUPPORTED_CONTENT_ACTION_KEYWORDS
+    )
+    return has_unsupported_feature and has_read_only_action
 
 
 def _kill_process_group_best_effort(proc: subprocess.Popen[str]) -> None:
