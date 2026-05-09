@@ -34,6 +34,7 @@
 //! | `xl/charts/chart<N>.xml`             | `next_chart`    |
 //! | `xl/charts/style<N>.xml`             | `next_chart_style` |
 //! | `xl/charts/colors<N>.xml`            | `next_chart_color` |
+//! | `xl/ctrlProps/ctrlProp<N>.xml`       | `next_ctrl_prop` |
 //!
 //! Any path with a non-numeric or missing suffix (e.g. `xl/tables/foo.xml`)
 //! is skipped — it does not contribute to any counter and does not panic.
@@ -75,6 +76,8 @@ pub struct PartIdAllocator {
     next_timeline_cache: u32,
     // Sprint Σ G08 (RFC-068 §5) — threaded-comment counter.
     next_threaded_comments: u32,
+    // Real Excel form-control property parts.
+    next_ctrl_prop: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -103,6 +106,7 @@ impl PartIdAllocator {
             next_timeline: 1,
             next_timeline_cache: 1,
             next_threaded_comments: 1,
+            next_ctrl_prop: 1,
         }
     }
 
@@ -161,6 +165,8 @@ impl PartIdAllocator {
             self.bump(Counter::TimelineCache, n);
         } else if let Some(n) = parse_n(path, "xl/threadedComments/threadedComments", ".xml") {
             self.bump(Counter::ThreadedComments, n);
+        } else if let Some(n) = parse_n(path, "xl/ctrlProps/ctrlProp", ".xml") {
+            self.bump(Counter::CtrlProp, n);
         } else if path.starts_with("xl/media/image") {
             // Images use heterogeneous extensions (png/jpeg/gif/...) so a
             // generic strip+parse covers all of them.
@@ -191,6 +197,7 @@ impl PartIdAllocator {
             Counter::Timeline => &mut self.next_timeline,
             Counter::TimelineCache => &mut self.next_timeline_cache,
             Counter::ThreadedComments => &mut self.next_threaded_comments,
+            Counter::CtrlProp => &mut self.next_ctrl_prop,
         };
         if n + 1 > *slot {
             *slot = n + 1;
@@ -324,6 +331,13 @@ impl PartIdAllocator {
         n
     }
 
+    /// Allocate a fresh `ctrlPropN` suffix; returns `N` (>=1).
+    pub fn alloc_ctrl_prop(&mut self) -> u32 {
+        let n = self.next_ctrl_prop;
+        self.next_ctrl_prop += 1;
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
     fn peek(&self) -> [u32; 7] {
@@ -356,6 +370,7 @@ enum Counter {
     PivotTable,
     PivotCache,
     ThreadedComments,
+    CtrlProp,
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +390,7 @@ mod tests {
         assert_eq!(a.alloc_drawing(), 1);
         assert_eq!(a.alloc_sheet(), 1);
         assert_eq!(a.alloc_chart(), 1);
+        assert_eq!(a.alloc_ctrl_prop(), 1);
     }
 
     #[test]
@@ -413,6 +429,15 @@ mod tests {
         assert_eq!(a.alloc_drawing(), 1);
         assert_eq!(a.alloc_sheet(), 1);
         assert_eq!(a.alloc_chart(), 1);
+        assert_eq!(a.alloc_ctrl_prop(), 1);
+    }
+
+    #[test]
+    fn from_zip_parts_seeds_ctrl_prop_counter() {
+        let parts = ["xl/ctrlProps/ctrlProp1.xml", "xl/ctrlProps/ctrlProp4.xml"];
+        let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
+        assert_eq!(a.alloc_ctrl_prop(), 5);
+        assert_eq!(a.alloc_ctrl_prop(), 6);
     }
 
     #[test]
