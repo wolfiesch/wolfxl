@@ -1096,6 +1096,64 @@
       ]
     },
     {
+      "name": "synthgl_cds_case_study_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study --recursive --json > /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 16},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 16},
+        {"path": "bucket_fixtures.chart_or_chart_style", "length_at_least": 1},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 16},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 2},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 2},
+        {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 2},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 2},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 16}
+      ]
+    },
+    {
+      "name": "synthgl_cds_case_study_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-synthgl-cds-case-study-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study --recursive --json > /tmp/wolfxl-gap-radar-synthgl-cds-case-study-20260509.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 16},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_cds_case_study_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-quick-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-quick-20260509 --mutation no_op --mutation marker_cell --mutation add_data_validation > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-quick-20260509.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "add_data_validation"]},
+        {"path": "result_count", "equals": 48},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": false}
+      ]
+    },
+    {
+      "name": "synthgl_cds_case_study_structural_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-structural-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-structural-20260509 --mutation style_cell --mutation copy_first_sheet --mutation rename_first_sheet --mutation move_formula_range --mutation add_conditional_formatting > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-cds-case-study-structural-20260509.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/cds-case-study"},
+        {"path": "mutations", "equals": ["style_cell", "copy_first_sheet", "rename_first_sheet", "move_formula_range", "add_conditional_formatting"]},
+        {"path": "result_count", "equals": 80},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": false}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_external_link_prompt_click",
       "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",
