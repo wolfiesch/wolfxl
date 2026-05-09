@@ -101,6 +101,44 @@ def test_interactive_audit_accepts_passing_probe_report(tmp_path: Path) -> None:
     assert report["probe_kind"] == "ooxml_state_presence"
 
 
+def test_interactive_audit_accepts_expected_unsupported_content_prompt(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_powerview_data_model_workbook(fixture_dir / "powerview.xlsx")
+    _write_manifest(fixture_dir, "powerview.xlsx")
+    probe_report = tmp_path / "interactive-report.json"
+    probe_report.write_text(
+        json.dumps(
+            {
+                "probe_kind": "excel_ui_interaction",
+                "results": [
+                    {
+                        "fixture": "powerview.xlsx",
+                        "probe": "unsupported_content_prompt",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    report = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[probe_report],
+        probe_kind=interactive.UI_INTERACTION_PROBE_KIND,
+        required_probes=("unsupported_content_prompt",),
+    )
+
+    assert report["ready"] is True
+    unsupported = report["probes"]["unsupported_content_prompt"]
+    assert unsupported["status"] == "clear"
+    assert unsupported["passed_fixtures"] == ["powerview.xlsx"]
+    assert unsupported["probe_kind"] == "excel_ui_interaction"
+
+
 def test_interactive_audit_does_not_go_ready_on_incomplete_report(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
@@ -784,6 +822,39 @@ def test_ui_interaction_probe_records_macro_button_click(tmp_path: Path, monkeyp
     assert result["probe_kind"] == "excel_ui_interaction"
     assert result["status"] == "passed"
     assert result["ui_actions"] == ["clicked button: Disable Macros"]
+
+
+def test_unsupported_content_ui_probe_records_open_read_only_click(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_powerview_data_model_workbook(fixture_dir / "powerview.xlsx")
+    _write_manifest(fixture_dir, "powerview.xlsx")
+
+    def fake_open_with_ui(src: Path, probe: str, timeout: int):
+        assert src.name == "powerview.xlsx"
+        assert probe == "unsupported_content_prompt"
+        assert timeout == 90
+        return "powerview.xlsx", ["clicked button: Open as Read-Only"]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("unsupported_content_prompt",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["fixture"] == "powerview.xlsx"
+    assert result["probe"] == "unsupported_content_prompt"
+    assert result["probe_kind"] == "excel_ui_interaction"
+    assert result["status"] == "passed"
+    assert result["ui_actions"] == ["clicked button: Open as Read-Only"]
 
 
 def test_external_link_ui_probe_forces_and_restores_update_prompt(
@@ -1669,6 +1740,15 @@ def _write_external_link_workbook(path: Path) -> None:
 <externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <externalBook><sheetNames><sheetName val="Sheet1"/></sheetNames></externalBook>
 </externalLink>"""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+
+
+def _write_powerview_data_model_workbook(path: Path) -> None:
+    entries = _base_entries()
+    entries["xl/sharedStrings.xml"] = "<sst>PowerView report</sst>"
+    entries["xl/model/item.data"] = b"powerpivot-model"
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
