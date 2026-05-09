@@ -63,6 +63,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_excel_expected_unsupported",
     "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_marker_unsupported_content_prompt_evidence",
+    "powerpivot_contoso_sidecar_style_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_rename_sheet_render_equivalence",
@@ -122,8 +123,8 @@ OPEN_REQUIREMENTS = (
             "clicks plus a marker-cell mutated "
             "macro security prompt path, current-setting external-link prompt "
             "path, adjacent issue-corpus forced external-link prompt path, "
-            "and marker-cell mutated "
-            "PowerView read-only prompt path, list-box and button-control click "
+            "and marker/style-cell mutated "
+            "PowerView read-only prompt paths, list-box and button-control click "
             "persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
