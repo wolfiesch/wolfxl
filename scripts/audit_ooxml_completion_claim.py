@@ -94,6 +94,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "sec_edgar_copy_remove_sheet_render_equivalence",
     "iran_osint_recursive_add_data_validation_render_equivalence",
     "iran_osint_recursive_add_conditional_formatting_render_equivalence",
+    "iran_osint_recursive_copy_remove_sheet_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -130,8 +131,8 @@ OPEN_REQUIREMENTS = (
             "public-company "
             "workbooks; Iran OSINT side evidence separately proves "
             "add-data-validation and add-conditional-formatting render "
-            "equivalence on the full 16-workbook recursive public-data "
-            "corpus, plus expected "
+            "equivalence plus copy-remove-sheet render equivalence on the full "
+            "16-workbook recursive public-data corpus, plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
             "delete-marker-tail-row/column, move-formula-range, and first "
