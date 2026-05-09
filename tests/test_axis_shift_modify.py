@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 import openpyxl
 import pytest
@@ -76,6 +77,25 @@ def _make_hyperlink_fixture(path: Path) -> None:
 def _read_zip_text(path: Path, entry: str) -> str:
     with zipfile.ZipFile(path) as zf:
         return zf.read(entry).decode("utf-8")
+
+
+def _first_drawing_xml(path: Path) -> str:
+    with zipfile.ZipFile(path) as zf:
+        drawing_name = next(
+            name
+            for name in zf.namelist()
+            if name.startswith("xl/drawings/drawing") and name.endswith(".xml")
+        )
+        return zf.read(drawing_name).decode("utf-8")
+
+
+def _drawing_marker_values(path: Path, local_name: str) -> list[str]:
+    root = ElementTree.fromstring(_first_drawing_xml(path))
+    return [
+        str(node.text)
+        for node in root.iter()
+        if node.tag.rsplit("}", 1)[-1] == local_name and node.text is not None
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +264,51 @@ def test_hyperlink_anchor_shifts(tmp_path: Path) -> None:
     sheet_xml = _read_zip_text(dst, "xl/worksheets/sheet1.xml")
     # The hyperlink ref="B5" should have shifted to ref="B8".
     assert 'ref="B8"' in sheet_xml
+
+
+# ---------------------------------------------------------------------------
+# Tests — DrawingML anchors
+# ---------------------------------------------------------------------------
+
+
+def test_delete_rows_clamps_drawing_anchor_inside_deleted_band(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    from openpyxl.drawing.image import Image
+
+    image_path = Path(__file__).parent / "fixtures" / "images" / "tiny_red_dot.png"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.add_image(Image(str(image_path)), "E6")
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    ws2 = wb2.active
+    ws2.delete_rows(5, amount=3)
+    wb2.save(dst)
+
+    assert "4" in _drawing_marker_values(dst, "row")
+
+
+def test_delete_cols_clamps_drawing_anchor_inside_deleted_band(tmp_path: Path) -> None:
+    src = tmp_path / "src.xlsx"
+    dst = tmp_path / "dst.xlsx"
+    from openpyxl.drawing.image import Image
+
+    image_path = Path(__file__).parent / "fixtures" / "images" / "tiny_red_dot.png"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.add_image(Image(str(image_path)), "F2")
+    wb.save(src)
+
+    wb2 = wolfxl.load_workbook(src, modify=True)
+    ws2 = wb2.active
+    ws2.delete_cols(5, amount=3)
+    wb2.save(dst)
+
+    assert "4" in _drawing_marker_values(dst, "col")
 
 
 # ---------------------------------------------------------------------------
