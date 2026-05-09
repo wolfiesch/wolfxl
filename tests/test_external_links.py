@@ -485,8 +485,11 @@ def test_update_external_link_target_rewrites_link_rels(
 
     with zipfile.ZipFile(out, "r") as zf:
         rels = zf.read("xl/externalLinks/_rels/externalLink1.xml.rels").decode("utf-8")
+        sheet = zf.read("xl/worksheets/sheet1.xml").decode("utf-8")
 
     assert "renamed.xlsx" in rels
     assert "ext.xlsx" not in rels
+    assert "[renamed.xlsx]Sheet1" in sheet
+    assert "[ext.xlsx]Sheet1" not in sheet
     wb2 = wolfxl.load_workbook(out)
     assert wb2._external_links[0].target == "renamed.xlsx"

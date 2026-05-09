@@ -310,8 +310,8 @@
     },
     {
       "name": "excel_render_intentional_retarget_external_links_full_pack_report",
-      "path": "/tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
-      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation retarget_external_links > /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
+      "path": "/tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation retarget_external_links > /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509.json",
       "expect": [
         {"path": "render_engine", "equals": "excel"},
         {"path": "mutations", "equals": ["retarget_external_links"]},
@@ -349,6 +349,20 @@
         {"path": "ready", "equals": true},
         {"path": "render_engine", "equals": "excel"},
         {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_retarget_external_links_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-retarget-external-links-render-equivalence-first-last-pages-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation retarget_external_links > /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509.json && uv run --no-sync python scripts/audit_ooxml_retarget_external_links_render_equivalence.py /tmp/wolfxl-render-excel-retarget-external-links-first-last-pages-20260509/render-compare-report.json --timeout 180 --strict > /tmp/wolfxl-retarget-external-links-render-equivalence-first-last-pages-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "retarget_external_links"},
         {"path": "result_count", "equals": 22},
         {"path": "passed_count", "equals": 22},
         {"path": "inconclusive_count", "equals": 0},
@@ -890,10 +904,12 @@
         {"path": "mutations", "equals": ["retarget_external_links"]},
         {"path": "results.7.fixture", "equals": "synthetic-external-link-basic.xlsx"},
         {"path": "results.7.status", "equals": "passed_with_expected_drift"},
-        {"path": "results.7.expected_issue_count", "equals": 2},
+        {"path": "results.7.expected_issue_count", "equals": 3},
         {"path": "results.7.expected_issues.0.kind", "equals": "missing_relationship"},
         {"path": "results.7.expected_issues.1.kind", "equals": "external_links_semantic_drift"},
         {"path": "results.7.expected_issues.1.message", "contains": "wolfxl-retargeted-external-link.xlsx"},
+        {"path": "results.7.expected_issues.2.kind", "equals": "worksheet_formulas_semantic_drift"},
+        {"path": "results.7.expected_issues.2.message", "contains": "wolfxl-retargeted-external-link.xlsx"},
         {"path": "results.10.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
         {"path": "results.10.status", "equals": "passed_with_expected_drift"},
         {"path": "results.10.expected_issue_count", "equals": 2},

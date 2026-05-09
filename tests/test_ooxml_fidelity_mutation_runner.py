@@ -390,10 +390,11 @@ def test_runner_retargets_external_links_with_required_drift(tmp_path: Path) -> 
     result = report["results"][0]
     assert result["status"] == "passed_with_expected_drift"
     assert result["issue_count"] == 0
-    assert result["expected_issue_count"] == 2
+    assert result["expected_issue_count"] == 3
     assert {issue["kind"] for issue in result["expected_issues"]} == {
         "external_links_semantic_drift",
         "missing_relationship",
+        "worksheet_formulas_semantic_drift",
     }
     semantic_drift = [
         issue
@@ -459,6 +460,15 @@ def test_runner_rejects_unrelated_external_link_relationship_loss_for_retarget(
                     ),
                 },
                 {
+                    "kind": "worksheet_formulas_semantic_drift",
+                    "severity": "error",
+                    "part": "worksheet_formulas",
+                    "message": (
+                        "worksheet_formulas semantic fingerprint changed after save: "
+                        "wolfxl-retargeted-external-link.xlsx"
+                    ),
+                },
+                {
                     "kind": "missing_relationship",
                     "severity": "error",
                     "part": "xl/externalLinks/_rels/externalLink1.xml.rels",
@@ -496,6 +506,7 @@ def test_runner_rejects_unrelated_external_link_relationship_loss_for_retarget(
     assert result["status"] == "failed"
     assert [issue["kind"] for issue in result["expected_issues"]] == [
         "external_links_semantic_drift",
+        "worksheet_formulas_semantic_drift",
         "missing_relationship",
     ]
     assert [issue["message"] for issue in result["issues"]] == [

@@ -46,6 +46,19 @@ _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _EXTERNAL_LINK_CT = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"
 )
+_FORMULA_TAG_RE = re.compile(
+    rb"(<(?:[A-Za-z_][\w.-]*:)?(?:f|formula|formula1|formula2|definedName)\b[^>]*>)"
+    rb"(.*?)"
+    rb"(</(?:[A-Za-z_][\w.-]*:)?(?:f|formula|formula1|formula2|definedName)>)",
+    re.DOTALL,
+)
+_FORMULA_PART_PREFIXES = (
+    "xl/worksheets/",
+    "xl/charts/",
+    "xl/chartsheets/",
+    "xl/tables/",
+    "xl/pivotCache/",
+)
 
 
 @dataclass
@@ -77,6 +90,7 @@ class ExternalLink:
     _collection: "ExternalLinkCollection | None" = field(
         default=None, repr=False, compare=False
     )
+    _original_target: str = field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.file_link is None:
@@ -85,6 +99,8 @@ class ExternalLink:
             self.target = self.file_link.target
         if self.file_link.target != self.target:
             self.file_link.target = self.target
+        if not self._original_target:
+            self._original_target = self.target
 
     def update_target(self, target: str) -> None:
         self.target = target
@@ -179,6 +195,8 @@ class ExternalLinkCollection(list[ExternalLink]):
 
     def mark_clean(self) -> None:
         self._snapshot = self._signature()
+        for link in self:
+            link._original_target = link.target
         self._dirty = False
 
     def _mark_dirty(self) -> None:
@@ -248,8 +266,13 @@ def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
             raise ValueError(f"workbook missing required OOXML part: {exc.args[0]}") from exc
 
     link_list = list(links)
+    formula_replacements = _external_link_formula_replacements(link_list)
     rels_xml, rel_ids = _rewrite_workbook_rels(workbook_rels_xml, link_list)
     workbook_xml_bytes = _rewrite_workbook_external_references(workbook_xml, rel_ids)
+    workbook_xml_bytes = _rewrite_external_formula_targets_xml(
+        workbook_xml_bytes,
+        formula_replacements,
+    )
     content_types_bytes = _rewrite_content_types(content_types_xml, len(link_list))
 
     generated: dict[str, bytes] = {
@@ -274,7 +297,12 @@ def apply_authoring_to_xlsx(path: str, links: ExternalLinkCollection) -> None:
                 if name.startswith("xl/externalLinks/") or name in generated:
                     continue
                 with src.open(info, "r") as handle:
-                    dst.writestr(info, handle.read())
+                    data = _rewrite_part_external_formula_targets(
+                        name,
+                        handle.read(),
+                        formula_replacements,
+                    )
+                    dst.writestr(info, data)
             for name in sorted(generated):
                 dst.writestr(name, generated[name])
         os.replace(tmp_name, path)
@@ -518,6 +546,68 @@ def _render_external_link_rels_xml(link: ExternalLink) -> bytes:
         f'Target="{_xml_attr_escape(target)}" TargetMode="{_xml_attr_escape(target_mode)}"/>'
         "</Relationships>"
     ).encode("utf-8")
+
+
+def _external_link_formula_replacements(
+    links: list[ExternalLink],
+) -> list[tuple[bytes, bytes]]:
+    replacements: list[tuple[bytes, bytes]] = []
+    seen: set[tuple[str, str]] = set()
+    for link in links:
+        old_target = link._original_target
+        new_target = link.target
+        if not old_target or old_target == new_target:
+            continue
+        old_book = _formula_workbook_name(old_target)
+        new_book = _formula_workbook_name(new_target)
+        if not old_book or not new_book or old_book == new_book:
+            continue
+        pair = (old_book, new_book)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        replacements.append(
+            (
+                f"[{_xml_text_escape(old_book)}]".encode("utf-8"),
+                f"[{_xml_text_escape(new_book)}]".encode("utf-8"),
+            )
+        )
+    return replacements
+
+
+def _formula_workbook_name(target: str) -> str:
+    target = target.replace("\\", "/").rstrip("/")
+    if not target:
+        return ""
+    return target.rsplit("/", 1)[-1]
+
+
+def _rewrite_part_external_formula_targets(
+    name: str,
+    data: bytes,
+    replacements: list[tuple[bytes, bytes]],
+) -> bytes:
+    if not replacements or not name.endswith(".xml"):
+        return data
+    if not name.startswith(_FORMULA_PART_PREFIXES):
+        return data
+    return _rewrite_external_formula_targets_xml(data, replacements)
+
+
+def _rewrite_external_formula_targets_xml(
+    xml: bytes,
+    replacements: list[tuple[bytes, bytes]],
+) -> bytes:
+    if not replacements:
+        return xml
+
+    def rewrite_match(match: re.Match[bytes]) -> bytes:
+        text = match.group(2)
+        for old, new in replacements:
+            text = text.replace(old, new)
+        return match.group(1) + text + match.group(3)
+
+    return _FORMULA_TAG_RE.sub(rewrite_match, xml)
 
 
 def _render_cached_data(cached_data: dict[str, list[dict[str, str]]]) -> str:
