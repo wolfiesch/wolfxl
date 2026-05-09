@@ -54,13 +54,9 @@ pub fn shift_drawing_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
                         Err(_) => String::from_utf8_lossy(t.as_ref()).into_owned(),
                     };
                     if let Ok(n) = s.trim().parse::<i64>() {
-                        if let Some(new_n) = shift_zero_based_point(n, plan) {
-                            let text = new_n.to_string();
-                            let new_t = BytesText::new(&text);
-                            let _ = writer.write_event(Event::Text(new_t));
-                        } else {
-                            let _ = writer.write_event(Event::Text(t.to_owned()));
-                        }
+                        let text = shift_zero_based_point(n, plan).to_string();
+                        let new_t = BytesText::new(&text);
+                        let _ = writer.write_event(Event::Text(new_t));
                     } else {
                         let _ = writer.write_event(Event::Text(t.to_owned()));
                     }
@@ -80,22 +76,22 @@ pub fn shift_drawing_xml(xml: &[u8], plan: &ShiftPlan) -> Vec<u8> {
     writer.into_inner().into_inner()
 }
 
-fn shift_zero_based_point(zero_based: i64, plan: &ShiftPlan) -> Option<i64> {
+fn shift_zero_based_point(zero_based: i64, plan: &ShiftPlan) -> i64 {
     if plan.is_insert() {
         if zero_based + 1 >= plan.idx as i64 {
-            Some(zero_based + plan.n as i64)
+            zero_based + plan.n as i64
         } else {
-            Some(zero_based)
+            zero_based
         }
     } else {
         let delete_start = plan.idx as i64 - 1;
         let delete_end = delete_start + plan.abs_n() as i64;
         if zero_based >= delete_start && zero_based < delete_end {
-            None
+            delete_start
         } else if zero_based >= delete_end {
-            Some(zero_based + plan.n as i64)
+            zero_based + plan.n as i64
         } else {
-            Some(zero_based)
+            zero_based
         }
     }
 }
@@ -121,5 +117,23 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("<d:col>0</d:col>"), "{s}");
         assert!(s.contains("<d:col>5</d:col>"), "{s}");
+    }
+
+    #[test]
+    fn deleted_row_anchor_markers_snap_to_delete_boundary() {
+        let xml = br#"<xdr:wsDr><xdr:twoCellAnchor><xdr:from><xdr:row>5</xdr:row></xdr:from><xdr:to><xdr:row>8</xdr:row></xdr:to></xdr:twoCellAnchor></xdr:wsDr>"#;
+        let out = shift_drawing_xml(xml, &ShiftPlan::delete(Axis::Row, 5, 3));
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("<xdr:row>4</xdr:row>"), "{s}");
+        assert!(s.contains("<xdr:row>5</xdr:row>"), "{s}");
+    }
+
+    #[test]
+    fn deleted_col_anchor_markers_snap_to_delete_boundary() {
+        let xml = br#"<xdr:wsDr><xdr:twoCellAnchor><xdr:from><xdr:col>5</xdr:col></xdr:from><xdr:to><xdr:col>8</xdr:col></xdr:to></xdr:twoCellAnchor></xdr:wsDr>"#;
+        let out = shift_drawing_xml(xml, &ShiftPlan::delete(Axis::Col, 5, 3));
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("<xdr:col>4</xdr:col>"), "{s}");
+        assert!(s.contains("<xdr:col>5</xdr:col>"), "{s}");
     }
 }
