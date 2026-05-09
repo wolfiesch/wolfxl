@@ -90,6 +90,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ilpa_reporting_template_retarget_render_equivalence",
     "ilpa_reporting_template_add_data_validation_render_equivalence",
     "ilpa_reporting_template_add_conditional_formatting_render_equivalence",
+    "ilpa_reporting_template_add_remove_chart_render_equivalence",
     "wbd_wdesk_add_data_validation_render_equivalence",
     "wbd_wdesk_add_conditional_formatting_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
@@ -126,7 +127,8 @@ OPEN_REQUIREMENTS = (
             "sidecar evidence separately proves copy-remove-sheet and rename-sheet "
             "equivalence plus delete-first-row/column visual deltas on a high-risk "
             "workbook; ILPA side evidence separately proves external-link "
-            "retarget, add-data-validation, and add-conditional-formatting render "
+            "retarget, add-data-validation, add-conditional-formatting, and "
+            "add-remove-chart render "
             "equivalence on public "
             "finance templates, and WBD wDesk "
             "side evidence separately proves add-data-validation, "
