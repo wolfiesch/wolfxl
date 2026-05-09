@@ -92,6 +92,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
     "sec_edgar_add_data_validation_render_equivalence",
     "sec_edgar_copy_remove_sheet_render_equivalence",
+    "iran_osint_renderable_add_data_validation_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -126,7 +127,9 @@ OPEN_REQUIREMENTS = (
             "public-company workbook; SEC/EDGAR side evidence separately proves "
             "add-data-validation and copy-remove-sheet render equivalence on six "
             "public-company "
-            "workbooks, plus expected "
+            "workbooks; Iran OSINT side evidence separately proves "
+            "add-data-validation render equivalence on a six-workbook "
+            "Excel-renderable public-data subset, plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
             "delete-marker-tail-row/column, move-formula-range, and first "
