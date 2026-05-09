@@ -88,6 +88,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ilpa_reporting_template_retarget_mutation_report",
     "ilpa_reporting_template_retarget_excel_app_open",
     "ilpa_reporting_template_retarget_render_equivalence",
+    "ilpa_reporting_template_add_conditional_formatting_render_equivalence",
     "wbd_wdesk_add_data_validation_render_equivalence",
     "wbd_wdesk_add_conditional_formatting_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
@@ -123,9 +124,9 @@ OPEN_REQUIREMENTS = (
             "add-remove-chart and copy-remove-sheet edits; shared pivot-slicer "
             "sidecar evidence separately proves copy-remove-sheet and rename-sheet "
             "equivalence plus delete-first-row/column visual deltas on a high-risk "
-            "workbook; ILPA side evidence separately "
-            "proves external-link "
-            "retarget render equivalence on public finance templates, and WBD wDesk "
+            "workbook; ILPA side evidence separately proves external-link "
+            "retarget and add-conditional-formatting render equivalence on public "
+            "finance templates, and WBD wDesk "
             "side evidence separately proves add-data-validation, "
             "add-conditional-formatting, and copy-remove-sheet render equivalence "
             "on an external-tool-authored "
