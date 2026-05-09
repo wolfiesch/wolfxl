@@ -257,6 +257,33 @@
       ]
     },
     {
+      "name": "excel_render_intentional_style_cell_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-style-cell-full-pack-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-style-cell-full-pack-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation style_cell > /tmp/wolfxl-render-excel-intentional-style-cell-full-pack-20260509.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["style_cell"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_style_cell_delta_full_pack_report",
+      "path": "/tmp/wolfxl-style-cell-render-delta-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-intentional-style-cell-full-pack-20260509.json --mutation style_cell --min-changed-count 19 --max-unchanged-count 3 --timeout 180 --strict > /tmp/wolfxl-style-cell-render-delta-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "style_cell"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 22},
+        {"path": "changed_count", "equals": 19},
+        {"path": "unchanged_count", "equals": 3},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_copy_sheet_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation copy_first_sheet > /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json",

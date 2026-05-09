@@ -27,6 +27,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_evidence_gate",
     "excel_render_full_pack_with_rename_sheet_intentional_coverage_gate",
     "excel_render_marker_cell_delta_full_pack_report",
+    "excel_render_style_cell_delta_full_pack_report",
     "excel_render_copy_sheet_equivalence_full_pack_report",
     "excel_render_rename_sheet_equivalence_full_pack_report",
     "excel_render_retarget_external_links_equivalence_full_pack_report",
@@ -73,9 +74,9 @@ OPEN_REQUIREMENTS = (
             "copy-sheet, rename-sheet, external-link retargeting, and the visually "
             "neutral add-data-validation, add-conditional-formatting, and "
             "add-remove-chart edits, plus expected visual-delta evidence for "
-            "marker-cell, move-formula-range, and first row/column deletion; they "
-            "still do not prove semantic visual equivalence for every high-risk "
-            "feature edit."
+            "marker-cell, style-cell, move-formula-range, and first row/column "
+            "deletion; they still do not prove semantic visual equivalence for "
+            "every high-risk feature edit."
         ),
     },
     {

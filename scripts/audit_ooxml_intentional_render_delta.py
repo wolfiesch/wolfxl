@@ -28,9 +28,10 @@ MUTATION_LABELS = {
     "delete_first_row": "delete-first-row",
     "marker_cell": "marker-cell",
     "move_formula_range": "move-formula-range",
+    "style_cell": "style-cell",
 }
 EXPECTED_PAGE_COUNT_DELTA_MUTATIONS = frozenset(
-    {"delete_first_col", "delete_first_row", "marker_cell"}
+    {"delete_first_col", "delete_first_row", "marker_cell", "style_cell"}
 )
 
 
