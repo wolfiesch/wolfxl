@@ -24,6 +24,7 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_rename_sheet_render_equivalence as base  # noqa: E402
 
 MUTATION_LABELS = {
+    "delete_marker_tail_row": "delete-marker-tail-row",
     "delete_first_col": "delete-first-col",
     "delete_first_row": "delete-first-row",
     "insert_tail_col": "insert-tail-col",

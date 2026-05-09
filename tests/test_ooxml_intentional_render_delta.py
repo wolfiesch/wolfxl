@@ -90,6 +90,7 @@ def _write_fake_render_result(
 @pytest.mark.parametrize(
     ("mutation", "label"),
     [
+        ("delete_marker_tail_row", "delete-marker-tail-row"),
         ("move_formula_range", "move-formula-range"),
         ("delete_first_row", "delete-first-row"),
         ("delete_first_col", "delete-first-col"),
