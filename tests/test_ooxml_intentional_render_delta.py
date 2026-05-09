@@ -191,6 +191,7 @@ def test_intentional_render_delta_can_allow_unchanged_sampled_pages(
     [
         ("delete_first_row", "delete-first-row"),
         ("marker_cell", "marker-cell"),
+        ("style_cell", "style-cell"),
     ],
 )
 def test_intentional_render_delta_accepts_page_count_delta(
