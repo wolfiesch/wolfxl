@@ -57,6 +57,9 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "slicer_shared_two_pivots_sidecar_interactive_evidence",
     "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
     "external_link_retarget_excel_app_open",
+    "ilpa_reporting_template_retarget_mutation_report",
+    "ilpa_reporting_template_retarget_excel_app_open",
+    "ilpa_reporting_template_retarget_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -82,7 +85,8 @@ OPEN_REQUIREMENTS = (
             "neutral add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet edits; shared pivot-slicer "
             "sidecar evidence separately proves copy-remove-sheet equivalence on a "
-            "high-risk workbook, plus expected "
+            "high-risk workbook; ILPA side evidence separately proves external-link "
+            "retarget render equivalence on public finance templates, plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, "
             "delete-marker-tail-row/column, move-formula-range, and first "
