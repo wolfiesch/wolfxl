@@ -53,6 +53,11 @@ INTERACTIVE_PROBES = {
         "feature_keys": ("external_link",),
         "probe_kind": PROBE_KIND,
     },
+    "unsupported_content_prompt": {
+        "label": "Expected unsupported-content prompt can be opened read-only in Excel",
+        "feature_keys": ("data_model",),
+        "probe_kind": PROBE_KIND,
+    },
     "macro_project_presence": {
         "label": "Macro project binary remains present after Excel open/save",
         "feature_keys": ("vba",),

@@ -51,6 +51,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "umya_test_files_quick_plus_structural_mutation_coverage",
     "powerpivot_contoso_sidecar_coverage",
     "powerpivot_contoso_sidecar_excel_expected_unsupported",
+    "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_interactive_evidence",

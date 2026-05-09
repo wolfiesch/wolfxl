@@ -42,6 +42,7 @@ SUPPORTED_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
     "external_link_update_prompt",
+    "unsupported_content_prompt",
     "pivot_refresh_state",
     "slicer_selection_state",
     "timeline_selection_state",
@@ -50,6 +51,7 @@ PROBE_FEATURE_KEYS = {
     "macro_project_presence": "vba",
     "embedded_control_openability": "embedded_object",
     "external_link_update_prompt": "external_link",
+    "unsupported_content_prompt": "data_model",
     "pivot_refresh_state": "pivot",
     "slicer_selection_state": "slicer",
     "timeline_selection_state": "timeline",
@@ -58,6 +60,7 @@ SUPPORTED_UI_INTERACTION_PROBES = (
     "macro_project_presence",
     "embedded_control_openability",
     "external_link_update_prompt",
+    "unsupported_content_prompt",
     "pivot_refresh_state",
     "slicer_selection_state",
     "timeline_selection_state",
@@ -66,6 +69,7 @@ REQUIRED_UI_ACTIONS = {
     "macro_project_presence": "clicked button: Disable Macros",
     "embedded_control_openability": "clicked Excel embedded/control object",
     "external_link_update_prompt": "clicked button: Don't Update",
+    "unsupported_content_prompt": "clicked button: Open as Read-Only",
     "pivot_refresh_state": "executed Excel command: refresh all",
     "slicer_selection_state": "clicked Excel slicer item",
     "timeline_selection_state": "clicked Excel timeline month",
@@ -584,6 +588,14 @@ def _open_excel_with_ui_interaction_impl(
         ui_actions.extend(_perform_probe_ui_actions(probe))
         dialog = run_ooxml_app_smoke._excel_dialog_text()
         if run_ooxml_app_smoke._is_excel_unsupported_content_dialog(dialog):
+            if probe == "unsupported_content_prompt":
+                ui_actions.extend(_perform_probe_ui_actions(probe))
+                if REQUIRED_UI_ACTIONS[probe] in ui_actions:
+                    time.sleep(0.25)
+                    continue
+                last_error = dialog
+                time.sleep(0.25)
+                continue
             run_ooxml_app_smoke._dismiss_excel_unsupported_content_dialogs()
             run_ooxml_app_smoke._close_excel_best_effort()
             run_ooxml_app_smoke._quit_excel_best_effort()
@@ -614,6 +626,14 @@ def _open_excel_with_ui_interaction_impl(
         ui_actions.extend(_perform_probe_ui_actions(probe))
         dialog = run_ooxml_app_smoke._excel_dialog_text()
         if run_ooxml_app_smoke._is_excel_unsupported_content_dialog(dialog):
+            if probe == "unsupported_content_prompt":
+                ui_actions.extend(_perform_probe_ui_actions(probe))
+                if REQUIRED_UI_ACTIONS[probe] in ui_actions:
+                    time.sleep(0.25)
+                    continue
+                last_error = dialog
+                time.sleep(0.25)
+                continue
             run_ooxml_app_smoke._dismiss_excel_unsupported_content_dialogs()
             run_ooxml_app_smoke._close_excel_best_effort()
             run_ooxml_app_smoke._quit_excel_best_effort()
@@ -628,6 +648,8 @@ def _open_excel_with_ui_interaction_impl(
             if probe == "embedded_control_openability":
                 ui_actions.extend(_click_embedded_control(src))
                 ui_actions.extend(_save_active_workbook())
+            if probe == "unsupported_content_prompt":
+                ui_actions.extend(_perform_probe_ui_actions(probe))
             if probe == "pivot_refresh_state":
                 ui_actions.extend(_refresh_all_active_workbook())
             if probe in {"slicer_selection_state", "timeline_selection_state"}:
@@ -680,26 +702,43 @@ def _perform_probe_ui_actions(probe: str) -> list[str]:
         return _click_excel_button("Disable Macros")
     if probe == "external_link_update_prompt":
         return _click_excel_button("Don't Update")
+    if probe == "unsupported_content_prompt":
+        return _click_excel_button("Open as Read-Only", match_contains="Open as Read")
     return []
 
 
-def _click_excel_button(button: str) -> list[str]:
+def _click_excel_button(button: str, match_contains: str | None = None) -> list[str]:
+    contains_check = ""
+    if match_contains is not None:
+        contains_check = f'''
+        repeat with candidateButton in buttons of w
+          set candidateName to name of candidateButton as text
+          if candidateName contains "{_escape_applescript_text(match_contains)}" then
+            click candidateButton
+            return "clicked button: {button}"
+          end if
+        end repeat
+'''
     script = f'''
 tell application "System Events"
   if not (exists process "Microsoft Excel") then return ""
   tell process "Microsoft Excel"
+    set frontmost to true
     try
-      if exists button "{button}" of window 1 then
-        click button "{button}" of window 1
-        return "clicked button: {button}"
-      end if
+      repeat with w in windows
+        if exists button "{button}" of w then
+          click button "{button}" of w
+          return "clicked button: {button}"
+        end if
+{contains_check}
+      end repeat
     end try
   end tell
 end tell
 return ""
 '''
     try:
-        proc = run_ooxml_app_smoke._run_osascript(script, timeout=1)
+        proc = run_ooxml_app_smoke._run_osascript(script, timeout=3)
     except subprocess.TimeoutExpired:
         return []
     action = proc.stdout.strip()
@@ -1248,6 +1287,8 @@ def _probe_part_present(path: Path, probe: str) -> bool:
         )
     if probe == "external_link_update_prompt":
         return any(name.startswith("xl/externalLinks/") for name in names)
+    if probe == "unsupported_content_prompt":
+        return run_ooxml_app_smoke._contains_powerview_content(path)
     if probe == "pivot_refresh_state":
         return any(
             name.startswith(("xl/pivotCache/", "xl/pivotTables/", "pivotCache/")) for name in names
@@ -1266,6 +1307,8 @@ def _probe_part_label(probe: str) -> str:
         return "embedded/control OOXML parts"
     if probe == "external_link_update_prompt":
         return "external-link OOXML parts"
+    if probe == "unsupported_content_prompt":
+        return "PowerView unsupported-content marker"
     if probe == "pivot_refresh_state":
         return "pivot cache/table OOXML parts"
     if probe == "slicer_selection_state":
