@@ -479,6 +479,15 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             run_ooxml_app_smoke._close_excel_best_effort()
             if proc.returncode != 0 and attempt == 0:
                 continue
+        elif (
+            proc.returncode != 0
+            and attempt == 0
+            and _is_excel_transient_automation_error(proc)
+        ):
+            run_ooxml_app_smoke._dismiss_excel_safe_dialogs()
+            run_ooxml_app_smoke._close_excel_best_effort()
+            _restore_excel_automation_security_best_effort()
+            continue
         break
     assert proc is not None
     if run_ooxml_app_smoke._is_excel_repair_dialog(dialog):
@@ -503,6 +512,19 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
         )
     shutil.copy2(staged_pdf, pdf)
     return pdf
+
+
+def _is_excel_transient_automation_error(
+    proc: subprocess.CompletedProcess[str],
+) -> bool:
+    output = f"{proc.stdout}\n{proc.stderr}"
+    return (
+        "(-600)" in output
+        or "(-609)" in output
+        or "Application isn't running" in output
+        or "Application isn\u2019t running" in output
+        or "Connection is invalid" in output
+    )
 
 
 def _run_excel_script_with_dialog_handling(
