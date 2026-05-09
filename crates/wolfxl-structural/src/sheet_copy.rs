@@ -213,6 +213,7 @@ const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_CHART_STYLE: &str = "application/vnd.ms-office.chartstyle+xml";
 const CT_CHART_COLOR_STYLE: &str = "application/vnd.ms-office.chartcolorstyle+xml";
+const CT_CTRL_PROP: &str = "application/vnd.ms-excel.controlproperties+xml";
 const CT_TIMELINE: &str = "application/vnd.ms-excel.timeline+xml";
 const CT_TIMELINE_CACHE: &str = "application/vnd.ms-excel.timelineCache+xml";
 const RT_TIMELINE: &str = "http://schemas.microsoft.com/office/2011/relationships/timeline";
@@ -295,6 +296,15 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     let mut taken_timeline_names = timeline_names_from_parts(zip_parts);
     let mut timeline_cache_name_remap: HashMap<String, String> = HashMap::new();
     let mut timeline_name_remap: HashMap<String, String> = HashMap::new();
+    inputs
+        .allocator
+        .observe_vml_shape_id_max(max_shape_id_from_parts(zip_parts));
+    let mut control_shape_id_remap: HashMap<String, String> = HashMap::new();
+    for old_id in control_shape_ids_from_sheet(src_sheet_xml) {
+        control_shape_id_remap
+            .entry(old_id)
+            .or_insert_with(|| inputs.allocator.alloc_vml_shape_id().to_string());
+    }
 
     // For tracking the "set already used in this session" to dedup tables
     // when one copy clones two tables with the same base name.
@@ -404,6 +414,37 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
                         bytes: src_bytes,
                         new_part_path,
                         content_type: None,
+                        new_target,
+                    },
+                    &mut outputs,
+                );
+            }
+            // ------ Form-control property parts ------
+            //
+            // A sheet control's DrawingML/VML shape is sheet-local, and the
+            // matching ctrlProp part must be sheet-local too. Sharing the
+            // source `ctrlPropN.xml` across the source and cloned sheet opens
+            // in Excel, but real Excel renders some copied controls with
+            // different geometry.
+            t if t == rt::CTRL_PROP => {
+                let resolved =
+                    resolve_relative(parent_dir(&inputs.src_sheet_path), &source_rel.target);
+                let new_n = inputs.allocator.alloc_ctrl_prop();
+                let new_part_path = format!("xl/ctrlProps/ctrlProp{new_n}.xml");
+                let src_bytes = zip_parts.get(&resolved).cloned().unwrap_or_default();
+                let new_target = format!("../ctrlProps/ctrlProp{new_n}.xml");
+                let mut outputs = SheetRelCloneOutputs {
+                    dest_rels: &mut dest_rels,
+                    rid_remap: &mut rid_remap,
+                    new_ancillary_parts: &mut new_ancillary_parts,
+                    content_type_overrides_to_add: &mut content_type_overrides_to_add,
+                };
+                add_internal_part_clone(
+                    source_rel,
+                    InternalPartClone {
+                        bytes: src_bytes,
+                        new_part_path,
+                        content_type: Some(CT_CTRL_PROP),
                         new_target,
                     },
                     &mut outputs,
@@ -761,6 +802,7 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
 
     // ---- Apply the rId remap to the cloned sheet XML in one pass ----------
     let new_sheet_xml = rewrite_rids(src_sheet_xml, &rid_remap)?;
+    let new_sheet_xml = rewrite_control_shape_ids(&new_sheet_xml, &control_shape_id_remap);
 
     // ---- RFC-035 + RFC-057: translate any explicit-sheet refs inside
     // the cloned sheet's <f> formula text AND the <f t="array" ref="..."/>
@@ -790,6 +832,20 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
         for (path, bytes) in &mut new_ancillary_parts {
             if path.starts_with("xl/drawings/drawing") && path.ends_with(".xml") {
                 *bytes = rewrite_drawing_object_names(bytes, &timeline_name_remap);
+            }
+        }
+    }
+    if !control_shape_id_remap.is_empty() {
+        for (path, bytes) in &mut new_ancillary_parts {
+            if path.starts_with("xl/drawings/drawing") && path.ends_with(".xml") {
+                *bytes = rewrite_control_shape_ids(bytes, &control_shape_id_remap);
+            } else if path.starts_with("xl/drawings/vmlDrawing") && path.ends_with(".vml") {
+                let control_ids = vml_control_shape_ids(bytes, &control_shape_id_remap);
+                if !control_ids.is_empty() {
+                    *bytes =
+                        rewrite_vml_control_shape_ids(bytes, &control_shape_id_remap, &control_ids);
+                    *bytes = rewrite_vml_control_idmap_data(bytes, &control_shape_id_remap);
+                }
             }
         }
     }
@@ -1662,6 +1718,251 @@ fn rewrite_drawing_object_names(xml: &[u8], name_remap: &HashMap<String, String>
     rewrite_attributes_by_local_name(xml, &attr_maps)
 }
 
+fn rewrite_control_shape_ids(xml: &[u8], id_remap: &HashMap<String, String>) -> Vec<u8> {
+    if id_remap.is_empty() {
+        return xml.to_vec();
+    }
+    let mut shape_ref_remap = HashMap::new();
+    for (old_id, new_id) in id_remap {
+        shape_ref_remap.insert(old_id.clone(), new_id.clone());
+        shape_ref_remap.insert(format!("_x0000_s{old_id}"), format!("_x0000_s{new_id}"));
+    }
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert("shapeId".to_string(), id_remap.clone());
+    attr_maps.insert("id".to_string(), shape_ref_remap.clone());
+    attr_maps.insert("spid".to_string(), shape_ref_remap);
+    rewrite_attributes_by_local_name(xml, &attr_maps)
+}
+
+fn rewrite_vml_control_shape_ids(
+    xml: &[u8],
+    id_remap: &HashMap<String, String>,
+    control_ids: &HashSet<String>,
+) -> Vec<u8> {
+    if control_ids.is_empty() {
+        return xml.to_vec();
+    }
+    let vml_id_remap: HashMap<String, String> = id_remap
+        .iter()
+        .map(|(old_id, new_id)| (format!("_x0000_s{old_id}"), format!("_x0000_s{new_id}")))
+        .filter(|(old_id, _)| control_ids.contains(old_id))
+        .collect();
+    if vml_id_remap.is_empty() {
+        return xml.to_vec();
+    }
+    let mut attr_maps = HashMap::new();
+    attr_maps.insert("id".to_string(), vml_id_remap);
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"shape" => {
+                let Ok(new_e) = rewrite_element_attrs_by_local_name(&e, &attr_maps) else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Start(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"shape" => {
+                let Ok(new_e) = rewrite_element_attrs_by_local_name(&e, &attr_maps) else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Empty(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(other) => {
+                if writer.write_event(other).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Err(_) => return xml.to_vec(),
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+fn vml_control_shape_ids(xml: &[u8], id_remap: &HashMap<String, String>) -> HashSet<String> {
+    let candidate_ids: HashSet<String> = id_remap
+        .keys()
+        .map(|old_id| format!("_x0000_s{old_id}"))
+        .collect();
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut shape_stack: Vec<Option<String>> = Vec::new();
+    let mut out = HashSet::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"shape" => {
+                let candidate = attr_value(&e, b"id").filter(|id| candidate_ids.contains(id));
+                shape_stack.push(candidate);
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"ClientData" => {
+                if let Some(Some(shape_id)) = shape_stack.last() {
+                    if is_vml_control_client_data(&e) {
+                        out.insert(shape_id.clone());
+                    }
+                }
+            }
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"ClientData" => {
+                if let Some(Some(shape_id)) = shape_stack.last() {
+                    if is_vml_control_client_data(&e) {
+                        out.insert(shape_id.clone());
+                    }
+                }
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == b"shape" => {
+                shape_stack.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn is_vml_control_client_data(e: &BytesStart<'_>) -> bool {
+    attr_value(e, b"ObjectType")
+        .map(|object_type| object_type != "Note")
+        .unwrap_or(false)
+}
+
+fn rewrite_vml_control_idmap_data(xml: &[u8], id_remap: &HashMap<String, String>) -> Vec<u8> {
+    let Some(idmap_data) = id_remap
+        .values()
+        .filter_map(|value| value.parse::<u32>().ok())
+        .min()
+        .map(vml_shape_id_block_data)
+    else {
+        return xml.to_vec();
+    };
+    let idmap_data = idmap_data.to_string();
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == b"idmap" => {
+                let Ok(new_e) = rewrite_element_attr_value_by_local_name(&e, "data", &idmap_data)
+                else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Start(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Empty(e)) if e.local_name().as_ref() == b"idmap" => {
+                let Ok(new_e) = rewrite_element_attr_value_by_local_name(&e, "data", &idmap_data)
+                else {
+                    return xml.to_vec();
+                };
+                if writer.write_event(Event::Empty(new_e)).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(other) => {
+                if writer.write_event(other).is_err() {
+                    return xml.to_vec();
+                }
+            }
+            Err(_) => return xml.to_vec(),
+        }
+        buf.clear();
+    }
+    writer.into_inner()
+}
+
+fn control_shape_ids_from_sheet(sheet_xml: &[u8]) -> Vec<String> {
+    let mut reader = XmlReader::from_reader(sheet_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.local_name().as_ref() == b"control" => {
+                if let Some(value) = attr_value(&e, b"shapeId") {
+                    if value.chars().all(|c| c.is_ascii_digit()) {
+                        out.push(value);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn max_shape_id_from_parts(zip_parts: &HashMap<String, Vec<u8>>) -> u32 {
+    zip_parts
+        .values()
+        .flat_map(|bytes| shape_ids_from_xml(bytes))
+        .max()
+        .unwrap_or(0)
+}
+
+fn vml_shape_id_block_data(shape_id: u32) -> u32 {
+    shape_id.saturating_sub(1) / 1024
+}
+
+fn shape_ids_from_xml(xml: &[u8]) -> Vec<u32> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                for attr in e.attributes().with_checks(false).flatten() {
+                    let key = attr.key.as_ref().to_vec();
+                    let local_key = key.rsplit(|b| *b == b':').next().unwrap_or(key.as_slice());
+                    let value = attr
+                        .unescape_value()
+                        .map(|v| v.into_owned())
+                        .unwrap_or_else(|_| {
+                            String::from_utf8_lossy(attr.value.as_ref()).into_owned()
+                        });
+                    match local_key {
+                        b"shapeId" => {
+                            if let Ok(id) = value.parse::<u32>() {
+                                out.push(id);
+                            }
+                        }
+                        b"id" | b"spid" => {
+                            if let Some(id) = value
+                                .strip_prefix("_x0000_s")
+                                .and_then(|suffix| suffix.parse::<u32>().ok())
+                            {
+                                out.push(id);
+                            } else if let Ok(id) = value.parse::<u32>() {
+                                out.push(id);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 fn rewrite_table_formula_refs(xml: &[u8], table_name_remap: &HashMap<String, String>) -> Vec<u8> {
     if table_name_remap.is_empty() {
         return xml.to_vec();
@@ -1757,6 +2058,32 @@ fn rewrite_element_attrs_by_local_name(
             .cloned()
             .unwrap_or(value);
         push_attr_escaped(&mut new_e, &key, &new_value);
+    }
+    Ok(new_e)
+}
+
+fn rewrite_element_attr_value_by_local_name(
+    e: &BytesStart<'_>,
+    attr_name: &str,
+    attr_value: &str,
+) -> Result<BytesStart<'static>, SheetCopyError> {
+    let mut new_e = BytesStart::new(
+        std::str::from_utf8(e.name().as_ref())
+            .map_err(|er| SheetCopyError::Xml(format!("element name utf8: {er}")))?
+            .to_owned(),
+    );
+    for a in e.attributes().with_checks(false).flatten() {
+        let key = a.key.as_ref().to_vec();
+        let local_key = key.rsplit(|b| *b == b':').next().unwrap_or(key.as_slice());
+        if local_key == attr_name.as_bytes() {
+            push_attr_escaped(&mut new_e, &key, attr_value);
+        } else {
+            let value = a
+                .unescape_value()
+                .map(|v| v.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(a.value.as_ref()).into_owned());
+            push_attr_escaped(&mut new_e, &key, &value);
+        }
     }
     Ok(new_e)
 }
@@ -2722,6 +3049,158 @@ mod tests {
             .collect();
         assert!(paths.contains(&"xl/comments2.xml"), "{paths:?}");
         assert!(paths.contains(&"xl/drawings/vmlDrawing2.vml"), "{paths:?}");
+    }
+
+    #[test]
+    fn clone_with_form_control_properties_allocates_fresh_ctrl_prop() {
+        let mut alloc = PartIdAllocator::new();
+        let mut zip_parts: HashMap<String, Vec<u8>> = HashMap::new();
+        zip_parts.insert(
+            "xl/worksheets/sheet1.xml".into(),
+            br#"<?xml version="1.0"?><worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><controls><control shapeId="1025" r:id="rId1"/></controls><legacyDrawing r:id="rId2"/><drawing r:id="rId3"/></worksheet>"#.to_vec(),
+        );
+        zip_parts.insert(
+            "xl/ctrlProps/ctrlProp1.xml".into(),
+            b"<formControlPr/>".to_vec(),
+        );
+        zip_parts.insert(
+            "xl/drawings/vmlDrawing1.vml".into(),
+            br#"<xml><o:shapelayout xmlns:o="urn:schemas-microsoft-com:office:office"><o:idmap data="1"/></o:shapelayout><v:shape xmlns:v="urn:schemas-microsoft-com:vml" id="_x0000_s1025"><x:ClientData xmlns:x="urn:schemas-microsoft-com:office:excel" ObjectType="List"/></v:shape></xml>"#
+                .to_vec(),
+        );
+        zip_parts.insert(
+            "xl/drawings/drawing1.xml".into(),
+            br#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"><xdr:cNvPr id="1025"><a14:compatExt spid="_x0000_s1025"/></xdr:cNvPr></xdr:wsDr>"#.to_vec(),
+        );
+        let workbook_bytes = one_sheet_workbook(&[], &[]);
+        let existing_table_names: HashSet<String> = HashSet::new();
+        let source_rels = rels_with(&[
+            (
+                rt::CTRL_PROP,
+                "../ctrlProps/ctrlProp1.xml",
+                TargetMode::Internal,
+            ),
+            (
+                rt::VML_DRAWING,
+                "../drawings/vmlDrawing1.vml",
+                TargetMode::Internal,
+            ),
+            (
+                rt::DRAWING,
+                "../drawings/drawing1.xml",
+                TargetMode::Internal,
+            ),
+        ]);
+        for p in zip_parts.keys() {
+            alloc.observe(p);
+        }
+
+        let mutations = plan_sheet_copy(SheetCopyInputs {
+            src_title: "Template".into(),
+            dst_title: "T2".into(),
+            src_sheet_path: "xl/worksheets/sheet1.xml".into(),
+            source_zip_parts: &zip_parts,
+            source_rels: &source_rels,
+            workbook_xml: &workbook_bytes,
+            allocator: &mut alloc,
+            existing_table_names: &existing_table_names,
+            deep_copy_images: false,
+        })
+        .expect("plan ok");
+
+        let paths: Vec<&str> = mutations
+            .new_ancillary_parts
+            .iter()
+            .map(|(p, _)| p.as_str())
+            .collect();
+        assert!(paths.contains(&"xl/ctrlProps/ctrlProp2.xml"), "{paths:?}");
+        assert!(mutations
+            .content_type_overrides_to_add
+            .contains(&("/xl/ctrlProps/ctrlProp2.xml".into(), CT_CTRL_PROP.into())));
+        let dest_rels = mutations
+            .new_ancillary_parts
+            .iter()
+            .find(|(p, _)| p == "xl/worksheets/_rels/sheet2.xml.rels")
+            .map(|(_, bytes)| std::str::from_utf8(bytes).unwrap().to_string())
+            .expect("dest rels emitted");
+        assert!(
+            dest_rels.contains("../ctrlProps/ctrlProp2.xml"),
+            "{dest_rels}"
+        );
+        assert!(
+            !dest_rels.contains("../ctrlProps/ctrlProp1.xml"),
+            "{dest_rels}"
+        );
+        let sheet = std::str::from_utf8(&mutations.new_sheet_xml).unwrap();
+        assert!(sheet.contains(r#"shapeId="2049""#), "{sheet}");
+        assert!(!sheet.contains(r#"shapeId="1025""#), "{sheet}");
+        let cloned_drawing = mutations
+            .new_ancillary_parts
+            .iter()
+            .find(|(p, _)| p == "xl/drawings/drawing2.xml")
+            .map(|(_, bytes)| std::str::from_utf8(bytes).unwrap().to_string())
+            .expect("cloned drawing");
+        assert!(cloned_drawing.contains(r#"id="2049""#), "{cloned_drawing}");
+        assert!(
+            cloned_drawing.contains(r#"spid="_x0000_s2049""#),
+            "{cloned_drawing}"
+        );
+        let cloned_vml = mutations
+            .new_ancillary_parts
+            .iter()
+            .find(|(p, _)| p == "xl/drawings/vmlDrawing2.vml")
+            .map(|(_, bytes)| std::str::from_utf8(bytes).unwrap().to_string())
+            .expect("cloned vml");
+        assert!(cloned_vml.contains(r#"id="_x0000_s2049""#), "{cloned_vml}");
+        assert!(cloned_vml.contains(r#"data="2""#), "{cloned_vml}");
+
+        let second = plan_sheet_copy(SheetCopyInputs {
+            src_title: "Template".into(),
+            dst_title: "T3".into(),
+            src_sheet_path: "xl/worksheets/sheet1.xml".into(),
+            source_zip_parts: &zip_parts,
+            source_rels: &source_rels,
+            workbook_xml: &workbook_bytes,
+            allocator: &mut alloc,
+            existing_table_names: &existing_table_names,
+            deep_copy_images: false,
+        })
+        .expect("second plan ok");
+        let second_sheet = std::str::from_utf8(&second.new_sheet_xml).unwrap();
+        assert!(second_sheet.contains(r#"shapeId="2050""#), "{second_sheet}");
+        assert!(
+            !second_sheet.contains(r#"shapeId="2049""#),
+            "{second_sheet}"
+        );
+    }
+
+    #[test]
+    fn vml_control_shape_rewrite_ignores_comment_notes() {
+        let mut remap = HashMap::new();
+        remap.insert("1025".to_string(), "2049".to_string());
+        let comment_vml = br#"<xml><v:shape xmlns:v="urn:schemas-microsoft-com:vml" id="_x0000_s1025"><x:ClientData xmlns:x="urn:schemas-microsoft-com:office:excel" ObjectType="Note"/></v:shape></xml>"#;
+        let control_vml = br#"<xml><o:shapelayout xmlns:o="urn:schemas-microsoft-com:office:office"><o:idmap data="1"/></o:shapelayout><v:shape xmlns:v="urn:schemas-microsoft-com:vml" id="_x0000_s1025"><x:ClientData xmlns:x="urn:schemas-microsoft-com:office:excel" ObjectType="List"/></v:shape></xml>"#;
+
+        let comment_ids = vml_control_shape_ids(comment_vml, &remap);
+        assert!(comment_ids.is_empty());
+        let comment_out = rewrite_vml_control_shape_ids(comment_vml, &remap, &comment_ids);
+        let comment_out = std::str::from_utf8(&comment_out).unwrap();
+        assert!(
+            comment_out.contains(r#"id="_x0000_s1025""#),
+            "{comment_out}"
+        );
+        assert!(!comment_out.contains("_x0000_s2049"), "{comment_out}");
+
+        let control_ids = vml_control_shape_ids(control_vml, &remap);
+        assert!(control_ids.contains("_x0000_s1025"));
+        let control_out = rewrite_vml_control_shape_ids(control_vml, &remap, &control_ids);
+        let control_out = rewrite_vml_control_idmap_data(&control_out, &remap);
+        let control_out = std::str::from_utf8(&control_out).unwrap();
+        assert!(
+            control_out.contains(r#"id="_x0000_s2049""#),
+            "{control_out}"
+        );
+        assert!(control_out.contains(r#"data="2""#), "{control_out}");
     }
 
     #[test]
