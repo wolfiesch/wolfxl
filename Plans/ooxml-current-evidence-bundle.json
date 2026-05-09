@@ -455,6 +455,17 @@
       ]
     },
     {
+      "name": "umya_test_files_rename_after_macro_sidecar_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508.json",
+      "producer": "uv run --no-sync --with openpyxl python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508 --mutation rename_first_sheet --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508.json",
+      "expect": [
+        {"path": "result_count", "equals": 63},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true},
+        {"path": "mutations", "equals": ["rename_first_sheet"]}
+      ]
+    },
+    {
       "name": "umya_test_files_quick_mutation_coverage",
       "path": "/tmp/wolfxl-coverage-umya-quick-mutations.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --report /tmp/wolfxl-ooxml-fidelity-mutations-umya-quick.json > /tmp/wolfxl-coverage-umya-quick-mutations.json",
