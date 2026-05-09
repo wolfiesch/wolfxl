@@ -93,6 +93,7 @@ def _write_fake_render_result(
         ("delete_marker_tail_col", "delete-marker-tail-col"),
         ("delete_marker_tail_row", "delete-marker-tail-row"),
         ("move_formula_range", "move-formula-range"),
+        ("move_marker_range", "move-marker-range"),
         ("delete_first_row", "delete-first-row"),
         ("delete_first_col", "delete-first-col"),
     ],
@@ -195,6 +196,7 @@ def test_intentional_render_delta_can_allow_unchanged_sampled_pages(
         ("insert_tail_col", "insert-tail-col"),
         ("insert_tail_row", "insert-tail-row"),
         ("marker_cell", "marker-cell"),
+        ("move_marker_range", "move-marker-range"),
         ("style_cell", "style-cell"),
     ],
 )
