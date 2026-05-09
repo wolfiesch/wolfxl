@@ -129,7 +129,7 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated pivot-chart "
             "slicer, marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, marker-cell-mutated and style-cell-mutated "
-            "shared pivot-slicer cache and timeline clicks plus "
+            "shared pivot-slicer cache clicks and timeline clicks, plus "
             "marker-cell-mutated and style-cell-mutated "
             "macro security prompt paths, marker-cell-mutated and "
             "style-cell-mutated current-setting external-link prompt "
