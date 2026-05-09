@@ -186,12 +186,21 @@ def test_intentional_render_delta_can_allow_unchanged_sampled_pages(
     assert result["results"][0]["status"] == "unchanged"
 
 
+@pytest.mark.parametrize(
+    ("mutation", "label"),
+    [
+        ("delete_first_row", "delete-first-row"),
+        ("marker_cell", "marker-cell"),
+    ],
+)
 def test_intentional_render_delta_accepts_page_count_delta(
     tmp_path: Path,
     monkeypatch,
+    mutation: str,
+    label: str,
 ) -> None:
-    report = _write_fake_render_result(tmp_path, mutation="delete_first_row")
-    work = tmp_path / "book" / "delete_first_row"
+    report = _write_fake_render_result(tmp_path, mutation=mutation)
+    work = tmp_path / "book" / mutation
     (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
 
     def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
@@ -206,7 +215,7 @@ def test_intentional_render_delta_accepts_page_count_delta(
 
     result = audit.audit_intentional_render_delta(
         report,
-        mutation="delete_first_row",
+        mutation=mutation,
         min_changed_count=1,
     )
 
@@ -214,7 +223,7 @@ def test_intentional_render_delta_accepts_page_count_delta(
     assert result["changed_count"] == 1
     assert result["failure_count"] == 0
     assert result["results"][0]["status"] == "changed"
-    assert "delete-first-row intentional page-count delta observed" in result["results"][0][
+    assert f"{label} intentional page-count delta observed" in result["results"][0][
         "message"
     ]
 
