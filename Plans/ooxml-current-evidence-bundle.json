@@ -342,6 +342,20 @@
       ]
     },
     {
+      "name": "excel_render_rename_sheet_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-rename-sheet-render-equivalence-first-last-pages-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation rename_first_sheet > /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509.json && uv run --no-sync python scripts/audit_ooxml_rename_sheet_render_equivalence.py /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509/render-compare-report.json --strict > /tmp/wolfxl-rename-sheet-render-equivalence-first-last-pages-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_full_pack_with_rename_sheet_intentional_coverage_gate",
       "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-rename-sheet-defined-name-20260508.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --render-report /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-rename-first-sheet-defined-name-fixed-20260508.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-rename-sheet-defined-name-20260508.json",
