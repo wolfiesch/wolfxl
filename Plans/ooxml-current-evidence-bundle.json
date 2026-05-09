@@ -637,6 +637,11 @@
       "expect": [
         {"path": "result_count", "equals": 2},
         {"path": "failure_count", "equals": 0},
+        {"path": "clean_pass_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "expected_app_unsupported_count", "equals": 2},
+        {"path": "unexpected_app_unsupported_count", "equals": 0},
+        {"path": "non_clean_count", "equals": 2},
         {"path": "apps", "equals": ["excel"]},
         {"path": "mutations", "equals": ["source", "marker_cell"]},
         {"path": "results.0.status", "equals": "expected_app_unsupported"},
