@@ -37,6 +37,18 @@ WHITE_PNG = b64decode(
 )
 
 
+def _patch_required_tools(tmp_path: Path, monkeypatch) -> None:
+    excel_app = tmp_path / "Microsoft Excel.app"
+    excel_app.mkdir()
+    monkeypatch.setattr(audit.run_ooxml_app_smoke, "EXCEL_APP", str(excel_app))
+    monkeypatch.setattr(
+        audit.run_ooxml_render_compare,
+        "_find_imagemagick_compare",
+        lambda: ("compare",),
+    )
+    monkeypatch.setattr(audit.shutil, "which", lambda name: "/usr/bin/pdftoppm")
+
+
 def _write_fake_render_result(
     tmp_path: Path,
     *,
@@ -91,9 +103,7 @@ def test_rename_sheet_render_equivalence_accepts_identical_pages(
         path.write_bytes(BLACK_PNG)
         return [path]
 
-    monkeypatch.setattr(audit.run_ooxml_render_compare, "_find_imagemagick_compare", lambda: ("compare",))
-    monkeypatch.setattr(audit, "shutil", audit.shutil)
-    monkeypatch.setattr(audit.shutil, "which", lambda name: "/usr/bin/pdftoppm")
+    _patch_required_tools(tmp_path, monkeypatch)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 1)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_rasterize_pdf_pages", fake_rasterize)
@@ -125,8 +135,7 @@ def test_rename_sheet_render_equivalence_fails_on_render_drift(
         path.write_bytes(BLACK_PNG)
         return [path]
 
-    monkeypatch.setattr(audit.run_ooxml_render_compare, "_find_imagemagick_compare", lambda: ("compare",))
-    monkeypatch.setattr(audit.shutil, "which", lambda name: "/usr/bin/pdftoppm")
+    _patch_required_tools(tmp_path, monkeypatch)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 1)
     monkeypatch.setattr(audit.run_ooxml_render_compare, "_rasterize_pdf_pages", fake_rasterize)
@@ -149,8 +158,7 @@ def test_rename_sheet_render_equivalence_marks_missing_before_workbook_inconclus
     (work / "before-book.xlsx").unlink()
     (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
 
-    monkeypatch.setattr(audit.run_ooxml_render_compare, "_find_imagemagick_compare", lambda: ("compare",))
-    monkeypatch.setattr(audit.shutil, "which", lambda name: "/usr/bin/pdftoppm")
+    _patch_required_tools(tmp_path, monkeypatch)
 
     result = audit.audit_rename_sheet_render_equivalence(report)
 
