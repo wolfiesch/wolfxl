@@ -26,12 +26,19 @@ import audit_ooxml_rename_sheet_render_equivalence as base  # noqa: E402
 MUTATION_LABELS = {
     "delete_first_col": "delete-first-col",
     "delete_first_row": "delete-first-row",
+    "insert_tail_row": "insert-tail-row",
     "marker_cell": "marker-cell",
     "move_formula_range": "move-formula-range",
     "style_cell": "style-cell",
 }
 EXPECTED_PAGE_COUNT_DELTA_MUTATIONS = frozenset(
-    {"delete_first_col", "delete_first_row", "marker_cell", "style_cell"}
+    {
+        "delete_first_col",
+        "delete_first_row",
+        "insert_tail_row",
+        "marker_cell",
+        "style_cell",
+    }
 )
 
 
