@@ -47,6 +47,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_macro_evidence",
     "excel_ui_interaction_style_macro_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
+    "excel_ui_interaction_style_table_slicer_evidence",
     "excel_ui_interaction_marker_pivot_chart_slicer_evidence",
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
@@ -120,7 +121,8 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "Targeted UI-interaction evidence exists, including marker-cell "
-            "mutated table-slicer, pivot-chart slicer, and external-tool "
+            "and style-cell-mutated table-slicer, marker-cell-mutated "
+            "pivot-chart slicer, and external-tool "
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
             "clicks plus marker-cell-mutated and style-cell-mutated "
             "macro security prompt paths, marker-cell-mutated and "
