@@ -37,6 +37,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_excel_expected_unsupported",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_interactive_evidence",
+    "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
     "external_link_retarget_excel_app_open",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",

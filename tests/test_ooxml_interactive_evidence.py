@@ -225,6 +225,70 @@ def test_interactive_audit_can_require_ui_interaction_report(tmp_path: Path) -> 
     assert clear["probes"]["slicer_selection_state"]["probe_kind"] == "excel_ui_interaction"
 
 
+def test_interactive_audit_can_scope_required_probes_for_mixed_fixture(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    mixed = fixture_dir / "mixed-slicer-pivot.xlsx"
+    _write_slicer_workbook(mixed)
+    _add_pivot_parts(mixed)
+    _write_manifest(fixture_dir, mixed.name)
+    ui_report = tmp_path / "ui-report.json"
+    ui_report.write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "probe_kind": "excel_ui_interaction",
+                "probes": ["slicer_selection_state"],
+                "results": [
+                    {
+                        "fixture": mixed.name,
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                        "ui_actions": ["clicked Excel slicer item"],
+                    }
+                ],
+            }
+        )
+    )
+
+    unfiltered = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[ui_report],
+        probe_kind="excel_ui_interaction",
+    )
+    scoped = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[ui_report],
+        probe_kind="excel_ui_interaction",
+        required_probes=("slicer_selection_state",),
+    )
+
+    assert unfiltered["ready"] is False
+    assert unfiltered["probes"]["pivot_refresh_state"]["status"] == "missing"
+    assert scoped["ready"] is True
+    assert scoped["required_probes"] == ["slicer_selection_state"]
+    assert list(scoped["probes"]) == ["slicer_selection_state"]
+    assert scoped["probes"]["slicer_selection_state"]["status"] == "clear"
+
+
+def test_interactive_audit_rejects_unknown_required_probe(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+
+    try:
+        interactive.audit_interactive_evidence(
+            fixture_dir,
+            required_probes=("not_a_probe",),
+        )
+    except ValueError as exc:
+        assert "unsupported interactive probe(s): not_a_probe" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_interactive_audit_scopes_incomplete_reports_to_probe_kind(
     tmp_path: Path,
 ) -> None:
@@ -314,6 +378,55 @@ def test_interactive_strict_cli_fails_when_probe_missing(tmp_path: Path, capsys)
     assert code == 1
     payload = json.loads(captured.out)
     assert payload["ready"] is False
+
+
+def test_interactive_strict_cli_accepts_scoped_probe(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    mixed = fixture_dir / "mixed-slicer-pivot.xlsx"
+    _write_slicer_workbook(mixed)
+    _add_pivot_parts(mixed)
+    _write_manifest(fixture_dir, mixed.name)
+    ui_report = tmp_path / "ui-report.json"
+    ui_report.write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "probe_kind": "excel_ui_interaction",
+                "probes": ["slicer_selection_state"],
+                "results": [
+                    {
+                        "fixture": mixed.name,
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    code = interactive.main(
+        [
+            str(fixture_dir),
+            "--probe-kind",
+            "excel_ui_interaction",
+            "--probe",
+            "slicer_selection_state",
+            "--report",
+            str(ui_report),
+            "--strict",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 0
+    assert payload["ready"] is True
+    assert payload["required_probes"] == ["slicer_selection_state"]
 
 
 def test_macro_probe_runner_emits_passing_interactive_report(tmp_path: Path, monkeypatch) -> None:
@@ -1578,6 +1691,28 @@ def _write_pivot_workbook(path: Path) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
             archive.writestr(name, content)
+
+
+def _add_pivot_parts(path: Path) -> None:
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "xl/pivotCache/pivotCacheDefinition1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      refreshOnLoad="1">
+  <cacheSource type="worksheet"><worksheetSource ref="A1:B4" sheet="Sheet1"/></cacheSource>
+  <cacheFields count="2"><cacheField name="Account"/><cacheField name="Amount"/></cacheFields>
+</pivotCacheDefinition>""",
+        )
+        archive.writestr(
+            "xl/pivotTables/pivotTable1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                      name="PivotTable1" cacheId="1">
+  <location ref="A3:B6" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>
+  <rowFields count="1"><field x="0"/></rowFields>
+</pivotTableDefinition>""",
+        )
 
 
 def _write_slicer_workbook(path: Path) -> None:
