@@ -24,7 +24,7 @@ completion = _load_completion_module()
 def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     tmp_path: Path,
 ) -> None:
-    manifest = _write_bundle_manifest(tmp_path, ready=True)
+    manifest = _write_bundle_manifest(tmp_path, ready=True, include_required_reports=True)
 
     report = completion.audit_completion_claim(manifest)
 
@@ -43,16 +43,45 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     }
 
 
-def test_completion_claim_audit_blocks_current_claim_when_bundle_is_stale(
+def test_completion_claim_audit_requires_named_current_evidence_reports(
     tmp_path: Path,
 ) -> None:
-    manifest = _write_bundle_manifest(tmp_path, ready=False)
+    manifest = _write_bundle_manifest(tmp_path, ready=True, include_required_reports=False)
 
     report = completion.audit_completion_claim(manifest)
 
     assert report["current_supported_claim_ready"] is False
     assert report["exhaustive_claim_ready"] is False
-    assert report["bundle_audit"]["issue_count"] == 1
+    assert report["bundle_audit"]["ready"] is True
+    required_reports = next(
+        criterion
+        for criterion in report["criteria"]
+        if criterion["id"] == "current_evidence_required_reports_present"
+    )
+    assert required_reports["status"] == "missing"
+    assert "combined_all_evidence_gate" in required_reports["evidence"]["missing_reports"]
+    assert report["missing_requirement_count"] == 5
+
+
+def test_completion_claim_audit_blocks_current_claim_when_bundle_is_stale(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(tmp_path, ready=False, include_required_reports=True)
+
+    report = completion.audit_completion_claim(manifest)
+
+    assert report["current_supported_claim_ready"] is False
+    assert report["exhaustive_claim_ready"] is False
+    assert report["bundle_audit"]["issue_count"] == (
+        len(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS) + 1
+    )
+    required_reports = next(
+        criterion
+        for criterion in report["criteria"]
+        if criterion["id"] == "current_evidence_required_reports_present"
+    )
+    assert required_reports["status"] == "satisfied"
+    assert required_reports["evidence"]["missing_reports"] == []
     assert report["missing_requirements"][0]["id"] == "current_evidence_bundle_ready"
 
 
@@ -60,8 +89,12 @@ def test_completion_claim_strict_current_evidence_only_checks_bundle_freshness(
     tmp_path: Path,
     capsys,
 ) -> None:
-    ready_manifest = _write_bundle_manifest(tmp_path / "ready", ready=True)
-    stale_manifest = _write_bundle_manifest(tmp_path / "stale", ready=False)
+    ready_manifest = _write_bundle_manifest(
+        tmp_path / "ready", ready=True, include_required_reports=True
+    )
+    stale_manifest = _write_bundle_manifest(
+        tmp_path / "stale", ready=False, include_required_reports=True
+    )
 
     ready_code = completion.main([str(ready_manifest), "--strict-current-evidence"])
     ready_payload = json.loads(capsys.readouterr().out)
@@ -79,7 +112,7 @@ def test_completion_claim_strict_claim_fails_until_open_requirements_close(
     tmp_path: Path,
     capsys,
 ) -> None:
-    manifest = _write_bundle_manifest(tmp_path, ready=True)
+    manifest = _write_bundle_manifest(tmp_path, ready=True, include_required_reports=True)
 
     code = completion.main([str(manifest), "--strict-claim"])
 
@@ -90,23 +123,28 @@ def test_completion_claim_strict_claim_fails_until_open_requirements_close(
     assert payload["exhaustive_claim_ready"] is False
 
 
-def _write_bundle_manifest(tmp_path: Path, *, ready: bool) -> Path:
+def _write_bundle_manifest(
+    tmp_path: Path,
+    *,
+    ready: bool,
+    include_required_reports: bool,
+) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
-    report_path = tmp_path / "report.json"
-    report_path.write_text(json.dumps({"ready": ready}))
-    manifest = tmp_path / "bundle.json"
-    manifest.write_text(
-        json.dumps(
+    reports = []
+    names = ["current"]
+    if include_required_reports:
+        names.extend(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS)
+    for index, name in enumerate(names):
+        report_path = tmp_path / f"report-{index}.json"
+        report_path.write_text(json.dumps({"ready": ready}))
+        reports.append(
             {
-                "reports": [
-                    {
-                        "name": "current",
-                        "path": str(report_path),
-                        "producer": "uv run --no-sync python scripts/example.py --strict",
-                        "expect": [{"path": "ready", "equals": True}],
-                    }
-                ]
+                "name": name,
+                "path": str(report_path),
+                "producer": "uv run --no-sync python scripts/example.py --strict",
+                "expect": [{"path": "ready", "equals": True}],
             }
         )
-    )
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(json.dumps({"reports": reports}))
     return manifest
