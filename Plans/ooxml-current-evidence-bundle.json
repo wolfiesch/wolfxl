@@ -1038,6 +1038,64 @@
       ]
     },
     {
+      "name": "synthgl_real_world_ingestion_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion --recursive --json > /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 28},
+        {"path": "skipped_workbook_count", "equals": 17},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 28},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 28},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 12},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 12},
+        {"path": "bucket_fixtures.external_link", "length_at_least": 2},
+        {"path": "bucket_fixtures.sheet_metadata", "length_at_least": 1},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 10},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 28}
+      ]
+    },
+    {
+      "name": "synthgl_real_world_ingestion_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-synthgl-real-world-ingestion-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion --recursive --json > /tmp/wolfxl-gap-radar-synthgl-real-world-ingestion-20260509.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 28},
+        {"path": "skipped_fixture_count", "equals": 17},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_real_world_ingestion_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-quick-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-quick-20260509 --mutation no_op --mutation marker_cell --mutation add_data_validation --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-quick-20260509.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "add_data_validation"]},
+        {"path": "result_count", "equals": 135},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "synthgl_real_world_ingestion_structural_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-structural-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-structural-20260509 --mutation style_cell --mutation copy_first_sheet --mutation rename_first_sheet --mutation move_formula_range --mutation add_conditional_formatting --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-real-world-ingestion-structural-20260509.json",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion"},
+        {"path": "mutations", "equals": ["style_cell", "copy_first_sheet", "rename_first_sheet", "move_formula_range", "add_conditional_formatting"]},
+        {"path": "result_count", "equals": 225},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_external_link_prompt_click",
       "path": "/tmp/wolfxl-ui-interaction-external-link-review-fix-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508 --probe-kind excel_ui_interaction --probe external_link_update_prompt --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-external-link-review-fix-20260508.stdout.json",

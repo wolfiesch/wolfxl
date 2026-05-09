@@ -39,6 +39,7 @@ CORE_PART_PATTERNS = (
     re.compile(r"^xl/theme/theme(?:\d+)?\.xml$"),
     re.compile(r"^xl/theme/_rels/theme(?:\d+)?\.xml\.rels$"),
     re.compile(r"^xl/metadata\.xml$"),
+    re.compile(r"^\[trash\]/\d+\.dat$"),
 )
 
 CORE_REL_TYPES = {
