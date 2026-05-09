@@ -600,11 +600,14 @@ def _rewrite_external_formula_targets_xml(
 ) -> bytes:
     if not replacements:
         return xml
+    replacement_map = dict(replacements)
+    token_re = re.compile(
+        b"|".join(re.escape(old) for old in sorted(replacement_map, key=len, reverse=True))
+    )
 
     def rewrite_match(match: re.Match[bytes]) -> bytes:
         text = match.group(2)
-        for old, new in replacements:
-            text = text.replace(old, new)
+        text = token_re.sub(lambda token: replacement_map[token.group(0)], text)
         return match.group(1) + text + match.group(3)
 
     return _FORMULA_TAG_RE.sub(rewrite_match, xml)
