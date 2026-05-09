@@ -21,8 +21,16 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 
 PASSING_STATUSES = {"passed"}
 SPREADSHEET_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
-PROBE_KIND = "ooxml_state_presence"
+PRESENCE_PROBE_KIND = "ooxml_state_presence"
+UI_INTERACTION_PROBE_KIND = "excel_ui_interaction"
+PROBE_KIND = PRESENCE_PROBE_KIND
+SUPPORTED_PROBE_KINDS = (PRESENCE_PROBE_KIND, UI_INTERACTION_PROBE_KIND)
 PRESENCE_PROBE_PASS = "interactive_presence_probe_pass"
+UI_INTERACTION_PASS = "excel_ui_interaction_pass"
+MISSING_MARKER_BY_KIND = {
+    PRESENCE_PROBE_KIND: PRESENCE_PROBE_PASS,
+    UI_INTERACTION_PROBE_KIND: UI_INTERACTION_PASS,
+}
 
 INTERACTIVE_PROBES = {
     "slicer_selection_state": {
@@ -68,20 +76,27 @@ def audit_interactive_evidence(
     fixture_dir: Path,
     reports: Iterable[Path] = (),
     recursive: bool = False,
+    probe_kind: str = PROBE_KIND,
 ) -> dict:
+    if probe_kind not in SUPPORTED_PROBE_KINDS:
+        raise ValueError(f"unsupported probe kind: {probe_kind}")
     fixture_dir = fixture_dir.resolve()
     report_paths = list(reports)
     fixtures = _discover_interactive_fixtures(fixture_dir, recursive=recursive)
-    passed = _passed_probes_by_fixture(report_paths)
-    incomplete_report_count = _incomplete_report_count(report_paths)
+    passed = _passed_probes_by_fixture(report_paths, probe_kind=probe_kind)
+    incomplete_report_count = _incomplete_report_count(
+        report_paths,
+        probe_kind=probe_kind,
+    )
     fixture_dicts = [asdict(fixture) for fixture in fixtures]
     probe_results = {
-        name: _probe_result(name, fixture_dicts, passed) for name in INTERACTIVE_PROBES
+        name: _probe_result(name, fixture_dicts, passed, probe_kind=probe_kind)
+        for name in INTERACTIVE_PROBES
     }
     return {
         "fixture_dir": str(fixture_dir),
         "recursive": recursive,
-        "probe_kind": PROBE_KIND,
+        "probe_kind": probe_kind,
         "report_count": len(report_paths),
         "incomplete_report_count": incomplete_report_count,
         "fixture_count": len(fixtures),
@@ -112,7 +127,11 @@ def _discover_interactive_fixtures(fixture_dir: Path, recursive: bool) -> list[I
     return fixtures
 
 
-def _passed_probes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
+def _passed_probes_by_fixture(
+    reports: Iterable[Path],
+    *,
+    probe_kind: str,
+) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     for report_path in reports:
         payload = json.loads(Path(report_path).read_text())
@@ -120,7 +139,7 @@ def _passed_probes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
         for result in payload.get("results", []):
             if result.get("status") not in PASSING_STATUSES:
                 continue
-            if result.get("probe_kind", report_probe_kind) != PROBE_KIND:
+            if result.get("probe_kind", report_probe_kind) != probe_kind:
                 continue
             fixture = result.get("fixture")
             probe = result.get("probe")
@@ -129,19 +148,38 @@ def _passed_probes_by_fixture(reports: Iterable[Path]) -> dict[str, set[str]]:
     return out
 
 
-def _incomplete_report_count(reports: Iterable[Path]) -> int:
+def _incomplete_report_count(
+    reports: Iterable[Path],
+    *,
+    probe_kind: str,
+) -> int:
     count = 0
     for report_path in reports:
         payload = json.loads(Path(report_path).read_text())
-        if payload.get("completed", True) is False:
+        if payload.get("completed", True) is False and _report_contains_probe_kind(
+            payload,
+            probe_kind=probe_kind,
+        ):
             count += 1
     return count
+
+
+def _report_contains_probe_kind(payload: dict, *, probe_kind: str) -> bool:
+    report_probe_kind = payload.get("probe_kind", PROBE_KIND)
+    if report_probe_kind == probe_kind:
+        return True
+    return any(
+        result.get("probe_kind", report_probe_kind) == probe_kind
+        for result in payload.get("results", [])
+    )
 
 
 def _probe_result(
     probe: str,
     fixtures: list[dict],
     passed: dict[str, set[str]],
+    *,
+    probe_kind: str,
 ) -> dict:
     config = INTERACTIVE_PROBES[probe]
     candidates = [
@@ -158,10 +196,10 @@ def _probe_result(
         missing = []
     else:
         status = "missing"
-        missing = [PRESENCE_PROBE_PASS]
+        missing = [MISSING_MARKER_BY_KIND[probe_kind]]
     return {
         "label": config["label"],
-        "probe_kind": config["probe_kind"],
+        "probe_kind": probe_kind,
         "feature_keys": list(config["feature_keys"]),
         "candidate_fixtures": candidates,
         "passed_fixtures": passed_fixtures,
@@ -187,6 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Discover workbooks recursively for non-manifest fixture dirs.",
     )
     parser.add_argument(
+        "--probe-kind",
+        choices=SUPPORTED_PROBE_KINDS,
+        default=PROBE_KIND,
+        help=(
+            "Which interactive evidence kind to audit. "
+            "Use excel_ui_interaction for real Excel UI click/command reports."
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit non-zero when any applicable interactive probe lacks evidence.",
@@ -197,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         args.fixture_dir,
         reports=args.report,
         recursive=args.recursive,
+        probe_kind=args.probe_kind,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if args.strict and not report["ready"] else 0

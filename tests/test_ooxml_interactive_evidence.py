@@ -165,6 +165,143 @@ def test_interactive_audit_rejects_mismatched_probe_kind(tmp_path: Path) -> None
     assert macro["missing"] == ["interactive_presence_probe_pass"]
 
 
+def test_interactive_audit_can_require_ui_interaction_report(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+    presence_report = tmp_path / "presence-report.json"
+    presence_report.write_text(
+        json.dumps(
+            {
+                "probe_kind": "ooxml_state_presence",
+                "results": [
+                    {
+                        "fixture": "slicer.xlsx",
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "ooxml_state_presence",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+    ui_report = tmp_path / "ui-report.json"
+    ui_report.write_text(
+        json.dumps(
+            {
+                "probe_kind": "excel_ui_interaction",
+                "results": [
+                    {
+                        "fixture": "slicer.xlsx",
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                        "ui_actions": ["clicked Excel slicer item"],
+                    }
+                ],
+            }
+        )
+    )
+
+    missing = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[presence_report],
+        probe_kind="excel_ui_interaction",
+    )
+    clear = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[presence_report, ui_report],
+        probe_kind="excel_ui_interaction",
+    )
+
+    assert missing["ready"] is False
+    assert missing["probe_kind"] == "excel_ui_interaction"
+    assert missing["probes"]["slicer_selection_state"]["missing"] == [
+        "excel_ui_interaction_pass"
+    ]
+    assert clear["ready"] is True
+    assert clear["probes"]["slicer_selection_state"]["status"] == "clear"
+    assert clear["probes"]["slicer_selection_state"]["probe_kind"] == "excel_ui_interaction"
+
+
+def test_interactive_audit_scopes_incomplete_reports_to_probe_kind(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_slicer_workbook(fixture_dir / "slicer.xlsx")
+    _write_manifest(fixture_dir, "slicer.xlsx")
+    incomplete_presence_report = tmp_path / "incomplete-presence-report.json"
+    incomplete_presence_report.write_text(
+        json.dumps(
+            {
+                "completed": False,
+                "probe_kind": "ooxml_state_presence",
+                "results": [
+                    {
+                        "fixture": "slicer.xlsx",
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "ooxml_state_presence",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+    incomplete_ui_report = tmp_path / "incomplete-ui-report.json"
+    incomplete_ui_report.write_text(
+        json.dumps(
+            {
+                "completed": False,
+                "probe_kind": "excel_ui_interaction",
+                "results": [
+                    {
+                        "fixture": "slicer.xlsx",
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+    complete_ui_report = tmp_path / "complete-ui-report.json"
+    complete_ui_report.write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "probe_kind": "excel_ui_interaction",
+                "results": [
+                    {
+                        "fixture": "slicer.xlsx",
+                        "probe": "slicer_selection_state",
+                        "probe_kind": "excel_ui_interaction",
+                        "status": "passed",
+                    }
+                ],
+            }
+        )
+    )
+
+    clear = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[incomplete_presence_report, complete_ui_report],
+        probe_kind="excel_ui_interaction",
+    )
+    blocked = interactive.audit_interactive_evidence(
+        fixture_dir,
+        reports=[incomplete_presence_report, incomplete_ui_report],
+        probe_kind="excel_ui_interaction",
+    )
+
+    assert clear["ready"] is True
+    assert clear["incomplete_report_count"] == 0
+    assert blocked["ready"] is False
+    assert blocked["incomplete_report_count"] == 1
+    assert blocked["probes"]["slicer_selection_state"]["status"] == "clear"
+
+
 def test_interactive_strict_cli_fails_when_probe_missing(tmp_path: Path, capsys) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
