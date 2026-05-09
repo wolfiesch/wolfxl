@@ -90,6 +90,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ilpa_reporting_template_retarget_render_equivalence",
     "wbd_wdesk_add_data_validation_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
+    "sec_edgar_add_data_validation_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -121,7 +122,9 @@ OPEN_REQUIREMENTS = (
             "retarget render equivalence on public finance templates, and WBD wDesk "
             "side evidence separately proves add-data-validation and "
             "copy-remove-sheet render equivalence on an external-tool-authored "
-            "public-company workbook, plus expected "
+            "public-company workbook; SEC/EDGAR side evidence separately proves "
+            "add-data-validation render equivalence on six public-company "
+            "workbooks, plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
             "delete-marker-tail-row/column, move-formula-range, and first "
