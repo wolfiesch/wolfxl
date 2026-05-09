@@ -46,6 +46,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
+    "excel_ui_interaction_marker_control_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -110,9 +111,10 @@ OPEN_REQUIREMENTS = (
         "reason": (
             "Targeted UI-interaction evidence exists, including marker-cell "
             "mutated shared pivot-slicer cache and timeline clicks plus a "
-            "marker-cell mutated current-setting external-link prompt path, "
-            "but broader slicer, timeline, embedded-control, and prompt "
-            "variants remain unexhausted."
+            "marker-cell mutated current-setting external-link prompt path "
+            "and marker-cell mutated embedded-control click persistence, but "
+            "broader slicer, timeline, embedded-control, and prompt variants "
+            "remain unexhausted."
         ),
     },
     {
