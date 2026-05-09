@@ -41,6 +41,7 @@ FEATURE_PART_PREFIXES = {
     "external_link": ("xl/externalLinks/",),
     "image_media": ("xl/media/",),
     "javascript_project": ("xl/jsaProject.bin",),
+    "named_sheet_view": ("xl/namedSheetViews/",),
     "pivot": ("xl/pivotCache/", "xl/pivotTables/", "pivotCache/"),
     "printer_settings": ("xl/printerSettings/",),
     "python": ("xl/python.xml",),
@@ -87,6 +88,10 @@ class Snapshot:
     dxfs_count: int
     cf_dxf_refs: list[tuple[str, int]]
     table_integrity_issues: list[dict[str, str]]
+    worksheet_sheet_ref_issues: list[dict[str, str]]
+    workbook_sheet_ref_issues: list[dict[str, str]]
+    chart_sheet_ref_issues: list[dict[str, str]]
+    pivot_sheet_ref_issues: list[dict[str, str]]
     feature_parts: dict[str, list[str]]
     semantic_fingerprints: dict[str, dict[str, object]]
 
@@ -103,6 +108,10 @@ def snapshot(path: Path) -> Snapshot:
             dxfs_count=_read_dxfs_count(archive),
             cf_dxf_refs=_read_cf_dxf_refs(archive),
             table_integrity_issues=_read_table_integrity_issues(archive),
+            worksheet_sheet_ref_issues=_read_worksheet_sheet_ref_issues(archive, parts),
+            workbook_sheet_ref_issues=_read_workbook_sheet_ref_issues(archive),
+            chart_sheet_ref_issues=_read_chart_sheet_ref_issues(archive),
+            pivot_sheet_ref_issues=_read_pivot_sheet_ref_issues(archive, parts),
             feature_parts=_classify_feature_parts(parts),
             semantic_fingerprints=_read_semantic_fingerprints(archive),
         )
@@ -125,11 +134,15 @@ def audit(before: Path, after: Path) -> dict:
         )
 
     _audit_relationship_preservation(before_snapshot, after_snapshot, issues)
-    _audit_xml_well_formed(after_snapshot, issues)
+    _audit_xml_well_formed(before_snapshot, after_snapshot, issues)
     _audit_dangling_relationships(after_snapshot, issues)
     _audit_content_type_preservation(before_snapshot, after_snapshot, issues)
     _audit_conditional_formatting_refs(after_snapshot, issues)
-    _audit_table_integrity(after_snapshot, issues)
+    _audit_table_integrity(before_snapshot, after_snapshot, issues)
+    _audit_worksheet_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_workbook_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_chart_sheet_refs(before_snapshot, after_snapshot, issues)
+    _audit_pivot_sheet_refs(before_snapshot, after_snapshot, issues)
     _audit_feature_hotspots(before_snapshot, after_snapshot, issues)
     _audit_semantic_fingerprints(before_snapshot, after_snapshot, issues)
 
@@ -161,8 +174,13 @@ def _audit_relationship_preservation(
             )
 
 
-def _audit_xml_well_formed(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
-    for part, error in snapshot_.xml_parse_errors:
+def _audit_xml_well_formed(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    before_errors = set(before.xml_parse_errors)
+    for part, error in after.xml_parse_errors:
+        if (part, error) in before_errors:
+            continue
         issues.append(
             {
                 "severity": "error",
@@ -177,7 +195,7 @@ def _audit_dangling_relationships(snapshot_: Snapshot, issues: list[dict[str, st
     for rel in snapshot_.relationships:
         if rel.resolved_target is None:
             continue
-        if rel.resolved_target not in snapshot_.parts:
+        if not _has_part_case_insensitive(snapshot_.parts, rel.resolved_target):
             issues.append(
                 {
                     "severity": "error",
@@ -189,6 +207,11 @@ def _audit_dangling_relationships(snapshot_: Snapshot, issues: list[dict[str, st
                     ),
                 }
             )
+
+
+def _has_part_case_insensitive(parts: set[str], target: str) -> bool:
+    target_lc = target.lower()
+    return any(part.lower() == target_lc for part in parts)
 
 
 def _audit_content_type_preservation(
@@ -230,8 +253,55 @@ def _audit_conditional_formatting_refs(
             )
 
 
-def _audit_table_integrity(snapshot_: Snapshot, issues: list[dict[str, str]]) -> None:
-    issues.extend(snapshot_.table_integrity_issues)
+def _audit_table_integrity(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(before.table_integrity_issues, after.table_integrity_issues, issues)
+
+
+def _audit_worksheet_sheet_refs(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(
+        before.worksheet_sheet_ref_issues, after.worksheet_sheet_ref_issues, issues
+    )
+
+
+def _audit_workbook_sheet_refs(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(
+        before.workbook_sheet_ref_issues, after.workbook_sheet_ref_issues, issues
+    )
+
+
+def _audit_chart_sheet_refs(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(before.chart_sheet_ref_issues, after.chart_sheet_ref_issues, issues)
+
+
+def _audit_pivot_sheet_refs(
+    before: Snapshot, after: Snapshot, issues: list[dict[str, str]]
+) -> None:
+    _extend_new_issues(before.pivot_sheet_ref_issues, after.pivot_sheet_ref_issues, issues)
+
+
+def _extend_new_issues(
+    before_issues: list[dict[str, str]],
+    after_issues: list[dict[str, str]],
+    issues: list[dict[str, str]],
+) -> None:
+    before_keys = {_issue_key(issue) for issue in before_issues}
+    issues.extend(issue for issue in after_issues if _issue_key(issue) not in before_keys)
+
+
+def _issue_key(issue: dict[str, str]) -> tuple[str, str, str]:
+    return (
+        issue.get("kind", ""),
+        issue.get("part", ""),
+        issue.get("message", ""),
+    )
 
 
 def _audit_feature_hotspots(
@@ -367,6 +437,8 @@ def _resolve_relationship_target(
 def _source_part_for_rels(rels_part: str) -> str:
     if rels_part == "_rels/.rels":
         return ""
+    if "\\" in rels_part or rels_part.startswith("/") or "/_rels/" not in rels_part:
+        raise ValueError(f"unsafe OOXML package part path: {rels_part}")
     prefix, name = rels_part.rsplit("/_rels/", 1)
     return posixpath.join(prefix, name.removesuffix(".rels"))
 
@@ -438,6 +510,227 @@ def _read_table_integrity_issues(archive: zipfile.ZipFile) -> list[dict[str, str
     return issues
 
 
+def _read_chart_sheet_ref_issues(
+    archive: zipfile.ZipFile,
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    parts = set(archive.namelist())
+    issues: list[dict[str, str]] = []
+    for part in sorted(_feature_xml_parts(parts, "xl/charts/", ".xml")):
+        if _is_chart_style_part(part):
+            continue
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for formula in _texts_by_local(root, "f"):
+            refs = _formula_sheet_reference_names(formula)
+            missing = sorted(ref for ref in refs if ref not in sheet_names)
+            if missing:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "kind": "chart_formula_missing_sheet",
+                        "part": part,
+                        "message": (
+                            f"{part} chart formula {formula!r} references missing "
+                            f"sheet(s): {missing}"
+                        ),
+                    }
+                )
+        for name in _pivot_source_names(root):
+            sheet_name = _pivot_source_sheet_reference_name(name)
+            if sheet_name is not None and sheet_name not in sheet_names:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "kind": "chart_pivot_source_missing_sheet",
+                        "part": part,
+                        "message": (
+                            f"{part} pivot source {name!r} references missing "
+                            f"sheet: {sheet_name!r}"
+                        ),
+                    }
+                )
+    return issues
+
+
+def _read_workbook_sheet_ref_issues(
+    archive: zipfile.ZipFile,
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if root is None:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for node in _nodes_by_local(root, "definedName"):
+        formula = _text(node)
+        refs = _formula_sheet_reference_names(formula)
+        missing = sorted(ref for ref in refs if ref not in sheet_names)
+        if missing:
+            name = _attr(node, "name") or "<unnamed>"
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": "workbook_defined_name_missing_sheet",
+                    "part": "xl/workbook.xml",
+                    "message": (
+                        f"defined name {name!r} formula {formula!r} references "
+                        f"missing sheet(s): {missing}"
+                    ),
+                }
+            )
+    return issues
+
+
+def _read_worksheet_sheet_ref_issues(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for part in sorted(_worksheet_parts(parts)):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for element_name, formula in _worksheet_formula_reference_texts(root):
+            refs = _formula_sheet_reference_names(formula)
+            missing = sorted(ref for ref in refs if ref not in sheet_names)
+            if missing:
+                issues.append(
+                    {
+                        "severity": "error",
+                        "kind": "worksheet_formula_missing_sheet",
+                        "part": part,
+                        "message": (
+                            f"{part} {element_name} formula {formula!r} references "
+                            f"missing sheet(s): {missing}"
+                        ),
+                    }
+                )
+    return issues
+
+
+def _read_pivot_sheet_ref_issues(
+    archive: zipfile.ZipFile, parts: set[str]
+) -> list[dict[str, str]]:
+    sheet_names = _workbook_sheet_names(archive)
+    if not sheet_names:
+        return []
+
+    issues: list[dict[str, str]] = []
+    for part in sorted(_feature_xml_parts(parts, "xl/pivotCache/", ".xml")):
+        root = _read_xml_or_none(archive, part)
+        if root is None:
+            continue
+        for source in _nodes_by_local(root, "worksheetSource"):
+            sheet_name = _attr(source, "sheet")
+            if not sheet_name or sheet_name in sheet_names:
+                continue
+            issues.append(
+                {
+                    "severity": "error",
+                    "kind": "pivot_cache_source_missing_sheet",
+                    "part": part,
+                    "message": (
+                        f"{part} worksheetSource sheet {sheet_name!r} references "
+                        "a missing sheet"
+                    ),
+                }
+            )
+    return issues
+
+
+def _worksheet_formula_reference_texts(
+    root: ElementTree.Element,
+) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    formula_node_names = {"f", "formula", "formula1", "formula2"}
+    for node in root.iter():
+        element_name = _local_name(node.tag)
+        if element_name not in formula_node_names:
+            continue
+        if (
+            element_name in {"formula1", "formula2"}
+            and _first_child_by_local(node, "f") is not None
+        ):
+            continue
+        if formula := _text(node):
+            out.append((element_name, formula))
+    return out
+
+
+def _workbook_sheet_names(archive: zipfile.ZipFile) -> set[str]:
+    root = _read_xml_or_none(archive, "xl/workbook.xml")
+    if root is None:
+        return set()
+    return {
+        name
+        for sheet in _nodes_by_local(root, "sheet")
+        if (name := _attr(sheet, "name"))
+    }
+
+
+def _formula_sheet_reference_names(formula: str) -> set[str]:
+    refs: set[str] = set()
+    consumed_ranges: list[tuple[int, int]] = []
+
+    for match in re.finditer(r'"(?:[^"]|"")*"', formula):
+        consumed_ranges.append(match.span())
+
+    for match in re.finditer(r"'((?:[^']|'')+)'!", formula):
+        consumed_ranges.append(match.span())
+        refs.update(_local_sheet_names_from_token(match.group(1).replace("''", "'")))
+
+    for match in re.finditer(r"(?<![\]\w'])((?:[A-Za-z0-9_][A-Za-z0-9_ .:]*)!)", formula):
+        if any(start <= match.start() < end for start, end in consumed_ranges):
+            continue
+        refs.update(_local_sheet_names_from_token(match.group(1)[:-1].strip()))
+
+    return refs
+
+
+def _local_sheet_names_from_token(token: str) -> set[str]:
+    if "[" in token or "]" in token:
+        return set()
+    return {
+        name
+        for name in token.split(":")
+        if name and not _is_formula_error_reference_token(name)
+    }
+
+
+def _is_formula_error_reference_token(token: str) -> bool:
+    return token.lstrip("#").upper() in {
+        "REF",
+        "VALUE",
+        "DIV/0",
+        "NAME?",
+        "N/A",
+        "NULL",
+        "NUM",
+    }
+
+
+
+def _pivot_source_sheet_reference_name(name: str) -> str | None:
+    if "!" not in name:
+        return None
+    left, _, _ = name.partition("!")
+    if "]" in left:
+        left = left.rsplit("]", 1)[1]
+    left = left.strip("'").replace("''", "'")
+    return left or None
+
+
 def _range_width(ref: str) -> int | None:
     first, _, last = ref.partition(":")
     last = last or first
@@ -471,6 +764,11 @@ def _read_semantic_fingerprints(archive: zipfile.ZipFile) -> dict[str, dict[str,
         "drawing_objects": _drawing_object_fingerprint(archive, parts),
         "extensions": _extension_payload_fingerprint(archive, parts),
         "external_links": _external_link_fingerprint(archive, parts),
+        "named_sheet_views": _xml_part_fingerprint(
+            archive,
+            parts,
+            tuple(sorted(part for part in parts if part.startswith("xl/namedSheetViews/"))),
+        ),
         "page_setup": _page_setup_fingerprint(archive, parts),
         "pivots": _pivot_fingerprint(archive, parts),
         "python": _xml_part_fingerprint(archive, parts, ("xl/python.xml",)),
@@ -1443,6 +1741,10 @@ def _snapshot_summary(snapshot_: Snapshot) -> dict:
         "dxfs_count": snapshot_.dxfs_count,
         "cf_dxf_ref_count": len(snapshot_.cf_dxf_refs),
         "table_integrity_issue_count": len(snapshot_.table_integrity_issues),
+        "worksheet_sheet_ref_issue_count": len(snapshot_.worksheet_sheet_ref_issues),
+        "workbook_sheet_ref_issue_count": len(snapshot_.workbook_sheet_ref_issues),
+        "chart_sheet_ref_issue_count": len(snapshot_.chart_sheet_ref_issues),
+        "pivot_sheet_ref_issue_count": len(snapshot_.pivot_sheet_ref_issues),
         "feature_part_counts": {
             feature: len(parts) for feature, parts in snapshot_.feature_parts.items()
         },

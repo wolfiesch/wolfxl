@@ -1354,6 +1354,7 @@ dependencies = [
  "wolfxl-autofilter",
  "wolfxl-classify",
  "wolfxl-core",
+ "wolfxl-formula",
  "wolfxl-merger",
  "wolfxl-pivot",
  "wolfxl-reader",

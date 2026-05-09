@@ -533,6 +533,11 @@ def pop_pending_image_deletions(ws: Worksheet) -> list[int]:
     return list(pending)
 
 
+def has_pending_image_deletions(ws: Worksheet) -> bool:
+    """Return whether source-image deletions are queued for *ws*."""
+    return bool(_PENDING_IMAGE_DELETIONS.get(id(ws)))
+
+
 def get_images(ws: Worksheet) -> list[Any]:
     """Return images attached to this worksheet, hydrating read-mode drawings."""
     workbook = ws._workbook  # noqa: SLF001

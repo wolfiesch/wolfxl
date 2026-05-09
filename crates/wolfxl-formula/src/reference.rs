@@ -118,14 +118,14 @@ pub struct SheetPrefix {
 
 impl SheetPrefix {
     /// Render the prefix exactly as it should appear in formula text,
-    /// including the trailing `!`. Quotes the name iff it actually
-    /// requires quoting (i.e. contains a non-identifier character).
+    /// including the trailing `!`. Preserve source quotes when present,
+    /// and add quotes when the name requires them.
     /// We deliberately drop unnecessary quotes after a rename: when the
     /// source was `'Old Name'!A1` and `Old Name` was renamed to `New`,
     /// we emit `New!A1` rather than `'New'!A1`.
     pub fn render(&self) -> String {
         let needs_quote = sheet_name_needs_quoting(&self.name);
-        if needs_quote {
+        if self.quoted || needs_quote {
             let escaped = self.name.replace('\'', "''");
             format!("'{}'!", escaped)
         } else {

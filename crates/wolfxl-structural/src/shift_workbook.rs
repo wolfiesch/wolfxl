@@ -741,6 +741,36 @@ mod tests {
     }
 
     #[test]
+    fn preserves_full_sheet_row_defined_name_at_tail_boundary() {
+        let xml = r#"<workbook><definedNames><definedName name="_bdm.hidden" hidden="1">'HB ROI'!$1:$1048576</definedName></definedNames></workbook>"#;
+        let insert_tail = ShiftPlan::insert(Axis::Row, crate::MAX_ROW, 1);
+        let inserted = shift_defined_names(xml.as_bytes(), &insert_tail, "HB ROI", Some(0));
+        let inserted_text = String::from_utf8_lossy(&inserted);
+        assert!(inserted_text.contains("$1:$1048576"));
+        assert!(!inserted_text.contains("#REF!"));
+
+        let delete_tail = ShiftPlan::delete(Axis::Row, crate::MAX_ROW, 1);
+        let deleted = shift_defined_names(xml.as_bytes(), &delete_tail, "HB ROI", Some(0));
+        let deleted_text = String::from_utf8_lossy(&deleted);
+        assert!(deleted_text.contains("$1:$1048576"));
+        assert!(!deleted_text.contains("$1:$1048575"));
+    }
+
+    #[test]
+    fn preserves_unnecessary_source_quotes_in_print_area_defined_name() {
+        let xml = r#"<workbook><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'Cover'!$A$1:$L$28</definedName></definedNames></workbook>"#;
+        let plan = ShiftPlan::insert(Axis::Row, crate::MAX_ROW, 1);
+        let shifted = shift_defined_names(xml.as_bytes(), &plan, "Cover", Some(0));
+        let shifted_text = String::from_utf8_lossy(&shifted);
+        assert!(
+            shifted_text.contains("'Cover'!$A$1:$L$28")
+                || shifted_text.contains("&apos;Cover&apos;!$A$1:$L$28")
+                || shifted_text.contains("&#39;Cover&#39;!$A$1:$L$28")
+        );
+        assert!(!shifted_text.contains(">Cover!$A$1:$L$28<"));
+    }
+
+    #[test]
     fn skips_per_sheet_dn_for_other_sheet() {
         let xml = r#"<workbook><definedNames><definedName name="Total" localSheetId="1">A5</definedName></definedNames></workbook>"#;
         let p = ShiftPlan::insert(Axis::Row, 5, 3);

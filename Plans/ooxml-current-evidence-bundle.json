@@ -261,13 +261,57 @@
       ]
     },
     {
-      "name": "excel_render_full_pack_with_structural_formula_validation_cf_intentional_coverage_gate",
-      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-structural-formula-validation-cf-intentional.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-structural-formula-validation-cf-intentional.json",
+      "name": "excel_render_intentional_add_remove_chart_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation add_remove_chart > /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_remove_chart"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_intentional_retarget_external_links_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation retarget_external_links > /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["retarget_external_links"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_intentional_delete_first_axis_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation delete_first_row --mutation delete_first_col > /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["delete_first_row", "delete_first_col"]},
+        {"path": "result_count", "equals": 44},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_intentional_rename_first_sheet_full_pack_report",
+      "path": "/tmp/wolfxl-render-excel-intentional-rename-first-sheet-defined-name-fixed-20260508.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-rename-first-sheet-defined-name-fixed-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation rename_first_sheet > /tmp/wolfxl-render-excel-intentional-rename-first-sheet-defined-name-fixed-20260508.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_full_pack_with_rename_sheet_intentional_coverage_gate",
+      "path": "/tmp/wolfxl-coverage-excel-render-full-pack-with-rename-sheet-defined-name-20260508.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_fidelity_coverage.py tests/fixtures/external_oracle --strict --require-render --require-intentional-render --require-render-engine excel --report /tmp/wolfxl-ooxml-fidelity-mutations-p1-all-final.json --report /tmp/wolfxl-ooxml-fidelity-mutations-connections.json --report /tmp/wolfxl-mutations-workbook-globals-payload-final.out --report /tmp/wolfxl-mutations-drawing-objects-final.out --render-report /tmp/wolfxl-render-excel-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-marker-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-copy-sheet-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack.json --render-report /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --render-report /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-retarget-external-links-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --render-report /tmp/wolfxl-render-excel-intentional-rename-first-sheet-defined-name-fixed-20260508.json > /tmp/wolfxl-coverage-excel-render-full-pack-with-rename-sheet-defined-name-20260508.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "fixture_count", "equals": 22},
-        {"path": "render_report_count", "equals": 6},
+        {"path": "render_report_count", "equals": 10},
         {"path": "render_engine_required", "equals": "excel"},
         {"path": "intentional_render_required", "equals": true},
         {"path": "surfaces.pivot_slicer_preservation.clear", "equals": true},
@@ -397,6 +441,28 @@
         {"path": "result_count", "equals": 183},
         {"path": "failure_count", "equals": 0},
         {"path": "mutations", "equals": ["no_op", "marker_cell", "add_conditional_formatting"]}
+      ]
+    },
+    {
+      "name": "umya_result_files_macro_sidecar_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-umya-result-files-auto-normalize-off-20260508/report.json",
+      "producer": "uv run --no-sync --with openpyxl python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/result_files --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-umya-result-files-auto-normalize-off-20260508 --mutation no_op --mutation marker_cell --mutation style_cell --skip-invalid-source",
+      "expect": [
+        {"path": "result_count", "equals": 240},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell"]}
+      ]
+    },
+    {
+      "name": "umya_test_files_rename_after_macro_sidecar_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508.json",
+      "producer": "uv run --no-sync --with openpyxl python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508 --mutation rename_first_sheet --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-umya-rename-after-macro-sidecar-20260508.json",
+      "expect": [
+        {"path": "result_count", "equals": 63},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true},
+        {"path": "mutations", "equals": ["rename_first_sheet"]}
       ]
     },
     {
@@ -998,6 +1064,17 @@
         {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
         {"path": "results.0.probe", "equals": "slicer_selection_state"},
         {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
+      ]
+    },
+    {
+      "name": "rename_sheet_defined_name_ref_audit_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-defined-name-audit-20260508/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-defined-name-audit-20260508 --mutation rename_first_sheet > /tmp/wolfxl-ooxml-fidelity-mutations-rename-sheet-defined-name-audit-20260508/report.json",
+      "expect": [
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
       ]
     }
   ]

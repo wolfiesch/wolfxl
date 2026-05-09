@@ -49,8 +49,17 @@ class CorpusWorkbook:
     surfaces: list[str]
 
 
+@dataclass(frozen=True)
+class SkippedWorkbook:
+    path: str
+    source_label: str
+    tool: str | None
+    reason: str
+
+
 def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
     workbooks: list[CorpusWorkbook] = []
+    skipped_workbooks: list[SkippedWorkbook] = []
     seen: set[Path] = set()
     for source in paths:
         for workbook_path, tool in _discover_workbooks(source, recursive=recursive):
@@ -60,7 +69,15 @@ def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
             seen.add(resolved)
             try:
                 snapshot = audit_ooxml_fidelity.snapshot(workbook_path)
-            except zipfile.BadZipFile:
+            except _SKIPPABLE_WORKBOOK_ERRORS as exc:
+                skipped_workbooks.append(
+                    SkippedWorkbook(
+                        path=str(workbook_path),
+                        source_label=str(source),
+                        tool=tool,
+                        reason=_error_reason(exc),
+                    )
+                )
                 continue
             feature_keys = audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(
                 snapshot
@@ -95,12 +112,32 @@ def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
     missing = sorted(bucket for bucket in REQUIRED_BUCKETS if not bucket_fixtures[bucket])
     return {
         "workbook_count": len(workbooks),
+        "skipped_workbook_count": len(skipped_workbooks),
         "required_buckets": sorted(REQUIRED_BUCKETS),
         "bucket_fixtures": bucket_fixtures,
         "missing_buckets": missing,
-        "ready": not missing,
+        "ready": not missing and not skipped_workbooks,
         "workbooks": [asdict(workbook) for workbook in workbooks],
+        "skipped_workbooks": [
+            asdict(skipped_workbook) for skipped_workbook in skipped_workbooks
+        ],
     }
+
+
+_SKIPPABLE_WORKBOOK_ERRORS = (
+    ElementTree.ParseError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    zipfile.BadZipFile,
+)
+
+
+def _error_reason(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
 
 
 def _discover_workbooks(source: Path, recursive: bool) -> list[tuple[Path, str | None]]:
@@ -205,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(f"Workbooks: {report['workbook_count']}")
+        print(f"Skipped workbooks: {report['skipped_workbook_count']}")
         print(f"Missing buckets: {len(report['missing_buckets'])}")
         for bucket in report["missing_buckets"]:
             print(f"- {bucket}")

@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_audit_module() -> ModuleType:
     script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_fidelity.py"
@@ -93,6 +95,42 @@ def test_clean_package_has_no_fidelity_issues(tmp_path: Path) -> None:
     assert report["issues"] == []
 
 
+def test_relationship_source_rejects_backslash_package_paths() -> None:
+    with pytest.raises(ValueError, match="unsafe OOXML package part path"):
+        audit_module._source_part_for_rels(r"xl\_rels\workbook.xml.rels")
+
+
+def test_dangling_relationship_audit_treats_part_names_case_insensitively(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["[Content_Types].xml"] = entries["[Content_Types].xml"].replace(
+        "</Types>",
+        '  <Override PartName="/xl/sharedStrings.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>\n'
+        "</Types>",
+    )
+    entries["xl/_rels/workbook.xml.rels"] = entries["xl/_rels/workbook.xml.rels"].replace(
+        "</Relationships>",
+        '  <Relationship Id="rId2" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" '
+        'Target="sharedStrings.xml"/>\n'
+        "</Relationships>",
+    )
+    entries["xl/SharedStrings.xml"] = (
+        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<si><t>Hello</t></si></sst>"
+    )
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert report["issues"] == []
+
+
 def test_detects_dangling_chart_relationship_after_modify_save(tmp_path: Path) -> None:
     before = tmp_path / "before.xlsx"
     after = tmp_path / "after.xlsx"
@@ -164,6 +202,23 @@ def test_detects_malformed_xml_part_after_save(tmp_path: Path) -> None:
     report = audit_module.audit(before, after)
 
     assert any(issue["kind"] == "malformed_xml_part" for issue in report["issues"])
+
+
+def test_ignores_preexisting_malformed_xml_part(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/worksheets/sheet1.xml"] = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<hyperlinks><hyperlink ref="A1" location="Sec. 1 & 2 Notes!A1"/></hyperlinks>'
+        "</worksheet>"
+    )
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(issue["kind"] == "malformed_xml_part" for issue in report["issues"])
 
 
 def test_detects_conditional_formatting_dxf_reference_out_of_range(
@@ -248,6 +303,280 @@ def test_detects_chart_formula_semantic_drift(tmp_path: Path) -> None:
     report = audit_module.audit(before, after)
 
     assert any(issue["kind"] == "charts_semantic_drift" for issue in report["issues"])
+
+
+def test_detects_chart_formula_reference_to_missing_sheet(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_xml("Sheet1!$A$1:$A$5")
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "chart_formula_missing_sheet"
+    )
+    assert issue["part"] == "xl/charts/chart1.xml"
+    assert "Sheet1" in issue["message"]
+
+
+def test_chart_formula_sheet_reference_audit_accepts_quoted_and_external_refs(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "chart-formulas.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    entries["xl/charts/chart1.xml"] = _chart_xml(
+        "'WolfXL Fidelity Rename'!$A$1:$A$5"
+    )
+    entries["xl/charts/chart2.xml"] = _chart_xml("'[Book.xlsx]Sheet1'!$A$1:$A$5")
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.chart_sheet_ref_issues == []
+
+
+def test_detects_chart_pivot_source_reference_to_missing_sheet(tmp_path: Path) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/charts/chart1.xml"] = _chart_pivot_source_xml(
+        "[Book.xlsx]Sheet1!PivotTable1"
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "chart_pivot_source_missing_sheet"
+    )
+    assert issue["part"] == "xl/charts/chart1.xml"
+    assert "Sheet1" in issue["message"]
+
+
+def test_detects_workbook_defined_name_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/workbook.xml"] = before_entries["xl/workbook.xml"].replace(
+        "<sheets>",
+        '<definedNames><definedName name="ReportRange">'
+        "'Sheet1'!$A$1:$D$4"
+        "</definedName></definedNames><sheets>",
+    )
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "workbook_defined_name_missing_sheet"
+    )
+    assert issue["part"] == "xl/workbook.xml"
+    assert "ReportRange" in issue["message"]
+    assert "Sheet1" in issue["message"]
+
+
+def test_ignores_preexisting_workbook_defined_name_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        "<sheets>",
+        '<definedNames><definedName name="ReportRange">'
+        "'Deleted Sheet'!$A$1:$D$4"
+        "</definedName></definedNames><sheets>",
+    )
+
+    _write_package(before, entries)
+    _write_package(after, entries)
+
+    report = audit_module.audit(before, after)
+
+    assert not any(
+        issue["kind"] == "workbook_defined_name_missing_sheet"
+        for issue in report["issues"]
+    )
+
+
+def test_workbook_defined_name_reference_audit_accepts_current_external_and_ref(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "defined-names.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"',
+        'name="WolfXL Fidelity Rename"',
+    ).replace(
+        "<sheets>",
+        '<definedNames><definedName name="CurrentRange">'
+        "'WolfXL Fidelity Rename'!$A$1:$D$4"
+        '</definedName><definedName name="ExternalRange">'
+        "'[Book.xlsx]Sheet1'!$A$1"
+        '</definedName><definedName name="BrokenAllowed">'
+        "#REF!"
+        "</definedName></definedNames><sheets>",
+    )
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.workbook_sheet_ref_issues == []
+
+
+def test_detects_worksheet_formula_references_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries()
+    before_entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+  xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>Sheet1!A1</f></c>
+      <c r="B1"><f>"Sheet1!"</f></c>
+    </row>
+  </sheetData>
+  <conditionalFormatting sqref="A1:A5">
+    <cfRule type="expression" priority="1">
+      <formula>Sheet1!$A$1&gt;0</formula>
+    </cfRule>
+  </conditionalFormatting>
+  <dataValidations count="1">
+    <dataValidation type="list" sqref="C1">
+      <formula1>Sheet1!$A$1:$A$3</formula1>
+      <formula2>"Sheet1!"</formula2>
+    </dataValidation>
+  </dataValidations>
+  <extLst>
+    <ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}">
+      <x14:dataValidations count="1">
+        <x14:dataValidation type="list">
+          <x14:formula1><xm:f>Sheet1!$A$1:$A$3</xm:f></x14:formula1>
+        </x14:dataValidation>
+      </x14:dataValidations>
+    </ext>
+  </extLst>
+</worksheet>"""
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issues = [
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "worksheet_formula_missing_sheet"
+    ]
+    assert len(issues) == 4
+    assert {issue["part"] for issue in issues} == {"xl/worksheets/sheet1.xml"}
+    assert all("Sheet1" in issue["message"] for issue in issues)
+    assert all('"Sheet1!"' not in issue["message"] for issue in issues)
+
+
+def test_worksheet_formula_reference_audit_accepts_current_external_and_literals(
+    tmp_path: Path,
+) -> None:
+    workbook = tmp_path / "worksheet-formulas.xlsx"
+    entries = _base_entries()
+    entries["xl/workbook.xml"] = entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    entries["xl/worksheets/sheet1.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>'WolfXL Fidelity Rename'!A1</f></c>
+      <c r="B1"><f>'[Book.xlsx]Sheet1'!A1</f></c>
+      <c r="C1"><f>"Sheet1!"</f></c>
+    </row>
+  </sheetData>
+  <conditionalFormatting sqref="A1:A5">
+    <cfRule type="expression" priority="1">
+      <formula>'WolfXL Fidelity Rename'!$A$1&gt;0</formula>
+    </cfRule>
+  </conditionalFormatting>
+  <dataValidations count="1">
+    <dataValidation type="list" sqref="D1">
+      <formula1>'WolfXL Fidelity Rename'!$A$1:$A$3</formula1>
+    </dataValidation>
+  </dataValidations>
+</worksheet>"""
+
+    _write_package(workbook, entries)
+
+    snapshot = audit_module.snapshot(workbook)
+
+    assert snapshot.worksheet_sheet_ref_issues == []
+
+
+def test_detects_pivot_cache_source_reference_to_missing_sheet(
+    tmp_path: Path,
+) -> None:
+    before = tmp_path / "before.xlsx"
+    after = tmp_path / "after.xlsx"
+    before_entries = _base_entries() | _pivot_slicer_entries("A1:B4", "1")
+    after_entries = dict(before_entries)
+    after_entries["xl/workbook.xml"] = after_entries["xl/workbook.xml"].replace(
+        'name="Sheet1"', 'name="WolfXL Fidelity Rename"'
+    )
+    after_entries["xl/pivotCache/pivotCacheDefinition1.xml"] = after_entries[
+        "xl/pivotCache/pivotCacheDefinition1.xml"
+    ].replace('sheet="Data"', 'sheet="Sheet1"')
+
+    _write_package(before, before_entries)
+    _write_package(after, after_entries)
+
+    report = audit_module.audit(before, after)
+
+    issue = next(
+        issue
+        for issue in report["issues"]
+        if issue["kind"] == "pivot_cache_source_missing_sheet"
+    )
+    assert issue["part"] == "xl/pivotCache/pivotCacheDefinition1.xml"
+    assert "Sheet1" in issue["message"]
 
 
 def test_fingerprints_structured_references_without_external_links(
@@ -799,6 +1128,14 @@ def _chart_xml(formula: str) -> str:
   <c:chart><c:plotArea><c:barChart><c:ser>
     <c:val><c:numRef><c:f>{formula}</c:f></c:numRef></c:val>
   </c:ser></c:barChart></c:plotArea></c:chart>
+</c:chartSpace>"""
+
+
+def _chart_pivot_source_xml(name: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:pivotSource><c:name>{name}</c:name><c:fmtId val="0"/></c:pivotSource>
+  <c:chart><c:plotArea/></c:chart>
 </c:chartSpace>"""
 
 

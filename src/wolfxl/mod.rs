@@ -1901,6 +1901,11 @@ impl XlsxPatcher {
         self.do_save(&target)
     }
 
+    /// Return whether the Rust patcher already has queued mutations.
+    fn _has_pending_save_work(&self) -> bool {
+        self.has_pending_save_work()
+    }
+
     /// RFC-072 (G19): return the raw `xl/vbaProject.bin` bytes from the
     /// source workbook, or `None` when the workbook contains no VBA
     /// archive. Read-only inspection — no authoring side effects.
@@ -2593,6 +2598,11 @@ impl XlsxPatcher {
             )?;
         }
         patcher_workbook::apply_workbook_xml_phases(self, &mut save.file_patches, &mut zip)?;
+        patcher_workbook::apply_sheet_rename_chart_formula_refs_phase(
+            self,
+            &mut save.file_patches,
+            &mut zip,
+        )?;
 
         // Serialize any mutated `*.rels` graphs. Routing depends on whether
         // the path already exists in the source ZIP:

@@ -72,6 +72,7 @@ pub fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> PyResult
     }
 
     let mut names = HashSet::with_capacity(zip.len());
+    let mut casefolded_names = HashSet::with_capacity(zip.len());
     let mut total: u64 = 0;
     for i in 0..zip.len() {
         let file = zip
@@ -82,6 +83,12 @@ pub fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> PyResult
         if !names.insert(name.clone()) {
             return Err(PyErr::new::<PyIOError, _>(format!(
                 "OOXML package contains duplicate ZIP entry: {name}"
+            )));
+        }
+        let casefolded_name = name.to_ascii_lowercase();
+        if !casefolded_names.insert(casefolded_name) {
+            return Err(PyErr::new::<PyIOError, _>(format!(
+                "OOXML package contains case-insensitive duplicate ZIP entry: {name}"
             )));
         }
         validate_zip_entry_metadata(&name, file.size(), file.compressed_size())?;
@@ -154,6 +161,22 @@ pub fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
     None
 }
 
+fn relationship_id_attr(e: &BytesStart<'_>) -> Option<String> {
+    attr_value(e, b"r:id").or_else(|| attr_value_by_suffix(e, b":id"))
+}
+
+fn attr_value_by_suffix(e: &BytesStart<'_>, suffix: &[u8]) -> Option<String> {
+    for a in e.attributes().with_checks(false).flatten() {
+        if a.key.as_ref().ends_with(suffix) {
+            if let Ok(v) = a.unescape_value() {
+                return Some(v.to_string());
+            }
+            return Some(String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        }
+    }
+    None
+}
+
 pub fn parse_workbook_sheet_rids(xml: &str) -> PyResult<Vec<(String, String)>> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -165,7 +188,7 @@ pub fn parse_workbook_sheet_rids(xml: &str) -> PyResult<Vec<(String, String)>> {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 if e.local_name().as_ref() == b"sheet" {
                     let name = attr_value(&e, b"name");
-                    let rid = attr_value(&e, b"r:id");
+                    let rid = relationship_id_attr(&e);
                     if let (Some(n), Some(r)) = (name, rid) {
                         out.push((n, r));
                     }
@@ -199,10 +222,27 @@ pub fn parse_relationship_targets(xml: &str) -> PyResult<HashMap<String, String>
 }
 
 pub fn zip_read_to_string(zip: &mut ZipArchive<File>, name: &str) -> PyResult<String> {
+    match zip.by_name(name) {
+        Ok(mut f) => {
+            validate_zip_entry_metadata(name, f.size(), f.compressed_size())?;
+            let mut out = String::new();
+            f.read_to_string(&mut out)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;
+            return Ok(out);
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => {
+            return Err(PyErr::new::<PyIOError, _>(format!(
+                "Missing zip entry {name}: {e}"
+            )));
+        }
+    }
+    let actual_name = resolve_zip_name_case_insensitive(zip, name)
+        .ok_or_else(|| PyErr::new::<PyIOError, _>(format!("Missing zip entry {name}")))?;
     let mut f = zip
-        .by_name(name)
+        .by_name(&actual_name)
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Missing zip entry {name}: {e}")))?;
-    validate_zip_entry_metadata(name, f.size(), f.compressed_size())?;
+    validate_zip_entry_metadata(&actual_name, f.size(), f.compressed_size())?;
     let mut out = String::new();
     f.read_to_string(&mut out)
         .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;
@@ -216,13 +256,36 @@ pub fn zip_read_to_string_opt(zip: &mut ZipArchive<File>, name: &str) -> PyResul
             let mut out = String::new();
             f.read_to_string(&mut out)
                 .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;
+            return Ok(Some(out));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => {
+            return Err(PyErr::new::<PyIOError, _>(format!(
+                "Zip error reading {name}: {e}"
+            )));
+        }
+    }
+    let Some(actual_name) = resolve_zip_name_case_insensitive(zip, name) else {
+        return Ok(None);
+    };
+    match zip.by_name(&actual_name) {
+        Ok(mut f) => {
+            validate_zip_entry_metadata(&actual_name, f.size(), f.compressed_size())?;
+            let mut out = String::new();
+            f.read_to_string(&mut out)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Failed to read {name}: {e}")))?;
             Ok(Some(out))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(PyErr::new::<PyIOError, _>(format!(
             "Zip error reading {name}: {e}"
         ))),
     }
+}
+
+fn resolve_zip_name_case_insensitive(zip: &ZipArchive<File>, name: &str) -> Option<String> {
+    zip.file_names()
+        .find(|candidate| candidate.eq_ignore_ascii_case(name))
+        .map(str::to_string)
 }
 
 #[cfg(test)]

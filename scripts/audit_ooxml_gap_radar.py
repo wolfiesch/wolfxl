@@ -9,6 +9,7 @@ import posixpath
 import re
 import sys
 import zipfile
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -33,7 +34,8 @@ CORE_PART_PATTERNS = (
     re.compile(r"^xl/worksheets/sheet\d+\.xml$"),
     re.compile(r"^xl/worksheets/_rels/sheet\d+\.xml\.rels$"),
     re.compile(r"^xl/styles\.xml$"),
-    re.compile(r"^xl/sharedStrings\.xml$"),
+    re.compile(r"^xl/[Ss]haredStrings\.xml$"),
+    re.compile(r"^xl/\.DS_Store$"),
     re.compile(r"^xl/theme/theme(?:\d+)?\.xml$"),
     re.compile(r"^xl/theme/_rels/theme(?:\d+)?\.xml\.rels$"),
     re.compile(r"^xl/metadata\.xml$"),
@@ -60,8 +62,10 @@ KNOWN_EXTENSION_URIS = {
     "{02D57815-91ED-43cb-92C2-25804820EDAC}",
     "{03082B11-2C62-411c-B77F-237D8FCFBE4C}",
     "{05A4C25C-085E-4340-85A3-A5531E510DB2}",
+    "{05C60535-1F16-4fd2-B633-F4F36F0B64E0}",
     "{0605FD5F-26C8-4aeb-8148-2DB25E43C511}",
     "{140A7094-0E35-4892-8432-C4D2E57EDEB5}",
+    "{2946ED86-A175-432a-8AC1-64E0C546D7DE}",
     "{28A0092B-C50C-407E-A947-70E740481C1C}",
     "{2F2917AC-EB37-4324-AD4E-5DD8C200BD13}",
     "{3A4CF648-6AED-40f4-86FF-DC5316D8AED3}",
@@ -69,11 +73,14 @@ KNOWN_EXTENSION_URIS = {
     "{46BE6895-7355-4a93-B00E-2C351335B9C9}",
     "{4F2E5C28-24EA-4eb8-9CBF-B6C8F9C3D259}",
     "{53640926-AAD7-44D8-BBD7-CCE9431645EC}",
+    "{64002731-A6B0-56B0-2670-7721B7C09600}",
     "{63B3BB69-23CF-44E3-9099-C40C66FF867C}",
     "{725AE2AE-9491-48be-B2B4-4EB974FC3084}",
     "{723BEF56-08C2-4564-9609-F4CBC75E7E54}",
     "{747A6164-185A-40DC-8AA5-F01512510D54}",
+    "{7523E5D3-25F3-A5E0-1632-64F254C22452}",
     "{7626C862-2A13-11E5-B345-FEFF819CDC9F}",
+    "{77bfe23e-c014-4d31-8a63-9c772dbf06b6}",
     "{781A3756-C4B2-4CAC-9D66-4F8BD8637D16}",
     "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
     "{79F54976-1DA5-4618-B147-4CDE4B953A38}",
@@ -112,9 +119,18 @@ KNOWN_EXTENSION_URIS = {
 KNOWN_EXTENSION_URIS_NORMALIZED = {uri.upper() for uri in KNOWN_EXTENSION_URIS}
 
 
+@dataclass(frozen=True)
+class SkippedFixture:
+    filename: str
+    fixture_id: str
+    tool: str | None
+    reason: str
+
+
 def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
     fixture_dir = fixture_dir.resolve()
     fixtures = []
+    skipped_fixtures: list[SkippedFixture] = []
     unknown_part_fixtures: dict[str, set[str]] = {}
     unknown_rel_fixtures: dict[str, set[str]] = {}
     unknown_content_type_fixtures: dict[str, set[str]] = {}
@@ -130,7 +146,18 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         path = fixture_dir / entry.filename
         if not path.is_file():
             continue
-        fixture_report = _fixture_unknowns(path)
+        try:
+            fixture_report = _fixture_unknowns(path)
+        except _SKIPPABLE_FIXTURE_ERRORS as exc:
+            skipped_fixtures.append(
+                SkippedFixture(
+                    filename=entry.filename,
+                    fixture_id=entry.fixture_id,
+                    tool=entry.tool,
+                    reason=_error_reason(exc),
+                )
+            )
+            continue
         observed_app_unsupported_features = set(fixture_report["app_unsupported_features"])
         expected_app_unsupported_features = set(entry.app_unsupported_features or [])
         expected_observed = sorted(
@@ -176,11 +203,23 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
                 feature, set()
             ).add(entry.filename)
 
+    clear = (
+        not unknown_part_fixtures
+        and not unknown_rel_fixtures
+        and not unknown_content_type_fixtures
+        and not unknown_extension_uri_fixtures
+        and not unexpected_app_unsupported_feature_fixtures
+        and not missing_expected_app_unsupported_feature_fixtures
+    )
     return {
         "fixture_dir": str(fixture_dir),
         "fixture_count": len(fixtures),
+        "skipped_fixture_count": len(skipped_fixtures),
         "recursive": recursive,
         "fixtures": fixtures,
+        "skipped_fixtures": [
+            asdict(skipped_fixture) for skipped_fixture in skipped_fixtures
+        ],
         "unknown_part_families": _sorted_mapping(unknown_part_fixtures),
         "unknown_relationship_types": _sorted_mapping(unknown_rel_fixtures),
         "unknown_content_types": _sorted_mapping(unknown_content_type_fixtures),
@@ -209,18 +248,31 @@ def audit_gap_radar(fixture_dir: Path, recursive: bool = False) -> dict:
         "missing_expected_app_unsupported_feature_count": len(
             missing_expected_app_unsupported_feature_fixtures
         ),
-        "clear": not unknown_part_fixtures
-        and not unknown_rel_fixtures
-        and not unknown_content_type_fixtures
-        and not unknown_extension_uri_fixtures
-        and not unexpected_app_unsupported_feature_fixtures
-        and not missing_expected_app_unsupported_feature_fixtures,
+        "clear": clear,
+        "ready": clear and not skipped_fixtures,
     }
+
+
+_SKIPPABLE_FIXTURE_ERRORS = (
+    ElementTree.ParseError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    zipfile.BadZipFile,
+)
+
+
+def _error_reason(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"
+    return type(exc).__name__
 
 
 def _fixture_unknowns(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         parts = set(archive.namelist())
+        _validate_package_part_names(parts)
         feature_parts = audit_ooxml_fidelity._classify_feature_parts(parts)
         classified_parts = {part for values in feature_parts.values() for part in values}
         unknown_parts = sorted(
@@ -259,6 +311,12 @@ def _fixture_unknowns(path: Path) -> dict:
         "unknown_extension_uris": unknown_extension_uris,
         "app_unsupported_features": app_unsupported_features,
     }
+
+
+def _validate_package_part_names(parts: set[str]) -> None:
+    for part in sorted(parts):
+        if "\\" in part:
+            raise ValueError(f"unsafe OOXML package part path: {part}")
 
 
 def _app_unsupported_features(archive: zipfile.ZipFile) -> list[str]:
@@ -337,18 +395,18 @@ def _is_known_relationship_type(rel_type: str) -> bool:
 
 def _known_feature_relationship_tails() -> tuple[tuple[str, ...], ...]:
     return (
-        ("chart", "chartsheet", "chartUserShapes", "chartStyle", "chartColorStyle"),
+        ("chart", "chartEx", "chartsheet", "chartUserShapes", "chartStyle", "chartColorStyle"),
         ("comments", "threadedComment", "person", "vmlDrawing"),
         ("drawing", "image", "printerSettings"),
         ("customProperty",),
         ("externalLink", "externalLinkPath", "xlPathMissing"),
-        ("Python", "sheetMetadata"),
+        ("Python", "sheetMetadata", "namedSheetView"),
         ("jsaProject",),
         ("table", "queryTable"),
         ("pivotTable", "pivotCacheDefinition", "pivotCacheRecords"),
         ("powerPivotData", "model"),
         ("slicer", "slicerCache", "timeline", "timelineCache"),
-        ("vbaProject", "control", "ctrlProp", "activeXControl", "oleObject"),
+        ("vbaProject", "control", "ctrlProp", "activeXControl", "oleObject", "package"),
         ("customXml", "customXmlProps"),
     )
 
@@ -386,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(f"Fixtures: {report['fixture_count']}")
+        print(f"Skipped fixtures: {report['skipped_fixture_count']}")
         print(f"Unknown part families: {report['unknown_part_family_count']}")
         print(f"Unknown relationship types: {report['unknown_relationship_type_count']}")
         print(f"Unknown content types: {report['unknown_content_type_count']}")
@@ -394,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {family}: {', '.join(fixtures)}")
         for uri, fixtures in report["unknown_extension_uris"].items():
             print(f"- {uri}: {', '.join(fixtures)}")
-    return 1 if args.strict and not report["clear"] else 0
+    return 1 if args.strict and not report["ready"] else 0
 
 
 if __name__ == "__main__":

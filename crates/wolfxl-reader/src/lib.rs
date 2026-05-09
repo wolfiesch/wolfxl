@@ -134,6 +134,7 @@ pub enum CellValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellDataType {
     Number,
+    DateIso,
     SharedString,
     InlineString,
     FormulaString,
@@ -1660,7 +1661,7 @@ fn parse_workbook(
                 }
                 b"sheet" => {
                     let name = attr_value(&e, b"name");
-                    let rid = attr_value(&e, b"r:id");
+                    let rid = relationship_id_attr(&e);
                     if let (Some(name), Some(rid)) = (name, rid) {
                         sheets.push(SheetRef {
                             name,
@@ -5734,6 +5735,7 @@ impl CellBuilder {
             Some("str") => CellDataType::FormulaString,
             Some("b") => CellDataType::Bool,
             Some("e") => CellDataType::Error,
+            Some("d") => CellDataType::DateIso,
             _ => CellDataType::Number,
         };
         let style_id = attr_value(e, b"s").and_then(|v| v.parse::<u32>().ok());
@@ -5860,6 +5862,7 @@ impl CellBuilder {
             }
             CellDataType::Bool => CellValue::Bool(matches!(self.value_text.trim(), "1" | "true")),
             CellDataType::Error => CellValue::Error(self.value_text),
+            CellDataType::DateIso => CellValue::String(self.value_text),
             CellDataType::FormulaString => CellValue::String(self.value_text),
             CellDataType::Number => {
                 let raw = self.value_text.trim();
@@ -5962,6 +5965,7 @@ fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
         )));
     }
     let mut names = HashSet::with_capacity(zip.len());
+    let mut casefolded_names = HashSet::with_capacity(zip.len());
     let mut total: u64 = 0;
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
@@ -5970,6 +5974,12 @@ fn validate_zip_archive<R: Read + Seek>(zip: &mut ZipArchive<R>) -> Result<()> {
         if !names.insert(name.clone()) {
             return Err(ReaderError::Unsupported(format!(
                 "OOXML package contains duplicate ZIP entry: {name}"
+            )));
+        }
+        let casefolded_name = name.to_ascii_lowercase();
+        if !casefolded_names.insert(casefolded_name) {
+            return Err(ReaderError::Unsupported(format!(
+                "OOXML package contains case-insensitive duplicate ZIP entry: {name}"
             )));
         }
         validate_zip_entry_metadata(&name, file.size(), file.compressed_size())?;
@@ -6040,9 +6050,21 @@ fn read_part_optional<R: Read + std::io::Seek>(
             validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
             let mut out = String::new();
             file.read_to_string(&mut out)?;
+            return Ok(Some(out));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => return Err(ReaderError::Zip(e)),
+    }
+    let Some(actual_name) = resolve_zip_part_name(zip, name) else {
+        return Ok(None);
+    };
+    match zip.by_name(&actual_name) {
+        Ok(mut file) => {
+            validate_zip_entry_metadata(&actual_name, file.size(), file.compressed_size())?;
+            let mut out = String::new();
+            file.read_to_string(&mut out)?;
             Ok(Some(out))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(ReaderError::Zip(e)),
     }
 }
@@ -6056,16 +6078,53 @@ fn read_part_optional_bytes<R: Read + std::io::Seek>(
             validate_zip_entry_metadata(name, file.size(), file.compressed_size())?;
             let mut out = Vec::new();
             file.read_to_end(&mut out)?;
+            return Ok(Some(out));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => return Err(ReaderError::Zip(e)),
+    }
+    let Some(actual_name) = resolve_zip_part_name(zip, name) else {
+        return Ok(None);
+    };
+    match zip.by_name(&actual_name) {
+        Ok(mut file) => {
+            validate_zip_entry_metadata(&actual_name, file.size(), file.compressed_size())?;
+            let mut out = Vec::new();
+            file.read_to_end(&mut out)?;
             Ok(Some(out))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
         Err(e) => Err(ReaderError::Zip(e)),
     }
+}
+
+fn resolve_zip_part_name<R: Read + std::io::Seek>(
+    zip: &ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
+    zip.file_names()
+        .find(|candidate| candidate.eq_ignore_ascii_case(name))
+        .map(str::to_string)
 }
 
 fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
     for a in e.attributes().with_checks(false).flatten() {
         if a.key.as_ref() == key {
+            if let Ok(v) = a.unescape_value() {
+                return Some(v.to_string());
+            }
+            return Some(String::from_utf8_lossy(a.value.as_ref()).into_owned());
+        }
+    }
+    None
+}
+
+fn relationship_id_attr(e: &BytesStart<'_>) -> Option<String> {
+    attr_value(e, b"r:id").or_else(|| attr_value_by_suffix(e, b":id"))
+}
+
+fn attr_value_by_suffix(e: &BytesStart<'_>, suffix: &[u8]) -> Option<String> {
+    for a in e.attributes().with_checks(false).flatten() {
+        if a.key.as_ref().ends_with(suffix) {
             if let Ok(v) = a.unescape_value() {
                 return Some(v.to_string());
             }
@@ -6591,6 +6650,32 @@ mod tests {
         assert_eq!(
             inline_rich[0].font.as_ref().and_then(|font| font.italic),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn parses_iso_date_cells_as_string_values() {
+        let xml = r#"<worksheet><sheetData>
+            <row r="1">
+                <c r="A1" t="d"><v>2021-01-01</v></c>
+                <c r="A2" t="d"><v>2021-01-01T10:10:10</v></c>
+                <c r="A3" t="d"><v>10:10:10</v></c>
+            </row>
+        </sheetData></worksheet>"#;
+        let sheet = parse_worksheet(xml, &SharedStrings::default(), None, Vec::new(), Vec::new())
+            .expect("parse worksheet");
+
+        assert_eq!(
+            sheet
+                .cells
+                .iter()
+                .map(|cell| cell.value.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                CellValue::String("2021-01-01".to_string()),
+                CellValue::String("2021-01-01T10:10:10".to_string()),
+                CellValue::String("10:10:10".to_string()),
+            ]
         );
     }
 

@@ -16,7 +16,8 @@
 use std::collections::HashMap;
 
 use crate::reference::{
-    col_letter, parse_ref, render_cell, A1Cell, A1Col, A1Row, RefKind, SheetPrefix,
+    col_letter, parse_ref, render_cell, sheet_name_needs_quoting, A1Cell, A1Col, A1Row, RefKind,
+    SheetPrefix,
 };
 use crate::tokenizer::{render, tokenize, Token, TokenKind, TokenSubKind, TokenizeError};
 use crate::{MAX_COL, MAX_ROW};
@@ -274,10 +275,7 @@ fn translate_cell(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
+            renamed_sheet_prefix(new_name)
         } else {
             s
         }
@@ -359,6 +357,16 @@ fn translate_range_kind(
     rhs: A1Cell,
     delta: &RefDelta,
 ) -> (RefKind, bool, bool) {
+    let full_sheet = is_full_sheet_range(&lhs, &rhs);
+    if full_sheet
+        && ((delta.rows != 0 && delta.anchor_row > 0)
+            || (delta.cols != 0 && delta.anchor_col > 0)
+            || delta.deleted_range.is_some())
+    {
+        let (sheet, sheet_changed) = translate_sheet_prefix(sheet, delta);
+        return (RefKind::Range { sheet, lhs, rhs }, sheet_changed, false);
+    }
+
     if let Some(d) = &delta.deleted_range {
         let eff_sheet = sheet
             .as_ref()
@@ -418,10 +426,7 @@ fn translate_cell_skip_tombstone(
 ) -> (Option<SheetPrefix>, A1Cell, bool, bool) {
     let sheet = sheet.map(|s| {
         if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
+            renamed_sheet_prefix(new_name)
         } else {
             s
         }
@@ -582,16 +587,13 @@ fn translate_row_range(
     rhs: A1Row,
     delta: &RefDelta,
 ) -> (RefKind, bool, bool) {
-    let sheet = sheet.map(|s| {
-        if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
-        } else {
-            s
-        }
-    });
+    let (sheet, sheet_changed) = translate_sheet_prefix(sheet, delta);
+
+    if is_full_row_range(&lhs, &rhs)
+        && (delta.rows != 0 && delta.anchor_row > 0 || row_delete_applies(delta))
+    {
+        return (RefKind::RowRange { sheet, lhs, rhs }, sheet_changed, false);
+    }
 
     if let Some(d) = &delta.deleted_range {
         if d.whole_rows() {
@@ -641,16 +643,13 @@ fn translate_col_range(
     rhs: A1Col,
     delta: &RefDelta,
 ) -> (RefKind, bool, bool) {
-    let sheet = sheet.map(|s| {
-        if let Some(new_name) = delta.sheet_renames.get(&s.name) {
-            SheetPrefix {
-                name: new_name.clone(),
-                quoted: s.quoted,
-            }
-        } else {
-            s
-        }
-    });
+    let (sheet, sheet_changed) = translate_sheet_prefix(sheet, delta);
+
+    if is_full_col_range(&lhs, &rhs)
+        && (delta.cols != 0 && delta.anchor_col > 0 || col_delete_applies(delta))
+    {
+        return (RefKind::ColRange { sheet, lhs, rhs }, sheet_changed, false);
+    }
 
     if let Some(d) = &delta.deleted_range {
         if d.whole_cols() {
@@ -692,6 +691,60 @@ fn shift_col(c: &A1Col, delta: &RefDelta) -> Option<A1Col> {
         col: nc as u32,
         abs: c.abs,
     })
+}
+
+fn translate_sheet_prefix(
+    sheet: Option<SheetPrefix>,
+    delta: &RefDelta,
+) -> (Option<SheetPrefix>, bool) {
+    match sheet {
+        Some(s) => {
+            if let Some(new_name) = delta.sheet_renames.get(&s.name) {
+                (Some(renamed_sheet_prefix(new_name)), true)
+            } else {
+                (Some(s), false)
+            }
+        }
+        None => (None, false),
+    }
+}
+
+fn renamed_sheet_prefix(new_name: &str) -> SheetPrefix {
+    SheetPrefix {
+        name: new_name.to_string(),
+        quoted: sheet_name_needs_quoting(new_name),
+    }
+}
+
+fn is_full_sheet_range(lhs: &A1Cell, rhs: &A1Cell) -> bool {
+    lhs.row.min(rhs.row) == 1
+        && lhs.row.max(rhs.row) == MAX_ROW
+        && lhs.col.min(rhs.col) == 1
+        && lhs.col.max(rhs.col) == MAX_COL
+}
+
+fn is_full_row_range(lhs: &A1Row, rhs: &A1Row) -> bool {
+    lhs.row.min(rhs.row) == 1 && lhs.row.max(rhs.row) == MAX_ROW
+}
+
+fn is_full_col_range(lhs: &A1Col, rhs: &A1Col) -> bool {
+    lhs.col.min(rhs.col) == 1 && lhs.col.max(rhs.col) == MAX_COL
+}
+
+fn row_delete_applies(delta: &RefDelta) -> bool {
+    delta
+        .deleted_range
+        .as_ref()
+        .map(|d| d.whole_rows())
+        .unwrap_or(false)
+}
+
+fn col_delete_applies(delta: &RefDelta) -> bool {
+    delta
+        .deleted_range
+        .as_ref()
+        .map(|d| d.whole_cols())
+        .unwrap_or(false)
 }
 
 #[allow(dead_code)]
