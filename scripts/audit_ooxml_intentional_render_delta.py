@@ -32,6 +32,7 @@ MUTATION_LABELS = {
     "insert_tail_row": "insert-tail-row",
     "marker_cell": "marker-cell",
     "move_formula_range": "move-formula-range",
+    "move_marker_range": "move-marker-range",
     "style_cell": "style-cell",
 }
 EXPECTED_PAGE_COUNT_DELTA_MUTATIONS = frozenset(
@@ -41,6 +42,7 @@ EXPECTED_PAGE_COUNT_DELTA_MUTATIONS = frozenset(
         "insert_tail_col",
         "insert_tail_row",
         "marker_cell",
+        "move_marker_range",
         "style_cell",
     }
 )

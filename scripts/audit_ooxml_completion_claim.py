@@ -40,6 +40,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_add_remove_chart_equivalence_full_pack_report",
     "excel_render_copy_remove_sheet_equivalence_full_pack_report",
     "excel_render_move_formula_range_delta_full_pack_report",
+    "excel_render_move_marker_range_delta_full_pack_report",
     "excel_render_delete_first_row_delta_full_pack_report",
     "excel_render_delete_first_col_delta_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
@@ -88,7 +89,7 @@ OPEN_REQUIREMENTS = (
             "high-risk workbook; ILPA side evidence separately proves external-link "
             "retarget render equivalence on public finance templates, plus expected "
             "visual-delta evidence for "
-            "marker-cell, style-cell, insert-tail-row/column, "
+            "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
             "delete-marker-tail-row/column, move-formula-range, and first "
             "row/column deletion; they still do "
             "not prove semantic visual equivalence for every high-risk feature "
