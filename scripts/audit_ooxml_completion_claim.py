@@ -60,6 +60,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_coverage",
     "powerpivot_contoso_sidecar_excel_expected_unsupported",
     "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
+    "powerpivot_contoso_sidecar_marker_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_rename_sheet_render_equivalence",
@@ -118,7 +119,7 @@ OPEN_REQUIREMENTS = (
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
             "clicks plus a marker-cell mutated "
             "current-setting external-link prompt path and marker-cell mutated "
-            "list-box and button-control click "
+            "PowerView read-only prompt path, list-box and button-control click "
             "persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
