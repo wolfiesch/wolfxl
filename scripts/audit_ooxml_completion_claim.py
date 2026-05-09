@@ -51,6 +51,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
+    "excel_ui_interaction_style_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_umya_external_link_forced_prompt_evidence",
     "excel_ui_interaction_marker_control_evidence",
     "excel_ui_interaction_marker_button_control_evidence",
@@ -122,7 +123,8 @@ OPEN_REQUIREMENTS = (
             "mutated table-slicer, pivot-chart slicer, and external-tool "
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
             "clicks plus marker-cell-mutated and style-cell-mutated "
-            "macro security prompt paths, current-setting external-link prompt "
+            "macro security prompt paths, marker-cell-mutated and "
+            "style-cell-mutated current-setting external-link prompt "
             "path, adjacent issue-corpus forced external-link prompt path, "
             "and marker/style-cell mutated "
             "PowerView read-only prompt paths, list-box and button-control click "
