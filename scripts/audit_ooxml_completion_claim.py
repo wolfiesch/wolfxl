@@ -59,6 +59,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_umya_external_link_forced_prompt_evidence",
     "excel_ui_interaction_marker_control_evidence",
     "excel_ui_interaction_marker_button_control_evidence",
+    "excel_ui_interaction_style_control_evidence",
+    "excel_ui_interaction_style_button_control_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -135,8 +137,8 @@ OPEN_REQUIREMENTS = (
             "style-cell-mutated current-setting external-link prompt "
             "path, adjacent issue-corpus forced external-link prompt path, "
             "and marker/style-cell mutated "
-            "PowerView read-only prompt paths, list-box and button-control click "
-            "persistence, but "
+            "PowerView read-only prompt paths, plus marker-cell-mutated and "
+            "style-cell-mutated list-box and button-control click persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
         ),
