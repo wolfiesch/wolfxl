@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+from types import ModuleType
+
+
+def _load_completion_module() -> ModuleType:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_completion_claim.py"
+    spec = importlib.util.spec_from_file_location("audit_ooxml_completion_claim", script)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+completion = _load_completion_module()
+
+
+def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(tmp_path, ready=True)
+
+    report = completion.audit_completion_claim(manifest)
+
+    assert report["objective"] == "no real-world Excel fidelity gaps"
+    assert report["current_supported_claim_ready"] is True
+    assert report["exhaustive_claim_ready"] is False
+    assert report["bundle_audit"]["ready"] is True
+    assert report["missing_requirement_count"] == 4
+    assert {
+        requirement["id"] for requirement in report["missing_requirements"]
+    } == {
+        "broader_real_world_corpus_diversity",
+        "feature_specific_intentional_render_equivalence",
+        "broader_click_level_interaction_variants",
+        "future_surface_exhaustiveness",
+    }
+
+
+def test_completion_claim_audit_blocks_current_claim_when_bundle_is_stale(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(tmp_path, ready=False)
+
+    report = completion.audit_completion_claim(manifest)
+
+    assert report["current_supported_claim_ready"] is False
+    assert report["exhaustive_claim_ready"] is False
+    assert report["bundle_audit"]["issue_count"] == 1
+    assert report["missing_requirements"][0]["id"] == "current_evidence_bundle_ready"
+
+
+def test_completion_claim_strict_current_evidence_only_checks_bundle_freshness(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    ready_manifest = _write_bundle_manifest(tmp_path / "ready", ready=True)
+    stale_manifest = _write_bundle_manifest(tmp_path / "stale", ready=False)
+
+    ready_code = completion.main([str(ready_manifest), "--strict-current-evidence"])
+    ready_payload = json.loads(capsys.readouterr().out)
+    stale_code = completion.main([str(stale_manifest), "--strict-current-evidence"])
+    stale_payload = json.loads(capsys.readouterr().out)
+
+    assert ready_code == 0
+    assert ready_payload["current_supported_claim_ready"] is True
+    assert ready_payload["exhaustive_claim_ready"] is False
+    assert stale_code == 1
+    assert stale_payload["current_supported_claim_ready"] is False
+
+
+def test_completion_claim_strict_claim_fails_until_open_requirements_close(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    manifest = _write_bundle_manifest(tmp_path, ready=True)
+
+    code = completion.main([str(manifest), "--strict-claim"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 1
+    assert payload["current_supported_claim_ready"] is True
+    assert payload["exhaustive_claim_ready"] is False
+
+
+def _write_bundle_manifest(tmp_path: Path, *, ready: bool) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps({"ready": ready}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "current",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py --strict",
+                        "expect": [{"path": "ready", "equals": True}],
+                    }
+                ]
+            }
+        )
+    )
+    return manifest

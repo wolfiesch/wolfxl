@@ -491,6 +491,7 @@ Prompt-to-artifact checklist:
 | Whole-pack preservation under common edits | `tests/test_external_oracle_preservation.py` | `198 passed` after the latest changes | Strong pinned-pack regression gate |
 | Combined all-evidence gate | `scripts/audit_ooxml_fidelity_coverage.py --strict --require-render --require-intentional-render --require-app --require-intentional-app` | Latest regenerated report `/tmp/wolfxl-coverage-all-evidence-current-code-plus-excel-powerpivot.json`: `ready=True`, 22 fixtures, 13 surfaces, 5 mutation reports, 6 render reports, 9 app reports; external-link relationship edges now accept `retarget_external_links` as a structural mutation and clear on three retargeted external-link fixtures with intentional Microsoft Excel app-open evidence | Strong current-state gate |
 | Evidence bundle freshness | `scripts/audit_ooxml_evidence_bundle.py Plans/ooxml-current-evidence-bundle.json --strict` | Latest run `/tmp/wolfxl-current-evidence-bundle-audit-20260509-ui-interaction-gate.json`: `ready=True`, 83 report artifacts verified, 83 producer commands recorded, 0 issues | Stronger provenance over the current generated evidence set; still dependent on generated reports being refreshed when fixtures or gates change |
+| Completion claim guard | `scripts/audit_ooxml_completion_claim.py Plans/ooxml-current-evidence-bundle.json --strict-current-evidence` | Latest run `/tmp/wolfxl-completion-claim-audit-20260509.json`: `current_supported_claim_ready=True`, `exhaustive_claim_ready=False`, `missing_requirement_count=4`, and current bundle ready | Prevents the supported current claim from being silently upgraded into the exhaustive "no real-world Excel fidelity gaps" claim |
 
 Current conclusion:
 
@@ -501,6 +502,10 @@ Current conclusion:
   structural intentional-edit Excel-rendered smoke, broader click-level
   slicer/date-range variants, and more adversarial mutations than
   the current pack can provide.
+- The machine-readable completion claim guard now encodes that boundary:
+  `scripts/audit_ooxml_completion_claim.py --strict-current-evidence` passes
+  for the current supported claim, while `--strict-claim` intentionally fails
+  until the open requirements above are closed.
 
 Next evidence slices before declaring a higher-confidence "no known gaps":
 
