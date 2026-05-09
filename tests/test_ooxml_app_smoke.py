@@ -213,6 +213,12 @@ def test_excel_unsupported_content_dialog_detection() -> None:
     )
 
     assert smoke_module._is_excel_unsupported_content_dialog(dialog)
+    assert smoke_module._is_excel_unsupported_content_dialog(
+        "buttons=Open as Read-OnlyCancel\ntext=Power View"
+    )
+    assert not smoke_module._is_excel_unsupported_content_dialog(
+        "windows=Power View Dashboard.xlsx"
+    )
     assert not smoke_module._is_excel_unsupported_content_dialog("windows=fixture.xlsx")
 
 
@@ -408,9 +414,53 @@ def test_run_smoke_reports_failure_count(tmp_path: Path, monkeypatch) -> None:
 
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
+    assert report["clean_pass_count"] == 0
+    assert report["skipped_count"] == 0
+    assert report["expected_app_unsupported_count"] == 0
+    assert report["unexpected_app_unsupported_count"] == 0
+    assert report["non_clean_count"] == 1
     assert report["mutations"] == ["source"]
     assert report["aborted"] is False
     assert report["abort_reason"] is None
+    assert (output_dir / "app-smoke-report.json").is_file()
+
+
+def test_run_smoke_reports_expected_unsupported_separately(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "powerview.xlsx"
+    _make_fixture(fixture)
+
+    def fake_smoke(src: Path, _output_dir: Path, _timeout: int, **_kwargs):
+        return smoke_module.AppSmokeResult(
+            fixture=src.name,
+            mutation="source",
+            app="excel",
+            status="expected_app_unsupported",
+            output=str(src),
+            message=f"{smoke_module.EXCEL_UNSUPPORTED_CONTENT_MARKER} simulated",
+        )
+
+    monkeypatch.setattr(smoke_module, "_smoke_excel", fake_smoke)
+
+    report = smoke_module.run_smoke(
+        fixture_dir,
+        output_dir,
+        apps=("excel",),
+        timeout=1,
+    )
+
+    assert report["result_count"] == 1
+    assert report["failure_count"] == 0
+    assert report["clean_pass_count"] == 0
+    assert report["skipped_count"] == 0
+    assert report["expected_app_unsupported_count"] == 1
+    assert report["unexpected_app_unsupported_count"] == 0
+    assert report["non_clean_count"] == 1
     assert (output_dir / "app-smoke-report.json").is_file()
 
 
@@ -450,6 +500,10 @@ def test_run_smoke_aborts_after_first_excel_repair_dialog(tmp_path: Path, monkey
     assert "stopped after first Microsoft Excel repair dialog" in report["abort_reason"]
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
+    assert report["unexpected_app_unsupported_count"] == 0
+    assert report["expected_app_unsupported_count"] == 0
+    assert report["clean_pass_count"] == 0
+    assert report["non_clean_count"] == 1
     assert len(seen_sources) == 1
     assert (output_dir / "app-smoke-report.json").is_file()
 
@@ -493,6 +547,10 @@ def test_run_smoke_aborts_after_first_excel_unsupported_content_dialog(
     assert "unsupported-content dialog" in report["abort_reason"]
     assert report["result_count"] == 1
     assert report["failure_count"] == 1
+    assert report["unexpected_app_unsupported_count"] == 1
+    assert report["expected_app_unsupported_count"] == 0
+    assert report["clean_pass_count"] == 0
+    assert report["non_clean_count"] == 1
     assert len(seen_sources) == 1
     assert (output_dir / "app-smoke-report.json").is_file()
 
@@ -563,6 +621,10 @@ def test_run_smoke_can_apply_mutation_before_app_smoke(tmp_path: Path, monkeypat
 
     assert report["result_count"] == 1
     assert report["failure_count"] == 0
+    assert report["clean_pass_count"] == 1
+    assert report["expected_app_unsupported_count"] == 0
+    assert report["unexpected_app_unsupported_count"] == 0
+    assert report["non_clean_count"] == 0
     assert report["mutations"] == ["marker_cell"]
     result = report["results"][0]
     assert result["fixture"] == "simple.xlsx"
