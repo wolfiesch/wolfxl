@@ -53,6 +53,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_style_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
+    "excel_ui_interaction_style_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_style_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_umya_external_link_forced_prompt_evidence",
@@ -128,7 +129,7 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated pivot-chart "
             "slicer, marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, marker-cell-mutated and style-cell-mutated "
-            "shared pivot-slicer cache clicks, timeline clicks plus "
+            "shared pivot-slicer cache clicks and timeline clicks, plus "
             "marker-cell-mutated and style-cell-mutated "
             "macro security prompt paths, marker-cell-mutated and "
             "style-cell-mutated current-setting external-link prompt "
