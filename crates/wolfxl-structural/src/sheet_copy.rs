@@ -296,14 +296,14 @@ pub fn plan_sheet_copy(inputs: SheetCopyInputs<'_>) -> Result<SheetCopyMutations
     let mut taken_timeline_names = timeline_names_from_parts(zip_parts);
     let mut timeline_cache_name_remap: HashMap<String, String> = HashMap::new();
     let mut timeline_name_remap: HashMap<String, String> = HashMap::new();
-    let mut next_shape_id = next_vml_shape_id_block_start(max_shape_id_from_parts(zip_parts));
+    inputs
+        .allocator
+        .observe_vml_shape_id_max(max_shape_id_from_parts(zip_parts));
     let mut control_shape_id_remap: HashMap<String, String> = HashMap::new();
     for old_id in control_shape_ids_from_sheet(src_sheet_xml) {
-        control_shape_id_remap.entry(old_id).or_insert_with(|| {
-            let new_id = next_shape_id.to_string();
-            next_shape_id = next_shape_id.saturating_add(1);
-            new_id
-        });
+        control_shape_id_remap
+            .entry(old_id)
+            .or_insert_with(|| inputs.allocator.alloc_vml_shape_id().to_string());
     }
 
     // For tracking the "set already used in this session" to dedup tables
@@ -1913,13 +1913,6 @@ fn max_shape_id_from_parts(zip_parts: &HashMap<String, Vec<u8>>) -> u32 {
         .unwrap_or(0)
 }
 
-fn next_vml_shape_id_block_start(max_shape_id: u32) -> u32 {
-    let block = vml_shape_id_block_data(max_shape_id)
-        .saturating_add(1)
-        .max(1);
-    block.saturating_mul(1024).saturating_add(1)
-}
-
 fn vml_shape_id_block_data(shape_id: u32) -> u32 {
     shape_id.saturating_sub(1) / 1024
 }
@@ -3160,6 +3153,25 @@ mod tests {
             .expect("cloned vml");
         assert!(cloned_vml.contains(r#"id="_x0000_s2049""#), "{cloned_vml}");
         assert!(cloned_vml.contains(r#"data="2""#), "{cloned_vml}");
+
+        let second = plan_sheet_copy(SheetCopyInputs {
+            src_title: "Template".into(),
+            dst_title: "T3".into(),
+            src_sheet_path: "xl/worksheets/sheet1.xml".into(),
+            source_zip_parts: &zip_parts,
+            source_rels: &source_rels,
+            workbook_xml: &workbook_bytes,
+            allocator: &mut alloc,
+            existing_table_names: &existing_table_names,
+            deep_copy_images: false,
+        })
+        .expect("second plan ok");
+        let second_sheet = std::str::from_utf8(&second.new_sheet_xml).unwrap();
+        assert!(second_sheet.contains(r#"shapeId="2050""#), "{second_sheet}");
+        assert!(
+            !second_sheet.contains(r#"shapeId="2049""#),
+            "{second_sheet}"
+        );
     }
 
     #[test]

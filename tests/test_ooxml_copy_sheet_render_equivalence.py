@@ -72,8 +72,8 @@ def _write_fake_render_result(
 def test_copy_sheet_render_equivalence_accepts_duplicate_later_page(tmp_path: Path) -> None:
     report = _write_fake_render_result(tmp_path, fixture="book")
     work = tmp_path / "book" / "copy_first_sheet"
-    (work / "after-pages-1.png").write_bytes(BLACK_PNG)
-    (work / "after-pages-2.png").write_bytes(BLACK_PNG)
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+    (work / "after-pages-2-2.png").write_bytes(BLACK_PNG)
 
     result = audit.audit_copy_sheet_render_equivalence(report)
 
@@ -100,8 +100,8 @@ def test_copy_sheet_render_equivalence_fails_full_render_without_match(
     )
     report = _write_fake_render_result(tmp_path, fixture="book")
     work = tmp_path / "book" / "copy_first_sheet"
-    (work / "after-pages-1.png").write_bytes(BLACK_PNG)
-    (work / "after-pages-2.png").write_bytes(WHITE_PNG)
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+    (work / "after-pages-2-2.png").write_bytes(WHITE_PNG)
 
     result = audit.audit_copy_sheet_render_equivalence(report)
 
@@ -160,8 +160,8 @@ def test_copy_sheet_render_equivalence_marks_hidden_source_inconclusive(
     )
     report = _write_fake_render_result(tmp_path, fixture="book")
     work = tmp_path / "book" / "copy_first_sheet"
-    (work / "after-pages-1.png").write_bytes(BLACK_PNG)
-    (work / "after-pages-2.png").write_bytes(WHITE_PNG)
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+    (work / "after-pages-2-2.png").write_bytes(WHITE_PNG)
     with zipfile.ZipFile(work / "after-book.xlsx", "w") as zf:
         zf.writestr(
             "xl/workbook.xml",

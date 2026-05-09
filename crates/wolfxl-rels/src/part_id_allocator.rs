@@ -78,6 +78,9 @@ pub struct PartIdAllocator {
     next_threaded_comments: u32,
     // Real Excel form-control property parts.
     next_ctrl_prop: u32,
+    // Real Excel form-control VML shape IDs. The first authored form-control
+    // shape is conventionally `_x0000_s1025`.
+    next_vml_shape_id: u32,
 }
 
 impl Default for PartIdAllocator {
@@ -107,6 +110,7 @@ impl PartIdAllocator {
             next_timeline_cache: 1,
             next_threaded_comments: 1,
             next_ctrl_prop: 1,
+            next_vml_shape_id: 1025,
         }
     }
 
@@ -338,6 +342,24 @@ impl PartIdAllocator {
         n
     }
 
+    /// Seed the form-control VML shape-ID counter from the maximum existing
+    /// shape ID in the workbook package. Excel starts copied control shapes in
+    /// the next 1024-ID block (1025 -> 2049), while subsequent in-flight copies
+    /// keep consuming from the same allocator so IDs stay workbook-unique.
+    pub fn observe_vml_shape_id_max(&mut self, max_shape_id: u32) {
+        let next = next_vml_shape_id_block_start(max_shape_id);
+        if next > self.next_vml_shape_id {
+            self.next_vml_shape_id = next;
+        }
+    }
+
+    /// Allocate a fresh workbook-unique VML shape ID for copied form controls.
+    pub fn alloc_vml_shape_id(&mut self) -> u32 {
+        let n = self.next_vml_shape_id;
+        self.next_vml_shape_id = self.next_vml_shape_id.saturating_add(1);
+        n
+    }
+
     /// Peek at each counter without consuming. Test-only.
     #[cfg(test)]
     fn peek(&self) -> [u32; 7] {
@@ -351,6 +373,16 @@ impl PartIdAllocator {
             self.next_image,
         ]
     }
+}
+
+fn next_vml_shape_id_block_start(max_shape_id: u32) -> u32 {
+    let block = max_shape_id
+        .saturating_sub(1)
+        .checked_div(1024)
+        .unwrap_or(0)
+        .saturating_add(1)
+        .max(1);
+    block.saturating_mul(1024).saturating_add(1)
 }
 
 enum Counter {
@@ -438,6 +470,25 @@ mod tests {
         let mut a = PartIdAllocator::from_zip_parts(parts.iter().copied());
         assert_eq!(a.alloc_ctrl_prop(), 5);
         assert_eq!(a.alloc_ctrl_prop(), 6);
+    }
+
+    #[test]
+    fn vml_shape_id_counter_starts_at_next_excel_block() {
+        let mut a = PartIdAllocator::new();
+        a.observe_vml_shape_id_max(1025);
+        assert_eq!(a.alloc_vml_shape_id(), 2049);
+        assert_eq!(a.alloc_vml_shape_id(), 2050);
+        a.observe_vml_shape_id_max(1025);
+        assert_eq!(a.alloc_vml_shape_id(), 2051);
+    }
+
+    #[test]
+    fn vml_shape_id_observe_never_moves_backwards() {
+        let mut a = PartIdAllocator::new();
+        a.observe_vml_shape_id_max(2049);
+        assert_eq!(a.alloc_vml_shape_id(), 3073);
+        a.observe_vml_shape_id_max(1025);
+        assert_eq!(a.alloc_vml_shape_id(), 3074);
     }
 
     #[test]

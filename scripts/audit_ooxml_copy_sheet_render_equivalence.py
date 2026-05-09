@@ -141,7 +141,8 @@ def _audit_result(
 
     sampled = _is_sampled(result)
     message = (
-        f"no sampled later page matched page 1; best_page={best_page} "
+        f"{'no sampled later page' if sampled else 'no later page'} matched page 1; "
+        f"best_page={best_page} "
         f"best_normalized_rmse={best_rmse:.8f}"
         if best_rmse is not None
         else "no comparable later page was available"
