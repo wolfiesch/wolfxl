@@ -93,6 +93,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ilpa_reporting_template_add_remove_chart_render_equivalence",
     "wbd_wdesk_add_data_validation_render_equivalence",
     "wbd_wdesk_add_conditional_formatting_render_equivalence",
+    "wbd_wdesk_add_remove_chart_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
     "sec_edgar_add_data_validation_render_equivalence",
     "sec_edgar_add_conditional_formatting_render_equivalence",
@@ -132,7 +133,8 @@ OPEN_REQUIREMENTS = (
             "equivalence on public "
             "finance templates, and WBD wDesk "
             "side evidence separately proves add-data-validation, "
-            "add-conditional-formatting, and copy-remove-sheet render equivalence "
+            "add-conditional-formatting, add-remove-chart, and copy-remove-sheet "
+            "render equivalence "
             "on an external-tool-authored "
             "public-company workbook; SEC/EDGAR side evidence separately proves "
             "add-data-validation, add-conditional-formatting, and "
