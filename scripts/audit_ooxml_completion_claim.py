@@ -45,6 +45,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_delete_first_col_delta_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "excel_ui_interaction_marker_macro_evidence",
+    "excel_ui_interaction_style_macro_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_marker_pivot_chart_slicer_evidence",
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
@@ -120,7 +121,7 @@ OPEN_REQUIREMENTS = (
             "Targeted UI-interaction evidence exists, including marker-cell "
             "mutated table-slicer, pivot-chart slicer, and external-tool "
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
-            "clicks plus a marker-cell mutated "
+            "clicks plus marker/style-cell mutated "
             "macro security prompt path, current-setting external-link prompt "
             "path, adjacent issue-corpus forced external-link prompt path, "
             "and marker/style-cell mutated "
