@@ -120,8 +120,9 @@ OPEN_REQUIREMENTS = (
         "id": "broader_click_level_interaction_variants",
         "status": "open",
         "reason": (
-            "Targeted UI-interaction evidence exists, including marker-cell "
-            "and style-cell-mutated table-slicer, marker-cell-mutated "
+            "Targeted UI-interaction evidence exists, including "
+            "marker-cell-mutated and style-cell-mutated table-slicer, "
+            "marker-cell-mutated "
             "pivot-chart slicer, and external-tool "
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
             "clicks plus marker-cell-mutated and style-cell-mutated "
