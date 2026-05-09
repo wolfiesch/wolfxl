@@ -60,6 +60,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "slicer_shared_two_pivots_sidecar_delete_first_col_render_delta",
     "slicer_shared_two_pivots_sidecar_interactive_evidence",
     "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
+    "slicer_shared_two_pivots_sidecar_marker_ui_interaction_evidence",
     "external_link_retarget_excel_app_open",
     "ilpa_reporting_template_retarget_mutation_report",
     "ilpa_reporting_template_retarget_excel_app_open",
@@ -105,8 +106,9 @@ OPEN_REQUIREMENTS = (
         "id": "broader_click_level_interaction_variants",
         "status": "open",
         "reason": (
-            "Targeted UI-interaction evidence exists, but broader slicer, timeline, "
-            "embedded-control, and prompt variants remain unexhausted."
+            "Targeted UI-interaction evidence exists, including a marker-cell "
+            "mutated shared pivot-slicer cache click, but broader slicer, "
+            "timeline, embedded-control, and prompt variants remain unexhausted."
         ),
     },
     {
