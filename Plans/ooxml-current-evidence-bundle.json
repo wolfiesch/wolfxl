@@ -252,6 +252,24 @@
       ]
     },
     {
+      "name": "excel_render_copy_sheet_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-copy-sheet-render-equivalence-reviewfix-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-copy-sheet-full-pack-reviewfix-20260509 --render-engine excel --timeout 180 --mutation copy_first_sheet && uv run --no-sync python scripts/audit_ooxml_copy_sheet_render_equivalence.py /tmp/wolfxl-render-excel-copy-sheet-full-pack-reviewfix-20260509/render-compare-report.json --strict > /tmp/wolfxl-copy-sheet-render-equivalence-reviewfix-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "mutation", "equals": "copy_first_sheet"},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 20},
+        {"path": "inconclusive_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.19.fixture", "equals": "umya-control-props-basic.xlsx"},
+        {"path": "results.19.status", "equals": "inconclusive"},
+        {"path": "results.20.fixture", "equals": "real-excel-control-props-basic.xlsx"},
+        {"path": "results.20.status", "equals": "passed"},
+        {"path": "results.20.normalized_rmse", "equals": 0.0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_move_formula_range_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation move_formula_range > /tmp/wolfxl-render-excel-intentional-move-formula-range-full-pack.json",
