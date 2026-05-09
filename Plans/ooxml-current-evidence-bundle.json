@@ -329,6 +329,21 @@
       ]
     },
     {
+      "name": "excel_render_add_conditional_formatting_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-add-conditional-formatting-render-equivalence-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --mutation add_conditional_formatting --timeout 180 --strict > /tmp/wolfxl-add-conditional-formatting-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_add_remove_chart_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation add_remove_chart > /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",
@@ -396,6 +411,38 @@
         {"path": "mutation", "equals": "retarget_external_links"},
         {"path": "result_count", "equals": 22},
         {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_delete_first_row_delta_full_pack_report",
+      "path": "/tmp/wolfxl-delete-first-row-render-delta-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --mutation delete_first_row --min-changed-count 15 --max-unchanged-count 7 --timeout 180 --strict > /tmp/wolfxl-delete-first-row-render-delta-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "delete_first_row"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 22},
+        {"path": "changed_count", "equals": 21},
+        {"path": "unchanged_count", "equals": 1},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "excel_render_delete_first_col_delta_full_pack_report",
+      "path": "/tmp/wolfxl-delete-first-col-render-delta-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --mutation delete_first_col --min-changed-count 15 --max-unchanged-count 7 --timeout 180 --strict > /tmp/wolfxl-delete-first-col-render-delta-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "delete_first_col"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 22},
+        {"path": "changed_count", "equals": 21},
+        {"path": "unchanged_count", "equals": 1},
         {"path": "inconclusive_count", "equals": 0},
         {"path": "failure_count", "equals": 0}
       ]

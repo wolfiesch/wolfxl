@@ -25,6 +25,7 @@ import audit_ooxml_rename_sheet_render_equivalence as base  # noqa: E402
 
 DEFAULT_MUTATIONS = ("add_data_validation",)
 MUTATION_LABELS = {
+    "add_conditional_formatting": "add-conditional-formatting",
     "add_data_validation": "add-data-validation",
     "rename_first_sheet": "rename-sheet",
     "retarget_external_links": "external-link retarget",

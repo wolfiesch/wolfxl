@@ -8,6 +8,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Optional
 
+import pytest
+
 
 def _load_module() -> ModuleType:
     script = (
@@ -85,12 +87,22 @@ def _write_fake_render_result(
     return report
 
 
+@pytest.mark.parametrize(
+    ("mutation", "label"),
+    [
+        ("move_formula_range", "move-formula-range"),
+        ("delete_first_row", "delete-first-row"),
+        ("delete_first_col", "delete-first-col"),
+    ],
+)
 def test_intentional_render_delta_accepts_observed_visual_change(
     tmp_path: Path,
     monkeypatch,
+    mutation: str,
+    label: str,
 ) -> None:
-    report = _write_fake_render_result(tmp_path)
-    work = tmp_path / "book" / "move_formula_range"
+    report = _write_fake_render_result(tmp_path, mutation=mutation)
+    work = tmp_path / "book" / mutation
     (work / "after-pages-1-1.png").write_bytes(WHITE_PNG)
 
     def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
@@ -120,7 +132,7 @@ def test_intentional_render_delta_accepts_observed_visual_change(
 
     result = audit.audit_intentional_render_delta(
         report,
-        mutation="move_formula_range",
+        mutation=mutation,
         min_changed_count=1,
     )
 
@@ -128,7 +140,7 @@ def test_intentional_render_delta_accepts_observed_visual_change(
     assert result["changed_count"] == 1
     assert result["unchanged_count"] == 0
     assert result["results"][0]["status"] == "changed"
-    assert "move-formula-range intentional render delta observed" in result["results"][0][
+    assert f"{label} intentional render delta observed" in result["results"][0][
         "message"
     ]
 
@@ -172,6 +184,70 @@ def test_intentional_render_delta_can_allow_unchanged_sampled_pages(
     assert result["changed_count"] == 0
     assert result["unchanged_count"] == 1
     assert result["results"][0]["status"] == "unchanged"
+
+
+def test_intentional_render_delta_accepts_page_count_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report = _write_fake_render_result(tmp_path, mutation="delete_first_row")
+    work = tmp_path / "book" / "delete_first_row"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+
+    def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
+        outdir.mkdir(parents=True)
+        pdf = outdir / "before-book.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    _patch_required_tools(tmp_path, monkeypatch)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 2)
+
+    result = audit.audit_intentional_render_delta(
+        report,
+        mutation="delete_first_row",
+        min_changed_count=1,
+    )
+
+    assert result["ready"] is True
+    assert result["changed_count"] == 1
+    assert result["failure_count"] == 0
+    assert result["results"][0]["status"] == "changed"
+    assert "delete-first-row intentional page-count delta observed" in result["results"][0][
+        "message"
+    ]
+
+
+def test_intentional_render_delta_rejects_unexpected_page_count_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report = _write_fake_render_result(tmp_path, mutation="move_formula_range")
+    work = tmp_path / "book" / "move_formula_range"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+
+    def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
+        outdir.mkdir(parents=True)
+        pdf = outdir / "before-book.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    _patch_required_tools(tmp_path, monkeypatch)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 2)
+
+    result = audit.audit_intentional_render_delta(
+        report,
+        mutation="move_formula_range",
+        min_changed_count=1,
+    )
+
+    assert result["ready"] is False
+    assert result["changed_count"] == 0
+    assert result["failure_count"] == 1
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["message"].startswith("page-count mismatch:")
 
 
 def test_intentional_render_delta_requires_requested_mutation(
