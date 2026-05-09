@@ -97,6 +97,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
     "sec_edgar_add_data_validation_render_equivalence",
     "sec_edgar_add_conditional_formatting_render_equivalence",
+    "sec_edgar_add_remove_chart_render_equivalence",
     "sec_edgar_copy_remove_sheet_render_equivalence",
     "iran_osint_recursive_add_data_validation_render_equivalence",
     "iran_osint_recursive_add_conditional_formatting_render_equivalence",
@@ -138,7 +139,8 @@ OPEN_REQUIREMENTS = (
             "on an external-tool-authored "
             "public-company workbook; SEC/EDGAR side evidence separately proves "
             "add-data-validation, add-conditional-formatting, and "
-            "copy-remove-sheet render equivalence on six public-company "
+            "add-remove-chart and copy-remove-sheet render equivalence on six "
+            "public-company "
             "workbooks; Iran OSINT side evidence separately proves "
             "add-data-validation and add-conditional-formatting render "
             "equivalence plus copy-remove-sheet render equivalence on the full "
