@@ -671,3 +671,52 @@ def test_excel_pdf_export_retries_after_recovery_prompt(
 
     assert attempts == 2
     assert pdf.read_bytes() == b"%PDF"
+
+
+def test_excel_pdf_export_retries_after_transient_automation_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    src = tmp_path / "book.xlsx"
+    src.write_bytes(b"not-used")
+    output_dir = tmp_path / "out"
+    stage_dir = tmp_path / "stage"
+    attempts = 0
+
+    def fake_run_script(_script, _timeout):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:
+            (stage_dir / "workbook.pdf").write_bytes(b"%PDF")
+            return render_module.subprocess.CompletedProcess(["osascript"], 0, "", "")
+        return render_module.subprocess.CompletedProcess(
+            ["osascript"],
+            1,
+            "",
+            "Microsoft Excel got an error: Application isn't running. (-600)",
+        )
+
+    monkeypatch.setattr(
+        render_module,
+        "_run_excel_script_with_dialog_handling",
+        fake_run_script,
+    )
+    monkeypatch.setattr(
+        render_module, "_excel_render_stage_dir", lambda _src: stage_dir
+    )
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_excel_dialog_text", lambda: ""
+    )
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_dismiss_excel_safe_dialogs", lambda: None
+    )
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_close_excel_best_effort", lambda: None
+    )
+    monkeypatch.setattr(
+        render_module, "_restore_excel_automation_security_best_effort", lambda: None
+    )
+
+    pdf = render_module._export_pdf_excel(src, output_dir, timeout=3)
+
+    assert attempts == 2
+    assert pdf.read_bytes() == b"%PDF"
