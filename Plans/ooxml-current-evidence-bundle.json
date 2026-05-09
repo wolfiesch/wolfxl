@@ -450,6 +450,41 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_style_external_link_current_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-style-external-link-current-prompt-20260509/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-style-external-link-current-prompt-20260509 --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode current --mutation style_cell --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-style-external-link-current-prompt-20260509.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "external_link_prompt_mode", "equals": "current"},
+        {"path": "mutation", "equals": "style_cell"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "style_cell"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.message", "contains": "external-link OOXML parts"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_style_external_link_current_prompt_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-style-external-link-current-prompt-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe external_link_update_prompt --report /tmp/wolfxl-ui-interaction-style-external-link-current-prompt-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-style-external-link-current-prompt-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["external_link_update_prompt"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.external_link_update_prompt.status", "equals": "clear"},
+        {"path": "probes.external_link_update_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.external_link_update_prompt.passed_fixtures", "equals": ["real-excel-external-link-basic.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_marker_embedded_control_click",
       "path": "/tmp/wolfxl-ui-interaction-marker-control-click-20260509/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-marker-control-click-20260509 --probe-kind excel_ui_interaction --probe embedded_control_openability --mutation marker_cell --fixture real-excel-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-marker-control-click-20260509.stdout.json",
