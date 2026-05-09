@@ -218,3 +218,44 @@ def test_no_visual_change_render_equivalence_accepts_explicit_mutation(
     assert result["mutations"] == ["rename_first_sheet"]
     assert result["observed_mutations"] == ["rename_first_sheet"]
     assert "rename-sheet render equivalent" in result["results"][0]["message"]
+
+
+def test_no_visual_change_render_equivalence_labels_conditional_formatting(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report = _write_fake_render_result(tmp_path, mutation="add_conditional_formatting")
+    work = tmp_path / "book" / "add_conditional_formatting"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+
+    def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
+        outdir.mkdir(parents=True)
+        pdf = outdir / "before-book.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    def fake_rasterize(_pdftoppm, _pdf, prefix, _pages, _density, _timeout):
+        path = prefix.parent / "before-equivalence-pages-1-1.png"
+        path.write_bytes(BLACK_PNG)
+        return [path]
+
+    _patch_required_tools(tmp_path, monkeypatch)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 1)
+    monkeypatch.setattr(
+        audit.base.run_ooxml_render_compare,
+        "_rasterize_pdf_pages",
+        fake_rasterize,
+    )
+
+    result = audit.audit_no_visual_change_render_equivalence(
+        report,
+        mutations=("add_conditional_formatting",),
+    )
+
+    assert result["ready"] is True
+    assert result["mutations"] == ["add_conditional_formatting"]
+    assert result["observed_mutations"] == ["add_conditional_formatting"]
+    assert "add-conditional-formatting render equivalent" in result["results"][0][
+        "message"
+    ]

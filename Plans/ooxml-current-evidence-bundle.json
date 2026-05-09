@@ -329,6 +329,21 @@
       ]
     },
     {
+      "name": "excel_render_add_conditional_formatting_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-add-conditional-formatting-render-equivalence-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json --mutation add_conditional_formatting --timeout 180 --strict > /tmp/wolfxl-add-conditional-formatting-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_add_remove_chart_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508 --render-engine excel --timeout 120 --max-pages-per-fixture 1 --mutation add_remove_chart > /tmp/wolfxl-render-excel-intentional-add-remove-chart-20260508.json",

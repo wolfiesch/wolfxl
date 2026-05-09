@@ -30,6 +30,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_rename_sheet_equivalence_full_pack_report",
     "excel_render_retarget_external_links_equivalence_full_pack_report",
     "excel_render_add_data_validation_equivalence_full_pack_report",
+    "excel_render_add_conditional_formatting_equivalence_full_pack_report",
     "excel_render_move_formula_range_delta_full_pack_report",
     "excel_render_delete_first_row_delta_full_pack_report",
     "excel_render_delete_first_col_delta_full_pack_report",
@@ -68,9 +69,10 @@ OPEN_REQUIREMENTS = (
         "reason": (
             "Intentional Microsoft Excel render checks now include equivalence for "
             "copy-sheet, rename-sheet, external-link retargeting, and the visually "
-            "neutral add-data-validation edit, plus expected visual-delta evidence "
-            "for move-formula-range and first row/column deletion; they still do not "
-            "prove semantic visual equivalence for every high-risk feature edit."
+            "neutral add-data-validation and add-conditional-formatting edits, plus "
+            "expected visual-delta evidence for move-formula-range and first "
+            "row/column deletion; they still do not prove semantic visual "
+            "equivalence for every high-risk feature edit."
         ),
     },
     {
