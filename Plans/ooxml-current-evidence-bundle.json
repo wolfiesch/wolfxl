@@ -344,7 +344,7 @@
     {
       "name": "excel_render_rename_sheet_equivalence_full_pack_report",
       "path": "/tmp/wolfxl-rename-sheet-render-equivalence-first-last-pages-20260509.json",
-      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation rename_first_sheet > /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509.json && uv run --no-sync python scripts/audit_ooxml_rename_sheet_render_equivalence.py /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509/render-compare-report.json --strict > /tmp/wolfxl-rename-sheet-render-equivalence-first-last-pages-20260509.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation rename_first_sheet > /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509.json && uv run --no-sync python scripts/audit_ooxml_rename_sheet_render_equivalence.py /tmp/wolfxl-render-excel-rename-sheet-full-pack-first-last-pages-20260509/render-compare-report.json --timeout 180 --strict > /tmp/wolfxl-rename-sheet-render-equivalence-first-last-pages-20260509.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "render_engine", "equals": "excel"},

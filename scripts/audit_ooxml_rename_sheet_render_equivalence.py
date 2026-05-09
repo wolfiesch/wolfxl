@@ -47,6 +47,7 @@ def audit_rename_sheet_render_equivalence(
     payload = json.loads(render_report_path.read_text())
     compare_cmd = run_ooxml_render_compare._find_imagemagick_compare()
     pdftoppm = shutil.which("pdftoppm")
+    pdfinfo = shutil.which("pdfinfo")
     render_engine = str(payload.get("render_engine", "libreoffice"))
     density = int(payload.get("density", 96))
     soffice = None
@@ -61,6 +62,7 @@ def audit_rename_sheet_render_equivalence(
                 result,
                 compare_cmd=compare_cmd,
                 pdftoppm=pdftoppm,
+                pdfinfo=pdfinfo,
                 render_engine=render_engine,
                 soffice=soffice,
                 density=density,
@@ -93,6 +95,7 @@ def _audit_result(
     *,
     compare_cmd: tuple[str, ...] | None,
     pdftoppm: str | None,
+    pdfinfo: str | None,
     render_engine: str,
     soffice: str | None,
     density: int,
@@ -104,16 +107,18 @@ def _audit_result(
     if status not in PASSING_RENDER_STATUSES:
         return RenameSheetEquivalenceResult(
             fixture=fixture,
-            status="skipped",
+            status="failed",
             compared_pages=[],
             max_normalized_rmse=None,
             sampled=False,
-            message=f"render result status is not passing: {status}",
+            message=f"render result status is not passing: {status or '<missing>'}",
         )
     if compare_cmd is None:
         return _inconclusive(fixture, "ImageMagick compare is required")
     if pdftoppm is None:
         return _inconclusive(fixture, "pdftoppm is required")
+    if pdfinfo is None:
+        return _inconclusive(fixture, "pdfinfo is required")
     if render_engine == "libreoffice" and soffice is None:
         return _inconclusive(fixture, "soffice is required for LibreOffice rendering")
     if render_engine == "excel" and not Path(run_ooxml_app_smoke.EXCEL_APP).is_dir():
