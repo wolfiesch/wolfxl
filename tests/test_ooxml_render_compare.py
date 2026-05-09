@@ -200,6 +200,106 @@ def test_render_compare_samples_large_pdfs_when_page_limit_set(
     assert seen_pages == [[1, 50, 100], [1, 50, 100]]
 
 
+def test_render_compare_can_sample_first_pages_for_copy_sheet_equivalence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "large.xlsx")
+    after_pdf = tmp_path / "after.pdf"
+    after_pdf.write_bytes(b"%PDF-after")
+    after_page = tmp_path / "after-1.png"
+    after_page.write_bytes(b"after")
+    seen_pages: list[list[int]] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_find_libreoffice", lambda: "soffice"
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+    monkeypatch.setattr(
+        render_module,
+        "_export_pdf",
+        lambda *_args, **_kwargs: after_pdf,
+    )
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 100)
+
+    def fake_rasterize(_pdftoppm, _pdf, _prefix, pages, _density, _timeout):
+        seen_pages.append(pages)
+        return [after_page for _ in pages]
+
+    monkeypatch.setattr(render_module, "_rasterize_pdf_pages", fake_rasterize)
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        max_pages_per_fixture=2,
+        mutations=("copy_first_sheet",),
+        page_selection="first-pages",
+    )
+
+    assert report["page_selection"] == "first-pages"
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "sampled_rendered"
+    assert result["mutation"] == "copy_first_sheet"
+    assert result["page_count"] == 100
+    assert result["compared_page_count"] == 2
+    assert result["compared_pages"] == [1, 2]
+    assert seen_pages == [[1, 2]]
+
+
+def test_render_compare_can_sample_first_and_last_pages_for_appended_copy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "large.xlsx")
+    after_pdf = tmp_path / "after.pdf"
+    after_pdf.write_bytes(b"%PDF-after")
+    after_page = tmp_path / "after-1.png"
+    after_page.write_bytes(b"after")
+    seen_pages: list[list[int]] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke, "_find_libreoffice", lambda: "soffice"
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+    monkeypatch.setattr(
+        render_module,
+        "_export_pdf",
+        lambda *_args, **_kwargs: after_pdf,
+    )
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 74)
+
+    def fake_rasterize(_pdftoppm, _pdf, _prefix, pages, _density, _timeout):
+        seen_pages.append(pages)
+        return [after_page for _ in pages]
+
+    monkeypatch.setattr(render_module, "_rasterize_pdf_pages", fake_rasterize)
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        max_pages_per_fixture=4,
+        mutations=("copy_first_sheet",),
+        page_selection="first-and-last-pages",
+    )
+
+    assert report["page_selection"] == "first-and-last-pages"
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "sampled_rendered"
+    assert result["mutation"] == "copy_first_sheet"
+    assert result["page_count"] == 74
+    assert result["compared_page_count"] == 4
+    assert result["compared_pages"] == [1, 72, 73, 74]
+    assert seen_pages == [[1, 72, 73, 74]]
+
+
 def test_render_compare_can_pass_byte_identical_no_op_without_render(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -353,6 +453,8 @@ def test_sample_page_numbers_are_stable() -> None:
     assert render_module._sample_page_numbers(100, 1) == [1]
     assert render_module._sample_page_numbers(100, 2) == [1, 100]
     assert render_module._sample_page_numbers(100, 5) == [1, 26, 50, 75, 100]
+    assert render_module._first_page_numbers(100, 2) == [1, 2]
+    assert render_module._first_and_last_page_numbers(100, 4) == [1, 98, 99, 100]
 
 
 def test_rasterize_pdf_pages_honors_single_page_sample(

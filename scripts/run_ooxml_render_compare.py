@@ -31,6 +31,7 @@ import run_ooxml_fidelity_mutations  # noqa: E402
 DEFAULT_RENDER_MUTATIONS = ("no_op",)
 DEFAULT_RENDER_ENGINE = "libreoffice"
 RENDER_ENGINES = ("libreoffice", "excel")
+PAGE_SELECTION_MODES = ("spread", "first-pages", "first-and-last-pages")
 PASSING_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
@@ -61,9 +62,12 @@ def run_render_compare(
     pass_byte_identical_xlsx: bool = False,
     mutations: tuple[str, ...] = DEFAULT_RENDER_MUTATIONS,
     render_engine: str = DEFAULT_RENDER_ENGINE,
+    page_selection: str = "spread",
 ) -> dict:
     if render_engine not in RENDER_ENGINES:
         raise ValueError(f"unsupported render engine: {render_engine}")
+    if page_selection not in PAGE_SELECTION_MODES:
+        raise ValueError(f"unsupported page selection mode: {page_selection}")
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[RenderCompareResult] = []
@@ -85,6 +89,7 @@ def run_render_compare(
                     pass_byte_identical_xlsx=pass_byte_identical_xlsx,
                     mutation=mutation,
                     render_engine=render_engine,
+                    page_selection=page_selection,
                 )
             )
 
@@ -92,6 +97,7 @@ def run_render_compare(
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "render_engine": render_engine,
+        "page_selection": page_selection,
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
         "max_pages_per_fixture": max_pages_per_fixture,
@@ -122,6 +128,7 @@ def _compare_fixture(
     pass_byte_identical_xlsx: bool,
     mutation: str,
     render_engine: str,
+    page_selection: str,
 ) -> RenderCompareResult:
     if not fixture_path.is_file():
         return RenderCompareResult(
@@ -214,7 +221,9 @@ def _compare_fixture(
                 and after_page_count > max_pages_per_fixture
             )
             compared_pages = (
-                _sample_page_numbers(after_page_count, max_pages_per_fixture)
+                _select_page_numbers(
+                    after_page_count, max_pages_per_fixture, page_selection
+                )
                 if sampled
                 else list(range(1, after_page_count + 1))
             )
@@ -271,7 +280,9 @@ def _compare_fixture(
             and before_page_count > max_pages_per_fixture
         )
         compared_pages = (
-            _sample_page_numbers(before_page_count, max_pages_per_fixture)
+            _select_page_numbers(
+                before_page_count, max_pages_per_fixture, page_selection
+            )
             if sampled
             else list(range(1, before_page_count + 1))
         )
@@ -693,6 +704,40 @@ def _sample_page_numbers(page_count: int, max_pages: int | None) -> list[int]:
     return sorted(pages)
 
 
+def _first_page_numbers(page_count: int, max_pages: int | None) -> list[int]:
+    if max_pages is None or page_count <= max_pages:
+        return list(range(1, page_count + 1))
+    if max_pages <= 0:
+        raise ValueError("max_pages_per_fixture must be positive")
+    return list(range(1, max_pages + 1))
+
+
+def _select_page_numbers(
+    page_count: int,
+    max_pages: int | None,
+    page_selection: str,
+) -> list[int]:
+    if page_selection == "spread":
+        return _sample_page_numbers(page_count, max_pages)
+    if page_selection == "first-pages":
+        return _first_page_numbers(page_count, max_pages)
+    if page_selection == "first-and-last-pages":
+        return _first_and_last_page_numbers(page_count, max_pages)
+    raise ValueError(f"unsupported page selection mode: {page_selection}")
+
+
+def _first_and_last_page_numbers(page_count: int, max_pages: int | None) -> list[int]:
+    if max_pages is None or page_count <= max_pages:
+        return list(range(1, page_count + 1))
+    if max_pages <= 0:
+        raise ValueError("max_pages_per_fixture must be positive")
+    if max_pages == 1:
+        return [1]
+    tail_count = max_pages - 1
+    tail_start = max(2, page_count - tail_count + 1)
+    return [1, *range(tail_start, page_count + 1)]
+
+
 def _normalized_rmse(
     compare_cmd: tuple[str, ...],
     before_page: Path,
@@ -756,6 +801,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--page-selection",
+        choices=PAGE_SELECTION_MODES,
+        default="spread",
+        help=(
+            "Page selection mode when --max-pages-per-fixture samples a larger "
+            "PDF. Defaults to spread for broad smoke coverage; use first-pages "
+            "or first-and-last-pages when an intentional mutation appends a "
+            "copied sheet near the end of the rendered workbook."
+        ),
+    )
+    parser.add_argument(
         "--pass-byte-identical-xlsx",
         action="store_true",
         help=(
@@ -792,6 +848,7 @@ def main(argv: list[str] | None = None) -> int:
         pass_byte_identical_xlsx=args.pass_byte_identical_xlsx,
         mutations=tuple(args.mutations or DEFAULT_RENDER_MUTATIONS),
         render_engine=args.render_engine,
+        page_selection=args.page_selection,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0
