@@ -29,6 +29,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_copy_sheet_equivalence_full_pack_report",
     "excel_render_rename_sheet_equivalence_full_pack_report",
     "excel_render_retarget_external_links_equivalence_full_pack_report",
+    "excel_render_add_data_validation_equivalence_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "external_oracle_corpus_diversity",
     "external_oracle_gap_radar",
@@ -60,8 +61,10 @@ OPEN_REQUIREMENTS = (
         "id": "feature_specific_intentional_render_equivalence",
         "status": "open",
         "reason": (
-            "Intentional Microsoft Excel render checks prove renderability for selected "
-            "edits, not semantic visual equivalence for every high-risk feature edit."
+            "Intentional Microsoft Excel render checks now include equivalence for "
+            "copy-sheet, rename-sheet, external-link retargeting, and the visually "
+            "neutral add-data-validation edit, but not semantic visual equivalence "
+            "for every high-risk feature edit."
         ),
     },
     {
