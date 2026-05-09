@@ -77,9 +77,11 @@ def audit_interactive_evidence(
     reports: Iterable[Path] = (),
     recursive: bool = False,
     probe_kind: str = PROBE_KIND,
+    required_probes: Iterable[str] | None = None,
 ) -> dict:
     if probe_kind not in SUPPORTED_PROBE_KINDS:
         raise ValueError(f"unsupported probe kind: {probe_kind}")
+    probe_names = _required_probe_names(required_probes)
     fixture_dir = fixture_dir.resolve()
     report_paths = list(reports)
     fixtures = _discover_interactive_fixtures(fixture_dir, recursive=recursive)
@@ -87,16 +89,18 @@ def audit_interactive_evidence(
     incomplete_report_count = _incomplete_report_count(
         report_paths,
         probe_kind=probe_kind,
+        required_probes=probe_names,
     )
     fixture_dicts = [asdict(fixture) for fixture in fixtures]
     probe_results = {
         name: _probe_result(name, fixture_dicts, passed, probe_kind=probe_kind)
-        for name in INTERACTIVE_PROBES
+        for name in probe_names
     }
     return {
         "fixture_dir": str(fixture_dir),
         "recursive": recursive,
         "probe_kind": probe_kind,
+        "required_probes": probe_names,
         "report_count": len(report_paths),
         "incomplete_report_count": incomplete_report_count,
         "fixture_count": len(fixtures),
@@ -105,6 +109,18 @@ def audit_interactive_evidence(
         "ready": incomplete_report_count == 0
         and all(result["clear"] for result in probe_results.values()),
     }
+
+
+def _required_probe_names(required_probes: Iterable[str] | None) -> list[str]:
+    if required_probes is None:
+        return list(INTERACTIVE_PROBES)
+    probe_names = list(dict.fromkeys(str(probe) for probe in required_probes))
+    if not probe_names:
+        raise ValueError("at least one interactive probe is required")
+    unknown = sorted(set(probe_names) - set(INTERACTIVE_PROBES))
+    if unknown:
+        raise ValueError(f"unsupported interactive probe(s): {', '.join(unknown)}")
+    return probe_names
 
 
 def _discover_interactive_fixtures(fixture_dir: Path, recursive: bool) -> list[InteractiveFixture]:
@@ -152,24 +168,36 @@ def _incomplete_report_count(
     reports: Iterable[Path],
     *,
     probe_kind: str,
+    required_probes: Iterable[str],
 ) -> int:
     count = 0
+    required_probe_set = set(required_probes)
     for report_path in reports:
         payload = json.loads(Path(report_path).read_text())
         if payload.get("completed", True) is False and _report_contains_probe_kind(
             payload,
             probe_kind=probe_kind,
+            required_probes=required_probe_set,
         ):
             count += 1
     return count
 
 
-def _report_contains_probe_kind(payload: dict, *, probe_kind: str) -> bool:
+def _report_contains_probe_kind(
+    payload: dict,
+    *,
+    probe_kind: str,
+    required_probes: set[str],
+) -> bool:
     report_probe_kind = payload.get("probe_kind", PROBE_KIND)
-    if report_probe_kind == probe_kind:
+    report_probes = {str(probe) for probe in payload.get("probes", [])}
+    if report_probe_kind == probe_kind and (
+        not report_probes or bool(report_probes & required_probes)
+    ):
         return True
     return any(
         result.get("probe_kind", report_probe_kind) == probe_kind
+        and str(result.get("probe")) in required_probes
         for result in payload.get("results", [])
     )
 
@@ -234,6 +262,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--probe",
+        action="append",
+        choices=tuple(INTERACTIVE_PROBES),
+        default=None,
+        help=(
+            "Restrict the audit to specific interactive probe(s). May be passed multiple "
+            "times. Without this, every applicable probe class is required."
+        ),
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Exit non-zero when any applicable interactive probe lacks evidence.",
@@ -245,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         reports=args.report,
         recursive=args.recursive,
         probe_kind=args.probe_kind,
+        required_probes=args.probe,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if args.strict and not report["ready"] else 0

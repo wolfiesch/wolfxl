@@ -851,6 +851,22 @@
       ]
     },
     {
+      "name": "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-shared-slicer-cache-sidecar-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/slicer_timeline_variants --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-shared-slicer-cache-20260508/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-shared-slicer-cache-sidecar-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["real-excel-shared-slicer-two-pivots.xlsx"]}
+      ]
+    },
+    {
       "name": "external_link_retarget_mutation",
       "path": "/tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget --mutation retarget_external_links > /tmp/wolfxl-ooxml-fidelity-mutations-external-link-retarget.json",
