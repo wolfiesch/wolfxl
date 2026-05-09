@@ -190,6 +190,7 @@ def test_intentional_render_delta_can_allow_unchanged_sampled_pages(
     ("mutation", "label"),
     [
         ("delete_first_row", "delete-first-row"),
+        ("insert_tail_row", "insert-tail-row"),
         ("marker_cell", "marker-cell"),
         ("style_cell", "style-cell"),
     ],
