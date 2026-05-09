@@ -287,6 +287,21 @@
       ]
     },
     {
+      "name": "excel_render_add_data_validation_equivalence_full_pack_report",
+      "path": "/tmp/wolfxl-add-data-validation-render-equivalence-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-intentional-add-data-validation-full-pack/render-compare-report.json --mutation add_data_validation --timeout 180 --strict > /tmp/wolfxl-add-data-validation-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation"]},
+        {"path": "observed_mutations", "equals": ["add_data_validation"]},
+        {"path": "result_count", "equals": 22},
+        {"path": "passed_count", "equals": 22},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "failure_count", "equals": 0}
+      ]
+    },
+    {
       "name": "excel_render_intentional_add_conditional_formatting_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed --render-engine excel --timeout 180 --max-pages-per-fixture 3 --mutation add_conditional_formatting > /tmp/wolfxl-render-excel-intentional-add-conditional-formatting-full-pack-fixed.json",
@@ -737,6 +752,20 @@
       ]
     },
     {
+      "name": "powerpivot_variants_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py tests/fixtures/powerpivot_variants --json > /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 1},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["external_link", "external_tool_authored", "macro_vba", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 1},
+        {"path": "bucket_fixtures.powerpivot_data_model", "length_at_least": 1},
+        {"path": "bucket_fixtures.slicer_or_timeline", "length_at_least": 1}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_mutation_report",
       "path": "/tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots --mutation marker_cell --mutation copy_first_sheet --mutation move_formula_range > /tmp/wolfxl-ooxml-fidelity-mutations-slicer-shared-two-pivots.json",
@@ -851,6 +880,20 @@
         {"path": "unknown_relationship_type_count", "equals": 0},
         {"path": "unknown_content_type_count", "equals": 0},
         {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "slicer_timeline_variants_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py tests/fixtures/slicer_timeline_variants --json > /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 1},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 1},
+        {"path": "bucket_fixtures.slicer_or_timeline", "length_at_least": 1},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 1}
       ]
     },
     {
@@ -1555,6 +1598,27 @@
         {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 1},
         {"path": "bucket_fixtures.excel_authored", "length_at_least": 16},
         {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 16}
+      ]
+    },
+    {
+      "name": "corpus_portfolio_diversity",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json --min-sources 12 --min-workbooks 200 --strict > /tmp/wolfxl-corpus-portfolio-buckets-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_count", "equals": 15},
+        {"path": "workbook_count", "equals": 236},
+        {"path": "skipped_workbook_count", "equals": 31},
+        {"path": "missing_buckets", "equals": []},
+        {"path": "threshold_failures", "equals": []},
+        {"path": "bucket_counts.excel_authored", "equals": 210},
+        {"path": "bucket_counts.external_tool_authored", "equals": 26},
+        {"path": "bucket_counts.macro_vba", "equals": 5},
+        {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
+        {"path": "bucket_counts.slicer_or_timeline", "equals": 7},
+        {"path": "bucket_counts.external_link", "equals": 11},
+        {"path": "bucket_counts.chart_or_chart_style", "equals": 16},
+        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 39}
       ]
     },
     {
