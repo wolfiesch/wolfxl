@@ -57,6 +57,9 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_style_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_umya_external_link_forced_prompt_evidence",
+    "excel_ui_interaction_style_umya_external_link_forced_prompt_evidence",
+    "excel_ui_interaction_marker_umya_listbox_control_evidence",
+    "excel_ui_interaction_style_umya_listbox_control_evidence",
     "excel_ui_interaction_marker_control_evidence",
     "excel_ui_interaction_marker_button_control_evidence",
     "excel_ui_interaction_style_control_evidence",
@@ -135,8 +138,10 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated "
             "macro security prompt paths, marker-cell-mutated and "
             "style-cell-mutated current-setting external-link prompt "
-            "path, adjacent issue-corpus forced external-link prompt path, "
-            "and marker/style-cell mutated "
+            "path, marker-cell-mutated and style-cell-mutated adjacent "
+            "issue-corpus forced external-link prompt paths, "
+            "marker-cell-mutated and style-cell-mutated adjacent "
+            "issue-corpus list-box clicks, and marker/style-cell mutated "
             "PowerView read-only prompt paths, plus marker-cell-mutated and "
             "style-cell-mutated list-box and button-control click persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
