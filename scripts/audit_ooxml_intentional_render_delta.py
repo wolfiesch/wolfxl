@@ -28,6 +28,7 @@ MUTATION_LABELS = {
     "delete_first_row": "delete-first-row",
     "move_formula_range": "move-formula-range",
 }
+EXPECTED_PAGE_COUNT_DELTA_MUTATIONS = frozenset({"delete_first_col", "delete_first_row"})
 
 
 def audit_intentional_render_delta(
@@ -76,8 +77,10 @@ def audit_intentional_render_delta(
                     f"max_normalized_rmse={audit_result.max_normalized_rmse:.8f}"
                 ),
             )
-        elif audit_result.status == "failed" and audit_result.message.startswith(
-            "page-count mismatch:"
+        elif (
+            mutation in EXPECTED_PAGE_COUNT_DELTA_MUTATIONS
+            and audit_result.status == "failed"
+            and audit_result.message.startswith("page-count mismatch:")
         ):
             audit_result = replace(
                 audit_result,

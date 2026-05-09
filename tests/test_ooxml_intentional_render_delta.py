@@ -219,6 +219,37 @@ def test_intentional_render_delta_accepts_page_count_delta(
     ]
 
 
+def test_intentional_render_delta_rejects_unexpected_page_count_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report = _write_fake_render_result(tmp_path, mutation="move_formula_range")
+    work = tmp_path / "book" / "move_formula_range"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+
+    def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
+        outdir.mkdir(parents=True)
+        pdf = outdir / "before-book.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    _patch_required_tools(tmp_path, monkeypatch)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_export_pdf", fake_export_pdf)
+    monkeypatch.setattr(audit.base.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 2)
+
+    result = audit.audit_intentional_render_delta(
+        report,
+        mutation="move_formula_range",
+        min_changed_count=1,
+    )
+
+    assert result["ready"] is False
+    assert result["changed_count"] == 0
+    assert result["failure_count"] == 1
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["message"].startswith("page-count mismatch:")
+
+
 def test_intentional_render_delta_requires_requested_mutation(
     tmp_path: Path,
     monkeypatch,
