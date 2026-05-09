@@ -6,6 +6,7 @@ import sys
 from base64 import b64decode
 from pathlib import Path
 from types import ModuleType
+from typing import Optional
 
 
 def _load_module() -> ModuleType:
@@ -55,7 +56,7 @@ def _write_fake_render_result(
     mutation: str = "add_data_validation",
     status: str = "rendered",
     page_count: int = 1,
-    compared_pages: list[int] | None = None,
+    compared_pages: Optional[list[int]] = None,
     density: int = 96,
 ) -> Path:
     work = tmp_path / "book" / mutation

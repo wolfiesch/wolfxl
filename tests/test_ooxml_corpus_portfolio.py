@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Optional
 
 
 def _load_module() -> ModuleType:
@@ -26,7 +27,7 @@ def _write_bucket_report(
     *,
     workbooks: list[str],
     buckets: dict[str, list[str]],
-    missing_buckets: list[str] | None = None,
+    missing_buckets: Optional[list[str]] = None,
 ) -> Path:
     payload = {
         "ready": not missing_buckets,
@@ -110,3 +111,36 @@ def test_corpus_portfolio_deduplicates_workbooks(tmp_path: Path) -> None:
 
     assert result["workbook_count"] == 1
     assert result["bucket_counts"]["excel_authored"] == 1
+
+
+def test_corpus_portfolio_counts_distinct_non_empty_sources(tmp_path: Path) -> None:
+    required = sorted(portfolio.audit_ooxml_corpus_buckets.REQUIRED_BUCKETS)
+    report = _write_bucket_report(
+        tmp_path / "real.json",
+        workbooks=["same.xlsx"],
+        buckets={bucket: ["same.xlsx"] for bucket in required},
+    )
+    empty_report = _write_bucket_report(
+        tmp_path / "empty.json",
+        workbooks=[],
+        buckets={},
+        missing_buckets=required,
+    )
+
+    result = portfolio.audit_corpus_portfolio(
+        [report, report, empty_report],
+        min_sources=2,
+        min_workbooks=1,
+    )
+
+    assert result["ready"] is False
+    assert result["source_count"] == 1
+    assert result["input_report_count"] == 3
+    assert result["threshold_failures"] == [
+        {"id": "min_sources", "actual": 1, "expected_at_least": 2},
+    ]
+    assert [item["contributes_source"] for item in result["source_reports"]] == [
+        True,
+        True,
+        False,
+    ]

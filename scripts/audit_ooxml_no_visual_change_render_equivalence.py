@@ -15,6 +15,7 @@ import shutil
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -104,7 +105,7 @@ def audit_no_visual_change_render_equivalence(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("render_report", type=Path)
     parser.add_argument(

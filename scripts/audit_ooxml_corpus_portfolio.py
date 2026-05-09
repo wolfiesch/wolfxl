@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -26,6 +27,7 @@ def audit_corpus_portfolio(
         bucket: set() for bucket in audit_ooxml_corpus_buckets.REQUIRED_BUCKETS
     }
     all_workbooks: set[str] = set()
+    contributing_source_paths: set[str] = set()
     skipped_workbook_count = 0
 
     for report_path in reports:
@@ -36,12 +38,16 @@ def audit_corpus_portfolio(
             if workbook.get("path")
         }
         all_workbooks.update(workbook_paths)
+        contributes_source = bool(workbook_paths)
+        if contributes_source:
+            contributing_source_paths.add(str(report_path.resolve()))
         skipped_workbook_count += int(payload.get("skipped_workbook_count", 0))
         for bucket, paths in payload.get("bucket_fixtures", {}).items():
             bucket_fixtures.setdefault(str(bucket), set()).update(str(path) for path in paths)
         source_reports.append(
             {
                 "path": str(report_path),
+                "contributes_source": contributes_source,
                 "ready": bool(payload.get("ready")),
                 "workbook_count": int(payload.get("workbook_count", 0)),
                 "skipped_workbook_count": int(payload.get("skipped_workbook_count", 0)),
@@ -58,7 +64,7 @@ def audit_corpus_portfolio(
         if not combined_bucket_fixtures.get(bucket)
     )
     workbook_count = len(all_workbooks)
-    source_count = len(source_reports)
+    source_count = len(contributing_source_paths)
     threshold_failures = []
     if workbook_count < min_workbooks:
         threshold_failures.append(
@@ -79,6 +85,7 @@ def audit_corpus_portfolio(
     return {
         "ready": not missing_buckets and not threshold_failures,
         "source_count": source_count,
+        "input_report_count": len(source_reports),
         "workbook_count": workbook_count,
         "skipped_workbook_count": skipped_workbook_count,
         "min_workbooks": min_workbooks,
@@ -94,7 +101,7 @@ def audit_corpus_portfolio(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reports", nargs="+", type=Path)
     parser.add_argument("--min-workbooks", type=int, default=200)
