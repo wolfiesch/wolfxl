@@ -44,6 +44,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_render_delete_first_row_delta_full_pack_report",
     "excel_render_delete_first_col_delta_full_pack_report",
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
+    "excel_ui_interaction_marker_macro_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_marker_pivot_chart_slicer_evidence",
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
@@ -118,7 +119,8 @@ OPEN_REQUIREMENTS = (
             "mutated table-slicer, pivot-chart slicer, and external-tool "
             "pivot-slicer item clicks, shared pivot-slicer cache and timeline "
             "clicks plus a marker-cell mutated "
-            "current-setting external-link prompt path and marker-cell mutated "
+            "macro security prompt path, current-setting external-link prompt "
+            "path, and marker-cell mutated "
             "PowerView read-only prompt path, list-box and button-control click "
             "persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
