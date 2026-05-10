@@ -108,6 +108,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "wbd_wdesk_add_conditional_formatting_render_equivalence",
     "wbd_wdesk_add_remove_chart_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
+    "bf30_remaining_feature_render_equivalence",
     "bf30_remaining_copy_remove_sheet_render_equivalence",
     "blind_holdout_feature_render_equivalence",
     "blind_holdout_copy_remove_sheet_render_equivalence",
@@ -157,8 +158,10 @@ OPEN_REQUIREMENTS = (
             "render equivalence "
             "on an external-tool-authored "
             "public-company workbook; BF30 public-download side evidence "
-            "separately proves copy-remove-sheet render equivalence on six "
-            "readable real-world public downloads; blind-holdout side evidence "
+            "separately proves add-data-validation, "
+            "add-conditional-formatting, add-remove-chart, and "
+            "copy-remove-sheet render equivalence on six readable real-world "
+            "public downloads; blind-holdout side evidence "
             "separately proves add-data-validation, add-conditional-formatting, "
             "add-remove-chart, and copy-remove-sheet render equivalence on its "
             "one readable held-out workbook; rescue-downloads side evidence "
