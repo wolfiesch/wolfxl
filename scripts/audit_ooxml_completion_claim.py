@@ -69,6 +69,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_style_control_evidence",
     "excel_ui_interaction_style_button_control_evidence",
     "excel_ui_interaction_copy_remove_control_evidence",
+    "excel_ui_interaction_copy_remove_button_control_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -186,7 +187,7 @@ OPEN_REQUIREMENTS = (
             "read-only prompt paths, plus "
             "marker-cell-mutated and style-cell-mutated list-box and "
             "button-control click persistence, plus copy-remove-sheet-mutated "
-            "list-box click persistence, but "
+            "list-box and button-control click persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
         ),

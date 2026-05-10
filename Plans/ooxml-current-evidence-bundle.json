@@ -1022,6 +1022,42 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_copy_remove_button_control_click",
+      "path": "/tmp/wolfxl-ui-interaction-copy-remove-button-control-20260509/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-copy-remove-button-control-20260509 --probe-kind excel_ui_interaction --probe embedded_control_openability --mutation copy_remove_sheet --fixture umya-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-copy-remove-button-control-20260509.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "copy_remove_sheet"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "umya-control-props-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "copy_remove_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object: Button 1"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_copy_remove_button_control_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-copy-remove-button-control-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe embedded_control_openability --report /tmp/wolfxl-ui-interaction-copy-remove-button-control-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-copy-remove-button-control-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["embedded_control_openability"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.embedded_control_openability.status", "equals": "clear"},
+        {"path": "probes.embedded_control_openability.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.embedded_control_openability.passed_fixtures", "equals": ["umya-control-props-basic.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_render_full_pack_report",
       "path": "/tmp/wolfxl-render-excel-full-pack.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-full-pack --render-engine excel --timeout 180 --max-pages-per-fixture 3 > /tmp/wolfxl-render-excel-full-pack.json",
