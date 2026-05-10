@@ -112,6 +112,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "timeline_slicer_add_conditional_formatting_render_equivalence",
     "timeline_slicer_rename_sheet_render_equivalence",
     "timeline_slicer_copy_remove_sheet_render_equivalence",
+    "timeline_slicer_delete_first_row_render_delta",
+    "timeline_slicer_delete_first_col_render_delta",
     "slicer_shared_two_pivots_sidecar_delete_first_row_render_delta",
     "slicer_shared_two_pivots_sidecar_delete_first_col_render_delta",
     "slicer_shared_two_pivots_sidecar_interactive_evidence",
@@ -198,7 +200,7 @@ OPEN_REQUIREMENTS = (
             "shared-slicer workbook, plus add-data-validation, "
             "add-conditional-formatting, add-remove-chart, and "
             "copy-remove-sheet and rename-sheet equivalence on a high-risk "
-            "timeline workbook, along with "
+            "timeline workbook, along with shared-slicer and timeline "
             "delete-first-row/column visual deltas; ILPA "
             "side evidence separately proves external-link "
             "retarget, add-data-validation, add-conditional-formatting, and "
