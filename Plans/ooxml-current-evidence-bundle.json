@@ -3895,6 +3895,23 @@
       ]
     },
     {
+      "name": "ticker_to_gl_strongbox_excel_app_smoke_source_marker",
+      "path": "/tmp/wolfxl-app-smoke-excel-ticker-to-gl-source-marker-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-ticker-to-gl-flat-20260510 /tmp/wolfxl-app-smoke-excel-ticker-to-gl-source-marker-20260510 && mkdir -p /tmp/wolfxl-ticker-to-gl-flat-20260510 && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/aapl/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-20260510/aapl-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/amzn/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-20260510/amzn-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/googl/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-20260510/googl-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/msft/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-20260510/msft-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/nvda/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-20260510/nvda-strongbox.xlsx && uv run --no-sync python scripts/run_ooxml_app_smoke.py /tmp/wolfxl-ticker-to-gl-flat-20260510 --output-dir /tmp/wolfxl-app-smoke-excel-ticker-to-gl-source-marker-20260510 --app excel --timeout 180 --mutation source --mutation marker_cell > /tmp/wolfxl-app-smoke-excel-ticker-to-gl-source-marker-20260510.json",
+      "expect": [
+        {"path": "fixture_dir", "equals": "/private/tmp/wolfxl-ticker-to-gl-flat-20260510"},
+        {"path": "apps", "equals": ["excel"]},
+        {"path": "mutations", "equals": ["source", "marker_cell"]},
+        {"path": "result_count", "equals": 10},
+        {"path": "failure_count", "equals": 0},
+        {"path": "clean_pass_count", "equals": 10},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "expected_app_unsupported_count", "equals": 0},
+        {"path": "non_clean_count", "equals": 0},
+        {"path": "aborted", "equals": false}
+      ]
+    },
+    {
       "name": "spreadsheet_peek_examples_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/spreadsheet-peek/examples --json > /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
