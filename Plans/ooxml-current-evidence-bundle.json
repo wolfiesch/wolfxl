@@ -5212,6 +5212,38 @@
       ]
     },
     {
+      "name": "codexaudit_qoe_sample_add_dv_excel_render_report",
+      "path": "/tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510/render-compare-report.json",
+      "producer": "rm -rf /tmp/wolfxl-codexaudit-qoe-original-one-20260510 /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 && mkdir -p /tmp/wolfxl-codexaudit-qoe-original-one-20260510 && zsh -lc 'setopt null_glob; for f in /Users/wolfgangschoenberger/Documents/CodexAudit/workbooks/*.xlsx(NOn[1,1]); do cp \"$f\" /tmp/wolfxl-codexaudit-qoe-original-one-20260510/; done' && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-codexaudit-qoe-original-one-20260510 --output-dir /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 1 --page-selection first-pages --mutation add_data_validation > /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation"]},
+        {"path": "max_pages_per_fixture", "equals": 1},
+        {"path": "page_selection", "equals": "first-pages"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results", "length": 1},
+        {"path": "results.0.status", "equals": "sampled_rendered"}
+      ]
+    },
+    {
+      "name": "codexaudit_qoe_sample_add_dv_render_equivalence",
+      "path": "/tmp/wolfxl-codexaudit-qoe-original-one-add-dv-render-equivalence-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510/render-compare-report.json --mutation add_data_validation --timeout 240 --strict > /tmp/wolfxl-codexaudit-qoe-original-one-add-dv-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation"]},
+        {"path": "observed_mutations", "equals": ["add_data_validation"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 1},
+        {"path": "passed_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0}
+      ]
+    },
+    {
       "name": "iran_osint_gap_radar",
       "path": "/tmp/wolfxl-gap-radar-iran-osint-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/iran/osint/data --recursive --json > /tmp/wolfxl-gap-radar-iran-osint-20260509.json",
