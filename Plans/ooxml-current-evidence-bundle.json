@@ -5214,7 +5214,7 @@
     {
       "name": "codexaudit_qoe_sample_add_dv_excel_render_report",
       "path": "/tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510/render-compare-report.json",
-      "producer": "rm -rf /tmp/wolfxl-codexaudit-qoe-original-one-20260510 /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 && mkdir -p /tmp/wolfxl-codexaudit-qoe-original-one-20260510 && zsh -lc 'setopt null_glob; for f in /Users/wolfgangschoenberger/Documents/CodexAudit/workbooks/*.xlsx(NOn[1,1]); do cp \"$f\" /tmp/wolfxl-codexaudit-qoe-original-one-20260510/; done' && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-codexaudit-qoe-original-one-20260510 --output-dir /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 1 --page-selection first-pages --mutation add_data_validation > /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-codexaudit-qoe-original-one-20260510 /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 && mkdir -p /tmp/wolfxl-codexaudit-qoe-original-one-20260510 && cp '/Users/wolfgangschoenberger/Documents/CodexAudit/workbooks/Copy of San Diego Gymnastics_QofE Databook.xlsx' /tmp/wolfxl-codexaudit-qoe-original-one-20260510/ && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-codexaudit-qoe-original-one-20260510 --output-dir /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 1 --page-selection first-pages --mutation add_data_validation > /tmp/wolfxl-render-excel-codexaudit-qoe-original-one-20260510.json",
       "expect": [
         {"path": "render_engine", "equals": "excel"},
         {"path": "mutations", "equals": ["add_data_validation"]},
@@ -5223,6 +5223,7 @@
         {"path": "result_count", "equals": 1},
         {"path": "failure_count", "equals": 0},
         {"path": "results", "length": 1},
+        {"path": "results.0.fixture", "equals": "Copy of San Diego Gymnastics_QofE Databook.xlsx"},
         {"path": "results.0.status", "equals": "sampled_rendered"}
       ]
     },
