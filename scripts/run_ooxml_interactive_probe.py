@@ -74,6 +74,8 @@ REQUIRED_UI_ACTIONS = {
     "slicer_selection_state": "clicked Excel slicer item",
     "timeline_selection_state": "clicked Excel timeline month",
 }
+_SCREEN_LOCKED_CACHE_SECONDS = 1.0
+_SCREEN_LOCKED_CACHE: tuple[float, bool] | None = None
 
 
 @dataclass
@@ -419,6 +421,22 @@ def _run_ui_interaction_probe(
         )
 
     required_action = REQUIRED_UI_ACTIONS[probe]
+    screen_lock_action = next(
+        (action for action in ui_actions if "screen is locked" in action),
+        None,
+    )
+    if screen_lock_action is not None:
+        return InteractiveProbeResult(
+            fixture=fixture_label,
+            probe=probe,
+            probe_kind=UI_INTERACTION_PROBE_KIND,
+            mutation=mutation,
+            app="excel",
+            status="failed",
+            output=str(probe_path),
+            message=screen_lock_action,
+            ui_actions=ui_actions,
+        )
     required_action_observed = required_action in ui_actions
     required_action_optional = (
         probe == "external_link_update_prompt"
@@ -647,7 +665,6 @@ def _open_excel_with_ui_interaction_impl(
         if name:
             if probe == "embedded_control_openability":
                 ui_actions.extend(_click_embedded_control(src))
-                ui_actions.extend(_save_active_workbook())
             if probe == "unsupported_content_prompt":
                 ui_actions.extend(_perform_probe_ui_actions(probe))
             if probe == "pivot_refresh_state":
@@ -656,10 +673,8 @@ def _open_excel_with_ui_interaction_impl(
                 ui_actions.extend(_select_first_probe_shape(src, probe))
             if probe == "slicer_selection_state":
                 ui_actions.extend(_click_slicer_items(src))
-                ui_actions.extend(_save_active_workbook())
             if probe == "timeline_selection_state":
                 ui_actions.extend(_click_timeline_month(src))
-                ui_actions.extend(_save_active_workbook())
             run_ooxml_app_smoke._close_excel_best_effort()
             run_ooxml_app_smoke._quit_excel_best_effort()
             return name, _dedupe_actions(ui_actions)
@@ -815,10 +830,12 @@ end tell
 
 
 def _click_slicer_items(src: Path) -> list[str]:
-    """Click the first visible item in every authored table slicer."""
+    """Click visible slicer items until Excel persists a filter/cache change."""
     names = _probe_shape_names(src, "slicer_selection_state")
     if not names:
         return ["failed Excel slicer item click: no slicer shape names in package"]
+    filter_before = _slicer_table_filter_state(src)
+    cache_before = _slicer_cache_item_state(src)
     quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
     script = f"""
 tell application "Microsoft Excel"
@@ -863,10 +880,13 @@ end tell
         return [f"failed Excel slicer item click: {geometry or 'no matching shape'}"]
 
     # The probe normalizes the Excel window, zoom, and scroll origin above.
-    # These offsets target the first visible button in the MyExcelOnline slicer
-    # fixture; the persisted table filter change is the actual pass condition.
+    # The candidate offsets cover common slicer header/item spacing across the
+    # current real-Excel and external-tool fixtures; the persisted XML change is
+    # the actual pass condition.
     sheet_origin_x = 24.0
     sheet_origin_y = 259.0
+    click_x_fractions = (0.5, 0.28, 0.72)
+    click_y_offsets = (33.0, 49.0, 66.0, 84.0)
     actions = ["clicked Excel slicer item"]
     for line in geometry.splitlines():
         parts = line.split("||")
@@ -877,22 +897,28 @@ end tell
             left, top, width, _height = [float(part) for part in parts[1:]]
         except ValueError:
             return [f"failed Excel slicer item click: invalid shape geometry {line!r}"]
-        click_x = sheet_origin_x + left + (width / 2.0)
-        click_y = sheet_origin_y + top + 33.0
-        try:
-            _post_mouse_click(click_x, click_y)
-        except Exception as exc:
-            return [f"failed Excel slicer item click: {str(exc)[:250]}"]
-        actions.append(f"clicked Excel slicer item: {name}")
-        time.sleep(0.2)
+        for x_fraction in click_x_fractions:
+            for y_offset in click_y_offsets:
+                click_x = sheet_origin_x + left + (width * x_fraction)
+                click_y = sheet_origin_y + top + y_offset
+                try:
+                    _post_mouse_click(click_x, click_y)
+                except Exception as exc:
+                    return [f"failed Excel slicer item click: {str(exc)[:250]}"]
+                actions.append(f"clicked Excel slicer item: {name}")
+                time.sleep(0.2)
+                actions.extend(_save_active_workbook())
+                if _slicer_interaction_changed(src, filter_before, cache_before):
+                    return actions
     return actions
 
 
 def _click_embedded_control(src: Path) -> list[str]:
-    """Click a visible worksheet form control and rely on persisted state."""
+    """Click a visible worksheet form control until Excel persists state."""
     names = _control_shape_names(src)
     if not names:
         return ["failed Excel embedded/control click: no control shape names in package"]
+    control_before = _control_property_state(src)
     quoted_names = ", ".join(f'"{_escape_applescript_text(name)}"' for name in names)
     script = f"""
 tell application "Microsoft Excel"
@@ -945,21 +971,32 @@ end tell
     zoom = 1.75
     sheet_origin_x = 39.0
     sheet_origin_y = 276.0
-    click_x = sheet_origin_x + (left * zoom) + (width * zoom * 0.2)
-    click_y = sheet_origin_y + (top * zoom) + min(height * zoom * 0.45, 49.0)
-    try:
-        _post_mouse_click(click_x, click_y)
-    except Exception as exc:
-        return [f"failed Excel embedded/control click: {str(exc)[:250]}"]
-    time.sleep(0.5)
-    return [
+    actions = [
         "clicked Excel embedded/control object",
         f"clicked Excel embedded/control object: {name}",
     ]
+    click_x_fractions = (0.2, 0.5)
+    click_y_fractions = (0.35, 0.55, 0.75, 0.9)
+    for x_fraction in click_x_fractions:
+        for y_fraction in click_y_fractions:
+            click_x = sheet_origin_x + (left * zoom) + (width * zoom * x_fraction)
+            click_y = sheet_origin_y + (top * zoom) + (height * zoom * y_fraction)
+            try:
+                _post_mouse_click(click_x, click_y)
+            except Exception as exc:
+                return [f"failed Excel embedded/control click: {str(exc)[:250]}"]
+            time.sleep(0.5)
+            actions.extend(_save_active_workbook())
+            control_after = _control_property_state(src)
+            if control_after and (
+                control_after != control_before or _stateless_button_control_state(control_after)
+            ):
+                return actions
+    return actions
 
 
 def _click_timeline_month(src: Path) -> list[str]:
-    """Click a visible month in the first authored timeline on local Mac Excel."""
+    """Click visible timeline months until Excel persists selection state."""
     selection = _timeline_selection_range(src)
     if selection is None:
         return ["failed Excel timeline month click: no persisted selection in package"]
@@ -1019,14 +1056,25 @@ end tell
     sheet_origin_x = 24.0
     sheet_origin_y = 253.0
     month_width = (width * zoom) / 12.0
-    click_x = sheet_origin_x + (left * zoom) + ((target_month_index + 0.5) * month_width)
-    click_y = sheet_origin_y + (top * zoom) + 62.0
-    try:
-        _post_mouse_click(click_x, click_y)
-    except Exception as exc:
-        return [f"failed Excel timeline month click: {str(exc)[:250]}"]
-    target_label = _month_label(target_month_index)
-    return ["clicked Excel timeline month", f"clicked Excel timeline month: {target_label}"]
+    candidate_months = _candidate_timeline_months(target_month_index)
+    click_y_offsets = (62.0, 78.0, 96.0, 116.0)
+    actions = ["clicked Excel timeline month"]
+    for month_index in candidate_months:
+        target_label = _month_label(month_index)
+        click_x = sheet_origin_x + (left * zoom) + ((month_index + 0.5) * month_width)
+        for y_offset in click_y_offsets:
+            click_y = sheet_origin_y + (top * zoom) + y_offset
+            try:
+                _post_mouse_click(click_x, click_y)
+            except Exception as exc:
+                return [f"failed Excel timeline month click: {str(exc)[:250]}"]
+            actions.append(f"clicked Excel timeline month: {target_label}")
+            time.sleep(0.2)
+            actions.extend(_save_active_workbook())
+            timeline_after = _timeline_selection_range(src)
+            if timeline_after is not None and timeline_after != selection:
+                return actions
+    return actions
 
 
 def _timeline_target_month_index(end_date: str) -> int:
@@ -1035,11 +1083,22 @@ def _timeline_target_month_index(end_date: str) -> int:
     return max(0, min(11, parsed.month + 1))
 
 
+def _candidate_timeline_months(target_month_index: int) -> tuple[int, ...]:
+    candidates: list[int] = []
+    for offset in (0, 1, -1, 2, -2):
+        candidate = target_month_index + offset
+        if 0 <= candidate <= 11 and candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
 def _month_label(month_index: int) -> str:
     return dt.date(2000, month_index + 1, 1).strftime("%b")
 
 
 def _post_mouse_click(x: float, y: float) -> None:
+    if _mac_screen_is_locked():
+        raise RuntimeError("macOS screen is locked; unlock before Excel UI mouse probes")
     try:
         import Quartz  # type: ignore[import-not-found]
     except ImportError:
@@ -1102,6 +1161,53 @@ for event_type in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
         "PyObjC Quartz is not available for mouse events"
         + (f" ({'; '.join(errors[:3])})" if errors else "")
     )
+
+
+def _mac_screen_is_locked() -> bool:
+    global _SCREEN_LOCKED_CACHE
+    if (
+        _SCREEN_LOCKED_CACHE is not None
+        and time.monotonic() - _SCREEN_LOCKED_CACHE[0] <= _SCREEN_LOCKED_CACHE_SECONDS
+    ):
+        return _SCREEN_LOCKED_CACHE[1]
+    script = """
+import Quartz
+session = Quartz.CGSessionCopyCurrentDictionary() or {}
+print("1" if session.get("CGSSessionScreenIsLocked") else "0")
+"""
+    for candidate in _python_candidates_for_quartz():
+        proc = subprocess.run(
+            [str(candidate), "-c", script],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3,
+            check=False,
+        )
+        if proc.returncode != 0:
+            continue
+        locked = proc.stdout.strip() == "1"
+        _SCREEN_LOCKED_CACHE = (time.monotonic(), locked)
+        return locked
+    _SCREEN_LOCKED_CACHE = (time.monotonic(), False)
+    return False
+
+
+def _python_candidates_for_quartz() -> list[Path]:
+    candidates = [
+        Path(sys.executable),
+        Path("/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"),
+        Path("/opt/homebrew/bin/python3"),
+        Path("/usr/local/bin/python3"),
+        Path("/usr/bin/python3"),
+    ]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        candidate = Path(entry) / "python3"
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return [candidate for candidate in candidates if candidate.exists()]
 
 
 def _probe_shape_names(path: Path, probe: str) -> list[str]:
@@ -1223,6 +1329,18 @@ def _slicer_cache_item_state(
     except (zipfile.BadZipFile, ET.ParseError, OSError):
         return ()
     return tuple(state)
+
+
+def _slicer_interaction_changed(
+    path: Path,
+    filter_before: tuple[tuple[str, str, tuple[str, ...]], ...],
+    cache_before: tuple[tuple[str, tuple[tuple[int, tuple[tuple[str, str], ...]], ...]], ...],
+) -> bool:
+    filter_after = _slicer_table_filter_state(path)
+    cache_after = _slicer_cache_item_state(path)
+    return (
+        bool(filter_after) and filter_after != filter_before
+    ) or (bool(cache_after) and cache_after != cache_before)
 
 
 def _control_property_state(path: Path) -> tuple[tuple[str, tuple[tuple[str, str], ...]], ...]:
