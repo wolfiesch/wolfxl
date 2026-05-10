@@ -122,6 +122,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "iran_osint_recursive_add_conditional_formatting_render_equivalence",
     "iran_osint_recursive_copy_remove_sheet_render_equivalence",
     "iran_osint_recursive_add_remove_chart_render_equivalence",
+    "synthgl_docs_las_vegas_feature_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -175,6 +176,10 @@ OPEN_REQUIREMENTS = (
             "add-data-validation and add-conditional-formatting render "
             "equivalence plus copy-remove-sheet and add-remove-chart render "
             "equivalence on the full 16-workbook recursive public-data corpus, "
+            "and SynthGL docs QoE side evidence separately proves "
+            "add-data-validation, add-conditional-formatting, and "
+            "add-remove-chart render equivalence on two renderable Las Vegas "
+            "QoE databooks, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "

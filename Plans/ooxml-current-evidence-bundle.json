@@ -3835,6 +3835,23 @@
       ]
     },
     {
+      "name": "synthgl_docs_las_vegas_feature_render_equivalence",
+      "path": "/tmp/wolfxl-synthgl-docs-las-vegas-feature-render-equivalence-20260509.json",
+      "producer": "rm -rf /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-input-20260509 && mkdir -p /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-input-20260509 && cp '/Users/wolfgangschoenberger/Projects/SynthGL/docs/examples/excel/Project Las Vegas_QofE Databook (version 2).xlsx' /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-input-20260509/ && cp '/Users/wolfgangschoenberger/Projects/SynthGL/docs/examples/excel/Project Las Vegas_QofE Databook_GOLDEN.xlsx' /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-input-20260509/ && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-input-20260509 --output-dir /tmp/wolfxl-render-excel-synthgl-docs-las-vegas-feature-equivalence-20260509 --render-engine excel --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --max-pages-per-fixture 2 --page-selection first-and-last-pages --timeout 180 > /tmp/wolfxl-synthgl-docs-las-vegas-feature-equivalence-render-20260509.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-synthgl-docs-las-vegas-feature-equivalence-20260509/render-compare-report.json --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --timeout 180 --strict > /tmp/wolfxl-synthgl-docs-las-vegas-feature-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting", "add_data_validation", "add_remove_chart"]},
+        {"path": "result_count", "equals": 6},
+        {"path": "passed_count", "equals": 6},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "corpus_portfolio_diversity",
       "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-synthgl-docs-examples-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json --min-sources 19 --min-workbooks 270 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-synthgl-docs-examples-20260509.json",
