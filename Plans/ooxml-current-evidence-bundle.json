@@ -4857,23 +4857,23 @@
     },
     {
       "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-sec-investment-mgmt-20260510.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json --min-sources 24 --min-workbooks 321 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-sec-investment-mgmt-20260510.json",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-sec-municipal-and-investment-mgmt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json --min-sources 25 --min-workbooks 350 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-sec-municipal-and-investment-mgmt-20260510.json",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 24},
-        {"path": "workbook_count", "equals": 321},
+        {"path": "source_count", "equals": 25},
+        {"path": "workbook_count", "equals": 350},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 288},
+        {"path": "bucket_counts.excel_authored", "equals": 317},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
         {"path": "bucket_counts.slicer_or_timeline", "equals": 7},
         {"path": "bucket_counts.external_link", "equals": 15},
         {"path": "bucket_counts.chart_or_chart_style", "equals": 19},
-        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 60}
+        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 80}
       ]
     },
     {
