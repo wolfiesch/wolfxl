@@ -49,6 +49,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_copy_remove_macro_evidence",
     "excel_ui_interaction_add_data_validation_macro_evidence",
     "excel_ui_interaction_mutated_pivot_refresh_evidence",
+    "excel_ui_interaction_add_data_validation_pivot_refresh_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_style_table_slicer_evidence",
     "excel_ui_interaction_copy_remove_table_slicer_evidence",
@@ -234,8 +235,9 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "Targeted UI-interaction evidence exists, including "
-            "marker-cell-mutated, style-cell-mutated, and "
-            "copy-remove-sheet-mutated pivot refresh commands, "
+            "marker-cell-mutated, style-cell-mutated, "
+            "copy-remove-sheet-mutated, and add-data-validation-mutated "
+            "pivot refresh commands, "
             "marker-cell-mutated and style-cell-mutated table-slicer, "
             "copy-remove-sheet-mutated table-slicer, "
             "marker-cell-mutated and style-cell-mutated pivot-chart "
