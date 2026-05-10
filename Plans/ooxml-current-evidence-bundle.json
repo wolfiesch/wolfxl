@@ -2755,6 +2755,55 @@
       ]
     },
     {
+      "name": "slicer_shared_two_pivots_sidecar_excel_render_copy_first_sheet_all_pages",
+      "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 80 --mutation copy_first_sheet > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["copy_first_sheet"]},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.status", "equals": "rendered"},
+        {"path": "results.0.page_count", "equals": 72},
+        {"path": "results.0.compared_page_count", "equals": 72}
+      ]
+    },
+    {
+      "name": "slicer_shared_two_pivots_native_excel_copy_render_baseline",
+      "path": "/tmp/wolfxl-render-excel-manual-copy-slicer-20260510.json",
+      "producer": "Native Microsoft Excel copy baseline: open tests/fixtures/slicer_timeline_variants/real-excel-shared-slicer-two-pivots.xlsx in Microsoft Excel, copy worksheet 1 after worksheet 2, save as /tmp/wolfxl-excel-manual-copy-slicer-20260510/excel-manual-copy.xlsx, then run uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-excel-manual-copy-slicer-20260510 --output-dir /tmp/wolfxl-render-excel-manual-copy-slicer-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 80 > /tmp/wolfxl-render-excel-manual-copy-slicer-20260510.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["no_op"]},
+        {"path": "results.0.fixture", "equals": "excel-manual-copy.xlsx"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.page_count", "equals": 72},
+        {"path": "results.0.compared_page_count", "equals": 72},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0}
+      ]
+    },
+    {
+      "name": "slicer_shared_two_pivots_copy_first_sheet_native_excel_page_multiset_equivalence",
+      "path": "/tmp/wolfxl-slicer-shared-two-pivots-copy-first-sheet-excel-native-page-multiset-equivalence-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_render_page_multiset_equivalence.py /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510/render-compare-report.json /tmp/wolfxl-render-excel-manual-copy-slicer-20260510/render-compare-report.json --left-mutation copy_first_sheet --right-mutation no_op --left-prefix after --right-prefix before --strict > /tmp/wolfxl-slicer-shared-two-pivots-copy-first-sheet-excel-native-page-multiset-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "left_mutation", "equals": "copy_first_sheet"},
+        {"path": "right_mutation", "equals": "no_op"},
+        {"path": "result_count", "equals": 1},
+        {"path": "passed_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.left_page_count", "equals": 72},
+        {"path": "results.0.right_page_count", "equals": 72},
+        {"path": "results.0.differing_hash_count", "equals": 0}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_rename_sheet",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --render-engine excel --mutation rename_first_sheet --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509 --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509.json",
