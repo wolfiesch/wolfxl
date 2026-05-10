@@ -57,6 +57,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_style_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_copy_remove_external_tool_pivot_slicer_evidence",
+    "excel_ui_interaction_add_data_validation_pivot_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_style_timeline_evidence",
     "excel_ui_interaction_copy_remove_timeline_evidence",
@@ -236,7 +237,9 @@ OPEN_REQUIREMENTS = (
             "slicer, copy-remove-sheet-mutated pivot-chart slicer, "
             "marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, copy-remove-sheet-mutated external-tool "
-            "pivot-slicer item clicks, marker-cell-mutated, style-cell-mutated, "
+            "pivot-slicer item clicks, add-data-validation-mutated "
+            "external-tool and pivot-chart slicer item clicks, "
+            "marker-cell-mutated, style-cell-mutated, "
             "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
             "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
             "timeline clicks, plus marker-cell-mutated, style-cell-mutated, "
