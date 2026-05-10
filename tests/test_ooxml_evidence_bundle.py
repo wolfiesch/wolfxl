@@ -94,6 +94,33 @@ def test_bundle_audit_accepts_length_expectation(tmp_path: Path) -> None:
     assert audit["issue_count"] == 0
 
 
+def test_bundle_audit_accepts_exact_length_expectation(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(json.dumps({"fixtures": ["a.xlsx", "b.xlsx"]}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
+                        "expect": [
+                            {"path": "fixtures", "length": 2},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is True
+    assert audit["issue_count"] == 0
+
+
 def test_bundle_audit_accepts_contains_expectation(tmp_path: Path) -> None:
     report_path = tmp_path / "coverage.json"
     report_path.write_text(

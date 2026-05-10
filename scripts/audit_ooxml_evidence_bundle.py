@@ -115,6 +115,11 @@ def _evaluate_check(payload: object, check: dict[str, object]) -> dict:
         actual_len = len(actual) if isinstance(actual, (list, dict, str)) else None
         passed = actual_len is not None and actual_len >= expected
         message = "ok" if passed else f"expected len({path}) >= {expected!r}, got {actual_len!r}"
+    elif "length" in check:
+        expected = check["length"]
+        actual_len = len(actual) if isinstance(actual, (list, dict, str)) else None
+        passed = actual_len is not None and actual_len == expected
+        message = "ok" if passed else f"expected len({path}) == {expected!r}, got {actual_len!r}"
     elif "contains" in check:
         expected = check["contains"]
         passed = _contains(actual, expected)
