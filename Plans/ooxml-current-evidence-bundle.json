@@ -1013,6 +1013,96 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_conditional_formatting_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-cf-excelize-pivot-slicer-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-cf-excelize-pivot-slicer-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation add_conditional_formatting --fixture excelize-2.10-pivot-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-cf-excelize-pivot-slicer-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_conditional_formatting"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "excelize-2.10-pivot-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_conditional_formatting"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel slicer shape"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_conditional_formatting_pivot_slicer_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-cf-excelize-pivot-slicer-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-add-cf-excelize-pivot-slicer-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-cf-excelize-pivot-slicer-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["excelize-2.10-pivot-slicers.xlsx"]}
+      ]
+    },
+    {
+      "name": "current_excel_16_108_source_table_slicer_recheck_non_state_change",
+      "path": "/tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "source"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 1},
+        {"path": "results.0.fixture", "equals": "real-excel-table-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.status", "equals": "failed"},
+        {"path": "results.0.message", "contains": "did not change persisted table filter or slicer-cache item state"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "current_excel_16_108_source_timeline_recheck_non_state_change",
+      "path": "/tmp/wolfxl-ui-interaction-source-timeline-check-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-timeline-check-20260510 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-timeline-check-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "source"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 1},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.status", "equals": "failed"},
+        {"path": "results.0.message", "contains": "did not change persisted timeline selection"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel timeline month"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "current_excel_16_108_source_control_recheck_non_state_change",
+      "path": "/tmp/wolfxl-ui-interaction-source-control-click-check-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-control-click-check-20260510 --probe-kind excel_ui_interaction --probe embedded_control_openability --fixture real-excel-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-control-click-check-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "source"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 1},
+        {"path": "results.0.fixture", "equals": "real-excel-control-props-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.status", "equals": "failed"},
+        {"path": "results.0.message", "contains": "did not change persisted control-property state"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_add_data_validation_shared_slicer_click",
       "path": "/tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510/interactive-probe-report.json",
       "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation add_data_validation --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510.stdout.json",

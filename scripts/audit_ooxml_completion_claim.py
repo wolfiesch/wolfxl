@@ -61,6 +61,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_style_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_copy_remove_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_add_data_validation_pivot_slicer_evidence",
+    "excel_ui_interaction_add_conditional_formatting_pivot_slicer_evidence",
     "excel_ui_interaction_add_data_validation_shared_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_style_timeline_evidence",
@@ -265,6 +266,8 @@ OPEN_REQUIREMENTS = (
             "pivot-slicer item clicks, copy-remove-sheet-mutated external-tool "
             "pivot-slicer item clicks, add-data-validation-mutated "
             "external-tool, pivot-chart, and shared pivot-slicer item clicks, "
+            "add-conditional-formatting-mutated external-tool pivot-slicer "
+            "item clicks, "
             "marker-cell-mutated, style-cell-mutated, "
             "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
             "marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, "
@@ -287,7 +290,10 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated list-box and "
             "button-control click persistence, plus copy-remove-sheet-mutated "
             "list-box and button-control click persistence, plus add-data-validation-mutated "
-            "list-box and button-control click persistence, but "
+            "list-box and button-control click persistence. Current Excel 16.108 "
+            "source rechecks also show that the existing table-slicer, timeline, "
+            "and list-box click harness paths can complete UI actions without "
+            "persisting a state change in this environment, so "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
         ),
