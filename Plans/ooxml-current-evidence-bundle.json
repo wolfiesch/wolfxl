@@ -3867,6 +3867,20 @@
       ]
     },
     {
+      "name": "ticker_to_gl_strongbox_noop_marker_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-ticker-to-gl-noop-marker-20260510/report.json",
+      "producer": "rm -rf /tmp/wolfxl-ooxml-fidelity-mutations-ticker-to-gl-noop-marker-20260510 && uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/ticker-to-gl --recursive --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-ticker-to-gl-noop-marker-20260510 --mutation no_op --mutation marker_cell --skip-invalid-source",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/Users/wolfgangschoenberger/Projects/ticker-to-gl"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell"]},
+        {"path": "result_count", "equals": 10},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "spreadsheet_peek_examples_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/spreadsheet-peek/examples --json > /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
