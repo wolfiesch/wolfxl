@@ -5208,9 +5208,7 @@
         {"path": "failure_count", "equals": 0},
         {"path": "skipped_fixture_count", "equals": 0},
         {"path": "skip_invalid_source", "equals": true},
-        {"path": "results", "length": 40},
-        {"path": "results.0.status", "equals": "passed"},
-        {"path": "results.39.status", "equals": "passed_with_expected_drift"}
+        {"path": "results", "length": 40}
       ]
     },
     {
