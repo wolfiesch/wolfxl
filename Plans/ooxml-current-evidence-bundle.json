@@ -833,6 +833,76 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_data_validation_shared_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation add_data_validation --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_data_validation"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel slicer shape"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_data_validation_shared_slicer_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-dv-shared-slicer-cache-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/slicer_timeline_variants --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-add-dv-shared-slicer-cache-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-dv-shared-slicer-cache-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["real-excel-shared-slicer-two-pivots.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_data_validation_timeline_month_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-dv-timeline-click-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-dv-timeline-click-20260510 --probe-kind excel_ui_interaction --probe timeline_selection_state --mutation add_data_validation --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-dv-timeline-click-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_data_validation"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel timeline shape", "selected Excel timeline shape: ORDER DATE", "clicked Excel timeline month", "clicked Excel timeline month: May", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_data_validation_timeline_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-dv-timeline-click-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe timeline_selection_state --report /tmp/wolfxl-ui-interaction-add-dv-timeline-click-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-dv-timeline-click-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["timeline_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.timeline_selection_state.status", "equals": "clear"},
+        {"path": "probes.timeline_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.timeline_selection_state.passed_fixtures", "equals": ["real-excel-timeline-slicer.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_timeline_month_click",
       "path": "/tmp/wolfxl-ui-interaction-timeline-click-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-timeline-click-20260508 --probe-kind excel_ui_interaction --probe timeline_selection_state --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-timeline-click-20260508.stdout.json",
