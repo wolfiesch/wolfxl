@@ -78,6 +78,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_marker_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_style_unsupported_content_prompt_evidence",
+    "powerpivot_contoso_sidecar_copy_remove_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_rename_sheet_render_equivalence",
@@ -179,10 +180,11 @@ OPEN_REQUIREMENTS = (
             "path, marker-cell-mutated and style-cell-mutated adjacent "
             "issue-corpus forced external-link prompt paths, "
             "marker-cell-mutated and style-cell-mutated adjacent "
-            "issue-corpus list-box clicks, and marker-cell-mutated and "
-            "style-cell-mutated "
-            "PowerView read-only prompt paths, plus marker-cell-mutated and "
-            "style-cell-mutated list-box and button-control click persistence, but "
+            "issue-corpus list-box clicks, and source, marker-cell-mutated, "
+            "style-cell-mutated, and copy-remove-sheet-mutated PowerView "
+            "read-only prompt paths, plus "
+            "marker-cell-mutated and style-cell-mutated list-box and "
+            "button-control click persistence, but "
             "broader slicer, timeline, embedded-control, and prompt variants "
             "remain unexhausted."
         ),
