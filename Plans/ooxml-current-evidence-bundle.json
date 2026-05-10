@@ -4951,6 +4951,25 @@
       ]
     },
     {
+      "name": "domain_ground_truth_neutral_render_equivalence",
+      "path": "/tmp/wolfxl-domain-ground-truth-neutral-render-equivalence-20260510.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-domain-ground-truth-valid-20260510 --output-dir /tmp/wolfxl-render-excel-domain-ground-truth-neutral-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet > /tmp/wolfxl-domain-ground-truth-neutral-render-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-domain-ground-truth-neutral-20260510/render-compare-report.json --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet --timeout 240 --strict > /tmp/wolfxl-domain-ground-truth-neutral-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 96},
+        {"path": "passed_count", "equals": 96},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results", "length": 96},
+        {"path": "results.0.message", "contains": "render equivalent"},
+        {"path": "results.95.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "corpus_portfolio_diversity",
       "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-domain-ground-truth-20260510.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json --min-sources 26 --min-workbooks 374 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-domain-ground-truth-20260510.json",
