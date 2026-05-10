@@ -46,6 +46,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_app_open_full_pack_with_cf_verified_coverage_gate",
     "excel_ui_interaction_marker_macro_evidence",
     "excel_ui_interaction_style_macro_evidence",
+    "excel_ui_interaction_copy_remove_macro_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_style_table_slicer_evidence",
     "excel_ui_interaction_copy_remove_table_slicer_evidence",
@@ -173,9 +174,8 @@ OPEN_REQUIREMENTS = (
             "pivot-slicer item clicks, marker-cell-mutated, style-cell-mutated, "
             "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
             "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
-            "timeline clicks, plus "
-            "marker-cell-mutated and style-cell-mutated "
-            "macro security prompt paths, marker-cell-mutated and "
+            "timeline clicks, plus marker-cell-mutated, style-cell-mutated, "
+            "and copy-remove-sheet-mutated macro security prompt paths, marker-cell-mutated and "
             "style-cell-mutated current-setting external-link prompt "
             "path, marker-cell-mutated and style-cell-mutated adjacent "
             "issue-corpus forced external-link prompt paths, "
