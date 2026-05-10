@@ -247,7 +247,7 @@ OPEN_REQUIREMENTS = (
             "public/regulatory investment-management workbooks, "
             "and SEC municipal adviser sidecar evidence separately proves "
             "add-data-validation, add-conditional-formatting, add-remove-chart, "
-            "and copy-remove-sheet render equivalence on four "
+            "and copy-remove-sheet render equivalence on all 29 "
             "public/regulatory municipal-adviser workbooks, "
             "plus expected "
             "visual-delta evidence for "
