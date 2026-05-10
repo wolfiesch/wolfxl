@@ -3839,6 +3839,34 @@
       ]
     },
     {
+      "name": "spreadsheet_peek_examples_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/spreadsheet-peek/examples --json > /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 3},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 3},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 3},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 3}
+      ]
+    },
+    {
+      "name": "ticker_to_gl_strongbox_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/ticker-to-gl --recursive --json > /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 5},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 5},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 5},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 5}
+      ]
+    },
+    {
       "name": "synthgl_docs_examples_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/docs/examples/excel --json > /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json",
@@ -3936,16 +3964,16 @@
     },
     {
       "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-synthgl-docs-examples-20260509.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json --min-sources 19 --min-workbooks 270 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-synthgl-docs-examples-20260509.json",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-local-app-sidecars-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json --min-sources 21 --min-workbooks 288 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-local-app-sidecars-20260509.json",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 19},
-        {"path": "workbook_count", "equals": 280},
+        {"path": "source_count", "equals": 21},
+        {"path": "workbook_count", "equals": 288},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 247},
+        {"path": "bucket_counts.excel_authored", "equals": 255},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
