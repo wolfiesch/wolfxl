@@ -169,7 +169,7 @@ OPEN_REQUIREMENTS = (
         "id": "broader_real_world_corpus_diversity",
         "status": "open",
         "reason": (
-            "The current corpus portfolio spans 321 unique readable workbooks across 24 "
+            "The current corpus portfolio spans 350 unique readable workbooks across 25 "
             "source reports, includes standalone SEC municipal-adviser and "
             "SEC investment-management public/regulatory sidecars, and covers all "
             "required diversity buckets, but it is still not "
