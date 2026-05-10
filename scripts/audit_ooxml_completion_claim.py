@@ -147,6 +147,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ticker_to_gl_strongbox_feature_render_equivalence",
     "ticker_to_gl_strongbox_add_conditional_formatting_render_equivalence",
     "ticker_to_gl_strongbox_copy_remove_sheet_render_equivalence",
+    "sec_adviser_reports_feature_neutral_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -224,6 +225,9 @@ OPEN_REQUIREMENTS = (
             "add-conditional-formatting, add-remove-chart, and "
             "copy-remove-sheet render equivalence on five finance-cache "
             "workbooks under the recorded temporary print-area clamp, "
+            "and SEC adviser side evidence separately proves "
+            "add-data-validation, add-remove-chart, and copy-remove-sheet "
+            "render equivalence on four public/regulatory adviser workbooks, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
