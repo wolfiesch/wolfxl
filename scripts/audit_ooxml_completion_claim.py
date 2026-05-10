@@ -66,6 +66,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_style_umya_external_link_forced_prompt_evidence",
     "excel_ui_interaction_marker_umya_listbox_control_evidence",
     "excel_ui_interaction_style_umya_listbox_control_evidence",
+    "excel_ui_interaction_copy_remove_umya_listbox_control_evidence",
     "excel_ui_interaction_marker_control_evidence",
     "excel_ui_interaction_marker_button_control_evidence",
     "excel_ui_interaction_style_control_evidence",
@@ -184,8 +185,9 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
             "current-setting external-link prompt paths, marker-cell-mutated and style-cell-mutated adjacent "
             "issue-corpus forced external-link prompt paths, "
-            "marker-cell-mutated and style-cell-mutated adjacent "
-            "issue-corpus list-box clicks, and source, marker-cell-mutated, "
+            "marker-cell-mutated, style-cell-mutated, and "
+            "copy-remove-sheet-mutated adjacent issue-corpus list-box "
+            "clicks, and source, marker-cell-mutated, "
             "style-cell-mutated, and copy-remove-sheet-mutated PowerView "
             "read-only prompt paths, plus "
             "marker-cell-mutated and style-cell-mutated list-box and "

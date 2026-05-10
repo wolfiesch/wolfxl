@@ -303,6 +303,42 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_copy_remove_umya_listbox_control_click",
+      "path": "/tmp/wolfxl-ui-interaction-copy-remove-umya-listbox-control-20260509/interactive-probe-report.json",
+      "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ui-interaction-copy-remove-umya-listbox-control-20260509 --probe-kind excel_ui_interaction --probe embedded_control_openability --mutation copy_remove_sheet --fixture issue_208.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-copy-remove-umya-listbox-control-20260509.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "copy_remove_sheet"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "issue_208.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "copy_remove_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object: List Box 1"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_copy_remove_umya_listbox_control_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-copy-remove-umya-listbox-control-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --probe-kind excel_ui_interaction --probe embedded_control_openability --report /tmp/wolfxl-ui-interaction-copy-remove-umya-listbox-control-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-copy-remove-umya-listbox-control-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["embedded_control_openability"]},
+        {"path": "fixture_count", "equals": 63},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.embedded_control_openability.status", "equals": "clear"},
+        {"path": "probes.embedded_control_openability.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.embedded_control_openability.passed_fixtures", "equals": ["issue_208.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_button_control_click",
       "path": "/tmp/wolfxl-ui-interaction-button-control-20260508/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-button-control-20260508 --probe-kind excel_ui_interaction --probe embedded_control_openability --fixture umya-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-button-control-20260508.stdout.json",
