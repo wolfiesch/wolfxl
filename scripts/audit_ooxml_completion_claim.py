@@ -111,6 +111,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "bf30_remaining_copy_remove_sheet_render_equivalence",
     "blind_holdout_feature_render_equivalence",
     "blind_holdout_copy_remove_sheet_render_equivalence",
+    "rescue_downloads_feature_render_equivalence",
     "rescue_downloads_copy_remove_sheet_render_equivalence",
     "sec_edgar_add_data_validation_render_equivalence",
     "sec_edgar_add_conditional_formatting_render_equivalence",
@@ -161,7 +162,8 @@ OPEN_REQUIREMENTS = (
             "separately proves add-data-validation, add-conditional-formatting, "
             "add-remove-chart, and copy-remove-sheet render equivalence on its "
             "one readable held-out workbook; rescue-downloads side evidence "
-            "separately proves copy-remove-sheet render equivalence on two "
+            "separately proves add-data-validation, add-conditional-formatting, "
+            "add-remove-chart, and copy-remove-sheet render equivalence on two "
             "readable budget workbooks; SEC/EDGAR side evidence separately proves "
             "add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet render equivalence on six "
