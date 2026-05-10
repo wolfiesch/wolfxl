@@ -2047,6 +2047,41 @@
       ]
     },
     {
+      "name": "powerpivot_contoso_sidecar_add_data_validation_unsupported_content_prompt",
+      "path": "/tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510 --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation add_data_validation --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_data_validation"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Open as Read-Only"]},
+        {"path": "results.0.message", "contains": "PowerView unsupported-content marker"}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_add_data_validation_unsupported_content_prompt_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-dv-powerview-open-readonly-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/powerpivot_variants --probe-kind excel_ui_interaction --probe unsupported_content_prompt --report /tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-dv-powerview-open-readonly-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["unsupported_content_prompt"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.unsupported_content_prompt.status", "equals": "clear"},
+        {"path": "probes.unsupported_content_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.unsupported_content_prompt.passed_fixtures", "equals": ["real-excel-powerpivot-contoso-pnl.xlsx"]}
+      ]
+    },
+    {
       "name": "powerpivot_contoso_sidecar_marker_unsupported_content_prompt",
       "path": "/tmp/wolfxl-ui-interaction-marker-powerview-open-readonly-20260509/interactive-probe-report.json",
       "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-ui-interaction-marker-powerview-open-readonly-20260509 --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation marker_cell --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-marker-powerview-open-readonly-20260509.stdout.json",

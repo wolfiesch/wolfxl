@@ -84,6 +84,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_coverage",
     "powerpivot_contoso_sidecar_excel_expected_unsupported",
     "powerpivot_contoso_sidecar_unsupported_content_prompt_evidence",
+    "powerpivot_contoso_sidecar_add_data_validation_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_marker_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_style_unsupported_content_prompt_evidence",
     "powerpivot_contoso_sidecar_copy_remove_unsupported_content_prompt_evidence",
@@ -246,9 +247,9 @@ OPEN_REQUIREMENTS = (
             "copy-remove-sheet-mutated adjacent issue-corpus forced external-link prompt path, "
             "marker-cell-mutated, style-cell-mutated, and "
             "copy-remove-sheet-mutated adjacent issue-corpus list-box "
-            "clicks, and source, marker-cell-mutated, "
-            "style-cell-mutated, and copy-remove-sheet-mutated PowerView "
-            "read-only prompt paths, plus "
+            "clicks, and source, add-data-validation-mutated, "
+            "marker-cell-mutated, style-cell-mutated, and "
+            "copy-remove-sheet-mutated PowerView read-only prompt paths, plus "
             "marker-cell-mutated and style-cell-mutated list-box and "
             "button-control click persistence, plus copy-remove-sheet-mutated "
             "list-box and button-control click persistence, but "
