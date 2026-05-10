@@ -128,6 +128,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excelbench_external_validated_neutral_render_equivalence",
     "spreadsheet_peek_neutral_feature_render_equivalence",
     "spreadsheet_peek_copy_remove_sheet_render_equivalence",
+    "excelbench_real_world_existing_neutral_render_equivalence",
     "ticker_to_gl_strongbox_noop_marker_mutation_report",
     "ticker_to_gl_strongbox_style_copy_remove_mutation_report",
     "ticker_to_gl_strongbox_excel_app_smoke_source_marker",
@@ -201,7 +202,13 @@ OPEN_REQUIREMENTS = (
             "equivalence on three generated finance/table examples while its "
             "add-conditional-formatting run intentionally remains outside the "
             "neutral-equivalence set because one generated wide-table example "
-            "visibly changes under the new formatting rule; ticker-to-GL "
+            "visibly changes under the new formatting rule; ExcelBench "
+            "curated-manifest side evidence separately proves "
+            "add-data-validation, add-conditional-formatting, add-remove-chart, "
+            "and copy-remove-sheet render equivalence on seven existing "
+            "Excel-renderable project-owned fixtures, while the table fixture "
+            "is excluded from that neutral-render claim because Excel PDF export "
+            "fails after neutral edits; ticker-to-GL "
             "Strongbox side evidence separately proves add-data-validation, "
             "add-conditional-formatting, add-remove-chart, and "
             "copy-remove-sheet render equivalence on five finance-cache "
