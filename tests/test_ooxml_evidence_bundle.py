@@ -159,6 +159,175 @@ def test_bundle_audit_accepts_contains_expectation(tmp_path: Path) -> None:
     assert audit["issue_count"] == 0
 
 
+def test_bundle_audit_accepts_render_compare_rendered_statuses(tmp_path: Path) -> None:
+    report_path = tmp_path / "render.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "result_count": 4,
+                "failure_count": 0,
+                "density": 96,
+                "max_normalized_rmse_threshold": 0.001,
+                "results": [
+                    {"fixture": "a.xlsx", "mutation": "no_op", "status": "passed"},
+                    {
+                        "fixture": "b.xlsx",
+                        "mutation": "no_op",
+                        "status": "sampled_passed",
+                    },
+                    {
+                        "fixture": "c.xlsx",
+                        "mutation": "marker_cell",
+                        "status": "rendered",
+                    },
+                    {
+                        "fixture": "d.xlsx",
+                        "mutation": "marker_cell",
+                        "status": "sampled_rendered",
+                    },
+                ],
+            }
+        )
+    )
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "render",
+                        "path": str(report_path),
+                        "producer": (
+                            "uv run --no-sync python "
+                            "scripts/run_ooxml_render_compare.py fixtures "
+                            "--render-engine excel"
+                        ),
+                        "expect": [
+                            {"path": "failure_count", "equals": 0},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is True
+    assert audit["issue_count"] == 0
+    implicit_checks = [
+        check for check in audit["reports"][0]["checks"] if check["path"] == "results.*.status"
+    ]
+    assert implicit_checks == [
+        {
+            "path": "results.*.status",
+            "actual": ["passed", "sampled_passed", "rendered", "sampled_rendered"],
+            "passed": True,
+            "message": "ok",
+        }
+    ]
+
+
+def test_bundle_audit_rejects_skipped_render_compare_results(tmp_path: Path) -> None:
+    report_path = tmp_path / "render.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "result_count": 1,
+                "failure_count": 0,
+                "density": 96,
+                "max_normalized_rmse_threshold": 0.001,
+                "results": [
+                    {
+                        "fixture": "a.xlsx",
+                        "mutation": "marker_cell",
+                        "status": "skipped",
+                        "message": "Microsoft Excel not found",
+                    }
+                ],
+            }
+        )
+    )
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "render",
+                        "path": str(report_path),
+                        "producer": (
+                            "uv run --no-sync python "
+                            "scripts/run_ooxml_render_compare.py fixtures "
+                            "--render-engine excel"
+                        ),
+                        "expect": [
+                            {"path": "failure_count", "equals": 0},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is False
+    assert audit["issue_count"] == 1
+    assert audit["issues"][0]["check"] == "results.*.status"
+    assert "non-rendered or skipped" in audit["issues"][0]["message"]
+    assert "'status': 'skipped'" in audit["issues"][0]["message"]
+
+
+def test_bundle_audit_does_not_apply_render_guard_to_derived_audits(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "render-equivalence.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "ready": True,
+                "failure_count": 0,
+                "results": [
+                    {
+                        "fixture": "a.xlsx",
+                        "status": "inconclusive",
+                        "message": "source first sheet is hidden",
+                    }
+                ],
+            }
+        )
+    )
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "render_equivalence",
+                        "path": str(report_path),
+                        "producer": (
+                            "uv run --no-sync python "
+                            "scripts/run_ooxml_render_compare.py fixtures && "
+                            "uv run --no-sync python "
+                            "scripts/audit_ooxml_copy_sheet_render_equivalence.py"
+                        ),
+                        "expect": [
+                            {"path": "failure_count", "equals": 0},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is True
+    assert audit["issue_count"] == 0
+    assert all(check["path"] != "results.*.status" for check in audit["reports"][0]["checks"])
+
+
 def test_bundle_audit_reports_unhashable_contains_expectation(tmp_path: Path) -> None:
     report_path = tmp_path / "coverage.json"
     report_path.write_text(json.dumps({"fixtures": {"external-link.xlsx": {"ok": True}}}))

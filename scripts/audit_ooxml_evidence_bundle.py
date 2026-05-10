@@ -19,6 +19,15 @@ class BundleIssue:
     message: str
 
 
+RENDER_COMPARE_PRODUCER_MARKER = "scripts/run_ooxml_render_compare.py"
+RENDER_COMPARE_RENDERED_STATUSES = {
+    "passed",
+    "sampled_passed",
+    "rendered",
+    "sampled_rendered",
+}
+
+
 def audit_bundle(manifest_path: Path) -> dict:
     manifest = json.loads(manifest_path.read_text())
     base_dir = manifest_path.resolve().parent
@@ -65,6 +74,17 @@ def audit_bundle(manifest_path: Path) -> dict:
                         report=name,
                         path=str(path),
                         check=str(check.get("path")),
+                        message=check_result["message"],
+                    )
+                )
+        for check_result in _evaluate_implicit_checks(payload, producer):
+            result["checks"].append(check_result)
+            if not check_result["passed"]:
+                issues.append(
+                    BundleIssue(
+                        report=name,
+                        path=str(path),
+                        check=check_result["path"],
                         message=check_result["message"],
                     )
                 )
@@ -145,6 +165,81 @@ def _contains(actual: object, expected: object) -> bool:
         except TypeError:
             return False
     return False
+
+
+def _evaluate_implicit_checks(payload: object, producer: object) -> list[dict]:
+    if (
+        isinstance(producer, str)
+        and RENDER_COMPARE_PRODUCER_MARKER in producer
+        and _is_render_compare_report(payload)
+    ):
+        return [_evaluate_render_compare_statuses(payload)]
+    return []
+
+
+def _is_render_compare_report(payload: object) -> bool:
+    return (
+        isinstance(payload, dict)
+        and "max_normalized_rmse_threshold" in payload
+        and "density" in payload
+        and "results" in payload
+    )
+
+
+def _evaluate_render_compare_statuses(payload: object) -> dict:
+    path = "results.*.status"
+    if not isinstance(payload, dict):
+        return {
+            "path": path,
+            "actual": None,
+            "passed": False,
+            "message": "expected render compare report to be a JSON object",
+        }
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return {
+            "path": path,
+            "actual": None,
+            "passed": False,
+            "message": "expected render compare report to include a results list",
+        }
+    statuses = []
+    bad_results = []
+    for index, result in enumerate(results):
+        status = result.get("status") if isinstance(result, dict) else None
+        statuses.append(status)
+        if status not in RENDER_COMPARE_RENDERED_STATUSES:
+            if isinstance(result, dict):
+                fixture = result.get("fixture")
+                mutation = result.get("mutation")
+            else:
+                fixture = None
+                mutation = None
+            bad_results.append(
+                {
+                    "index": index,
+                    "fixture": fixture,
+                    "mutation": mutation,
+                    "status": status,
+                }
+            )
+    if bad_results:
+        sample = bad_results[:5]
+        return {
+            "path": path,
+            "actual": statuses,
+            "passed": False,
+            "message": (
+                "render compare report contains non-rendered or skipped "
+                f"result statuses: {sample!r}"
+            ),
+        }
+    return {
+        "path": path,
+        "actual": statuses,
+        "passed": True,
+        "message": "ok",
+    }
 
 
 def _get_path(payload: Any, path: str) -> Any:
