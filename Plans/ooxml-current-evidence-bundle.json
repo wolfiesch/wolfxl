@@ -4545,6 +4545,42 @@
       ]
     },
     {
+      "name": "sec_investment_mgmt_feature_neutral_render_equivalence",
+      "path": "/tmp/wolfxl-sec-investment-mgmt-feature-neutral-render-equivalence-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-sec-investment-mgmt-render-sample-20260510 /tmp/wolfxl-render-excel-sec-investment-mgmt-feature-neutral-20260510 /tmp/wolfxl-sec-investment-mgmt-feature-neutral-render-20260510.json /tmp/wolfxl-sec-investment-mgmt-feature-neutral-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-sec-investment-mgmt-render-sample-20260510 && find /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_mgmt -maxdepth 1 -type f -name '*.xlsx' -exec cp '{}' /tmp/wolfxl-sec-investment-mgmt-render-sample-20260510/ ';' && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-sec-investment-mgmt-render-sample-20260510 --output-dir /tmp/wolfxl-render-excel-sec-investment-mgmt-feature-neutral-20260510 --render-engine excel --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --timeout 180 > /tmp/wolfxl-sec-investment-mgmt-feature-neutral-render-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-sec-investment-mgmt-feature-neutral-20260510/render-compare-report.json --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --timeout 180 --strict > /tmp/wolfxl-sec-investment-mgmt-feature-neutral-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "observed_mutations", "equals": ["add_data_validation", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "result_count", "equals": 15},
+        {"path": "passed_count", "equals": 15},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
+      "name": "sec_investment_mgmt_add_conditional_formatting_render_equivalence",
+      "path": "/tmp/wolfxl-sec-investment-mgmt-add-cf-render-equivalence-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-sec-investment-mgmt-render-sample-cf-20260510 /tmp/wolfxl-render-excel-sec-investment-mgmt-add-cf-20260510 /tmp/wolfxl-sec-investment-mgmt-add-cf-render-20260510.json /tmp/wolfxl-sec-investment-mgmt-add-cf-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-sec-investment-mgmt-render-sample-cf-20260510 && find /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_mgmt -maxdepth 1 -type f -name '*.xlsx' -exec cp '{}' /tmp/wolfxl-sec-investment-mgmt-render-sample-cf-20260510/ ';' && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-sec-investment-mgmt-render-sample-cf-20260510 --output-dir /tmp/wolfxl-render-excel-sec-investment-mgmt-add-cf-20260510 --render-engine excel --mutation add_conditional_formatting --max-pages-per-fixture 1 --page-selection first-pages --timeout 180 > /tmp/wolfxl-sec-investment-mgmt-add-cf-render-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-sec-investment-mgmt-add-cf-20260510/render-compare-report.json --mutation add_conditional_formatting --timeout 180 --strict > /tmp/wolfxl-sec-investment-mgmt-add-cf-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "result_count", "equals": 5},
+        {"path": "passed_count", "equals": 5},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "sec_adviser_reports_feature_neutral_render_equivalence",
       "path": "/tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json",
       "producer": "rm -rf /tmp/wolfxl-sec-adviser-render-sample-20260510 /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510 /tmp/wolfxl-sec-adviser-feature-neutral-render-20260510.json /tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-sec-adviser-render-sample-20260510 && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_advisers/ia080124-exempt.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_advisers/ia08102023-exempt.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors/ma080124.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors/ma080125.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-sec-adviser-render-sample-20260510 --output-dir /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510 --render-engine excel --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --timeout 180 > /tmp/wolfxl-sec-adviser-feature-neutral-render-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510/render-compare-report.json --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --timeout 180 --strict > /tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json",
