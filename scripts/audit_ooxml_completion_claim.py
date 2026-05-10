@@ -125,6 +125,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "iran_osint_recursive_add_remove_chart_render_equivalence",
     "synthgl_docs_las_vegas_feature_render_equivalence",
     "synthgl_docs_las_vegas_copy_remove_sheet_render_equivalence",
+    "spreadsheet_peek_neutral_feature_render_equivalence",
+    "spreadsheet_peek_copy_remove_sheet_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -182,6 +184,12 @@ OPEN_REQUIREMENTS = (
             "add-data-validation, add-conditional-formatting, and "
             "add-remove-chart plus copy-remove-sheet render equivalence on two "
             "renderable Las Vegas QoE databooks, "
+            "and Spreadsheet Peek side evidence separately proves "
+            "add-data-validation, add-remove-chart, and copy-remove-sheet render "
+            "equivalence on three generated finance/table examples while its "
+            "add-conditional-formatting run intentionally remains outside the "
+            "neutral-equivalence set because one generated wide-table example "
+            "visibly changes under the new formatting rule, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
