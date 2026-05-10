@@ -47,6 +47,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_macro_evidence",
     "excel_ui_interaction_style_macro_evidence",
     "excel_ui_interaction_copy_remove_macro_evidence",
+    "excel_ui_interaction_add_data_validation_macro_evidence",
     "excel_ui_interaction_mutated_pivot_refresh_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_style_table_slicer_evidence",
@@ -66,6 +67,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_style_external_link_current_prompt_evidence",
     "excel_ui_interaction_copy_remove_external_link_current_prompt_evidence",
+    "excel_ui_interaction_add_data_validation_external_link_current_prompt_evidence",
     "excel_ui_interaction_marker_umya_external_link_forced_prompt_evidence",
     "excel_ui_interaction_style_umya_external_link_forced_prompt_evidence",
     "excel_ui_interaction_copy_remove_umya_external_link_forced_prompt_evidence",
@@ -246,9 +248,12 @@ OPEN_REQUIREMENTS = (
             "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
             "marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, "
             "and add-data-validation-mutated timeline clicks, plus marker-cell-mutated, style-cell-mutated, "
-            "and copy-remove-sheet-mutated macro security prompt paths, plus "
+            "copy-remove-sheet-mutated, and add-data-validation-mutated "
+            "macro security prompt paths, plus "
             "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
-            "current-setting external-link prompt paths, marker-cell-mutated and style-cell-mutated adjacent "
+            "current-setting external-link prompt paths, plus "
+            "add-data-validation-mutated current-setting external-link prompt path, "
+            "marker-cell-mutated and style-cell-mutated adjacent "
             "issue-corpus forced external-link prompt paths, "
             "copy-remove-sheet-mutated adjacent issue-corpus forced external-link prompt path, "
             "marker-cell-mutated, style-cell-mutated, and "
