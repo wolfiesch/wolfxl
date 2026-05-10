@@ -2874,6 +2874,59 @@
       ]
     },
     {
+      "name": "timeline_slicer_excel_render_delete_axis",
+      "path": "/tmp/wolfxl-render-excel-timeline-delete-axis-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-timeline-delete-axis-render-input-20260510 /tmp/wolfxl-render-excel-timeline-delete-axis-20260510 /tmp/wolfxl-render-excel-timeline-delete-axis-20260510.json && mkdir -p /tmp/wolfxl-timeline-delete-axis-render-input-20260510 && cp tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx /tmp/wolfxl-timeline-delete-axis-render-input-20260510/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-timeline-delete-axis-render-input-20260510 --output-dir /tmp/wolfxl-render-excel-timeline-delete-axis-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation delete_first_row --mutation delete_first_col > /tmp/wolfxl-render-excel-timeline-delete-axis-20260510.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["delete_first_row", "delete_first_col"]},
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.status", "equals": "sampled_rendered"},
+        {"path": "results.0.message", "contains": "rendered mutated workbook"},
+        {"path": "results.1.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.1.status", "equals": "sampled_rendered"},
+        {"path": "results.1.message", "contains": "rendered mutated workbook"}
+      ]
+    },
+    {
+      "name": "timeline_slicer_delete_first_row_render_delta",
+      "path": "/tmp/wolfxl-timeline-delete-first-row-render-delta-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-timeline-delete-axis-20260510/render-compare-report.json --mutation delete_first_row --timeout 180 --min-changed-count 1 --max-unchanged-count 0 --strict > /tmp/wolfxl-timeline-delete-first-row-render-delta-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "delete_first_row"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 1},
+        {"path": "changed_count", "equals": 1},
+        {"path": "unchanged_count", "equals": 0},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.status", "equals": "changed"}
+      ]
+    },
+    {
+      "name": "timeline_slicer_delete_first_col_render_delta",
+      "path": "/tmp/wolfxl-timeline-delete-first-col-render-delta-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-timeline-delete-axis-20260510/render-compare-report.json --mutation delete_first_col --timeout 180 --min-changed-count 1 --max-unchanged-count 0 --strict > /tmp/wolfxl-timeline-delete-first-col-render-delta-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "delete_first_col"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 1},
+        {"path": "changed_count", "equals": 1},
+        {"path": "unchanged_count", "equals": 0},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.status", "equals": "changed"}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_copy_first_sheet_all_pages",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 80 --mutation copy_first_sheet > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
