@@ -4389,6 +4389,23 @@
       ]
     },
     {
+      "name": "sec_municipal_advisers_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors --json > /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 29},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 29},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 29},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length_at_least": 20},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 29},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length_at_least": 1},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length_at_least": 1}
+      ]
+    },
+    {
       "name": "sec_investment_mgmt_gap_radar",
       "path": "/tmp/wolfxl-gap-radar-sec-investment-mgmt-20260510.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_mgmt --json --strict > /tmp/wolfxl-gap-radar-sec-investment-mgmt-20260510.json",
