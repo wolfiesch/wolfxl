@@ -576,7 +576,10 @@ tell application "Microsoft Excel"
   end try
 end tell
 """
-    proc = _run_osascript(script, timeout=2)
+    try:
+        proc = _run_osascript(script, timeout=5)
+    except subprocess.TimeoutExpired:
+        return None
     name = proc.stdout.strip()
     if name == "missing value":
         return None
