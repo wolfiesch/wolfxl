@@ -48,6 +48,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_style_macro_evidence",
     "excel_ui_interaction_marker_table_slicer_evidence",
     "excel_ui_interaction_style_table_slicer_evidence",
+    "excel_ui_interaction_copy_remove_table_slicer_evidence",
     "excel_ui_interaction_marker_pivot_chart_slicer_evidence",
     "excel_ui_interaction_style_pivot_chart_slicer_evidence",
     "excel_ui_interaction_marker_external_tool_pivot_slicer_evidence",
@@ -161,6 +162,7 @@ OPEN_REQUIREMENTS = (
         "reason": (
             "Targeted UI-interaction evidence exists, including "
             "marker-cell-mutated and style-cell-mutated table-slicer, "
+            "copy-remove-sheet-mutated table-slicer, "
             "marker-cell-mutated and style-cell-mutated pivot-chart "
             "slicer, marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, marker-cell-mutated and style-cell-mutated "
