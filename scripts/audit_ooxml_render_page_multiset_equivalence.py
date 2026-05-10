@@ -19,7 +19,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-PASSING_RENDER_STATUSES = {"passed", "rendered", "sampled_rendered"}
+PASSING_RENDER_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered"}
+SAMPLED_RENDER_STATUSES = {"sampled_passed", "sampled_rendered"}
 PAGE_RE_TEMPLATE = r"^{prefix}-pages-(?P<page>\d+)(?:-\d+)?\.png$"
 
 
@@ -131,6 +132,23 @@ def _audit_result(
 
     left_pages = _page_hashes(left_dir, left_prefix)
     right_pages = _page_hashes(right_dir, right_prefix)
+    for side, result, pages in (
+        ("left", left_result, left_pages),
+        ("right", right_result, right_pages),
+    ):
+        completeness_issue = _page_completeness_issue(side, result, len(pages))
+        if completeness_issue:
+            return PageMultisetEquivalenceResult(
+                left_fixture=left_fixture,
+                right_fixture=right_fixture,
+                status="inconclusive",
+                left_page_count=len(left_pages),
+                right_page_count=len(right_pages),
+                differing_hash_count=0,
+                remapped_pages=[],
+                message=completeness_issue,
+            )
+
     left_counter = Counter(left_pages.values())
     right_counter = Counter(right_pages.values())
     differing_hash_count = sum((left_counter - right_counter).values()) + sum(
@@ -190,23 +208,64 @@ def _page_hashes(result_dir: Path, prefix: str) -> dict[int, str]:
     return pages
 
 
+def _page_completeness_issue(side: str, result: dict, found_page_count: int) -> str:
+    status = str(result.get("status", ""))
+    if status in SAMPLED_RENDER_STATUSES:
+        return f"{side} render result is sampled, so exact full-page equivalence is not proven"
+
+    page_count = _optional_int(result.get("page_count"))
+    compared_page_count = _optional_int(result.get("compared_page_count"))
+    if (
+        page_count is not None
+        and compared_page_count is not None
+        and page_count != compared_page_count
+    ):
+        return (
+            f"{side} render result is incomplete: page_count={page_count}, "
+            f"compared_page_count={compared_page_count}"
+        )
+
+    expected_page_count = compared_page_count if compared_page_count is not None else page_count
+    if expected_page_count is not None and found_page_count != expected_page_count:
+        return (
+            f"{side} rendered PNG page count is incomplete: "
+            f"expected={expected_page_count}, found={found_page_count}"
+        )
+    return ""
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
 def _remapped_pages(
     left_pages: dict[int, str],
     right_pages: dict[int, str],
 ) -> list[dict[str, int]]:
+    used_right_pages: set[int] = set()
+    unmatched_left_pages: list[tuple[int, str]] = []
+    for left_page, digest in sorted(left_pages.items()):
+        if right_pages.get(left_page) == digest:
+            used_right_pages.add(left_page)
+        else:
+            unmatched_left_pages.append((left_page, digest))
+
     right_by_hash: dict[str, deque[int]] = defaultdict(deque)
     for page, digest in sorted(right_pages.items()):
+        if page in used_right_pages:
+            continue
         right_by_hash[digest].append(page)
 
     remapped: list[dict[str, int]] = []
-    for left_page, digest in sorted(left_pages.items()):
+    for left_page, digest in unmatched_left_pages:
         candidates = right_by_hash.get(digest)
         if not candidates:
             continue
-        if left_page in candidates:
-            right_page = left_page
-        else:
-            right_page = candidates[0]
+        right_page = candidates.popleft()
         if right_page != left_page:
             remapped.append({"left_page": left_page, "right_page": right_page})
     return remapped
