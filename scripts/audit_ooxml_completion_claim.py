@@ -89,6 +89,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
+    "sec_municipal_advisers_gap_radar",
+    "sec_municipal_advisers_corpus_buckets",
     "sec_investment_mgmt_gap_radar",
     "sec_investment_mgmt_corpus_buckets",
     "synthgl_recursive_gap_radar",
@@ -168,8 +170,9 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "The current corpus portfolio spans 321 unique readable workbooks across 24 "
-            "source reports, including the SEC investment-management public/regulatory "
-            "sidecar, and covers all required diversity buckets, but it is still not "
+            "source reports, includes standalone SEC municipal-adviser and "
+            "SEC investment-management public/regulatory sidecars, and covers all "
+            "required diversity buckets, but it is still not "
             "customer-scale or random real-world Excel evidence."
         ),
     },
