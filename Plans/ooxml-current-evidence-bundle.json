@@ -4284,9 +4284,9 @@
       ]
     },
     {
-      "name": "sec_municipal_advisors_gap_radar",
-      "path": "/tmp/wolfxl-gap-radar-sec-municipal-advisors-20260510.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors --json --strict > /tmp/wolfxl-gap-radar-sec-municipal-advisors-20260510.json",
+      "name": "sec_municipal_advisers_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-sec-municipal-advisers-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors --json --strict > /tmp/wolfxl-gap-radar-sec-municipal-advisers-20260510.json",
       "expect": [
         {"path": "ready", "equals": true},
         {"path": "clear", "equals": true},
