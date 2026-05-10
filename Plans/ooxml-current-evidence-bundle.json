@@ -703,6 +703,42 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_copy_remove_timeline_month_click",
+      "path": "/tmp/wolfxl-ui-interaction-copy-remove-timeline-click-20260509/interactive-probe-report.json",
+      "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-copy-remove-timeline-click-20260509 --probe-kind excel_ui_interaction --probe timeline_selection_state --mutation copy_remove_sheet --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-copy-remove-timeline-click-20260509.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "copy_remove_sheet"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "copy_remove_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel timeline shape"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel timeline month"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_copy_remove_timeline_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-copy-remove-timeline-click-20260509.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe timeline_selection_state --report /tmp/wolfxl-ui-interaction-copy-remove-timeline-click-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-copy-remove-timeline-click-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["timeline_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.timeline_selection_state.status", "equals": "clear"},
+        {"path": "probes.timeline_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.timeline_selection_state.passed_fixtures", "equals": ["real-excel-timeline-slicer.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_marker_external_link_current_prompt_click",
       "path": "/tmp/wolfxl-ui-interaction-marker-external-link-current-prompt-20260509/interactive-probe-report.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-marker-external-link-current-prompt-20260509 --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode current --mutation marker_cell --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-marker-external-link-current-prompt-20260509.stdout.json",
