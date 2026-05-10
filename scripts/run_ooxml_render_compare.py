@@ -35,6 +35,7 @@ PAGE_SELECTION_MODES = ("spread", "first-pages", "first-and-last-pages")
 PASSING_STATUSES = {"passed", "sampled_passed", "rendered", "sampled_rendered", "skipped"}
 RENDER_KEYWORDS = ("corrupt", "repaired", "repair", "error")
 RMSE_RE = re.compile(r"\((?P<normalized>[0-9.]+(?:e[+-]?[0-9]+)?)\)", re.I)
+_EXCEL_PRINT_AREA_LIMIT: str | None = None
 
 
 @dataclass
@@ -63,40 +64,50 @@ def run_render_compare(
     mutations: tuple[str, ...] = DEFAULT_RENDER_MUTATIONS,
     render_engine: str = DEFAULT_RENDER_ENGINE,
     page_selection: str = "spread",
+    excel_print_area: str | None = None,
 ) -> dict:
     if render_engine not in RENDER_ENGINES:
         raise ValueError(f"unsupported render engine: {render_engine}")
     if page_selection not in PAGE_SELECTION_MODES:
         raise ValueError(f"unsupported page selection mode: {page_selection}")
+    if excel_print_area is not None and render_engine != "excel":
+        raise ValueError("--excel-print-area can only be used with --render-engine excel")
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[RenderCompareResult] = []
-    for entry in run_ooxml_fidelity_mutations.discover_fixtures(
-        fixture_dir, recursive=recursive
-    ):
-        fixture_path = fixture_dir / entry.filename
-        for mutation in mutations:
-            results.append(
-                _compare_fixture(
-                    fixture_path,
-                    entry.filename,
-                    entry.sha256,
-                    output_dir,
-                    timeout=timeout,
-                    density=density,
-                    max_normalized_rmse=max_normalized_rmse,
-                    max_pages_per_fixture=max_pages_per_fixture,
-                    pass_byte_identical_xlsx=pass_byte_identical_xlsx,
-                    mutation=mutation,
-                    render_engine=render_engine,
-                    page_selection=page_selection,
+    global _EXCEL_PRINT_AREA_LIMIT
+    previous_excel_print_area_limit = _EXCEL_PRINT_AREA_LIMIT
+    _EXCEL_PRINT_AREA_LIMIT = excel_print_area
+    try:
+        for entry in run_ooxml_fidelity_mutations.discover_fixtures(
+            fixture_dir, recursive=recursive
+        ):
+            fixture_path = fixture_dir / entry.filename
+            for mutation in mutations:
+                results.append(
+                    _compare_fixture(
+                        fixture_path,
+                        entry.filename,
+                        entry.sha256,
+                        output_dir,
+                        timeout=timeout,
+                        density=density,
+                        max_normalized_rmse=max_normalized_rmse,
+                        max_pages_per_fixture=max_pages_per_fixture,
+                        pass_byte_identical_xlsx=pass_byte_identical_xlsx,
+                        mutation=mutation,
+                        render_engine=render_engine,
+                        page_selection=page_selection,
+                    )
                 )
-            )
+    finally:
+        _EXCEL_PRINT_AREA_LIMIT = previous_excel_print_area_limit
 
     report = {
         "fixture_dir": str(fixture_dir),
         "output_dir": str(output_dir.resolve()),
         "render_engine": render_engine,
+        "excel_print_area": excel_print_area,
         "page_selection": page_selection,
         "density": density,
         "max_normalized_rmse_threshold": max_normalized_rmse,
@@ -383,7 +394,7 @@ def _export_pdf(
             raise RuntimeError("soffice not found")
         return _export_pdf_libreoffice(soffice, src, outdir, timeout)
     if render_engine == "excel":
-        return _export_pdf_excel(src, outdir, timeout)
+        return _export_pdf_excel(src, outdir, timeout, _EXCEL_PRINT_AREA_LIMIT)
     raise ValueError(f"unsupported render engine: {render_engine}")
 
 
@@ -421,7 +432,12 @@ def _export_pdf_libreoffice(soffice: str, src: Path, outdir: Path, timeout: int)
     return pdf
 
 
-def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
+def _export_pdf_excel(
+    src: Path,
+    outdir: Path,
+    timeout: int,
+    excel_print_area: str | None = None,
+) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
     pdf = outdir / f"{src.stem}.pdf"
     if pdf.exists():
@@ -442,6 +458,17 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
         "    save workbook as active workbook filename pdfPath "
         "file format PDF file format"
     )
+    print_area_lines: list[str] = []
+    if excel_print_area:
+        print_area_lines = [
+            f"    set printAreaRef to {json.dumps(excel_print_area)}",
+            "    repeat with sheetIndex from 1 to count worksheets of active workbook",
+            "      try",
+            "        set print area of page setup object of "
+            "worksheet sheetIndex of active workbook to printAreaRef",
+            "      end try",
+            "    end repeat",
+        ]
     script = "\n".join(
         [
             f"set workbookPath to POSIX file {json.dumps(str(staged_src.resolve()))}",
@@ -454,6 +481,7 @@ def _export_pdf_excel(src: Path, outdir: Path, timeout: int) -> Path:
             "    set ask to update links to false",
             "    set automation security to msoAutomationSecurityForceDisable",
             open_cmd,
+            *print_area_lines,
             save_cmd,
             "    close active workbook saving no",
             "    set ask to update links to previousAskToUpdateLinks",
@@ -843,6 +871,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--excel-print-area",
+        default=None,
+        help=(
+            "Excel-only safety valve for very large workbooks: before PDF export, "
+            "temporarily set every worksheet's print area to this A1-style range "
+            "(for example $A$1:$K$80). The source workbook is not saved."
+        ),
+    )
+    parser.add_argument(
         "--pass-byte-identical-xlsx",
         action="store_true",
         help=(
@@ -880,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
         mutations=tuple(args.mutations or DEFAULT_RENDER_MUTATIONS),
         render_engine=args.render_engine,
         page_selection=args.page_selection,
+        excel_print_area=args.excel_print_area,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 1 if report["failure_count"] else 0

@@ -448,6 +448,78 @@ def test_render_compare_can_use_excel_render_engine(tmp_path: Path, monkeypatch)
     assert seen_engines == ["excel", "excel"]
 
 
+def test_render_compare_can_limit_excel_print_area(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "wide.xlsx")
+    fake_excel_app = tmp_path / "Microsoft Excel.app"
+    fake_excel_app.mkdir()
+    after_pdf = tmp_path / "after.pdf"
+    after_pdf.write_bytes(b"%PDF-after")
+    after_page = tmp_path / "after-1.png"
+    after_page.write_bytes(b"after")
+    seen_print_areas: list[str | None] = []
+
+    monkeypatch.setattr(
+        render_module.run_ooxml_app_smoke,
+        "EXCEL_APP",
+        str(fake_excel_app),
+    )
+    monkeypatch.setattr(render_module.shutil, "which", lambda name: name)
+
+    def fake_export(_engine, _soffice, _src, _outdir, _timeout):
+        seen_print_areas.append(render_module._EXCEL_PRINT_AREA_LIMIT)
+        return after_pdf
+
+    monkeypatch.setattr(render_module, "_export_pdf", fake_export)
+    monkeypatch.setattr(render_module, "_pdf_page_count", lambda _pdf: 1)
+    monkeypatch.setattr(
+        render_module,
+        "_rasterize_pdf_pages",
+        lambda _pdftoppm, _pdf, _prefix, pages, _density, _timeout: [
+            after_page for _ in pages
+        ],
+    )
+
+    report = render_module.run_render_compare(
+        fixture_dir,
+        output_dir,
+        timeout=1,
+        render_engine="excel",
+        mutations=("add_data_validation",),
+        excel_print_area="$A$1:$K$80",
+    )
+
+    assert report["excel_print_area"] == "$A$1:$K$80"
+    assert report["failure_count"] == 0
+    assert report["results"][0]["status"] == "rendered"
+    assert seen_print_areas == ["$A$1:$K$80"]
+    assert render_module._EXCEL_PRINT_AREA_LIMIT is None
+
+
+def test_render_compare_rejects_print_area_for_non_excel_renderer(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "simple.xlsx")
+
+    try:
+        render_module.run_render_compare(
+            fixture_dir,
+            output_dir,
+            timeout=1,
+            render_engine="libreoffice",
+            excel_print_area="$A$1:$K$80",
+        )
+    except ValueError as exc:
+        assert "--excel-print-area" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_sample_page_numbers_are_stable() -> None:
     assert render_module._sample_page_numbers(1, 3) == [1]
     assert render_module._sample_page_numbers(100, 1) == [1]
