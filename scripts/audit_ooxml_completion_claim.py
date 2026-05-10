@@ -105,6 +105,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "powerpivot_contoso_sidecar_copy_remove_unsupported_content_prompt_evidence",
     "slicer_shared_two_pivots_sidecar_coverage",
     "slicer_shared_two_pivots_sidecar_copy_remove_sheet_render_equivalence",
+    "slicer_shared_two_pivots_sidecar_add_conditional_formatting_render_equivalence",
     "slicer_shared_two_pivots_sidecar_rename_sheet_render_equivalence",
     "slicer_shared_two_pivots_sidecar_delete_first_row_render_delta",
     "slicer_shared_two_pivots_sidecar_delete_first_col_render_delta",
@@ -187,8 +188,9 @@ OPEN_REQUIREMENTS = (
             "neutral add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet edits; shared pivot-slicer "
             "sidecar evidence separately proves copy-remove-sheet and rename-sheet "
-            "equivalence plus delete-first-row/column visual deltas on a high-risk "
-            "workbook; ILPA side evidence separately proves external-link "
+            "equivalence, add-conditional-formatting equivalence, plus "
+            "delete-first-row/column visual deltas on a high-risk workbook; ILPA "
+            "side evidence separately proves external-link "
             "retarget, add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet render "
             "equivalence on public "
