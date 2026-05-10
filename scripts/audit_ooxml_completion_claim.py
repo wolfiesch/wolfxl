@@ -158,6 +158,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "sec_investment_mgmt_add_conditional_formatting_render_equivalence",
     "sec_municipal_adviser_reports_feature_neutral_render_equivalence",
     "sec_municipal_adviser_reports_add_conditional_formatting_render_equivalence",
+    "domain_ground_truth_neutral_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -191,7 +192,10 @@ OPEN_REQUIREMENTS = (
             "retarget, add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet render "
             "equivalence on public "
-            "finance templates, and WBD wDesk "
+            "finance templates; domain-ground-truth side evidence separately proves "
+            "add-data-validation, add-conditional-formatting, add-remove-chart, and "
+            "copy-remove-sheet render equivalence across 24 source-valid public "
+            "domain workbooks; and WBD wDesk "
             "side evidence separately proves add-data-validation, "
             "add-conditional-formatting, add-remove-chart, and copy-remove-sheet "
             "render equivalence "
