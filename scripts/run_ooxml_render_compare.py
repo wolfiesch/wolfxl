@@ -70,8 +70,11 @@ def run_render_compare(
         raise ValueError(f"unsupported render engine: {render_engine}")
     if page_selection not in PAGE_SELECTION_MODES:
         raise ValueError(f"unsupported page selection mode: {page_selection}")
+    excel_print_area = _normalize_excel_print_area(excel_print_area)
     if excel_print_area is not None and render_engine != "excel":
-        raise ValueError("--excel-print-area can only be used with --render-engine excel")
+        raise ValueError(
+            "--excel-print-area can only be used with --render-engine excel"
+        )
     fixture_dir = fixture_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[RenderCompareResult] = []
@@ -125,6 +128,15 @@ def run_render_compare(
         json.dumps(report, indent=2, sort_keys=True)
     )
     return report
+
+
+def _normalize_excel_print_area(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("--excel-print-area must not be empty")
+    return normalized
 
 
 def _compare_fixture(
@@ -463,10 +475,8 @@ def _export_pdf_excel(
         print_area_lines = [
             f"    set printAreaRef to {json.dumps(excel_print_area)}",
             "    repeat with sheetIndex from 1 to count worksheets of active workbook",
-            "      try",
             "        set print area of page setup object of "
             "worksheet sheetIndex of active workbook to printAreaRef",
-            "      end try",
             "    end repeat",
         ]
     script = "\n".join(

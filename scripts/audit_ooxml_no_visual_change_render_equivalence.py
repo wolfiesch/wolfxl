@@ -51,7 +51,9 @@ def audit_no_visual_change_render_equivalence(
     if render_engine == "libreoffice":
         soffice = base.run_ooxml_app_smoke._find_libreoffice()
     excel_print_area = payload.get("excel_print_area")
-    if not isinstance(excel_print_area, str):
+    if isinstance(excel_print_area, str):
+        excel_print_area = excel_print_area.strip() or None
+    else:
         excel_print_area = None
 
     wanted = set(mutations)

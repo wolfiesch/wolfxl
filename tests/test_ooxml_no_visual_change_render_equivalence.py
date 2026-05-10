@@ -172,6 +172,49 @@ def test_no_visual_change_render_equivalence_reuses_excel_print_area(
     assert audit.base.run_ooxml_render_compare._EXCEL_PRINT_AREA_LIMIT is None
 
 
+def test_no_visual_change_render_equivalence_normalizes_blank_print_area(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    report = _write_fake_render_result(tmp_path, excel_print_area="   ")
+    work = tmp_path / "book" / "add_data_validation"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+    seen_print_areas: list[str | None] = []
+
+    def fake_export_pdf(_engine, _soffice, _src, outdir, _timeout):
+        seen_print_areas.append(
+            audit.base.run_ooxml_render_compare._EXCEL_PRINT_AREA_LIMIT
+        )
+        outdir.mkdir(parents=True)
+        pdf = outdir / "before-book.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    def fake_rasterize(_pdftoppm, _pdf, prefix, _pages, _density, _timeout):
+        path = prefix.parent / "before-equivalence-pages-1-1.png"
+        path.write_bytes(BLACK_PNG)
+        return [path]
+
+    _patch_required_tools(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        audit.base.run_ooxml_render_compare, "_export_pdf", fake_export_pdf
+    )
+    monkeypatch.setattr(
+        audit.base.run_ooxml_render_compare, "_pdf_page_count", lambda _pdf: 1
+    )
+    monkeypatch.setattr(
+        audit.base.run_ooxml_render_compare,
+        "_rasterize_pdf_pages",
+        fake_rasterize,
+    )
+
+    result = audit.audit_no_visual_change_render_equivalence(report)
+
+    assert result["ready"] is True
+    assert result["excel_print_area"] is None
+    assert seen_print_areas == [None]
+
+
 def test_no_visual_change_render_equivalence_fails_on_render_drift(
     tmp_path: Path,
     monkeypatch,

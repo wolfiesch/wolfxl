@@ -520,6 +520,26 @@ def test_render_compare_rejects_print_area_for_non_excel_renderer(tmp_path: Path
         raise AssertionError("expected ValueError")
 
 
+def test_render_compare_rejects_blank_excel_print_area(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _make_fixture(fixture_dir / "simple.xlsx")
+
+    try:
+        render_module.run_render_compare(
+            fixture_dir,
+            output_dir,
+            timeout=1,
+            render_engine="excel",
+            excel_print_area="   ",
+        )
+    except ValueError as exc:
+        assert "--excel-print-area must not be empty" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_sample_page_numbers_are_stable() -> None:
     assert render_module._sample_page_numbers(1, 3) == [1]
     assert render_module._sample_page_numbers(100, 1) == [1]
