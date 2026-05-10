@@ -86,6 +86,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "slicer_shared_two_pivots_sidecar_ui_interaction_evidence",
     "slicer_shared_two_pivots_sidecar_marker_ui_interaction_evidence",
     "slicer_shared_two_pivots_sidecar_style_ui_interaction_evidence",
+    "slicer_shared_two_pivots_sidecar_copy_remove_ui_interaction_evidence",
     "external_link_retarget_excel_app_open",
     "ilpa_reporting_template_retarget_mutation_report",
     "ilpa_reporting_template_retarget_excel_app_open",
@@ -167,8 +168,9 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated pivot-chart "
             "slicer, marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, copy-remove-sheet-mutated external-tool "
-            "pivot-slicer item clicks, marker-cell-mutated and style-cell-mutated "
-            "shared pivot-slicer cache clicks and timeline clicks, plus "
+            "pivot-slicer item clicks, marker-cell-mutated, style-cell-mutated, "
+            "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
+            "marker-cell-mutated and style-cell-mutated timeline clicks, plus "
             "marker-cell-mutated and style-cell-mutated "
             "macro security prompt paths, marker-cell-mutated and "
             "style-cell-mutated current-setting external-link prompt "
