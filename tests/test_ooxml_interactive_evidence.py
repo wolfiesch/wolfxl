@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -35,6 +36,16 @@ def _load_probe_runner_module() -> ModuleType:
 
 
 probe_runner = _load_probe_runner_module()
+
+
+def test_excel_active_workbook_name_treats_timeout_as_not_ready(monkeypatch) -> None:
+    def fake_run_osascript(_script: str, timeout: int):
+        assert timeout == 5
+        raise subprocess.TimeoutExpired(["osascript"], timeout)
+
+    monkeypatch.setattr(probe_runner.run_ooxml_app_smoke, "_run_osascript", fake_run_osascript)
+
+    assert probe_runner.run_ooxml_app_smoke._excel_active_workbook_name() is None
 
 
 def test_interactive_audit_marks_absent_probes_not_applicable(tmp_path: Path) -> None:
