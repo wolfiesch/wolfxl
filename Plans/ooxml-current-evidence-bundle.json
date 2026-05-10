@@ -1341,6 +1341,143 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_remove_chart_macro_disable_button",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-macro-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-macro-20260510 --probe-kind excel_ui_interaction --probe macro_project_presence --mutation add_remove_chart --fixture real-excel-macro-basic.xlsm --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-macro-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-macro-basic.xlsm"},
+        {"path": "results.0.probe", "equals": "macro_project_presence"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Disable Macros"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_macro_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-macro-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe macro_project_presence --report /tmp/wolfxl-ui-interaction-add-remove-chart-macro-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-macro-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["macro_project_presence"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.macro_project_presence.status", "equals": "clear"},
+        {"path": "probes.macro_project_presence.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.macro_project_presence.passed_fixtures", "equals": ["real-excel-macro-basic.xlsm"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_external_link_current_setting_preservation",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-external-link-current-prompt-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-external-link-current-prompt-20260510 --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode current --mutation add_remove_chart --fixture real-excel-external-link-basic.xlsx --timeout 45 > /tmp/wolfxl-ui-interaction-add-remove-chart-external-link-current-prompt-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "external_link_prompt_mode", "equals": "current"},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": []}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_external_link_current_setting_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-external-link-current-prompt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe external_link_update_prompt --report /tmp/wolfxl-ui-interaction-add-remove-chart-external-link-current-prompt-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-external-link-current-prompt-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["external_link_update_prompt"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.external_link_update_prompt.status", "equals": "clear"},
+        {"path": "probes.external_link_update_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.external_link_update_prompt.passed_fixtures", "equals": ["real-excel-external-link-basic.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_umya_external_link_forced_prompt_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-umya-external-link-forced-prompt-20260510-rerun/interactive-probe-report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_interactive_probe.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-umya-external-link-forced-prompt-20260510-rerun --probe-kind excel_ui_interaction --probe external_link_update_prompt --external-link-prompt-mode force --mutation add_remove_chart --fixture issue_297.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-umya-external-link-forced-prompt-20260510-rerun.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "issue_297.xlsx"},
+        {"path": "results.0.probe", "equals": "external_link_update_prompt"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Don't Update"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_umya_external_link_forced_prompt_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-umya-external-link-forced-prompt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py /Users/wolfgangschoenberger/Projects/umya-spreadsheet/tests/test_files --probe-kind excel_ui_interaction --probe external_link_update_prompt --report /tmp/wolfxl-ui-interaction-add-remove-chart-umya-external-link-forced-prompt-20260510-rerun/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-umya-external-link-forced-prompt-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["external_link_update_prompt"]},
+        {"path": "fixture_count", "equals": 63},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.external_link_update_prompt.status", "equals": "clear"},
+        {"path": "probes.external_link_update_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.external_link_update_prompt.passed_fixtures", "equals": ["issue_297.xlsx"]}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_add_remove_chart_unsupported_content_prompt",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-powerview-open-readonly-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-powerview-open-readonly-20260510 --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation add_remove_chart --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-powerview-open-readonly-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["clicked button: Open as Read-Only"]}
+      ]
+    },
+    {
+      "name": "powerpivot_contoso_sidecar_add_remove_chart_unsupported_content_prompt_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-powerview-open-readonly-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/powerpivot_variants --probe-kind excel_ui_interaction --probe unsupported_content_prompt --report /tmp/wolfxl-ui-interaction-add-remove-chart-powerview-open-readonly-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-powerview-open-readonly-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["unsupported_content_prompt"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.unsupported_content_prompt.status", "equals": "clear"},
+        {"path": "probes.unsupported_content_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.unsupported_content_prompt.passed_fixtures", "equals": ["real-excel-powerpivot-contoso-pnl.xlsx"]}
+      ]
+    },
+    {
       "name": "current_excel_16_108_source_table_slicer_recheck_non_state_change",
       "path": "/tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510/interactive-probe-report.json",
       "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510.stdout.json",
