@@ -108,6 +108,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "wbd_wdesk_add_conditional_formatting_render_equivalence",
     "wbd_wdesk_add_remove_chart_render_equivalence",
     "wbd_wdesk_copy_remove_sheet_render_equivalence",
+    "bf30_remaining_copy_remove_sheet_render_equivalence",
     "sec_edgar_add_data_validation_render_equivalence",
     "sec_edgar_add_conditional_formatting_render_equivalence",
     "sec_edgar_add_remove_chart_render_equivalence",
@@ -151,7 +152,9 @@ OPEN_REQUIREMENTS = (
             "add-conditional-formatting, add-remove-chart, and copy-remove-sheet "
             "render equivalence "
             "on an external-tool-authored "
-            "public-company workbook; SEC/EDGAR side evidence separately proves "
+            "public-company workbook; BF30 public-download side evidence "
+            "separately proves copy-remove-sheet render equivalence on six "
+            "readable real-world public downloads; SEC/EDGAR side evidence separately proves "
             "add-data-validation, add-conditional-formatting, and "
             "add-remove-chart and copy-remove-sheet render equivalence on six "
             "public-company "
