@@ -4958,6 +4958,7 @@
         {"path": "ready", "equals": true},
         {"path": "render_engine", "equals": "excel"},
         {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting", "add_data_validation", "add_remove_chart", "copy_remove_sheet"]},
         {"path": "missing_mutations", "equals": []},
         {"path": "result_count", "equals": 96},
         {"path": "passed_count", "equals": 96},
