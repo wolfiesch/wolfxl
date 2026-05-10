@@ -2854,6 +2854,26 @@
       ]
     },
     {
+      "name": "timeline_slicer_rename_sheet_render_equivalence",
+      "path": "/tmp/wolfxl-timeline-rename-render-equivalence-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-timeline-rename-render-input-20260510 /tmp/wolfxl-render-excel-timeline-rename-sheet-20260510 /tmp/wolfxl-render-excel-timeline-rename-sheet-20260510.json /tmp/wolfxl-timeline-rename-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-timeline-rename-render-input-20260510 && cp tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx /tmp/wolfxl-timeline-rename-render-input-20260510/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-timeline-rename-render-input-20260510 --output-dir /tmp/wolfxl-render-excel-timeline-rename-sheet-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation rename_first_sheet > /tmp/wolfxl-render-excel-timeline-rename-sheet-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-timeline-rename-sheet-20260510/render-compare-report.json --mutation rename_first_sheet --timeout 180 --strict > /tmp/wolfxl-timeline-rename-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "observed_mutations", "equals": ["rename_first_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 1},
+        {"path": "passed_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_copy_first_sheet_all_pages",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510 --render-engine excel --timeout 240 --max-pages-per-fixture 80 --mutation copy_first_sheet > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-first-sheet-all-pages-20260510.json",
