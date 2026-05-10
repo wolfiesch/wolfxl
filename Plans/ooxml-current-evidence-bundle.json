@@ -3353,6 +3353,23 @@
       ]
     },
     {
+      "name": "rescue_downloads_feature_render_equivalence",
+      "path": "/tmp/wolfxl-rescue-feature-render-equivalence-20260509.json",
+      "producer": "rm -rf /tmp/wolfxl-rescue-readable-feature-render-input-20260509 && mkdir -p /tmp/wolfxl-rescue-readable-feature-render-input-20260509 && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/rescue/oregon_fy21_budget_model.xlsx /tmp/wolfxl-rescue-readable-feature-render-input-20260509/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/rescue/santa_monica_fy2425_sjc_yrt.xlsx /tmp/wolfxl-rescue-readable-feature-render-input-20260509/ && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-rescue-readable-feature-render-input-20260509 --output-dir /tmp/wolfxl-render-excel-rescue-feature-equivalence-20260509 --render-engine excel --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --max-pages-per-fixture 2 --page-selection first-and-last-pages --timeout 180 > /tmp/wolfxl-rescue-feature-equivalence-render-20260509.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-rescue-feature-equivalence-20260509/render-compare-report.json --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --timeout 180 --strict > /tmp/wolfxl-rescue-feature-render-equivalence-20260509.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting", "add_data_validation", "add_remove_chart"]},
+        {"path": "result_count", "equals": 6},
+        {"path": "passed_count", "equals": 6},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "rescue_downloads_copy_remove_sheet_render_equivalence",
       "path": "/tmp/wolfxl-rescue-copy-remove-sheet-render-equivalence-20260509.json",
       "producer": "rm -rf /tmp/wolfxl-rescue-readable-render-input-20260509 && mkdir -p /tmp/wolfxl-rescue-readable-render-input-20260509 && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/rescue/oregon_fy21_budget_model.xlsx /tmp/wolfxl-rescue-readable-render-input-20260509/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion/downloads/rescue/santa_monica_fy2425_sjc_yrt.xlsx /tmp/wolfxl-rescue-readable-render-input-20260509/ && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-rescue-readable-render-input-20260509 --output-dir /tmp/wolfxl-render-excel-rescue-copy-remove-sheet-20260509 --render-engine excel --mutation copy_remove_sheet --max-pages-per-fixture 2 --page-selection first-and-last-pages --timeout 180 > /tmp/wolfxl-rescue-copy-remove-sheet-render-20260509.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-rescue-copy-remove-sheet-20260509/render-compare-report.json --mutation copy_remove_sheet --timeout 180 --strict > /tmp/wolfxl-rescue-copy-remove-sheet-render-equivalence-20260509.json",
