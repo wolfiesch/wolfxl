@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from types import ModuleType
 
+import pytest
+
 
 def _load_interactive_module() -> ModuleType:
     script = Path(__file__).resolve().parents[1] / "scripts" / "audit_ooxml_interactive_evidence.py"
@@ -1272,6 +1274,42 @@ def test_control_shape_names_come_from_authored_worksheet_controls(tmp_path: Pat
     _write_embedded_control_workbook(control)
 
     assert probe_runner._control_shape_names(control) == ["List Box 1"]
+
+
+def test_mouse_click_rejects_locked_screen(monkeypatch) -> None:
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: True)
+
+    with pytest.raises(RuntimeError, match="screen is locked"):
+        probe_runner._post_mouse_click(10, 10)
+
+
+def test_ui_interaction_reports_locked_screen_blocker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    _write_embedded_control_workbook(fixture_dir / "control.xlsx")
+    _write_manifest(fixture_dir, "control.xlsx")
+
+    def fake_open_with_ui(_src: Path, probe: str, _timeout: int):
+        assert probe == "embedded_control_openability"
+        return "control.xlsx", [
+            "failed Excel embedded/control click: macOS screen is locked; "
+            "unlock before Excel UI mouse probes"
+        ]
+
+    monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction", fake_open_with_ui)
+
+    report = probe_runner.run_interactive_probes(
+        fixture_dir,
+        output_dir,
+        probes=("embedded_control_openability",),
+        probe_kind=probe_runner.UI_INTERACTION_PROBE_KIND,
+    )
+
+    assert report["failure_count"] == 1
+    assert "macOS screen is locked" in report["results"][0]["message"]
 
 
 def test_slicer_ui_interaction_requires_persisted_filter_change(
