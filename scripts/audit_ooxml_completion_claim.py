@@ -58,9 +58,11 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_style_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_copy_remove_external_tool_pivot_slicer_evidence",
     "excel_ui_interaction_add_data_validation_pivot_slicer_evidence",
+    "excel_ui_interaction_add_data_validation_shared_slicer_evidence",
     "excel_ui_interaction_marker_timeline_evidence",
     "excel_ui_interaction_style_timeline_evidence",
     "excel_ui_interaction_copy_remove_timeline_evidence",
+    "excel_ui_interaction_add_data_validation_timeline_evidence",
     "excel_ui_interaction_marker_external_link_current_prompt_evidence",
     "excel_ui_interaction_style_external_link_current_prompt_evidence",
     "excel_ui_interaction_copy_remove_external_link_current_prompt_evidence",
@@ -238,11 +240,11 @@ OPEN_REQUIREMENTS = (
             "marker-cell-mutated and style-cell-mutated external-tool "
             "pivot-slicer item clicks, copy-remove-sheet-mutated external-tool "
             "pivot-slicer item clicks, add-data-validation-mutated "
-            "external-tool and pivot-chart slicer item clicks, "
+            "external-tool, pivot-chart, and shared pivot-slicer item clicks, "
             "marker-cell-mutated, style-cell-mutated, "
             "and copy-remove-sheet-mutated shared pivot-slicer cache clicks, plus "
-            "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
-            "timeline clicks, plus marker-cell-mutated, style-cell-mutated, "
+            "marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, "
+            "and add-data-validation-mutated timeline clicks, plus marker-cell-mutated, style-cell-mutated, "
             "and copy-remove-sheet-mutated macro security prompt paths, plus "
             "marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated "
             "current-setting external-link prompt paths, marker-cell-mutated and style-cell-mutated adjacent "
