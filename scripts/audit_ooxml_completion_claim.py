@@ -131,6 +131,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ticker_to_gl_strongbox_style_copy_remove_mutation_report",
     "ticker_to_gl_strongbox_excel_app_smoke_source_marker",
     "ticker_to_gl_strongbox_excel_app_smoke_style_copy",
+    "ticker_to_gl_strongbox_feature_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",

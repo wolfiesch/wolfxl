@@ -50,36 +50,50 @@ def audit_no_visual_change_render_equivalence(
     soffice = None
     if render_engine == "libreoffice":
         soffice = base.run_ooxml_app_smoke._find_libreoffice()
+    excel_print_area = payload.get("excel_print_area")
+    if isinstance(excel_print_area, str):
+        excel_print_area = excel_print_area.strip() or None
+    else:
+        excel_print_area = None
 
     wanted = set(mutations)
     results: list[base.RenameSheetEquivalenceResult] = []
     observed_mutations: set[str] = set()
-    for result in payload.get("results", []):
-        mutation = result.get("mutation")
-        if mutation not in wanted:
-            continue
-        observed_mutations.add(str(mutation))
-        audit_result = base._audit_result(
-            result,
-            compare_cmd=compare_cmd,
-            pdftoppm=pdftoppm,
-            pdfinfo=pdfinfo,
-            render_engine=render_engine,
-            soffice=soffice,
-            density=density,
-            max_normalized_rmse=max_normalized_rmse,
-            timeout=timeout,
-        )
-        if audit_result.status == "passed":
-            label = MUTATION_LABELS.get(str(mutation), str(mutation).replace("_", "-"))
-            audit_result = replace(
-                audit_result,
-                message=(
-                    f"{label} render equivalent: "
-                    f"max_normalized_rmse={audit_result.max_normalized_rmse:.8f}"
-                ),
+    previous_excel_print_area = base.run_ooxml_render_compare._EXCEL_PRINT_AREA_LIMIT
+    base.run_ooxml_render_compare._EXCEL_PRINT_AREA_LIMIT = excel_print_area
+    try:
+        for result in payload.get("results", []):
+            mutation = result.get("mutation")
+            if mutation not in wanted:
+                continue
+            observed_mutations.add(str(mutation))
+            audit_result = base._audit_result(
+                result,
+                compare_cmd=compare_cmd,
+                pdftoppm=pdftoppm,
+                pdfinfo=pdfinfo,
+                render_engine=render_engine,
+                soffice=soffice,
+                density=density,
+                max_normalized_rmse=max_normalized_rmse,
+                timeout=timeout,
             )
-        results.append(audit_result)
+            if audit_result.status == "passed":
+                label = MUTATION_LABELS.get(
+                    str(mutation), str(mutation).replace("_", "-")
+                )
+                audit_result = replace(
+                    audit_result,
+                    message=(
+                        f"{label} render equivalent: "
+                        f"max_normalized_rmse={audit_result.max_normalized_rmse:.8f}"
+                    ),
+                )
+            results.append(audit_result)
+    finally:
+        base.run_ooxml_render_compare._EXCEL_PRINT_AREA_LIMIT = (
+            previous_excel_print_area
+        )
 
     passed_count = sum(1 for result in results if result.status == "passed")
     failure_count = sum(1 for result in results if result.status == "failed")
@@ -89,6 +103,7 @@ def audit_no_visual_change_render_equivalence(
     return {
         "render_report": str(render_report_path),
         "render_engine": render_engine,
+        "excel_print_area": excel_print_area,
         "mutations": list(mutations),
         "observed_mutations": sorted(observed_mutations),
         "missing_mutations": missing_mutations,

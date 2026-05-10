@@ -3929,6 +3929,23 @@
       ]
     },
     {
+      "name": "ticker_to_gl_strongbox_feature_render_equivalence",
+      "path": "/tmp/wolfxl-ticker-to-gl-feature-render-equivalence-20260510.json",
+      "producer": "rm -rf /tmp/wolfxl-ticker-to-gl-flat-render-20260510 /tmp/wolfxl-render-excel-ticker-to-gl-feature-neutral-20260510 /tmp/wolfxl-render-excel-ticker-to-gl-feature-neutral-20260510.json /tmp/wolfxl-ticker-to-gl-feature-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-ticker-to-gl-flat-render-20260510 && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/aapl/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-render-20260510/aapl-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/amzn/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-render-20260510/amzn-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/googl/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-render-20260510/googl-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/msft/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-render-20260510/msft-strongbox.xlsx && cp /Users/wolfgangschoenberger/Projects/ticker-to-gl/cache/nvda/strongbox.xlsx /tmp/wolfxl-ticker-to-gl-flat-render-20260510/nvda-strongbox.xlsx && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-ticker-to-gl-flat-render-20260510 --output-dir /tmp/wolfxl-render-excel-ticker-to-gl-feature-neutral-20260510 --render-engine excel --timeout 180 --density 96 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation add_data_validation --mutation add_remove_chart --excel-print-area '$A$1:$AC$20' > /tmp/wolfxl-render-excel-ticker-to-gl-feature-neutral-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-ticker-to-gl-feature-neutral-20260510/render-compare-report.json --mutation add_data_validation --mutation add_remove_chart --timeout 180 --strict > /tmp/wolfxl-ticker-to-gl-feature-render-equivalence-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "excel_print_area", "equals": "$A$1:$AC$20"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_remove_chart"]},
+        {"path": "observed_mutations", "equals": ["add_data_validation", "add_remove_chart"]},
+        {"path": "result_count", "equals": 10},
+        {"path": "passed_count", "equals": 10},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0}
+      ]
+    },
+    {
       "name": "spreadsheet_peek_examples_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/spreadsheet-peek/examples --json > /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json",
