@@ -88,6 +88,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
+    "sec_investment_mgmt_gap_radar",
+    "sec_investment_mgmt_corpus_buckets",
     "synthgl_recursive_gap_radar",
     "umya_test_files_gap_radar",
     "umya_test_files_quick_plus_structural_mutation_coverage",
@@ -160,9 +162,10 @@ OPEN_REQUIREMENTS = (
         "id": "broader_real_world_corpus_diversity",
         "status": "open",
         "reason": (
-            "The current corpus portfolio spans 316 unique readable workbooks across 23 "
-            "source reports and covers all required diversity buckets, but it is "
-            "still not customer-scale or random real-world Excel evidence."
+            "The current corpus portfolio spans 321 unique readable workbooks across 24 "
+            "source reports, including the SEC investment-management public/regulatory "
+            "sidecar, and covers all required diversity buckets, but it is still not "
+            "customer-scale or random real-world Excel evidence."
         ),
     },
     {

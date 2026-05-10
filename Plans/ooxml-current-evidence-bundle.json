@@ -4299,6 +4299,21 @@
       ]
     },
     {
+      "name": "sec_investment_mgmt_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-sec-investment-mgmt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_mgmt --json --strict > /tmp/wolfxl-gap-radar-sec-investment-mgmt-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 5},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
       "name": "fintech_hackathon_demo_quick_mutation_report",
       "path": "/tmp/wolfxl-ooxml-fidelity-mutations-fintech-hackathon-demo-quick-20260510/report.json",
       "producer": "rm -rf /tmp/wolfxl-ooxml-fidelity-mutations-fintech-hackathon-demo-quick-20260510 && uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /Users/wolfgangschoenberger/Projects/fintech-hackathon/tieout/demo_data --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-fintech-hackathon-demo-quick-20260510 --mutation no_op --mutation marker_cell --mutation style_cell --mutation copy_remove_sheet --mutation add_data_validation --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-fintech-hackathon-demo-quick-20260510.json",
@@ -4516,6 +4531,20 @@
       ]
     },
     {
+      "name": "sec_investment_mgmt_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_mgmt --json > /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 5},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length_at_least": 5},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length_at_least": 5},
+        {"path": "bucket_fixtures.workbook_global_state", "length_at_least": 5}
+      ]
+    },
+    {
       "name": "sec_adviser_reports_feature_neutral_render_equivalence",
       "path": "/tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json",
       "producer": "rm -rf /tmp/wolfxl-sec-adviser-render-sample-20260510 /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510 /tmp/wolfxl-sec-adviser-feature-neutral-render-20260510.json /tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json && mkdir -p /tmp/wolfxl-sec-adviser-render-sample-20260510 && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_advisers/ia080124-exempt.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_investment_advisers/ia08102023-exempt.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors/ma080124.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && cp /Users/wolfgangschoenberger/Projects/SynthGL/data/rwd_validation/sec_municipal_advisors/ma080125.xlsx /tmp/wolfxl-sec-adviser-render-sample-20260510/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-sec-adviser-render-sample-20260510 --output-dir /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510 --render-engine excel --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --timeout 180 > /tmp/wolfxl-sec-adviser-feature-neutral-render-20260510.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-sec-adviser-feature-neutral-20260510/render-compare-report.json --mutation add_data_validation --mutation add_remove_chart --mutation copy_remove_sheet --timeout 180 --strict > /tmp/wolfxl-sec-adviser-feature-neutral-render-equivalence-20260510.json",
@@ -4649,16 +4678,16 @@
     },
     {
       "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-sec-adviser-sample-20260510.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json --min-sources 23 --min-workbooks 316 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-sec-adviser-sample-20260510.json",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-sec-investment-mgmt-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json --min-sources 24 --min-workbooks 321 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-sec-investment-mgmt-20260510.json",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 23},
-        {"path": "workbook_count", "equals": 316},
+        {"path": "source_count", "equals": 24},
+        {"path": "workbook_count", "equals": 321},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 283},
+        {"path": "bucket_counts.excel_authored", "equals": 288},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
