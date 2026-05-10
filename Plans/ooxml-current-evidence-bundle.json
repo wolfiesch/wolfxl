@@ -286,6 +286,40 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_data_validation_pivot_refresh_command",
+      "path": "/tmp/wolfxl-ui-interaction-add-dv-pivot-refresh-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-dv-pivot-refresh-20260510 --probe-kind excel_ui_interaction --probe pivot_refresh_state --mutation add_data_validation --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-dv-pivot-refresh-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_data_validation"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "pivot_refresh_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["executed Excel command: refresh all"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_data_validation_pivot_refresh_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-dv-pivot-refresh-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe pivot_refresh_state --report /tmp/wolfxl-ui-interaction-add-dv-pivot-refresh-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-dv-pivot-refresh-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["pivot_refresh_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.pivot_refresh_state.status", "equals": "clear"},
+        {"path": "probes.pivot_refresh_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.pivot_refresh_state.passed_fixtures", "equals": ["real-excel-pivot-chart-slicers.xlsx"]}
+      ]
+    },
+    {
       "name": "excel_ui_interaction_mutated_pivot_refresh_evidence",
       "path": "/tmp/wolfxl-ui-interaction-evidence-mutated-pivot-refresh-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe pivot_refresh_state --report /tmp/wolfxl-ui-interaction-marker-pivot-refresh-20260509/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-style-pivot-refresh-20260509/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-copy-remove-pivot-refresh-20260509/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-mutated-pivot-refresh-20260509.json",
