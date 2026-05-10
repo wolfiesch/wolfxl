@@ -125,6 +125,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "iran_osint_recursive_add_remove_chart_render_equivalence",
     "synthgl_docs_las_vegas_feature_render_equivalence",
     "synthgl_docs_las_vegas_copy_remove_sheet_render_equivalence",
+    "excelbench_external_validated_neutral_render_equivalence",
     "spreadsheet_peek_neutral_feature_render_equivalence",
     "spreadsheet_peek_copy_remove_sheet_render_equivalence",
     "ticker_to_gl_strongbox_noop_marker_mutation_report",
@@ -191,6 +192,10 @@ OPEN_REQUIREMENTS = (
             "add-data-validation, add-conditional-formatting, and "
             "add-remove-chart plus copy-remove-sheet render equivalence on two "
             "renderable Las Vegas QoE databooks, "
+            "and ExcelBench external-validated side evidence separately proves "
+            "add-data-validation, add-conditional-formatting, add-remove-chart, "
+            "and copy-remove-sheet render equivalence on five Excel-renderable "
+            "external-tool fixtures, "
             "and Spreadsheet Peek side evidence separately proves "
             "add-data-validation, add-remove-chart, and copy-remove-sheet render "
             "equivalence on three generated finance/table examples while its "
