@@ -1195,6 +1195,152 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_remove_chart_pivot_refresh_command",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-pivot-refresh-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-pivot-refresh-20260510 --probe-kind excel_ui_interaction --probe pivot_refresh_state --mutation add_remove_chart --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-pivot-refresh-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "pivot_refresh_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["executed Excel command: refresh all"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_pivot_refresh_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-pivot-refresh-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe pivot_refresh_state --report /tmp/wolfxl-ui-interaction-add-remove-chart-pivot-refresh-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-pivot-refresh-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["pivot_refresh_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.pivot_refresh_state.status", "equals": "clear"},
+        {"path": "probes.pivot_refresh_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.pivot_refresh_state.passed_fixtures", "equals": ["real-excel-pivot-chart-slicers.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_shared_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-shared-slicer-cache-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-shared-slicer-cache-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation add_remove_chart --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-shared-slicer-cache-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "selected Excel slicer shape"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_shared_slicer_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-shared-slicer-cache-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/slicer_timeline_variants --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-add-remove-chart-shared-slicer-cache-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-shared-slicer-cache-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["real-excel-shared-slicer-two-pivots.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_control_clicks",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-control-clicks-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-control-clicks-20260510 --probe-kind excel_ui_interaction --probe embedded_control_openability --mutation add_remove_chart --fixture real-excel-control-props-basic.xlsx --fixture umya-control-props-basic.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-control-clicks-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "umya-control-props-basic.xlsx"},
+        {"path": "results.0.probe", "equals": "embedded_control_openability"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel embedded/control object"},
+        {"path": "results.0.ui_actions", "contains": "saved active workbook"},
+        {"path": "results.1.fixture", "equals": "real-excel-control-props-basic.xlsx"},
+        {"path": "results.1.probe", "equals": "embedded_control_openability"},
+        {"path": "results.1.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.1.mutation", "equals": "add_remove_chart"},
+        {"path": "results.1.status", "equals": "passed"},
+        {"path": "results.1.ui_actions", "contains": "clicked Excel embedded/control object"},
+        {"path": "results.1.ui_actions", "contains": "saved active workbook"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_control_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-control-clicks-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe embedded_control_openability --report /tmp/wolfxl-ui-interaction-add-remove-chart-control-clicks-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-control-clicks-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["embedded_control_openability"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.embedded_control_openability.status", "equals": "clear"},
+        {"path": "probes.embedded_control_openability.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.embedded_control_openability.passed_fixtures", "equals": ["umya-control-props-basic.xlsx", "real-excel-control-props-basic.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_timeline_month_click",
+      "path": "/tmp/wolfxl-ui-interaction-add-remove-chart-timeline-click-20260510/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-add-remove-chart-timeline-click-20260510 --probe-kind excel_ui_interaction --probe timeline_selection_state --mutation add_remove_chart --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-add-remove-chart-timeline-click-20260510.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_remove_chart"},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "results.0.mutation", "equals": "add_remove_chart"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "equals": ["selected Excel timeline shape", "selected Excel timeline shape: ORDER DATE", "clicked Excel timeline month", "clicked Excel timeline month: May", "saved active workbook"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_add_remove_chart_timeline_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-add-remove-chart-timeline-click-20260510.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe timeline_selection_state --report /tmp/wolfxl-ui-interaction-add-remove-chart-timeline-click-20260510/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-add-remove-chart-timeline-click-20260510.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["timeline_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.timeline_selection_state.status", "equals": "clear"},
+        {"path": "probes.timeline_selection_state.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.timeline_selection_state.passed_fixtures", "equals": ["real-excel-timeline-slicer.xlsx"]}
+      ]
+    },
+    {
       "name": "current_excel_16_108_source_table_slicer_recheck_non_state_change",
       "path": "/tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510/interactive-probe-report.json",
       "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510.stdout.json",
