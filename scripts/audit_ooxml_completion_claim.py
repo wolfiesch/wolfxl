@@ -132,6 +132,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "ticker_to_gl_strongbox_excel_app_smoke_source_marker",
     "ticker_to_gl_strongbox_excel_app_smoke_style_copy",
     "ticker_to_gl_strongbox_feature_render_equivalence",
+    "ticker_to_gl_strongbox_add_conditional_formatting_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -194,7 +195,11 @@ OPEN_REQUIREMENTS = (
             "equivalence on three generated finance/table examples while its "
             "add-conditional-formatting run intentionally remains outside the "
             "neutral-equivalence set because one generated wide-table example "
-            "visibly changes under the new formatting rule, "
+            "visibly changes under the new formatting rule; ticker-to-GL "
+            "Strongbox side evidence separately proves add-data-validation, "
+            "add-conditional-formatting, and add-remove-chart render "
+            "equivalence on five finance-cache workbooks under the recorded "
+            "temporary print-area clamp, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
