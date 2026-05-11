@@ -41,6 +41,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "broader_click_level_interaction_variants",
         "future_surface_exhaustiveness",
     }
+    corpus_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "broader_real_world_corpus_diversity"
+    )
+    assert "11 unique readable workbooks across 3 source reports" in corpus_requirement["reason"]
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(
@@ -136,13 +142,23 @@ def _write_bundle_manifest(
         names.extend(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS)
     for index, name in enumerate(names):
         report_path = tmp_path / f"report-{index}.json"
-        report_path.write_text(json.dumps({"ready": ready}))
+        payload = {"ready": ready}
+        expect = [{"path": "ready", "equals": True}]
+        if name == "corpus_portfolio_diversity":
+            payload.update({"source_count": 3, "workbook_count": 11})
+            expect.extend(
+                [
+                    {"path": "source_count", "equals": 3},
+                    {"path": "workbook_count", "equals": 11},
+                ]
+            )
+        report_path.write_text(json.dumps(payload))
         reports.append(
             {
                 "name": name,
                 "path": str(report_path),
                 "producer": "uv run --no-sync python scripts/example.py --strict",
-                "expect": [{"path": "ready", "equals": True}],
+                "expect": expect,
             }
         )
     manifest = tmp_path / "bundle.json"
