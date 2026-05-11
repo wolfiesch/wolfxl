@@ -13,7 +13,7 @@ import sys
 from copy import deepcopy
 from xml.etree import ElementTree
 import zipfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -66,9 +66,13 @@ EXISTING_SHEET_MUTATIONS = set(SUPPORTED_MUTATIONS) - {
     "no_op",
     "add_remove_chart",
 }
+WORKSHEET_MUTATIONS = EXISTING_SHEET_MUTATIONS - {
+    "retarget_external_links",
+}
 PASSING_STATUSES = {
     "passed",
     "passed_with_expected_drift",
+    "passed_with_source_preexisting_issues",
     "skipped_source_invalid",
     "skipped_source_missing",
 }
@@ -215,6 +219,16 @@ REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
         "external_links_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
     },
 }
+SOURCE_PREEXISTING_ISSUE_KINDS = {
+    "chart_formula_missing_sheet",
+    "chart_pivot_source_missing_sheet",
+    "conditional_formatting_dxf_out_of_range",
+    "dangling_relationship",
+    "pivot_cache_source_missing_sheet",
+    "table_column_count_mismatch",
+    "workbook_defined_name_missing_sheet",
+    "worksheet_formula_missing_sheet",
+}
 
 
 @dataclass
@@ -238,6 +252,8 @@ class MutationResult:
     before: str
     after: str
     error: str | None = None
+    source_preexisting_issue_count: int = 0
+    source_preexisting_issues: list[dict] = field(default_factory=list)
 
 
 def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[FixtureEntry]:
@@ -447,8 +463,12 @@ def _run_single_mutation(
             error=str(exc),
         )
 
-    issues, expected_issues = _split_expected_issues(
+    issues, source_preexisting_issues = _split_source_preexisting_issues(
         list(audit_report["issues"]),
+        before_path=before_path,
+    )
+    issues, expected_issues = _split_expected_issues(
+        issues,
         mutation,
         before_path=before_path,
         after_path=after_path,
@@ -462,6 +482,8 @@ def _run_single_mutation(
         status = "failed"
     elif expected_issues:
         status = "passed_with_expected_drift"
+    elif source_preexisting_issues:
+        status = "passed_with_source_preexisting_issues"
     return MutationResult(
         fixture=fixture_label,
         mutation=mutation,
@@ -472,6 +494,8 @@ def _run_single_mutation(
         expected_issues=expected_issues,
         before=str(before_path),
         after=str(after_path),
+        source_preexisting_issue_count=len(source_preexisting_issues),
+        source_preexisting_issues=source_preexisting_issues,
     )
 
 
@@ -502,18 +526,19 @@ def _source_error_reason(exc: BaseException) -> str:
 def _apply_mutation(path: Path, mutation: str) -> None:
     workbook = wolfxl.load_workbook(path, modify=True)
     try:
-        if mutation in EXISTING_SHEET_MUTATIONS and not workbook.sheetnames:
+        worksheet = _first_worksheet(workbook)
+        if mutation in WORKSHEET_MUTATIONS and worksheet is None:
             workbook.save(path)
             return
 
         if mutation == "no_op":
             pass
         elif mutation == "marker_cell":
-            workbook[workbook.sheetnames[0]][MARKER_CELL] = MARKER_VALUE
+            worksheet[MARKER_CELL] = MARKER_VALUE
         elif mutation == "style_cell":
             from wolfxl.styles import Font, PatternFill
 
-            cell = workbook[workbook.sheetnames[0]][STYLE_CELL]
+            cell = worksheet[STYLE_CELL]
             cell.value = MARKER_VALUE
             cell.font = Font(bold=True, color="FF1F4E79")
             cell.fill = PatternFill(
@@ -521,60 +546,54 @@ def _apply_mutation(path: Path, mutation: str) -> None:
                 fgColor="FFEAF2F8",
             )
         elif mutation == "insert_tail_row":
-            worksheet = workbook[workbook.sheetnames[0]]
             row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.insert_rows(row_idx, amount=1)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
         elif mutation == "insert_tail_col":
-            worksheet = workbook[workbook.sheetnames[0]]
             col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.insert_cols(col_idx, amount=1)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
         elif mutation == "delete_marker_tail_row":
-            worksheet = workbook[workbook.sheetnames[0]]
             row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet.delete_rows(row_idx, amount=1)
         elif mutation == "delete_marker_tail_col":
-            worksheet = workbook[workbook.sheetnames[0]]
             col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet.delete_cols(col_idx, amount=1)
         elif mutation == "delete_first_row":
-            workbook[workbook.sheetnames[0]].delete_rows(1, amount=1)
+            worksheet.delete_rows(1, amount=1)
         elif mutation == "delete_first_col":
-            workbook[workbook.sheetnames[0]].delete_cols(1, amount=1)
+            worksheet.delete_cols(1, amount=1)
         elif mutation == "copy_first_sheet":
-            workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+            workbook.copy_worksheet(worksheet)
         elif mutation == "copy_remove_sheet":
-            clone = workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+            clone = workbook.copy_worksheet(worksheet)
             clone_title = clone.title
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
             workbook.remove(workbook[clone_title])
         elif mutation == "move_marker_range":
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE
             worksheet["AA1"] = f"{MARKER_VALUE}_right"
             worksheet.move_range("Z1:AA1", rows=1, cols=0)
         elif mutation == "move_formula_range":
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.move_range("Z1:AA1", rows=1, cols=0, translate=True)
         elif mutation == "retarget_external_links":
             links = getattr(workbook, "_external_links", [])
             if links:
                 links[0].update_target(RETARGETED_EXTERNAL_LINK)
         elif mutation == "rename_first_sheet":
-            workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
+            worksheet.title = RENAMED_SHEET
         elif mutation == "add_remove_chart":
             from wolfxl.chart import BarChart, Reference
 
@@ -600,7 +619,6 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         elif mutation == "add_data_validation":
             from wolfxl.worksheet.datavalidation import DataValidation
 
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.data_validations.append(
                 DataValidation(
                     type="whole",
@@ -614,7 +632,6 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         elif mutation == "add_conditional_formatting":
             from wolfxl.formatting.rule import CellIsRule
 
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.conditional_formatting.add(
                 "AC2:AC10",
                 CellIsRule(
@@ -630,6 +647,25 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         close = getattr(workbook, "close", None)
         if close is not None:
             close()
+
+
+def _first_worksheet(workbook):
+    for sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+        if (
+            hasattr(sheet, "cell")
+            and hasattr(sheet, "max_row")
+            and hasattr(sheet, "max_column")
+        ):
+            return sheet
+    return None
+
+
+def _required_first_worksheet(workbook):
+    worksheet = _first_worksheet(workbook)
+    if worksheet is None:
+        raise ValueError("workbook has no worksheets")
+    return worksheet
 
 
 def _safe_tail_row_index(path: Path, worksheet) -> int:
@@ -683,7 +719,7 @@ def _prepare_mutation_baseline(before_path: Path, after_path: Path, mutation: st
     for path in (before_path, after_path):
         workbook = wolfxl.load_workbook(path, modify=True)
         try:
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet["Z1"] = 10
             worksheet["AA1"] = "=Z1"
             workbook.save(path)
@@ -714,6 +750,57 @@ def _split_expected_issues(
         else:
             unexpected.append(issue)
     return unexpected, expected
+
+
+def _split_source_preexisting_issues(
+    issues: list[dict],
+    before_path: Path,
+) -> tuple[list[dict], list[dict]]:
+    candidates = [
+        issue
+        for issue in issues
+        if issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+    ]
+    if not candidates:
+        return issues, []
+
+    source_issue_keys = _source_preexisting_issue_keys(before_path)
+    if not source_issue_keys:
+        return issues, []
+
+    unexpected: list[dict] = []
+    source_preexisting: list[dict] = []
+    for issue in issues:
+        if (
+            issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+            and _issue_key(issue) in source_issue_keys
+        ):
+            annotated = dict(issue)
+            annotated["source_preexisting"] = True
+            source_preexisting.append(annotated)
+        else:
+            unexpected.append(issue)
+    return unexpected, source_preexisting
+
+
+def _source_preexisting_issue_keys(path: Path) -> set[tuple[str, str, str]]:
+    try:
+        report = audit_ooxml_fidelity.audit(path, path)
+    except Exception:
+        return set()
+    return {
+        _issue_key(issue)
+        for issue in report.get("issues", [])
+        if issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+    }
+
+
+def _issue_key(issue: dict) -> tuple[str, str, str]:
+    return (
+        str(issue.get("kind", "")),
+        str(issue.get("part", "")),
+        str(issue.get("message", "")),
+    )
 
 
 def _is_expected_issue(
