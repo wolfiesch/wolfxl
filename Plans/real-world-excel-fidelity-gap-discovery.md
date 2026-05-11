@@ -613,6 +613,16 @@ and clicked the May timeline month in `real-excel-timeline-slicer.xlsx`. Both
 strict audit reports are `ready=true` with 5 raw UI reports, 0 failures, and 0
 incomplete reports.
 
+Latest rename-sheet prompt/control interaction increment adds
+`/tmp/wolfxl-ui-interaction-evidence-rename-external-oracle-prompt-control-20260511.json`
+and `/tmp/wolfxl-ui-interaction-evidence-rename-powerview-open-readonly-20260511.json`:
+after a WolfXL `rename_first_sheet` save, Microsoft Excel handled the macro
+`Disable Macros` prompt, clicked both real-Excel and umya embedded controls,
+preserved the current-setting external-link prompt path while keeping external
+link parts present, and opened the PowerView workbook as read-only while keeping
+the unsupported-content marker present. Both strict audit reports are
+`ready=true` with 4 raw UI reports, 0 failures, and 0 incomplete reports.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned
