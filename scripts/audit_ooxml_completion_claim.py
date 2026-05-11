@@ -192,6 +192,8 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "random_corpus_holdout_10_smoke_mutation_report",
     "random_corpus_holdout_10_add_data_validation_render_smoke",
     "random_corpus_holdout_10_add_data_validation_render_equivalence",
+    "random_corpus_holdout_10_add_conditional_formatting_render_smoke",
+    "random_corpus_holdout_10_add_conditional_formatting_render_equivalence",
     "random_corpus_holdout_10_chart_copy_render_smoke",
     "random_corpus_holdout_10_chart_copy_render_equivalence",
     "public_powerbi_expanded_mutations",
@@ -297,9 +299,9 @@ OPEN_REQUIREMENTS = (
             "evidence separately proves add-data-validation and "
             "copy-remove-sheet render equivalence on two representative "
             "local workbooks, and deterministic random-holdout side evidence "
-            "separately proves add-data-validation, add-remove-chart, and "
-            "copy-remove-sheet render equivalence on 10 sampled workbooks "
-            "spanning eight source reports, "
+            "separately proves add-data-validation, add-conditional-formatting, "
+            "add-remove-chart, and copy-remove-sheet render equivalence on 10 "
+            "sampled workbooks spanning eight source reports, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
