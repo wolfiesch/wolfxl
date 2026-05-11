@@ -7960,6 +7960,71 @@
       ]
     },
     {
+      "name": "random_corpus_holdout_20_render_boundary",
+      "path": "/tmp/wolfxl-random-holdout-20-render-boundary-20260511.json",
+      "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 /tmp/wolfxl-render-excel-random-holdout-20-neutral-features-clamped-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 20 --min-sample-size 20 --min-sources 8 --seed wolfxl-random-holdout-render-20260511-v15 --stage-dir /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-20-staged-render-20260511.json && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 --output-dir /tmp/wolfxl-render-excel-random-holdout-20-neutral-features-clamped-20260511 --render-engine excel --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --excel-print-area '$A$1:$K$80' --timeout 120 > /tmp/wolfxl-render-excel-random-holdout-20-neutral-features-clamped-20260511.stdout.json || true; uv run --no-sync python scripts/summarize_ooxml_render_boundary.py /tmp/wolfxl-random-corpus-holdout-20-staged-render-20260511.json /tmp/wolfxl-render-excel-random-holdout-20-neutral-features-clamped-20260511/render-compare-report.json --strict > /tmp/wolfxl-random-holdout-20-render-boundary-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "seed", "equals": "wolfxl-random-holdout-render-20260511-v15"},
+        {"path": "sample_size", "equals": 20},
+        {"path": "selected_count", "equals": 20},
+        {"path": "selected_source_count", "equals": 14},
+        {"path": "selected_bucket_counts.excel_authored", "equals": 20},
+        {"path": "selected_bucket_counts.external_tool_authored", "equals": 1},
+        {"path": "selected_bucket_counts.chart_or_chart_style", "equals": 1},
+        {"path": "selected_bucket_counts.table_structured_ref_or_validation", "equals": 4},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "excel_print_area", "equals": "$A$1:$K$80"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "render_result_count", "equals": 80},
+        {"path": "render_failure_count", "equals": 8},
+        {"path": "status_counts.failed", "equals": 8},
+        {"path": "status_counts.sampled_rendered", "equals": 72},
+        {"path": "excluded_from_renderable_subset", "length": 2},
+        {"path": "excluded_from_renderable_subset.0.fixture", "equals": "001-d662d4eae9-Project_Newlin_QofE_Databook.xlsx"},
+        {"path": "excluded_from_renderable_subset.1.fixture", "equals": "011-3bb7f45268-empty_s_attribute.xlsx"},
+        {"path": "renderable_subset_count", "equals": 18}
+      ]
+    },
+    {
+      "name": "random_corpus_holdout_20_renderable_18_neutral_render_smoke",
+      "path": "/tmp/wolfxl-render-excel-random-holdout-20-renderable-18-neutral-features-20260511/render-compare-report.json",
+      "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 /tmp/wolfxl-random-corpus-holdout-20-renderable-18-stage-20260511 /tmp/wolfxl-render-excel-random-holdout-20-renderable-18-neutral-features-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 20 --min-sample-size 20 --min-sources 8 --seed wolfxl-random-holdout-render-20260511-v15 --stage-dir /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-20-staged-render-20260511.json && mkdir -p /tmp/wolfxl-random-corpus-holdout-20-renderable-18-stage-20260511 && find /tmp/wolfxl-random-corpus-holdout-20-stage-20260511 -maxdepth 1 -type f -name '*.xlsx' ! -name '001-d662d4eae9-Project_Newlin_QofE_Databook.xlsx' ! -name '011-3bb7f45268-empty_s_attribute.xlsx' -exec cp {} /tmp/wolfxl-random-corpus-holdout-20-renderable-18-stage-20260511/ \\; && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-random-corpus-holdout-20-renderable-18-stage-20260511 --output-dir /tmp/wolfxl-render-excel-random-holdout-20-renderable-18-neutral-features-20260511 --render-engine excel --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --excel-print-area '$A$1:$K$80' --timeout 120 > /tmp/wolfxl-render-excel-random-holdout-20-renderable-18-neutral-features-20260511.stdout.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "excel_print_area", "equals": "$A$1:$K$80"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "page_selection", "equals": "first-pages"},
+        {"path": "max_pages_per_fixture", "equals": 1},
+        {"path": "result_count", "equals": 72},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
+        {"path": "results.0.compared_page_count", "equals": 1},
+        {"path": "results.71.mutation", "equals": "copy_remove_sheet"},
+        {"path": "results.71.compared_page_count", "equals": 1}
+      ]
+    },
+    {
+      "name": "random_corpus_holdout_20_renderable_18_neutral_render_equivalence",
+      "path": "/tmp/wolfxl-random-holdout-20-renderable-18-neutral-render-equivalence-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-random-holdout-20-renderable-18-neutral-features-20260511/render-compare-report.json --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet --timeout 120 --strict > /tmp/wolfxl-random-holdout-20-renderable-18-neutral-render-equivalence-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "excel_print_area", "equals": "$A$1:$K$80"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting", "add_data_validation", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 72},
+        {"path": "passed_count", "equals": 72},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.71.status", "equals": "passed"}
+      ]
+    },
+    {
       "name": "random_corpus_holdout_10_smoke_mutation_report",
       "path": "/tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511/report.json",
       "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 10 --min-sample-size 10 --min-sources 5 --seed wolfxl-random-holdout-20260511-v1 --stage-dir /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-10-staged-20260511.json && uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511 --mutation no_op --mutation marker_cell --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511.stdout.json",

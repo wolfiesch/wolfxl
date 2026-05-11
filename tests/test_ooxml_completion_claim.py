@@ -93,6 +93,15 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "random_corpus_holdout_50_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "random_corpus_holdout_20_render_boundary" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_20_renderable_18_neutral_render_smoke" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_20_renderable_18_neutral_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "random_corpus_holdout_10_smoke_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
