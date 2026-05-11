@@ -61,6 +61,20 @@ Latest BEA GDP public-statistics sidecar evidence adds `/tmp/wolfxl-corpus-bucke
 
 Latest shared pivot-slicer copy-first-sheet follow-up adds `/tmp/wolfxl-slicer-shared-two-pivots-copy-first-sheet-excel-native-page-multiset-equivalence-20260510.json`: `ready=true`, 72 WolfXL-rendered pages and 72 native-Excel-copy rendered pages have identical page-image multisets. The earlier direct page-1-to-page-71 comparison remains intentionally unpinned because Excel itself assigns the copied-slicer shading state to the opposite printed page; the native-baseline audit proves WolfXL matches desktop Excel's rendered output set without weakening the stricter direct-equivalence audit.
 
+Timeline copy-first-sheet native-baseline follow-up remains open. A 2026-05-11
+exploratory WolfXL render at
+`/tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511/render-compare-report.json`
+successfully rendered 74 pages for `copy_first_sheet` on
+`real-excel-timeline-slicer.xlsx`, but the attempted native Microsoft Excel copy
+baseline was not reliable enough to pin: one rendered baseline at
+`/tmp/wolfxl-render-excel-manual-copy-timeline-20260511c-clean/render-compare-report.json`
+still had only 71 pages, matching the source workbook rather than a confirmed
+copied-sheet workbook, and the resulting page-multiset audit
+`/tmp/wolfxl-timeline-copy-first-sheet-excel-native-page-multiset-equivalence-20260511.json`
+failed. Treat that as an inconclusive baseline-generation failure, not proof of
+a WolfXL render mismatch, until Excel automation can verify the baseline
+workbook has the copied timeline sheet.
+
 Latest PowerView sidecar increment: `/tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510/interactive-probe-report.json` opens the Contoso PowerPivot/PowerView workbook after a WolfXL `add_data_validation` save, clicks `Open as Read-Only`, and verifies the PowerView marker remains present. The strict audit `/tmp/wolfxl-ui-interaction-evidence-add-dv-powerview-open-readonly-20260510.json` is `ready=true` with 1 report, 1 fixture, and 0 incomplete reports.
 
 Latest add-data-validation slicer increment: `/tmp/wolfxl-ui-interaction-add-dv-pivot-slicers-20260510/interactive-probe-report.json` covers the Excelize external-tool pivot-slicer workbook and the Microsoft-authored pivot-chart slicer workbook after WolfXL `add_data_validation` saves. The strict audit `/tmp/wolfxl-ui-interaction-evidence-add-dv-pivot-slicers-20260510.json` is `ready=true` with 2 passed slicer fixtures. A broader unpinned exploratory batch also included `real-excel-table-slicers.xlsx` and `real-excel-powerpivot-model-basic.xlsx`, but those UI-click state-change checks did not persist a changed slicer/table-filter state in the current local Excel run, so they are deliberately excluded from the pinned evidence.
