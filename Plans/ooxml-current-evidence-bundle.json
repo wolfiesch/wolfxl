@@ -5868,6 +5868,26 @@
       ]
     },
     {
+      "name": "pivot_slicer_structural_render_equivalence",
+      "path": "/tmp/wolfxl-pivot-slicer-structural-render-equivalence-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-pivot-slicer-structural-render-input-20260511; rm -rf \"$dest\" /tmp/wolfxl-render-excel-pivot-slicer-structural-20260511 /tmp/wolfxl-pivot-slicer-structural-render-20260511.json; mkdir -p \"$dest\"; cp \"$repo/tests/fixtures/external_oracle/real-excel-pivot-chart-slicers.xlsx\" \"$dest/\"; cp \"$repo/tests/fixtures/external_oracle/excelize-2.10-pivot-slicers.xlsx\" \"$dest/\"; cp \"$repo/tests/fixtures/external_oracle/excelize-sales-pivot-slicer-chart.xlsx\" \"$dest/\"; osascript -e '\\''tell application \"Microsoft Excel\" to quit'\\'' >/dev/null 2>&1 || true; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_render_compare.py \"$dest\" --output-dir /tmp/wolfxl-render-excel-pivot-slicer-structural-20260511 --render-engine excel --timeout 240 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation rename_first_sheet --mutation copy_remove_sheet > /tmp/wolfxl-pivot-slicer-structural-render-20260511.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-pivot-slicer-structural-20260511/render-compare-report.json --mutation rename_first_sheet --mutation copy_remove_sheet --timeout 240 --strict > /tmp/wolfxl-pivot-slicer-structural-render-equivalence-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["rename_first_sheet", "copy_remove_sheet"]},
+        {"path": "observed_mutations", "equals": ["copy_remove_sheet", "rename_first_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 6},
+        {"path": "passed_count", "equals": 6},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results", "length": 6},
+        {"path": "results.0.message", "contains": "rename-sheet render equivalent"},
+        {"path": "results.5.message", "contains": "copy-remove-sheet render equivalent"}
+      ]
+    },
+    {
       "name": "corpus_portfolio_diversity",
       "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json --min-sources 31 --min-workbooks 401 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",

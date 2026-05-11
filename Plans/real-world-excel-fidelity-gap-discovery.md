@@ -592,6 +592,16 @@ pages 1 and 1575 without a print-area clamp. The full six-file SITC download was
 not pinned because the largest workbooks made full mutation/classification too
 heavy for this pass.
 
+Latest pivot/slicer structural render increment adds
+`/tmp/wolfxl-pivot-slicer-structural-render-equivalence-20260511.json`:
+three high-risk pivot/slicer fixtures (`real-excel-pivot-chart-slicers.xlsx`,
+`excelize-2.10-pivot-slicers.xlsx`, and
+`excelize-sales-pivot-slicer-chart.xlsx`) now have Microsoft Excel
+render-equivalence proof for `rename_first_sheet` and `copy_remove_sheet`, with
+6 passed, 0 failures, and 0 inconclusive. Excel sampled the first and last
+pages for each rendered workbook, covering both Microsoft-authored and
+external-tool-authored pivot/slicer outputs.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned
