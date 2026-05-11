@@ -5607,18 +5607,61 @@
       ]
     },
     {
-      "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-domain-ground-truth-20260510.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json --min-sources 26 --min-workbooks 374 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-domain-ground-truth-20260510.json",
+      "name": "irs_soi_public_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-irs-soi-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-irs-soi-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; cd \"$dest\"; for f in 22it03fi.xlsx 25dbfigure07.xlsx 25dbfigure05.xlsx 25dbfigure06.xlsx 25dbfigure04.xlsx 25dbfigure03.xlsx 25dbfigure02.xlsx 25dbfigure01.xlsx 25db-6-04-ps.xlsx 25db-6-03-ps.xlsx 25db-6-01-cs.xlsx; do curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSLO \"https://www.irs.gov/pub/irs-soi/$f\"; done; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py \"$dest\" --json > /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 11},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length": 11},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length": 11},
+        {"path": "bucket_fixtures.workbook_global_state", "length": 11}
+      ]
+    },
+    {
+      "name": "irs_soi_public_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-irs-soi-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-irs-soi-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; cd \"$dest\"; for f in 22it03fi.xlsx 25dbfigure07.xlsx 25dbfigure05.xlsx 25dbfigure06.xlsx 25dbfigure04.xlsx 25dbfigure03.xlsx 25dbfigure02.xlsx 25dbfigure01.xlsx 25db-6-04-ps.xlsx 25db-6-03-ps.xlsx 25db-6-01-cs.xlsx; do curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSLO \"https://www.irs.gov/pub/irs-soi/$f\"; done; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_gap_radar.py \"$dest\" --json --strict > /tmp/wolfxl-gap-radar-irs-soi-20260511.json'",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 26},
-        {"path": "input_report_count", "equals": 26},
-        {"path": "workbook_count", "equals": 374},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 11},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "irs_soi_public_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-irs-soi-quick-20260511/report.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-irs-soi-20260511; rm -rf \"$dest\" /tmp/wolfxl-ooxml-fidelity-mutations-irs-soi-quick-20260511; mkdir -p \"$dest\"; cd \"$dest\"; for f in 22it03fi.xlsx 25dbfigure07.xlsx 25dbfigure05.xlsx 25dbfigure06.xlsx 25dbfigure04.xlsx 25dbfigure03.xlsx 25dbfigure02.xlsx 25dbfigure01.xlsx 25db-6-04-ps.xlsx 25db-6-03-ps.xlsx 25db-6-01-cs.xlsx; do curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSLO \"https://www.irs.gov/pub/irs-soi/$f\"; done; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py \"$dest\" --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-irs-soi-quick-20260511 --mutation no_op --mutation marker_cell --mutation style_cell --mutation copy_remove_sheet --mutation add_data_validation --mutation add_conditional_formatting --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-irs-soi-quick-20260511.json'",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/private/tmp/wolfxl-public-irs-soi-20260511"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "copy_remove_sheet", "add_data_validation", "add_conditional_formatting"]},
+        {"path": "result_count", "equals": 66},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "corpus_portfolio_diversity",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-irs-soi-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json --min-sources 27 --min-workbooks 385 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-irs-soi-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_count", "equals": 27},
+        {"path": "input_report_count", "equals": 27},
+        {"path": "workbook_count", "equals": 385},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 341},
+        {"path": "bucket_counts.excel_authored", "equals": 352},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
