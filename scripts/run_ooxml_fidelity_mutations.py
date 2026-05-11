@@ -66,6 +66,9 @@ EXISTING_SHEET_MUTATIONS = set(SUPPORTED_MUTATIONS) - {
     "no_op",
     "add_remove_chart",
 }
+WORKSHEET_MUTATIONS = EXISTING_SHEET_MUTATIONS - {
+    "retarget_external_links",
+}
 PASSING_STATUSES = {
     "passed",
     "passed_with_expected_drift",
@@ -502,18 +505,19 @@ def _source_error_reason(exc: BaseException) -> str:
 def _apply_mutation(path: Path, mutation: str) -> None:
     workbook = wolfxl.load_workbook(path, modify=True)
     try:
-        if mutation in EXISTING_SHEET_MUTATIONS and not workbook.sheetnames:
+        worksheet = _first_worksheet(workbook)
+        if mutation in WORKSHEET_MUTATIONS and worksheet is None:
             workbook.save(path)
             return
 
         if mutation == "no_op":
             pass
         elif mutation == "marker_cell":
-            workbook[workbook.sheetnames[0]][MARKER_CELL] = MARKER_VALUE
+            worksheet[MARKER_CELL] = MARKER_VALUE
         elif mutation == "style_cell":
             from wolfxl.styles import Font, PatternFill
 
-            cell = workbook[workbook.sheetnames[0]][STYLE_CELL]
+            cell = worksheet[STYLE_CELL]
             cell.value = MARKER_VALUE
             cell.font = Font(bold=True, color="FF1F4E79")
             cell.fill = PatternFill(
@@ -521,60 +525,54 @@ def _apply_mutation(path: Path, mutation: str) -> None:
                 fgColor="FFEAF2F8",
             )
         elif mutation == "insert_tail_row":
-            worksheet = workbook[workbook.sheetnames[0]]
             row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.insert_rows(row_idx, amount=1)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
         elif mutation == "insert_tail_col":
-            worksheet = workbook[workbook.sheetnames[0]]
             col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.insert_cols(col_idx, amount=1)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
         elif mutation == "delete_marker_tail_row":
-            worksheet = workbook[workbook.sheetnames[0]]
             row_idx = _safe_tail_row_index(path, worksheet)
             worksheet.cell(row=row_idx, column=1).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet.delete_rows(row_idx, amount=1)
         elif mutation == "delete_marker_tail_col":
-            worksheet = workbook[workbook.sheetnames[0]]
             col_idx = _safe_tail_col_index(path, worksheet)
             worksheet.cell(row=1, column=col_idx).value = MARKER_VALUE
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet.delete_cols(col_idx, amount=1)
         elif mutation == "delete_first_row":
-            workbook[workbook.sheetnames[0]].delete_rows(1, amount=1)
+            worksheet.delete_rows(1, amount=1)
         elif mutation == "delete_first_col":
-            workbook[workbook.sheetnames[0]].delete_cols(1, amount=1)
+            worksheet.delete_cols(1, amount=1)
         elif mutation == "copy_first_sheet":
-            workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+            workbook.copy_worksheet(worksheet)
         elif mutation == "copy_remove_sheet":
-            clone = workbook.copy_worksheet(workbook[workbook.sheetnames[0]])
+            clone = workbook.copy_worksheet(worksheet)
             clone_title = clone.title
             workbook.save(path)
             workbook.close()
             workbook = wolfxl.load_workbook(path, modify=True)
             workbook.remove(workbook[clone_title])
         elif mutation == "move_marker_range":
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet["Z1"] = MARKER_VALUE
             worksheet["AA1"] = f"{MARKER_VALUE}_right"
             worksheet.move_range("Z1:AA1", rows=1, cols=0)
         elif mutation == "move_formula_range":
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.move_range("Z1:AA1", rows=1, cols=0, translate=True)
         elif mutation == "retarget_external_links":
             links = getattr(workbook, "_external_links", [])
             if links:
                 links[0].update_target(RETARGETED_EXTERNAL_LINK)
         elif mutation == "rename_first_sheet":
-            workbook[workbook.sheetnames[0]].title = RENAMED_SHEET
+            worksheet.title = RENAMED_SHEET
         elif mutation == "add_remove_chart":
             from wolfxl.chart import BarChart, Reference
 
@@ -600,7 +598,6 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         elif mutation == "add_data_validation":
             from wolfxl.worksheet.datavalidation import DataValidation
 
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.data_validations.append(
                 DataValidation(
                     type="whole",
@@ -614,7 +611,6 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         elif mutation == "add_conditional_formatting":
             from wolfxl.formatting.rule import CellIsRule
 
-            worksheet = workbook[workbook.sheetnames[0]]
             worksheet.conditional_formatting.add(
                 "AC2:AC10",
                 CellIsRule(
@@ -630,6 +626,25 @@ def _apply_mutation(path: Path, mutation: str) -> None:
         close = getattr(workbook, "close", None)
         if close is not None:
             close()
+
+
+def _first_worksheet(workbook):
+    for sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+        if (
+            hasattr(sheet, "cell")
+            and hasattr(sheet, "max_row")
+            and hasattr(sheet, "max_column")
+        ):
+            return sheet
+    return None
+
+
+def _required_first_worksheet(workbook):
+    worksheet = _first_worksheet(workbook)
+    if worksheet is None:
+        raise ValueError("workbook has no worksheet sheets")
+    return worksheet
 
 
 def _safe_tail_row_index(path: Path, worksheet) -> int:

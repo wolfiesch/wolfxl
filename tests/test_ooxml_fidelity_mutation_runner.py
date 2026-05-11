@@ -147,6 +147,62 @@ def test_runner_treats_existing_sheet_mutation_as_noop_when_no_sheets(
     assert {result["status"] for result in report["results"]} == {"passed"}
 
 
+def test_apply_mutation_targets_first_worksheet_when_chartsheet_is_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class DummyChartsheet:
+        title = "Chart"
+
+    class DummyWorksheet:
+        title = "Data"
+        max_row = 1
+        max_column = 1
+
+        def __init__(self) -> None:
+            self.values: dict[str, object] = {}
+
+        def __setitem__(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+        def __getitem__(self, key: str):
+            return self.values[key]
+
+        def cell(self, row: int, column: int):
+            return self.values.setdefault(f"{row}:{column}", object())
+
+    class DummyWorkbook:
+        sheetnames = ["Chart", "Data"]
+
+        def __init__(self) -> None:
+            self.chart = DummyChartsheet()
+            self.worksheet = DummyWorksheet()
+            self.saved = False
+            self.closed = False
+
+        def __getitem__(self, name: str):
+            return {"Chart": self.chart, "Data": self.worksheet}[name]
+
+        def save(self, _path: Path) -> None:
+            self.saved = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    workbook = DummyWorkbook()
+
+    monkeypatch.setattr(
+        runner_module.wolfxl,
+        "load_workbook",
+        lambda _path, modify: workbook,
+    )
+
+    runner_module._apply_mutation(tmp_path / "chartsheet-first.xlsx", "marker_cell")
+
+    assert workbook.worksheet.values[runner_module.MARKER_CELL] == runner_module.MARKER_VALUE
+    assert workbook.saved is True
+    assert workbook.closed is True
+
+
 def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
