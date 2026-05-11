@@ -110,6 +110,7 @@ def test_gap_radar_allows_mac_excel_view_extension_uris(tmp_path: Path) -> None:
 
     report = gap_radar.audit_gap_radar(fixture_dir)
 
+    assert report["ready"] is True
     assert report["clear"] is True
     assert report["unknown_part_family_count"] == 0
     assert report["unknown_relationship_type_count"] == 0
