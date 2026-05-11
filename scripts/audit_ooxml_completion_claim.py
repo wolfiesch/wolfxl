@@ -325,7 +325,7 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 f"workbooks across {source_count} source reports, including the "
                 "domain-ground-truth public workbook sidecar, standalone SEC "
                 "municipal-adviser and SEC investment-management public/regulatory "
-                "sidecars, the IRS SOI public-statistics sidecar, and all required "
+                "sidecars, public-statistics sidecars, and all required "
                 "diversity buckets, but it is still not customer-scale or random "
                 "real-world Excel evidence."
             )
