@@ -82,6 +82,8 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["probe_report_count"] > 0
     assert interaction_requirement["evidence"]["raw_result_count"] > 0
     assert interaction_requirement["evidence"]["known_boundary_failure_count"] == 2
+    assert interaction_requirement["evidence"]["diagnostic_non_state_change_failure_count"] == 0
+    assert interaction_requirement["evidence"]["unresolved_non_boundary_failure_count"] == 0
     assert interaction_requirement["evidence"]["non_boundary_failure_count"] == 0
     assert interaction_requirement["evidence"]["failed_raw_reports"] == sorted(
         completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
@@ -89,6 +91,8 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["known_boundary_reports"] == sorted(
         completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
     )
+    assert interaction_requirement["evidence"]["diagnostic_non_state_change_reports"] == []
+    assert interaction_requirement["evidence"]["unresolved_failed_raw_reports"] == []
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
@@ -328,11 +332,82 @@ def test_completion_claim_marks_corpus_requirement_satisfied_at_customer_scale(
     assert "broader_real_world_corpus_diversity" not in report["missing_requirement_ids"]
 
 
+def test_completion_claim_classifies_paired_ui_diagnostic_non_state_change_rechecks(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(
+        tmp_path,
+        ready=True,
+        include_required_reports=True,
+        include_diagnostic_non_state_change_reports=True,
+    )
+
+    report = completion.audit_completion_claim(manifest)
+
+    interaction_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "broader_click_level_interaction_variants"
+    )
+    evidence = interaction_requirement["evidence"]
+    expected_diagnostics = sorted(
+        completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS
+    )
+    assert evidence["raw_failure_count"] == 5
+    assert evidence["known_boundary_failure_count"] == 2
+    assert evidence["observed_non_boundary_failure_count"] == 3
+    assert evidence["diagnostic_non_state_change_failure_count"] == 3
+    assert evidence["diagnostic_non_state_change_reports"] == expected_diagnostics
+    assert {
+        pairing["diagnostic_report"]
+        for pairing in evidence["diagnostic_non_state_change_pairings"]
+    } == set(expected_diagnostics)
+    assert evidence["unresolved_non_boundary_failure_count"] == 0
+    assert evidence["non_boundary_failure_count"] == 0
+    assert evidence["unresolved_failed_raw_reports"] == []
+    assert evidence["failed_raw_reports"] == sorted(
+        [
+            *completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS,
+            *completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS,
+        ]
+    )
+
+
+def test_completion_claim_counts_unexpected_ui_failures_from_failed_expectations(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(
+        tmp_path,
+        ready=True,
+        include_required_reports=True,
+        include_unexpected_ui_failure_report=True,
+    )
+
+    report = completion.audit_completion_claim(manifest)
+
+    interaction_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "broader_click_level_interaction_variants"
+    )
+    evidence = interaction_requirement["evidence"]
+    assert report["bundle_audit"]["ready"] is False
+    assert evidence["raw_failure_count"] == 3
+    assert evidence["known_boundary_failure_count"] == 2
+    assert evidence["unresolved_non_boundary_failure_count"] == 1
+    assert evidence["unresolved_failed_raw_reports"] == [
+        "excel_ui_interaction_unexpected_failure_probe"
+    ]
+    assert "excel_ui_interaction_unexpected_failure_probe" in evidence["failed_raw_reports"]
+
+
 def _write_bundle_manifest(
     tmp_path: Path,
     *,
     ready: bool,
     include_required_reports: bool,
+    include_diagnostic_non_state_change_reports: bool = False,
+    include_unexpected_ui_failure_report: bool = False,
     corpus_source_count: int = 3,
     corpus_workbook_count: int = 11,
 ) -> Path:
@@ -341,6 +416,13 @@ def _write_bundle_manifest(
     names = ["current"]
     if include_required_reports:
         names.extend(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS)
+    if include_diagnostic_non_state_change_reports:
+        names.extend(completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS)
+        names.extend(
+            completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.values()
+        )
+    if include_unexpected_ui_failure_report:
+        names.append("excel_ui_interaction_unexpected_failure_probe")
     for index, name in enumerate(names):
         report_path = tmp_path / f"report-{index}.json"
         payload = {"ready": ready}
@@ -404,6 +486,57 @@ def _write_bundle_manifest(
                     {"path": "completed", "equals": True},
                     {"path": "result_count", "equals": 11},
                     {"path": "failure_count", "equals": 1},
+                ]
+            )
+        if name in completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS:
+            payload.update(
+                {
+                    "probe_kind": "excel_ui_interaction",
+                    "completed": True,
+                    "result_count": 1,
+                    "failure_count": 1,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "completed", "equals": True},
+                    {"path": "result_count", "equals": 1},
+                    {"path": "failure_count", "equals": 1},
+                ]
+            )
+        if name in completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.values():
+            payload.update(
+                {
+                    "probe_kind": "excel_ui_interaction",
+                    "completed": True,
+                    "result_count": 1,
+                    "failure_count": 0,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "completed", "equals": True},
+                    {"path": "result_count", "equals": 1},
+                    {"path": "failure_count", "equals": 0},
+                ]
+            )
+        if name == "excel_ui_interaction_unexpected_failure_probe":
+            payload.update(
+                {
+                    "probe_kind": "excel_ui_interaction",
+                    "completed": True,
+                    "result_count": 1,
+                    "failure_count": 1,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "completed", "equals": True},
+                    {"path": "result_count", "equals": 1},
+                    {"path": "failure_count", "equals": 0},
                 ]
             )
         report_path.write_text(json.dumps(payload))
