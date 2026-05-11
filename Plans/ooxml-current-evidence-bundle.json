@@ -3935,6 +3935,45 @@
       ]
     },
     {
+      "name": "synthgl_ingest_confidence_sample_100_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-synthgl-ingest-confidence-sample-100-20260511.json",
+      "producer": "sh -c 'set -e; sample=/tmp/wolfxl-synthgl-ingest-confidence-sample-100-20260511; rm -rf \"$sample\"; mkdir -p \"$sample\"; i=0; find /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence -type f \\( -iname \"*.xlsx\" -o -iname \"*.xlsm\" \\) | sort | head -100 | while IFS= read -r f; do case_name=$(basename \"$(dirname \"$f\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); run_name=$(basename \"$(dirname \"$(dirname \"$(dirname \"$f\")\")\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); cp \"$f\" \"$sample/$(printf \"%03d\" \"$i\")-${run_name}-${case_name}.xlsx\"; i=$((i+1)); done; uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py \"$sample\" --json > /tmp/wolfxl-corpus-buckets-synthgl-ingest-confidence-sample-100-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 100},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length": 100},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length": 100},
+        {"path": "bucket_fixtures.workbook_global_state", "length": 100}
+      ]
+    },
+    {
+      "name": "synthgl_ingest_confidence_sample_100_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-synthgl-ingest-confidence-sample-100-20260511.json",
+      "producer": "sh -c 'set -e; sample=/tmp/wolfxl-synthgl-ingest-confidence-sample-100-20260511; rm -rf \"$sample\"; mkdir -p \"$sample\"; i=0; find /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence -type f \\( -iname \"*.xlsx\" -o -iname \"*.xlsm\" \\) | sort | head -100 | while IFS= read -r f; do case_name=$(basename \"$(dirname \"$f\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); run_name=$(basename \"$(dirname \"$(dirname \"$(dirname \"$f\")\")\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); cp \"$f\" \"$sample/$(printf \"%03d\" \"$i\")-${run_name}-${case_name}.xlsx\"; i=$((i+1)); done; uv run --no-sync python scripts/audit_ooxml_gap_radar.py \"$sample\" --json > /tmp/wolfxl-gap-radar-synthgl-ingest-confidence-sample-100-20260511.json'",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 100},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "synthgl_ingest_confidence_sample_100_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-synthgl-ingest-confidence-sample-100-quick-20260511/report.json",
+      "producer": "sh -c 'set -e; sample=/tmp/wolfxl-synthgl-ingest-confidence-sample-100-20260511; rm -rf \"$sample\" /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-ingest-confidence-sample-100-quick-20260511; mkdir -p \"$sample\"; i=0; find /Users/wolfgangschoenberger/Projects/SynthGL/output/ui_runs/ingest_confidence -type f \\( -iname \"*.xlsx\" -o -iname \"*.xlsm\" \\) | sort | head -100 | while IFS= read -r f; do case_name=$(basename \"$(dirname \"$f\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); run_name=$(basename \"$(dirname \"$(dirname \"$(dirname \"$f\")\")\")\" | tr -c \"A-Za-z0-9_.-\" \"_\"); cp \"$f\" \"$sample/$(printf \"%03d\" \"$i\")-${run_name}-${case_name}.xlsx\"; i=$((i+1)); done; uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py \"$sample\" --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-ingest-confidence-sample-100-quick-20260511 --mutation no_op --mutation marker_cell --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-synthgl-ingest-confidence-sample-100-quick-20260511.json'",
+      "expect": [
+        {"path": "mutations", "equals": ["no_op", "marker_cell"]},
+        {"path": "result_count", "equals": 200},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0}
+      ]
+    },
+    {
       "name": "synthgl_real_world_ingestion_corpus_buckets",
       "path": "/tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py /Users/wolfgangschoenberger/Projects/SynthGL/data/real-world-ingestion --recursive --json > /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json",
@@ -6368,17 +6407,17 @@
     },
     {
       "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-umya-result-files-20260511.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-umya-result-files-20260511.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json /tmp/wolfxl-corpus-buckets-synthgl-qoe-saas-001-workbooks-20260511.json /tmp/wolfxl-corpus-buckets-codexaudit-qoe-workbooks-20260510.json /tmp/wolfxl-corpus-buckets-local-project-holdouts-20260511.json /tmp/wolfxl-corpus-buckets-fed-aea-papers-20260511.json --min-workbooks 497 --min-sources 36 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-umya-result-files-20260511.json",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-ingest-confidence-sample-100-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-umya-result-files-20260511.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-ingest-confidence-sample-100-20260511.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json /tmp/wolfxl-corpus-buckets-synthgl-qoe-saas-001-workbooks-20260511.json /tmp/wolfxl-corpus-buckets-codexaudit-qoe-workbooks-20260510.json /tmp/wolfxl-corpus-buckets-local-project-holdouts-20260511.json /tmp/wolfxl-corpus-buckets-fed-aea-papers-20260511.json --min-workbooks 597 --min-sources 37 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-ingest-confidence-sample-100-20260511.json",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 36},
-        {"path": "input_report_count", "equals": 36},
-        {"path": "workbook_count", "equals": 497},
+        {"path": "source_count", "equals": 37},
+        {"path": "input_report_count", "equals": 37},
+        {"path": "workbook_count", "equals": 597},
         {"path": "skipped_workbook_count", "equals": 33},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 463},
+        {"path": "bucket_counts.excel_authored", "equals": 563},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 10},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
@@ -6386,8 +6425,8 @@
         {"path": "bucket_counts.external_link", "equals": 29},
         {"path": "bucket_counts.chart_or_chart_style", "equals": 43},
         {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 113},
-        {"path": "bucket_counts.conditional_formatting_extension", "equals": 497},
-        {"path": "bucket_counts.workbook_global_state", "equals": 492},
+        {"path": "bucket_counts.conditional_formatting_extension", "equals": 597},
+        {"path": "bucket_counts.workbook_global_state", "equals": 592},
         {"path": "bucket_counts.python_in_excel", "equals": 10},
         {"path": "bucket_counts.sheet_metadata", "equals": 29}
       ]
