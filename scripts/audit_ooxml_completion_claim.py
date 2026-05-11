@@ -167,6 +167,10 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "sec_municipal_adviser_reports_feature_neutral_render_equivalence",
     "sec_municipal_adviser_reports_add_conditional_formatting_render_equivalence",
     "domain_ground_truth_neutral_render_equivalence",
+    "pivot_slicer_structural_render_equivalence",
+    "local_project_holdouts_small_neutral_render_equivalence",
+    "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary",
+    "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -264,6 +268,12 @@ OPEN_REQUIREMENTS = (
             "add-data-validation, add-conditional-formatting, add-remove-chart, "
             "and copy-remove-sheet render equivalence on all 29 "
             "public/regulatory municipal-adviser workbooks, "
+            "pivot/slicer structural side evidence separately proves "
+            "rename-sheet and copy-remove-sheet render equivalence on three "
+            "high-risk pivot/slicer fixtures, and local-project holdout side "
+            "evidence separately proves add-data-validation and "
+            "copy-remove-sheet render equivalence on two representative "
+            "local workbooks, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
@@ -286,9 +296,11 @@ OPEN_REQUIREMENTS = (
             "Plans/real-world-excel-fidelity-gap-discovery.md. This still is "
             "not exhaustive: current Excel 16.108 rechecks show some source "
             "table-slicer, timeline, and list-box UI paths can complete actions "
-            "without persisting a state change in this environment, and broader "
-            "slicer, timeline, embedded-control, and prompt variants remain "
-            "unexhausted."
+            "without persisting a state change in this environment, and pinned "
+            "delete-first-row/column broad UI boundary reports still expose one "
+            "external-tool slicer click that is not observed after each "
+            "destructive-axis edit. Broader slicer, timeline, embedded-control, "
+            "and prompt variants remain unexhausted."
         ),
     },
     {

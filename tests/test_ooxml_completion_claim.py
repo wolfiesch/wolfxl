@@ -53,6 +53,27 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         if requirement["id"] == "broader_real_world_corpus_diversity"
     )
     assert "11 unique readable workbooks across 3 source reports" in corpus_requirement["reason"]
+    required_reports = next(
+        criterion
+        for criterion in report["criteria"]
+        if criterion["id"] == "current_evidence_required_reports_present"
+    )
+    assert required_reports["evidence"]["missing_reports"] == []
+    assert required_reports["evidence"]["required_report_count"] == len(
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "pivot_slicer_structural_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "local_project_holdouts_small_neutral_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(
