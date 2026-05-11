@@ -779,6 +779,19 @@ Excelize-authored pivot/slicer workbooks, and clicked the May timeline month.
 The raw report has 11 passed UI results and the scoped strict audit is
 `ready=true` with all six requested probe classes clear.
 
+Latest destructive-axis broad UI-interaction boundary checks add raw reports at
+`/tmp/wolfxl-ui-interaction-delete-first-row-external-oracle-broad-20260511/interactive-probe-report.json`
+and
+`/tmp/wolfxl-ui-interaction-delete-first-col-external-oracle-broad-20260511/interactive-probe-report.json`:
+after WolfXL `delete_first_row` and `delete_first_col` saves, Microsoft Excel
+completed 10 of 11 broad external-oracle actions, including external-tool pivot
+refresh, Microsoft-authored slicer clicks, timeline clicks, macro prompts,
+embedded controls, and external-link prompt preservation. Both reports keep one
+explicit failed result for `excelize-2.10-pivot-slicers.xlsx`
+`slicer_selection_state`: the required external-tool slicer click was not
+observed after the destructive axis edit. These reports document the current
+broad boundary and are not counted as broad all-clear UI-interaction evidence.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned
