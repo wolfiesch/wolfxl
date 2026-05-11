@@ -5737,25 +5737,73 @@
       ]
     },
     {
-      "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-usda-ers-county-20260511.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json --min-sources 29 --min-workbooks 393 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-usda-ers-county-20260511.json",
+      "name": "eia_energy_public_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-eia-energy-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-eia-energy-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_D1.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T01.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Energy_Consumption.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T02.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Petroleum_Overview.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T03.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/State_data_MER.xlsx\" \"https://www.eia.gov/totalenergy/data/monthly/State_data_MER.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/STEO_Fig42.xlsx\" \"https://www.eia.gov/outlooks/steo/xls/Fig42.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/refcap25.xlsx\" \"https://www.eia.gov/petroleum/refinerycapacity/refcap25.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/EIA_LiqPipProject.xlsx\" \"https://www.eia.gov/petroleum/xls/EIA_LiqPipProject.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py \"$dest\" --json > /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 7},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline"]},
+        {"path": "bucket_fixtures.excel_authored", "length": 7},
+        {"path": "bucket_fixtures.chart_or_chart_style", "length": 1},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length": 7},
+        {"path": "bucket_fixtures.drawing_comment_or_media", "length": 2},
+        {"path": "bucket_fixtures.embedded_object_or_control", "length": 2},
+        {"path": "bucket_fixtures.external_link", "length": 2},
+        {"path": "bucket_fixtures.table_structured_ref_or_validation", "length": 1},
+        {"path": "bucket_fixtures.workbook_global_state", "length": 7}
+      ]
+    },
+    {
+      "name": "eia_energy_public_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-eia-energy-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-eia-energy-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_D1.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T01.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Energy_Consumption.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T02.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Petroleum_Overview.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T03.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/State_data_MER.xlsx\" \"https://www.eia.gov/totalenergy/data/monthly/State_data_MER.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/STEO_Fig42.xlsx\" \"https://www.eia.gov/outlooks/steo/xls/Fig42.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/refcap25.xlsx\" \"https://www.eia.gov/petroleum/refinerycapacity/refcap25.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/EIA_LiqPipProject.xlsx\" \"https://www.eia.gov/petroleum/xls/EIA_LiqPipProject.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_gap_radar.py \"$dest\" --json --strict > /tmp/wolfxl-gap-radar-eia-energy-20260511.json'",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 29},
-        {"path": "input_report_count", "equals": 29},
-        {"path": "workbook_count", "equals": 393},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 7},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "eia_energy_public_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-eia-energy-quick-20260511/report.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-eia-energy-20260511; rm -rf \"$dest\" /tmp/wolfxl-ooxml-fidelity-mutations-eia-energy-quick-20260511; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_D1.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T01.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Energy_Consumption.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T02.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/Table_Petroleum_Overview.xlsx\" \"https://www.eia.gov/totalenergy/data/browser/xls.php?tbl=T03.01&freq=m\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/State_data_MER.xlsx\" \"https://www.eia.gov/totalenergy/data/monthly/State_data_MER.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/STEO_Fig42.xlsx\" \"https://www.eia.gov/outlooks/steo/xls/Fig42.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/refcap25.xlsx\" \"https://www.eia.gov/petroleum/refinerycapacity/refcap25.xlsx\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/EIA_LiqPipProject.xlsx\" \"https://www.eia.gov/petroleum/xls/EIA_LiqPipProject.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py \"$dest\" --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-eia-energy-quick-20260511 --mutation no_op --mutation marker_cell --mutation style_cell --mutation copy_remove_sheet --mutation add_data_validation --mutation add_conditional_formatting --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-eia-energy-quick-20260511.json'",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "equals": "/private/tmp/wolfxl-public-eia-energy-20260511"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "copy_remove_sheet", "add_data_validation", "add_conditional_formatting"]},
+        {"path": "result_count", "equals": 42},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "corpus_portfolio_diversity",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-eia-energy-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json --min-sources 30 --min-workbooks 400 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-eia-energy-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_count", "equals": 30},
+        {"path": "input_report_count", "equals": 30},
+        {"path": "workbook_count", "equals": 400},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 360},
+        {"path": "bucket_counts.excel_authored", "equals": 367},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
         {"path": "bucket_counts.slicer_or_timeline", "equals": 7},
-        {"path": "bucket_counts.external_link", "equals": 22},
-        {"path": "bucket_counts.chart_or_chart_style", "equals": 21},
-        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 87},
+        {"path": "bucket_counts.external_link", "equals": 24},
+        {"path": "bucket_counts.chart_or_chart_style", "equals": 22},
+        {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 88},
         {"path": "bucket_counts.python_in_excel", "equals": 6},
         {"path": "bucket_counts.sheet_metadata", "equals": 20}
       ]
