@@ -89,6 +89,22 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "census_sitc_renderable_neutral_render_equivalence" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "random_corpus_holdout_50" in completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    assert "random_corpus_holdout_10_smoke_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_10_add_data_validation_render_smoke" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_10_add_data_validation_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_10_chart_copy_render_smoke" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "random_corpus_holdout_10_chart_copy_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(

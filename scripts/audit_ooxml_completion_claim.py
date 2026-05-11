@@ -188,6 +188,12 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "local_project_holdouts_small_neutral_render_equivalence",
     "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary",
     "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
+    "random_corpus_holdout_50",
+    "random_corpus_holdout_10_smoke_mutation_report",
+    "random_corpus_holdout_10_add_data_validation_render_smoke",
+    "random_corpus_holdout_10_add_data_validation_render_equivalence",
+    "random_corpus_holdout_10_chart_copy_render_smoke",
+    "random_corpus_holdout_10_chart_copy_render_equivalence",
     "public_powerbi_expanded_mutations",
     "synthgl_recursive_mutation_coverage",
     "synthgl_recursive_excel_render_noop_byte_identical",
@@ -290,7 +296,10 @@ OPEN_REQUIREMENTS = (
             "high-risk pivot/slicer fixtures, and local-project holdout side "
             "evidence separately proves add-data-validation and "
             "copy-remove-sheet render equivalence on two representative "
-            "local workbooks, "
+            "local workbooks, and deterministic random-holdout side evidence "
+            "separately proves add-data-validation, add-remove-chart, and "
+            "copy-remove-sheet render equivalence on 10 sampled workbooks "
+            "spanning eight source reports, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
@@ -356,8 +365,12 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "municipal-adviser and SEC investment-management public/regulatory "
                 "sidecars, IRS SOI, BEA GDP, USDA ERS county, EIA energy, and "
                 "Census SITC public-statistics sidecars, and all required diversity "
-                "buckets, but it is still not customer-scale or random real-world "
-                "Excel evidence."
+                "buckets. The pinned deterministic random holdout now samples "
+                "50 workbooks from that portfolio across 22 source reports and "
+                "stages all selected files, with a smaller 10-workbook smoke "
+                "mutation passing no-op and marker-cell saves; this improves "
+                "curated-corpus pressure evidence, but it is still not "
+                "customer-scale real-world Excel evidence."
             )
             break
     return requirements
