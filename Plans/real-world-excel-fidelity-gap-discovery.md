@@ -557,6 +557,12 @@ embedded list-box/button-control clicks, and timeline month click after a
 WolfXL `add_remove_chart` save. Broader mouse-click slicer/timeline variants
 remain open.
 
+Follow-up runner hardening: click-level Excel UI probes now fail before opening
+Excel when macOS reports the screen is locked. This keeps blocked local UI
+sessions from being misread as workbook corruption or slow Excel launch
+timeouts; the blocked add-conditional-formatting macro-prompt attempt was left
+unpinned because it produced no usable UI evidence.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned

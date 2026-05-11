@@ -570,6 +570,8 @@ def _open_excel_with_ui_interaction(
     *,
     external_link_prompt_mode: str = EXTERNAL_LINK_PROMPT_MODE_FORCE,
 ) -> tuple[str, list[str]]:
+    if _mac_screen_is_locked():
+        raise RuntimeError("macOS screen is locked; unlock before Excel UI interaction probes")
     ask_to_update_links = None
     if (
         probe == "external_link_update_prompt"
@@ -592,6 +594,8 @@ def _open_excel_with_ui_interaction(
 def _open_excel_with_ui_interaction_impl(
     src: Path, probe: str, timeout: int
 ) -> tuple[str, list[str]]:
+    if _mac_screen_is_locked():
+        raise RuntimeError("macOS screen is locked; unlock before Excel UI interaction probes")
     launched = subprocess.Popen(
         ["open", "-a", "Microsoft Excel", str(src.resolve())],
         stdout=subprocess.PIPE,
