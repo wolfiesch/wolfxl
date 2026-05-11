@@ -479,7 +479,7 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "workbook_deficit": workbook_deficit,
                 "source_deficit": source_deficit,
             }
-            requirement["reason"] = (
+            corpus_summary = (
                 f"The current corpus portfolio spans {workbook_count} unique readable "
                 f"workbooks across {source_count} source reports, including the "
                 "domain-ground-truth public workbook sidecar, standalone SEC "
@@ -489,13 +489,24 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "buckets. The pinned deterministic random holdout now samples "
                 "50 workbooks from that portfolio across 22 source reports and "
                 "stages all selected files, with a smaller 10-workbook smoke "
-                "mutation passing no-op and marker-cell saves; this improves "
-                "curated-corpus pressure evidence, but it remains below the "
-                f"customer-scale target of {CUSTOMER_SCALE_MIN_WORKBOOKS} unique "
-                f"readable workbooks across {CUSTOMER_SCALE_MIN_SOURCES} source "
-                f"reports by {workbook_deficit} workbooks and {source_deficit} "
-                "source reports."
+                "mutation passing no-op and marker-cell saves."
             )
+            if workbook_deficit or source_deficit:
+                requirement["reason"] = (
+                    f"{corpus_summary} This improves curated-corpus pressure "
+                    "evidence, but it remains below the customer-scale target of "
+                    f"{CUSTOMER_SCALE_MIN_WORKBOOKS} unique readable workbooks "
+                    f"across {CUSTOMER_SCALE_MIN_SOURCES} source reports by "
+                    f"{workbook_deficit} workbooks and {source_deficit} source "
+                    "reports."
+                )
+            else:
+                requirement["status"] = "satisfied"
+                requirement["reason"] = (
+                    f"{corpus_summary} This satisfies the customer-scale corpus "
+                    f"target of {CUSTOMER_SCALE_MIN_WORKBOOKS} unique readable "
+                    f"workbooks across {CUSTOMER_SCALE_MIN_SOURCES} source reports."
+                )
             break
     return requirements
 

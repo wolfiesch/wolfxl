@@ -272,11 +272,39 @@ def test_completion_claim_strict_claim_fails_until_open_requirements_close(
     assert payload["exhaustive_claim_ready"] is False
 
 
+def test_completion_claim_marks_corpus_requirement_satisfied_at_customer_scale(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(
+        tmp_path,
+        ready=True,
+        include_required_reports=True,
+        corpus_source_count=completion.CUSTOMER_SCALE_MIN_SOURCES,
+        corpus_workbook_count=completion.CUSTOMER_SCALE_MIN_WORKBOOKS,
+    )
+
+    report = completion.audit_completion_claim(manifest)
+
+    corpus_requirement = next(
+        requirement
+        for requirement in report["criteria"]
+        if requirement["id"] == "broader_real_world_corpus_diversity"
+    )
+    assert corpus_requirement["status"] == "satisfied"
+    assert "satisfies the customer-scale corpus target" in corpus_requirement["reason"]
+    assert "remains below" not in corpus_requirement["reason"]
+    assert corpus_requirement["evidence"]["workbook_deficit"] == 0
+    assert corpus_requirement["evidence"]["source_deficit"] == 0
+    assert "broader_real_world_corpus_diversity" not in report["missing_requirement_ids"]
+
+
 def _write_bundle_manifest(
     tmp_path: Path,
     *,
     ready: bool,
     include_required_reports: bool,
+    corpus_source_count: int = 3,
+    corpus_workbook_count: int = 11,
 ) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     reports = []
@@ -288,11 +316,16 @@ def _write_bundle_manifest(
         payload = {"ready": ready}
         expect = [{"path": "ready", "equals": True}]
         if name == "corpus_portfolio_diversity":
-            payload.update({"source_count": 3, "workbook_count": 11})
+            payload.update(
+                {
+                    "source_count": corpus_source_count,
+                    "workbook_count": corpus_workbook_count,
+                }
+            )
             expect.extend(
                 [
-                    {"path": "source_count", "equals": 3},
-                    {"path": "workbook_count", "equals": 11},
+                    {"path": "source_count", "equals": corpus_source_count},
+                    {"path": "workbook_count", "equals": corpus_workbook_count},
                 ]
             )
         report_path.write_text(json.dumps(payload))
