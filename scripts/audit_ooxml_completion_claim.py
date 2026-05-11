@@ -26,6 +26,17 @@ KNOWN_UI_INTERACTION_BOUNDARY_REPORTS = (
     "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary",
     "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
 )
+KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS = {
+    "current_excel_16_108_source_table_slicer_recheck_non_state_change": (
+        "excel_ui_interaction_slicer_all_items_click"
+    ),
+    "current_excel_16_108_source_timeline_recheck_non_state_change": (
+        "excel_ui_interaction_timeline_month_click"
+    ),
+    "current_excel_16_108_source_control_recheck_non_state_change": (
+        "excel_ui_interaction_embedded_control_click"
+    ),
+}
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -437,7 +448,9 @@ OPEN_REQUIREMENTS = (
             "Plans/real-world-excel-fidelity-gap-discovery.md. This still is "
             "not exhaustive: current Excel 16.108 rechecks show some source "
             "table-slicer, timeline, and list-box UI paths can complete actions "
-            "without persisting a state change in this environment, and pinned "
+            "without persisting a state change in this environment even though "
+            "paired source click reports prove state-changing interactions for "
+            "the same fixture classes, and pinned "
             "delete-first-row/column broad UI boundary reports still expose one "
             "external-tool slicer click that is not observed after each "
             "destructive-axis edit. Broader slicer, timeline, embedded-control, "
@@ -532,30 +545,80 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
         for report in reports
         if report["name"] in KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
     ]
+    report_by_name = {str(report["name"]): report for report in reports}
+    diagnostic_report_names = {
+        diagnostic_name
+        for diagnostic_name, passing_source_report_name in (
+            KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.items()
+        )
+        if _is_qualified_diagnostic_non_state_change(
+            report_by_name.get(diagnostic_name),
+            report_by_name.get(passing_source_report_name),
+        )
+    }
+    diagnostic_reports = [
+        report for report in reports if report["name"] in diagnostic_report_names
+    ]
     failed_report_names = {
         str(report["name"])
         for report in completed_reports
         if _report_check_actual(report, "failure_count")
     }
     boundary_report_names = {str(report["name"]) for report in boundary_reports}
+    raw_failure_count = _sum_numeric_report_checks(completed_reports, "failure_count")
+    boundary_failure_count = _sum_numeric_report_checks(boundary_reports, "failure_count")
+    diagnostic_failure_count = _sum_numeric_report_checks(
+        diagnostic_reports, "failure_count"
+    )
+    unresolved_failed_report_names = (
+        failed_report_names - boundary_report_names - diagnostic_report_names
+    )
+    unresolved_non_boundary_failure_count = (
+        raw_failure_count - boundary_failure_count - diagnostic_failure_count
+    )
     return {
         "probe_report_count": len(reports),
         "completed_probe_report_count": len(completed_reports),
         "ready_gate_report_count": len(ready_gates),
         "raw_result_count": _sum_numeric_report_checks(completed_reports, "result_count"),
-        "raw_failure_count": _sum_numeric_report_checks(completed_reports, "failure_count"),
+        "raw_failure_count": raw_failure_count,
         "known_boundary_report_count": len(boundary_reports),
-        "known_boundary_failure_count": _sum_numeric_report_checks(
-            boundary_reports, "failure_count"
-        ),
-        "non_boundary_failure_count": _sum_numeric_report_checks(
-            completed_reports, "failure_count"
-        )
-        - _sum_numeric_report_checks(boundary_reports, "failure_count"),
+        "known_boundary_failure_count": boundary_failure_count,
+        "diagnostic_non_state_change_report_count": len(diagnostic_reports),
+        "diagnostic_non_state_change_failure_count": diagnostic_failure_count,
+        "observed_non_boundary_failure_count": raw_failure_count - boundary_failure_count,
+        "non_boundary_failure_count": unresolved_non_boundary_failure_count,
+        "unresolved_non_boundary_failure_count": unresolved_non_boundary_failure_count,
         "failed_raw_reports": sorted(failed_report_names),
         "known_boundary_reports": sorted(boundary_report_names),
+        "diagnostic_non_state_change_reports": sorted(diagnostic_report_names),
+        "diagnostic_non_state_change_pairings": [
+            {
+                "diagnostic_report": diagnostic_name,
+                "passing_source_report": passing_source_report_name,
+            }
+            for diagnostic_name, passing_source_report_name in sorted(
+                KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.items()
+            )
+            if diagnostic_name in diagnostic_report_names
+        ],
+        "unresolved_failed_raw_reports": sorted(unresolved_failed_report_names),
         "target_status": "open_unbounded_click_level_variant_universe",
     }
+
+
+def _is_qualified_diagnostic_non_state_change(
+    diagnostic_report: Optional[dict],
+    passing_source_report: Optional[dict],
+) -> bool:
+    if diagnostic_report is None or passing_source_report is None:
+        return False
+    return (
+        _report_check_actual(diagnostic_report, "completed") is True
+        and _report_check_actual(diagnostic_report, "failure_count") == 1
+        and _report_check_actual(passing_source_report, "completed") is True
+        and _report_check_actual(passing_source_report, "failure_count") == 0
+    )
 
 
 def _open_requirements(bundle_audit: dict) -> list[dict]:
@@ -634,9 +697,12 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "UI-interaction failures, including "
                 f"{interaction_evidence['known_boundary_failure_count']} known broad "
                 "destructive-axis external-tool slicer boundary failures and "
-                f"{interaction_evidence['non_boundary_failure_count']} non-boundary "
-                "source recheck failures. Broader slicer, timeline, embedded-control, "
-                "and prompt variants remain unexhausted."
+                f"{interaction_evidence['diagnostic_non_state_change_failure_count']} "
+                "paired diagnostic source rechecks where the UI action completed "
+                "without persisting a state change in this Excel environment. "
+                f"{interaction_evidence['unresolved_non_boundary_failure_count']} "
+                "non-boundary failures remain unresolved. Broader slicer, timeline, "
+                "embedded-control, and prompt variants remain unexhausted."
             )
     return requirements
 
