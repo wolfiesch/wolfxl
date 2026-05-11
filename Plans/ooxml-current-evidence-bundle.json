@@ -7944,6 +7944,22 @@
       ]
     },
     {
+      "name": "random_corpus_holdout_50_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-50-quick-20260511/report.json",
+      "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-50-stage-20260511 /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-50-quick-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 50 --min-sample-size 50 --min-sources 8 --seed wolfxl-random-holdout-20260511-v1 --stage-dir /tmp/wolfxl-random-corpus-holdout-50-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-50-staged-20260511.json && uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-random-corpus-holdout-50-stage-20260511 --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-50-quick-20260511 --mutation no_op --mutation marker_cell --mutation style_cell --mutation copy_remove_sheet --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-50-quick-20260511.stdout.json",
+      "expect": [
+        {"path": "fixture_dir", "contains": "wolfxl-random-corpus-holdout-50-stage-20260511"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "copy_remove_sheet", "add_data_validation", "add_conditional_formatting", "add_remove_chart"]},
+        {"path": "result_count", "equals": 350},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "results", "length": 350},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.2.status", "equals": "passed_with_expected_drift"},
+        {"path": "results.349.status", "equals": "passed"}
+      ]
+    },
+    {
       "name": "random_corpus_holdout_10_smoke_mutation_report",
       "path": "/tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511/report.json",
       "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 10 --min-sample-size 10 --min-sources 5 --seed wolfxl-random-holdout-20260511-v1 --stage-dir /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-10-staged-20260511.json && uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511 --mutation no_op --mutation marker_cell --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-random-holdout-10-smoke-20260511.stdout.json",
