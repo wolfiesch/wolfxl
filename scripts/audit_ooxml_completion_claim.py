@@ -189,6 +189,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary",
     "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
     "random_corpus_holdout_50",
+    "random_corpus_holdout_50_quick_mutation_report",
     "random_corpus_holdout_10_smoke_mutation_report",
     "random_corpus_holdout_10_add_data_validation_render_smoke",
     "random_corpus_holdout_10_add_data_validation_render_equivalence",
@@ -208,7 +209,9 @@ OPEN_REQUIREMENTS = (
         "status": "open",
         "reason": (
             "The current corpus portfolio covers all required diversity buckets, "
-            "but it is still not customer-scale or random real-world Excel evidence."
+            "and the deterministic 50-workbook random holdout now has richer "
+            "mutation evidence, but it is still not customer-scale real-world "
+            "Excel evidence."
         ),
     },
     {
