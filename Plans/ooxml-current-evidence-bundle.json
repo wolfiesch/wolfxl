@@ -7991,6 +7991,42 @@
       ]
     },
     {
+      "name": "random_corpus_holdout_10_add_conditional_formatting_render_smoke",
+      "path": "/tmp/wolfxl-render-excel-random-holdout-10-add-cf-20260511/render-compare-report.json",
+      "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 /tmp/wolfxl-render-excel-random-holdout-10-add-cf-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 10 --min-sample-size 10 --min-sources 5 --seed wolfxl-random-holdout-20260511-v1 --stage-dir /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-10-staged-20260511.json && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --output-dir /tmp/wolfxl-render-excel-random-holdout-10-add-cf-20260511 --render-engine excel --mutation add_conditional_formatting --max-pages-per-fixture 1 --page-selection first-pages --timeout 120 > /tmp/wolfxl-render-excel-random-holdout-10-add-cf-20260511.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "page_selection", "equals": "first-pages"},
+        {"path": "max_pages_per_fixture", "equals": 1},
+        {"path": "result_count", "equals": 10},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.mutation", "equals": "add_conditional_formatting"},
+        {"path": "results.0.compared_page_count", "equals": 1},
+        {"path": "results.9.mutation", "equals": "add_conditional_formatting"},
+        {"path": "results.9.compared_page_count", "equals": 1}
+      ]
+    },
+    {
+      "name": "random_corpus_holdout_10_add_conditional_formatting_render_equivalence",
+      "path": "/tmp/wolfxl-random-holdout-10-add-cf-render-equivalence-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-random-holdout-10-add-cf-20260511/render-compare-report.json --mutation add_conditional_formatting --timeout 120 --strict > /tmp/wolfxl-random-holdout-10-add-cf-render-equivalence-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 10},
+        {"path": "passed_count", "equals": 10},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.9.status", "equals": "passed"}
+      ]
+    },
+    {
       "name": "random_corpus_holdout_10_chart_copy_render_smoke",
       "path": "/tmp/wolfxl-render-excel-random-holdout-10-chart-copy-20260511/render-compare-report.json",
       "producer": "rm -rf /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 /tmp/wolfxl-render-excel-random-holdout-10-chart-copy-20260511 && uv run --no-sync python scripts/audit_ooxml_random_corpus_holdout.py /tmp/wolfxl-corpus-portfolio-buckets-with-fed-aea-20260511.json --sample-size 10 --min-sample-size 10 --min-sources 5 --seed wolfxl-random-holdout-20260511-v1 --stage-dir /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --strict > /tmp/wolfxl-random-corpus-holdout-10-staged-20260511.json && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-random-corpus-holdout-10-stage-20260511 --output-dir /tmp/wolfxl-render-excel-random-holdout-10-chart-copy-20260511 --render-engine excel --mutation add_remove_chart --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --timeout 120 > /tmp/wolfxl-render-excel-random-holdout-10-chart-copy-20260511.json",
