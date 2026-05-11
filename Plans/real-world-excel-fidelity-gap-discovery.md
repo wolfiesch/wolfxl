@@ -583,6 +583,19 @@ embedded list-box/button-control clicks, and timeline month click after a
 WolfXL `add_remove_chart` save. Broader mouse-click slicer/timeline variants
 remain open.
 
+Latest random-render increment: a deterministic 20-workbook random holdout
+using seed `wolfxl-random-holdout-render-20260511-v15` stages cleanly across
+14 source reports and records its renderability boundary at
+`/tmp/wolfxl-random-holdout-20-render-boundary-20260511.json`. Microsoft Excel
+PDF export fails with parameter error `-50` for two sampled workbooks after the
+neutral feature edits, so those two are explicitly excluded from the
+renderable-subset claim instead of being counted as passes. The renderable
+18-workbook subset then passes Microsoft Excel neutral render-equivalence for
+`add_data_validation`, `add_conditional_formatting`, `add_remove_chart`, and
+`copy_remove_sheet`: `/tmp/wolfxl-random-holdout-20-renderable-18-neutral-render-equivalence-20260511.json`
+is `ready=true` with 72 passed, 0 failures, and 0 inconclusive under the
+recorded `$A$1:$K$80` temporary print-area clamp.
+
 Follow-up runner hardening: click-level Excel UI probes now fail before opening
 Excel when macOS reports the screen is locked. This keeps blocked local UI
 sessions from being misread as workbook corruption or slow Excel launch

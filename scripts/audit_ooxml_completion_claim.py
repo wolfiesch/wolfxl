@@ -190,6 +190,9 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
     "random_corpus_holdout_50",
     "random_corpus_holdout_50_quick_mutation_report",
+    "random_corpus_holdout_20_render_boundary",
+    "random_corpus_holdout_20_renderable_18_neutral_render_smoke",
+    "random_corpus_holdout_20_renderable_18_neutral_render_equivalence",
     "random_corpus_holdout_10_smoke_mutation_report",
     "random_corpus_holdout_10_add_data_validation_render_smoke",
     "random_corpus_holdout_10_add_data_validation_render_equivalence",
@@ -305,6 +308,10 @@ OPEN_REQUIREMENTS = (
             "separately proves add-data-validation, add-conditional-formatting, "
             "add-remove-chart, and copy-remove-sheet render equivalence on 10 "
             "sampled workbooks spanning eight source reports, "
+            "and proves the same four neutral feature edits on an 18-workbook "
+            "Excel-renderable subset of a 20-workbook random holdout spanning "
+            "14 source reports, with the two Excel PDF-export boundary "
+            "workbooks recorded separately, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
