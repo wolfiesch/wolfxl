@@ -13,7 +13,7 @@ import sys
 from copy import deepcopy
 from xml.etree import ElementTree
 import zipfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable
 
@@ -72,6 +72,7 @@ WORKSHEET_MUTATIONS = EXISTING_SHEET_MUTATIONS - {
 PASSING_STATUSES = {
     "passed",
     "passed_with_expected_drift",
+    "passed_with_source_preexisting_issues",
     "skipped_source_invalid",
     "skipped_source_missing",
 }
@@ -218,6 +219,16 @@ REQUIRED_EXPECTED_ISSUE_MARKERS_BY_MUTATION = {
         "external_links_semantic_drift": "wolfxl-retargeted-external-link.xlsx",
     },
 }
+SOURCE_PREEXISTING_ISSUE_KINDS = {
+    "chart_formula_missing_sheet",
+    "chart_pivot_source_missing_sheet",
+    "conditional_formatting_dxf_out_of_range",
+    "dangling_relationship",
+    "pivot_cache_source_missing_sheet",
+    "table_column_count_mismatch",
+    "workbook_defined_name_missing_sheet",
+    "worksheet_formula_missing_sheet",
+}
 
 
 @dataclass
@@ -241,6 +252,8 @@ class MutationResult:
     before: str
     after: str
     error: str | None = None
+    source_preexisting_issue_count: int = 0
+    source_preexisting_issues: list[dict] = field(default_factory=list)
 
 
 def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[FixtureEntry]:
@@ -450,8 +463,12 @@ def _run_single_mutation(
             error=str(exc),
         )
 
-    issues, expected_issues = _split_expected_issues(
+    issues, source_preexisting_issues = _split_source_preexisting_issues(
         list(audit_report["issues"]),
+        before_path=before_path,
+    )
+    issues, expected_issues = _split_expected_issues(
+        issues,
         mutation,
         before_path=before_path,
         after_path=after_path,
@@ -465,6 +482,8 @@ def _run_single_mutation(
         status = "failed"
     elif expected_issues:
         status = "passed_with_expected_drift"
+    elif source_preexisting_issues:
+        status = "passed_with_source_preexisting_issues"
     return MutationResult(
         fixture=fixture_label,
         mutation=mutation,
@@ -475,6 +494,8 @@ def _run_single_mutation(
         expected_issues=expected_issues,
         before=str(before_path),
         after=str(after_path),
+        source_preexisting_issue_count=len(source_preexisting_issues),
+        source_preexisting_issues=source_preexisting_issues,
     )
 
 
@@ -643,7 +664,7 @@ def _first_worksheet(workbook):
 def _required_first_worksheet(workbook):
     worksheet = _first_worksheet(workbook)
     if worksheet is None:
-        raise ValueError("workbook has no worksheet sheets")
+        raise ValueError("workbook has no worksheets")
     return worksheet
 
 
@@ -698,7 +719,7 @@ def _prepare_mutation_baseline(before_path: Path, after_path: Path, mutation: st
     for path in (before_path, after_path):
         workbook = wolfxl.load_workbook(path, modify=True)
         try:
-            worksheet = workbook[workbook.sheetnames[0]]
+            worksheet = _required_first_worksheet(workbook)
             worksheet["Z1"] = 10
             worksheet["AA1"] = "=Z1"
             workbook.save(path)
@@ -729,6 +750,57 @@ def _split_expected_issues(
         else:
             unexpected.append(issue)
     return unexpected, expected
+
+
+def _split_source_preexisting_issues(
+    issues: list[dict],
+    before_path: Path,
+) -> tuple[list[dict], list[dict]]:
+    candidates = [
+        issue
+        for issue in issues
+        if issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+    ]
+    if not candidates:
+        return issues, []
+
+    source_issue_keys = _source_preexisting_issue_keys(before_path)
+    if not source_issue_keys:
+        return issues, []
+
+    unexpected: list[dict] = []
+    source_preexisting: list[dict] = []
+    for issue in issues:
+        if (
+            issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+            and _issue_key(issue) in source_issue_keys
+        ):
+            annotated = dict(issue)
+            annotated["source_preexisting"] = True
+            source_preexisting.append(annotated)
+        else:
+            unexpected.append(issue)
+    return unexpected, source_preexisting
+
+
+def _source_preexisting_issue_keys(path: Path) -> set[tuple[str, str, str]]:
+    try:
+        report = audit_ooxml_fidelity.audit(path, path)
+    except Exception:
+        return set()
+    return {
+        _issue_key(issue)
+        for issue in report.get("issues", [])
+        if issue.get("kind") in SOURCE_PREEXISTING_ISSUE_KINDS
+    }
+
+
+def _issue_key(issue: dict) -> tuple[str, str, str]:
+    return (
+        str(issue.get("kind", "")),
+        str(issue.get("part", "")),
+        str(issue.get("message", "")),
+    )
 
 
 def _is_expected_issue(

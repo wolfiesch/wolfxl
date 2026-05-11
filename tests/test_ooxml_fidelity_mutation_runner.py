@@ -203,6 +203,65 @@ def test_apply_mutation_targets_first_worksheet_when_chartsheet_is_first(
     assert workbook.closed is True
 
 
+def test_prepare_mutation_baseline_targets_first_worksheet_when_chartsheet_is_first(
+    tmp_path: Path, monkeypatch
+) -> None:
+    class DummyChartsheet:
+        title = "Chart"
+
+    class DummyWorksheet:
+        title = "Data"
+        max_row = 1
+        max_column = 1
+
+        def __init__(self) -> None:
+            self.values: dict[str, object] = {}
+
+        def __setitem__(self, key: str, value: object) -> None:
+            self.values[key] = value
+
+        def cell(self, row: int, column: int):
+            return self.values.setdefault(f"{row}:{column}", object())
+
+    class DummyWorkbook:
+        sheetnames = ["Chart", "Data"]
+
+        def __init__(self) -> None:
+            self.chart = DummyChartsheet()
+            self.worksheet = DummyWorksheet()
+            self.saved = False
+            self.closed = False
+
+        def __getitem__(self, name: str):
+            return {"Chart": self.chart, "Data": self.worksheet}[name]
+
+        def save(self, _path: Path) -> None:
+            self.saved = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    loaded_workbooks = [DummyWorkbook(), DummyWorkbook()]
+    workbook_queue = list(loaded_workbooks)
+
+    def fake_load_workbook(_path: Path, modify: bool):
+        assert modify is True
+        return workbook_queue.pop(0)
+
+    monkeypatch.setattr(runner_module.wolfxl, "load_workbook", fake_load_workbook)
+
+    runner_module._prepare_mutation_baseline(
+        tmp_path / "before.xlsx",
+        tmp_path / "after.xlsx",
+        "move_formula_range",
+    )
+
+    for workbook in loaded_workbooks:
+        assert workbook.worksheet.values == {"Z1": 10, "AA1": "=Z1"}
+        assert workbook.saved is True
+        assert workbook.closed is True
+
+
 def test_runner_can_discover_recursive_fixture_trees(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     output_dir = tmp_path / "out"
@@ -599,6 +658,93 @@ def test_runner_reports_manifest_hash_mismatch(tmp_path: Path) -> None:
 
     assert report["failure_count"] == 1
     assert report["results"][0]["status"] == "hash_mismatch"
+
+
+def test_runner_separates_source_preexisting_package_issues(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    source_issue = {
+        "kind": "dangling_relationship",
+        "severity": "error",
+        "part": "xl/drawings/_rels/drawing5.xml.rels",
+        "message": (
+            "xl/drawings/_rels/drawing5.xml.rels rId1 points to missing "
+            "xl/drawings/NULL"
+        ),
+    }
+
+    def fake_audit(before: Path, after: Path) -> dict:
+        if before == after:
+            return {"issues": [source_issue]}
+        return {"issues": [source_issue]}
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+    )
+
+    assert report["failure_count"] == 0
+    result = report["results"][0]
+    assert result["status"] == "passed_with_source_preexisting_issues"
+    assert result["issue_count"] == 0
+    assert result["source_preexisting_issue_count"] == 1
+    assert result["source_preexisting_issues"] == [
+        {**source_issue, "source_preexisting": True}
+    ]
+
+
+def test_runner_keeps_new_issues_when_source_preexisting_issue_also_exists(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    output_dir = tmp_path / "out"
+    fixture_dir.mkdir()
+    fixture = fixture_dir / "simple.xlsx"
+    _make_fixture(fixture)
+
+    source_issue = {
+        "kind": "dangling_relationship",
+        "severity": "error",
+        "part": "xl/drawings/_rels/drawing5.xml.rels",
+        "message": (
+            "xl/drawings/_rels/drawing5.xml.rels rId1 points to missing "
+            "xl/drawings/NULL"
+        ),
+    }
+    new_issue = {
+        "kind": "missing_part",
+        "severity": "error",
+        "part": "xl/charts/chart1.xml",
+        "message": "Part existed before save and is missing after save: xl/charts/chart1.xml",
+    }
+
+    def fake_audit(before: Path, after: Path) -> dict:
+        if before == after:
+            return {"issues": [source_issue]}
+        return {"issues": [source_issue, new_issue]}
+
+    monkeypatch.setattr(runner_module.audit_ooxml_fidelity, "audit", fake_audit)
+
+    report = runner_module.run_sweep(
+        fixture_dir,
+        output_dir,
+        mutations=("no_op",),
+    )
+
+    assert report["failure_count"] == 1
+    result = report["results"][0]
+    assert result["status"] == "failed"
+    assert result["issues"] == [new_issue]
+    assert result["source_preexisting_issue_count"] == 1
 
 
 def test_runner_separates_expected_rename_drift(tmp_path: Path, monkeypatch) -> None:

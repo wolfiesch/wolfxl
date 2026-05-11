@@ -19,7 +19,11 @@ if str(SCRIPT_DIR) not in sys.path:
 import audit_ooxml_fidelity  # noqa: E402
 import run_ooxml_fidelity_mutations  # noqa: E402
 
-PASSING_STATUSES = {"passed", "passed_with_expected_drift"}
+PASSING_STATUSES = {
+    "passed",
+    "passed_with_expected_drift",
+    "passed_with_source_preexisting_issues",
+}
 PASSING_APP_STATUSES = {"passed"}
 PASSING_NO_OP_RENDER_STATUSES = {"passed", "sampled_passed"}
 PASSING_INTENTIONAL_RENDER_STATUSES = {"rendered", "sampled_rendered"}
