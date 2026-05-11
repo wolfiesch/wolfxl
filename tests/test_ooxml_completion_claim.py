@@ -89,6 +89,18 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "census_sitc_renderable_neutral_render_equivalence" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "fintech_hackathon_demo_neutral_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "fed_aea_papers_neutral_render_smoke" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "fed_aea_papers_copy_chart_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "codexaudit_qoe_sample_add_dv_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "random_corpus_holdout_50" in completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     assert "random_corpus_holdout_50_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS

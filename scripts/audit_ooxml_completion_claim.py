@@ -142,6 +142,10 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "census_sitc_renderable_gap_radar",
     "census_sitc_renderable_quick_mutation_report",
     "census_sitc_renderable_neutral_render_equivalence",
+    "fintech_hackathon_demo_neutral_render_equivalence",
+    "fed_aea_papers_neutral_render_smoke",
+    "fed_aea_papers_copy_chart_render_equivalence",
+    "codexaudit_qoe_sample_add_dv_render_equivalence",
     "synthgl_recursive_gap_radar",
     "umya_test_files_gap_radar",
     "umya_test_files_quick_plus_structural_mutation_coverage",
@@ -344,6 +348,9 @@ OPEN_REQUIREMENTS = (
             "Excel-renderable subset of a 20-workbook random holdout spanning "
             "14 source reports, with the two Excel PDF-export boundary "
             "workbooks recorded separately, "
+            "plus fintech-hackathon finance-demo neutral equivalence, Fed AEA "
+            "research-data neutral render smoke and copy/chart equivalence, "
+            "and CodexAudit QoE add-data-validation equivalence, "
             "plus expected "
             "visual-delta evidence for "
             "marker-cell, style-cell, insert-tail-row/column, move-marker-range, "
