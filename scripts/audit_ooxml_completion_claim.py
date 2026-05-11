@@ -483,10 +483,17 @@ def _report_check_actual(report: dict, check_path: str) -> Optional[object]:
     return None
 
 
+def _report_check_observed_actual(report: dict, check_path: str) -> Optional[object]:
+    for check in report["checks"]:
+        if check["path"] == check_path:
+            return check["actual"]
+    return None
+
+
 def _sum_numeric_report_checks(reports: list[dict], check_path: str) -> int:
     total = 0
     for report in reports:
-        actual = _report_check_actual(report, check_path)
+        actual = _report_check_observed_actual(report, check_path)
         if isinstance(actual, (int, float)):
             total += int(actual)
     return total
@@ -495,7 +502,7 @@ def _sum_numeric_report_checks(reports: list[dict], check_path: str) -> int:
 def _unique_list_report_checks(reports: list[dict], check_path: str) -> list[object]:
     values = set()
     for report in reports:
-        actual = _report_check_actual(report, check_path)
+        actual = _report_check_observed_actual(report, check_path)
         if isinstance(actual, list):
             values.update(actual)
     return sorted(values)
@@ -562,7 +569,7 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
     failed_report_names = {
         str(report["name"])
         for report in completed_reports
-        if _report_check_actual(report, "failure_count")
+        if _report_check_observed_actual(report, "failure_count")
     }
     boundary_report_names = {str(report["name"]) for report in boundary_reports}
     raw_failure_count = _sum_numeric_report_checks(completed_reports, "failure_count")

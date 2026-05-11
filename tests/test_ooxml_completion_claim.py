@@ -373,12 +373,41 @@ def test_completion_claim_classifies_paired_ui_diagnostic_non_state_change_reche
     )
 
 
+def test_completion_claim_counts_unexpected_ui_failures_from_failed_expectations(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_bundle_manifest(
+        tmp_path,
+        ready=True,
+        include_required_reports=True,
+        include_unexpected_ui_failure_report=True,
+    )
+
+    report = completion.audit_completion_claim(manifest)
+
+    interaction_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "broader_click_level_interaction_variants"
+    )
+    evidence = interaction_requirement["evidence"]
+    assert report["bundle_audit"]["ready"] is False
+    assert evidence["raw_failure_count"] == 3
+    assert evidence["known_boundary_failure_count"] == 2
+    assert evidence["unresolved_non_boundary_failure_count"] == 1
+    assert evidence["unresolved_failed_raw_reports"] == [
+        "excel_ui_interaction_unexpected_failure_probe"
+    ]
+    assert "excel_ui_interaction_unexpected_failure_probe" in evidence["failed_raw_reports"]
+
+
 def _write_bundle_manifest(
     tmp_path: Path,
     *,
     ready: bool,
     include_required_reports: bool,
     include_diagnostic_non_state_change_reports: bool = False,
+    include_unexpected_ui_failure_report: bool = False,
     corpus_source_count: int = 3,
     corpus_workbook_count: int = 11,
 ) -> Path:
@@ -392,6 +421,8 @@ def _write_bundle_manifest(
         names.extend(
             completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.values()
         )
+    if include_unexpected_ui_failure_report:
+        names.append("excel_ui_interaction_unexpected_failure_probe")
     for index, name in enumerate(names):
         report_path = tmp_path / f"report-{index}.json"
         payload = {"ready": ready}
@@ -481,6 +512,23 @@ def _write_bundle_manifest(
                     "completed": True,
                     "result_count": 1,
                     "failure_count": 0,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "completed", "equals": True},
+                    {"path": "result_count", "equals": 1},
+                    {"path": "failure_count", "equals": 0},
+                ]
+            )
+        if name == "excel_ui_interaction_unexpected_failure_probe":
+            payload.update(
+                {
+                    "probe_kind": "excel_ui_interaction",
+                    "completed": True,
+                    "result_count": 1,
+                    "failure_count": 1,
                 }
             )
             expect.extend(
