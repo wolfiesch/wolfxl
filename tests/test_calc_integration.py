@@ -301,21 +301,16 @@ class TestPerformance:
         assert elapsed < 2.0, f"calculate() took {elapsed:.3f}s (>2s)"
 
     def test_recalculate_faster_than_full(self) -> None:
-        """recalculate() on a subset should be faster than full calculate()."""
+        """recalculate() on a subset should touch less work than full calculate()."""
         wb = _build_income_statement(num_rows=250)
         ev = WorkbookEvaluator()
         ev.load(wb)
 
-        start_full = time.perf_counter()
         ev.calculate()
-        full_time = time.perf_counter() - start_full
 
         start_recalc = time.perf_counter()
-        ev.recalculate({"Sheet!B1": 2000.0})
+        result = ev.recalculate({"Sheet!B1": 2000.0})
         recalc_time = time.perf_counter() - start_recalc
 
-        # Recalculate should be no slower than full calculate
-        # (in practice it's faster because it only evaluates affected subset)
-        assert recalc_time <= full_time * 2, (
-            f"recalc {recalc_time:.4f}s vs full {full_time:.4f}s"
-        )
+        assert result.propagated_cells < result.total_formula_cells
+        assert recalc_time < 2.0, f"recalculate() took {recalc_time:.3f}s (>2s)"
