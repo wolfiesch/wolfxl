@@ -877,6 +877,7 @@ def test_external_link_ui_probe_forces_and_restores_update_prompt(
     fixture.write_bytes(b"placeholder")
     settings: list[bool] = []
 
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: False)
     monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
     monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
     monkeypatch.setattr(
@@ -909,6 +910,7 @@ def test_external_link_ui_probe_restores_update_prompt_after_failure(
     def fail_open(_src: Path, _probe: str, _timeout: int) -> tuple[str, list[str]]:
         raise RuntimeError("boom")
 
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: False)
     monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
     monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", fail_open)
@@ -940,6 +942,7 @@ def test_external_link_ui_probe_does_not_force_unknown_update_prompt(
         opened = True
         return "external-link.xlsx", []
 
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: False)
     monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: None)
     monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
     monkeypatch.setattr(probe_runner, "_open_excel_with_ui_interaction_impl", open_with_ui)
@@ -966,6 +969,7 @@ def test_external_link_ui_probe_current_prompt_mode_does_not_force_setting(
     fixture.write_bytes(b"placeholder")
     settings: list[bool] = []
 
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: False)
     monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", lambda: False)
     monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", settings.append)
     monkeypatch.setattr(
@@ -1281,6 +1285,46 @@ def test_mouse_click_rejects_locked_screen(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="screen is locked"):
         probe_runner._post_mouse_click(10, 10)
+
+
+def test_ui_interaction_open_rejects_locked_screen(monkeypatch, tmp_path: Path) -> None:
+    workbook = tmp_path / "simple.xlsx"
+    workbook.write_bytes(b"placeholder")
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: True)
+
+    def fail_popen(*_args, **_kwargs):
+        raise AssertionError("Excel should not be launched while the screen is locked")
+
+    monkeypatch.setattr(probe_runner.subprocess, "Popen", fail_popen)
+
+    with pytest.raises(RuntimeError, match="unlock before Excel UI interaction probes"):
+        probe_runner._open_excel_with_ui_interaction_impl(
+            workbook,
+            "macro_project_presence",
+            timeout=1,
+        )
+
+
+def test_ui_interaction_wrapper_rejects_locked_screen_before_applescript(
+    monkeypatch, tmp_path: Path
+) -> None:
+    workbook = tmp_path / "simple.xlsx"
+    workbook.write_bytes(b"placeholder")
+    monkeypatch.setattr(probe_runner, "_mac_screen_is_locked", lambda: True)
+
+    def fail_excel_setting(*_args, **_kwargs):
+        raise AssertionError("Excel AppleScript helpers should not run while locked")
+
+    monkeypatch.setattr(probe_runner, "_excel_ask_to_update_links", fail_excel_setting)
+    monkeypatch.setattr(probe_runner, "_set_excel_ask_to_update_links", fail_excel_setting)
+    monkeypatch.setattr(probe_runner.subprocess, "Popen", fail_excel_setting)
+
+    with pytest.raises(RuntimeError, match="unlock before Excel UI interaction probes"):
+        probe_runner._open_excel_with_ui_interaction(
+            workbook,
+            "external_link_update_prompt",
+            timeout=1,
+        )
 
 
 def test_ui_interaction_reports_locked_screen_blocker(
