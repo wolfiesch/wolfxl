@@ -22,6 +22,10 @@ CURRENT_SUPPORTED_CLAIM = (
 )
 CUSTOMER_SCALE_MIN_WORKBOOKS = 1_000
 CUSTOMER_SCALE_MIN_SOURCES = 50
+KNOWN_UI_INTERACTION_BOUNDARY_REPORTS = (
+    "current_excel_16_108_delete_first_row_broad_external_tool_slicer_boundary",
+    "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary",
+)
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -455,10 +459,103 @@ def _check_actual(bundle_audit: dict, report_name: str, check_path: str) -> Opti
     for report in bundle_audit["reports"]:
         if report["name"] != report_name:
             continue
-        for check in report["checks"]:
-            if check["path"] == check_path and check["passed"]:
-                return check["actual"]
+        return _report_check_actual(report, check_path)
     return None
+
+
+def _report_check_actual(report: dict, check_path: str) -> Optional[object]:
+    for check in report["checks"]:
+        if check["path"] == check_path and check["passed"]:
+            return check["actual"]
+    return None
+
+
+def _sum_numeric_report_checks(reports: list[dict], check_path: str) -> int:
+    total = 0
+    for report in reports:
+        actual = _report_check_actual(report, check_path)
+        if isinstance(actual, (int, float)):
+            total += int(actual)
+    return total
+
+
+def _unique_list_report_checks(reports: list[dict], check_path: str) -> list[object]:
+    values = set()
+    for report in reports:
+        actual = _report_check_actual(report, check_path)
+        if isinstance(actual, list):
+            values.update(actual)
+    return sorted(values)
+
+
+def _render_equivalence_evidence(bundle_audit: dict) -> dict:
+    reports = [
+        report
+        for report in bundle_audit["reports"]
+        if "render_equivalence" in str(report["name"])
+    ]
+    ready_reports = [
+        report for report in reports if _report_check_actual(report, "ready") is True
+    ]
+    excel_reports = [
+        report
+        for report in ready_reports
+        if _report_check_actual(report, "render_engine") == "excel"
+    ]
+    return {
+        "ready_report_count": len(ready_reports),
+        "excel_report_count": len(excel_reports),
+        "result_count": _sum_numeric_report_checks(reports, "result_count"),
+        "passed_count": _sum_numeric_report_checks(reports, "passed_count"),
+        "failure_count": _sum_numeric_report_checks(reports, "failure_count"),
+        "inconclusive_count": _sum_numeric_report_checks(reports, "inconclusive_count"),
+        "skipped_count": _sum_numeric_report_checks(reports, "skipped_count"),
+        "observed_mutations": _unique_list_report_checks(reports, "observed_mutations"),
+        "target_status": "open_unbounded_high_risk_feature_edit_universe",
+    }
+
+
+def _ui_interaction_evidence(bundle_audit: dict) -> dict:
+    reports = [
+        report
+        for report in bundle_audit["reports"]
+        if _report_check_actual(report, "probe_kind") == "excel_ui_interaction"
+    ]
+    completed_reports = [
+        report for report in reports if _report_check_actual(report, "completed") is True
+    ]
+    ready_gates = [
+        report for report in reports if _report_check_actual(report, "ready") is True
+    ]
+    boundary_reports = [
+        report
+        for report in reports
+        if report["name"] in KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
+    ]
+    failed_report_names = {
+        str(report["name"])
+        for report in completed_reports
+        if _report_check_actual(report, "failure_count")
+    }
+    boundary_report_names = {str(report["name"]) for report in boundary_reports}
+    return {
+        "probe_report_count": len(reports),
+        "completed_probe_report_count": len(completed_reports),
+        "ready_gate_report_count": len(ready_gates),
+        "raw_result_count": _sum_numeric_report_checks(completed_reports, "result_count"),
+        "raw_failure_count": _sum_numeric_report_checks(completed_reports, "failure_count"),
+        "known_boundary_report_count": len(boundary_reports),
+        "known_boundary_failure_count": _sum_numeric_report_checks(
+            boundary_reports, "failure_count"
+        ),
+        "non_boundary_failure_count": _sum_numeric_report_checks(
+            completed_reports, "failure_count"
+        )
+        - _sum_numeric_report_checks(boundary_reports, "failure_count"),
+        "failed_raw_reports": sorted(failed_report_names),
+        "known_boundary_reports": sorted(boundary_report_names),
+        "target_status": "open_unbounded_click_level_variant_universe",
+    }
 
 
 def _open_requirements(bundle_audit: dict) -> list[dict]:
@@ -508,6 +605,39 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                     f"workbooks across {CUSTOMER_SCALE_MIN_SOURCES} source reports."
                 )
             break
+    render_evidence = _render_equivalence_evidence(bundle_audit)
+    interaction_evidence = _ui_interaction_evidence(bundle_audit)
+    for requirement in requirements:
+        if requirement["id"] == "feature_specific_intentional_render_equivalence":
+            requirement["evidence"] = render_evidence
+            requirement["reason"] = (
+                f"The pinned bundle currently has {render_evidence['ready_report_count']} "
+                "ready render-equivalence reports, including "
+                f"{render_evidence['excel_report_count']} Microsoft Excel-rendered "
+                f"reports, with {render_evidence['passed_count']} passed result rows, "
+                f"{render_evidence['failure_count']} failures, "
+                f"{render_evidence['inconclusive_count']} inconclusive rows, and "
+                f"{render_evidence['skipped_count']} skips. This is substantial "
+                "feature-specific visual evidence, but the high-risk feature-edit "
+                "universe is still open-ended, so it does not yet prove semantic "
+                "visual equivalence for every high-risk edit."
+            )
+        elif requirement["id"] == "broader_click_level_interaction_variants":
+            requirement["evidence"] = interaction_evidence
+            requirement["reason"] = (
+                f"The pinned bundle currently has {interaction_evidence['probe_report_count']} "
+                "Excel UI-interaction evidence reports, including "
+                f"{interaction_evidence['ready_gate_report_count']} ready aggregate gates "
+                f"and {interaction_evidence['completed_probe_report_count']} completed raw "
+                f"probe reports with {interaction_evidence['raw_result_count']} raw result "
+                f"rows. It still records {interaction_evidence['raw_failure_count']} raw "
+                "UI-interaction failures, including "
+                f"{interaction_evidence['known_boundary_failure_count']} known broad "
+                "destructive-axis external-tool slicer boundary failures and "
+                f"{interaction_evidence['non_boundary_failure_count']} non-boundary "
+                "source recheck failures. Broader slicer, timeline, embedded-control, "
+                "and prompt variants remain unexhausted."
+            )
     return requirements
 
 
