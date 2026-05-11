@@ -86,6 +86,38 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "excel_ui_interaction_copy_remove_control_evidence",
     "excel_ui_interaction_copy_remove_button_control_evidence",
     "excel_ui_interaction_add_data_validation_control_evidence",
+    "excel_ui_interaction_add_conditional_formatting_pivot_refresh_evidence",
+    "excel_ui_interaction_add_conditional_formatting_shared_slicer_evidence",
+    "excel_ui_interaction_add_conditional_formatting_control_evidence",
+    "excel_ui_interaction_add_conditional_formatting_timeline_evidence",
+    "excel_ui_interaction_add_remove_chart_pivot_refresh_evidence",
+    "excel_ui_interaction_add_remove_chart_shared_slicer_evidence",
+    "excel_ui_interaction_add_remove_chart_control_evidence",
+    "excel_ui_interaction_add_remove_chart_timeline_evidence",
+    "excel_ui_interaction_add_remove_chart_macro_evidence",
+    "excel_ui_interaction_add_remove_chart_external_link_current_setting_evidence",
+    "excel_ui_interaction_add_remove_chart_external_link_forced_prompt_evidence",
+    "excel_ui_interaction_add_remove_chart_umya_external_link_forced_prompt_evidence",
+    "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
+    "excel_ui_interaction_rename_shared_slicer_evidence",
+    "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+    "excel_ui_interaction_rename_powerview_evidence",
+    "excel_ui_interaction_move_formula_range_external_oracle_evidence",
+    "excel_ui_interaction_move_marker_range_external_oracle_evidence",
+    "excel_ui_interaction_rename_first_sheet_external_oracle_evidence",
+    "excel_ui_interaction_add_data_validation_external_oracle_evidence",
+    "excel_ui_interaction_copy_remove_sheet_external_oracle_evidence",
+    "excel_ui_interaction_add_conditional_formatting_external_oracle_evidence",
+    "excel_ui_interaction_add_remove_chart_external_oracle_evidence",
+    "excel_ui_interaction_insert_tail_row_external_oracle_evidence",
+    "excel_ui_interaction_insert_tail_col_external_oracle_evidence",
+    "excel_ui_interaction_style_cell_external_oracle_evidence",
+    "excel_ui_interaction_marker_cell_external_oracle_evidence",
+    "excel_ui_interaction_delete_marker_tail_row_external_oracle_evidence",
+    "excel_ui_interaction_delete_marker_tail_col_external_oracle_evidence",
+    "excel_ui_interaction_retarget_external_links_external_oracle_evidence",
+    "excel_ui_interaction_delete_first_row_external_oracle_core_evidence",
+    "excel_ui_interaction_delete_first_col_external_oracle_core_evidence",
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "external_oracle_gap_radar",
@@ -327,10 +359,13 @@ OPEN_REQUIREMENTS = (
         "reason": (
             "Targeted UI-interaction evidence now covers source and selected "
             "marker-cell, style-cell, copy-remove-sheet, add-data-validation, "
-            "add-conditional-formatting, and add-remove-chart saves across "
-            "pivot refresh, slicer/shared-slicer clicks, timeline clicks, "
-            "embedded controls, macro prompts, external-link prompts, and "
-            "PowerView read-only prompts. The detailed artifact list lives in "
+            "add-conditional-formatting, add-remove-chart, rename-sheet, "
+            "move-formula-range, move-marker-range, insert-tail-row/column, "
+            "delete-marker-tail-row/column, retarget-external-links, and "
+            "delete-first-row/column saves across pivot refresh, "
+            "slicer/shared-slicer clicks, timeline clicks, embedded controls, "
+            "macro prompts, external-link prompts, and PowerView read-only "
+            "prompts. The detailed artifact list lives in "
             "Plans/real-world-excel-fidelity-gap-discovery.md. This still is "
             "not exhaustive: current Excel 16.108 rechecks show some source "
             "table-slicer, timeline, and list-box UI paths can complete actions "
