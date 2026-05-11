@@ -129,6 +129,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "synthgl_ingest_confidence_sample_100_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "synthgl_codex_spark_archive_71_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "synthgl_codex_spark_archive_71_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "sec_commission_votes_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )

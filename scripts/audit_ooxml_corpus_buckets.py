@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import zipfile
 from dataclasses import asdict, dataclass
@@ -57,7 +58,11 @@ class SkippedWorkbook:
     reason: str
 
 
-def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
+def audit_corpus(
+    paths: list[Path],
+    recursive: bool = False,
+    workbook_timeout_seconds: float | None = None,
+) -> dict:
     workbooks: list[CorpusWorkbook] = []
     skipped_workbooks: list[SkippedWorkbook] = []
     seen: set[Path] = set()
@@ -68,7 +73,10 @@ def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
                 continue
             seen.add(resolved)
             try:
-                snapshot = audit_ooxml_fidelity.snapshot(workbook_path)
+                workbook_features = _audit_workbook_features(
+                    workbook_path,
+                    timeout_seconds=workbook_timeout_seconds,
+                )
             except _SKIPPABLE_WORKBOOK_ERRORS as exc:
                 skipped_workbooks.append(
                     SkippedWorkbook(
@@ -79,11 +87,9 @@ def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
                     )
                 )
                 continue
-            feature_keys = audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(
-                snapshot
-            )
-            surfaces = audit_ooxml_fidelity_coverage._surfaces_for_snapshot(snapshot)
-            application = _application_name(workbook_path)
+            feature_keys = workbook_features["feature_keys"]
+            surfaces = workbook_features["surfaces"]
+            application = workbook_features["application"]
             buckets = _buckets_for_workbook(
                 tool=tool,
                 application=application,
@@ -124,10 +130,20 @@ def audit_corpus(paths: list[Path], recursive: bool = False) -> dict:
     }
 
 
+class WorkbookAuditTimeoutError(TimeoutError):
+    """Raised when a single workbook takes too long to snapshot."""
+
+
+class WorkbookAuditError(RuntimeError):
+    """Raised when child-process workbook auditing reports a skippable failure."""
+
+
 _SKIPPABLE_WORKBOOK_ERRORS = (
     ElementTree.ParseError,
     OSError,
     RuntimeError,
+    WorkbookAuditError,
+    WorkbookAuditTimeoutError,
     ValueError,
     zipfile.BadZipFile,
 )
@@ -138,6 +154,56 @@ def _error_reason(exc: BaseException) -> str:
     if message:
         return f"{type(exc).__name__}: {message}"
     return type(exc).__name__
+
+
+def _audit_workbook_features(
+    workbook_path: Path,
+    *,
+    timeout_seconds: float | None,
+) -> dict:
+    if not timeout_seconds or timeout_seconds <= 0:
+        return _audit_workbook_features_unbounded(workbook_path)
+
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--_audit-one-workbook-json",
+        str(workbook_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        raise WorkbookAuditTimeoutError(
+            f"timed out after {timeout_seconds:g}s while snapshotting {workbook_path}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        stderr = result.stderr.strip()
+        detail = f": {stderr}" if stderr else ""
+        raise WorkbookAuditError(
+            f"worker returned invalid JSON for {workbook_path}{detail}"
+        ) from exc
+    if result.returncode != 0:
+        raise WorkbookAuditError(str(payload.get("reason") or result.stderr.strip()))
+    return payload
+
+
+def _audit_workbook_features_unbounded(workbook_path: Path) -> dict:
+    snapshot = audit_ooxml_fidelity.snapshot(workbook_path)
+    return {
+        "feature_keys": audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(
+            snapshot
+        ),
+        "surfaces": audit_ooxml_fidelity_coverage._surfaces_for_snapshot(snapshot),
+        "application": _application_name(workbook_path),
+    }
 
 
 def _discover_workbooks(source: Path, recursive: bool) -> list[tuple[Path, str | None]]:
@@ -223,11 +289,26 @@ def _is_external_tool_authored(tool: str | None, application: str | None) -> boo
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument(
+        "--_audit-one-workbook-json",
+        dest="audit_one_workbook_json",
+        type=Path,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument(
         "--recursive",
         action="store_true",
         help="Discover workbooks recursively for non-manifest directories.",
+    )
+    parser.add_argument(
+        "--workbook-timeout-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Skip a workbook when snapshotting it exceeds this many seconds. "
+            "The default preserves the historical no-timeout behavior."
+        ),
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     parser.add_argument(
@@ -237,7 +318,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    report = audit_corpus(args.paths, recursive=args.recursive)
+    if args.audit_one_workbook_json is not None:
+        try:
+            payload = _audit_workbook_features_unbounded(args.audit_one_workbook_json)
+        except _SKIPPABLE_WORKBOOK_ERRORS as exc:
+            print(json.dumps({"reason": _error_reason(exc)}))
+            return 1
+        print(json.dumps(payload, sort_keys=True))
+        return 0
+    if not args.paths:
+        parser.error("the following arguments are required: paths")
+
+    report = audit_corpus(
+        args.paths,
+        recursive=args.recursive,
+        workbook_timeout_seconds=args.workbook_timeout_seconds,
+    )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

@@ -7,6 +7,8 @@ import zipfile
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_corpus_module() -> ModuleType:
     script = (
@@ -94,6 +96,33 @@ def test_corpus_bucket_audit_reports_unreadable_workbooks_without_crashing(
             "reason": "BadZipFile: File is not a zip file",
         }
     ]
+
+
+def test_corpus_bucket_audit_skips_timed_out_workbook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    workbook = fixture_dir / "slow.xlsx"
+    _write_plain_workbook(workbook, application="Microsoft Excel")
+
+    def timed_out_run(*args: object, **kwargs: object) -> object:
+        raise corpus.subprocess.TimeoutExpired(cmd=["audit"], timeout=0.01)
+
+    monkeypatch.setattr(corpus.subprocess, "run", timed_out_run)
+
+    report = corpus.audit_corpus([fixture_dir], workbook_timeout_seconds=0.01)
+
+    assert report["ready"] is False
+    assert report["workbook_count"] == 0
+    assert report["skipped_workbook_count"] == 1
+    assert report["skipped_workbooks"][0]["path"] == str(workbook)
+    assert report["skipped_workbooks"][0]["source_label"] == str(fixture_dir)
+    assert report["skipped_workbooks"][0]["tool"] is None
+    assert report["skipped_workbooks"][0]["reason"].startswith(
+        "WorkbookAuditTimeoutError: timed out after 0.01s"
+    )
 
 
 def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) -> None:
