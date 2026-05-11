@@ -62,6 +62,36 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "workbook_deficit": completion.CUSTOMER_SCALE_MIN_WORKBOOKS - 11,
         "source_deficit": completion.CUSTOMER_SCALE_MIN_SOURCES - 3,
     }
+    render_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "feature_specific_intentional_render_equivalence"
+    )
+    assert render_requirement["evidence"]["ready_report_count"] > 0
+    assert render_requirement["evidence"]["excel_report_count"] > 0
+    assert render_requirement["evidence"]["passed_count"] > 0
+    assert render_requirement["evidence"]["failure_count"] == 0
+    assert render_requirement["evidence"]["target_status"] == (
+        "open_unbounded_high_risk_feature_edit_universe"
+    )
+    interaction_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "broader_click_level_interaction_variants"
+    )
+    assert interaction_requirement["evidence"]["probe_report_count"] > 0
+    assert interaction_requirement["evidence"]["raw_result_count"] > 0
+    assert interaction_requirement["evidence"]["known_boundary_failure_count"] == 2
+    assert interaction_requirement["evidence"]["non_boundary_failure_count"] == 0
+    assert interaction_requirement["evidence"]["failed_raw_reports"] == sorted(
+        completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
+    )
+    assert interaction_requirement["evidence"]["known_boundary_reports"] == sorted(
+        completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
+    )
+    assert interaction_requirement["evidence"]["target_status"] == (
+        "open_unbounded_click_level_variant_universe"
+    )
     required_reports = next(
         criterion
         for criterion in report["criteria"]
@@ -326,6 +356,54 @@ def _write_bundle_manifest(
                 [
                     {"path": "source_count", "equals": corpus_source_count},
                     {"path": "workbook_count", "equals": corpus_workbook_count},
+                ]
+            )
+        if "render_equivalence" in name:
+            payload.update(
+                {
+                    "render_engine": "excel",
+                    "observed_mutations": ["add_data_validation"],
+                    "result_count": 2,
+                    "passed_count": 2,
+                    "failure_count": 0,
+                    "inconclusive_count": 0,
+                    "skipped_count": 0,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "render_engine", "equals": "excel"},
+                    {"path": "observed_mutations", "equals": ["add_data_validation"]},
+                    {"path": "result_count", "equals": 2},
+                    {"path": "passed_count", "equals": 2},
+                    {"path": "failure_count", "equals": 0},
+                    {"path": "inconclusive_count", "equals": 0},
+                    {"path": "skipped_count", "equals": 0},
+                ]
+            )
+        if name.startswith("excel_ui_interaction_"):
+            payload.update({"probe_kind": "excel_ui_interaction", "report_count": 1})
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "report_count", "equals": 1},
+                ]
+            )
+        if name in completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS:
+            payload.update(
+                {
+                    "probe_kind": "excel_ui_interaction",
+                    "completed": True,
+                    "result_count": 11,
+                    "failure_count": 1,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "probe_kind", "equals": "excel_ui_interaction"},
+                    {"path": "completed", "equals": True},
+                    {"path": "result_count", "equals": 11},
+                    {"path": "failure_count", "equals": 1},
                 ]
             )
         report_path.write_text(json.dumps(payload))
