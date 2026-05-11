@@ -430,6 +430,53 @@ def test_bundle_audit_reports_missing_producer(tmp_path: Path) -> None:
     ]
 
 
+def test_bundle_audit_rejects_duplicate_report_names_and_paths(tmp_path: Path) -> None:
+    report_path = tmp_path / "coverage.json"
+    report_path.write_text(json.dumps({"ready": True}))
+    manifest = tmp_path / "bundle.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "reports": [
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example.py",
+                        "expect": [{"path": "ready", "equals": True}],
+                    },
+                    {
+                        "name": "coverage",
+                        "path": str(report_path),
+                        "producer": "uv run --no-sync python scripts/example_again.py",
+                        "expect": [{"path": "ready", "equals": True}],
+                    },
+                ]
+            }
+        )
+    )
+
+    audit = bundle.audit_bundle(manifest)
+
+    assert audit["ready"] is False
+    duplicate_issues = [
+        issue for issue in audit["issues"] if issue["check"].startswith("duplicate_")
+    ]
+    assert duplicate_issues == [
+        {
+            "report": "coverage",
+            "path": str(report_path),
+            "check": "duplicate_name",
+            "message": f"duplicate report name also used for {report_path}",
+        },
+        {
+            "report": "coverage",
+            "path": str(report_path),
+            "check": "duplicate_path",
+            "message": "duplicate report path also used by coverage",
+        },
+    ]
+
+
 def test_bundle_strict_cli_fails_for_stale_evidence(tmp_path: Path, capsys) -> None:
     report_path = tmp_path / "coverage.json"
     report_path.write_text(json.dumps({"ready": False}))
