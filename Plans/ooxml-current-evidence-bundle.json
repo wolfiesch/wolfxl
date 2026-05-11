@@ -6200,6 +6200,35 @@
       ]
     },
     {
+      "name": "nemesis_small_example_gl_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-nemesis-small-example-gl-20260511.json",
+      "producer": "sh -c 'set -e; root=/tmp/wolfxl-nemesis-small-example-gl-20260511; rm -rf \"$root\"; mkdir -p \"$root\"; cp \"/Users/wolfgangschoenberger/Projects/Nemesis Reconciliation Platform/Example GL files/STRONGBOX FULL ANALYSIS - ACCRUAL BASIS - BLACK LINE GROUP, LLC V1.XLSX\" \"$root/nemesis-strongbox-black-line-group.xlsx\"; cp \"/Users/wolfgangschoenberger/Projects/Nemesis Reconciliation Platform/Example GL files/STRONGBOX FULL ANALYSIS - ACCRUAL BASIS - CARITAS ACADEMY V1.XLSX\" \"$root/nemesis-strongbox-caritas-academy.xlsx\"; cp \"/Users/wolfgangschoenberger/Projects/Nemesis Reconciliation Platform/Example GL files/STRONGBOX FULL ANALYSIS - ACCRUAL BASIS - MURPHY, MILLER & BAGLIERI, LLP V1 - NOV.XLSX\" \"$root/nemesis-strongbox-murphy-miller-baglieri.xlsx\"; uv run --no-sync python scripts/audit_ooxml_gap_radar.py \"$root\" --json --strict > /tmp/wolfxl-gap-radar-nemesis-small-example-gl-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 3},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "nemesis_small_example_gl_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-nemesis-small-example-gl-quick-20260511/report.json",
+      "producer": "uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py /tmp/wolfxl-nemesis-small-example-gl-20260511 --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-nemesis-small-example-gl-quick-20260511 --mutation no_op --mutation marker_cell --mutation copy_remove_sheet --mutation add_data_validation --skip-invalid-source > /tmp/wolfxl-ooxml-fidelity-mutations-nemesis-small-example-gl-quick-20260511.json",
+      "expect": [
+        {"path": "recursive", "equals": false},
+        {"path": "fixture_dir", "contains": "wolfxl-nemesis-small-example-gl-20260511"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "copy_remove_sheet", "add_data_validation"]},
+        {"path": "result_count", "equals": 12},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
       "name": "local_project_holdouts_small_neutral_render_report",
       "path": "/tmp/wolfxl-render-excel-local-project-holdouts-small-neutral-20260511/render-compare-report.json",
       "producer": "sh -c 'set -e; root=/tmp/wolfxl-local-project-holdouts-small-render-20260511; out=/tmp/wolfxl-render-excel-local-project-holdouts-small-neutral-20260511; rm -rf \"$root\" \"$out\" /tmp/wolfxl-local-project-holdouts-small-neutral-render-20260511.json /tmp/wolfxl-local-project-holdouts-small-neutral-render-equivalence-20260511.json; mkdir -p \"$root\"; cp /tmp/wolfxl-local-project-holdouts-20260511/cityscope-bay-area-geospatial-sources-inventory.xlsx \"$root/\"; cp /tmp/wolfxl-local-project-holdouts-20260511/pyumya-example.xlsx \"$root/\"; (osascript -e '\\''tell application \"Microsoft Excel\" to quit'\\'' >/dev/null 2>&1 || true); uv run --no-sync python scripts/run_ooxml_render_compare.py \"$root\" --output-dir \"$out\" --render-engine excel --mutation add_data_validation --mutation copy_remove_sheet --max-pages-per-fixture 1 --page-selection first-pages --timeout 90 > /tmp/wolfxl-local-project-holdouts-small-neutral-render-20260511.json'",
