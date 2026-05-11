@@ -7,6 +7,8 @@ import zipfile
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_corpus_module() -> ModuleType:
     script = (
@@ -48,6 +50,7 @@ def test_corpus_bucket_audit_reports_missing_buckets(tmp_path: Path) -> None:
     report = corpus.audit_corpus([fixture_dir])
 
     assert report["ready"] is False
+    assert report["audit_mode"] == "full_snapshot"
     assert report["workbook_count"] == 1
     assert report["bucket_fixtures"]["excel_authored"] == [str(workbook)]
     assert "powerpivot_data_model" in report["missing_buckets"]
@@ -94,6 +97,81 @@ def test_corpus_bucket_audit_reports_unreadable_workbooks_without_crashing(
             "reason": "BadZipFile: File is not a zip file",
         }
     ]
+
+
+def test_corpus_bucket_audit_skips_timed_out_workbook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    workbook = fixture_dir / "slow.xlsx"
+    _write_plain_workbook(workbook, application="Microsoft Excel")
+
+    def timed_out_run(*args: object, **kwargs: object) -> object:
+        raise corpus.subprocess.TimeoutExpired(cmd=["audit"], timeout=0.01)
+
+    monkeypatch.setattr(corpus.subprocess, "run", timed_out_run)
+
+    report = corpus.audit_corpus([fixture_dir], workbook_timeout_seconds=0.01)
+
+    assert report["ready"] is False
+    assert report["workbook_count"] == 0
+    assert report["skipped_workbook_count"] == 1
+    assert report["skipped_workbooks"][0]["path"] == str(workbook)
+    assert report["skipped_workbooks"][0]["source_label"] == str(fixture_dir)
+    assert report["skipped_workbooks"][0]["tool"] is None
+    assert report["skipped_workbooks"][0]["reason"].startswith(
+        "WorkbookAuditTimeoutError: timed out after 0.01s"
+    )
+
+
+def test_corpus_bucket_audit_package_only_mode_uses_package_features(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    workbook = fixture_dir / "package.xlsx"
+    _write_feature_rich_workbook(workbook)
+
+    report = corpus.audit_corpus([fixture_dir], package_only=True)
+
+    assert report["audit_mode"] == "package_only"
+    assert report["workbook_count"] == 1
+    assert report["skipped_workbook_count"] == 0
+    buckets = set(report["workbooks"][0]["buckets"])
+    assert {
+        "excel_authored",
+        "macro_vba",
+        "powerpivot_data_model",
+        "slicer_or_timeline",
+        "embedded_object_or_control",
+        "external_link",
+        "chart_or_chart_style",
+        "conditional_formatting_extension",
+        "table_structured_ref_or_validation",
+        "drawing_comment_or_media",
+        "workbook_global_state",
+    }.issubset(buckets)
+
+
+def test_package_only_global_parts_keep_only_global_workbook_payloads() -> None:
+    parts = {
+        "xl/workbook.xml",
+        "xl/worksheets/sheet1.xml",
+        "xl/styles.xml",
+        "xl/calcChain.xml",
+        "xl/vbaProject.bin",
+        "customXml/item1.xml",
+        "xl/printerSettings/printerSettings1.bin",
+    }
+
+    assert set(corpus._package_only_global_parts(parts)) == {
+        "xl/calcChain.xml",
+        "xl/vbaProject.bin",
+        "customXml/item1.xml",
+        "xl/printerSettings/printerSettings1.bin",
+    }
 
 
 def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) -> None:

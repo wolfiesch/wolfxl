@@ -129,6 +129,39 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "synthgl_ingest_confidence_sample_100_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "synthgl_codex_spark_archive_71_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "synthgl_codex_spark_archive_71_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_investment_advisers_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_era_2012_2015_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_era_2016_2018_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_era_2019_2022_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_ria_2006_2011_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_ria_2012_2015_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_ria_2016_2018_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "sec_ria_2019_2022_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "bls_cps_annual_tables_package_only_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "sec_commission_votes_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
