@@ -147,6 +147,24 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "sec_enforcement_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "domain_consolidation_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_consolidation_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_consolidation_quick_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_international_standards_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_international_standards_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_international_standards_quick_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "umya_result_files_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
