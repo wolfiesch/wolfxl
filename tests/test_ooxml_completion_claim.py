@@ -33,6 +33,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert report["exhaustive_claim_ready"] is False
     assert report["bundle_audit"]["ready"] is True
     assert report["missing_requirement_count"] == 4
+    assert report["missing_requirement_ids"] == [
+        "broader_real_world_corpus_diversity",
+        "feature_specific_intentional_render_equivalence",
+        "broader_click_level_interaction_variants",
+        "future_surface_exhaustiveness",
+    ]
     assert {
         requirement["id"] for requirement in report["missing_requirements"]
     } == {
