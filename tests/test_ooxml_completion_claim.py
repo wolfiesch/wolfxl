@@ -325,6 +325,65 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     )
 
 
+def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
+    report = completion._render_equivalence_evidence(
+        {
+            "reports": [
+                {
+                    "name": "excel_render_copy_sheet_equivalence_full_pack_report",
+                    "path": "/tmp/copy-sheet-render-equivalence.json",
+                    "checks": [
+                        {"path": "ready", "actual": True, "passed": True},
+                        {
+                            "path": "mutation",
+                            "actual": "copy_first_sheet",
+                            "passed": True,
+                        },
+                        {"path": "result_count", "actual": 2, "passed": True},
+                        {"path": "passed_count", "actual": 2, "passed": True},
+                        {"path": "failure_count", "actual": 0, "passed": True},
+                        {
+                            "path": "inconclusive_count",
+                            "actual": 0,
+                            "passed": True,
+                        },
+                    ],
+                },
+                {
+                    "name": "neutral_feature_render_equivalence",
+                    "path": "/tmp/neutral-feature-render-equivalence.json",
+                    "checks": [
+                        {"path": "ready", "actual": True, "passed": True},
+                        {"path": "render_engine", "actual": "excel", "passed": True},
+                        {
+                            "path": "observed_mutations",
+                            "actual": ["add_data_validation"],
+                            "passed": True,
+                        },
+                        {"path": "result_count", "actual": 3, "passed": True},
+                        {"path": "passed_count", "actual": 3, "passed": True},
+                        {"path": "failure_count", "actual": 0, "passed": True},
+                        {
+                            "path": "inconclusive_count",
+                            "actual": 0,
+                            "passed": True,
+                        },
+                    ],
+                },
+            ]
+        }
+    )
+
+    assert report["ready_report_count"] == 2
+    assert report["excel_report_count"] == 1
+    assert report["result_count"] == 5
+    assert report["passed_count"] == 5
+    assert report["observed_mutations"] == [
+        "add_data_validation",
+        "copy_first_sheet",
+    ]
+
+
 def test_completion_claim_audit_requires_named_current_evidence_reports(
     tmp_path: Path,
 ) -> None:

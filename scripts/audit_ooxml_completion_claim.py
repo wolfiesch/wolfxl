@@ -541,11 +541,30 @@ def _unique_list_report_checks(reports: list[dict], check_path: str) -> list[obj
     return sorted(values)
 
 
+def _unique_mutation_report_checks(reports: list[dict]) -> list[object]:
+    values = set(_unique_list_report_checks(reports, "observed_mutations"))
+    for report in reports:
+        actual = _report_check_observed_actual(report, "mutation")
+        if actual is not None:
+            values.add(actual)
+    return sorted(values)
+
+
+def _is_render_equivalence_report(report: dict) -> bool:
+    name = str(report.get("name", ""))
+    path = str(report.get("path", ""))
+    return (
+        "render_equivalence" in name
+        or "render-equivalence" in path
+        or ("excel_render_" in name and "_equivalence_" in name)
+    )
+
+
 def _render_equivalence_evidence(bundle_audit: dict) -> dict:
     reports = [
         report
         for report in bundle_audit["reports"]
-        if "render_equivalence" in str(report["name"])
+        if _is_render_equivalence_report(report)
     ]
     ready_reports = [
         report for report in reports if _report_check_actual(report, "ready") is True
@@ -563,7 +582,7 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         "failure_count": _sum_numeric_report_checks(reports, "failure_count"),
         "inconclusive_count": _sum_numeric_report_checks(reports, "inconclusive_count"),
         "skipped_count": _sum_numeric_report_checks(reports, "skipped_count"),
-        "observed_mutations": _unique_list_report_checks(reports, "observed_mutations"),
+        "observed_mutations": _unique_mutation_report_checks(reports),
         "target_status": "open_unbounded_high_risk_feature_edit_universe",
     }
 
