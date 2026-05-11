@@ -89,6 +89,21 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "fed_aea_papers_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "synthgl_real_world_ingestion_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "powerpivot_contoso_sidecar_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_ground_truth_valid_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "codexaudit_qoe_workbooks_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "fed_aea_papers_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "irs_soi_public_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
