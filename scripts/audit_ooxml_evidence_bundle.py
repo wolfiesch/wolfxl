@@ -33,13 +33,38 @@ def audit_bundle(manifest_path: Path) -> dict:
     base_dir = manifest_path.resolve().parent
     issues: list[BundleIssue] = []
     report_results = []
+    seen_names: dict[str, str] = {}
+    seen_paths: dict[str, str] = {}
     for report in manifest.get("reports", []):
         name = str(report["name"])
         path = _resolve_path(str(report["path"]), base_dir)
         producer = report.get("producer")
+        path_text = str(path)
+        if name in seen_names:
+            issues.append(
+                BundleIssue(
+                    report=name,
+                    path=path_text,
+                    check="duplicate_name",
+                    message=f"duplicate report name also used for {seen_names[name]}",
+                )
+            )
+        else:
+            seen_names[name] = path_text
+        if path_text in seen_paths:
+            issues.append(
+                BundleIssue(
+                    report=name,
+                    path=path_text,
+                    check="duplicate_path",
+                    message=f"duplicate report path also used by {seen_paths[path_text]}",
+                )
+            )
+        else:
+            seen_paths[path_text] = name
         result = {
             "name": name,
-            "path": str(path),
+            "path": path_text,
             "producer": producer,
             "exists": path.is_file(),
             "checks": [],
@@ -48,7 +73,7 @@ def audit_bundle(manifest_path: Path) -> dict:
             issues.append(
                 BundleIssue(
                     report=name,
-                    path=str(path),
+                    path=path_text,
                     check="producer",
                     message="producer command is missing",
                 )
@@ -57,7 +82,7 @@ def audit_bundle(manifest_path: Path) -> dict:
             issues.append(
                 BundleIssue(
                     report=name,
-                    path=str(path),
+                    path=path_text,
                     check="exists",
                     message="report file is missing",
                 )
@@ -72,7 +97,7 @@ def audit_bundle(manifest_path: Path) -> dict:
                 issues.append(
                     BundleIssue(
                         report=name,
-                        path=str(path),
+                        path=path_text,
                         check=str(check.get("path")),
                         message=check_result["message"],
                     )
@@ -83,7 +108,7 @@ def audit_bundle(manifest_path: Path) -> dict:
                 issues.append(
                     BundleIssue(
                         report=name,
-                        path=str(path),
+                        path=path_text,
                         check=check_result["path"],
                         message=check_result["message"],
                     )
