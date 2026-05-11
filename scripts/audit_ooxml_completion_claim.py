@@ -138,6 +138,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "external_oracle_corpus_diversity",
     "corpus_portfolio_diversity",
     "umya_test_files_corpus_buckets",
+    "umya_result_files_corpus_buckets",
     "synthgl_recursive_corpus_buckets",
     "synthgl_real_world_ingestion_corpus_buckets",
     "synthgl_cds_case_study_corpus_buckets",

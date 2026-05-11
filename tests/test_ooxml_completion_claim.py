@@ -120,6 +120,9 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "synthgl_real_world_ingestion_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "umya_result_files_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "calamine_reader_corpus_buckets" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
