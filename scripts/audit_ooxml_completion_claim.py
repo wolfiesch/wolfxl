@@ -178,12 +178,8 @@ OPEN_REQUIREMENTS = (
         "id": "broader_real_world_corpus_diversity",
         "status": "open",
         "reason": (
-            "The current corpus portfolio spans 374 unique readable workbooks across 26 "
-            "source reports, including the domain-ground-truth public workbook sidecar, "
-            "standalone SEC municipal-adviser and SEC investment-management "
-            "public/regulatory sidecars, and covers all required diversity buckets, "
-            "but it is still not "
-            "customer-scale or random real-world Excel evidence."
+            "The current corpus portfolio covers all required diversity buckets, "
+            "but it is still not customer-scale or random real-world Excel evidence."
         ),
     },
     {
@@ -306,6 +302,37 @@ OPEN_REQUIREMENTS = (
 )
 
 
+def _check_actual(bundle_audit: dict, report_name: str, check_path: str) -> Optional[object]:
+    for report in bundle_audit["reports"]:
+        if report["name"] != report_name:
+            continue
+        for check in report["checks"]:
+            if check["path"] == check_path and check["passed"]:
+                return check["actual"]
+    return None
+
+
+def _open_requirements(bundle_audit: dict) -> list[dict]:
+    requirements = [dict(requirement) for requirement in OPEN_REQUIREMENTS]
+    source_count = _check_actual(bundle_audit, "corpus_portfolio_diversity", "source_count")
+    workbook_count = _check_actual(bundle_audit, "corpus_portfolio_diversity", "workbook_count")
+    if isinstance(source_count, int) and isinstance(workbook_count, int):
+        for requirement in requirements:
+            if requirement["id"] != "broader_real_world_corpus_diversity":
+                continue
+            requirement["reason"] = (
+                f"The current corpus portfolio spans {workbook_count} unique readable "
+                f"workbooks across {source_count} source reports, including the "
+                "domain-ground-truth public workbook sidecar, standalone SEC "
+                "municipal-adviser and SEC investment-management public/regulatory "
+                "sidecars, the IRS SOI public-statistics sidecar, and all required "
+                "diversity buckets, but it is still not customer-scale or random "
+                "real-world Excel evidence."
+            )
+            break
+    return requirements
+
+
 def audit_completion_claim(bundle_path: Path) -> dict:
     bundle_audit = audit_ooxml_evidence_bundle.audit_bundle(bundle_path)
     bundle_ready = bool(bundle_audit["ready"])
@@ -341,7 +368,7 @@ def audit_completion_claim(bundle_path: Path) -> dict:
                 "missing_reports": missing_report_names,
             },
         },
-        *OPEN_REQUIREMENTS,
+        *_open_requirements(bundle_audit),
     ]
     missing = [
         criterion
