@@ -155,6 +155,25 @@ def test_corpus_bucket_audit_package_only_mode_uses_package_features(
     }.issubset(buckets)
 
 
+def test_package_only_global_parts_keep_only_global_workbook_payloads() -> None:
+    parts = {
+        "xl/workbook.xml",
+        "xl/worksheets/sheet1.xml",
+        "xl/styles.xml",
+        "xl/calcChain.xml",
+        "xl/vbaProject.bin",
+        "customXml/item1.xml",
+        "xl/printerSettings/printerSettings1.bin",
+    }
+
+    assert set(corpus._package_only_global_parts(parts)) == {
+        "xl/calcChain.xml",
+        "xl/vbaProject.bin",
+        "customXml/item1.xml",
+        "xl/printerSettings/printerSettings1.bin",
+    }
+
+
 def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()

@@ -235,9 +235,21 @@ def _package_only_semantic_fingerprints(parts: set[str]) -> dict[str, dict[str, 
         workbook_global_entries.append(("workbook_views", True))
     workbook_globals = {
         "xl/workbook.xml": workbook_global_entries,
-        "package_parts": sorted(parts),
+        "package_parts": _package_only_global_parts(parts),
     }
     return {"workbook_globals": workbook_globals}
+
+
+def _package_only_global_parts(parts: set[str]) -> list[str]:
+    return [
+        part
+        for part in parts
+        if part == "xl/calcChain.xml"
+        or part == "xl/vbaProject.bin"
+        or part.startswith("customXml/")
+        or part.startswith("xl/customXml/")
+        or part.startswith("xl/printerSettings/")
+    ]
 
 
 def _discover_workbooks(source: Path, recursive: bool) -> list[tuple[Path, str | None]]:
