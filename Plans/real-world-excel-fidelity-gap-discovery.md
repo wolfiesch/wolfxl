@@ -602,6 +602,17 @@ render-equivalence proof for `rename_first_sheet` and `copy_remove_sheet`, with
 pages for each rendered workbook, covering both Microsoft-authored and
 external-tool-authored pivot/slicer outputs.
 
+Latest click-level rename-sheet interaction increment adds
+`/tmp/wolfxl-ui-interaction-evidence-rename-external-oracle-pivot-slicer-timeline-20260511.json`
+and `/tmp/wolfxl-ui-interaction-evidence-rename-shared-slicer-cache-20260511.json`:
+after a WolfXL `rename_first_sheet` save, Microsoft Excel successfully ran
+pivot refresh on `real-excel-pivot-chart-slicers.xlsx`, clicked slicers in both
+`real-excel-pivot-chart-slicers.xlsx` and `excelize-2.10-pivot-slicers.xlsx`,
+clicked the shared pivot-slicer cache in `real-excel-shared-slicer-two-pivots.xlsx`,
+and clicked the May timeline month in `real-excel-timeline-slicer.xlsx`. Both
+strict audit reports are `ready=true` with 5 raw UI reports, 0 failures, and 0
+incomplete reports.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned

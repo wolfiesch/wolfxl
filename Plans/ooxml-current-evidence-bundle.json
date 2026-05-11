@@ -5888,6 +5888,125 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_rename_pivot_refresh_command",
+      "path": "/tmp/wolfxl-ui-interaction-rename-pivot-refresh-20260511/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-rename-pivot-refresh-20260511 --probe-kind excel_ui_interaction --probe pivot_refresh_state --mutation rename_first_sheet --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-rename-pivot-refresh-20260511.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "pivot_refresh_state"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "executed Excel command: refresh all"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_pivot_chart_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-rename-pivot-chart-slicer-20260511/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-rename-pivot-chart-slicer-20260511 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation rename_first_sheet --fixture real-excel-pivot-chart-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-rename-pivot-chart-slicer-20260511.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.fixture", "equals": "real-excel-pivot-chart-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_external_tool_pivot_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-rename-excelize-pivot-slicer-20260511/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-rename-excelize-pivot-slicer-20260511 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation rename_first_sheet --fixture excelize-2.10-pivot-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-rename-excelize-pivot-slicer-20260511.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.fixture", "equals": "excelize-2.10-pivot-slicers.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_shared_slicer_click",
+      "path": "/tmp/wolfxl-ui-interaction-rename-shared-slicer-cache-20260511/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-ui-interaction-rename-shared-slicer-cache-20260511 --probe-kind excel_ui_interaction --probe slicer_selection_state --mutation rename_first_sheet --fixture real-excel-shared-slicer-two-pivots.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-rename-shared-slicer-cache-20260511.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.probe", "equals": "slicer_selection_state"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel slicer item"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_timeline_month_click",
+      "path": "/tmp/wolfxl-ui-interaction-rename-timeline-click-20260511/interactive-probe-report.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-rename-timeline-click-20260511 --probe-kind excel_ui_interaction --probe timeline_selection_state --mutation rename_first_sheet --fixture real-excel-timeline-slicer.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-rename-timeline-click-20260511.stdout.json",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.probe", "equals": "timeline_selection_state"},
+        {"path": "results.0.mutation", "equals": "rename_first_sheet"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked Excel timeline month"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-rename-external-oracle-pivot-slicer-timeline-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/external_oracle --probe-kind excel_ui_interaction --probe pivot_refresh_state --probe slicer_selection_state --probe timeline_selection_state --report /tmp/wolfxl-ui-interaction-rename-pivot-refresh-20260511/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-rename-pivot-chart-slicer-20260511/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-rename-excelize-pivot-slicer-20260511/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-rename-timeline-click-20260511/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-rename-external-oracle-pivot-slicer-timeline-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["pivot_refresh_state", "slicer_selection_state", "timeline_selection_state"]},
+        {"path": "fixture_count", "equals": 22},
+        {"path": "report_count", "equals": 4},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.pivot_refresh_state.status", "equals": "clear"},
+        {"path": "probes.pivot_refresh_state.passed_fixtures", "equals": ["real-excel-pivot-chart-slicers.xlsx"]},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["excelize-2.10-pivot-slicers.xlsx", "real-excel-pivot-chart-slicers.xlsx"]},
+        {"path": "probes.timeline_selection_state.status", "equals": "clear"},
+        {"path": "probes.timeline_selection_state.passed_fixtures", "equals": ["real-excel-timeline-slicer.xlsx"]}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_rename_shared_slicer_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-rename-shared-slicer-cache-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/slicer_timeline_variants --probe-kind excel_ui_interaction --probe slicer_selection_state --report /tmp/wolfxl-ui-interaction-rename-shared-slicer-cache-20260511/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-rename-shared-slicer-cache-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["slicer_selection_state"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 1},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.slicer_selection_state.status", "equals": "clear"},
+        {"path": "probes.slicer_selection_state.passed_fixtures", "equals": ["real-excel-shared-slicer-two-pivots.xlsx"]}
+      ]
+    },
+    {
       "name": "corpus_portfolio_diversity",
       "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json --min-sources 31 --min-workbooks 401 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",
