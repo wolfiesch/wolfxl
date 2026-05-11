@@ -53,6 +53,15 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         if requirement["id"] == "broader_real_world_corpus_diversity"
     )
     assert "11 unique readable workbooks across 3 source reports" in corpus_requirement["reason"]
+    assert "below the customer-scale target" in corpus_requirement["reason"]
+    assert corpus_requirement["evidence"] == {
+        "actual_workbook_count": 11,
+        "actual_source_count": 3,
+        "customer_scale_min_workbooks": completion.CUSTOMER_SCALE_MIN_WORKBOOKS,
+        "customer_scale_min_sources": completion.CUSTOMER_SCALE_MIN_SOURCES,
+        "workbook_deficit": completion.CUSTOMER_SCALE_MIN_WORKBOOKS - 11,
+        "source_deficit": completion.CUSTOMER_SCALE_MIN_SOURCES - 3,
+    }
     required_reports = next(
         criterion
         for criterion in report["criteria"]

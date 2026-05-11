@@ -20,6 +20,8 @@ EXHAUSTIVE_CLAIM = "no_real_world_excel_fidelity_gaps"
 CURRENT_SUPPORTED_CLAIM = (
     "no known fidelity gap in the currently pinned and classified real-world OOXML surface"
 )
+CUSTOMER_SCALE_MIN_WORKBOOKS = 1_000
+CUSTOMER_SCALE_MIN_SOURCES = 50
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -464,9 +466,19 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
     source_count = _check_actual(bundle_audit, "corpus_portfolio_diversity", "source_count")
     workbook_count = _check_actual(bundle_audit, "corpus_portfolio_diversity", "workbook_count")
     if isinstance(source_count, int) and isinstance(workbook_count, int):
+        workbook_deficit = max(0, CUSTOMER_SCALE_MIN_WORKBOOKS - workbook_count)
+        source_deficit = max(0, CUSTOMER_SCALE_MIN_SOURCES - source_count)
         for requirement in requirements:
             if requirement["id"] != "broader_real_world_corpus_diversity":
                 continue
+            requirement["evidence"] = {
+                "actual_workbook_count": workbook_count,
+                "actual_source_count": source_count,
+                "customer_scale_min_workbooks": CUSTOMER_SCALE_MIN_WORKBOOKS,
+                "customer_scale_min_sources": CUSTOMER_SCALE_MIN_SOURCES,
+                "workbook_deficit": workbook_deficit,
+                "source_deficit": source_deficit,
+            }
             requirement["reason"] = (
                 f"The current corpus portfolio spans {workbook_count} unique readable "
                 f"workbooks across {source_count} source reports, including the "
@@ -478,8 +490,11 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "50 workbooks from that portfolio across 22 source reports and "
                 "stages all selected files, with a smaller 10-workbook smoke "
                 "mutation passing no-op and marker-cell saves; this improves "
-                "curated-corpus pressure evidence, but it is still not "
-                "customer-scale real-world Excel evidence."
+                "curated-corpus pressure evidence, but it remains below the "
+                f"customer-scale target of {CUSTOMER_SCALE_MIN_WORKBOOKS} unique "
+                f"readable workbooks across {CUSTOMER_SCALE_MIN_SOURCES} source "
+                f"reports by {workbook_deficit} workbooks and {source_deficit} "
+                "source reports."
             )
             break
     return requirements
