@@ -74,6 +74,21 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "synthgl_real_world_ingestion_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "calamine_reader_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "domain_ground_truth_valid_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "codexaudit_qoe_workbooks_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "fed_aea_papers_corpus_buckets" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
     assert "irs_soi_public_quick_mutation_report" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
