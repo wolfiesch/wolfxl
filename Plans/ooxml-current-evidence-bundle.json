@@ -5916,7 +5916,7 @@
     {
       "name": "fed_aea_papers_neutral_render_smoke",
       "path": "/tmp/wolfxl-render-excel-fed-aea-neutral-20260511/render-compare-report.json",
-      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-fed-aea-render-input-20260511; rm -rf \"$dest\" /tmp/wolfxl-render-excel-fed-aea-neutral-20260511 /tmp/wolfxl-fed-aea-neutral-render-20260511.json /tmp/wolfxl-fed-aea-copy-chart-render-equivalence-20260511.json; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/fed-aea-papers-proceedings-1911-2020.xlsx\" \"https://www.federalreserve.gov/econres/notes/feds-notes/feds-note-2975-full-dataset.xlsx\"; osascript -e '\\''tell application \"Microsoft Excel\" to quit'\\'' >/dev/null 2>&1 || true; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_render_compare.py \"$dest\" --output-dir /tmp/wolfxl-render-excel-fed-aea-neutral-20260511 --render-engine excel --timeout 240 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet > /tmp/wolfxl-fed-aea-neutral-render-20260511.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-fed-aea-neutral-20260511/render-compare-report.json --mutation add_remove_chart --mutation copy_remove_sheet --timeout 240 --strict > /tmp/wolfxl-fed-aea-copy-chart-render-equivalence-20260511.json'",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-fed-aea-render-input-20260511; rm -rf \"$dest\" /tmp/wolfxl-render-excel-fed-aea-neutral-20260511 /tmp/wolfxl-fed-aea-neutral-render-20260511.json; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/fed-aea-papers-proceedings-1911-2020.xlsx\" \"https://www.federalreserve.gov/econres/notes/feds-notes/feds-note-2975-full-dataset.xlsx\"; osascript -e '\\''tell application \"Microsoft Excel\" to quit'\\'' >/dev/null 2>&1 || true; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_render_compare.py \"$dest\" --output-dir /tmp/wolfxl-render-excel-fed-aea-neutral-20260511 --render-engine excel --timeout 240 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet > /tmp/wolfxl-fed-aea-neutral-render-20260511.json'",
       "expect": [
         {"path": "render_engine", "equals": "excel"},
         {"path": "page_selection", "equals": "first-and-last-pages"},
@@ -5925,12 +5925,16 @@
         {"path": "result_count", "equals": 4},
         {"path": "failure_count", "equals": 0},
         {"path": "results", "length": 4},
+        {"path": "results.0.mutation", "equals": "add_data_validation"},
         {"path": "results.0.status", "equals": "sampled_rendered"},
         {"path": "results.0.compared_page_count", "equals": 2},
+        {"path": "results.1.mutation", "equals": "add_conditional_formatting"},
         {"path": "results.1.status", "equals": "sampled_rendered"},
         {"path": "results.1.compared_page_count", "equals": 2},
+        {"path": "results.2.mutation", "equals": "add_remove_chart"},
         {"path": "results.2.status", "equals": "sampled_rendered"},
         {"path": "results.2.compared_page_count", "equals": 2},
+        {"path": "results.3.mutation", "equals": "copy_remove_sheet"},
         {"path": "results.3.status", "equals": "sampled_rendered"},
         {"path": "results.3.compared_page_count", "equals": 2}
       ]
