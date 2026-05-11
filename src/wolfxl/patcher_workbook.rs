@@ -157,7 +157,12 @@ pub(crate) fn splice_into_sheets_block(
                     && Some(depth) == sheets_open_depth
                     && splice_pos.is_none()
                 {
-                    splice_pos = Some(pre);
+                    let event_name: Vec<u8> = sheets_element_name
+                        .as_ref()
+                        .map(|name| name.as_bytes().to_vec())
+                        .unwrap_or_else(|| e.name().as_ref().to_vec());
+                    splice_pos =
+                        find_end_event_start(workbook_xml, pre, post, &event_name).or(Some(pre));
                     break;
                 }
             }
@@ -199,6 +204,50 @@ pub(crate) fn splice_into_sheets_block(
     Err(PyIOError::new_err(
         "Phase 2.7: workbook.xml has no <sheets> block",
     ))
+}
+
+fn find_end_event_start(
+    xml: &[u8],
+    event_pre: usize,
+    event_post: usize,
+    event_name: &[u8],
+) -> Option<usize> {
+    let end = event_post
+        .saturating_add(event_name.len())
+        .saturating_add(3)
+        .min(xml.len());
+    let needle_len = event_name.len();
+    if needle_len == 0 || end < needle_len + 3 {
+        return None;
+    }
+
+    let start = event_pre.min(end);
+    if let Some(i) = find_named_end_tag(xml, start, end, event_name) {
+        return Some(i);
+    }
+    find_named_end_tag(xml, end, xml.len(), event_name)
+}
+
+fn find_named_end_tag(xml: &[u8], start: usize, end: usize, event_name: &[u8]) -> Option<usize> {
+    let end = end.min(xml.len());
+    let needle_len = event_name.len();
+    let mut i = start.min(end);
+    while i + needle_len + 3 <= end {
+        if xml.get(i) == Some(&b'<')
+            && xml.get(i + 1) == Some(&b'/')
+            && xml.get(i + 2..i + 2 + needle_len) == Some(event_name)
+        {
+            let after_name = i + 2 + needle_len;
+            if matches!(
+                xml.get(after_name),
+                Some(b'>') | Some(b' ' | b'\t' | b'\r' | b'\n')
+            ) {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 fn qualify_sheet_element_for_sheets(new_sheet_element: &[u8], sheets_name: &str) -> Vec<u8> {
@@ -1154,8 +1203,11 @@ pub(super) fn apply_sheet_rename_chart_formula_refs_phase(
         let Some(bytes) = current_part_bytes(file_patches, &patcher.file_adds, zip, &path) else {
             continue;
         };
-        let updated = rewrite_worksheet_formula_sheet_renames(&bytes, &patcher.queued_sheet_renames)
-            .map_err(|e| PyIOError::new_err(format!("worksheet formula sheet-rename merge: {e}")))?;
+        let updated =
+            rewrite_worksheet_formula_sheet_renames(&bytes, &patcher.queued_sheet_renames)
+                .map_err(|e| {
+                    PyIOError::new_err(format!("worksheet formula sheet-rename merge: {e}"))
+                })?;
         if updated != bytes {
             file_patches.insert(path, updated);
         }
@@ -1712,7 +1764,9 @@ fn double_quoted_ranges(formula: &str) -> Vec<(usize, usize)> {
 }
 
 fn byte_index_in_ranges(index: usize, ranges: &[(usize, usize)]) -> bool {
-    ranges.iter().any(|(start, end)| *start <= index && index < *end)
+    ranges
+        .iter()
+        .any(|(start, end)| *start <= index && index < *end)
 }
 
 fn rename_sheet_token(token: &str, old_name: &str, new_name: &str) -> Option<String> {
@@ -2333,6 +2387,19 @@ mod tests {
         assert!(s.contains("<x:sheet name=\"Copy\""));
         assert!(!s.contains("<sheet name=\"Copy\""));
         assert!(s.contains("</x:sheets>"));
+    }
+
+    #[test]
+    fn splice_handles_prefixed_sheets_with_space_before_empty_close() {
+        let xml = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?><x:workbook xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><x:sheets><x:sheet name=\"BAL\" sheetId=\"4\" state=\"hidden\" r:id=\"rId3\" /></x:sheets><x:definedNames><x:definedName name=\"BAL_DATA\" localSheetId=\"0\">BAL!$A$1</x:definedName></x:definedNames></x:workbook>";
+        let out = splice_into_sheets_block(xml, NEW_SHEET).expect("splice ok");
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(s.contains(r#"<x:sheet name="BAL" sheetId="4" state="hidden" r:id="rId3" />"#));
+        assert!(s.contains(r#"<x:sheet name="Copy" sheetId="2" r:id="rId99"/>"#));
+        assert!(s.contains("</x:sheets>"));
+        assert!(s.contains("<x:definedNames>"));
+        assert!(!s.contains(r#"r:id="rId3"<x:sheet"#));
+        assert!(!s.contains("</x:shee<x:definedNames>"));
     }
 
     #[test]

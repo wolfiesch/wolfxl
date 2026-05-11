@@ -161,11 +161,16 @@ pub fn merge_defined_names(
     // Pass 2: emit any remaining upserts (new names) at the end of the block.
     // Deletes for missing names are no-ops. BTreeMap order keeps this
     // deterministic.
+    let defined_name_child_name = layout.defined_name_child_name();
     for ((_name, _scope), mutation) in &pending {
         if mutation.delete {
             continue;
         }
-        serialize_new_defined_name(&mut merged_inner, mutation);
+        serialize_new_defined_name(
+            &mut merged_inner,
+            mutation,
+            defined_name_child_name.as_bytes(),
+        );
     }
 
     // Empty merged block + no existing block + nothing to emit → identity.
@@ -179,9 +184,17 @@ pub fn merge_defined_names(
         Vec::new()
     } else {
         let mut wrapped: Vec<u8> = Vec::with_capacity(merged_inner.len() + 32);
-        wrapped.extend_from_slice(b"<definedNames>");
+        let wrapper_name = layout
+            .defined_names_name
+            .as_deref()
+            .unwrap_or("definedNames");
+        wrapped.push(b'<');
+        wrapped.extend_from_slice(wrapper_name.as_bytes());
+        wrapped.push(b'>');
         wrapped.extend_from_slice(&merged_inner);
-        wrapped.extend_from_slice(b"</definedNames>");
+        wrapped.extend_from_slice(b"</");
+        wrapped.extend_from_slice(wrapper_name.as_bytes());
+        wrapped.push(b'>');
         wrapped
     };
 
@@ -220,6 +233,17 @@ struct WorkbookLayout {
     /// between `<definedNames>` and `</definedNames>` exclusive of the
     /// wrapper tags themselves. `None` when no existing block.
     defined_names_inner: Option<(usize, usize)>,
+    defined_names_name: Option<String>,
+}
+
+impl WorkbookLayout {
+    fn defined_name_child_name(&self) -> String {
+        self.defined_names_name
+            .as_deref()
+            .and_then(|name| name.strip_suffix("definedNames"))
+            .map(|prefix| format!("{prefix}definedName"))
+            .unwrap_or_else(|| "definedName".to_string())
+    }
 }
 
 fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
@@ -234,6 +258,7 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
     let mut dn_inner_start: Option<usize> = None;
     let mut dn_inner_end: Option<usize> = None;
     let mut dn_outer_end: Option<usize> = None;
+    let mut dn_name: Option<String> = None;
     let mut dn_depth: u32 = 0;
 
     loop {
@@ -244,8 +269,12 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         match evt {
             Ok(Event::Start(ref e)) => {
                 if e.local_name().as_ref() == b"definedNames" && dn_start.is_none() {
-                    dn_start = Some(pre);
-                    dn_inner_start = Some(post);
+                    let name = e.name().as_ref().to_vec();
+                    let start = find_start_event_start(xml, pre, post, &name).unwrap_or(pre);
+                    let end = find_tag_end(xml, start, post).unwrap_or(post);
+                    dn_name = Some(String::from_utf8_lossy(&name).into_owned());
+                    dn_start = Some(start);
+                    dn_inner_start = Some(end);
                     dn_depth = 1;
                 } else if dn_start.is_some() && e.local_name().as_ref() == b"definedNames" {
                     dn_depth += 1;
@@ -254,23 +283,36 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
             Ok(Event::Empty(ref e)) => {
                 if e.local_name().as_ref() == b"definedNames" && dn_start.is_none() {
                     // `<definedNames/>` self-closing — empty existing block.
-                    dn_start = Some(pre);
-                    dn_inner_start = Some(post);
-                    dn_inner_end = Some(post);
-                    dn_outer_end = Some(post);
+                    let name = e.name().as_ref().to_vec();
+                    let start = find_start_event_start(xml, pre, post, &name).unwrap_or(pre);
+                    let end = find_tag_end(xml, start, post).unwrap_or(post);
+                    dn_name = Some(String::from_utf8_lossy(&name).into_owned());
+                    dn_start = Some(start);
+                    dn_inner_start = Some(end);
+                    dn_inner_end = Some(end);
+                    dn_outer_end = Some(end);
                 }
             }
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
                 if local.as_ref() == b"sheets" && sheets_end.is_none() {
-                    sheets_end = Some(post);
+                    let name = e.name().as_ref().to_vec();
+                    sheets_end = find_end_event_start(xml, pre, post, &name)
+                        .and_then(|start| find_tag_end(xml, start, post))
+                        .or(Some(post));
                 } else if local.as_ref() == b"definedNames" && dn_start.is_some() {
                     if dn_depth > 0 {
                         dn_depth -= 1;
                     }
                     if dn_depth == 0 && dn_outer_end.is_none() {
-                        dn_inner_end = Some(pre);
-                        dn_outer_end = Some(post);
+                        let name = dn_name
+                            .as_ref()
+                            .map(|n| n.as_bytes().to_vec())
+                            .unwrap_or_else(|| e.name().as_ref().to_vec());
+                        let start = find_end_event_start(xml, pre, post, &name).unwrap_or(pre);
+                        let end = find_tag_end(xml, start, post).unwrap_or(post);
+                        dn_inner_end = Some(start);
+                        dn_outer_end = Some(end);
                     }
                 }
             }
@@ -295,7 +337,66 @@ fn scan_workbook_layout(xml: &[u8]) -> Result<WorkbookLayout, String> {
         sheets_end,
         defined_names_outer: outer,
         defined_names_inner: inner,
+        defined_names_name: dn_name,
     })
+}
+
+fn find_start_event_start(
+    xml: &[u8],
+    event_pre: usize,
+    event_post: usize,
+    event_name: &[u8],
+) -> Option<usize> {
+    let end = event_post
+        .saturating_add(event_name.len())
+        .saturating_add(3)
+        .min(xml.len());
+    let mut i = event_pre.min(end);
+    while i + event_name.len() + 1 <= end {
+        if xml.get(i) == Some(&b'<')
+            && xml.get(i + 1) != Some(&b'/')
+            && xml.get(i + 1..i + 1 + event_name.len()) == Some(event_name)
+        {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find_end_event_start(
+    xml: &[u8],
+    event_pre: usize,
+    event_post: usize,
+    event_name: &[u8],
+) -> Option<usize> {
+    let end = event_post
+        .saturating_add(event_name.len())
+        .saturating_add(3)
+        .min(xml.len());
+    let mut i = event_pre.min(end);
+    while i + event_name.len() + 2 <= end {
+        if xml.get(i) == Some(&b'<')
+            && xml.get(i + 1) == Some(&b'/')
+            && xml.get(i + 2..i + 2 + event_name.len()) == Some(event_name)
+        {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find_tag_end(xml: &[u8], tag_start: usize, event_post: usize) -> Option<usize> {
+    let search_end = event_post.saturating_add(64).min(xml.len());
+    let mut i = tag_start.min(search_end);
+    while i < search_end {
+        if xml.get(i) == Some(&b'>') {
+            return Some(i + 1);
+        }
+        i += 1;
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -376,8 +477,10 @@ fn parse_defined_name_attrs(e: &quick_xml::events::BytesStart<'_>) -> (String, O
 // Internal: serialize a brand-new `<definedName>` element from a `DefinedNameMut`.
 // ---------------------------------------------------------------------------
 
-fn serialize_new_defined_name(out: &mut Vec<u8>, dn: &DefinedNameMut) {
-    out.extend_from_slice(b"<definedName name=\"");
+fn serialize_new_defined_name(out: &mut Vec<u8>, dn: &DefinedNameMut, element_name: &[u8]) {
+    out.push(b'<');
+    out.extend_from_slice(element_name);
+    out.extend_from_slice(b" name=\"");
     push_xml_attr_escape(out, &dn.name);
     out.push(b'"');
     if let Some(idx) = dn.local_sheet_id {
@@ -404,7 +507,9 @@ fn serialize_new_defined_name(out: &mut Vec<u8>, dn: &DefinedNameMut) {
     push_opt_bool_true_attr(out, b"workbookParameter", dn.workbook_parameter);
     out.push(b'>');
     push_xml_text_escape(out, &dn.formula);
-    out.extend_from_slice(b"</definedName>");
+    out.extend_from_slice(b"</");
+    out.extend_from_slice(element_name);
+    out.push(b'>');
 }
 
 fn push_opt_str_attr(out: &mut Vec<u8>, key: &[u8], value: Option<&str>) {
@@ -437,7 +542,7 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
         Err(_) => {
             // Pathological — fall back to a fresh emit.
             let mut out = Vec::new();
-            serialize_new_defined_name(&mut out, upsert);
+            serialize_new_defined_name(&mut out, upsert, b"definedName");
             return out;
         }
     };
@@ -449,11 +554,13 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
     let mut buf: Vec<u8> = Vec::new();
 
     let mut existing_attrs: Vec<(Vec<u8>, String)> = Vec::new();
+    let mut element_name: Vec<u8> = b"definedName".to_vec();
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e))
                 if e.local_name().as_ref() == b"definedName" =>
             {
+                element_name = e.name().as_ref().to_vec();
                 for a in e.attributes().with_checks(false).flatten() {
                     let key = a.key.as_ref().to_vec();
                     let val = a
@@ -552,7 +659,8 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
     // Re-emit the element. Attribute order: keep original order for
     // attrs that existed, then append any newly added ones.
     let mut out: Vec<u8> = Vec::with_capacity(raw.len() + upsert.formula.len());
-    out.extend_from_slice(b"<definedName");
+    out.push(b'<');
+    out.extend_from_slice(&element_name);
     for (key, val) in &existing_attrs {
         out.push(b' ');
         out.extend_from_slice(key);
@@ -562,7 +670,9 @@ fn serialize_upsert_over_existing(raw: &[u8], upsert: &DefinedNameMut) -> Vec<u8
     }
     out.push(b'>');
     push_xml_text_escape(&mut out, &upsert.formula);
-    out.extend_from_slice(b"</definedName>");
+    out.extend_from_slice(b"</");
+    out.extend_from_slice(&element_name);
+    out.push(b'>');
     out
 }
 
@@ -677,6 +787,28 @@ mod tests {
         assert!(text.contains(r#"<definedName name="_xlnm.Print_Area" localSheetId="0">Sheet1!$A$1:$D$20</definedName>"#));
         assert!(text.contains(r#"<definedName name="Budget">Sheet1!$B$1</definedName>"#));
         assert_eq!(text.matches("<definedNames>").count(), 1);
+    }
+
+    #[test]
+    fn merge_preserves_prefixed_defined_names_after_compact_sheets_block() {
+        let xml = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?><x:workbook xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><x:sheets><x:sheet name=\"BAL\" sheetId=\"4\" state=\"hidden\" r:id=\"rId3\" /><x:sheet name=\"COVER Copy\" sheetId=\"119\" r:id=\"rId74\"/></x:sheets><x:definedNames><x:definedName name=\"BAL_DATA\" localSheetId=\"0\">BAL!$A$1</x:definedName></x:definedNames><x:calcPr/></x:workbook>";
+        let names = vec![DefinedNameMut {
+            name: "CopyRange".into(),
+            formula: "'COVER Copy'!$A$1".into(),
+            local_sheet_id: Some(1),
+            ..Default::default()
+        }];
+        let bytes = merge_defined_names(xml, &names).expect("merge");
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("</x:sheets><x:definedNames>"));
+        assert!(text.contains(
+            r#"<x:definedName name="BAL_DATA" localSheetId="0">BAL!$A$1</x:definedName>"#
+        ));
+        assert!(text.contains(
+            r#"<x:definedName name="CopyRange" localSheetId="1">'COVER Copy'!$A$1</x:definedName>"#
+        ));
+        assert!(!text.contains("</x:shee<definedNames>"));
+        assert!(!text.contains("<definedNames>"));
     }
 
     #[test]
