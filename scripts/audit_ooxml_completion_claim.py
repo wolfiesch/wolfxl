@@ -93,6 +93,23 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "sec_municipal_advisers_corpus_buckets",
     "sec_investment_mgmt_gap_radar",
     "sec_investment_mgmt_corpus_buckets",
+    "irs_soi_public_corpus_buckets",
+    "irs_soi_public_gap_radar",
+    "irs_soi_public_quick_mutation_report",
+    "bea_gdp_public_corpus_buckets",
+    "bea_gdp_public_gap_radar",
+    "bea_gdp_public_quick_mutation_report",
+    "usda_ers_county_public_corpus_buckets",
+    "usda_ers_county_public_gap_radar",
+    "usda_ers_county_public_quick_mutation_report",
+    "eia_energy_public_corpus_buckets",
+    "eia_energy_public_gap_radar",
+    "eia_energy_public_quick_mutation_report",
+    "eia_energy_public_neutral_render_equivalence",
+    "census_sitc_renderable_corpus_buckets",
+    "census_sitc_renderable_gap_radar",
+    "census_sitc_renderable_quick_mutation_report",
+    "census_sitc_renderable_neutral_render_equivalence",
     "synthgl_recursive_gap_radar",
     "umya_test_files_gap_radar",
     "umya_test_files_quick_plus_structural_mutation_coverage",
@@ -337,9 +354,10 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 f"workbooks across {source_count} source reports, including the "
                 "domain-ground-truth public workbook sidecar, standalone SEC "
                 "municipal-adviser and SEC investment-management public/regulatory "
-                "sidecars, public-statistics sidecars, and all required "
-                "diversity buckets, but it is still not customer-scale or random "
-                "real-world Excel evidence."
+                "sidecars, IRS SOI, BEA GDP, USDA ERS county, EIA energy, and "
+                "Census SITC public-statistics sidecars, and all required diversity "
+                "buckets, but it is still not customer-scale or random real-world "
+                "Excel evidence."
             )
             break
     return requirements

@@ -74,6 +74,21 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "current_excel_16_108_delete_first_col_broad_external_tool_slicer_boundary" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "irs_soi_public_quick_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "bea_gdp_public_quick_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "usda_ers_county_public_quick_mutation_report" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "eia_energy_public_neutral_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "census_sitc_renderable_neutral_render_equivalence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(
