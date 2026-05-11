@@ -10,6 +10,7 @@ import sys
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from xml.etree import ElementTree
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -62,6 +63,7 @@ def audit_corpus(
     paths: list[Path],
     recursive: bool = False,
     workbook_timeout_seconds: float | None = None,
+    package_only: bool = False,
 ) -> dict:
     workbooks: list[CorpusWorkbook] = []
     skipped_workbooks: list[SkippedWorkbook] = []
@@ -76,6 +78,7 @@ def audit_corpus(
                 workbook_features = _audit_workbook_features(
                     workbook_path,
                     timeout_seconds=workbook_timeout_seconds,
+                    package_only=package_only,
                 )
             except _SKIPPABLE_WORKBOOK_ERRORS as exc:
                 skipped_workbooks.append(
@@ -117,6 +120,7 @@ def audit_corpus(
     }
     missing = sorted(bucket for bucket in REQUIRED_BUCKETS if not bucket_fixtures[bucket])
     return {
+        "audit_mode": "package_only" if package_only else "full_snapshot",
         "workbook_count": len(workbooks),
         "skipped_workbook_count": len(skipped_workbooks),
         "required_buckets": sorted(REQUIRED_BUCKETS),
@@ -160,7 +164,10 @@ def _audit_workbook_features(
     workbook_path: Path,
     *,
     timeout_seconds: float | None,
+    package_only: bool,
 ) -> dict:
+    if package_only:
+        return _audit_workbook_features_package_only(workbook_path)
     if not timeout_seconds or timeout_seconds <= 0:
         return _audit_workbook_features_unbounded(workbook_path)
 
@@ -204,6 +211,33 @@ def _audit_workbook_features_unbounded(workbook_path: Path) -> dict:
         "surfaces": audit_ooxml_fidelity_coverage._surfaces_for_snapshot(snapshot),
         "application": _application_name(workbook_path),
     }
+
+
+def _audit_workbook_features_package_only(workbook_path: Path) -> dict:
+    with zipfile.ZipFile(workbook_path) as archive:
+        parts = set(archive.namelist())
+    snapshot = SimpleNamespace(
+        feature_parts=audit_ooxml_fidelity._classify_feature_parts(parts),
+        semantic_fingerprints=_package_only_semantic_fingerprints(parts),
+    )
+    return {
+        "feature_keys": audit_ooxml_fidelity_coverage._feature_keys_for_snapshot(
+            snapshot
+        ),
+        "surfaces": audit_ooxml_fidelity_coverage._surfaces_for_snapshot(snapshot),
+        "application": _application_name(workbook_path),
+    }
+
+
+def _package_only_semantic_fingerprints(parts: set[str]) -> dict[str, dict[str, object]]:
+    workbook_global_entries = []
+    if "xl/workbook.xml" in parts:
+        workbook_global_entries.append(("workbook_views", True))
+    workbook_globals = {
+        "xl/workbook.xml": workbook_global_entries,
+        "package_parts": sorted(parts),
+    }
+    return {"workbook_globals": workbook_globals}
 
 
 def _discover_workbooks(source: Path, recursive: bool) -> list[tuple[Path, str | None]]:
@@ -310,6 +344,15 @@ def main(argv: list[str] | None = None) -> int:
             "The default preserves the historical no-timeout behavior."
         ),
     )
+    parser.add_argument(
+        "--package-only",
+        action="store_true",
+        help=(
+            "Use package part names and workbook application metadata only. "
+            "This is useful for large public corpora where full semantic "
+            "snapshotting is too expensive."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     parser.add_argument(
         "--strict",
@@ -333,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
         args.paths,
         recursive=args.recursive,
         workbook_timeout_seconds=args.workbook_timeout_seconds,
+        package_only=args.package_only,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))

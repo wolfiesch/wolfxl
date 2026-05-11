@@ -50,6 +50,7 @@ def test_corpus_bucket_audit_reports_missing_buckets(tmp_path: Path) -> None:
     report = corpus.audit_corpus([fixture_dir])
 
     assert report["ready"] is False
+    assert report["audit_mode"] == "full_snapshot"
     assert report["workbook_count"] == 1
     assert report["bucket_fixtures"]["excel_authored"] == [str(workbook)]
     assert "powerpivot_data_model" in report["missing_buckets"]
@@ -123,6 +124,35 @@ def test_corpus_bucket_audit_skips_timed_out_workbook(
     assert report["skipped_workbooks"][0]["reason"].startswith(
         "WorkbookAuditTimeoutError: timed out after 0.01s"
     )
+
+
+def test_corpus_bucket_audit_package_only_mode_uses_package_features(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    workbook = fixture_dir / "package.xlsx"
+    _write_feature_rich_workbook(workbook)
+
+    report = corpus.audit_corpus([fixture_dir], package_only=True)
+
+    assert report["audit_mode"] == "package_only"
+    assert report["workbook_count"] == 1
+    assert report["skipped_workbook_count"] == 0
+    buckets = set(report["workbooks"][0]["buckets"])
+    assert {
+        "excel_authored",
+        "macro_vba",
+        "powerpivot_data_model",
+        "slicer_or_timeline",
+        "embedded_object_or_control",
+        "external_link",
+        "chart_or_chart_style",
+        "conditional_formatting_extension",
+        "table_structured_ref_or_validation",
+        "drawing_comment_or_media",
+        "workbook_global_state",
+    }.issubset(buckets)
 
 
 def test_corpus_bucket_audit_classifies_feature_rich_manifest(tmp_path: Path) -> None:

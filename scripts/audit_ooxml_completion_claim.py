@@ -144,6 +144,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "synthgl_real_world_ingestion_corpus_buckets",
     "synthgl_cds_case_study_corpus_buckets",
     "synthgl_codex_spark_archive_71_corpus_buckets",
+    "sec_investment_advisers_package_only_corpus_buckets",
     "calamine_reader_corpus_buckets",
     "ilpa_reporting_template_corpus_buckets",
     "wbd_wdesk_corpus_buckets",
