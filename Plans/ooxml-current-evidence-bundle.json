@@ -5805,18 +5805,81 @@
       ]
     },
     {
-      "name": "corpus_portfolio_diversity",
-      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-eia-energy-20260511.json",
-      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json --min-sources 30 --min-workbooks 400 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-eia-energy-20260511.json",
+      "name": "census_sitc_renderable_corpus_buckets",
+      "path": "/tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-census-sitc-renderable-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/sitc115presdigit.xlsx\" \"https://www.census.gov/foreign-trade/statistics/country/sitc/sitc115presdigit.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_corpus_buckets.py \"$dest\" --recursive --json > /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": false},
+        {"path": "workbook_count", "equals": 1},
+        {"path": "skipped_workbook_count", "equals": 0},
+        {"path": "missing_buckets", "equals": ["chart_or_chart_style", "drawing_comment_or_media", "embedded_object_or_control", "external_link", "external_tool_authored", "macro_vba", "powerpivot_data_model", "slicer_or_timeline", "table_structured_ref_or_validation"]},
+        {"path": "bucket_fixtures.excel_authored", "length": 1},
+        {"path": "bucket_fixtures.conditional_formatting_extension", "length": 1},
+        {"path": "bucket_fixtures.workbook_global_state", "length": 1}
+      ]
+    },
+    {
+      "name": "census_sitc_renderable_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-census-sitc-renderable-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-census-sitc-renderable-20260511; rm -rf \"$dest\"; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/sitc115presdigit.xlsx\" \"https://www.census.gov/foreign-trade/statistics/country/sitc/sitc115presdigit.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/audit_ooxml_gap_radar.py \"$dest\" --recursive --json --strict > /tmp/wolfxl-gap-radar-census-sitc-renderable-20260511.json'",
       "expect": [
         {"path": "ready", "equals": true},
-        {"path": "source_count", "equals": 30},
-        {"path": "input_report_count", "equals": 30},
-        {"path": "workbook_count", "equals": 400},
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0}
+      ]
+    },
+    {
+      "name": "census_sitc_renderable_quick_mutation_report",
+      "path": "/tmp/wolfxl-ooxml-fidelity-mutations-census-sitc-renderable-quick-20260511/report.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-census-sitc-renderable-20260511; rm -rf \"$dest\" /tmp/wolfxl-ooxml-fidelity-mutations-census-sitc-renderable-quick-20260511; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/sitc115presdigit.xlsx\" \"https://www.census.gov/foreign-trade/statistics/country/sitc/sitc115presdigit.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_fidelity_mutations.py \"$dest\" --recursive --skip-invalid-source --output-dir /tmp/wolfxl-ooxml-fidelity-mutations-census-sitc-renderable-quick-20260511 --mutation no_op --mutation marker_cell --mutation style_cell --mutation copy_remove_sheet --mutation add_data_validation > /tmp/wolfxl-census-sitc-renderable-quick-mutation-20260511.json'",
+      "expect": [
+        {"path": "recursive", "equals": true},
+        {"path": "fixture_dir", "equals": "/private/tmp/wolfxl-public-census-sitc-renderable-20260511"},
+        {"path": "mutations", "equals": ["no_op", "marker_cell", "style_cell", "copy_remove_sheet", "add_data_validation"]},
+        {"path": "result_count", "equals": 5},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "skip_invalid_source", "equals": true}
+      ]
+    },
+    {
+      "name": "census_sitc_renderable_neutral_render_equivalence",
+      "path": "/tmp/wolfxl-census-sitc-renderable-neutral-render-equivalence-20260511.json",
+      "producer": "sh -c 'set -e; repo=\"$(git rev-parse --show-toplevel)\"; dest=/tmp/wolfxl-public-census-sitc-renderable-20260511; rm -rf \"$dest\" /tmp/wolfxl-render-excel-census-sitc-renderable-neutral-20260511; mkdir -p \"$dest\"; curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 -fsSL -o \"$dest/sitc115presdigit.xlsx\" \"https://www.census.gov/foreign-trade/statistics/country/sitc/sitc115presdigit.xlsx\"; cd \"$repo\"; uv run --no-sync python scripts/run_ooxml_render_compare.py \"$dest\" --recursive --output-dir /tmp/wolfxl-render-excel-census-sitc-renderable-neutral-20260511 --render-engine excel --timeout 240 --max-pages-per-fixture 2 --page-selection first-and-last-pages --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet > /tmp/wolfxl-census-sitc-renderable-neutral-render-20260511.json && uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-census-sitc-renderable-neutral-20260511/render-compare-report.json --mutation add_data_validation --mutation add_conditional_formatting --mutation add_remove_chart --mutation copy_remove_sheet --timeout 240 --strict > /tmp/wolfxl-census-sitc-renderable-neutral-render-equivalence-20260511.json'",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["add_data_validation", "add_conditional_formatting", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "observed_mutations", "equals": ["add_conditional_formatting", "add_data_validation", "add_remove_chart", "copy_remove_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 4},
+        {"path": "passed_count", "equals": 4},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results", "length": 4},
+        {"path": "results.0.message", "contains": "render equivalent"},
+        {"path": "results.3.message", "contains": "render equivalent"}
+      ]
+    },
+    {
+      "name": "corpus_portfolio_diversity",
+      "path": "/tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_corpus_portfolio.py /tmp/wolfxl-corpus-buckets-external-oracle-final.json /tmp/wolfxl-corpus-buckets-umya-test-files.json /tmp/wolfxl-corpus-buckets-synthgl-recursive-python-metadata.json /tmp/wolfxl-corpus-buckets-synthgl-real-world-ingestion-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-cds-case-study-20260509.json /tmp/wolfxl-corpus-buckets-calamine-tests-20260508.json /tmp/wolfxl-corpus-buckets-ilpa-20260509.json /tmp/wolfxl-corpus-buckets-wdesk-wbd-20260509.json /tmp/wolfxl-corpus-buckets-bf30-remaining-20260509.json /tmp/wolfxl-corpus-buckets-blind-holdout-20260509.json /tmp/wolfxl-corpus-buckets-rescue-downloads-20260509.json /tmp/wolfxl-corpus-buckets-sec-edgar-20260509.json /tmp/wolfxl-corpus-buckets-iran-osint-20260509.json /tmp/wolfxl-corpus-buckets-powerpivot-variants-20260509.json /tmp/wolfxl-corpus-buckets-slicer-timeline-variants-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-core-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-external-validated-20260509.json /tmp/wolfxl-corpus-buckets-excelbench-real-world-20260509.json /tmp/wolfxl-corpus-buckets-spreadsheet-peek-examples-20260509.json /tmp/wolfxl-corpus-buckets-ticker-to-gl-20260509.json /tmp/wolfxl-corpus-buckets-synthgl-docs-examples-excel-20260509.json /tmp/wolfxl-corpus-buckets-fintech-hackathon-demo-20260510.json /tmp/wolfxl-corpus-buckets-sec-adviser-reports-sample-20260510.json /tmp/wolfxl-corpus-buckets-sec-municipal-advisers-20260510.json /tmp/wolfxl-corpus-buckets-sec-investment-mgmt-20260510.json /tmp/wolfxl-corpus-buckets-domain-ground-truth-valid-20260510.json /tmp/wolfxl-corpus-buckets-irs-soi-20260511.json /tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json /tmp/wolfxl-corpus-buckets-usda-ers-county-20260511.json /tmp/wolfxl-corpus-buckets-eia-energy-20260511.json /tmp/wolfxl-corpus-buckets-census-sitc-renderable-20260511.json --min-sources 31 --min-workbooks 401 --strict > /tmp/wolfxl-corpus-portfolio-buckets-with-census-sitc-20260511.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_count", "equals": 31},
+        {"path": "input_report_count", "equals": 31},
+        {"path": "workbook_count", "equals": 401},
         {"path": "skipped_workbook_count", "equals": 31},
         {"path": "missing_buckets", "equals": []},
         {"path": "threshold_failures", "equals": []},
-        {"path": "bucket_counts.excel_authored", "equals": 367},
+        {"path": "bucket_counts.excel_authored", "equals": 368},
         {"path": "bucket_counts.external_tool_authored", "equals": 41},
         {"path": "bucket_counts.macro_vba", "equals": 5},
         {"path": "bucket_counts.powerpivot_data_model", "equals": 2},
@@ -5824,6 +5887,8 @@
         {"path": "bucket_counts.external_link", "equals": 24},
         {"path": "bucket_counts.chart_or_chart_style", "equals": 22},
         {"path": "bucket_counts.table_structured_ref_or_validation", "equals": 88},
+        {"path": "bucket_counts.conditional_formatting_extension", "equals": 401},
+        {"path": "bucket_counts.workbook_global_state", "equals": 396},
         {"path": "bucket_counts.python_in_excel", "equals": 6},
         {"path": "bucket_counts.sheet_metadata", "equals": 20}
       ]
