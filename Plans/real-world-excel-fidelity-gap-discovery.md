@@ -645,6 +645,19 @@ pinned because the pre-check did not find the PowerView marker after the
 retarget mutation, so this increment only claims the six prompt/control and
 pivot/slicer/timeline classes listed above.
 
+Latest delete-first-row UI-interaction increment adds
+`/tmp/wolfxl-ui-interaction-evidence-delete-first-row-external-oracle-core-20260511.json`:
+after a WolfXL `delete_first_row` save, Microsoft Excel handled macro security,
+clicked real-Excel and umya embedded controls, preserved current-setting
+external-link prompt paths, ran pivot refresh on Microsoft-authored pivot/timeline
+fixtures, clicked a Microsoft-authored pivot-chart slicer, and clicked the May
+timeline month. The raw report has 9 passed UI results and the scoped strict
+audit is `ready=true` with all six requested probe classes clear. A broader
+exploratory run is intentionally not pinned because the Excelize pivot-slicer
+workbook refreshed successfully after `delete_first_row`, but the UI automation
+could not find a matching slicer item shape to click after that structural edit;
+that external-tool slicer click remains outside this increment's coverage.
+
 Current conclusion:
 
 - The repo can honestly claim: **no known fidelity gap in the currently pinned
@@ -684,7 +697,7 @@ Next evidence slices before declaring a higher-confidence "no known gaps":
    Microsoft-authored pivot-chart slicer item clicks, source, marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, and add-data-validation-mutated external-tool-authored pivot-slicer item clicks, source, marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, and add-data-validation-mutated shared
    pivot-slicer cache clicks,
    source, marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, and add-data-validation-mutated
-   timeline date-range clicks, move-formula-range-mutated and retarget-external-links-mutated macro, embedded-control, external-link, pivot-refresh, slicer, and timeline paths, source, add-data-validation-mutated, marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated PowerView read-only prompts, and external-link prompt handling under prompt-forcing,
+   timeline date-range clicks, move-formula-range-mutated and retarget-external-links-mutated macro, embedded-control, external-link, pivot-refresh, slicer, and timeline paths, delete-first-row-mutated macro, embedded-control, external-link, Microsoft-authored pivot-refresh, Microsoft-authored slicer, and timeline paths, source, add-data-validation-mutated, marker-cell-mutated, style-cell-mutated, and copy-remove-sheet-mutated PowerView read-only prompts, and external-link prompt handling under prompt-forcing,
    source current-setting, marker-cell-mutated current-setting, style-cell-mutated current-setting, copy-remove-sheet-mutated current-setting, add-data-validation-mutated current-setting, and marker-cell-mutated, style-cell-mutated, copy-remove-sheet-mutated, plus add-data-validation-mutated adjacent issue-corpus prompt paths now have pinned UI-interaction
    artifacts; broader embedded-control/slicer/timeline variants remain open.
 4. Keep the gap radar strict: every newly seen part family, relationship type,
