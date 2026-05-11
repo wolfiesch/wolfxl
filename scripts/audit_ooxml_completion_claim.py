@@ -383,6 +383,7 @@ def audit_completion_claim(bundle_path: Path) -> dict:
         "current_supported_claim_ready": current_supported_claim_ready,
         "criteria": criteria,
         "missing_requirement_count": len(missing),
+        "missing_requirement_ids": [criterion["id"] for criterion in missing],
         "missing_requirements": missing,
         "bundle_audit": {
             "ready": bundle_ready,
