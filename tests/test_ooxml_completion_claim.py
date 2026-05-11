@@ -124,6 +124,21 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert "random_corpus_holdout_10_chart_copy_render_equivalence" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
+    assert "excel_ui_interaction_add_conditional_formatting_shared_slicer_evidence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "excel_ui_interaction_add_remove_chart_external_link_forced_prompt_evidence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "excel_ui_interaction_move_formula_range_external_oracle_evidence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "excel_ui_interaction_delete_first_row_external_oracle_core_evidence" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(
