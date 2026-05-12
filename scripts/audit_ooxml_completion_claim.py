@@ -723,6 +723,8 @@ def _ui_interaction_coverage_matrix(
         "missing_expected_mutation_probe_pairs": missing_expected_pairs,
         "unpassed_expected_mutation_probe_pair_count": len(unpassed_expected_pairs),
         "unpassed_expected_mutation_probe_pairs": unpassed_expected_pairs,
+        "current_target_ready": not missing_expected_pairs
+        and not unpassed_expected_pairs,
         "boundary_only_expected_mutation_probe_pair_count": len(
             boundary_only_expected_pairs
         ),
@@ -894,6 +896,8 @@ def _render_equivalence_coverage_matrix(
         "missing_expected_mutations": missing_expected_mutations,
         "unpassed_expected_mutation_count": len(unpassed_expected_mutations),
         "unpassed_expected_mutations": unpassed_expected_mutations,
+        "current_target_ready": not missing_expected_mutations
+        and not unpassed_expected_mutations,
         "multi_mutation_report_count": len(multi_mutation_reports),
         "multi_mutation_reports": sorted(multi_mutation_reports),
         "issue_report_count": len(issue_reports),
@@ -1068,8 +1072,10 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 f"buckets, with {render_matrix['missing_expected_mutation_count']} "
                 "missing expected buckets and "
                 f"{render_matrix['unpassed_expected_mutation_count']} unpassed "
-                "expected buckets. This is substantial feature-specific visual "
-                "evidence, but the high-risk feature-edit universe is still "
+                "expected buckets; current target ready is "
+                f"{render_matrix['current_target_ready']}. This is substantial "
+                "feature-specific visual evidence, but the high-risk feature-edit "
+                "universe is still "
                 "open-ended, so it does not yet prove semantic visual equivalence "
                 "for every high-risk edit."
             )
@@ -1093,7 +1099,10 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "embedded-control, and prompt variants remain unexhausted; the "
                 "current target matrix is missing "
                 f"{interaction_evidence['coverage_matrix']['missing_expected_mutation_probe_pair_count']} "
-                "expected mutation/probe pairs."
+                "expected mutation/probe pairs, has "
+                f"{interaction_evidence['coverage_matrix']['unpassed_expected_mutation_probe_pair_count']} "
+                "unpassed expected mutation/probe pairs, and current target ready "
+                f"is {interaction_evidence['coverage_matrix']['current_target_ready']}."
             )
     return requirements
 

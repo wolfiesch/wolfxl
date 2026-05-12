@@ -86,9 +86,13 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert render_requirement["evidence"]["coverage_matrix"][
         "unpassed_expected_mutation_count"
     ] == 0
+    assert render_requirement["evidence"]["coverage_matrix"][
+        "current_target_ready"
+    ] is False
     assert "current render-equivalence target matrix covers 1 of" in (
         render_requirement["reason"]
     )
+    assert "current target ready is False" in render_requirement["reason"]
     assert "missing expected buckets" in render_requirement["reason"]
     interaction_requirement = next(
         requirement
@@ -131,6 +135,10 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
             "observed_expected_mutation_probe_pair_count"
         ]
     )
+    assert interaction_requirement["evidence"]["coverage_matrix"][
+        "current_target_ready"
+    ] is False
+    assert "current target ready is False" in interaction_requirement["reason"]
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
@@ -637,6 +645,7 @@ def test_render_equivalence_coverage_matrix_reports_current_target_gaps() -> Non
         "excel_or_native_clean_report_count"
     ] == 1
     assert report["unpassed_expected_mutations"] == ["rename_first_sheet"]
+    assert report["current_target_ready"] is False
 
 
 def test_render_equivalence_coverage_matrix_rejects_non_excel_clean_target() -> None:
@@ -667,6 +676,7 @@ def test_render_equivalence_coverage_matrix_rejects_non_excel_clean_target() -> 
         "excel_or_native_clean_report_count"
     ] == 0
     assert report["unpassed_expected_mutations"] == ["copy_remove_sheet"]
+    assert report["current_target_ready"] is False
 
 
 def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() -> None:
