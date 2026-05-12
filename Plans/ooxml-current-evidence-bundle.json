@@ -1513,6 +1513,192 @@
       ]
     },
     {
+      "name": "excel_ui_interaction_add_conditional_formatting_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-add-conditional-formatting-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "add_conditional_formatting"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "add_conditional_formatting"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_move_formula_range_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-move-formula-range-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "move_formula_range"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "move_formula_range"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_move_marker_range_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-move-marker-range-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "move_marker_range"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "move_marker_range"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_insert_tail_row_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-insert-tail-row-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "insert_tail_row"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "insert_tail_row"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_insert_tail_col_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-insert-tail-col-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "insert_tail_col"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "insert_tail_col"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_delete_marker_tail_row_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-delete-marker-tail-row-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "delete_marker_tail_row"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "delete_marker_tail_row"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_delete_marker_tail_col_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-delete-marker-tail-col-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "delete_marker_tail_col"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "delete_marker_tail_col"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_retarget_external_links_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-retarget-external-links-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "retarget_external_links"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "retarget_external_links"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_delete_first_row_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-delete-first-row-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "delete_first_row"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "delete_first_row"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_delete_first_col_powerview_open_readonly",
+      "path": "/tmp/wolfxl-ui-interaction-delete-first-col-powerview-open-readonly-20260512/interactive-probe-report.json",
+      "producer": "for mutation in add_conditional_formatting move_formula_range move_marker_range insert_tail_row insert_tail_col delete_marker_tail_row delete_marker_tail_col retarget_external_links delete_first_row delete_first_col; do out=\"/tmp/wolfxl-ui-interaction-$(printf '%s' \"$mutation\" | tr _ -)-powerview-open-readonly-20260512\"; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/powerpivot_variants --output-dir \"$out\" --probe-kind excel_ui_interaction --probe unsupported_content_prompt --mutation \"$mutation\" --fixture real-excel-powerpivot-contoso-pnl.xlsx --timeout 120 > \"$out.stdout.json\" || exit $?; done",
+      "expect": [
+        {"path": "completed", "equals": true},
+        {"path": "failure_count", "equals": 0},
+        {"path": "result_count", "equals": 1},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "mutation", "equals": "delete_first_col"},
+        {"path": "results.0.fixture", "equals": "real-excel-powerpivot-contoso-pnl.xlsx"},
+        {"path": "results.0.probe", "equals": "unsupported_content_prompt"},
+        {"path": "results.0.mutation", "equals": "delete_first_col"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.ui_actions", "contains": "clicked button: Open as Read-Only"}
+      ]
+    },
+    {
+      "name": "excel_ui_interaction_powerview_missing_mutations_evidence",
+      "path": "/tmp/wolfxl-ui-interaction-evidence-powerview-missing-mutations-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_interactive_evidence.py tests/fixtures/powerpivot_variants --probe-kind excel_ui_interaction --probe unsupported_content_prompt --report /tmp/wolfxl-ui-interaction-add-conditional-formatting-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-move-formula-range-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-move-marker-range-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-insert-tail-row-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-insert-tail-col-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-delete-marker-tail-row-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-delete-marker-tail-col-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-retarget-external-links-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-delete-first-row-powerview-open-readonly-20260512/interactive-probe-report.json --report /tmp/wolfxl-ui-interaction-delete-first-col-powerview-open-readonly-20260512/interactive-probe-report.json --strict > /tmp/wolfxl-ui-interaction-evidence-powerview-missing-mutations-20260512.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "required_probes", "equals": ["unsupported_content_prompt"]},
+        {"path": "fixture_count", "equals": 1},
+        {"path": "report_count", "equals": 10},
+        {"path": "incomplete_report_count", "equals": 0},
+        {"path": "probes.unsupported_content_prompt.status", "equals": "clear"},
+        {"path": "probes.unsupported_content_prompt.probe_kind", "equals": "excel_ui_interaction"},
+        {"path": "probes.unsupported_content_prompt.passed_fixtures", "equals": ["real-excel-powerpivot-contoso-pnl.xlsx"]}
+      ]
+    },
+    {
       "name": "current_excel_16_108_source_table_slicer_recheck_non_state_change",
       "path": "/tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510/interactive-probe-report.json",
       "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_interactive_probe.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510 --probe-kind excel_ui_interaction --probe slicer_selection_state --fixture real-excel-table-slicers.xlsx --timeout 120 > /tmp/wolfxl-ui-interaction-source-table-slicer-check-20260510.stdout.json",
