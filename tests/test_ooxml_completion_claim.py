@@ -168,23 +168,39 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     }
     assert interaction_frontier["broader_embedded_control_variants"][
         "observed_report_count"
-    ] == 1
+    ] == 6
     assert interaction_frontier["broader_embedded_control_variants"][
         "observed_reports"
-    ] == ["excel_ui_interaction_rename_external_oracle_prompt_control_evidence"]
+    ] == [
+        "excel_ui_interaction_add_conditional_formatting_control_evidence",
+        "excel_ui_interaction_add_data_validation_umya_listbox_control_evidence",
+        "excel_ui_interaction_copy_remove_control_evidence",
+        "excel_ui_interaction_marker_control_evidence",
+        "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+        "excel_ui_interaction_style_control_evidence",
+    ]
     assert interaction_frontier["broader_slicer_timeline_variants"][
         "observed_report_count"
-    ] == 2
+    ] == 7
     assert interaction_frontier["broader_slicer_timeline_variants"][
         "observed_reports"
     ] == [
+        "excel_ui_interaction_add_conditional_formatting_shared_slicer_evidence",
+        "excel_ui_interaction_add_conditional_formatting_timeline_evidence",
+        "excel_ui_interaction_copy_remove_timeline_evidence",
+        "excel_ui_interaction_marker_timeline_evidence",
         "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
         "excel_ui_interaction_rename_shared_slicer_evidence",
+        "excel_ui_interaction_style_timeline_evidence",
     ]
     assert interaction_frontier["broader_prompt_variants"][
         "observed_report_count"
-    ] == 2
+    ] == 6
     assert interaction_frontier["broader_prompt_variants"]["observed_reports"] == [
+        "excel_ui_interaction_add_remove_chart_external_link_current_setting_evidence",
+        "excel_ui_interaction_add_remove_chart_external_link_forced_prompt_evidence",
+        "excel_ui_interaction_add_remove_chart_macro_evidence",
+        "excel_ui_interaction_marker_external_link_current_prompt_evidence",
         "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
         "excel_ui_interaction_rename_powerview_evidence",
     ]
