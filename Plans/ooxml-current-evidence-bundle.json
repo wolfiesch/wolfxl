@@ -2322,8 +2322,10 @@
         {"path": "mutation", "equals": "copy_first_sheet"},
         {"path": "result_count", "equals": 22},
         {"path": "passed_count", "equals": 20},
-        {"path": "inconclusive_count", "equals": 2},
-        {"path": "failure_count", "equals": 0}
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "non_comparable_count", "equals": 2},
+        {"path": "failure_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0}
       ]
     },
     {
