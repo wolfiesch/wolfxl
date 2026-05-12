@@ -142,10 +142,32 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "broader_slicer_timeline_variants",
         "broader_prompt_variants",
     }
-    assert all(
-        candidate["observed_report_count"] == 0
+    interaction_frontier = {
+        candidate["id"]: candidate
         for candidate in interaction_requirement["evidence"]["frontier_candidates"]
-    )
+    }
+    assert interaction_frontier["broader_embedded_control_variants"][
+        "observed_report_count"
+    ] == 1
+    assert interaction_frontier["broader_embedded_control_variants"][
+        "observed_reports"
+    ] == ["excel_ui_interaction_rename_external_oracle_prompt_control_evidence"]
+    assert interaction_frontier["broader_slicer_timeline_variants"][
+        "observed_report_count"
+    ] == 2
+    assert interaction_frontier["broader_slicer_timeline_variants"][
+        "observed_reports"
+    ] == [
+        "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
+        "excel_ui_interaction_rename_shared_slicer_evidence",
+    ]
+    assert interaction_frontier["broader_prompt_variants"][
+        "observed_report_count"
+    ] == 2
+    assert interaction_frontier["broader_prompt_variants"]["observed_reports"] == [
+        "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+        "excel_ui_interaction_rename_powerview_evidence",
+    ]
     assert interaction_requirement["evidence"]["diagnostic_non_state_change_reports"] == []
     assert interaction_requirement["evidence"]["unresolved_failed_raw_reports"] == []
     assert interaction_requirement["evidence"]["coverage_matrix"][

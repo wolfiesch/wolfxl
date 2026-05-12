@@ -129,7 +129,19 @@ UI_INTERACTION_FRONTIER_CANDIDATES = (
         ),
     },
 )
-UI_INTERACTION_FRONTIER_EVIDENCE_REPORTS: dict[str, tuple[str, ...]] = {}
+UI_INTERACTION_FRONTIER_EVIDENCE_REPORTS: dict[str, tuple[str, ...]] = {
+    "broader_embedded_control_variants": (
+        "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+    ),
+    "broader_slicer_timeline_variants": (
+        "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
+        "excel_ui_interaction_rename_shared_slicer_evidence",
+    ),
+    "broader_prompt_variants": (
+        "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+        "excel_ui_interaction_rename_powerview_evidence",
+    ),
+}
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
