@@ -2734,6 +2734,42 @@
       ]
     },
     {
+      "name": "external_link_rename_sheet_excel_render",
+      "path": "/tmp/wolfxl-render-excel-external-link-rename-sheet-20260512.json",
+      "producer": "rm -rf /tmp/wolfxl-external-link-rename-render-input-20260512 /tmp/wolfxl-render-excel-external-link-rename-sheet-20260512 /tmp/wolfxl-render-excel-external-link-rename-sheet-20260512.json /tmp/wolfxl-external-link-rename-sheet-render-equivalence-20260512.json && mkdir -p /tmp/wolfxl-external-link-rename-render-input-20260512 && cp tests/fixtures/external_oracle/real-excel-external-link-basic.xlsx /tmp/wolfxl-external-link-rename-render-input-20260512/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-external-link-rename-render-input-20260512 --output-dir /tmp/wolfxl-render-excel-external-link-rename-sheet-20260512 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation rename_first_sheet > /tmp/wolfxl-render-excel-external-link-rename-sheet-20260512.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.status", "equals": "rendered"},
+        {"path": "results.0.page_count", "equals": 1},
+        {"path": "results.0.compared_page_count", "equals": 1}
+      ]
+    },
+    {
+      "name": "external_link_rename_sheet_render_equivalence",
+      "path": "/tmp/wolfxl-external-link-rename-sheet-render-equivalence-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_no_visual_change_render_equivalence.py /tmp/wolfxl-render-excel-external-link-rename-sheet-20260512/render-compare-report.json --mutation rename_first_sheet --timeout 180 --strict > /tmp/wolfxl-external-link-rename-sheet-render-equivalence-20260512.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["rename_first_sheet"]},
+        {"path": "observed_mutations", "equals": ["rename_first_sheet"]},
+        {"path": "missing_mutations", "equals": []},
+        {"path": "result_count", "equals": 1},
+        {"path": "passed_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0},
+        {"path": "results.0.message", "contains": "render equivalent"}
+      ]
+    },
+    {
       "name": "excel_render_delete_first_row_delta_full_pack_report",
       "path": "/tmp/wolfxl-delete-first-row-render-delta-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --mutation delete_first_row --min-changed-count 15 --max-unchanged-count 7 --timeout 180 --strict > /tmp/wolfxl-delete-first-row-render-delta-20260509.json",
