@@ -74,6 +74,53 @@ EXPECTED_RENDER_EQUIVALENCE_MUTATIONS = (
     "rename_first_sheet",
     "retarget_external_links",
 )
+RENDER_EQUIVALENCE_FRONTIER_CANDIDATES = (
+    {
+        "id": "pivot_slicer_structural_edits",
+        "description": (
+            "Add more feature-specific Excel-rendered proof for pivot/slicer "
+            "structural edits beyond the currently pinned copy/remove/rename "
+            "and native copy-sheet baselines."
+        ),
+    },
+    {
+        "id": "external_link_relationship_preserving_edits",
+        "description": (
+            "Add more external-link relationship-preserving structural edits "
+            "beyond the current retarget-equivalence proof."
+        ),
+    },
+    {
+        "id": "additional_high_risk_feature_edits",
+        "description": (
+            "Keep widening feature-specific visual proof for high-risk edits "
+            "that are not part of the current render-equivalence target matrix."
+        ),
+    },
+)
+UI_INTERACTION_FRONTIER_CANDIDATES = (
+    {
+        "id": "broader_embedded_control_variants",
+        "description": (
+            "Exercise more embedded-control/list-box/button variants beyond "
+            "the currently pinned controls."
+        ),
+    },
+    {
+        "id": "broader_slicer_timeline_variants",
+        "description": (
+            "Exercise more slicer and timeline layouts, filters, and date-range "
+            "interactions beyond the current pinned mutation/probe matrix."
+        ),
+    },
+    {
+        "id": "broader_prompt_variants",
+        "description": (
+            "Exercise more prompt paths, including external-link, macro, and "
+            "unsupported-content prompts, across additional workbook variants."
+        ),
+    },
+)
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -780,6 +827,10 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         "observed_mutations": _unique_mutation_report_checks(reports),
         "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_high_risk_feature_edit_universe",
+        "frontier_candidate_count": len(RENDER_EQUIVALENCE_FRONTIER_CANDIDATES),
+        "frontier_candidates": [
+            dict(candidate) for candidate in RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
+        ],
     }
 
 
@@ -987,6 +1038,10 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
         "unresolved_failed_raw_reports": sorted(unresolved_failed_report_names),
         "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_click_level_variant_universe",
+        "frontier_candidate_count": len(UI_INTERACTION_FRONTIER_CANDIDATES),
+        "frontier_candidates": [
+            dict(candidate) for candidate in UI_INTERACTION_FRONTIER_CANDIDATES
+        ],
     }
 
 
@@ -1073,7 +1128,9 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "missing expected buckets and "
                 f"{render_matrix['unpassed_expected_mutation_count']} unpassed "
                 "expected buckets; current target ready is "
-                f"{render_matrix['current_target_ready']}. This is substantial "
+                f"{render_matrix['current_target_ready']}. The next frontier "
+                f"ledger lists {render_evidence['frontier_candidate_count']} "
+                "candidate evidence lanes. This is substantial "
                 "feature-specific visual evidence, but the high-risk feature-edit "
                 "universe is still "
                 "open-ended, so it does not yet prove semantic visual equivalence "
@@ -1102,7 +1159,10 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "expected mutation/probe pairs, has "
                 f"{interaction_evidence['coverage_matrix']['unpassed_expected_mutation_probe_pair_count']} "
                 "unpassed expected mutation/probe pairs, and current target ready "
-                f"is {interaction_evidence['coverage_matrix']['current_target_ready']}."
+                f"is {interaction_evidence['coverage_matrix']['current_target_ready']}. "
+                "The next frontier ledger lists "
+                f"{interaction_evidence['frontier_candidate_count']} candidate "
+                "evidence lanes."
             )
     return requirements
 

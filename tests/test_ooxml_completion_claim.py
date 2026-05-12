@@ -74,6 +74,20 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert render_requirement["evidence"]["target_status"] == (
         "open_unbounded_high_risk_feature_edit_universe"
     )
+    assert render_requirement["evidence"]["frontier_candidate_count"] == len(
+        completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
+    )
+    assert render_requirement["evidence"]["frontier_candidates"] == list(
+        completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
+    )
+    assert {
+        candidate["id"]
+        for candidate in render_requirement["evidence"]["frontier_candidates"]
+    } == {
+        "pivot_slicer_structural_edits",
+        "external_link_relationship_preserving_edits",
+        "additional_high_risk_feature_edits",
+    }
     assert render_requirement["evidence"]["coverage_matrix"][
         "expected_mutation_count"
     ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)
@@ -93,6 +107,11 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         render_requirement["reason"]
     )
     assert "current target ready is False" in render_requirement["reason"]
+    assert (
+        "next frontier ledger lists "
+        f"{len(completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES)} "
+        "candidate evidence lanes"
+    ) in render_requirement["reason"]
     assert "missing expected buckets" in render_requirement["reason"]
     interaction_requirement = next(
         requirement
@@ -111,6 +130,20 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["known_boundary_reports"] == sorted(
         completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS
     )
+    assert interaction_requirement["evidence"]["frontier_candidate_count"] == len(
+        completion.UI_INTERACTION_FRONTIER_CANDIDATES
+    )
+    assert interaction_requirement["evidence"]["frontier_candidates"] == list(
+        completion.UI_INTERACTION_FRONTIER_CANDIDATES
+    )
+    assert {
+        candidate["id"]
+        for candidate in interaction_requirement["evidence"]["frontier_candidates"]
+    } == {
+        "broader_embedded_control_variants",
+        "broader_slicer_timeline_variants",
+        "broader_prompt_variants",
+    }
     assert interaction_requirement["evidence"]["diagnostic_non_state_change_reports"] == []
     assert interaction_requirement["evidence"]["unresolved_failed_raw_reports"] == []
     assert interaction_requirement["evidence"]["coverage_matrix"][
@@ -139,6 +172,11 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "current_target_ready"
     ] is False
     assert "current target ready is False" in interaction_requirement["reason"]
+    assert (
+        "next frontier ledger lists "
+        f"{len(completion.UI_INTERACTION_FRONTIER_CANDIDATES)} "
+        "candidate evidence lanes"
+    ) in interaction_requirement["reason"]
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
