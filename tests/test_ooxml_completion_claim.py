@@ -138,8 +138,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert render_delta_evidence["reports"] == sorted(
         completion.RENDER_DELTA_EVIDENCE_REPORTS
     )
-    assert "marker_cell" in render_delta_evidence["observed_mutations"]
-    assert "delete_first_row" in render_delta_evidence["observed_mutations"]
+    assert render_delta_evidence["observed_mutations"] == sorted(
+        {
+            _render_delta_mutation_for_report(report_name)
+            for report_name in completion.RENDER_DELTA_EVIDENCE_REPORTS
+        }
+    )
     assert render_requirement["evidence"]["coverage_matrix"][
         "expected_mutation_count"
     ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)
@@ -1237,6 +1241,27 @@ def _diagnostic_probe_for_report(name: str) -> str:
     return "slicer_selection_state"
 
 
+_RENDER_DELTA_MUTATION_TOKENS = (
+    ("delete_marker_tail_col", "delete_marker_tail_col"),
+    ("delete_marker_tail_row", "delete_marker_tail_row"),
+    ("delete_first_col", "delete_first_col"),
+    ("delete_first_row", "delete_first_row"),
+    ("insert_tail_col", "insert_tail_col"),
+    ("insert_tail_row", "insert_tail_row"),
+    ("move_formula_range", "move_formula_range"),
+    ("move_marker_range", "move_marker_range"),
+    ("marker_cell", "marker_cell"),
+    ("style_cell", "style_cell"),
+)
+
+
+def _render_delta_mutation_for_report(name: str) -> str:
+    for token, mutation in _RENDER_DELTA_MUTATION_TOKENS:
+        if token in name:
+            return mutation
+    raise AssertionError(f"Unhandled render-delta report mutation for {name!r}")
+
+
 def _write_bundle_manifest(
     tmp_path: Path,
     *,
@@ -1329,11 +1354,7 @@ def _write_bundle_manifest(
             payload.update(
                 {
                     "render_engine": "excel",
-                    "mutation": (
-                        "delete_first_row"
-                        if "delete_first_row" in name
-                        else "marker_cell"
-                    ),
+                    "mutation": _render_delta_mutation_for_report(name),
                     "missing_mutation": False,
                     "result_count": 1,
                     "changed_count": 1,
