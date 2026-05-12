@@ -48,6 +48,7 @@ def audit_copy_sheet_render_equivalence(
     timeout: int = 30,
 ) -> dict:
     payload = json.loads(render_report_path.read_text())
+    render_engine = str(payload.get("render_engine", "libreoffice"))
     compare_cmd = run_ooxml_render_compare._find_imagemagick_compare()
     results: list[CopySheetEquivalenceResult] = []
     for result in payload.get("results", []):
@@ -68,6 +69,7 @@ def audit_copy_sheet_render_equivalence(
     skipped_count = sum(1 for result in results if result.status == "skipped")
     return {
         "render_report": str(render_report_path),
+        "render_engine": render_engine,
         "mutation": MUTATION,
         "max_normalized_rmse_threshold": max_normalized_rmse,
         "result_count": len(results),

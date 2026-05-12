@@ -550,6 +550,28 @@ def _unique_mutation_report_checks(reports: list[dict]) -> list[object]:
     return sorted(values)
 
 
+def _report_mutations(report: dict) -> list[str]:
+    values = set()
+    observed = _report_check_observed_actual(report, "observed_mutations")
+    if isinstance(observed, list):
+        values.update(str(value) for value in observed)
+    else:
+        requested = _report_check_observed_actual(report, "mutations")
+        missing = _report_check_observed_actual(report, "missing_mutations")
+        missing_values = {str(value) for value in missing} if isinstance(missing, list) else set()
+        if isinstance(requested, list):
+            values.update(str(value) for value in requested if str(value) not in missing_values)
+    mutation = _report_check_observed_actual(report, "mutation")
+    if mutation is not None:
+        values.add(str(mutation))
+    return sorted(values) or ["unknown"]
+
+
+def _report_count(report: dict, check_path: str) -> int:
+    actual = _report_check_observed_actual(report, check_path)
+    return int(actual) if isinstance(actual, (int, float)) else 0
+
+
 def _indexed_result_checks(report: dict) -> dict[int, dict[str, object]]:
     values: dict[int, dict[str, object]] = {}
     for check in report["checks"]:
@@ -639,6 +661,7 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         for report in ready_reports
         if _report_check_actual(report, "render_engine") == "excel"
     ]
+    coverage_matrix = _render_equivalence_coverage_matrix(reports)
     return {
         "ready_report_count": len(ready_reports),
         "excel_report_count": len(excel_reports),
@@ -648,7 +671,86 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         "inconclusive_count": _sum_numeric_report_checks(reports, "inconclusive_count"),
         "skipped_count": _sum_numeric_report_checks(reports, "skipped_count"),
         "observed_mutations": _unique_mutation_report_checks(reports),
+        "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_high_risk_feature_edit_universe",
+    }
+
+
+def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
+    matrix: dict[str, dict[str, object]] = {}
+    multi_mutation_reports: list[str] = []
+    issue_reports: list[str] = []
+    for report in reports:
+        report_name = str(report["name"])
+        mutations = _report_mutations(report)
+        ready = _report_check_actual(report, "ready") is True
+        excel_rendered = _report_check_actual(report, "render_engine") == "excel"
+        result_count = _report_count(report, "result_count")
+        passed_count = _report_count(report, "passed_count")
+        failure_count = _report_count(report, "failure_count")
+        inconclusive_count = _report_count(report, "inconclusive_count")
+        skipped_count = _report_count(report, "skipped_count")
+        has_issue_rows = bool(failure_count or inconclusive_count or skipped_count)
+        if has_issue_rows:
+            issue_reports.append(report_name)
+        if len(mutations) > 1:
+            multi_mutation_reports.append(report_name)
+        for mutation in mutations:
+            cell = matrix.setdefault(
+                mutation,
+                {
+                    "report_count": 0,
+                    "ready_report_count": 0,
+                    "excel_report_count": 0,
+                    "single_mutation_result_count": 0,
+                    "single_mutation_passed_count": 0,
+                    "single_mutation_failure_count": 0,
+                    "single_mutation_inconclusive_count": 0,
+                    "single_mutation_skipped_count": 0,
+                    "multi_mutation_report_count": 0,
+                    "issue_report_count": 0,
+                    "issue_reports": [],
+                },
+            )
+            cell["report_count"] = int(cell["report_count"]) + 1
+            if ready:
+                cell["ready_report_count"] = int(cell["ready_report_count"]) + 1
+            if excel_rendered:
+                cell["excel_report_count"] = int(cell["excel_report_count"]) + 1
+            if len(mutations) == 1:
+                cell["single_mutation_result_count"] = (
+                    int(cell["single_mutation_result_count"]) + result_count
+                )
+                cell["single_mutation_passed_count"] = (
+                    int(cell["single_mutation_passed_count"]) + passed_count
+                )
+                cell["single_mutation_failure_count"] = (
+                    int(cell["single_mutation_failure_count"]) + failure_count
+                )
+                cell["single_mutation_inconclusive_count"] = (
+                    int(cell["single_mutation_inconclusive_count"])
+                    + inconclusive_count
+                )
+                cell["single_mutation_skipped_count"] = (
+                    int(cell["single_mutation_skipped_count"]) + skipped_count
+                )
+            else:
+                cell["multi_mutation_report_count"] = (
+                    int(cell["multi_mutation_report_count"]) + 1
+                )
+            if has_issue_rows:
+                cell["issue_report_count"] = int(cell["issue_report_count"]) + 1
+                issue_report_names = cell["issue_reports"]
+                if isinstance(issue_report_names, list):
+                    issue_report_names.append(report_name)
+    return {
+        "observed_mutations": sorted(matrix),
+        "mutation_count": len(matrix),
+        "mutation_matrix": matrix,
+        "multi_mutation_report_count": len(multi_mutation_reports),
+        "multi_mutation_reports": sorted(multi_mutation_reports),
+        "issue_report_count": len(issue_reports),
+        "issue_reports": sorted(issue_reports),
     }
 
 
