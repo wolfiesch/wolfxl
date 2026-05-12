@@ -240,6 +240,34 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
+    future_surface_requirement = next(
+        requirement
+        for requirement in report["missing_requirements"]
+        if requirement["id"] == "future_surface_exhaustiveness"
+    )
+    assert future_surface_requirement["evidence"]["required_gap_radar_report_count"] == len(
+        completion.FUTURE_SURFACE_GAP_RADAR_REPORTS
+    )
+    assert future_surface_requirement["evidence"]["present_gap_radar_report_count"] == len(
+        completion.FUTURE_SURFACE_GAP_RADAR_REPORTS
+    )
+    assert future_surface_requirement["evidence"]["missing_gap_radar_reports"] == []
+    assert future_surface_requirement["evidence"]["clear_gap_radar_report_count"] == len(
+        completion.FUTURE_SURFACE_GAP_RADAR_REPORTS
+    )
+    assert future_surface_requirement["evidence"]["unclear_gap_radar_reports"] == []
+    assert future_surface_requirement["evidence"]["missing_clear_status_reports"] == []
+    assert future_surface_requirement["evidence"]["fixture_count"] == len(
+        completion.FUTURE_SURFACE_GAP_RADAR_REPORTS
+    )
+    assert future_surface_requirement["evidence"]["unknown_part_family_count"] == 0
+    assert future_surface_requirement["evidence"]["unknown_relationship_type_count"] == 0
+    assert future_surface_requirement["evidence"]["unknown_content_type_count"] == 0
+    assert future_surface_requirement["evidence"]["unknown_extension_uri_count"] == 0
+    assert "required gap-radar reports present" in future_surface_requirement["reason"]
+    assert "cannot prove that no unseen future real-world Excel surface exists" in (
+        future_surface_requirement["reason"]
+    )
     required_reports = next(
         criterion
         for criterion in report["criteria"]
@@ -1233,6 +1261,27 @@ def _write_bundle_manifest(
                     {"path": "failure_count", "equals": 0},
                     {"path": "inconclusive_count", "equals": 0},
                     {"path": "skipped_count", "equals": 0},
+                ]
+            )
+        if name in completion.FUTURE_SURFACE_GAP_RADAR_REPORTS:
+            payload.update(
+                {
+                    "clear": True,
+                    "fixture_count": 1,
+                    "unknown_part_family_count": 0,
+                    "unknown_relationship_type_count": 0,
+                    "unknown_content_type_count": 0,
+                    "unknown_extension_uri_count": 0,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "clear", "equals": True},
+                    {"path": "fixture_count", "equals": 1},
+                    {"path": "unknown_part_family_count", "equals": 0},
+                    {"path": "unknown_relationship_type_count", "equals": 0},
+                    {"path": "unknown_content_type_count", "equals": 0},
+                    {"path": "unknown_extension_uri_count", "equals": 0},
                 ]
             )
         if name.startswith("excel_ui_interaction_"):
