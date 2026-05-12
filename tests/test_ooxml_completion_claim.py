@@ -91,7 +91,10 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     }
     assert render_frontier["pivot_slicer_structural_edits"][
         "observed_report_count"
-    ] == 0
+    ] == 1
+    assert render_frontier["pivot_slicer_structural_edits"]["observed_reports"] == [
+        "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta"
+    ]
     assert render_frontier["external_link_relationship_preserving_edits"][
         "observed_report_count"
     ] == 0
@@ -109,6 +112,38 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "timeline_slicer_delete_first_col_render_delta",
         "timeline_slicer_delete_first_row_render_delta",
     ]
+    render_delta_evidence = render_requirement["evidence"]["render_delta_evidence"]
+    assert render_delta_evidence["required_report_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["present_report_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["missing_reports"] == []
+    assert render_delta_evidence["ready_report_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["excel_report_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["result_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["changed_count"] == len(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["unchanged_count"] == 0
+    assert render_delta_evidence["failure_count"] == 0
+    assert render_delta_evidence["inconclusive_count"] == 0
+    assert render_delta_evidence["reports"] == sorted(
+        completion.RENDER_DELTA_EVIDENCE_REPORTS
+    )
+    assert render_delta_evidence["observed_mutations"] == sorted(
+        {
+            _render_delta_mutation_for_report(report_name)
+            for report_name in completion.RENDER_DELTA_EVIDENCE_REPORTS
+        }
+    )
     assert render_requirement["evidence"]["coverage_matrix"][
         "expected_mutation_count"
     ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)
@@ -128,6 +163,7 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         render_requirement["reason"]
     )
     assert "current target ready is False" in render_requirement["reason"]
+    assert "pinned visual-delta render evidence" in render_requirement["reason"]
     assert (
         "next frontier ledger lists "
         f"{len(completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES)} "
@@ -1046,8 +1082,12 @@ def test_completion_claim_audit_blocks_current_claim_when_bundle_is_stale(
 
     assert report["current_supported_claim_ready"] is False
     assert report["exhaustive_claim_ready"] is False
+    stale_report_count = len(
+        set(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS)
+        | set(completion.RENDER_DELTA_EVIDENCE_REPORTS)
+    ) + 1
     assert report["bundle_audit"]["issue_count"] == (
-        len(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS) + 1
+        stale_report_count
     )
     required_reports = next(
         criterion
@@ -1201,6 +1241,27 @@ def _diagnostic_probe_for_report(name: str) -> str:
     return "slicer_selection_state"
 
 
+_RENDER_DELTA_MUTATION_TOKENS = (
+    ("delete_marker_tail_col", "delete_marker_tail_col"),
+    ("delete_marker_tail_row", "delete_marker_tail_row"),
+    ("delete_first_col", "delete_first_col"),
+    ("delete_first_row", "delete_first_row"),
+    ("insert_tail_col", "insert_tail_col"),
+    ("insert_tail_row", "insert_tail_row"),
+    ("move_formula_range", "move_formula_range"),
+    ("move_marker_range", "move_marker_range"),
+    ("marker_cell", "marker_cell"),
+    ("style_cell", "style_cell"),
+)
+
+
+def _render_delta_mutation_for_report(name: str) -> str:
+    for token, mutation in _RENDER_DELTA_MUTATION_TOKENS:
+        if token in name:
+            return mutation
+    raise AssertionError(f"Unhandled render-delta report mutation for {name!r}")
+
+
 def _write_bundle_manifest(
     tmp_path: Path,
     *,
@@ -1216,6 +1277,11 @@ def _write_bundle_manifest(
     names = ["current"]
     if include_required_reports:
         names.extend(completion.REQUIRED_CURRENT_EVIDENCE_REPORTS)
+        names.extend(
+            report_name
+            for report_name in completion.RENDER_DELTA_EVIDENCE_REPORTS
+            if report_name not in names
+        )
     if include_diagnostic_non_state_change_reports:
         names.extend(completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS)
         names.extend(
@@ -1282,6 +1348,31 @@ def _write_bundle_manifest(
                     {"path": "unknown_relationship_type_count", "equals": 0},
                     {"path": "unknown_content_type_count", "equals": 0},
                     {"path": "unknown_extension_uri_count", "equals": 0},
+                ]
+            )
+        if name in completion.RENDER_DELTA_EVIDENCE_REPORTS:
+            payload.update(
+                {
+                    "render_engine": "excel",
+                    "mutation": _render_delta_mutation_for_report(name),
+                    "missing_mutation": False,
+                    "result_count": 1,
+                    "changed_count": 1,
+                    "unchanged_count": 0,
+                    "failure_count": 0,
+                    "inconclusive_count": 0,
+                }
+            )
+            expect.extend(
+                [
+                    {"path": "render_engine", "equals": "excel"},
+                    {"path": "mutation", "equals": payload["mutation"]},
+                    {"path": "missing_mutation", "equals": False},
+                    {"path": "result_count", "equals": 1},
+                    {"path": "changed_count", "equals": 1},
+                    {"path": "unchanged_count", "equals": 0},
+                    {"path": "failure_count", "equals": 0},
+                    {"path": "inconclusive_count", "equals": 0},
                 ]
             )
         if name.startswith("excel_ui_interaction_"):
