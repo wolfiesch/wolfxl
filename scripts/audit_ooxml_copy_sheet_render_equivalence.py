@@ -66,6 +66,9 @@ def audit_copy_sheet_render_equivalence(
     passed_count = sum(1 for result in results if result.status == "passed")
     failure_count = sum(1 for result in results if result.status == "failed")
     inconclusive_count = sum(1 for result in results if result.status == "inconclusive")
+    non_comparable_count = sum(
+        1 for result in results if result.status == "non_comparable"
+    )
     skipped_count = sum(1 for result in results if result.status == "skipped")
     return {
         "render_report": str(render_report_path),
@@ -76,8 +79,9 @@ def audit_copy_sheet_render_equivalence(
         "passed_count": passed_count,
         "failure_count": failure_count,
         "inconclusive_count": inconclusive_count,
+        "non_comparable_count": non_comparable_count,
         "skipped_count": skipped_count,
-        "ready": passed_count > 0 and failure_count == 0,
+        "ready": passed_count > 0 and failure_count == 0 and inconclusive_count == 0,
         "results": [asdict(result) for result in results],
     }
 
@@ -107,7 +111,7 @@ def _audit_result(
         return _inconclusive(fixture, "render result has no after_pdf")
     result_dir = Path(after_pdf).parent.parent
     if _source_first_sheet_hidden(result_dir):
-        return _inconclusive(
+        return _non_comparable(
             fixture,
             "source first sheet is hidden; no rendered source page to compare",
         )
@@ -116,7 +120,10 @@ def _audit_result(
         return _inconclusive(fixture, "page 1 image is missing")
     later_pages = [page for page in sorted(pages) if page > 1]
     if not later_pages:
-        return _inconclusive(fixture, "no later rendered page to compare against page 1")
+        return _non_comparable(
+            fixture,
+            "no later rendered page to compare against page 1",
+        )
 
     best_page: int | None = None
     best_rmse: float | None = None
@@ -240,6 +247,19 @@ def _inconclusive(fixture: str, message: str) -> CopySheetEquivalenceResult:
     )
 
 
+def _non_comparable(fixture: str, message: str) -> CopySheetEquivalenceResult:
+    return CopySheetEquivalenceResult(
+        fixture=fixture,
+        status="non_comparable",
+        source_page=None,
+        matched_page=None,
+        compared_pages=[],
+        normalized_rmse=None,
+        sampled=False,
+        message=message,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("render_report", type=Path)
@@ -248,7 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit non-zero when no duplicate render evidence is found or failures exist.",
+        help=(
+            "Exit non-zero when the report is not ready: no passed duplicate "
+            "render comparison, any failure, or any inconclusive result."
+        ),
     )
     args = parser.parse_args(argv)
     report = audit_copy_sheet_render_equivalence(

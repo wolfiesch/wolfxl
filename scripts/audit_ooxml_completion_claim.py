@@ -669,6 +669,9 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         "passed_count": _sum_numeric_report_checks(reports, "passed_count"),
         "failure_count": _sum_numeric_report_checks(reports, "failure_count"),
         "inconclusive_count": _sum_numeric_report_checks(reports, "inconclusive_count"),
+        "non_comparable_count": _sum_numeric_report_checks(
+            reports, "non_comparable_count"
+        ),
         "skipped_count": _sum_numeric_report_checks(reports, "skipped_count"),
         "observed_mutations": _unique_mutation_report_checks(reports),
         "coverage_matrix": coverage_matrix,
@@ -689,6 +692,7 @@ def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
         passed_count = _report_count(report, "passed_count")
         failure_count = _report_count(report, "failure_count")
         inconclusive_count = _report_count(report, "inconclusive_count")
+        non_comparable_count = _report_count(report, "non_comparable_count")
         skipped_count = _report_count(report, "skipped_count")
         has_issue_rows = bool(failure_count or inconclusive_count or skipped_count)
         if has_issue_rows:
@@ -706,6 +710,7 @@ def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
                     "single_mutation_passed_count": 0,
                     "single_mutation_failure_count": 0,
                     "single_mutation_inconclusive_count": 0,
+                    "single_mutation_non_comparable_count": 0,
                     "single_mutation_skipped_count": 0,
                     "multi_mutation_report_count": 0,
                     "issue_report_count": 0,
@@ -730,6 +735,10 @@ def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
                 cell["single_mutation_inconclusive_count"] = (
                     int(cell["single_mutation_inconclusive_count"])
                     + inconclusive_count
+                )
+                cell["single_mutation_non_comparable_count"] = (
+                    int(cell["single_mutation_non_comparable_count"])
+                    + non_comparable_count
                 )
                 cell["single_mutation_skipped_count"] = (
                     int(cell["single_mutation_skipped_count"]) + skipped_count
@@ -912,7 +921,8 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 f"reports, with {render_evidence['passed_count']} passed result rows, "
                 f"{render_evidence['failure_count']} failures, "
                 f"{render_evidence['inconclusive_count']} inconclusive rows, and "
-                f"{render_evidence['skipped_count']} skips. This is substantial "
+                f"{render_evidence['non_comparable_count']} non-comparable rows, "
+                f"and {render_evidence['skipped_count']} skips. This is substantial "
                 "feature-specific visual evidence, but the high-risk feature-edit "
                 "universe is still open-ended, so it does not yet prove semantic "
                 "visual equivalence for every high-risk edit."

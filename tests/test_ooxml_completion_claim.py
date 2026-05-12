@@ -466,6 +466,7 @@ def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate
         "single_mutation_passed_count": 4,
         "single_mutation_failure_count": 0,
         "single_mutation_inconclusive_count": 0,
+        "single_mutation_non_comparable_count": 0,
         "single_mutation_skipped_count": 0,
         "multi_mutation_report_count": 0,
         "issue_report_count": 0,

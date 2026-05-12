@@ -82,6 +82,7 @@ def test_copy_sheet_render_equivalence_accepts_duplicate_later_page(tmp_path: Pa
     assert result["render_engine"] == "excel"
     assert result["passed_count"] == 1
     assert result["failure_count"] == 0
+    assert result["non_comparable_count"] == 0
     assert result["results"][0]["matched_page"] == 2
     assert result["results"][0]["normalized_rmse"] == 0.0
 
@@ -146,7 +147,7 @@ def test_copy_sheet_render_equivalence_marks_sampled_without_match_inconclusive(
     assert result["results"][0]["sampled"] is True
 
 
-def test_copy_sheet_render_equivalence_marks_hidden_source_inconclusive(
+def test_copy_sheet_render_equivalence_marks_hidden_source_non_comparable(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -179,9 +180,27 @@ def test_copy_sheet_render_equivalence_marks_hidden_source_inconclusive(
 
     assert result["ready"] is False
     assert result["failure_count"] == 0
-    assert result["inconclusive_count"] == 1
-    assert result["results"][0]["status"] == "inconclusive"
+    assert result["inconclusive_count"] == 0
+    assert result["non_comparable_count"] == 1
+    assert result["results"][0]["status"] == "non_comparable"
     assert "source first sheet is hidden" in result["results"][0]["message"]
+
+
+def test_copy_sheet_render_equivalence_marks_single_page_render_non_comparable(
+    tmp_path: Path,
+) -> None:
+    report = _write_fake_render_result(tmp_path, fixture="book", page_count=1)
+    work = tmp_path / "book" / "copy_first_sheet"
+    (work / "after-pages-1-1.png").write_bytes(BLACK_PNG)
+
+    result = audit.audit_copy_sheet_render_equivalence(report)
+
+    assert result["ready"] is False
+    assert result["failure_count"] == 0
+    assert result["inconclusive_count"] == 0
+    assert result["non_comparable_count"] == 1
+    assert result["results"][0]["status"] == "non_comparable"
+    assert "no later rendered page" in result["results"][0]["message"]
 
 
 def test_copy_sheet_render_equivalence_ignores_other_mutations(tmp_path: Path) -> None:
