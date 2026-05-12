@@ -71,21 +71,25 @@ Latest IRS SOI public-statistics sidecar evidence adds `/tmp/wolfxl-corpus-bucke
 
 Latest BEA GDP public-statistics sidecar evidence adds `/tmp/wolfxl-corpus-buckets-bea-gdp-20260511.json`, `/tmp/wolfxl-gap-radar-bea-gdp-20260511.json`, and `/tmp/wolfxl-ooxml-fidelity-mutations-bea-gdp-quick-20260511/report.json`: 4 downloaded public Bureau of Economic Analysis GDP workbooks, 0 skipped, gap radar clear, and 24 no-op, marker-cell, style-cell, copy-remove-sheet, add-data-validation, and add-conditional-formatting mutation results with 0 failures. The aggregate portfolio now reaches 28 source reports and 389 readable workbooks while still covering all required diversity buckets.
 
-Latest shared pivot-slicer copy-first-sheet follow-up adds `/tmp/wolfxl-slicer-shared-two-pivots-copy-first-sheet-excel-native-page-multiset-equivalence-20260510.json`: `ready=true`, 72 WolfXL-rendered pages and 72 native-Excel-copy rendered pages have identical page-image multisets. The earlier direct page-1-to-page-71 comparison remains intentionally unpinned because Excel itself assigns the copied-slicer shading state to the opposite printed page; the native-baseline audit proves WolfXL matches desktop Excel's rendered output set without weakening the stricter direct-equivalence audit.
-
-Timeline copy-first-sheet native-baseline follow-up remains open. A 2026-05-11
-exploratory WolfXL render at
-`/tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511/render-compare-report.json`
-successfully rendered 74 pages for `copy_first_sheet` on
-`real-excel-timeline-slicer.xlsx`, but the attempted native Microsoft Excel copy
-baseline was not reliable enough to pin: one rendered baseline at
-`/tmp/wolfxl-render-excel-manual-copy-timeline-20260511c-clean/render-compare-report.json`
-still had only 71 pages, matching the source workbook rather than a confirmed
-copied-sheet workbook, and the resulting page-multiset audit
-`/tmp/wolfxl-timeline-copy-first-sheet-excel-native-page-multiset-equivalence-20260511.json`
-failed. Treat that as an inconclusive baseline-generation failure, not proof of
-a WolfXL render mismatch, until Excel automation can verify the baseline
-workbook has the copied timeline sheet.
+Latest copy-first-sheet native-baseline follow-up adds two high-risk slicer/timeline
+page-multiset proofs. The shared pivot-slicer audit at
+`/tmp/wolfxl-slicer-shared-two-pivots-copy-first-sheet-excel-native-page-multiset-equivalence-20260510.json`
+is `ready=true`: 72 WolfXL-rendered pages and 72 native-Excel-copy rendered pages
+have identical page-image multisets. The timeline audit at
+`/tmp/wolfxl-timeline-copy-first-sheet-excel-native-page-multiset-equivalence-20260512.json`
+is also `ready=true`: 74 WolfXL-rendered pages and 74 native-Excel-copy rendered
+pages have identical page-image multisets. The timeline native baseline is now
+verified before rendering by
+`/tmp/wolfxl-excel-native-copy-timeline-baseline-20260512.json`, which records
+the source workbook's two sheets and the native Excel copy baseline's three
+sheets, including `Pivot Table (2)`. An earlier 2026-05-11 timeline baseline
+attempt rendered only 71 pages because the saved workbook still had the original
+two sheets; that artifact remains an invalid baseline-generation failure, not a
+WolfXL render mismatch. The older direct page-order comparisons remain
+intentionally unpinned where Excel itself assigns copied slicer/timeline state to
+different printed pages; the native-baseline multiset audits prove WolfXL
+matches desktop Excel's rendered output set without weakening the stricter
+direct-equivalence audits.
 
 Latest PowerView sidecar increment: `/tmp/wolfxl-ui-interaction-add-dv-powerview-open-readonly-20260510/interactive-probe-report.json` opens the Contoso PowerPivot/PowerView workbook after a WolfXL `add_data_validation` save, clicks `Open as Read-Only`, and verifies the PowerView marker remains present. The strict audit `/tmp/wolfxl-ui-interaction-evidence-add-dv-powerview-open-readonly-20260510.json` is `ready=true` with 1 report, 1 fixture, and 0 incomplete reports.
 

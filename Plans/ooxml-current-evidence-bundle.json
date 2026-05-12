@@ -3648,6 +3648,68 @@
       ]
     },
     {
+      "name": "timeline_slicer_sidecar_excel_render_copy_first_sheet_all_pages",
+      "path": "/tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511.json",
+      "producer": "rm -rf /tmp/wolfxl-timeline-copy-first-sheet-render-input-20260511 /tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511 /tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511.json && mkdir -p /tmp/wolfxl-timeline-copy-first-sheet-render-input-20260511 && cp tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx /tmp/wolfxl-timeline-copy-first-sheet-render-input-20260511/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-timeline-copy-first-sheet-render-input-20260511 --output-dir /tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511 --render-engine excel --timeout 240 --max-pages-per-fixture 80 --mutation copy_first_sheet > /tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["copy_first_sheet"]},
+        {"path": "results.0.fixture", "equals": "real-excel-timeline-slicer.xlsx"},
+        {"path": "results.0.status", "equals": "rendered"},
+        {"path": "results.0.page_count", "equals": 74},
+        {"path": "results.0.compared_page_count", "equals": 74}
+      ]
+    },
+    {
+      "name": "timeline_slicer_native_excel_copy_baseline_metadata",
+      "path": "/tmp/wolfxl-excel-native-copy-timeline-baseline-20260512.json",
+      "producer": "Native Microsoft Excel copy baseline: open tests/fixtures/external_oracle/real-excel-timeline-slicer.xlsx, run Excel's copy worksheet command for worksheet 1 after worksheet 2, save as /tmp/wolfxl-excel-native-copy-timeline-20260512/excel-native-copy.xlsx, then inspect xl/workbook.xml to verify the source has 2 sheets and the native baseline has 3 sheets including Pivot Table (2).",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "source_sheet_count", "equals": 2},
+        {"path": "native_copy_sheet_count", "equals": 3},
+        {"path": "source_sheets", "equals": ["Pivot Table", "Data_Table "]},
+        {"path": "native_copy_sheets", "equals": ["Pivot Table", "Data_Table ", "Pivot Table (2)"]},
+        {"path": "copied_sheet_name", "equals": "Pivot Table (2)"}
+      ]
+    },
+    {
+      "name": "timeline_slicer_native_excel_copy_render_baseline",
+      "path": "/tmp/wolfxl-render-excel-native-copy-timeline-20260512.json",
+      "producer": "(osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-excel-native-copy-timeline-20260512 --output-dir /tmp/wolfxl-render-excel-native-copy-timeline-20260512 --render-engine excel --timeout 240 --max-pages-per-fixture 80 > /tmp/wolfxl-render-excel-native-copy-timeline-20260512.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["no_op"]},
+        {"path": "results.0.fixture", "equals": "excel-native-copy.xlsx"},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.page_count", "equals": 74},
+        {"path": "results.0.compared_page_count", "equals": 74},
+        {"path": "results.0.max_normalized_rmse", "equals": 0.0}
+      ]
+    },
+    {
+      "name": "timeline_slicer_copy_first_sheet_native_excel_page_multiset_equivalence",
+      "path": "/tmp/wolfxl-timeline-copy-first-sheet-excel-native-page-multiset-equivalence-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_render_page_multiset_equivalence.py /tmp/wolfxl-render-excel-timeline-copy-first-sheet-all-pages-20260511/render-compare-report.json /tmp/wolfxl-render-excel-native-copy-timeline-20260512/render-compare-report.json --left-mutation copy_first_sheet --right-mutation no_op --left-prefix after --right-prefix before --strict > /tmp/wolfxl-timeline-copy-first-sheet-excel-native-page-multiset-equivalence-20260512.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "left_mutation", "equals": "copy_first_sheet"},
+        {"path": "right_mutation", "equals": "no_op"},
+        {"path": "result_count", "equals": 1},
+        {"path": "passed_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "results.0.status", "equals": "passed"},
+        {"path": "results.0.left_page_count", "equals": 74},
+        {"path": "results.0.right_page_count", "equals": 74},
+        {"path": "results.0.differing_hash_count", "equals": 0}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_rename_sheet",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509.json",
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --render-engine excel --mutation rename_first_sheet --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509 --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-rename-sheet-20260509.json",
