@@ -372,6 +372,7 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
                     "path": "/tmp/copy-sheet-render-equivalence.json",
                     "checks": [
                         {"path": "ready", "actual": True, "passed": True},
+                        {"path": "render_engine", "actual": "excel", "passed": True},
                         {
                             "path": "mutation",
                             "actual": "copy_first_sheet",
@@ -413,7 +414,7 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
     )
 
     assert report["ready_report_count"] == 2
-    assert report["excel_report_count"] == 1
+    assert report["excel_report_count"] == 2
     assert report["result_count"] == 5
     assert report["passed_count"] == 5
     assert report["observed_mutations"] == [
@@ -439,9 +440,7 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
         "rename_first_sheet",
         "retarget_external_links",
     ]
-    assert report["coverage_matrix"]["unpassed_expected_mutations"] == [
-        "copy_first_sheet"
-    ]
+    assert report["coverage_matrix"]["unpassed_expected_mutations"] == []
 
 
 def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate() -> None:
@@ -515,6 +514,8 @@ def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate
         "single_mutation_non_comparable_count": 0,
         "single_mutation_skipped_count": 0,
         "multi_mutation_report_count": 0,
+        "ready_clean_report_count": 1,
+        "excel_or_native_clean_report_count": 1,
         "issue_report_count": 0,
         "issue_reports": [],
     }
@@ -582,6 +583,24 @@ def test_render_equivalence_coverage_matrix_reports_current_target_gaps() -> Non
                 ],
             },
             {
+                "name": "copy_remove_sheet_native_excel_page_multiset_equivalence",
+                "path": "/tmp/page-multiset-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {
+                        "path": "left_mutation",
+                        "actual": "copy_remove_sheet",
+                        "passed": True,
+                    },
+                    {"path": "right_mutation", "actual": "no_op", "passed": True},
+                    {"path": "result_count", "actual": 1, "passed": True},
+                    {"path": "passed_count", "actual": 1, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+            {
                 "name": "single_issue_equivalence",
                 "path": "/tmp/single-issue-render-equivalence.json",
                 "checks": [
@@ -610,10 +629,44 @@ def test_render_equivalence_coverage_matrix_reports_current_target_gaps() -> Non
     ]
     assert report["observed_expected_mutation_count"] == 2
     assert report["missing_expected_mutations"] == ["retarget_external_links"]
-    assert report["unpassed_expected_mutations"] == [
-        "copy_remove_sheet",
-        "rename_first_sheet",
-    ]
+    assert report["mutation_matrix"]["copy_remove_sheet"]["issue_report_count"] == 1
+    assert report["mutation_matrix"]["copy_remove_sheet"][
+        "ready_clean_report_count"
+    ] == 1
+    assert report["mutation_matrix"]["copy_remove_sheet"][
+        "excel_or_native_clean_report_count"
+    ] == 1
+    assert report["unpassed_expected_mutations"] == ["rename_first_sheet"]
+
+
+def test_render_equivalence_coverage_matrix_rejects_non_excel_clean_target() -> None:
+    report = completion._render_equivalence_coverage_matrix(
+        [
+            {
+                "name": "libreoffice_copy_remove_sheet_render_equivalence",
+                "path": "/tmp/libreoffice-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "libreoffice", "passed": True},
+                    {"path": "mutation", "actual": "copy_remove_sheet", "passed": True},
+                    {"path": "result_count", "actual": 1, "passed": True},
+                    {"path": "passed_count", "actual": 1, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            }
+        ],
+        expected_mutations=("copy_remove_sheet",),
+    )
+
+    assert report["mutation_matrix"]["copy_remove_sheet"][
+        "ready_clean_report_count"
+    ] == 1
+    assert report["mutation_matrix"]["copy_remove_sheet"][
+        "excel_or_native_clean_report_count"
+    ] == 0
+    assert report["unpassed_expected_mutations"] == ["copy_remove_sheet"]
 
 
 def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() -> None:

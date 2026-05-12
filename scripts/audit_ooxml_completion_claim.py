@@ -601,6 +601,12 @@ def _report_mutations(report: dict) -> list[str]:
     mutation = _report_check_observed_actual(report, "mutation")
     if mutation is not None:
         values.add(str(mutation))
+    left_mutation = _report_check_observed_actual(report, "left_mutation")
+    if left_mutation not in (None, "no_op"):
+        values.add(str(left_mutation))
+    right_mutation = _report_check_observed_actual(report, "right_mutation")
+    if right_mutation not in (None, "no_op"):
+        values.add(str(right_mutation))
     return sorted(values) or ["unknown"]
 
 
@@ -733,8 +739,14 @@ def _is_render_equivalence_report(report: dict) -> bool:
     return (
         "render_equivalence" in name
         or "render-equivalence" in path
+        or "page_multiset_equivalence" in name
         or ("excel_render_" in name and "_equivalence_" in name)
     )
+
+
+def _is_native_excel_page_multiset_report(report: dict) -> bool:
+    name = str(report.get("name", ""))
+    return "native_excel_page_multiset_equivalence" in name
 
 
 def _render_equivalence_evidence(bundle_audit: dict) -> dict:
@@ -812,6 +824,8 @@ def _render_equivalence_coverage_matrix(
                     "single_mutation_non_comparable_count": 0,
                     "single_mutation_skipped_count": 0,
                     "multi_mutation_report_count": 0,
+                    "ready_clean_report_count": 0,
+                    "excel_or_native_clean_report_count": 0,
                     "issue_report_count": 0,
                     "issue_reports": [],
                 },
@@ -846,6 +860,14 @@ def _render_equivalence_coverage_matrix(
                 cell["multi_mutation_report_count"] = (
                     int(cell["multi_mutation_report_count"]) + 1
                 )
+            if ready and not has_issue_rows:
+                cell["ready_clean_report_count"] = (
+                    int(cell["ready_clean_report_count"]) + 1
+                )
+                if excel_rendered or _is_native_excel_page_multiset_report(report):
+                    cell["excel_or_native_clean_report_count"] = (
+                        int(cell["excel_or_native_clean_report_count"]) + 1
+                    )
             if has_issue_rows:
                 cell["issue_report_count"] = int(cell["issue_report_count"]) + 1
                 issue_report_names = cell["issue_reports"]
@@ -858,11 +880,7 @@ def _render_equivalence_coverage_matrix(
         mutation
         for mutation in expected_mutations
         if mutation in matrix
-        and (
-            int(matrix[mutation]["ready_report_count"]) == 0
-            or int(matrix[mutation]["excel_report_count"]) == 0
-            or int(matrix[mutation]["issue_report_count"]) > 0
-        )
+        and int(matrix[mutation]["excel_or_native_clean_report_count"]) == 0
     ]
     return {
         "observed_mutations": sorted(matrix),
