@@ -37,6 +37,34 @@ KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS = {
         "excel_ui_interaction_embedded_control_click"
     ),
 }
+EXPECTED_UI_INTERACTION_MUTATIONS = (
+    "source",
+    "marker_cell",
+    "style_cell",
+    "copy_remove_sheet",
+    "add_data_validation",
+    "add_conditional_formatting",
+    "add_remove_chart",
+    "rename_first_sheet",
+    "move_formula_range",
+    "move_marker_range",
+    "insert_tail_row",
+    "insert_tail_col",
+    "delete_marker_tail_row",
+    "delete_marker_tail_col",
+    "retarget_external_links",
+    "delete_first_row",
+    "delete_first_col",
+)
+EXPECTED_UI_INTERACTION_PROBES = (
+    "embedded_control_openability",
+    "external_link_update_prompt",
+    "macro_project_presence",
+    "pivot_refresh_state",
+    "slicer_selection_state",
+    "timeline_selection_state",
+    "unsupported_content_prompt",
+)
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -591,6 +619,8 @@ def _ui_interaction_coverage_matrix(
     *,
     known_boundary_reports: set[str],
     diagnostic_reports: set[str],
+    expected_mutations: tuple[str, ...] = EXPECTED_UI_INTERACTION_MUTATIONS,
+    expected_probes: tuple[str, ...] = EXPECTED_UI_INTERACTION_PROBES,
 ) -> dict:
     matrix: dict[str, dict[str, dict[str, int]]] = {}
     for report in reports:
@@ -619,6 +649,42 @@ def _ui_interaction_coverage_matrix(
                     cell["known_boundary_failed"] += 1
                 if report_name in diagnostic_reports:
                     cell["diagnostic_failed"] += 1
+    expected_pairs = [
+        {"mutation": mutation, "probe": probe}
+        for mutation in expected_mutations
+        for probe in expected_probes
+    ]
+    missing_expected_pairs = [
+        pair
+        for pair in expected_pairs
+        if pair["probe"] not in matrix.get(pair["mutation"], {})
+    ]
+    unpassed_expected_pairs = [
+        pair
+        for pair in expected_pairs
+        if (
+            pair["probe"] in matrix.get(pair["mutation"], {})
+            and not matrix[pair["mutation"]][pair["probe"]]["passed"]
+        )
+    ]
+    boundary_only_expected_pairs = [
+        pair
+        for pair in unpassed_expected_pairs
+        if (
+            matrix[pair["mutation"]][pair["probe"]]["failed"]
+            == matrix[pair["mutation"]][pair["probe"]]["known_boundary_failed"]
+            and matrix[pair["mutation"]][pair["probe"]]["known_boundary_failed"] > 0
+        )
+    ]
+    diagnostic_only_expected_pairs = [
+        pair
+        for pair in unpassed_expected_pairs
+        if (
+            matrix[pair["mutation"]][pair["probe"]]["failed"]
+            == matrix[pair["mutation"]][pair["probe"]]["diagnostic_failed"]
+            and matrix[pair["mutation"]][pair["probe"]]["diagnostic_failed"] > 0
+        )
+    ]
     return {
         "observed_mutations": sorted(matrix),
         "observed_probes": sorted(
@@ -632,6 +698,21 @@ def _ui_interaction_coverage_matrix(
             for probe_counts in matrix.values()
             for cell in probe_counts.values()
             if cell["failed"]
+        ),
+        "expected_mutations": list(expected_mutations),
+        "expected_probes": list(expected_probes),
+        "expected_mutation_probe_pair_count": len(expected_pairs),
+        "observed_expected_mutation_probe_pair_count": len(expected_pairs)
+        - len(missing_expected_pairs),
+        "missing_expected_mutation_probe_pair_count": len(missing_expected_pairs),
+        "missing_expected_mutation_probe_pairs": missing_expected_pairs,
+        "unpassed_expected_mutation_probe_pair_count": len(unpassed_expected_pairs),
+        "unpassed_expected_mutation_probe_pairs": unpassed_expected_pairs,
+        "boundary_only_expected_mutation_probe_pair_count": len(
+            boundary_only_expected_pairs
+        ),
+        "diagnostic_only_expected_mutation_probe_pair_count": len(
+            diagnostic_only_expected_pairs
         ),
         "mutation_probe_matrix": matrix,
     }
@@ -944,7 +1025,10 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "without persisting a state change in this Excel environment. "
                 f"{interaction_evidence['unresolved_non_boundary_failure_count']} "
                 "non-boundary failures remain unresolved. Broader slicer, timeline, "
-                "embedded-control, and prompt variants remain unexhausted."
+                "embedded-control, and prompt variants remain unexhausted; the "
+                "current target matrix is missing "
+                f"{interaction_evidence['coverage_matrix']['missing_expected_mutation_probe_pair_count']} "
+                "expected mutation/probe pairs."
             )
     return requirements
 
