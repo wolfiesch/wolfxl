@@ -102,6 +102,9 @@ RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS = {
     "pivot_slicer_structural_edits": (
         "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta",
     ),
+    "external_link_relationship_preserving_edits": (
+        "external_link_rename_sheet_render_equivalence",
+    ),
 }
 UI_INTERACTION_FRONTIER_CANDIDATES = (
     {

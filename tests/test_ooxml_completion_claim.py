@@ -475,35 +475,58 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
                         {"path": "failure_count", "actual": 0, "passed": True},
                     ],
                 },
+                {
+                    "name": "external_link_rename_sheet_render_equivalence",
+                    "path": "/tmp/external-link-rename-sheet-render-equivalence.json",
+                    "checks": [
+                        {"path": "ready", "actual": True, "passed": True},
+                        {"path": "render_engine", "actual": "excel", "passed": True},
+                        {
+                            "path": "observed_mutations",
+                            "actual": ["rename_first_sheet"],
+                            "passed": True,
+                        },
+                        {"path": "result_count", "actual": 1, "passed": True},
+                        {"path": "passed_count", "actual": 1, "passed": True},
+                        {"path": "failure_count", "actual": 0, "passed": True},
+                        {
+                            "path": "inconclusive_count",
+                            "actual": 0,
+                            "passed": True,
+                        },
+                        {"path": "skipped_count", "actual": 0, "passed": True},
+                    ],
+                },
             ]
         }
     )
 
-    assert report["ready_report_count"] == 2
-    assert report["excel_report_count"] == 2
-    assert report["result_count"] == 5
-    assert report["passed_count"] == 5
+    assert report["ready_report_count"] == 3
+    assert report["excel_report_count"] == 3
+    assert report["result_count"] == 6
+    assert report["passed_count"] == 6
     assert report["observed_mutations"] == [
         "add_data_validation",
         "copy_first_sheet",
+        "rename_first_sheet",
     ]
     assert report["coverage_matrix"]["observed_mutations"] == [
         "add_data_validation",
         "copy_first_sheet",
+        "rename_first_sheet",
     ]
-    assert report["coverage_matrix"]["mutation_count"] == 2
+    assert report["coverage_matrix"]["mutation_count"] == 3
     assert report["coverage_matrix"]["mutation_matrix"]["copy_first_sheet"][
         "single_mutation_result_count"
     ] == 2
     assert report["coverage_matrix"]["expected_mutation_count"] == len(
         completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS
     )
-    assert report["coverage_matrix"]["observed_expected_mutation_count"] == 2
+    assert report["coverage_matrix"]["observed_expected_mutation_count"] == 3
     assert report["coverage_matrix"]["missing_expected_mutations"] == [
         "add_conditional_formatting",
         "add_remove_chart",
         "copy_remove_sheet",
-        "rename_first_sheet",
         "retarget_external_links",
     ]
     assert report["coverage_matrix"]["unpassed_expected_mutations"] == []
@@ -515,6 +538,15 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
     assert pivot_frontier["observed_report_count"] == 1
     assert pivot_frontier["observed_reports"] == [
         "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta"
+    ]
+    external_link_frontier = next(
+        candidate
+        for candidate in report["frontier_candidates"]
+        if candidate["id"] == "external_link_relationship_preserving_edits"
+    )
+    assert external_link_frontier["observed_report_count"] == 1
+    assert external_link_frontier["observed_reports"] == [
+        "external_link_rename_sheet_render_equivalence"
     ]
 
 
