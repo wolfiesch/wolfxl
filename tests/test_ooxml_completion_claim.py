@@ -296,6 +296,9 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert future_surface_requirement["evidence"]["fixture_count"] == len(
         completion.FUTURE_SURFACE_GAP_RADAR_REPORTS
     )
+    assert "wolfxl_repo_fixtures_gap_radar" in future_surface_requirement["evidence"][
+        "gap_radar_reports"
+    ]
     assert future_surface_requirement["evidence"]["unknown_part_family_count"] == 0
     assert future_surface_requirement["evidence"]["unknown_relationship_type_count"] == 0
     assert future_surface_requirement["evidence"]["unknown_content_type_count"] == 0
@@ -440,6 +443,9 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
     assert "synthgl_real_world_ingestion_gap_radar" in (
+        completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
+    )
+    assert "wolfxl_repo_fixtures_gap_radar" in (
         completion.REQUIRED_CURRENT_EVIDENCE_REPORTS
     )
     assert "powerpivot_contoso_sidecar_gap_radar" in (

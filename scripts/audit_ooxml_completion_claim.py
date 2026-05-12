@@ -313,6 +313,7 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "local_project_holdouts_corpus_buckets",
     "fed_aea_papers_corpus_buckets",
     "external_oracle_gap_radar",
+    "wolfxl_repo_fixtures_gap_radar",
     "powerpivot_contoso_sidecar_gap_radar",
     "slicer_shared_two_pivots_sidecar_gap_radar",
     "public_powerbi_expanded_gap_radar",

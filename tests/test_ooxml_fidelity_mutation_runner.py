@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import sys
 import zipfile
@@ -358,6 +359,94 @@ def test_discover_fixtures_supports_curated_workbooks_manifest(tmp_path: Path) -
             tool="synthetic_external",
             app_unsupported_features=["powerview"],
         )
+    ]
+
+
+def test_recursive_discover_fixtures_uses_nested_manifest_metadata(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    nested_dir = fixture_dir / "powerpivot_variants"
+    other_dir = fixture_dir / "misc"
+    nested_dir.mkdir(parents=True)
+    other_dir.mkdir(parents=True)
+    _make_fixture(nested_dir / "powerview.xlsx")
+    _make_fixture(other_dir / "plain.xlsx")
+    nested_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "filename": "powerview.xlsx",
+                        "fixture_id": "powerview",
+                        "tool": "excel",
+                        "sha256": "abc123",
+                        "app_unsupported_features": ["power_view"],
+                    }
+                ]
+            }
+        )
+    )
+
+    entries = runner_module.discover_fixtures(fixture_dir, recursive=True)
+
+    assert entries == [
+        runner_module.FixtureEntry(filename="misc/plain.xlsx"),
+        runner_module.FixtureEntry(
+            filename="powerpivot_variants/powerview.xlsx",
+            sha256="abc123",
+            fixture_id="powerview",
+            tool="excel",
+            app_unsupported_features=["power_view"],
+        ),
+    ]
+
+
+def test_recursive_discover_fixtures_preserves_root_relative_nested_manifest_paths(
+    tmp_path: Path,
+) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    tier_dir = fixture_dir / "tier1"
+    tier_dir.mkdir(parents=True)
+    _make_fixture(tier_dir / "local.xlsx")
+    _make_fixture(tier_dir / "root-relative.xlsx")
+    tier_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "excel_version": "16.105.3",
+                "files": [
+                    {
+                        "path": "local.xlsx",
+                        "feature": "local_path",
+                        "sha256": "local123",
+                    },
+                    {
+                        "path": "tier1/root-relative.xlsx",
+                        "feature": "root_relative_path",
+                        "sha256": "root123",
+                    },
+                ],
+            }
+        )
+    )
+
+    entries = runner_module.discover_fixtures(fixture_dir, recursive=True)
+
+    assert entries == [
+        runner_module.FixtureEntry(
+            filename="tier1/local.xlsx",
+            sha256="local123",
+            fixture_id="local_path",
+            tool="excel",
+            app_unsupported_features=None,
+        ),
+        runner_module.FixtureEntry(
+            filename="tier1/root-relative.xlsx",
+            sha256="root123",
+            fixture_id="root_relative_path",
+            tool="excel",
+            app_unsupported_features=None,
+        ),
     ]
 
 

@@ -2890,6 +2890,23 @@
       ]
     },
     {
+      "name": "wolfxl_repo_fixtures_gap_radar",
+      "path": "/tmp/wolfxl-gap-radar-tests-fixtures-nested-manifest-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py tests/fixtures --recursive --json --strict > /tmp/wolfxl-gap-radar-tests-fixtures-nested-manifest-20260512.json",
+      "expect": [
+        {"path": "clear", "equals": true},
+        {"path": "fixture_count", "equals": 48},
+        {"path": "skipped_fixture_count", "equals": 0},
+        {"path": "unknown_part_family_count", "equals": 0},
+        {"path": "unknown_relationship_type_count", "equals": 0},
+        {"path": "unknown_content_type_count", "equals": 0},
+        {"path": "unknown_extension_uri_count", "equals": 0},
+        {"path": "expected_app_unsupported_feature_count", "equals": 1},
+        {"path": "unexpected_app_unsupported_feature_count", "equals": 0},
+        {"path": "missing_expected_app_unsupported_feature_count", "equals": 0}
+      ]
+    },
+    {
       "name": "synthgl_recursive_gap_radar",
       "path": "/tmp/wolfxl-gap-radar-synthgl-fixtures-recursive-classified-final.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_gap_radar.py /Users/wolfgangschoenberger/Projects/SynthGL/tests/app/fixtures --recursive --json --strict > /tmp/wolfxl-gap-radar-synthgl-fixtures-recursive-classified-final.json",

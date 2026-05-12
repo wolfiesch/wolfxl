@@ -14,7 +14,7 @@ from copy import deepcopy
 from xml.etree import ElementTree
 import zipfile
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -262,9 +262,15 @@ def discover_fixtures(fixture_dir: Path, recursive: bool = False) -> list[Fixtur
         payload = json.loads(manifest.read_text())
         return _manifest_fixture_entries(payload)
 
+    nested_manifest_entries = (
+        _recursive_manifest_fixture_entries(fixture_dir) if recursive else {}
+    )
     pattern = "**/*" if recursive else "*"
     return [
-        FixtureEntry(filename=path.relative_to(fixture_dir).as_posix())
+        nested_manifest_entries.get(
+            path.relative_to(fixture_dir).as_posix(),
+            FixtureEntry(filename=path.relative_to(fixture_dir).as_posix()),
+        )
         for path in sorted(fixture_dir.glob(pattern))
         if path.is_file()
         and path.suffix.lower() in SPREADSHEET_SUFFIXES
@@ -313,6 +319,34 @@ def _manifest_fixture_entries(payload: dict) -> list[FixtureEntry]:
         ]
 
     return []
+
+
+def _recursive_manifest_fixture_entries(fixture_dir: Path) -> dict[str, FixtureEntry]:
+    entries: dict[str, FixtureEntry] = {}
+    for manifest in sorted(fixture_dir.glob(f"**/{MANIFEST_NAME}")):
+        if manifest.parent == fixture_dir:
+            continue
+        payload = json.loads(manifest.read_text())
+        manifest_dir = manifest.parent.relative_to(fixture_dir)
+        for entry in _manifest_fixture_entries(payload):
+            filename = _nested_manifest_entry_filename(manifest_dir, entry.filename)
+            entries[filename] = FixtureEntry(
+                filename=filename,
+                sha256=entry.sha256,
+                fixture_id=entry.fixture_id,
+                tool=entry.tool,
+                app_unsupported_features=entry.app_unsupported_features,
+            )
+    return entries
+
+
+def _nested_manifest_entry_filename(manifest_dir: Path, entry_filename: str) -> str:
+    entry_path = PurePosixPath(entry_filename)
+    entry_posix = entry_path.as_posix()
+    manifest_posix = manifest_dir.as_posix()
+    if entry_posix == manifest_posix or entry_posix.startswith(f"{manifest_posix}/"):
+        return entry_posix
+    return (PurePosixPath(manifest_posix) / entry_path).as_posix()
 
 
 def run_sweep(
