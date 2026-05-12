@@ -85,10 +85,30 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "external_link_relationship_preserving_edits",
         "additional_high_risk_feature_edits",
     }
-    assert all(
-        candidate["observed_report_count"] == 0
+    render_frontier = {
+        candidate["id"]: candidate
         for candidate in render_requirement["evidence"]["frontier_candidates"]
-    )
+    }
+    assert render_frontier["pivot_slicer_structural_edits"][
+        "observed_report_count"
+    ] == 0
+    assert render_frontier["external_link_relationship_preserving_edits"][
+        "observed_report_count"
+    ] == 0
+    assert render_frontier["additional_high_risk_feature_edits"][
+        "observed_report_count"
+    ] == 9
+    assert render_frontier["additional_high_risk_feature_edits"]["observed_reports"] == [
+        "excel_render_insert_tail_col_delta_full_pack_report",
+        "excel_render_insert_tail_row_delta_full_pack_report",
+        "excel_render_marker_cell_delta_full_pack_report",
+        "excel_render_move_marker_range_delta_full_pack_report",
+        "excel_render_style_cell_delta_full_pack_report",
+        "slicer_shared_two_pivots_sidecar_delete_first_col_render_delta",
+        "slicer_shared_two_pivots_sidecar_delete_first_row_render_delta",
+        "timeline_slicer_delete_first_col_render_delta",
+        "timeline_slicer_delete_first_row_render_delta",
+    ]
     assert render_requirement["evidence"]["coverage_matrix"][
         "expected_mutation_count"
     ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)

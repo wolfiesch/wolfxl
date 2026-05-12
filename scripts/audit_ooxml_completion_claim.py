@@ -105,6 +105,17 @@ RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS = {
     "external_link_relationship_preserving_edits": (
         "external_link_rename_sheet_render_equivalence",
     ),
+    "additional_high_risk_feature_edits": (
+        "excel_render_marker_cell_delta_full_pack_report",
+        "excel_render_style_cell_delta_full_pack_report",
+        "excel_render_insert_tail_row_delta_full_pack_report",
+        "excel_render_insert_tail_col_delta_full_pack_report",
+        "excel_render_move_marker_range_delta_full_pack_report",
+        "timeline_slicer_delete_first_row_render_delta",
+        "timeline_slicer_delete_first_col_render_delta",
+        "slicer_shared_two_pivots_sidecar_delete_first_row_render_delta",
+        "slicer_shared_two_pivots_sidecar_delete_first_col_render_delta",
+    ),
 }
 UI_INTERACTION_FRONTIER_CANDIDATES = (
     {
