@@ -97,7 +97,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     ]
     assert render_frontier["external_link_relationship_preserving_edits"][
         "observed_report_count"
-    ] == 0
+    ] == 1
+    assert render_frontier["external_link_relationship_preserving_edits"][
+        "observed_reports"
+    ] == [
+        "external_link_move_formula_range_render_delta",
+    ]
     assert render_frontier["additional_high_risk_feature_edits"][
         "observed_report_count"
     ] == 9
