@@ -481,6 +481,21 @@ FUTURE_SURFACE_GAP_RADAR_REPORTS = tuple(
     for report_name in REQUIRED_CURRENT_EVIDENCE_REPORTS
     if report_name.endswith("_gap_radar")
 )
+RENDER_DELTA_EVIDENCE_REPORTS = tuple(
+    sorted(
+        {
+            report_name
+            for report_name in REQUIRED_CURRENT_EVIDENCE_REPORTS
+            if "render_delta" in report_name or "_delta_" in report_name
+        }
+        | {
+            report_name
+            for report_names in RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS.values()
+            for report_name in report_names
+            if "render_delta" in report_name or "_delta_" in report_name
+        }
+    )
+)
 
 OPEN_REQUIREMENTS = (
     {
@@ -864,6 +879,7 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         if _report_check_actual(report, "render_engine") == "excel"
     ]
     coverage_matrix = _render_equivalence_coverage_matrix(reports)
+    delta_reports = _render_delta_reports(bundle_audit["reports"])
     return {
         "ready_report_count": len(ready_reports),
         "excel_report_count": len(excel_reports),
@@ -876,6 +892,7 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         ),
         "skipped_count": _sum_numeric_report_checks(reports, "skipped_count"),
         "observed_mutations": _unique_mutation_report_checks(reports),
+        "render_delta_evidence": _render_delta_evidence(delta_reports),
         "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_high_risk_feature_edit_universe",
         "frontier_candidate_count": len(RENDER_EQUIVALENCE_FRONTIER_CANDIDATES),
@@ -884,6 +901,43 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
             RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS,
             bundle_audit["reports"],
         ),
+    }
+
+
+def _render_delta_reports(reports: list[dict]) -> list[dict]:
+    report_by_name = {str(report["name"]): report for report in reports}
+    return [
+        report_by_name[report_name]
+        for report_name in RENDER_DELTA_EVIDENCE_REPORTS
+        if report_name in report_by_name
+    ]
+
+
+def _render_delta_evidence(reports: list[dict]) -> dict:
+    ready_reports = [
+        report for report in reports if _report_check_observed_actual(report, "ready") is True
+    ]
+    excel_reports = [
+        report
+        for report in ready_reports
+        if _report_check_observed_actual(report, "render_engine") == "excel"
+    ]
+    return {
+        "required_report_count": len(RENDER_DELTA_EVIDENCE_REPORTS),
+        "present_report_count": len(reports),
+        "missing_reports": sorted(
+            set(RENDER_DELTA_EVIDENCE_REPORTS)
+            - {str(report["name"]) for report in reports}
+        ),
+        "ready_report_count": len(ready_reports),
+        "excel_report_count": len(excel_reports),
+        "result_count": _sum_numeric_report_checks(reports, "result_count"),
+        "changed_count": _sum_numeric_report_checks(reports, "changed_count"),
+        "unchanged_count": _sum_numeric_report_checks(reports, "unchanged_count"),
+        "failure_count": _sum_numeric_report_checks(reports, "failure_count"),
+        "inconclusive_count": _sum_numeric_report_checks(reports, "inconclusive_count"),
+        "observed_mutations": _unique_mutation_report_checks(reports),
+        "reports": sorted(str(report["name"]) for report in reports),
     }
 
 
@@ -1253,7 +1307,16 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "missing expected buckets and "
                 f"{render_matrix['unpassed_expected_mutation_count']} unpassed "
                 "expected buckets; current target ready is "
-                f"{render_matrix['current_target_ready']}. The next frontier "
+                f"{render_matrix['current_target_ready']}. The pinned visual-delta "
+                "render evidence separately has "
+                f"{render_evidence['render_delta_evidence']['ready_report_count']} "
+                "ready reports, "
+                f"{render_evidence['render_delta_evidence']['changed_count']} "
+                "changed rendered results, "
+                f"{render_evidence['render_delta_evidence']['failure_count']} "
+                "failures, and "
+                f"{render_evidence['render_delta_evidence']['inconclusive_count']} "
+                "inconclusive rows. The next frontier "
                 f"ledger lists {render_evidence['frontier_candidate_count']} "
                 "candidate evidence lanes. This is substantial "
                 "feature-specific visual evidence, but the high-risk feature-edit "
