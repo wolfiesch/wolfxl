@@ -550,6 +550,71 @@ def _unique_mutation_report_checks(reports: list[dict]) -> list[object]:
     return sorted(values)
 
 
+def _indexed_result_checks(report: dict) -> dict[int, dict[str, object]]:
+    values: dict[int, dict[str, object]] = {}
+    for check in report["checks"]:
+        parts = str(check["path"]).split(".")
+        if len(parts) != 3 or parts[0] != "results":
+            continue
+        try:
+            index = int(parts[1])
+        except ValueError:
+            continue
+        values.setdefault(index, {})[parts[2]] = check["actual"]
+    return values
+
+
+def _ui_interaction_coverage_matrix(
+    reports: list[dict],
+    *,
+    known_boundary_reports: set[str],
+    diagnostic_reports: set[str],
+) -> dict:
+    matrix: dict[str, dict[str, dict[str, int]]] = {}
+    for report in reports:
+        mutation = _report_check_observed_actual(report, "mutation")
+        mutation_name = str(mutation) if mutation is not None else "source"
+        report_name = str(report["name"])
+        for result in _indexed_result_checks(report).values():
+            probe = result.get("probe")
+            status = result.get("status")
+            if not isinstance(probe, str) or not isinstance(status, str):
+                continue
+            cell = matrix.setdefault(mutation_name, {}).setdefault(
+                probe,
+                {
+                    "passed": 0,
+                    "failed": 0,
+                    "known_boundary_failed": 0,
+                    "diagnostic_failed": 0,
+                },
+            )
+            if status == "passed":
+                cell["passed"] += 1
+            elif status == "failed":
+                cell["failed"] += 1
+                if report_name in known_boundary_reports:
+                    cell["known_boundary_failed"] += 1
+                if report_name in diagnostic_reports:
+                    cell["diagnostic_failed"] += 1
+    return {
+        "observed_mutations": sorted(matrix),
+        "observed_probes": sorted(
+            {probe for probe_counts in matrix.values() for probe in probe_counts}
+        ),
+        "mutation_probe_pair_count": sum(
+            len(probe_counts) for probe_counts in matrix.values()
+        ),
+        "mutation_probe_pairs_with_failures": sum(
+            1
+            for probe_counts in matrix.values()
+            for cell in probe_counts.values()
+            if cell["failed"]
+        ),
+        "mutation_probe_matrix": matrix,
+    }
+
+
 def _is_render_equivalence_report(report: dict) -> bool:
     name = str(report.get("name", ""))
     path = str(report.get("path", ""))
@@ -635,6 +700,11 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
     unresolved_non_boundary_failure_count = (
         raw_failure_count - boundary_failure_count - diagnostic_failure_count
     )
+    coverage_matrix = _ui_interaction_coverage_matrix(
+        completed_reports,
+        known_boundary_reports=boundary_report_names,
+        diagnostic_reports=diagnostic_report_names,
+    )
     return {
         "probe_report_count": len(reports),
         "completed_probe_report_count": len(completed_reports),
@@ -662,6 +732,7 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
             if diagnostic_name in diagnostic_report_names
         ],
         "unresolved_failed_raw_reports": sorted(unresolved_failed_report_names),
+        "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_click_level_variant_universe",
     }
 

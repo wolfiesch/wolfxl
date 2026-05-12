@@ -93,6 +93,12 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     )
     assert interaction_requirement["evidence"]["diagnostic_non_state_change_reports"] == []
     assert interaction_requirement["evidence"]["unresolved_failed_raw_reports"] == []
+    assert interaction_requirement["evidence"]["coverage_matrix"][
+        "mutation_probe_pair_count"
+    ] > 0
+    assert interaction_requirement["evidence"]["coverage_matrix"][
+        "mutation_probe_pairs_with_failures"
+    ] == 2
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
@@ -384,6 +390,64 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
     ]
 
 
+def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() -> None:
+    report = completion._ui_interaction_coverage_matrix(
+        [
+            {
+                "name": "excel_ui_interaction_source_probe",
+                "checks": [
+                    {"path": "results.0.probe", "actual": "slicer_selection_state"},
+                    {"path": "results.0.status", "actual": "passed"},
+                    {"path": "results.1.probe", "actual": "pivot_refresh_state"},
+                    {"path": "results.1.status", "actual": "passed"},
+                ],
+            },
+            {
+                "name": "known_boundary_report",
+                "checks": [
+                    {"path": "mutation", "actual": "delete_first_row"},
+                    {"path": "results.0.probe", "actual": "slicer_selection_state"},
+                    {"path": "results.0.status", "actual": "failed"},
+                    {"path": "results.1.probe", "actual": "pivot_refresh_state"},
+                    {"path": "results.1.status", "actual": "passed"},
+                ],
+            },
+            {
+                "name": "diagnostic_report",
+                "checks": [
+                    {"path": "results.0.probe", "actual": "timeline_selection_state"},
+                    {"path": "results.0.status", "actual": "failed"},
+                ],
+            },
+        ],
+        known_boundary_reports={"known_boundary_report"},
+        diagnostic_reports={"diagnostic_report"},
+    )
+
+    assert report["observed_mutations"] == ["delete_first_row", "source"]
+    assert report["observed_probes"] == [
+        "pivot_refresh_state",
+        "slicer_selection_state",
+        "timeline_selection_state",
+    ]
+    assert report["mutation_probe_pair_count"] == 5
+    assert report["mutation_probe_pairs_with_failures"] == 2
+    assert report["mutation_probe_matrix"]["delete_first_row"][
+        "slicer_selection_state"
+    ] == {
+        "passed": 0,
+        "failed": 1,
+        "known_boundary_failed": 1,
+        "diagnostic_failed": 0,
+    }
+    assert report["mutation_probe_matrix"]["source"]["timeline_selection_state"] == {
+        "passed": 0,
+        "failed": 1,
+        "known_boundary_failed": 0,
+        "diagnostic_failed": 1,
+    }
+
+
 def test_completion_claim_audit_requires_named_current_evidence_reports(
     tmp_path: Path,
 ) -> None:
@@ -529,6 +593,7 @@ def test_completion_claim_classifies_paired_ui_diagnostic_non_state_change_reche
             *completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS,
         ]
     )
+    assert evidence["coverage_matrix"]["mutation_probe_pairs_with_failures"] == 5
 
 
 def test_completion_claim_counts_unexpected_ui_failures_from_failed_expectations(
@@ -557,6 +622,14 @@ def test_completion_claim_counts_unexpected_ui_failures_from_failed_expectations
         "excel_ui_interaction_unexpected_failure_probe"
     ]
     assert "excel_ui_interaction_unexpected_failure_probe" in evidence["failed_raw_reports"]
+
+
+def _diagnostic_probe_for_report(name: str) -> str:
+    if "control" in name:
+        return "embedded_control_openability"
+    if "timeline" in name:
+        return "timeline_selection_state"
+    return "slicer_selection_state"
 
 
 def _write_bundle_manifest(
@@ -630,29 +703,41 @@ def _write_bundle_manifest(
                 ]
             )
         if name in completion.KNOWN_UI_INTERACTION_BOUNDARY_REPORTS:
+            mutation = (
+                "delete_first_col" if "delete_first_col" in name else "delete_first_row"
+            )
             payload.update(
                 {
                     "probe_kind": "excel_ui_interaction",
                     "completed": True,
+                    "mutation": mutation,
                     "result_count": 11,
                     "failure_count": 1,
+                    "results": [
+                        {"probe": "slicer_selection_state", "status": "failed"}
+                    ],
                 }
             )
             expect.extend(
                 [
                     {"path": "probe_kind", "equals": "excel_ui_interaction"},
                     {"path": "completed", "equals": True},
+                    {"path": "mutation", "equals": mutation},
                     {"path": "result_count", "equals": 11},
                     {"path": "failure_count", "equals": 1},
+                    {"path": "results.0.probe", "equals": "slicer_selection_state"},
+                    {"path": "results.0.status", "equals": "failed"},
                 ]
             )
         if name in completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS:
+            probe = _diagnostic_probe_for_report(name)
             payload.update(
                 {
                     "probe_kind": "excel_ui_interaction",
                     "completed": True,
                     "result_count": 1,
                     "failure_count": 1,
+                    "results": [{"probe": probe, "status": "failed"}],
                 }
             )
             expect.extend(
@@ -661,15 +746,19 @@ def _write_bundle_manifest(
                     {"path": "completed", "equals": True},
                     {"path": "result_count", "equals": 1},
                     {"path": "failure_count", "equals": 1},
+                    {"path": "results.0.probe", "equals": probe},
+                    {"path": "results.0.status", "equals": "failed"},
                 ]
             )
         if name in completion.KNOWN_UI_INTERACTION_DIAGNOSTIC_NON_STATE_CHANGE_REPORTS.values():
+            probe = _diagnostic_probe_for_report(name)
             payload.update(
                 {
                     "probe_kind": "excel_ui_interaction",
                     "completed": True,
                     "result_count": 1,
                     "failure_count": 0,
+                    "results": [{"probe": probe, "status": "passed"}],
                 }
             )
             expect.extend(
@@ -678,6 +767,8 @@ def _write_bundle_manifest(
                     {"path": "completed", "equals": True},
                     {"path": "result_count", "equals": 1},
                     {"path": "failure_count", "equals": 0},
+                    {"path": "results.0.probe", "equals": probe},
+                    {"path": "results.0.status", "equals": "passed"},
                 ]
             )
         if name == "excel_ui_interaction_unexpected_failure_probe":
@@ -687,6 +778,9 @@ def _write_bundle_manifest(
                     "completed": True,
                     "result_count": 1,
                     "failure_count": 1,
+                    "results": [
+                        {"probe": "slicer_selection_state", "status": "failed"}
+                    ],
                 }
             )
             expect.extend(
@@ -695,6 +789,8 @@ def _write_bundle_manifest(
                     {"path": "completed", "equals": True},
                     {"path": "result_count", "equals": 1},
                     {"path": "failure_count", "equals": 0},
+                    {"path": "results.0.probe", "equals": "slicer_selection_state"},
+                    {"path": "results.0.status", "equals": "failed"},
                 ]
             )
         report_path.write_text(json.dumps(payload))
