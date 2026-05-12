@@ -104,6 +104,7 @@ RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS = {
     ),
     "external_link_relationship_preserving_edits": (
         "external_link_rename_sheet_render_equivalence",
+        "external_link_move_formula_range_render_delta",
     ),
     "additional_high_risk_feature_edits": (
         "excel_render_marker_cell_delta_full_pack_report",

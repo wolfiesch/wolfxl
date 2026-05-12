@@ -2770,6 +2770,39 @@
       ]
     },
     {
+      "name": "external_link_move_formula_range_excel_render",
+      "path": "/tmp/wolfxl-render-excel-external-link-move-formula-20260512.json",
+      "producer": "rm -rf /tmp/wolfxl-external-link-move-formula-render-input-20260512 /tmp/wolfxl-render-excel-external-link-move-formula-20260512 /tmp/wolfxl-render-excel-external-link-move-formula-20260512.json /tmp/wolfxl-external-link-move-formula-render-delta-20260512.json && mkdir -p /tmp/wolfxl-external-link-move-formula-render-input-20260512 && cp tests/fixtures/external_oracle/real-excel-external-link-basic.xlsx /tmp/wolfxl-external-link-move-formula-render-input-20260512/ && (osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true) && uv run --no-sync python scripts/run_ooxml_render_compare.py /tmp/wolfxl-external-link-move-formula-render-input-20260512 --output-dir /tmp/wolfxl-render-excel-external-link-move-formula-20260512 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation move_formula_range > /tmp/wolfxl-render-excel-external-link-move-formula-20260512.json",
+      "expect": [
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["move_formula_range"]},
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.status", "equals": "rendered"}
+      ]
+    },
+    {
+      "name": "external_link_move_formula_range_render_delta",
+      "path": "/tmp/wolfxl-external-link-move-formula-render-delta-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-external-link-move-formula-20260512/render-compare-report.json --mutation move_formula_range --min-changed-count 1 --max-unchanged-count 0 --timeout 180 --strict > /tmp/wolfxl-external-link-move-formula-render-delta-20260512.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "move_formula_range"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 1},
+        {"path": "changed_count", "equals": 1},
+        {"path": "unchanged_count", "equals": 0},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-external-link-basic.xlsx"},
+        {"path": "results.0.status", "equals": "changed"},
+        {"path": "results.0.message", "contains": "intentional render delta observed"}
+      ]
+    },
+    {
       "name": "excel_render_delete_first_row_delta_full_pack_report",
       "path": "/tmp/wolfxl-delete-first-row-render-delta-20260509.json",
       "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-intentional-delete-first-axis-20260508.json --mutation delete_first_row --min-changed-count 15 --max-unchanged-count 7 --timeout 180 --strict > /tmp/wolfxl-delete-first-row-render-delta-20260509.json",
