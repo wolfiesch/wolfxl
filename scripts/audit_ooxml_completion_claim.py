@@ -476,6 +476,11 @@ REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "synthgl_recursive_excel_render_noop_byte_identical",
     "rename_sheet_defined_name_ref_audit_report",
 )
+FUTURE_SURFACE_GAP_RADAR_REPORTS = tuple(
+    report_name
+    for report_name in REQUIRED_CURRENT_EVIDENCE_REPORTS
+    if report_name.endswith("_gap_radar")
+)
 
 OPEN_REQUIREMENTS = (
     {
@@ -1130,6 +1135,54 @@ def _is_qualified_diagnostic_non_state_change(
     )
 
 
+def _future_surface_evidence(bundle_audit: dict) -> dict:
+    report_by_name = {str(report["name"]): report for report in bundle_audit["reports"]}
+    present_reports = [
+        report_by_name[report_name]
+        for report_name in FUTURE_SURFACE_GAP_RADAR_REPORTS
+        if report_name in report_by_name
+    ]
+    clear_reports = [
+        str(report["name"])
+        for report in present_reports
+        if _report_check_observed_actual(report, "clear") is True
+    ]
+    unclear_reports = [
+        str(report["name"])
+        for report in present_reports
+        if _report_check_observed_actual(report, "clear") is False
+    ]
+    missing_clear_status_reports = [
+        str(report["name"])
+        for report in present_reports
+        if _report_check_observed_actual(report, "clear") is None
+    ]
+    return {
+        "required_gap_radar_report_count": len(FUTURE_SURFACE_GAP_RADAR_REPORTS),
+        "present_gap_radar_report_count": len(present_reports),
+        "missing_gap_radar_reports": sorted(
+            set(FUTURE_SURFACE_GAP_RADAR_REPORTS) - set(report_by_name)
+        ),
+        "clear_gap_radar_report_count": len(clear_reports),
+        "unclear_gap_radar_reports": sorted(unclear_reports),
+        "missing_clear_status_reports": sorted(missing_clear_status_reports),
+        "fixture_count": _sum_numeric_report_checks(present_reports, "fixture_count"),
+        "unknown_part_family_count": _sum_numeric_report_checks(
+            present_reports, "unknown_part_family_count"
+        ),
+        "unknown_relationship_type_count": _sum_numeric_report_checks(
+            present_reports, "unknown_relationship_type_count"
+        ),
+        "unknown_content_type_count": _sum_numeric_report_checks(
+            present_reports, "unknown_content_type_count"
+        ),
+        "unknown_extension_uri_count": _sum_numeric_report_checks(
+            present_reports, "unknown_extension_uri_count"
+        ),
+        "gap_radar_reports": sorted(str(report["name"]) for report in present_reports),
+    }
+
+
 def _open_requirements(bundle_audit: dict) -> list[dict]:
     requirements = [dict(requirement) for requirement in OPEN_REQUIREMENTS]
     source_count = _check_actual(bundle_audit, "corpus_portfolio_diversity", "source_count")
@@ -1179,6 +1232,7 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
             break
     render_evidence = _render_equivalence_evidence(bundle_audit)
     interaction_evidence = _ui_interaction_evidence(bundle_audit)
+    future_surface_evidence = _future_surface_evidence(bundle_audit)
     for requirement in requirements:
         if requirement["id"] == "feature_specific_intentional_render_equivalence":
             requirement["evidence"] = render_evidence
@@ -1234,6 +1288,27 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 "The next frontier ledger lists "
                 f"{interaction_evidence['frontier_candidate_count']} candidate "
                 "evidence lanes."
+            )
+        elif requirement["id"] == "future_surface_exhaustiveness":
+            requirement["evidence"] = future_surface_evidence
+            requirement["reason"] = (
+                f"The pinned bundle currently has "
+                f"{future_surface_evidence['present_gap_radar_report_count']} of "
+                f"{future_surface_evidence['required_gap_radar_report_count']} "
+                "required gap-radar reports present, covering "
+                f"{future_surface_evidence['fixture_count']} scanned workbooks. "
+                f"{future_surface_evidence['clear_gap_radar_report_count']} reports "
+                "are clear, with "
+                f"{future_surface_evidence['unknown_part_family_count']} unknown "
+                "part families, "
+                f"{future_surface_evidence['unknown_relationship_type_count']} "
+                "unknown relationship types, "
+                f"{future_surface_evidence['unknown_content_type_count']} unknown "
+                "content types, and "
+                f"{future_surface_evidence['unknown_extension_uri_count']} unknown "
+                "extension URIs reported across those pinned scans. Gap radar is a "
+                "strong tripwire over the scanned corpora, but it still cannot "
+                "prove that no unseen future real-world Excel surface exists."
             )
     return requirements
 
