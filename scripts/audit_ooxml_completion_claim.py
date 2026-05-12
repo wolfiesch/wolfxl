@@ -65,6 +65,15 @@ EXPECTED_UI_INTERACTION_PROBES = (
     "timeline_selection_state",
     "unsupported_content_prompt",
 )
+EXPECTED_RENDER_EQUIVALENCE_MUTATIONS = (
+    "add_conditional_formatting",
+    "add_data_validation",
+    "add_remove_chart",
+    "copy_first_sheet",
+    "copy_remove_sheet",
+    "rename_first_sheet",
+    "retarget_external_links",
+)
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -760,7 +769,11 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
     }
 
 
-def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
+def _render_equivalence_coverage_matrix(
+    reports: list[dict],
+    *,
+    expected_mutations: tuple[str, ...] = EXPECTED_RENDER_EQUIVALENCE_MUTATIONS,
+) -> dict:
     matrix: dict[str, dict[str, object]] = {}
     multi_mutation_reports: list[str] = []
     issue_reports: list[str] = []
@@ -775,7 +788,12 @@ def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
         inconclusive_count = _report_count(report, "inconclusive_count")
         non_comparable_count = _report_count(report, "non_comparable_count")
         skipped_count = _report_count(report, "skipped_count")
-        has_issue_rows = bool(failure_count or inconclusive_count or skipped_count)
+        has_issue_rows = bool(
+            failure_count
+            or inconclusive_count
+            or non_comparable_count
+            or skipped_count
+        )
         if has_issue_rows:
             issue_reports.append(report_name)
         if len(mutations) > 1:
@@ -833,10 +851,31 @@ def _render_equivalence_coverage_matrix(reports: list[dict]) -> dict:
                 issue_report_names = cell["issue_reports"]
                 if isinstance(issue_report_names, list):
                     issue_report_names.append(report_name)
+    missing_expected_mutations = [
+        mutation for mutation in expected_mutations if mutation not in matrix
+    ]
+    unpassed_expected_mutations = [
+        mutation
+        for mutation in expected_mutations
+        if mutation in matrix
+        and (
+            int(matrix[mutation]["ready_report_count"]) == 0
+            or int(matrix[mutation]["excel_report_count"]) == 0
+            or int(matrix[mutation]["issue_report_count"]) > 0
+        )
+    ]
     return {
         "observed_mutations": sorted(matrix),
         "mutation_count": len(matrix),
         "mutation_matrix": matrix,
+        "expected_mutations": list(expected_mutations),
+        "expected_mutation_count": len(expected_mutations),
+        "observed_expected_mutation_count": len(expected_mutations)
+        - len(missing_expected_mutations),
+        "missing_expected_mutation_count": len(missing_expected_mutations),
+        "missing_expected_mutations": missing_expected_mutations,
+        "unpassed_expected_mutation_count": len(unpassed_expected_mutations),
+        "unpassed_expected_mutations": unpassed_expected_mutations,
         "multi_mutation_report_count": len(multi_mutation_reports),
         "multi_mutation_reports": sorted(multi_mutation_reports),
         "issue_report_count": len(issue_reports),
@@ -995,6 +1034,7 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
     for requirement in requirements:
         if requirement["id"] == "feature_specific_intentional_render_equivalence":
             requirement["evidence"] = render_evidence
+            render_matrix = render_evidence["coverage_matrix"]
             requirement["reason"] = (
                 f"The pinned bundle currently has {render_evidence['ready_report_count']} "
                 "ready render-equivalence reports, including "
@@ -1003,10 +1043,17 @@ def _open_requirements(bundle_audit: dict) -> list[dict]:
                 f"{render_evidence['failure_count']} failures, "
                 f"{render_evidence['inconclusive_count']} inconclusive rows, and "
                 f"{render_evidence['non_comparable_count']} non-comparable rows, "
-                f"and {render_evidence['skipped_count']} skips. This is substantial "
-                "feature-specific visual evidence, but the high-risk feature-edit "
-                "universe is still open-ended, so it does not yet prove semantic "
-                "visual equivalence for every high-risk edit."
+                f"and {render_evidence['skipped_count']} skips. The current "
+                "render-equivalence target matrix covers "
+                f"{render_matrix['observed_expected_mutation_count']} of "
+                f"{render_matrix['expected_mutation_count']} expected mutation "
+                f"buckets, with {render_matrix['missing_expected_mutation_count']} "
+                "missing expected buckets and "
+                f"{render_matrix['unpassed_expected_mutation_count']} unpassed "
+                "expected buckets. This is substantial feature-specific visual "
+                "evidence, but the high-risk feature-edit universe is still "
+                "open-ended, so it does not yet prove semantic visual equivalence "
+                "for every high-risk edit."
             )
         elif requirement["id"] == "broader_click_level_interaction_variants":
             requirement["evidence"] = interaction_evidence
