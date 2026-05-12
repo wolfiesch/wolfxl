@@ -99,6 +99,22 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["coverage_matrix"][
         "mutation_probe_pairs_with_failures"
     ] == 2
+    assert interaction_requirement["evidence"]["coverage_matrix"][
+        "expected_mutation_probe_pair_count"
+    ] == (
+        len(completion.EXPECTED_UI_INTERACTION_MUTATIONS)
+        * len(completion.EXPECTED_UI_INTERACTION_PROBES)
+    )
+    assert interaction_requirement["evidence"]["coverage_matrix"][
+        "missing_expected_mutation_probe_pair_count"
+    ] == (
+        interaction_requirement["evidence"]["coverage_matrix"][
+            "expected_mutation_probe_pair_count"
+        ]
+        - interaction_requirement["evidence"]["coverage_matrix"][
+            "observed_expected_mutation_probe_pair_count"
+        ]
+    )
     assert interaction_requirement["evidence"]["target_status"] == (
         "open_unbounded_click_level_variant_universe"
     )
@@ -559,6 +575,23 @@ def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() ->
     ]
     assert report["mutation_probe_pair_count"] == 5
     assert report["mutation_probe_pairs_with_failures"] == 2
+    assert report["expected_mutation_probe_pair_count"] == (
+        len(completion.EXPECTED_UI_INTERACTION_MUTATIONS)
+        * len(completion.EXPECTED_UI_INTERACTION_PROBES)
+    )
+    assert report["observed_expected_mutation_probe_pair_count"] == 5
+    assert report["missing_expected_mutation_probe_pair_count"] == (
+        report["expected_mutation_probe_pair_count"] - 5
+    )
+    assert {
+        (pair["mutation"], pair["probe"])
+        for pair in report["unpassed_expected_mutation_probe_pairs"]
+    } == {
+        ("delete_first_row", "slicer_selection_state"),
+        ("source", "timeline_selection_state"),
+    }
+    assert report["boundary_only_expected_mutation_probe_pair_count"] == 1
+    assert report["diagnostic_only_expected_mutation_probe_pair_count"] == 1
     assert report["mutation_probe_matrix"]["delete_first_row"][
         "slicer_selection_state"
     ] == {
