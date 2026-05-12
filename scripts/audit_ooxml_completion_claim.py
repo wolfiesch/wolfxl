@@ -98,6 +98,11 @@ RENDER_EQUIVALENCE_FRONTIER_CANDIDATES = (
         ),
     },
 )
+RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS = {
+    "pivot_slicer_structural_edits": (
+        "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta",
+    ),
+}
 UI_INTERACTION_FRONTIER_CANDIDATES = (
     {
         "id": "broader_embedded_control_variants",
@@ -121,6 +126,7 @@ UI_INTERACTION_FRONTIER_CANDIDATES = (
         ),
     },
 )
+UI_INTERACTION_FRONTIER_EVIDENCE_REPORTS: dict[str, tuple[str, ...]] = {}
 
 REQUIRED_CURRENT_EVIDENCE_REPORTS = (
     "combined_all_evidence_gate",
@@ -828,10 +834,33 @@ def _render_equivalence_evidence(bundle_audit: dict) -> dict:
         "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_high_risk_feature_edit_universe",
         "frontier_candidate_count": len(RENDER_EQUIVALENCE_FRONTIER_CANDIDATES),
-        "frontier_candidates": [
-            dict(candidate) for candidate in RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
-        ],
+        "frontier_candidates": _frontier_candidates_with_evidence(
+            RENDER_EQUIVALENCE_FRONTIER_CANDIDATES,
+            RENDER_EQUIVALENCE_FRONTIER_EVIDENCE_REPORTS,
+            bundle_audit["reports"],
+        ),
     }
+
+
+def _frontier_candidates_with_evidence(
+    candidates: tuple[dict, ...],
+    evidence_reports: dict[str, tuple[str, ...]],
+    reports: list[dict],
+) -> list[dict]:
+    report_names = {str(report["name"]) for report in reports}
+    enriched: list[dict] = []
+    for candidate in candidates:
+        candidate_id = str(candidate["id"])
+        observed_reports = sorted(
+            report_name
+            for report_name in evidence_reports.get(candidate_id, ())
+            if report_name in report_names
+        )
+        enriched_candidate = dict(candidate)
+        enriched_candidate["observed_report_count"] = len(observed_reports)
+        enriched_candidate["observed_reports"] = observed_reports
+        enriched.append(enriched_candidate)
+    return enriched
 
 
 def _render_equivalence_coverage_matrix(
@@ -1039,9 +1068,11 @@ def _ui_interaction_evidence(bundle_audit: dict) -> dict:
         "coverage_matrix": coverage_matrix,
         "target_status": "open_unbounded_click_level_variant_universe",
         "frontier_candidate_count": len(UI_INTERACTION_FRONTIER_CANDIDATES),
-        "frontier_candidates": [
-            dict(candidate) for candidate in UI_INTERACTION_FRONTIER_CANDIDATES
-        ],
+        "frontier_candidates": _frontier_candidates_with_evidence(
+            UI_INTERACTION_FRONTIER_CANDIDATES,
+            UI_INTERACTION_FRONTIER_EVIDENCE_REPORTS,
+            bundle_audit["reports"],
+        ),
     }
 
 

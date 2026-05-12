@@ -3401,6 +3401,41 @@
       ]
     },
     {
+      "name": "slicer_shared_two_pivots_sidecar_excel_render_move_formula_range",
+      "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512.json",
+      "producer": "rm -rf /tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512 /tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512.json /tmp/wolfxl-slicer-shared-two-pivots-move-formula-render-delta-20260512.json; osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation move_formula_range > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512.json",
+      "expect": [
+        {"path": "result_count", "equals": 1},
+        {"path": "failure_count", "equals": 0},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutations", "equals": ["move_formula_range"]},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.status", "equals": "sampled_rendered"},
+        {"path": "results.0.page_count", "equals": 72},
+        {"path": "results.0.compared_page_count", "equals": 4}
+      ]
+    },
+    {
+      "name": "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta",
+      "path": "/tmp/wolfxl-slicer-shared-two-pivots-move-formula-render-delta-20260512.json",
+      "producer": "uv run --no-sync python scripts/audit_ooxml_intentional_render_delta.py /tmp/wolfxl-render-excel-slicer-shared-two-pivots-move-formula-20260512/render-compare-report.json --mutation move_formula_range --min-changed-count 1 --max-unchanged-count 0 --timeout 180 --strict > /tmp/wolfxl-slicer-shared-two-pivots-move-formula-render-delta-20260512.json",
+      "expect": [
+        {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
+        {"path": "mutation", "equals": "move_formula_range"},
+        {"path": "missing_mutation", "equals": false},
+        {"path": "result_count", "equals": 1},
+        {"path": "changed_count", "equals": 1},
+        {"path": "unchanged_count", "equals": 0},
+        {"path": "failure_count", "equals": 0},
+        {"path": "inconclusive_count", "equals": 0},
+        {"path": "skipped_count", "equals": 0},
+        {"path": "results.0.fixture", "equals": "real-excel-shared-slicer-two-pivots.xlsx"},
+        {"path": "results.0.status", "equals": "changed"},
+        {"path": "results.0.message", "contains": "intentional render delta observed"}
+      ]
+    },
+    {
       "name": "slicer_shared_two_pivots_sidecar_excel_render_copy_remove_sheet",
       "path": "/tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-remove-sheet-20260509.json",
       "producer": "osascript -e 'tell application \"Microsoft Excel\" to quit' >/dev/null 2>&1 || true; uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/slicer_timeline_variants --output-dir /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-remove-sheet-20260509 --render-engine excel --timeout 240 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation copy_remove_sheet > /tmp/wolfxl-render-excel-slicer-shared-two-pivots-copy-remove-sheet-20260509.json",
