@@ -77,9 +77,6 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert render_requirement["evidence"]["frontier_candidate_count"] == len(
         completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
     )
-    assert render_requirement["evidence"]["frontier_candidates"] == list(
-        completion.RENDER_EQUIVALENCE_FRONTIER_CANDIDATES
-    )
     assert {
         candidate["id"]
         for candidate in render_requirement["evidence"]["frontier_candidates"]
@@ -88,6 +85,10 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "external_link_relationship_preserving_edits",
         "additional_high_risk_feature_edits",
     }
+    assert all(
+        candidate["observed_report_count"] == 0
+        for candidate in render_requirement["evidence"]["frontier_candidates"]
+    )
     assert render_requirement["evidence"]["coverage_matrix"][
         "expected_mutation_count"
     ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)
@@ -133,9 +134,6 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert interaction_requirement["evidence"]["frontier_candidate_count"] == len(
         completion.UI_INTERACTION_FRONTIER_CANDIDATES
     )
-    assert interaction_requirement["evidence"]["frontier_candidates"] == list(
-        completion.UI_INTERACTION_FRONTIER_CANDIDATES
-    )
     assert {
         candidate["id"]
         for candidate in interaction_requirement["evidence"]["frontier_candidates"]
@@ -144,6 +142,10 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
         "broader_slicer_timeline_variants",
         "broader_prompt_variants",
     }
+    assert all(
+        candidate["observed_report_count"] == 0
+        for candidate in interaction_requirement["evidence"]["frontier_candidates"]
+    )
     assert interaction_requirement["evidence"]["diagnostic_non_state_change_reports"] == []
     assert interaction_requirement["evidence"]["unresolved_failed_raw_reports"] == []
     assert interaction_requirement["evidence"]["coverage_matrix"][
@@ -455,6 +457,24 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
                         },
                     ],
                 },
+                {
+                    "name": (
+                        "slicer_shared_two_pivots_sidecar_move_formula_range_"
+                        "render_delta"
+                    ),
+                    "path": "/tmp/pivot-slicer-move-formula-render-delta.json",
+                    "checks": [
+                        {"path": "ready", "actual": True, "passed": True},
+                        {"path": "render_engine", "actual": "excel", "passed": True},
+                        {
+                            "path": "mutation",
+                            "actual": "move_formula_range",
+                            "passed": True,
+                        },
+                        {"path": "changed_count", "actual": 1, "passed": True},
+                        {"path": "failure_count", "actual": 0, "passed": True},
+                    ],
+                },
             ]
         }
     )
@@ -487,6 +507,15 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
         "retarget_external_links",
     ]
     assert report["coverage_matrix"]["unpassed_expected_mutations"] == []
+    pivot_frontier = next(
+        candidate
+        for candidate in report["frontier_candidates"]
+        if candidate["id"] == "pivot_slicer_structural_edits"
+    )
+    assert pivot_frontier["observed_report_count"] == 1
+    assert pivot_frontier["observed_reports"] == [
+        "slicer_shared_two_pivots_sidecar_move_formula_range_render_delta"
+    ]
 
 
 def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate() -> None:
