@@ -142,13 +142,27 @@ UI_INTERACTION_FRONTIER_CANDIDATES = (
 )
 UI_INTERACTION_FRONTIER_EVIDENCE_REPORTS: dict[str, tuple[str, ...]] = {
     "broader_embedded_control_variants": (
+        "excel_ui_interaction_add_conditional_formatting_control_evidence",
+        "excel_ui_interaction_add_data_validation_umya_listbox_control_evidence",
+        "excel_ui_interaction_copy_remove_control_evidence",
+        "excel_ui_interaction_marker_control_evidence",
         "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
+        "excel_ui_interaction_style_control_evidence",
     ),
     "broader_slicer_timeline_variants": (
+        "excel_ui_interaction_add_conditional_formatting_shared_slicer_evidence",
+        "excel_ui_interaction_add_conditional_formatting_timeline_evidence",
+        "excel_ui_interaction_copy_remove_timeline_evidence",
+        "excel_ui_interaction_marker_timeline_evidence",
         "excel_ui_interaction_rename_external_oracle_pivot_slicer_timeline_evidence",
         "excel_ui_interaction_rename_shared_slicer_evidence",
+        "excel_ui_interaction_style_timeline_evidence",
     ),
     "broader_prompt_variants": (
+        "excel_ui_interaction_add_remove_chart_external_link_current_setting_evidence",
+        "excel_ui_interaction_add_remove_chart_external_link_forced_prompt_evidence",
+        "excel_ui_interaction_add_remove_chart_macro_evidence",
+        "excel_ui_interaction_marker_external_link_current_prompt_evidence",
         "excel_ui_interaction_rename_external_oracle_prompt_control_evidence",
         "excel_ui_interaction_rename_powerview_evidence",
     ),
