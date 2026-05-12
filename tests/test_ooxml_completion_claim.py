@@ -648,6 +648,49 @@ def test_render_equivalence_coverage_matrix_reports_current_target_gaps() -> Non
     assert report["current_target_ready"] is False
 
 
+def test_render_equivalence_coverage_matrix_marks_current_target_ready() -> None:
+    report = completion._render_equivalence_coverage_matrix(
+        [
+            {
+                "name": "copy_remove_sheet_render_equivalence",
+                "path": "/tmp/copy-remove-sheet-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {"path": "mutation", "actual": "copy_remove_sheet", "passed": True},
+                    {"path": "result_count", "actual": 4, "passed": True},
+                    {"path": "passed_count", "actual": 4, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "non_comparable_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+            {
+                "name": "rename_first_sheet_render_equivalence",
+                "path": "/tmp/rename-first-sheet-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {"path": "mutation", "actual": "rename_first_sheet", "passed": True},
+                    {"path": "result_count", "actual": 2, "passed": True},
+                    {"path": "passed_count", "actual": 2, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "non_comparable_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+        ],
+        expected_mutations=("copy_remove_sheet", "rename_first_sheet"),
+    )
+
+    assert report["observed_expected_mutation_count"] == 2
+    assert report["missing_expected_mutations"] == []
+    assert report["unpassed_expected_mutations"] == []
+    assert report["current_target_ready"] is True
+
+
 def test_render_equivalence_coverage_matrix_rejects_non_excel_clean_target() -> None:
     report = completion._render_equivalence_coverage_matrix(
         [
@@ -752,6 +795,41 @@ def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() ->
         "known_boundary_failed": 0,
         "diagnostic_failed": 1,
     }
+
+
+def test_ui_interaction_coverage_matrix_marks_current_target_ready() -> None:
+    report = completion._ui_interaction_coverage_matrix(
+        [
+            {
+                "name": "excel_ui_interaction_source_probe",
+                "checks": [
+                    {"path": "results.0.probe", "actual": "slicer_selection_state"},
+                    {"path": "results.0.status", "actual": "passed"},
+                    {"path": "results.1.probe", "actual": "pivot_refresh_state"},
+                    {"path": "results.1.status", "actual": "passed"},
+                ],
+            },
+            {
+                "name": "excel_ui_interaction_copy_remove_sheet_probe",
+                "checks": [
+                    {"path": "mutation", "actual": "copy_remove_sheet"},
+                    {"path": "results.0.probe", "actual": "slicer_selection_state"},
+                    {"path": "results.0.status", "actual": "passed"},
+                    {"path": "results.1.probe", "actual": "pivot_refresh_state"},
+                    {"path": "results.1.status", "actual": "passed"},
+                ],
+            },
+        ],
+        known_boundary_reports=set(),
+        diagnostic_reports=set(),
+        expected_mutations=("source", "copy_remove_sheet"),
+        expected_probes=("slicer_selection_state", "pivot_refresh_state"),
+    )
+
+    assert report["observed_expected_mutation_probe_pair_count"] == 4
+    assert report["missing_expected_mutation_probe_pairs"] == []
+    assert report["unpassed_expected_mutation_probe_pairs"] == []
+    assert report["current_target_ready"] is True
 
 
 def test_completion_claim_audit_requires_named_current_evidence_reports(
