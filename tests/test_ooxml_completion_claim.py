@@ -388,6 +388,132 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
         "add_data_validation",
         "copy_first_sheet",
     ]
+    assert report["coverage_matrix"]["observed_mutations"] == [
+        "add_data_validation",
+        "copy_first_sheet",
+    ]
+    assert report["coverage_matrix"]["mutation_count"] == 2
+    assert report["coverage_matrix"]["mutation_matrix"]["copy_first_sheet"][
+        "single_mutation_result_count"
+    ] == 2
+
+
+def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate() -> None:
+    report = completion._render_equivalence_coverage_matrix(
+        [
+            {
+                "name": "single_copy_remove_sheet_equivalence",
+                "path": "/tmp/copy-remove-sheet-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {"path": "mutation", "actual": "copy_remove_sheet", "passed": True},
+                    {"path": "result_count", "actual": 4, "passed": True},
+                    {"path": "passed_count", "actual": 4, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+            {
+                "name": "neutral_feature_equivalence",
+                "path": "/tmp/neutral-feature-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {
+                        "path": "observed_mutations",
+                        "actual": ["add_data_validation", "add_remove_chart"],
+                        "passed": True,
+                    },
+                    {
+                        "path": "mutations",
+                        "actual": [
+                            "add_data_validation",
+                            "add_remove_chart",
+                            "missing_requested_mutation",
+                        ],
+                        "passed": True,
+                    },
+                    {
+                        "path": "missing_mutations",
+                        "actual": ["missing_requested_mutation"],
+                        "passed": True,
+                    },
+                    {"path": "result_count", "actual": 6, "passed": True},
+                    {"path": "passed_count", "actual": 5, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 1, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+        ]
+    )
+
+    assert report["observed_mutations"] == [
+        "add_data_validation",
+        "add_remove_chart",
+        "copy_remove_sheet",
+    ]
+    assert "missing_requested_mutation" not in report["observed_mutations"]
+    assert report["multi_mutation_report_count"] == 1
+    assert report["issue_reports"] == ["neutral_feature_equivalence"]
+    assert report["mutation_matrix"]["copy_remove_sheet"] == {
+        "report_count": 1,
+        "ready_report_count": 1,
+        "excel_report_count": 1,
+        "single_mutation_result_count": 4,
+        "single_mutation_passed_count": 4,
+        "single_mutation_failure_count": 0,
+        "single_mutation_inconclusive_count": 0,
+        "single_mutation_skipped_count": 0,
+        "multi_mutation_report_count": 0,
+        "issue_report_count": 0,
+        "issue_reports": [],
+    }
+    assert report["mutation_matrix"]["add_data_validation"][
+        "single_mutation_result_count"
+    ] == 0
+    assert report["mutation_matrix"]["add_data_validation"][
+        "multi_mutation_report_count"
+    ] == 1
+    assert report["mutation_matrix"]["add_remove_chart"]["issue_reports"] == [
+        "neutral_feature_equivalence"
+    ]
+
+
+def test_render_equivalence_coverage_matrix_uses_requested_minus_missing_fallback() -> None:
+    report = completion._render_equivalence_coverage_matrix(
+        [
+            {
+                "name": "legacy_requested_mutations_equivalence",
+                "path": "/tmp/legacy-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {
+                        "path": "mutations",
+                        "actual": ["copy_remove_sheet", "missing_requested_mutation"],
+                        "passed": True,
+                    },
+                    {
+                        "path": "missing_mutations",
+                        "actual": ["missing_requested_mutation"],
+                        "passed": True,
+                    },
+                    {"path": "result_count", "actual": 3, "passed": True},
+                    {"path": "passed_count", "actual": 3, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            }
+        ]
+    )
+
+    assert report["observed_mutations"] == ["copy_remove_sheet"]
+    assert "missing_requested_mutation" not in report["mutation_matrix"]
+    assert report["mutation_matrix"]["copy_remove_sheet"]["single_mutation_result_count"] == 3
 
 
 def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() -> None:

@@ -52,6 +52,7 @@ def _write_fake_render_result(
     after_pdf = after_pdf_dir / f"after-{fixture}.pdf"
     after_pdf.write_bytes(b"%PDF-1.4\n")
     payload = {
+        "render_engine": "excel",
         "results": [
             {
                 "fixture": f"{fixture}.xlsx",
@@ -78,6 +79,7 @@ def test_copy_sheet_render_equivalence_accepts_duplicate_later_page(tmp_path: Pa
     result = audit.audit_copy_sheet_render_equivalence(report)
 
     assert result["ready"] is True
+    assert result["render_engine"] == "excel"
     assert result["passed_count"] == 1
     assert result["failure_count"] == 0
     assert result["results"][0]["matched_page"] == 2

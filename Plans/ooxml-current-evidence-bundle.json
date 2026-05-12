@@ -2318,6 +2318,7 @@
       "producer": "uv run --no-sync python scripts/run_ooxml_render_compare.py tests/fixtures/external_oracle --output-dir /tmp/wolfxl-render-excel-copy-sheet-full-pack-first-last-pages-20260509 --render-engine excel --timeout 180 --max-pages-per-fixture 4 --page-selection first-and-last-pages --mutation copy_first_sheet && uv run --no-sync python scripts/audit_ooxml_copy_sheet_render_equivalence.py /tmp/wolfxl-render-excel-copy-sheet-full-pack-first-last-pages-20260509/render-compare-report.json --strict > /tmp/wolfxl-copy-sheet-render-equivalence-first-last-pages-20260509.json",
       "expect": [
         {"path": "ready", "equals": true},
+        {"path": "render_engine", "equals": "excel"},
         {"path": "mutation", "equals": "copy_first_sheet"},
         {"path": "result_count", "equals": 22},
         {"path": "passed_count", "equals": 20},
