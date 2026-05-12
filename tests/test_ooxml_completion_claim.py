@@ -74,6 +74,22 @@ def test_completion_claim_audit_supports_current_claim_but_not_exhaustive_claim(
     assert render_requirement["evidence"]["target_status"] == (
         "open_unbounded_high_risk_feature_edit_universe"
     )
+    assert render_requirement["evidence"]["coverage_matrix"][
+        "expected_mutation_count"
+    ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS)
+    assert render_requirement["evidence"]["coverage_matrix"][
+        "observed_expected_mutation_count"
+    ] == 1
+    assert render_requirement["evidence"]["coverage_matrix"][
+        "missing_expected_mutation_count"
+    ] == len(completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS) - 1
+    assert render_requirement["evidence"]["coverage_matrix"][
+        "unpassed_expected_mutation_count"
+    ] == 0
+    assert "current render-equivalence target matrix covers 1 of" in (
+        render_requirement["reason"]
+    )
+    assert "missing expected buckets" in render_requirement["reason"]
     interaction_requirement = next(
         requirement
         for requirement in report["missing_requirements"]
@@ -412,6 +428,20 @@ def test_render_equivalence_evidence_counts_scalar_mutation_reports() -> None:
     assert report["coverage_matrix"]["mutation_matrix"]["copy_first_sheet"][
         "single_mutation_result_count"
     ] == 2
+    assert report["coverage_matrix"]["expected_mutation_count"] == len(
+        completion.EXPECTED_RENDER_EQUIVALENCE_MUTATIONS
+    )
+    assert report["coverage_matrix"]["observed_expected_mutation_count"] == 2
+    assert report["coverage_matrix"]["missing_expected_mutations"] == [
+        "add_conditional_formatting",
+        "add_remove_chart",
+        "copy_remove_sheet",
+        "rename_first_sheet",
+        "retarget_external_links",
+    ]
+    assert report["coverage_matrix"]["unpassed_expected_mutations"] == [
+        "copy_first_sheet"
+    ]
 
 
 def test_render_equivalence_coverage_matrix_keeps_multi_mutation_counts_separate() -> None:
@@ -531,6 +561,59 @@ def test_render_equivalence_coverage_matrix_uses_requested_minus_missing_fallbac
     assert report["observed_mutations"] == ["copy_remove_sheet"]
     assert "missing_requested_mutation" not in report["mutation_matrix"]
     assert report["mutation_matrix"]["copy_remove_sheet"]["single_mutation_result_count"] == 3
+
+
+def test_render_equivalence_coverage_matrix_reports_current_target_gaps() -> None:
+    report = completion._render_equivalence_coverage_matrix(
+        [
+            {
+                "name": "single_ready_excel_equivalence",
+                "path": "/tmp/single-ready-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {"path": "mutation", "actual": "copy_remove_sheet", "passed": True},
+                    {"path": "result_count", "actual": 4, "passed": True},
+                    {"path": "passed_count", "actual": 4, "passed": True},
+                    {"path": "failure_count", "actual": 0, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "non_comparable_count", "actual": 1, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+            {
+                "name": "single_issue_equivalence",
+                "path": "/tmp/single-issue-render-equivalence.json",
+                "checks": [
+                    {"path": "ready", "actual": True, "passed": True},
+                    {"path": "render_engine", "actual": "excel", "passed": True},
+                    {"path": "mutation", "actual": "rename_first_sheet", "passed": True},
+                    {"path": "result_count", "actual": 2, "passed": True},
+                    {"path": "passed_count", "actual": 1, "passed": True},
+                    {"path": "failure_count", "actual": 1, "passed": True},
+                    {"path": "inconclusive_count", "actual": 0, "passed": True},
+                    {"path": "skipped_count", "actual": 0, "passed": True},
+                ],
+            },
+        ],
+        expected_mutations=(
+            "copy_remove_sheet",
+            "rename_first_sheet",
+            "retarget_external_links",
+        ),
+    )
+
+    assert report["expected_mutations"] == [
+        "copy_remove_sheet",
+        "rename_first_sheet",
+        "retarget_external_links",
+    ]
+    assert report["observed_expected_mutation_count"] == 2
+    assert report["missing_expected_mutations"] == ["retarget_external_links"]
+    assert report["unpassed_expected_mutations"] == [
+        "copy_remove_sheet",
+        "rename_first_sheet",
+    ]
 
 
 def test_ui_interaction_coverage_matrix_groups_mutations_and_probe_statuses() -> None:
